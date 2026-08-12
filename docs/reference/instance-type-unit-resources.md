@@ -1,4 +1,4 @@
-# Unit Resources Preset Reference
+# Instance Type Unit Resources Reference
 
 > **Purpose** — the per-product CPU/RAM tier a node-derived `InstanceType` is sized with, and the
 > public configuration each tier was taken from.

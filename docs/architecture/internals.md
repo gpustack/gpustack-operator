@@ -65,13 +65,18 @@ with no repair loop and nothing to say so.
 > every object back over the incoming one, once per interval, for as long as it lives.
 
 > **The one residual risk, taken deliberately** — an object deleted **inside** the overlap is recreated
-> by whichever replica notices first, so the incoming replica can keep the older version until some
-> replica boots again; nothing in the chart does that (Helm never deletes CRDs on upgrade, the
-> operator's own come from Go rather than `crds/`, the migration hooks prune only what carries a legacy
-> sub-release's Helm labels — which the worker's APIServices lack — and `cleanup.sh` runs only on
-> uninstall behind `cleanupOnUninstall`, default false, with no incoming replica to inherit anything),
-> so it takes an out-of-band delete in that window. Realigning the spec every tick would instead have
-> the outgoing replica fight the incoming one through *every* rolling update: likelier, and worse.
+> by whichever replica notices first, so if that is the outgoing one the incoming replica keeps the older
+> version until some replica boots again. It takes an out-of-band delete in that window, because nothing
+> in the chart deletes there:
+>
+> - Helm never deletes CRDs on upgrade, and the operator's own come from Go rather than `crds/`;
+> - the migration hooks prune only what carries a legacy sub-release's Helm labels, which the worker's
+>   APIServices lack;
+> - `cleanup.sh` runs only on uninstall, behind `cleanupOnUninstall` (default false), with no incoming
+>   replica to inherit anything.
+>
+> Realigning the spec every tick would instead have the outgoing replica fight the incoming one through
+> *every* rolling update: likelier, and worse.
 
 ### The one step that takes a lock
 

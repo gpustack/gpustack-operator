@@ -134,8 +134,8 @@ mirrored onto the node as `nvidia.com/gpu.partitioned.mig-<profile>`. Admission 
 per-GPU AdmissionCheck admits a Pod only while the requested profile has a free slot, and **retries** (never
 hard-rejects) while the ledger is unpopulated.
 
-> **Why both terms** — the scheduler fits a Pod by subtracting the requests of the Pods already on the node,
-> so publishing only what is free would subtract every live instance twice.
+> **Why both terms** — publishing only what is free would make the scheduler subtract every live
+> instance twice; see [Scheduling Chain](../architecture/scheduling-chain.md#hardware-partitioning-capacities).
 
 **Reclaim.** When the Pod exits, the operator destroys its compute instance then its GPU instance, and the
 profile's `Remaining` restores within one reclaim cycle. A destroy racing a residual process returns
@@ -179,18 +179,22 @@ only when *that* instance has active processes; sibling workloads are unaffected
 - **Carving an instance out of band is unsupported on a managed node**: let GPUStack materialize them, and
   it reuses any already on a GPU it manages. Every node-level number (per-profile capacity key, partition
   token health, AdmissionCheck) derives from the allocation annotations the device plugin writes, and
-  `nvidia-smi mig -cgi` by hand produces none. So while a GPUStack workload holds the GPU the node
-  advertises room it does not have, and that **never converges** — placement reads live NVML and will not
-  double-book it, but the accounting above stays wrong. Once the GPU is drained the reverse happens: after
-  its debounce the reclaimer **destroys** an instance no allocation accounts for as an orphan, including one
-  it never created and one your own process is using.
+  `nvidia-smi mig -cgi` by hand produces none.
+
+  So while a GPUStack workload holds the GPU the node advertises room it does not have, and that **never
+  converges** — placement reads live NVML and will not double-book it, but the accounting above stays
+  wrong. Once the GPU is drained the reverse happens: after its debounce the reclaimer **destroys** an
+  instance no allocation accounts for as an orphan, including one it never created and one your own
+  process is using.
+
 - **A same-profile replacement submitted the instant its predecessor is deleted can fail to start.** Leave a
-  gap between the delete and the replacement, or let the replacement's own restart handle it. Node accounting
-  is rebuilt from Pod annotations, so a deleted Pod's slot reappears in the per-profile key and the healthy
-  token count **immediately**, while the reclaimer destroys the hardware on its own debounce. A replacement
-  admitted in that gap is handed the outgoing instance and fails to create (`failed to get device handle from
-  UUID: Not Found`) or ends in `UnexpectedAdmissionError` — a startup failure, not corruption; a resubmit
-  after the reclaim succeeds.
+  gap between the delete and the replacement, or let the replacement's own restart handle it.
+
+  Node accounting is rebuilt from Pod annotations, so a deleted Pod's slot reappears in the per-profile key
+  and the healthy token count **immediately**, while the reclaimer destroys the hardware on its own
+  debounce. A replacement admitted in that gap is handed the outgoing instance and fails to create
+  (`failed to get device handle from UUID: Not Found`) or ends in `UnexpectedAdmissionError` — a startup
+  failure, not corruption; a resubmit after the reclaim succeeds.
 - **A managed provider may health-check the GPUs and reboot the node for you.** Some managed Kubernetes
   offerings probe the NVLink topology matrix for `N × (N-1)` healthy pairs; a partitioning-mode GPU drops out
   of it, the probe reads short, and the provider's node agent can cordon and restart the node. Check the
@@ -252,8 +256,8 @@ so the ledger returns the GPU to its whole-GPU / logical-slice capability.
 If you did **not** reset MIG before a reboot ([Limitations](#limitations) says what persists):
 
 - On the way back up the instances are gone (and, on Hopper+, so is the mode).
-- Redo the [enable sequence](#enabling-mig-on-a-node): re-detection realigns the `Devices` ledger to the
-  post-reboot hardware.
+- Redo the [enable sequence](#enabling-mig-on-a-node), **including the Device Manager DaemonSet restart**
+  — nothing else makes the post-reboot hardware reach the cluster.
 
 A workload running before the reboot lost its instance, so **resubmit it** — delete and re-create the
 Pod/workload, and the operator materializes a fresh instance on admission. A lingering pre-reboot Pod keeps

@@ -101,7 +101,7 @@ Defaults:
 | `nvidia` | `10de` | `nvidia.com/gpu` | `nvidia` |
 | `thead` | `1ded` | `alibabacloud.com/ppu` | — (none) |
 
-> T-Head has no default runtime name; `GPUSTACK_THEAD_ACCELERATABLE_RUNTIME_NAME` is still honored and supplies one.
+> T-Head has no default runtime name, but `GPUSTACK_THEAD_ACCELERATABLE_RUNTIME_NAME` is still honored and can supply one.
 
 A fourth override applies only to a manufacturer that has hardware partitioning at all:
 
@@ -111,7 +111,7 @@ A fourth override applies only to a manufacturer that has hardware partitioning 
 Elsewhere the variable does nothing: without hardware partitioning there is no `.partitioned` family, so
 no key segment to rename.
 
-### Vendor toolkit paths
+### Manufacturer toolkit paths
 
 The DM device bindings locate manufacturer libraries through conventional toolkit-home variables, each
 falling back to the listed default when unset.

@@ -71,10 +71,15 @@ Two things the table does not say:
 
 All four are Pods submitted on a pool's entrance `LocalQueue` (`kueue.x-k8s.io/queue-name`).
 
-**Exclusive** — two whole accelerators; **Shared** — 3 of an accelerator's 10 ownership shares:
+**Exclusive** — two whole accelerators:
 
 ```yaml
 resources: { limits: { nvidia.com/gpu: "2" } }
+```
+
+**Shared** — 3 of an accelerator's 10 ownership shares:
+
+```yaml
 resources: { limits: { nvidia.com/gpu.shared: "3" } }
 ```
 
@@ -371,20 +376,24 @@ DaemonSet, then let the workloads reschedule.
   above.
 - **Hand-carving a partition outside GPUStack is unsupported on a managed node.** Every node-level key —
   per-profile capacity, partition token health, the admission check — comes from the Pod annotations the
-  device plugin writes, and an instance made with `nvidia-smi mig -cgi` produces none. The node keeps
-  advertising room it does not have, and unlike a transient over-advertisement this **never converges**:
-  it persists until the instance is removed. Placement reads the live hardware and will not double-book
-  it, but the accounting above stays wrong. Let GPUStack materialize the instances; it reuses any
-  already on an accelerator it manages.
+  device plugin writes, and an instance made with `nvidia-smi mig -cgi` produces none.
+
+  The node keeps advertising room it does not have, and unlike a transient over-advertisement this
+  **never converges**: it persists until the instance is removed. Placement reads the live hardware and
+  will not double-book it, but the accounting above stays wrong. Let GPUStack materialize the instances;
+  it reuses any already on an accelerator it manages.
+
 - **Flipping an accelerator's partitioning mode is an operational procedure, not a live switch.** An
   accelerator advertises a family's tokens only while its reported capability backs that family, so a
   flip *removes* the old tokens rather than marking them unhealthy — there is no continuity across it.
+
   Drain the accelerator (the hardware refuses the toggle under load anyway), flip the mode with the
   manufacturer's tool, then **restart that node's Device Manager DaemonSet**: the re-detect trigger
   watches the device set and health, not the partitioning mode. Deleting the node's `Devices` object is
-  **not** required — an existing group's capability is rewritten in place. Full procedure: [NVIDIA MIG
-  Operations](./operation/nvidia-mig.md#enabling-mig-on-a-node) · [T-Head MIG
-  Operations](./operation/thead-mig.md#enabling-partitioning-on-a-node).
+  **not** required — an existing group's capability is rewritten in place.
+
+  Full procedure: [NVIDIA MIG Operations](./operation/nvidia-mig.md#enabling-mig-on-a-node) ·
+  [T-Head MIG Operations](./operation/thead-mig.md#enabling-partitioning-on-a-node).
 - **A non-default `TopologyManager` policy can mis-align a partition.** The Partitioned resource reports
   no NUMA topology (the plugin may not use the accelerator the kubelet aligned to), so under
   `single-numa-node` the CPU and memory providers can settle on one socket while the only accelerator

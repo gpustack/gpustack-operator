@@ -206,11 +206,13 @@ Device-node injection is the one place T-Head's response differs in *shape* from
   none; see [Accelerator Requests](../accelerator-requests.md#limitations).
 - **A same-profile replacement submitted the instant its predecessor is deleted can fail to start**, the
   reclaim-debounce reason documented for [NVIDIA](nvidia-mig.md#limitations); T-Head runs the same reclaim
-  loop and bounded busy-destroy retry. The retry is narrower than its name: merely holding the PPU's
-  device node does **not** block a destroy (with the device manager holding all sixteen nodes, one
-  succeeded first try). What blocks a destroy is a condition — a GPU Instance refuses it while a live
-  Compute Instance is under it, which the reclaim handles by destroying compute instances first. A busy
-  destroy that survives the retry is a real fault, not a window to widen.
+  loop and bounded busy-destroy retry.
+
+  The retry is narrower than its name: merely holding the PPU's device node does **not** block a destroy
+  (with the device manager holding all sixteen nodes, one succeeded first try). What blocks a destroy is
+  a condition — a GPU Instance refuses it while a live Compute Instance is under it, which the reclaim
+  handles by destroying compute instances first. A busy destroy that survives the retry is a real fault,
+  not a window to widen.
 - **Whether the mode persists across a host reboot is not yet confirmed on real hardware.** Until your own
   testing says otherwise, re-apply it after any reboot, and restart the device-manager DaemonSet
   regardless. A mode switch needs **no** device reset: on a PPU free of instances and holders, enabling and
@@ -282,7 +284,8 @@ has hosted partitions accumulates entries. They are harmless: the minor is deter
 the instance is recreated, and the operator never reads them as evidence — it takes each allocation's minor
 from the live procfs record, which disappears with the instance.
 
-To see what is partitioned, read `ppu-smi mig -i <N> -lgi`.
+**Do not read `/dev/alixpu-caps/` to find out what is partitioned** — those nodes outlive the instances.
+Read `ppu-smi mig -i <N> -lgi`.
 
 ## Node reboot recovery
 

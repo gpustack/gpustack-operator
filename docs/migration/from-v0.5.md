@@ -134,7 +134,7 @@ If an old ClusterQueue still holds admitted workloads (a v0.5.x `Instance` ran a
 the script sets `HoldAndDrain` first — the graceful retirement the operator uses for an InstanceType
 (`pkg/worker/controllers/worker/instance_type.go`) — so Kueue evicts them and releases the finalizer,
 then deletes the drained queue; a queue with no workloads goes directly. The names changed, so
-**re-create the evicted workloads under the new pool's queue**.
+**re-submit the evicted workloads against the new pool's `LocalQueue`**.
 
 ## Verify
 

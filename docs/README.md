@@ -57,7 +57,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [T-Head MIG Operations](operation/thead-mig.md) | Enabling/disabling T-Head's own MIG-named partitioning, the busy-mode-change prerequisite, and reboot recovery | operators | ~10 min |
 | [Migrating to Bundled Subcharts](migration/to-subcharts.md) | The one-time ownership transfer from the runtime-installed releases | operators | ~9 min |
 | [Migrating from v0.5.x](migration/from-v0.5.md) | Upgrading across the scheduling-chain refactor | operators | ~5 min |
-| [Unit Resources Preset Reference](reference/instance-type-unit-resources.md) | The per-product CPU/RAM tier a derived InstanceType is sized with, and where each tier came from | operators | reference |
+| [Instance Type Unit Resources Reference](reference/instance-type-unit-resources.md) | The per-product CPU/RAM tier a derived InstanceType is sized with, and where each tier came from | operators | reference |
 | [Instance Metrics Reference](reference/instance-metrics.md) | The `instances/<name>/metrics` subresource: one CPU/memory/disk/GPU sample, its sources, scoping and limits | users, console developers | ~3 min |
 
 ## Conventions

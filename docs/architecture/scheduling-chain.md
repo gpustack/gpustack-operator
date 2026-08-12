@@ -59,10 +59,16 @@ still reads 1 free instance.
 > published yet falls back to its static per-profile ceiling, not to zero, so a fresh node advertises
 > room instead of nothing.
 
-`<profile>` is the **published** name, not always what the manufacturer's CLI prints: a two-number
-geometry spelled without a separator (T-Head `4g48gb`, NVIDIA `3g.40gb`) gains one on publication, so
-either manufacturer's partition reads alike in a Pod spec, in the `InstanceType`'s offered inventory and
-in the per-profile ledgers. Any other shape is published as the driver reports it.
+`<profile>` is the **published** name, not always what the manufacturer's CLI prints:
+
+- a manufacturer that writes its two-number geometry without a separator has one added — T-Head's
+  `4g48gb` publishes as `4g.48gb`, matching how NVIDIA already writes `3g.40gb`;
+- the rule is keyed on the manufacturer, not the shape, so the same string from NVIDIA is published
+  untouched;
+- any other shape is published as the driver reports it.
+
+So either manufacturer's partition reads alike in a Pod spec, in the `InstanceType`'s offered inventory
+and in the per-profile ledgers.
 
 Below that boundary every layer keeps the manufacturer's spelling — the `Devices` record, the on-disk
 ownership markers, every call into its library — since a name the library does not report cannot create

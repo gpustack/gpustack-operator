@@ -24,10 +24,11 @@ surface is the chart's `values.yaml`, reachable two ways:
 - **Image mode.** No Helm release deploys the worker; it runs from a checkout or outside the cluster and
   installs the chart **packaged into its own image**
   (`${GPUSTACK_CONF_DIR:-/etc/gpustack}/charts/gpustack-operator-<version>.tgz`) as release
-  `gpustack-operator-device-manager`. Its overlay — from the worker's own flags and settings:
-  `worker.enabled=false`, `fullnameOverride: gpustack-operator`, one `enabled` per component, the
-  manufacturer map — is the **whole** values surface, so an override like
-  `kueue.controllerManager.replicas` cannot be expressed.
+  `gpustack-operator-device-manager`.
+
+  Its overlay is the **whole** values surface, so an override like `kueue.controllerManager.replicas`
+  cannot be expressed. The overlay comes from the worker's own flags and settings: `worker.enabled=false`,
+  `fullnameOverride: gpustack-operator`, one `enabled` per component, and the manufacturer map.
 
 > **Why that release name** — earlier versions gave it to the device-manager-only release; keeping it
 > spares existing clusters a release migration.

@@ -195,8 +195,10 @@ detection.
 
 **On a cluster that has cert-manager, this upgrade therefore moves Kueue onto it.** Kueue stops
 generating and rotating its own webhook certificate and consumes a `Certificate` this chart creates,
-cainjector filling the CA bundles its webhooks and CRD conversion carry. Decide before upgrading:
-`--set global.certmanager.enabled=false` keeps every component, worker included, self-managing. A
+cainjector filling the CA bundles its webhooks and CRD conversion carry.
+
+Decide before upgrading, and pass it **in the same `helm upgrade`**: `--set
+global.certmanager.enabled=false` keeps every component, worker included, self-managing. A
 `worker.certmanager` left in your values is ignored.
 
 Naming an existing issuer (`global.certmanager.issuer.name`) now covers Kueue's certificates as well
@@ -243,9 +245,10 @@ and its CRDs, and a deleted CRD takes every custom resource of that kind — so
 `helm uninstall gpustack-operator` deletes **every ClusterQueue, LocalQueue, ResourceFlavor,
 AdmissionCheck and Workload in the cluster**, not only the operator's.
 
-If something else depends on Kueue, [keep it and disable the
-subcharts](#if-kueue-or-nfd-was-not-installed-by-helm). The chart prints the uninstall notes at
-install time, so you need not remember this.
+If something else depends on Kueue, keep it and disable the subcharts — `--set kueue.enabled=false`,
+whether or not your Kueue came from Helm ([the not-installed-by-Helm
+case](#if-kueue-or-nfd-was-not-installed-by-helm) needs extra steps). The chart prints the uninstall
+notes at install time, so you need not remember this.
 
 ### A handful of old certificate Secrets are left behind
 

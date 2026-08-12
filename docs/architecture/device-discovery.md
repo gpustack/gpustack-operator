@@ -180,10 +180,12 @@ so that set is narrower than the manufacturers merely stating a `runtimeName`.
 
 > **Why not `runtimeName`** — it is the class the operator will *use*, while either `runtimeInjects*`
 > fact lets the runtime's presence be **inferred**: a manufacturer missing what it names cannot work
-> unless the handler is registered. One with neither injects its own device nodes and needs no
-> RuntimeClass — creating one would break it, since the operator attaches a RuntimeClass whenever one
-> exists and the kubelet rejects a Pod naming an unconfigured runtime. A class the manufacturer's own
-> operator created is still used; the chart never conjures one.
+> unless the handler is registered.
+>
+> A manufacturer with neither injects its own device nodes and needs no RuntimeClass — creating one
+> would break it, since the operator attaches a RuntimeClass whenever one exists and the kubelet
+> rejects a Pod naming an unconfigured runtime. A class the manufacturer's own operator created is
+> still used; the chart never conjures one.
 
 ## Stage 2: the Device Manager (DM)
 
@@ -305,8 +307,9 @@ accelerator-wide.
 
 ## Logical slicing per manufacturer
 
-Every sliceable manufacturer has real per-slice runtime isolation, but only four take both budgets
-from a preload library. Every preload library is activated through `/etc/ld.so.preload`.
+Every sliceable manufacturer has real per-slice runtime isolation, but only four — NVIDIA, Iluvatar,
+Ascend and T-Head — take **both** budgets from a preload library. Every preload library is activated
+through `/etc/ld.so.preload`.
 
 | Manufacturer | Enforcer | Per-container quota and injection |
 |---|---|---|
@@ -367,12 +370,15 @@ in the `ROCR_VISIBLE_DEVICES` list, never physical ordinals. The three are emitt
 stay in step.
 
 > **Why this one needs a probe** — a CU mask fails **open**: one ROCr rejects yields no error, no log
-> line, no changed return code, and the container gets the whole accelerator; `rocm-smi` and
-> `amd-smi` read sysfs and never see a mask. So the allocator mounts `rocm-cumask-check` beside the
-> library: it runs a kernel, reads the physical units its own waves landed on, and exits `0` only if
-> they are the units the mask asked for. `rocm-monitor`, mounted alongside, prints the memory quota
-> and what is charged against it — a slice behaving like a whole accelerator is one command from
-> diagnosis, on a node nobody watches.
+> line, no changed return code, and the container gets the whole accelerator, while `rocm-smi` and
+> `amd-smi` read sysfs and never see a mask. So the allocator mounts two tools beside the library:
+>
+> - `rocm-cumask-check` runs a kernel, reads the physical units its own waves landed on, and exits `0`
+>   only if they are the units the mask asked for;
+> - `rocm-monitor` prints the memory quota and what is charged against it.
+>
+> A slice behaving like a whole accelerator is then one command from diagnosis, on a node nobody
+> watches.
 
 Because the mask is quantised to the accelerator's allocation atom, the **smallest requestable
 percentage is a per-accelerator property**: 9 % on a 60 CU / 3 shader-engine part, 3 % on a

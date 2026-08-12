@@ -85,11 +85,15 @@ caught exactly and held with `Retry`, transient and self-healing once Kueue re-a
 A **check-only** gate: never preempts, never `Rejected`.
 
 > **Why it skips an evicted Workload** — Kueue resets the checks to `Pending` and drops the quota
-> reservation in two separate writes, so between them an evicted Workload still reports a reservation
-> and a verdict written there overwrites the reset, and whichever writer wins is final: Kueue stops
-> resetting while the eviction condition is set, its scheduler will not reserve quota while a check is
-> `Retry`, and this reconciler stops evaluating without a reservation, so the backoff loop deadlocks
-> instead of self-healing. Re-reserving quota clears the eviction condition and re-opens evaluation.
+> reservation in two separate writes. Between them an evicted Workload still reports a reservation, so
+> a verdict written there overwrites the reset — and whichever writer wins is final:
+>
+> - Kueue stops resetting while the eviction condition is set;
+> - its scheduler will not reserve quota while a check is `Retry`;
+> - this reconciler stops evaluating without a reservation.
+>
+> So the backoff loop deadlocks instead of self-healing. Re-reserving quota clears the eviction
+> condition and re-opens evaluation.
 
 ### Gate 4 — default scheduler / kubelet
 

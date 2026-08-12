@@ -158,7 +158,7 @@ helm uninstall gpustack-operator --namespace gpustack-system
 Every manufacturer below supports **whole-accelerator** (`<base>`) and **shared** (`<base>.shared`, 10
 ownership slots each) requests. What differs is whether one accelerator can be *split*, and how:
 
-| Vendor | Class | Kubernetes resource | Logical slicing (`.sliced`) | Physical partitioning (`.partitioned`) |
+| Manufacturer | Class | Kubernetes resource | Logical slicing (`.sliced`) | Physical partitioning (`.partitioned`) |
 |---|---|---|---|---|
 | **AMD** | GPU | `amd.com/gpu` | ✅ |  |
 | **Cambricon** | MLU | `cambricon.com/mlu` | ✅ |  |
@@ -199,7 +199,7 @@ ownership slots each) requests. What differs is whether one accelerator can be *
   `Devices` ledger, catches the fragmentation a coarse quota total cannot see, so a request never lands
   on an accelerator with no room.
 - **Live capacity, as a real resource** — each pool is a materialized `InstanceType` CRD whose
-  `.status` carries the four views above. You can also **declare** `InstanceType`s directly
+  `.status` carries the four views above. A cluster admin can also **declare** `InstanceType`s directly
   (immutable-sized inputs, descriptors enriched at admission); the list-only `InstanceTypeFlavor`
   catalog surfaces every pool's hardware profile.
 - **SSH-enabled Instances** — launch a workload with an SSH sidecar that shares its sliced accelerator

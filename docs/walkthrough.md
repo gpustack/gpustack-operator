@@ -413,14 +413,15 @@ NVIDIA A10G, 4912 MiB
 
 Deleting the Instance releases the slice: the row returns to `1/1 10/10 100/100 0/0`.
 
-> **Physical partitioning (MIG).** The A10G slices *logically*: a runtime caps a shared accelerator,
-> and the `SL` view above tracks the per-accelerator credit budget. A MIG-capable accelerator
-> (A100 / H100) instead **hard-partitions** into fixed hardware instances the operator materializes on
-> demand — a different resource family (`.partitioned*`, reported under `PT`) with a different request
-> shape, whose keys and rules are in [Accelerator Requests](./accelerator-requests.md). MIG *mode* is
-> driven by the administrator with `nvidia-smi`, so it has its own runbook and a worked
-> enable → request → reclaim → disable walkthrough, recorded the same way, in
-> [NVIDIA MIG Operations](./operation/nvidia-mig.md).
+> **Physical partitioning (MIG).** The A10G slices *logically*: a runtime caps a shared accelerator, and
+> the `SL` view above tracks the per-accelerator credit budget. A MIG-capable accelerator (A100 / H100)
+> instead **hard-partitions** into fixed hardware instances the operator materializes on demand:
+>
+> - a different resource family (`.partitioned*`, reported under `PT`), with a different request shape —
+>   keys and rules in [Accelerator Requests](./accelerator-requests.md);
+> - MIG *mode* is the administrator's, driven with `nvidia-smi`, so it has its own runbook and a recorded
+>   enable → request → reclaim → disable walkthrough in
+>   [NVIDIA MIG Operations](./operation/nvidia-mig.md).
 
 ---
 

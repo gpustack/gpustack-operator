@@ -85,7 +85,7 @@ cannot:
 | Gate 2 — Kueue | reserves against the pool ClusterQueue's `credits.gpustack.ai/nvidia` quota — a scalar total, so it can over-admit a fragmented pool | [Admission](architecture/admission.md#gate-2--kueue-credits) |
 | Gate 3 — AdmissionCheck | asks the pool's `Devices` ledger whether one accelerator can really host the slice; holds the workload with `Retry` if not | [Admission](architecture/admission.md#gate-3--the-per-accelerator-admissioncheck) |
 | Gate 4 — scheduler / kubelet | picks a node whose `.sliced.*` capacity keys still fit, then an accelerator-bound token — *which is* the accelerator | [Device Discovery](architecture/device-discovery.md#placement-is-a-preference-not-a-decision) |
-| Gate 5 — allocator | refuses an accelerator another family holds, injects the manufacturer's runtime isolation, and records the allocation in the `Devices` ledger | [Device Discovery](architecture/device-discovery.md#the-device-plugin-allocator) |
+| Gate 5 — allocator | refuses an accelerator another mode holds, injects the manufacturer's runtime isolation, and records the allocation in the `Devices` ledger | [Device Discovery](architecture/device-discovery.md#the-device-plugin-allocator) |
 | Observe | the `InstanceType.status` four-view moves as the pod allocates, and back when it exits (`kubectl get instancetype -w`) | [Admission](architecture/admission.md#four-view-status) |
 
 ## Vocabulary

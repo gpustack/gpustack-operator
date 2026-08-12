@@ -17,6 +17,7 @@ caveats inline.
 
 - [Before you start: count your nodes](#before-you-start-count-your-nodes)
 - [The knobs, per component](#the-knobs-per-component)
+- [The one topology that cannot be made redundant](#the-one-topology-that-cannot-be-made-redundant)
 - [Verify](#verify)
 
 ## Before you start: count your nodes
@@ -144,7 +145,7 @@ process-level failover, not node-level redundancy.
 Also set `strategyType: RollingUpdate`: both default to `Recreate`, taking every replica down before the
 new one starts — giving up at every upgrade the failover the replica was added for.
 
-### The one topology that cannot be made redundant
+## The one topology that cannot be made redundant
 
 When the worker runs **outside** the cluster it manages but near it (image mode, `!LoopbackKubeInside &&
 LoopbackKubeNearby`), its admission webhooks register against one node IP URL, not a Service: one
