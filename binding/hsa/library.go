@@ -148,6 +148,21 @@ func (r Return) IsSuccess() bool {
 	return r == STATUS_SUCCESS
 }
 
+// IsAPIUnavailable reports whether the Return says the call could not be made at all, because the
+// loaded library or the installed driver does not offer it: the shared object is absent, the symbol
+// is missing from it, or the library and the driver are version-incompatible as a pair.
+//
+// It is false for every code a caller could act on differently — another argument, another agent,
+// different permissions — and for every code that reports the runtime's own state rather than the
+// absence of an entry point, STATUS_ERROR_NOT_INITIALIZED above all.
+func (r Return) IsAPIUnavailable() bool {
+	switch r {
+	case STATUS_ERROR_LIBRARY_NOT_FOUND, STATUS_ERROR_FUNCTION_NOT_FOUND:
+		return true
+	}
+	return false
+}
+
 // String returns the string representation of a Return.
 func (r Return) String() string {
 	return r.Error()

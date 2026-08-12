@@ -83,6 +83,22 @@ func (r Return) IsSuccess() bool {
 	return r == SUCCESS
 }
 
+// IsAPIUnavailable reports whether the Return says the call could not be made at all, because the
+// loaded library or the installed driver does not offer it: the shared object is absent, the symbol
+// is missing from it, or the library and the driver are version-incompatible as a pair.
+//
+// It is false for every code a caller could act on differently — another struct version, another
+// device, different permissions — and for every code that is the driver's own answer about a
+// device, ERROR_NOT_SUPPORTED above all.
+func (r Return) IsAPIUnavailable() bool {
+	switch r {
+	case ERROR_LIBRARY_NOT_FOUND, ERROR_FUNCTION_NOT_FOUND,
+		ERROR_DRIVER_NOT_LOADED, ERROR_DRIVER_TOO_OLD, ERROR_DRIVER_TOO_NEW:
+		return true
+	}
+	return false
+}
+
 // String returns the string representation of a Return.
 func (r Return) String() string {
 	return r.Error()
