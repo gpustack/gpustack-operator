@@ -580,7 +580,7 @@ alongside the code, snake_case multi-word file names, `make generate` after any 
       older than three monitor periods yields none and sets its success gauge to 0.
       Verify: `go test -race ./pkg/devicemanager/...`
 
-- [ ] **T6 · Chart: NetworkPolicy, annotation fix, and an on-cluster verification round**
+- [x] **T6 · Chart: NetworkPolicy, annotation fix, and an on-cluster verification round**
       Blocked by: None
       Owns: `deploy/gpustack-operator/chart/templates/device-manager/networkpolicy.yaml`,
       `deploy/gpustack-operator/chart/templates/device-manager/service.yaml`,
@@ -714,7 +714,11 @@ for the exporter's poller, plus the e2e cases below.
 - NetworkPolicy enforcement is deliberately **not** asserted by any e2e case: the local kind
   CNI does not implement NetworkPolicy, so a green run would prove nothing. It is verified once,
   by hand, in T6 against a cluster whose CNI enforces it, and the observed behaviour is written
-  into the docs.
+  into the docs. That round ran on `2026-08-12`: a pod matching no peer was refused on the
+  secure port while the worker's and a configured scraper's peers were admitted, and the served
+  pod stayed Ready across both its readiness and liveness probes with no restart — so that CNI
+  exempts the kubelet's probes from the policy, and `extraIngress` is the escape hatch for one
+  that does not.
 
 ## Alternatives
 
@@ -767,6 +771,19 @@ for the exporter's poller, plus the e2e cases below.
   cover accelerator-free nodes. Keeps the node-local shape and closes the coverage gap, but adds
   a second DaemonSet that coexists with the vendor ones on accelerator nodes and has to be
   folded into the single-exporter rule. Deferred: revisit if the gap becomes a real requirement.
+- **Switching the Device Manager's probes from `httpGet` to `exec` when the NetworkPolicy is
+  enabled**, so a CNI that does not exempt node-local traffic cannot cut them. Feasible — the
+  image is Ubuntu-based, a loopback `curl` needs no new subcommand, and traffic that never
+  leaves the pod's network namespace is not subject to policy. Rejected: it would silently
+  change what Ready means, and two consumers in this very feature depend on Ready meaning
+  "reachable over the network". The worker picks a Ready Device Manager pod to fetch
+  `/monitor/snapshot` from, and the single-exporter rule picks among Ready pods — so under an
+  `exec` probe a pod whose networking is broken stays Ready, and the accelerator section goes
+  silently empty for the first while the node's pod-level series vanish for the second, both
+  with a healthy-looking success gauge. The problem is also at the wrong layer: a policy
+  blocking the kubelet is fixed by admitting the node in the policy, not by taking the probe
+  off the network. `extraIngress` is that admission, and an operator can derive its value from
+  their own cluster in one `kubectl get nodes` — see the docs.
 - **Authenticating `/metrics` with delegated authn/authz**, as the worker's API server does.
   Correct security-wise, rejected for this iteration: the Device Manager has no authentication
   chain today, and it would cost the zero-configuration scraping that is the feature's point.
