@@ -523,7 +523,7 @@ alongside the code, snake_case multi-word file names, `make generate` after any 
       Verify: `go test ./pkg/kubemetrics/... ./pkg/worker/extensionapis/...
       ./pkg/worker/controllers/worker/... && go build ./...`
 
-- [ ] **T2 · `/metrics` serves partial metrics instead of 500**
+- [x] **T2 · `/metrics` serves partial metrics instead of 500**
       Blocked by: None
       Owns: `pkg/manager/**`
       Gate: review

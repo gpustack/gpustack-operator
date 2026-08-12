@@ -11,11 +11,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"k8s.io/apiserver/pkg/server/healthz"
 	"k8s.io/apiserver/pkg/server/routes"
 	"k8s.io/component-base/logs"
-	klog "k8s.io/klog/v2"
 	ctrlhealthz "sigs.k8s.io/controller-runtime/pkg/healthz"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
@@ -63,13 +61,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	ms := cm.GetWebhookServer()
 
 	// Register /metrics.
-	{
-		h := promhttp.HandlerOpts{
-			ErrorLog:      klog.NewStandardLogger("WARNING"),
-			ErrorHandling: promhttp.HTTPErrorOnError,
-		}
-		ms.Register("/metrics", promhttp.HandlerFor(ctrlmetrics.Registry, h))
-	}
+	ms.Register("/metrics", newMetricsHandler(ctrlmetrics.Registry))
 
 	// Register /readyz.
 	{
