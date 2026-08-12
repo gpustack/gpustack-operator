@@ -20,7 +20,10 @@ on:
     paths:
       - "**.md"
       - "docs/**"
+      # README.md links ./LICENSE, and the script resolves non-markdown link targets too.
+      - "LICENSE"
       - ".claude/skills/gpustack-operator-docs/scripts/check-docs.sh"
+      - "hack/lint.sh"
       - ".github/workflows/docs.yml"
   pull_request:
     branches:
@@ -29,7 +32,10 @@ on:
     paths:
       - "**.md"
       - "docs/**"
+      # README.md links ./LICENSE, and the script resolves non-markdown link targets too.
+      - "LICENSE"
       - ".claude/skills/gpustack-operator-docs/scripts/check-docs.sh"
+      - "hack/lint.sh"
       - ".github/workflows/docs.yml"
 
 jobs:
@@ -44,5 +50,14 @@ jobs:
       # Links and anchors, the "## Contents" list, each page's header block and
       # footer, the docs/README.md index, the prose paragraph cap, the page line
       # and "##" caps, and every index label against its page's H1.
+      # The script's portability floor is onetrueawk, which is what macOS ships; ubuntu-24.04's default
+      # awk is gawk and would silently accept a gawk-only extension no macOS contributor could run.
+      # This pins the implementation, not the version: noble's original-awk is newer (2023-11-27) than
+      # the 20200816 on a current macOS, so a feature added between the two still passes here.
+      - name: Setup onetrueawk
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends original-awk
       - name: Check
-        run: bash .claude/skills/gpustack-operator-docs/scripts/check-docs.sh
+        run: |
+          sudo update-alternatives --set awk /usr/bin/original-awk
+          awk --version 2>&1 | head -1
+          make lint docs

@@ -14,9 +14,21 @@ function chart_lint() {
   gpustack::helm::lint "${ROOT_DIR}/deploy/gpustack-operator/chart"
 }
 
+function docs_lint() {
+  # The documentation contract: links and anchors, each page's Contents/header/footer, the
+  # docs/README.md index and its labels, and the three size caps. Pure bash + awk, so it needs
+  # neither the Go toolchain nor a cluster, and runs in about a second.
+  bash "${ROOT_DIR}/.claude/skills/gpustack-operator-docs/scripts/check-docs.sh" "${ROOT_DIR}"
+}
+
 function lint() {
   if [[ "${1:-}" == "chart" ]]; then
     chart_lint
+    return
+  fi
+
+  if [[ "${1:-}" == "docs" ]]; then
+    docs_lint
     return
   fi
 

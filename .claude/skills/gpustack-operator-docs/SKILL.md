@@ -71,7 +71,7 @@ reader's trust.
 ## Before you finish
 
 ```bash
-bash .claude/skills/gpustack-operator-docs/scripts/check-docs.sh            # the gate, as CI runs it
+make lint docs                                                             # the gate, as CI runs it
 bash .claude/skills/gpustack-operator-docs/scripts/check-docs.sh --report   # while writing
 ```
 
@@ -80,7 +80,10 @@ It verifies relative links and `#anchor`s across `README.md`, `CLAUDE.md`, `docs
 header-block fields, a `**See also**` footer at the end, registration in the `## All pages` table of
 `docs/README.md`, the label there against the page's H1, and the three size caps (paragraph, page
 length, `##` count — see `references/conventions.md`). `--report` demotes the caps to warnings and
-prints the per-page metrics. `.github/workflows/docs.yml` runs the plain form on every markdown change.
+prints the per-page metrics.
+
+`make lint docs` is that same run, and it is the one entrypoint: `.github/workflows/docs.yml` invokes it
+on every markdown change, and the repo's Stop hook invokes it whenever a turn leaves a `.md` file dirty.
 
 It still does **not** read prose: everything below is on you.
 
