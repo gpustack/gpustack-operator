@@ -1,6 +1,6 @@
 # Spec: Instance Metrics Totals and Node-Local Prometheus Exporter
 
-Status: Building
+Status: Built
 Type: Feature
 
 ## Summary
@@ -605,7 +605,7 @@ alongside the code, snake_case multi-word file names, `make generate` after any 
       the NetworkPolicy behaviour observed in T6.
       Verify: `make lint docs` and the `gpustack-operator-docs` skill's index/link/TOC checks
 
-- [ ] **T8 · e2e: renames and a new exporter case**
+- [x] **T8 · e2e: renames and a new exporter case**
       Blocked by: T1, T5, T6
       Owns: `.claude/skills/gpustack-operator-e2e/**`
       Acceptance: AC5.2. `case-37` asserts the new pairs and needs no Device Manager, since
@@ -704,13 +704,19 @@ for the exporter's poller, plus the e2e cases below.
 
 #### e2e tests
 
-- `case-37` — the subresource contract with the new pairs: fields present, instance-scoped, an
+- `case-37` — the subresource contract with the new pairs: every field present, each total equal
+  to the sum of the backing Pod's container limits, the used side moving under a load burst, an
   unprivileged caller denied. Any cluster; no Device Manager required.
 - `case-38` / `case-39` — unchanged contracts, renamed accelerator field; still auto-skipping
   without their respective hardware.
-- `case-40` (new) — scrape a Device Manager pod's `/metrics`; assert the test Instance's
-  gauges, the exact label set, and that exactly one target on the node carries the pod-level
-  families. Auto-skips when the Instance's node runs no Device Manager.
+- `case-40` (new) — scrape a Device Manager pod's `/metrics` through the API server's pod proxy,
+  so nothing has to be installed in the image; assert every pod-level family carries the test
+  Instance, that its labels are exactly the four identifying ones with the Instance's own values,
+  that the totals equal what the subresource serves for it, that no series carries a bare
+  `instance` label, that each target reports on its own sources, and that exactly one target on
+  the node carries the pod-level families. Accelerator families are asserted only when the scrape
+  carries any, which a CPU-only node has none of. Auto-skips when the Instance's node runs no
+  Ready Device Manager.
 - NetworkPolicy enforcement is deliberately **not** asserted by any e2e case: the local kind
   CNI does not implement NetworkPolicy, so a green run would prove nothing. It is verified once,
   by hand, in T6 against a cluster whose CNI enforces it, and the observed behaviour is written

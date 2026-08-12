@@ -9,16 +9,20 @@
 # creating it in <NS> would be denied outright.
 #
 # Goal:        The aggregated API's instances/<name>/metrics subresource returns the Instance's own
-#              current CPU/memory/disk utilization, read in real time from the node kubelet through
-#              the API-server node proxy — no Prometheus or metrics-server involved on this path.
-# Environment: Any cluster with a materialized scheduling chain (run case-1 first); the device
-#              manager DaemonSet rolls on the Instance's node. No GPU required.
+#              current CPU/memory/storage utilization as Total/Used pairs, the used side read in
+#              real time from the node kubelet through the API-server node proxy — no Prometheus
+#              or metrics-server involved on this path.
+# Environment: Any cluster with a materialized scheduling chain (run case-1 first). No GPU and no
+#              device manager required: this path reads the kubelet, and only the accelerator
+#              entries — which a CPU Instance has none of — come from a device manager.
 # Inputs:      All real, nothing mocked — sets the general InstanceType unit spec; a CPU Instance
 #              gpustack-e2e-metrics (alpine sleep + ephemeral volume) on the general pool.
-# Expected:    - GET .../instances/<name>/metrics returns one sample carrying timestamp,
-#              cpuUsageNanoCores, memoryWorkingSetMiB, rootfsUsedMiB and
-#              ephemeralStorageUsedMiB;
-#              - the figures belong to the backing pod (cpu/memory move after a load burst);
+# Expected:    - GET .../instances/<name>/metrics returns one sample carrying timestamp and all
+#              three pairs: cpuTotalMilliCores/cpuUsedMilliCores, memoryTotalMiB/memoryUsedMiB,
+#              storageTotalMiB/storageUsedMiB;
+#              - each total equals the sum of the backing pod's container limits, since a total is
+#              the Instance's declaration rather than a measurement;
+#              - the used figures belong to the backing pod (cpu moves after a load burst);
 #              - a caller without the instances/metrics grant is denied
 #              (kubectl auth can-i ... --as an unprivileged identity says no).
 # Cleanup:     Trap deletes the test Instance.
@@ -76,15 +80,17 @@ done
 
 RAW="/apis/worker.gpustack.ai/v1/namespaces/default/instances/${INST}/metrics"
 
-# 2. Current sample: structure and instance-scoped fields. The kubelet publishes a fresh pod's
-#    stats field by field — rootfs lands only once the CRI has sized every container's writable
-#    layer, so retry until the whole set is there rather than until CPU alone shows up.
+# 2. Current sample: structure and instance-scoped fields. The totals are declarations and are
+#    there from the first answer; the used figures are measurements the kubelet publishes field by
+#    field, so retry until the whole set is there rather than until CPU alone shows up.
 checks=(
   ".sample.timestamp"
-  ".sample.cpuUsageNanoCores"
-  ".sample.memoryWorkingSetMiB"
-  ".sample.rootfsUsedMiB"
-  ".sample.ephemeralStorageUsedMiB"
+  ".sample.cpuTotalMilliCores"
+  ".sample.cpuUsedMilliCores"
+  ".sample.memoryTotalMiB"
+  ".sample.memoryUsedMiB"
+  ".sample.storageTotalMiB"
+  ".sample.storageUsedMiB"
 )
 missing_fields() {
   local payload=$1 jp v out=""
@@ -109,15 +115,65 @@ if [ -z "$latest" ]; then
   record FAIL "current sample served" "kubectl get --raw ${RAW} returned nothing"
 else
   if [ -z "$missing" ]; then
-    record PASS "current sample served" "timestamp/cpu/memory/rootfs/ephemeralStorage all present"
+    record PASS "current sample served" \
+      "timestamp plus all three Total/Used pairs present: $(echo "$latest" | jq -c '.sample | {cpuTotalMilliCores, cpuUsedMilliCores, memoryTotalMiB, memoryUsedMiB, storageTotalMiB, storageUsedMiB}' 2>/dev/null)"
   else
     record FAIL "current sample served" "missing fields:${missing}"
   fi
 fi
 
-# 3. The figures track the backing pod: burn CPU inside the instance and require the
+# 3. A total is the Instance's declaration, not a measurement: it must equal the sum of the
+#    backing pod's container limits. Init containers are excluded — they are gone by the time
+#    anything is measured, and the kubelet does not evict on their limits.
+totals_verdict=$(kubectl -n default get pod "$INST" -o json 2>/dev/null | python3 -c '
+import json, sys
+
+SCALES = {"Ki": 1024, "Mi": 1024 ** 2, "Gi": 1024 ** 3, "Ti": 1024 ** 4,
+          "k": 1000, "M": 1000 ** 2, "G": 1000 ** 3, "T": 1000 ** 4}
+
+def ceil(a, b):
+    return -(-a // b)
+
+def bytes_of(q):
+    for suffix, scale in SCALES.items():
+        if q.endswith(suffix):
+            return ceil(int(float(q[: -len(suffix)]) * scale), 1)
+    return int(float(q))
+
+def milli_of(q):
+    # The API sums ScaledValue(Milli) per container, which rounds a sub-milli quantity up.
+    return ceil(int(float(q[:-1]) * 1000), 1000) if q.endswith("m") else int(float(q) * 1000)
+
+sample = json.loads(sys.argv[1])["sample"]
+pod = json.load(sys.stdin)
+
+# Sum bytes across the containers and convert ONCE, exactly as the API does: converting per
+# container and adding would round up twice on limits that are not MiB-aligned.
+cpu = memory = storage = 0
+for c in pod["spec"]["containers"]:
+    limits = (c.get("resources") or {}).get("limits") or {}
+    if "cpu" in limits:
+        cpu += milli_of(limits["cpu"])
+    if "memory" in limits:
+        memory += bytes_of(limits["memory"])
+    if "ephemeral-storage" in limits:
+        storage += bytes_of(limits["ephemeral-storage"])
+
+want = {"cpuTotalMilliCores": cpu,
+        "memoryTotalMiB": ceil(memory, 1024 ** 2),
+        "storageTotalMiB": ceil(storage, 1024 ** 2)}
+bad = [f"{k}: sample={sample.get(k)} declared={v}" for k, v in want.items() if sample.get(k) != v]
+print("FAIL " + "; ".join(bad) if bad else "PASS " + ", ".join(f"{k}={v}" for k, v in want.items()))
+' "$latest" 2>/dev/null)
+case "$totals_verdict" in
+  PASS*) record PASS "totals equal the declared limits" "${totals_verdict#PASS }" ;;
+  FAIL*) record FAIL "totals equal the declared limits" "${totals_verdict#FAIL }" ;;
+  *)     record FAIL "totals equal the declared limits" "could not compare (pod ${INST} unreadable or python3 missing)" ;;
+esac
+
+# 4. The used figures track the backing pod: burn CPU inside the instance and require the
 #    reading to rise (two kubelet sample windows apart).
-before=$(echo "$latest" | jq -r '.sample.cpuUsageNanoCores // 0' 2>/dev/null)
+before=$(echo "$latest" | jq -r '.sample.cpuUsedMilliCores // 0' 2>/dev/null)
 # Collect the PIDs: job control is off in a non-interactive shell, so neither %1..%8 nor
 # `jobs -p` reliably names the busy loops — leaving them alive would peg the node.
 # shellcheck disable=SC2016  # the expansions belong to the instance's shell, not this one
@@ -126,17 +182,17 @@ kubectl -n default exec "$INST" -c main -- sh -c \
   >/dev/null 2>&1
 after=""
 for _ in $(seq 1 10); do
-  after=$(kubectl get --raw "$RAW" 2>/dev/null | jq -r '.sample.cpuUsageNanoCores // 0' 2>/dev/null)
+  after=$(kubectl get --raw "$RAW" 2>/dev/null | jq -r '.sample.cpuUsedMilliCores // 0' 2>/dev/null)
   [ -n "$after" ] && [ "$after" -gt "$before" ] && break
   sleep 5
 done
 if [ -n "$after" ] && [ "$after" -gt "$before" ]; then
-  record PASS "figures track the backing pod" "cpuUsageNanoCores ${before} -> ${after} under load"
+  record PASS "used figures track the backing pod" "cpuUsedMilliCores ${before} -> ${after} under load"
 else
-  record FAIL "figures track the backing pod" "cpuUsageNanoCores did not rise under load (before=${before} after=${after})"
+  record FAIL "used figures track the backing pod" "cpuUsedMilliCores did not rise under load (before=${before} after=${after})"
 fi
 
-# 4. Authorization: an unprivileged identity must not hold get on instances/metrics.
+# 5. Authorization: an unprivileged identity must not hold get on instances/metrics.
 deny=$(kubectl auth can-i get instances.worker.gpustack.ai/metrics -n default \
   --as system:serviceaccount:default:default 2>/dev/null)
 if [ "$deny" = "no" ]; then

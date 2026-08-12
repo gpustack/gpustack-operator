@@ -781,7 +781,7 @@ INST_CHECKS=("exclusive Instance: reaches Ready"
   "exclusive Instance: ppu-smi in the container agrees with the recorded allocation"
   "Instance metrics: accelerators present, one entry per allocated accelerator"
   "Instance metrics: every entry's id matches the allocation and the container's view"
-  "Instance metrics: memoryMiB equals the accelerator's physical VRAM"
+  "Instance metrics: memoryTotalMiB equals the accelerator's physical VRAM"
   "Instance metrics: utilization percentages within [0,100]")
 IDLE_NOW_COUNT=$(printf '%s\n' "$(idle_now)" | wc -w | tr -d ' ')
 if [ "${IDLE_NOW_COUNT:-0}" -lt "${HOST_COUNT:-0}" ] || [ "$UNSAFE" -ne 0 ]; then
@@ -849,9 +849,9 @@ EOF
     "ids '{${metric_ids:-<none>}}' vs the allocation's '{${inst_ids:-<none>}}', bus addresses '{${metric_buses:-<none>}}' vs the container's '{${inst_buses:-<none>}}'"
 
   bad_mem=$(printf '%s' "$metrics" | jq -r --arg mx "$CARD_MEM_MIB" \
-    '[.sample.accelerators[]? | select((.memoryMiB // 0) != ($mx|tonumber)) | .id] | join(",")' 2>/dev/null)
+    '[.sample.accelerators[]? | select((.memoryTotalMiB // 0) != ($mx|tonumber)) | .id] | join(",")' 2>/dev/null)
   { [ -n "$metric_ids" ] && [ -z "$bad_mem" ]; }
-  verdict $? "Instance metrics: memoryMiB equals the accelerator's physical VRAM" \
+  verdict $? "Instance metrics: memoryTotalMiB equals the accelerator's physical VRAM" \
     "every entry reports ${CARD_MEM_MIB}MiB, the accelerator's physical capacity" \
     "entries {${bad_mem:-<none read>}} do not report the physical ${CARD_MEM_MIB}MiB"
 
@@ -897,7 +897,7 @@ EOF
     sleep 5
   done
   s_n=$(printf '%s' "$smetrics" | jq -r '(.sample.accelerators // []) | length' 2>/dev/null)
-  s_mem=$(printf '%s' "$smetrics" | jq -r '[.sample.accelerators[]?.memoryMiB] | join(",")' 2>/dev/null)
+  s_mem=$(printf '%s' "$smetrics" | jq -r '[.sample.accelerators[]?.memoryTotalMiB] | join(",")' 2>/dev/null)
   if [ "$sanswered" = 0 ] || [ -z "$smetrics" ]; then
     record SKIP "OBSERVED: sliced Instance metrics" \
       "phase=${sphase:-?}: the metrics subresource never answered, so nothing is observed here — this is not evidence that it serves no per-slice figures"
@@ -906,10 +906,10 @@ EOF
       "phase=${sphase:-?}: the accelerators array is ABSENT for a sliced claim — the subresource serves no per-slice figures"
   elif [ "$s_mem" = "$CARD_MEM_MIB" ]; then
     record PASS "OBSERVED: sliced Instance metrics" \
-      "phase=${sphase:-?}: ${s_n} entry/entries carrying WHOLE-ACCELERATOR figures (memoryMiB=${s_mem}MiB), not the slice's share"
+      "phase=${sphase:-?}: ${s_n} entry/entries carrying WHOLE-ACCELERATOR figures (memoryTotalMiB=${s_mem}MiB), not the slice's share"
   else
     record PASS "OBSERVED: sliced Instance metrics" \
-      "phase=${sphase:-?}: ${s_n} entry/entries with memoryMiB={${s_mem}} against a physical ${CARD_MEM_MIB}MiB"
+      "phase=${sphase:-?}: ${s_n} entry/entries with memoryTotalMiB={${s_mem}} against a physical ${CARD_MEM_MIB}MiB"
   fi
 fi
 
