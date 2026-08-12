@@ -2,6 +2,7 @@ package cambricon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,10 +44,12 @@ type fakeQuota struct {
 // name-encoding / marker / profile-reuse / reclaim logic be tested without Cambricon
 // hardware.
 type fakeSMLUDriver struct {
-	mu              sync.Mutex
-	instances       map[string]smluInstance // name -> instance
-	profiles        map[profileKey]fakeQuota
-	ensured         map[string]bool
+	mu        sync.Mutex
+	instances map[string]smluInstance // name -> instance
+	profiles  map[profileKey]fakeQuota
+	// modes is the per-card sMLU mode the driver holds, so a test can start a card already on,
+	// already off, and then assert which way the preflight moved it.
+	modes           map[string]bool
 	nextProfileID   int32
 	profileCreates  int
 	instanceCreates int
@@ -54,21 +57,41 @@ type fakeSMLUDriver struct {
 	failCard        map[string]bool
 	failList        bool
 	failProfileList bool
+	// The mode read and the mode write are counted and failed separately, which is the whole
+	// point of splitting them out of one compound call: "one read and no write" is assertable.
+	modeReads     int
+	modeWrites    int
+	failModeRead  error
+	failModeWrite error
 }
 
 func newFakeDriver() *fakeSMLUDriver {
 	return &fakeSMLUDriver{
 		instances: map[string]smluInstance{},
 		profiles:  map[profileKey]fakeQuota{},
-		ensured:   map[string]bool{},
+		modes:     map[string]bool{},
 		failCard:  map[string]bool{},
 	}
 }
 
-func (f *fakeSMLUDriver) EnsureSMLUMode(card string) error {
+func (f *fakeSMLUDriver) GetSMLUMode(card string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.ensured[card] = true
+	f.modeReads++
+	if f.failModeRead != nil {
+		return false, f.failModeRead
+	}
+	return f.modes[card], nil
+}
+
+func (f *fakeSMLUDriver) SetSMLUMode(card string, enabled bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.modeWrites++
+	if f.failModeWrite != nil {
+		return f.failModeWrite
+	}
+	f.modes[card] = enabled
 	return nil
 }
 
@@ -158,6 +181,19 @@ func (f *fakeSMLUDriver) hasInstance(name string) bool {
 	return ok
 }
 
+func (f *fakeSMLUDriver) modeEnabled(card string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.modes[card]
+}
+
+// modeCalls reports how many mode reads and mode writes the driver has served.
+func (f *fakeSMLUDriver) modeCalls() (reads, writes int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.modeReads, f.modeWrites
+}
+
 func seedMarker(t *testing.T, uid, ctr, card, instance string, profileID int32, cores int, mem int64) {
 	t.Helper()
 	require.NoError(t, writeMarker(markerPath(uid, ctr), smluMarker{
@@ -218,6 +254,96 @@ func Test_marker_roundtrip_and_failClosed(t *testing.T) {
 	require.Error(t, err)
 }
 
+// The preflight reads the mode before it writes, so a card already in sMLU mode costs one query
+// and nothing else. Splitting the seam into a read and a write is what makes any of this
+// assertable: a single compound ensure call could only ever report that it had succeeded.
+func Test_ensureSMLUMode(t *testing.T) {
+	readErr := errors.New("driver mode read failed")
+	writeErr := errors.New("driver mode write failed")
+
+	testCases := []struct {
+		name       string
+		modeOn     bool
+		failRead   error
+		failWrite  error
+		wantErr    error
+		wantReads  int
+		wantWrites int
+		wantModeOn bool
+	}{
+		{
+			name:      "a card already in sMLU mode is left alone",
+			modeOn:    true,
+			wantReads: 1, wantWrites: 0, wantModeOn: true,
+		},
+		{
+			name:      "a card with the mode off is turned on once",
+			wantReads: 1, wantWrites: 1, wantModeOn: true,
+		},
+		{
+			// A read this preflight cannot trust falls through to the write, so a library whose
+			// getter is broken but whose setter works keeps working. T3 narrows this to the
+			// failures that are not a positively identified absent API.
+			name:      "a failed read still attempts the write",
+			failRead:  readErr,
+			wantReads: 1, wantWrites: 1, wantModeOn: true,
+		},
+		{
+			// The read's answer is discarded when the read itself failed, so even a card that is
+			// already on gets written to.
+			name:      "a failed read on an already-on card still writes",
+			modeOn:    true,
+			failRead:  readErr,
+			wantReads: 1, wantWrites: 1, wantModeOn: true,
+		},
+		{
+			name:      "a failed write is reported to the caller",
+			failWrite: writeErr,
+			wantErr:   writeErr,
+			wantReads: 1, wantWrites: 1, wantModeOn: false,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newFakeDriver()
+			d.modes[testCard0] = tc.modeOn
+			d.failModeRead, d.failModeWrite = tc.failRead, tc.failWrite
+
+			err := ensureSMLUMode(d, testCard0)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+
+			reads, writes := d.modeCalls()
+			assert.Equal(t, tc.wantReads, reads, "mode reads")
+			assert.Equal(t, tc.wantWrites, writes, "mode writes")
+			assert.Equal(t, tc.wantModeOn, d.modeEnabled(testCard0), "resulting mode")
+		})
+	}
+}
+
+// A marker-reuse retry never touches the mode: the fast path returns before the preflight, so a
+// pod restarting onto its own live slice costs no driver mode call at all.
+func Test_reserveInstance_markerReuseSkipsPreflight(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	d := newFakeDriver()
+
+	_, err := reserveInstance(d, "pod-a", "train", testCard0, 25, 16384)
+	require.NoError(t, err)
+	reads, writes := d.modeCalls()
+	require.Equal(t, 1, reads, "the first reserve reads the mode once")
+	require.Equal(t, 1, writes, "the first reserve turns the mode on once")
+
+	_, err = reserveInstance(d, "pod-a", "train", testCard0, 25, 16384)
+	require.NoError(t, err)
+
+	gotReads, gotWrites := d.modeCalls()
+	assert.Equal(t, reads, gotReads, "a marker-reuse retry reads no mode")
+	assert.Equal(t, writes, gotWrites, "a marker-reuse retry writes no mode")
+}
+
 // A corrupt marker for one pod must not block reserving an instance for another pod.
 func Test_reserveInstance_corruptOtherMarkerDoesNotBlock(t *testing.T) {
 	redirectLogicalSliceDirs(t)
@@ -230,7 +356,7 @@ func Test_reserveInstance_corruptOtherMarkerDoesNotBlock(t *testing.T) {
 	inst, err := reserveInstance(d, "uid-ok", "train", testCard0, 25, 16384)
 	require.NoError(t, err)
 	assert.NotEmpty(t, inst.name)
-	assert.True(t, d.ensured[testCard0], "sMLU mode ensured on first reserve")
+	assert.True(t, d.modeEnabled(testCard0), "sMLU mode ensured on first reserve")
 }
 
 func Test_reserveInstance_idempotentReuseAndFailClosed(t *testing.T) {

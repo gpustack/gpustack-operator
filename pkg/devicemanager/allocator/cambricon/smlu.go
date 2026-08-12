@@ -82,8 +82,11 @@ type profileKey struct {
 // wrappers. ListInstances is global (every accelerator's instances, each carrying its own) so
 // reclaim can catch a crash-orphan on an accelerator that has no marker yet.
 type smluDriver interface {
-	// EnsureSMLUMode puts the accelerator into sMLU mode.
-	EnsureSMLUMode(card string) error
+	// GetSMLUMode reports whether sMLU mode is on for the accelerator.
+	GetSMLUMode(card string) (enabled bool, err error)
+	// SetSMLUMode turns sMLU mode on or off for the accelerator. It writes host driver state
+	// that outlives the process, so callers write only after a read says the mode disagrees.
+	SetSMLUMode(card string, enabled bool) error
 	// CreateProfile creates a profile with the given compute (%) and VRAM (MiB) quota and
 	// returns its profile ID.
 	CreateProfile(card string, coresPct int, memMiB int64) (int32, error)
@@ -231,6 +234,21 @@ func scanMarkers(podsDir string) (entries []markerEntry, corrupt []string) {
 // sMLU mode, reuses a profile on an exact (cores%, memMiB) match on that accelerator or
 // creates one, instantiates a named instance, and writes the marker (rolling back the
 // instance + a freshly created profile if the marker write fails).
+// ensureSMLUMode puts the accelerator a logical slice is about to land on into sMLU mode, which the
+// card needs before any profile or instance can exist on it. It reads first and writes only when
+// the mode is off, so an accelerator already carrying a slice costs one query, and it never turns
+// the mode off — that would strand the slices another pod is still running.
+//
+// It lives here rather than behind the driver seam so the read-then-write decision is exercised by
+// a fake that records which of the two actually happened; the seam itself only drives the hardware.
+func ensureSMLUMode(driver smluDriver, card string) error {
+	enabled, err := driver.GetSMLUMode(card)
+	if err == nil && enabled {
+		return nil
+	}
+	return driver.SetSMLUMode(card, true)
+}
+
 func reserveInstance(driver smluDriver, podUID, container, card string, coresPct int, memMiB int64) (smluInstance, error) {
 	allocMu.Lock()
 	defer allocMu.Unlock()
@@ -260,7 +278,7 @@ func reserveInstance(driver smluDriver, podUID, container, card string, coresPct
 		return smluInstance{}, fmt.Errorf("read self marker %q: %w", self, err)
 	}
 
-	if err := driver.EnsureSMLUMode(card); err != nil {
+	if err := ensureSMLUMode(driver, card); err != nil {
 		return smluInstance{}, fmt.Errorf("card %s: ensure smlu mode: %w", card, err)
 	}
 

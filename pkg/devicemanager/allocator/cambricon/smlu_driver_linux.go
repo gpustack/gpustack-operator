@@ -40,15 +40,24 @@ func (d *cndevSMLUDriver) device(card string) (cndev.Device, error) {
 	return dev, nil
 }
 
-func (d *cndevSMLUDriver) EnsureSMLUMode(card string) error {
+func (d *cndevSMLUDriver) GetSMLUMode(card string) (bool, error) {
+	dev, err := d.device(card)
+	if err != nil {
+		return false, err
+	}
+	mode, ret := dev.GetSMLUMode()
+	if !ret.IsSuccess() {
+		return false, fmt.Errorf("card %s: get smlu mode: %w", card, ret)
+	}
+	return mode.SmluMode == uint32(cndev.FEATURE_ENABLED), nil
+}
+
+func (d *cndevSMLUDriver) SetSMLUMode(card string, enabled bool) error {
 	dev, err := d.device(card)
 	if err != nil {
 		return err
 	}
-	if mode, ret := dev.GetSMLUMode(); ret.IsSuccess() && mode.SmluMode == uint32(cndev.FEATURE_ENABLED) {
-		return nil
-	}
-	if ret := dev.SetSMLUMode(true); !ret.IsSuccess() {
+	if ret := dev.SetSMLUMode(enabled); !ret.IsSuccess() {
 		return fmt.Errorf("card %s: set smlu mode: %w", card, ret)
 	}
 	return nil
