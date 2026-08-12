@@ -116,8 +116,8 @@ func TestVdevConfRenderRoundTrip(t *testing.T) {
 	assert.Equal(t, c, got)
 }
 
-// A first slice, a second slice on the same card, and a third on a different card exercise
-// the three pools together: node-wide vdev_id, per-card pipe_id, and per-card CU bits.
+// A first slice, a second slice on the same accelerator, and a third on a different accelerator exercise
+// the three pools together: node-wide vdev_id, per-accelerator pipe_id, and per-accelerator CU bits.
 func TestAllocateVdev_PoolsAcrossCards(t *testing.T) {
 	root := t.TempDir()
 
@@ -128,14 +128,14 @@ func TestAllocateVdev_PoolsAcrossCards(t *testing.T) {
 	assert.Equal(t, 0, c0.pipeID)
 	assert.Equal(t, 16, c0.cuCount)
 
-	// Same card, different pod: next 16 CU bits, next node vdev id, next per-card pipe id.
+	// Same accelerator, different pod: next 16 CU bits, next node vdev id, next per-accelerator pipe id.
 	c1, err := allocateVdev(root, selfPathFor(root, "pod-1", "train", 0), bdfA, 64, 25, 24576, 0)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(0x00000000ffff0000), c1.mask.lo)
 	assert.Equal(t, 1, c1.vdevID)
 	assert.Equal(t, 1, c1.pipeID)
 
-	// Different card: CU bits and pipe id reset, but the node-wide vdev id keeps climbing.
+	// Different accelerator: CU bits and pipe id reset, but the node-wide vdev id keeps climbing.
 	c2, err := allocateVdev(root, selfPathFor(root, "pod-2", "train", 0), bdfB, 64, 25, 24576, 0)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(0x000000000000ffff), c2.mask.lo)
@@ -143,8 +143,8 @@ func TestAllocateVdev_PoolsAcrossCards(t *testing.T) {
 	assert.Equal(t, 0, c2.pipeID, "pipe id is per-card")
 }
 
-// Different card models advertise different CU counts; cuCount tracks each card's total
-// and a whole-card slice fills every CU bit across both mask words.
+// Different accelerator models advertise different CU counts; cuCount tracks each accelerator's total
+// and a whole-accelerator slice fills every CU bit across both mask words.
 func TestAllocateVdev_VariedCardCU(t *testing.T) {
 	root := t.TempDir()
 
@@ -153,7 +153,8 @@ func TestAllocateVdev_VariedCardCU(t *testing.T) {
 	assert.Equal(t, 60, half.cuCount) // ceil(50% * 120)
 	assert.Equal(t, 0, half.deviceID)
 
-	// A whole-card second card of a multi-card container: the container-local index is 1.
+	// The second accelerator of a multi-accelerator container, taken whole: the container-local index
+	// is 1.
 	whole, err := allocateVdev(root, selfPathFor(root, "pod-a", "train", 1), bdfB, 128, 100, 65536, 1)
 	require.NoError(t, err)
 	assert.Equal(t, 128, whole.cuCount)
@@ -162,7 +163,7 @@ func TestAllocateVdev_VariedCardCU(t *testing.T) {
 	assert.Equal(t, uint64(0xffffffffffffffff), whole.mask.hi)
 }
 
-// Re-allocating the same self path for the same card reuses the on-disk record.
+// Re-allocating the same self path for the same accelerator reuses the on-disk record.
 func TestAllocateVdev_Idempotent(t *testing.T) {
 	root := t.TempDir()
 	self := selfPathFor(root, "pod-0", "train", 0)
@@ -197,8 +198,8 @@ func TestAllocateVdev_RestartAndHoleReuse(t *testing.T) {
 	assert.Equal(t, uint64(0x000000000000ffff), c2.mask.lo)
 }
 
-// Concurrent allocates on one card must serialize on allocMu: distinct vdev/pipe ids and
-// pairwise-disjoint CU masks that tile the card. Run under -race.
+// Concurrent allocates on one accelerator must serialize on allocMu: distinct vdev/pipe ids and
+// pairwise-disjoint CU masks that tile the accelerator. Run under -race.
 func TestAllocateVdev_ConcurrentDisjoint(t *testing.T) {
 	root := t.TempDir()
 	const n = 4 // four 16-CU slices exactly tile a 64-CU card
@@ -287,7 +288,7 @@ func TestScanVdevConfs_FailClosedOnUnreadableDir(t *testing.T) {
 	require.Error(t, err)
 }
 
-// A sliced request that resolves to zero compute units (a cores=0 card, or a non-positive
+// A sliced request that resolves to zero compute units (a cores=0 accelerator, or a non-positive
 // compute percent) must fail closed rather than publish a slot-consuming empty conf.
 func TestAllocateVdev_ZeroComputeRejected(t *testing.T) {
 	root := t.TempDir()
@@ -301,7 +302,7 @@ func TestAllocateVdev_ZeroComputeRejected(t *testing.T) {
 func TestAllocateVdev_Exhaustion(t *testing.T) {
 	t.Run("pipe id at 20", func(t *testing.T) {
 		root := t.TempDir()
-		// 20 single-CU slices on one card fill the pipe pool without exhausting CUs.
+		// 20 single-CU slices on one accelerator fill the pipe pool without exhausting CUs.
 		for i := 0; i < maxPipeID; i++ {
 			seedConf(t, root, fmt.Sprintf("pod-%d", i), "train", 0,
 				vdevConf{pciBusID: bdfA, mask: cuMask{lo: uint64(1) << uint(i)}, cuCount: 1, memMib: 1024, vdevID: i, pipeID: i})
@@ -313,7 +314,7 @@ func TestAllocateVdev_Exhaustion(t *testing.T) {
 
 	t.Run("insufficient free CUs", func(t *testing.T) {
 		root := t.TempDir()
-		// Four 16-CU slices fill a 64-CU card; a fifth cannot pack 16 more.
+		// Four 16-CU slices fill a 64-CU accelerator; a fifth cannot pack 16 more.
 		for i := 0; i < 4; i++ {
 			seedConf(t, root, fmt.Sprintf("pod-%d", i), "train", 0,
 				vdevConf{pciBusID: bdfA, mask: cuMask{lo: uint64(0xffff) << uint(16*i)}, cuCount: 16, memMib: 24576, vdevID: i, pipeID: i})
@@ -325,7 +326,7 @@ func TestAllocateVdev_Exhaustion(t *testing.T) {
 
 	t.Run("vdev id at 200", func(t *testing.T) {
 		root := t.TempDir()
-		// 200 single-CU slices spread across many cards fill the node vdev pool.
+		// 200 single-CU slices spread across many accelerators fill the node vdev pool.
 		for i := 0; i < maxVdevID; i++ {
 			bdf := fmt.Sprintf("0000:%02x:00.0", i)
 			seedConf(t, root, fmt.Sprintf("pod-%d", i), "train", 0,

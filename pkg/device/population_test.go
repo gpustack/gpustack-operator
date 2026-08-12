@@ -11,8 +11,8 @@ func TestPopulationPredicates(t *testing.T) {
 		wantWholeCard      bool
 	}{
 		{
-			// A not-partitioned card that reports a logical-slice count is logically
-			// sliceable and, since it has no hardware partitions, still whole-card
+			// A not-partitioned accelerator that reports a logical-slice count is logically
+			// sliceable and, since it has no hardware partitions, still whole-accelerator
 			// capable.
 			name:               "logically sliceable, not partitioned",
 			status:             AcceleratorStatus{LogicalSliced: AcceleratorLogicalSliced{Count: 4}},
@@ -21,17 +21,17 @@ func TestPopulationPredicates(t *testing.T) {
 			wantWholeCard:      true,
 		},
 		{
-			// A MIG-enabled card reports zero logical count (by construction) and a
+			// A MIG-enabled accelerator reports zero logical count (by construction) and a
 			// non-zero physical ceiling; it is partitioned and cannot serve a
-			// whole-card claim.
+			// whole-accelerator claim.
 			name:            "partitioned",
 			status:          AcceleratorStatus{PhysicalSliced: AcceleratorPhysicalSliced{Count: 7}},
 			wantPartitioned: true,
 			wantWholeCard:   false,
 		},
 		{
-			// A card reporting neither capability is not sliceable in either mode,
-			// and remains whole-card capable since it is not partitioned.
+			// An accelerator reporting neither capability is not sliceable in either mode,
+			// and remains whole-accelerator capable since it is not partitioned.
 			name:          "reports neither capability",
 			status:        AcceleratorStatus{},
 			wantWholeCard: true,
@@ -39,7 +39,7 @@ func TestPopulationPredicates(t *testing.T) {
 		{
 			// No detector produces this — the capabilities are written in exclusive
 			// branches — but the predicates must not let it serve both families if one
-			// ever did. Partitioning wins: the card serves the partition family alone.
+			// ever did. Partitioning wins: the accelerator serves the partition family alone.
 			name: "reports both capabilities",
 			status: AcceleratorStatus{
 				LogicalSliced:  AcceleratorLogicalSliced{Count: 4},
@@ -59,8 +59,8 @@ func TestPopulationPredicates(t *testing.T) {
 			if got := IsPartitioned(tc.status); got != tc.wantPartitioned {
 				t.Errorf("IsPartitioned() = %v, want %v", got, tc.wantPartitioned)
 			}
-			if got := IsWholeCardCapable(tc.status); got != tc.wantWholeCard {
-				t.Errorf("IsWholeCardCapable() = %v, want %v", got, tc.wantWholeCard)
+			if got := IsWholeAcceleratorCapable(tc.status); got != tc.wantWholeCard {
+				t.Errorf("IsWholeAcceleratorCapable() = %v, want %v", got, tc.wantWholeCard)
 			}
 		})
 	}

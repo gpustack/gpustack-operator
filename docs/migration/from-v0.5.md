@@ -33,12 +33,12 @@ worked example throughout; substitute your actual target version in the commands
 | **ResourceFlavor** | `gpustack--generic-ln-x64-4c-16g-98g--nvidia-tesla-t4-1d` — **double dash**, abbreviated `ln-x64`, CPU+device **composite**, unit-spec (`-4c-16g-98g`) baked into the name | **double dash**, full `os`/`arch`, CPU and device **split** into two flavors, `count`-suffixed: CPU `gpustack--<cpu>-linux-amd64-4c`, device `gpustack--<cpu>--nvidia-tesla-t4-linux-amd64-1d` |
 | **ClusterQueue** | composite name; up to two per pool; joined by `spec.cohortName` | `gpustack--<key>-<os>-<arch>`; **one isolated CQ per pool**, `spec.cohortName` empty (**zero Cohort**) |
 | **Cohort** | one per pool | **removed** — the `CohortReconciler` is gone |
-| **AdmissionCheck** | — (did not exist) | `gpustack-node-devices` (per-card feasibility gate) |
+| **AdmissionCheck** | — (did not exist) | `gpustack-node-devices` (per-accelerator feasibility gate) |
 | **InstanceType** | aggregated **virtual** API (projected from ClusterQueues; nothing stored) | a real **CRD** `instancetypes.worker.gpustack.ai` with a `.status` subresource; `spec.group` renamed `spec.acceleratorGroup`, `spec.generalGroup` added |
 | **Node feature labels** | `general.feature.gpustack.ai/generic-ln-x64` + `.z-flavor`/`.z-queue`/`.z-cohort` + per-unit `.cpu`/`.ram`/`.storage` | real per-CPU key `general.feature.gpustack.ai/<cpu>` + `.count`/`.capacity`; the `feature.gpustack.ai/acceleratable` boolean; `.z-*` and `.cpu`/`.ram`/`.storage` **dropped** |
 
 `Devices` and `Instance` keep their per-node / same names (the `Devices` schema only grows a
-per-card allocation ledger), so they update in place — no orphaning there.
+per-accelerator allocation ledger), so they update in place — no orphaning there.
 
 ## Why a plain `helm upgrade` is not enough
 

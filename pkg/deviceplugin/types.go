@@ -3,12 +3,24 @@ package deviceplugin
 import (
 	"context"
 
-	core "k8s.io/api/core/v1"
 	deviceplugin "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
-
-	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
 
+// The first block below aliases k8s.io/kubelet's device-plugin v1beta1 API types, re-exported so
+// a manufacturer's allocator can name the gRPC payloads it builds without importing the kubelet
+// package itself. The aliases keep kubelet's own names deliberately: the block's whole value is
+// that it mirrors that API 1:1, and a renamed mirror is a worse mirror.
+//
+// The price of the mirror is that "Device" names three different things here — two of kubelet's and
+// one of this package's own — so a reader has to know which is which:
+//
+//   - Device is kubelet's advertised device: the {ID, Health, Topology} record ListAndWatch
+//     publishes. Its ID is a device ID (a token string), not a Device ID in our sense.
+//   - DeviceSpec is kubelet's host device-node spec: the /dev path a response asks the runtime to
+//     inject into the container.
+//   - Device, on Resource, is the ID of the physical device a token names. It is this package's
+//     own vocabulary, not kubelet's — see the package doc of pkg/device for the
+//     Device/Accelerator/Resource layering.
 type (
 	Options                              = deviceplugin.DevicePluginOptions
 	Device                               = deviceplugin.Device
@@ -28,6 +40,8 @@ type (
 	PreStartContainerRequest             = deviceplugin.PreStartContainerRequest
 	PreStartContainerResponse            = deviceplugin.PreStartContainerResponse
 
+	// Server is the lifecycle contract every device-plugin gRPC server (ResourceServer among
+	// them) exposes to its caller, independent of the kubelet API surface it also implements.
 	Server interface {
 		// Start starts the gRPC server and registers it to kubelet.
 		// This method should be blocking until context is canceled or an error occurs.
@@ -37,134 +51,4 @@ type (
 		// This method should be non-blocking and return immediately.
 		Stop()
 	}
-
-	ContainerAllocateResponder interface {
-		// GetContainerAllocateResponse returns the ContainerAllocateResponse
-		// for the given pod, devices and allocated resources.
-		GetContainerAllocateResponse(
-			context.Context,
-			*core.Pod,
-			*core.Container,
-			*workercore.Devices,
-			map[Resource]int32,
-		) (*ContainerAllocateResponse, error)
-	}
-
-	// PhysicalSlicedResponder is an optional capability of a ContainerAllocateResponder that owns
-	// a hardware GPU partition (e.g. an NVIDIA MIG instance) end to end: materializing it for the
-	// container that requests one, and naming it again for a container co-allocating the same
-	// partition. A responder that does not implement it cannot serve partition requests at all.
-	// The two live on one interface so that "a responder able to carve a partition can name it"
-	// is a compile-time invariant rather than a runtime hole.
-	PhysicalSlicedResponder interface {
-		// ActuatePhysicalSliced materializes the partition for a container carrying a
-		// "<base>.partitioned.<kind>-<profile>" request. The server invokes it — under the
-		// vendor's own per-card lock — on the card IT chose, after reserving that card and
-		// before patching the allocation annotation, so the placement actually taken is
-		// recorded upward (AllocatedPhysicalProfile / AllocatedPhysicalPlacements) for the
-		// reconciler's placement-aware ledger.
-		ActuatePhysicalSliced(
-			context.Context,
-			*core.Pod,
-			*core.Container,
-			*workercore.Devices,
-			map[Resource]int32,
-			string,
-		) (*PhysicalSlicedAllocation, error)
-
-		// GetPhysicalSlicedVisibilityResponse returns the container response naming the
-		// partitions the owner container already holds on the given cards. The server invokes it
-		// for a visibility Allocate whose accelerator-holding container requests a partition
-		// profile, passing the container being served, the cards the owner holds, and the
-		// owner's name. It must resolve from a durable, node-local record — not in-process
-		// state — and must return an error, never an empty or parent-card response, when the
-		// identity cannot be resolved or cannot be shown to still be live.
-		//
-		// It returns a whole container response, not an identity: vendors differ in how they
-		// make a device visible (an env for NVIDIA, injected device nodes elsewhere), so
-		// substituting a partition for a card stays inside the vendor's own response shape.
-		GetPhysicalSlicedVisibilityResponse(
-			context.Context,
-			*core.Pod,
-			*core.Container,
-			*workercore.Devices,
-			map[Resource]int32,
-			string,
-		) (*ContainerAllocateResponse, error)
-	}
-
-	// LogicalSlicedResponder is an optional capability of a ContainerAllocateResponder whose
-	// logical slice occupies a POSITION on the card rather than only a share of it — an AMD CU
-	// mask is a range of compute units, and two containers handed the same range share those
-	// units instead of the card. A responder that does not implement it keeps today's behavior
-	// exactly: the server never reads logical occupancy and never records a window.
-	//
-	// The two methods are split by where they may run, not by taste:
-	//
-	//   - PlaceLogicalSliced is called under the node allocate mutex, so the window it picks is
-	//     published into the reservation before the next serialized Allocate reads it. Choosing
-	//     it in GetContainerAllocateResponse instead cannot be made race-free: that call happens
-	//     after the mutex is released AND after the durable annotation is written, so two
-	//     concurrent allocations would pick the same free window and neither choice would
-	//     survive a restart. It must therefore be pure over the snapshot it is given: no I/O.
-	//   - GetLogicalSlicedResponse is called after the mutex is released, and CONSUMES the
-	//     placement the server published rather than recomputing it. The responder's own I/O
-	//     (creating a per-container working directory, say) belongs here for the same reason the
-	//     annotation patch does — off the serialized path.
-	//
-	// Unlike PhysicalSlicedResponder there is no rollback: a mask is a string in an environment,
-	// and nothing was materialized on the card that a failure could strand.
-	LogicalSlicedResponder interface {
-		// PlaceLogicalSliced picks the geometry this container will occupy on each allocated
-		// card, given what the node's live allocations already occupy. Returning an empty map
-		// is legal and means "this responder records no geometry for this container".
-		PlaceLogicalSliced(
-			context.Context,
-			*core.Pod,
-			*core.Container,
-			*workercore.Devices,
-			map[Resource]int32,
-			LogicalPlacements,
-		) (LogicalPlacements, error)
-
-		// GetLogicalSlicedResponse renders the container response for a placement the server
-		// has already published. It replaces GetContainerAllocateResponse for the sliced mode.
-		GetLogicalSlicedResponse(
-			context.Context,
-			*core.Pod,
-			*core.Container,
-			*workercore.Devices,
-			map[Resource]int32,
-			LogicalPlacements,
-		) (*ContainerAllocateResponse, error)
-	}
 )
-
-// LogicalPlacements maps an accelerator's UUID to the interval(s) a logical slice occupies on it,
-// in whatever unit that vendor's geometry counts (AMD: CU-mask bit indexes, exactly as they appear
-// in HSA_CU_MASK).
-//
-// Keyed by UUID alone, not by Resource: a card's group ID is derived from its detected name and
-// memory, so a re-detect that regroups the card — a marketing name that reads differently, a VRAM
-// figure that rounds differently — would orphan an entry keyed by both, and the card would then
-// hand out a window it has already given away. The UUID is the identity that survives regrouping.
-type LogicalPlacements map[string][]workercore.AcceleratorPhysicalPlacement
-
-// PhysicalSlicedAllocation is the outcome of materializing a physical GPU partition for a
-// container: the per-card placements to record upward into the Pod's allocation annotation
-// and the container response carrying the partition's visible-devices env.
-type PhysicalSlicedAllocation struct {
-	// Profile is the physical-slice profile that was materialized (e.g. "1g.10gb").
-	Profile string
-	// Placements maps each allocated card to the memory-slice interval(s) its partition
-	// occupies. The server folds these into the allocation annotation as the reconciler
-	// ledger's occupied source.
-	Placements map[Resource][]workercore.AcceleratorPhysicalPlacement
-	// Response carries the vendor visible-devices env for the partitions (no logical-slice
-	// artifacts). The server returns it in place of GetContainerAllocateResponse.
-	Response *ContainerAllocateResponse
-	// Rollback tears down whatever this allocation created; a no-op for a fully reused
-	// partition. The server calls it when the post-actuation annotation patch fails, so no
-	// half-owned partition persists.
-	Rollback func()
-}

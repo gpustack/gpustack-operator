@@ -59,8 +59,8 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	// The visibility server co-allocates a container to the same physical GPU(s) its owner
 	// container was granted; for any non-sliced mode the responder emits only
 	// NVIDIA_VISIBLE_DEVICES, which is exactly what a device-cgroup grant needs (no HAMi
-	// logical-slicing artifacts). On a partition-backed card that env must name the owner's
-	// partition, not the parent card, which is what the shared MIG driver is for.
+	// logical-slicing artifacts). On a partition-backed accelerator that env must name the owner's
+	// partition, not the parent accelerator, which is what the shared MIG driver is for.
 	servers = append(servers,
 		newServer(logger, workercore.DeviceAllocationModeVisibility, mig),
 	)
@@ -112,9 +112,9 @@ func (in aggregated) Start(ctx context.Context) error {
 }
 
 // liveClaimsFrom adapts the reconciler's annotation-derived live physical-slice occupancy into
-// the reclaimer's per-card-UUID placement view (the Resource Device field is the card UUID for
-// NVIDIA). It is the attribution self-check source: reclaim never destroys an instance a running
-// Pod still claims.
+// the reclaimer's per-accelerator-UUID placement view (the Resource's accelerator field is the GPU
+// UUID for NVIDIA). It is the attribution self-check source: reclaim never destroys an instance a
+// running Pod still claims.
 func liveClaimsFrom(ctx context.Context, reconciler *deviceplugin.DevicesReconciler) func() (map[string][]migPlacement, error) {
 	return func() (map[string][]migPlacement, error) {
 		occupied, err := reconciler.LivePhysicalOccupied(ctx)
@@ -169,7 +169,7 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode, mig mig
 }
 
 // _AllocatedAccelerator pairs an allocated GPU with its group; the group carries the
-// memory + CUDA runtime version that drive the sliced per-card limits and the libvgpu
+// memory + CUDA runtime version that drive the sliced per-accelerator limits and the libvgpu
 // subdir.
 type _AllocatedAccelerator struct {
 	group *workercore.DevicesGroup
@@ -184,8 +184,8 @@ func (s *server) GetContainerAllocateResponse(
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
 	// Single pass over the allocated GPUs in devs order (= NVIDIA_VISIBLE_DEVICES /
-	// per-card CUDA_DEVICE_MEMORY_LIMIT_<i> order): collect the UUIDs and the
-	// accelerator/group pairs the sliced path needs for the per-card limits.
+	// per-accelerator CUDA_DEVICE_MEMORY_LIMIT_<i> order): collect the UUIDs and the
+	// accelerator/group pairs the sliced path needs for the per-accelerator limits.
 	var (
 		ids          = make([]string, 0, len(allocated))
 		accelerators []_AllocatedAccelerator
@@ -244,9 +244,9 @@ var hostVgpuLockPath = "/tmp/vgpulock"
 
 // getSlicedContainerAllocateResponse renders the HAMi-core logical-slicing injection for
 // a sliced container: a compute (SM) limit from the container's ".sliced.cores-percentage"
-// and a per-card VRAM limit from its ".sliced.memory-percentage"/".sliced.memory-mib"
+// and a per-accelerator VRAM limit from its ".sliced.memory-percentage"/".sliced.memory-mib"
 // (independent dimensions, no single ratio), plus the mounts that preload libvgpu.so
-// and provide the shared lock/cache. The card stays visible via NVIDIA_VISIBLE_DEVICES;
+// and provide the shared lock/cache. The accelerator stays visible via NVIDIA_VISIBLE_DEVICES;
 // HAMi-core (preloaded through /etc/ld.so.preload) enforces the limits at runtime.
 func (s *server) getSlicedContainerAllocateResponse(
 	pod *core.Pod,
@@ -267,7 +267,7 @@ func (s *server) getSlicedContainerAllocateResponse(
 		}
 	}
 
-	// Envs: SM (compute) percent from .sliced.cores-percentage and a per-card VRAM
+	// Envs: SM (compute) percent from .sliced.cores-percentage and a per-accelerator VRAM
 	// limit (MiB) from .sliced.memory-percentage / .sliced.memory-mib (independent
 	// dimensions), plus the shared cache.
 	coresRes := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer)
@@ -318,7 +318,7 @@ func (s *server) getSlicedContainerAllocateResponse(
 	}, nil
 }
 
-// nvidiaCUDADir returns the HAMi-core library subdirectory for a card's CUDA runtime
+// nvidiaCUDADir returns the HAMi-core library subdirectory for an accelerator's CUDA runtime
 // version ("cuda-<major>"), defaulting to "cuda-12" when the version is unknown.
 func nvidiaCUDADir(runtimeVersion string) string {
 	return "cuda-" + device.RuntimeMajor(runtimeVersion, "12")

@@ -6,7 +6,7 @@ package v1alpha1
 // with apply.
 //
 // AcceleratorSlicedDetail is the group-level slicing capability view, aggregated from
-// the group's per-card slicing status.
+// the group's per-accelerator slicing status.
 type AcceleratorSlicedDetailApplyConfiguration struct {
 	// Logical is the aggregated logical (software) slicing capability.
 	Logical *AcceleratorSlicedLogicalDetailApplyConfiguration `json:"logical,omitempty"`

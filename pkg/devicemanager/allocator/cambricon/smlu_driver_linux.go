@@ -15,11 +15,11 @@ func newSMLUDriver() smluDriver {
 	return &cndevSMLUDriver{lib: l, initRet: l.Init()}
 }
 
-// cndevSMLUDriver is the real smluDriver, driving cnDev on a card addressed by PCI bus ID
+// cndevSMLUDriver is the real smluDriver, driving cnDev on an accelerator addressed by PCI bus ID
 // over the exported sMLU wrappers.
 //
 // The exact sMLU field semantics and device-node set are a documented hardware open
-// question (see the spec): the calls below follow the vendor documentation but are
+// question (see the spec): the calls below follow the manufacturer documentation but are
 // unvalidated on real hardware, which is why every op goes through the seam so only this
 // type changes when the contract is confirmed. All unit tests use a fake driver.
 type cndevSMLUDriver struct {
@@ -172,8 +172,8 @@ func (d *cndevSMLUDriver) ListProfiles() ([]profileKey, error) {
 	return out, nil
 }
 
-// instanceFromInfo builds an smluInstance from a cnDev SMluInfo record on card. The quota
-// is read from the MAX (index 0) slot; memory is bytes, converted back to MiB.
+// instanceFromInfo builds an smluInstance from a cnDev SMluInfo record on an accelerator. The
+// quota is read from the MAX (index 0) slot; memory is bytes, converted back to MiB.
 func instanceFromInfo(card string, info cndev.SMluInfo) smluInstance {
 	return smluInstance{
 		card:      card,

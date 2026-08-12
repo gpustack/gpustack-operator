@@ -161,8 +161,14 @@ if [ "$outcome" = "Running" ]; then
     POD_NUMA="$(node_ssh "first=\$(echo '${POD_CPUS}' | cut -d, -f1 | cut -d- -f1); for n in /sys/devices/system/node/node[0-9]*; do hit=\$(tr ',' '\n' < \$n/cpulist | awk -F- -v c=\$first '{ if (NF==2) { if (c>=\$1 && c<=\$2) f=1 } else { if (c==\$1) f=1 } } END { print f+0 }'); if [ \"\$hit\" = 1 ]; then basename \$n | sed 's/^node//'; fi; done" 2>/dev/null | head -1 | tr -d '[:space:]')"
   fi
 fi
-TAE="$(pod_events "$P" | grep -ci 'TopologyAffinityError')"
-[ "${TAE:-0}" = 0 ] && TAE=0
+# An unreadable event list is reported as such, never as zero: this row is an observation, and "we
+# could not tell" is a different observation from "it did not happen".
+if TAE="$(pod_events "$P")"; then
+  TAE="$(printf '%s\n' "$TAE" | grep -ci 'TopologyAffinityError')"
+  [ "${TAE:-0}" = 0 ] && TAE=0
+else
+  TAE="unreadable"
+fi
 
 record PASS "OBSERVED: the partition Pod's outcome under ${TM_POLICY}" "outcome=${outcome}$([ "$outcome" = Running ] && echo ", container cpus=${POD_CPUS:-?} on NUMA node ${POD_NUMA:-?} vs card on node ${CARD_NUMA}"), TopologyAffinityError events=${TAE}, held reason='$(held_reason "$P")'"
 if [ "$outcome" = "Running" ] && [ -n "$POD_NUMA" ] && [ "$POD_NUMA" != "$CARD_NUMA" ]; then

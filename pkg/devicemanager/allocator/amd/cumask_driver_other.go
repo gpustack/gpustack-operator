@@ -17,7 +17,7 @@ var errTopologyUnsupported = errors.New("hsa topology reader is not available on
 // linking the cgo binding/hsa into a darwin test binary (which links Go's plugin package through
 // pkg/deviceplugin) aborts at dyld load on the unresolved HSA symbols, so the real reader
 // (cumask_driver_linux.go) is linux-only; this stub lets the package build and its
-// vendor-library-free mask arithmetic be table-tested on the development platform.
+// manufacturer-library-free mask arithmetic be table-tested on the development platform.
 func readTopology(_, _ string) (Topology, error) {
 	return Topology{}, errTopologyUnsupported
 }

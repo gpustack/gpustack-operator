@@ -19,12 +19,12 @@ type InstanceResourcesApplyConfiguration struct {
 	LocalStorage *resource.Quantity `json:"localStorage,omitempty"`
 	// Accelerator is the accelerator resource requirement for the Instance, e.g. "1", "2".
 	Accelerator *resource.Quantity `json:"accelerator,omitempty"`
-	// AcceleratorSlicedMemoryPercentage is the per-card VRAM budget requested on a
+	// AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a
 	// sliced InstanceType, as a percentage in [0,100]. 0 disables slicing (the request
-	// becomes an exclusive whole-card request). The Pod webhook folds it into the
+	// becomes an exclusive whole-accelerator request). The Pod webhook folds it into the
 	// normalized .sliced.units; it is ignored by non-sliced requests.
 	AcceleratorSlicedMemoryPercentage *int32 `json:"acceleratorSlicedMemoryPercentage,omitempty"`
-	// AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on
+	// AcceleratorSlicedCoresPercentage is the per-accelerator compute (SM) budget requested on
 	// a sliced InstanceType, as a percentage in [0,100]. It is independent of
 	// AcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook
 	// copies it to the other. It is ignored by non-sliced requests.
@@ -33,7 +33,7 @@ type InstanceResourcesApplyConfiguration struct {
 	// partition-offering InstanceType, e.g. "3g.40gb". A non-empty value makes this a
 	// request for one hardware partition of that shape, which is mutually exclusive with
 	// the two slice percentages above: hardware partitioning and software slicing cannot
-	// both apply to one card. It is ignored by InstanceTypes offering no partition.
+	// both apply to one accelerator. It is ignored by InstanceTypes offering no partition.
 	AcceleratorPartitionedProfile *string `json:"acceleratorPartitionedProfile,omitempty"`
 }
 

@@ -89,8 +89,13 @@ variable "cpu_instance_types" {
 # platform at any time. mig declares whether the group's cards can be partitioned in hardware; it
 # defaults to whether the platform appears in main.tf's mig_platforms list, and gates the
 # MIG-specific node preparation (see README).
+#
+# public_ip gives the group's nodes a public IPv4, which is what makes them reachable over SSH —
+# how the hardware-partition tests toggle MIG on the card — and so defaults to true for a GPU
+# group. Each address is charged against the project's vpc.ipv4-address.public.count quota, so set
+# it to false on a GPU group nobody logs in to; the CPU group never takes one (see README).
 variable "gpu_instance_types" {
-  description = "GPU node groups keyed by group name (each becomes gpu-<name>). platform+preset are required; os and drivers_preset default to the newest match from `nebius mk8s node-group get-compatibility-matrix` for var.release; preemptible defaults to false; mig defaults to whether the platform supports NVIDIA MIG."
+  description = "GPU node groups keyed by group name (each becomes gpu-<name>). platform+preset are required; os and drivers_preset default to the newest match from `nebius mk8s node-group get-compatibility-matrix` for var.release; preemptible defaults to false; mig defaults to whether the platform supports NVIDIA MIG; public_ip defaults to true, giving the nodes an SSH-reachable public IPv4 at the cost of one public-address quota unit each."
   type = map(object({
     platform       = string
     preset         = string
@@ -98,6 +103,7 @@ variable "gpu_instance_types" {
     drivers_preset = optional(string)
     preemptible    = optional(bool, false)
     mig            = optional(bool)
+    public_ip      = optional(bool, true)
   }))
   default = {
     h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" }

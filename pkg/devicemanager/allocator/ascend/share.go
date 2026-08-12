@@ -20,13 +20,14 @@ type shareDriver interface {
 }
 
 // ensureShareEnabled turns on the driver flag that lets one device be mounted into more than
-// one container, for the card a logical slice is about to land on. It reads first and writes
-// only when the flag is off, so a card already carrying a slice costs one query.
+// one container, for the accelerator a logical slice is about to land on. It reads first and
+// writes only when the flag is off, so an accelerator already carrying a slice costs one query.
 //
-// Without the flag the second sliced container on a card still starts, and then its workload
-// fails inside the container on the device open with a driver-internal error that names
-// neither the card nor the flag. Failing the allocation instead trades that for a diagnosis,
-// which is why a card whose flag cannot be turned on is refused rather than admitted.
+// Without the flag the second sliced container on an accelerator still starts, and then its
+// workload fails inside the container on the device open with a driver-internal error that names
+// neither the accelerator nor the flag. Failing the allocation instead trades that for a
+// diagnosis, which is why an accelerator whose flag cannot be turned on is refused rather than
+// admitted.
 func (s *server) ensureShareEnabled(accel *workercore.Accelerator) error {
 	if s.share == nil {
 		return fmt.Errorf("container-share actuator not configured")

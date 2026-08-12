@@ -17,7 +17,7 @@ import (
 // noClaims is the empty attribution self-check source: no running Pod claims any placement.
 func noClaims() (map[string][]migPlacement, error) { return nil, nil }
 
-// seedMarkedInstance seeds a live instance on a card and writes its ownership marker, so the
+// seedMarkedInstance seeds a live instance on an accelerator and writes its ownership marker, so the
 // pair models one Pod's created-and-recorded MIG partition.
 func seedMarkedInstance(t *testing.T, drv *fakeMigDriver, podUID, card string, giID uint32) {
 	t.Helper()
@@ -183,14 +183,14 @@ func TestReclaim_StaleMarkerGiIdReuseNotDestroyed(t *testing.T) {
 	require.NoError(t, err, "the live pod's marker is intact")
 }
 
-// migSeed is one live GPU instance to seed on a card, as the orphan sweep sees it (no parseable
+// migSeed is one live GPU instance to seed on an accelerator, as the orphan sweep sees it (no parseable
 // marker owns it).
 type migSeed struct {
 	card string
 	giID uint32
 }
 
-// seedInstances seeds each migSeed as a live instance at a distinct slot on its card.
+// seedInstances seeds each migSeed as a live instance at a distinct slot on its accelerator.
 func seedInstances(drv *fakeMigDriver, seeds []migSeed) {
 	for i, s := range seeds {
 		drv.seedLive(s.card, migInstance{
@@ -200,9 +200,9 @@ func seedInstances(drv *fakeMigDriver, seeds []migSeed) {
 	}
 }
 
-// TestReclaim_CorruptMarkerHoldsCardClosed asserts a card an unparseable marker names is never
-// treated as drained: its instance would otherwise look exactly like a marker-less orphan and be
-// destroyed under a running container. The hold is per card (a sibling card's orphan is still
+// TestReclaim_CorruptMarkerHoldsCardClosed asserts an accelerator an unparseable marker names is
+// never treated as drained: its instance would otherwise look exactly like a marker-less orphan and
+// be destroyed under a running container. The hold is per accelerator (a sibling's orphan is still
 // collected, so one bad file cannot deny the node's capacity), and a corrupt marker whose Pod is
 // alive is kept rather than retired. A corrupt path that names no Pod is held indefinitely: with no
 // owner there is no liveness evidence to retire it on.
@@ -227,14 +227,14 @@ func TestReclaim_CorruptMarkerHoldsCardClosed(t *testing.T) {
 			seeds:       []migSeed{{card: testGPUUUID0, giID: 1}},
 		},
 		{
-			name:        "a corrupt marker naming no card holds every card",
+			name:        "a corrupt marker naming no accelerator holds every accelerator",
 			corruptPod:  "pod-live",
 			corruptFile: markerFileName(""),
 			live:        []string{"pod-live"},
 			seeds:       []migSeed{{card: testGPUUUID0, giID: 1}, {card: testGPUUUID1, giID: 2}},
 		},
 		{
-			name:          "a sibling card's orphan is still collected",
+			name:          "a sibling accelerator's orphan is still collected",
 			corruptPod:    "pod-live",
 			corruptFile:   markerFileName(testGPUUUID1),
 			live:          []string{"pod-live"},
@@ -275,9 +275,9 @@ func TestReclaim_CorruptMarkerHoldsCardClosed(t *testing.T) {
 	}
 }
 
-// TestReclaim_UnattributableCorruptPathBoundedLog asserts the one hold this loop cannot release is not
-// silent: a corrupt path naming neither a Pod nor a card keeps failing closed node-wide forever (there
-// is no liveness evidence to retire it on), and the loop surfaces the operator-visible log naming the
+// TestReclaim_UnattributableCorruptPathBoundedLog asserts the one hold this loop cannot release is
+// not silent: a corrupt path naming neither a Pod nor an accelerator keeps failing closed node-wide
+// forever (there is no liveness evidence to retire it on), and the loop surfaces the log naming the
 // path exactly once, at the bound — the same surface the IN_USE path uses, because a status condition
 // would be stomped by the wholesale Devices.Status rebuild.
 func TestReclaim_UnattributableCorruptPathBoundedLog(t *testing.T) {
@@ -285,7 +285,7 @@ func TestReclaim_UnattributableCorruptPathBoundedLog(t *testing.T) {
 	drv := newFakeMigDriver()
 	seedInstances(drv, []migSeed{{card: testGPUUUID0, giID: 1}})
 	// A marker-named file one level above a container dir: its path names no Pod, and its own name is
-	// not attributable to a card either.
+	// not attributable to an accelerator either.
 	path := writeCorruptMarker(t, filepath.Join(deviceplugin.OperatorPodsDir, "pod-dead"), markerFileName(""))
 
 	var bounded int
@@ -306,10 +306,11 @@ func TestReclaim_UnattributableCorruptPathBoundedLog(t *testing.T) {
 }
 
 // TestReclaim_LiveOwnersCorruptMarkerBoundedLog asserts the sibling hold is not silent either. An
-// unparseable record whose Pod is still running is kept — the Pod depends on the ownership it records —
-// and nothing in this loop can release it while that Pod lives, which is the case that reads as
-// transient and is not. So it earns the same surface: one operator-visible log naming the card, the Pod
-// and the path, at the bound and only there. What the record does is unchanged, before the bound and
+// unparseable record whose Pod is still running is kept — the Pod depends on the ownership it
+// records — and nothing in this loop can release it while that Pod lives, which is the case that
+// reads as transient and is not. So it earns the same surface: one operator-visible log naming the
+// accelerator, the Pod and the path, at the bound and only there. What the record does is unchanged,
+// before the bound and
 // after it.
 func TestReclaim_LiveOwnersCorruptMarkerBoundedLog(t *testing.T) {
 	redirectLogicalSliceDirs(t)
@@ -346,7 +347,7 @@ func TestReclaim_LiveOwnersCorruptMarkerBoundedLog(t *testing.T) {
 // TestReclaim_CorruptMarkerOfDeadPodConverges asserts the hold clears by itself instead of leaking
 // a partition for the node's lifetime: a corrupt marker whose Pod is gone is retired on that
 // evidence alone (its path names the Pod) after the same debounce every other decision here uses,
-// and the partition it shadowed then becomes a genuine orphan the collector takes once the card's
+// and the partition it shadowed then becomes a genuine orphan the collector takes once the accelerator's
 // own debounce elapses. The retirement is observed by the next pass, never by the one that removed
 // the file.
 func TestReclaim_CorruptMarkerOfDeadPodConverges(t *testing.T) {
@@ -374,7 +375,7 @@ func TestReclaim_CorruptMarkerOfDeadPodConverges(t *testing.T) {
 			assert.NoFileExists(t, path, "the corrupt marker of a dead pod is retired after the debounce")
 			assert.Empty(t, drv.destroyed, "the pass that removed the file still holds the card closed")
 
-			// With the record gone, the shadowed partition is a plain orphan on a drained card.
+			// With the record gone, the shadowed partition is a plain orphan on a drained accelerator.
 			for i := 0; i < reclaimMaxMisses-1; i++ {
 				r.reconcile(nil)
 			}
@@ -387,15 +388,15 @@ func TestReclaim_CorruptMarkerOfDeadPodConverges(t *testing.T) {
 	}
 }
 
-// TestReclaim_OrphanKeptWhileCardHasMarker asserts the drained-card guard: a marker-less orphan is
-// not GC'd while the card still carries any marker (here a dead-but-in-use pod whose marker cannot
-// be removed), because such a card is not fully drained.
+// TestReclaim_OrphanKeptWhileCardHasMarker asserts the drained-accelerator guard: a marker-less
+// orphan is not GC'd while the accelerator still carries any marker (here a dead-but-in-use pod
+// whose marker cannot be removed), because such an accelerator is not fully drained.
 func TestReclaim_OrphanKeptWhileCardHasMarker(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	drv.inUseGiIDs = map[uint32]bool{1: true} // the marked pod's GI 1 is wedged in-use
 	seedMarkedInstance(t, drv, "pod-stuck", testGPUUUID0, 1)
-	// A marker-less orphan shares the card.
+	// A marker-less orphan shares the accelerator.
 	drv.seedLive(testGPUUUID0, migInstance{GiID: 2, CiID: 2, ComputeSlices: 1, Placement: migPlacement{2, 2}, UUID: "MIG-orphan"})
 	r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logr.Discard(), noClaims)
 
@@ -406,13 +407,13 @@ func TestReclaim_OrphanKeptWhileCardHasMarker(t *testing.T) {
 }
 
 // TestReclaim_OrphanGCOnlyOnDrainedCard asserts a marker-less GPU instance is kept while any live
-// Pod is on its card and reclaimed only once the card fully drains past the debounce.
+// Pod is on its accelerator and reclaimed only once the accelerator fully drains past the debounce.
 func TestReclaim_OrphanGCOnlyOnDrainedCard(t *testing.T) {
-	t.Run("kept while a live pod is on the card", func(t *testing.T) {
+	t.Run("kept while a live pod is on the accelerator", func(t *testing.T) {
 		redirectLogicalSliceDirs(t)
 		drv := newFakeMigDriver()
 		seedMarkedInstance(t, drv, "pod-live", testGPUUUID0, 1)
-		// A marker-less orphan (a crash between GI-create and marker-write) shares the card.
+		// A marker-less orphan (a crash between GI-create and marker-write) shares the accelerator.
 		drv.seedLive(testGPUUUID0, migInstance{GiID: 2, CiID: 2, ComputeSlices: 1, Placement: migPlacement{2, 2}, UUID: "MIG-orphan"})
 		r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logr.Discard(), noClaims)
 
@@ -422,10 +423,10 @@ func TestReclaim_OrphanGCOnlyOnDrainedCard(t *testing.T) {
 		assert.Empty(t, drv.destroyed, "an orphan on a card hosting a live pod is kept")
 	})
 
-	t.Run("gc'd after the card drains and the debounce", func(t *testing.T) {
+	t.Run("gc'd after the accelerator drains and the debounce", func(t *testing.T) {
 		redirectLogicalSliceDirs(t)
 		drv := newFakeMigDriver()
-		// A single marker-less orphan on an otherwise-empty card.
+		// A single marker-less orphan on an otherwise-empty accelerator.
 		drv.seedLive(testGPUUUID0, migInstance{GiID: 2, CiID: 2, ComputeSlices: 1, Placement: migPlacement{2, 2}, UUID: "MIG-orphan"})
 		r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logr.Discard(), noClaims)
 
@@ -440,8 +441,8 @@ func TestReclaim_OrphanGCOnlyOnDrainedCard(t *testing.T) {
 	})
 }
 
-// The identity check has to read the card INSIDE its lock, not from the snapshot the pass opened
-// with. That snapshot can be a whole allocation old by the time a given card is reached, and an
+// The identity check has to read the accelerator INSIDE its lock, not from the snapshot the pass opened
+// with. That snapshot can be a whole allocation old by the time a given accelerator is reached, and an
 // out-of-band `nvidia-smi mig -dgi` plus NVML's id reuse can put a different — possibly live —
 // instance at the recorded id in exactly that window. Checked against the stale view, the marker
 // still "matches" and a running Pod's MIG device is destroyed under it.
@@ -451,7 +452,7 @@ func TestReclaim_IDReusedAfterThePassSnapshotIsNotDestroyed(t *testing.T) {
 	seedMarkedInstance(t, drv, "pod-dead", testGPUUUID0, 1)
 
 	// The reclaimMaxMisses-th pass is the one that destroys. Its own snapshot is enumeration number
-	// reclaimMaxMisses, and the re-read under the card lock is the one after it — so replacing the
+	// reclaimMaxMisses, and the re-read under the accelerator lock is the one after it — so replacing the
 	// instance there lands strictly between the two.
 	drv.listHook = func(d *fakeMigDriver, call int) {
 		if call != reclaimMaxMisses+1 {
@@ -474,8 +475,8 @@ func TestReclaim_IDReusedAfterThePassSnapshotIsNotDestroyed(t *testing.T) {
 	require.Error(t, err, "the stale marker is dropped, since it describes an instance that is gone")
 }
 
-// A re-read that fails is a per-card skip rather than a destroy on an unvalidated view: the marker
-// stays, the debounce is not cleared, and the next pass tries again.
+// A re-read that fails is a per-accelerator skip rather than a destroy on an unvalidated view: the
+// marker stays, the debounce is not cleared, and the next pass tries again.
 func TestReclaim_FailsClosedWhenTheLockedRereadFails(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()

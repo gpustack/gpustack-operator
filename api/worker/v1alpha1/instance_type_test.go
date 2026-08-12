@@ -7,9 +7,10 @@ import (
 )
 
 // TestInstanceTypeAcceleratorDetailSliceablePredicates pins that the pool's two slicing
-// predicates are independent. Logical and physical slicing are mutually exclusive per CARD — the
-// per-card device.IsLogicallySliceable folds in !IsPartitioned for exactly that reason — but a
-// pool aggregates cards of both kinds, and a mixed node advertises both families at once. Making
+// predicates are independent. Logical and physical slicing are mutually exclusive per
+// ACCELERATOR — the per-accelerator device.IsLogicallySliceable folds in !IsPartitioned for
+// exactly that reason — but a pool aggregates accelerators of both kinds, and a mixed node
+// advertises both families at once. Making
 // either predicate exclude the other here would starve a mixed pool of logical slices, or let an
 // all-partitioned pool read as logically sliceable.
 func TestInstanceTypeAcceleratorDetailSliceablePredicates(t *testing.T) {

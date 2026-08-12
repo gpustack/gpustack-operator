@@ -23,7 +23,7 @@ const (
 	visProfile = "1g.10gb"
 )
 
-// seedOwnedPartition puts a card into the state a workload Allocate leaves behind: a live MIG
+// seedOwnedPartition puts an accelerator into the state a workload Allocate leaves behind: a live MIG
 // instance plus the owner container's ownership marker naming it.
 func seedOwnedPartition(t *testing.T, drv *fakeMigDriver, card string, giID uint32, uuid string) {
 	t.Helper()
@@ -36,7 +36,7 @@ func seedOwnedPartition(t *testing.T, drv *fakeMigDriver, card string, giID uint
 	})
 }
 
-// writeOwnerMarker writes the owner container's marker for a card verbatim, so a case can
+// writeOwnerMarker writes the owner container's marker for an accelerator verbatim, so a case can
 // record something the live hardware contradicts.
 func writeOwnerMarker(t *testing.T, card string, m migMarker) {
 	t.Helper()
@@ -45,8 +45,8 @@ func writeOwnerMarker(t *testing.T, card string, m migMarker) {
 
 // TestGetPhysicalSlicedVisibilityResponse covers the sidecar's partition resolution: the happy
 // path names the owner's partitions in devs order, and every record the resolver cannot prove
-// still describes a live partition of the owner's on that card fails the admission closed —
-// answering with the parent card would hand the sidecar a device-cgroup grant over every
+// still describes a live partition of the owner's on that accelerator fails the admission closed —
+// answering with the parent accelerator would hand the sidecar a device-cgroup grant over every
 // partition carved on it, including other tenants'.
 func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 	cases := []struct {
@@ -57,7 +57,7 @@ func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:  "one card names the owner's partition",
+			name:  "one accelerator names the owner's partition",
 			cards: []string{testGPUUUID0},
 			setup: func(t *testing.T, drv *fakeMigDriver) {
 				seedOwnedPartition(t, drv, testGPUUUID0, 1, "MIG-one")
@@ -67,7 +67,7 @@ func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 		{
 			// Seeded in reverse, so the order can only come from devs — which is the order the
 			// workload's own response used, and the whole point of the assertion sshd == main.
-			name:  "two cards join in devs order, not marker-write order",
+			name:  "two accelerators join in devs order, not marker-write order",
 			cards: []string{testGPUUUID0, testGPUUUID1},
 			setup: func(t *testing.T, drv *fakeMigDriver) {
 				seedOwnedPartition(t, drv, testGPUUUID1, 2, "MIG-second")
@@ -105,7 +105,7 @@ func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 			wantErr: "ownership marker",
 		},
 		{
-			name:  "a marker recording another card fails closed",
+			name:  "a marker recording another accelerator fails closed",
 			cards: []string{testGPUUUID0},
 			setup: func(t *testing.T, drv *fakeMigDriver) {
 				drv.seedLive(testGPUUUID0, migInstance{GiID: 1, ComputeSlices: 1, Placement: migPlacement{0, 2}, UUID: "MIG-one"})
@@ -142,7 +142,7 @@ func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 			wantErr: "id reused",
 		},
 		{
-			name:  "a profile the card no longer offers fails closed",
+			name:  "a profile the accelerator no longer offers fails closed",
 			cards: []string{testGPUUUID0},
 			setup: func(t *testing.T, drv *fakeMigDriver) {
 				drv.seedLive(testGPUUUID0, migInstance{GiID: 1, ComputeSlices: 1, Placement: migPlacement{0, 2}, UUID: "MIG-one"})
@@ -185,7 +185,7 @@ func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 }
 
 // TestGetPhysicalSlicedVisibilityResponse_NoDriver pins that a visibility server built on a node
-// that serves no partitioning rejects rather than answering with the parent card.
+// that serves no partitioning rejects rather than answering with the parent accelerator.
 func TestGetPhysicalSlicedVisibilityResponse_NoDriver(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := &server{}
@@ -244,11 +244,11 @@ func visibilityPod() *core.Pod {
 	return &core.Pod{ObjectMeta: meta.ObjectMeta{Name: "p", UID: types.UID(visPodUID)}}
 }
 
-// allocatedCardSet is the owner's card map the server hands the resolver.
+// allocatedCardSet is the owner's accelerator map the server hands the resolver.
 func allocatedCardSet(devs *workercore.Devices, cards []string) map[deviceplugin.Resource]int32 {
 	allocated := make(map[deviceplugin.Resource]int32, len(cards))
 	for _, card := range cards {
-		allocated[resourceForCard(devs, card)] = 1
+		allocated[resourceForAccelerator(devs, card)] = 1
 	}
 	return allocated
 }

@@ -10,14 +10,15 @@ import (
 	"gpustack.ai/gpustack/binding/hsa"
 )
 
-// The HSA handle and the per-card topology it answered with, both guarded by one mutex.
+// The HSA handle and the per-accelerator topology it answered with, both guarded by one mutex.
 //
 // The cache is not an optimization, it is what makes the caller's contract true. readTopology is
 // invoked from PlaceLogicalSliced, which runs under the device-plugin's node-wide allocate mutex,
 // and an uncached read is a dlopen, an agent walk and nine cgo queries per agent — held there, it
-// would stall Allocate for every OTHER vendor on this node, not only for AMD. A card's topology is
-// immutable for the life of the process (compute units, shader engines and XCCs do not change
-// under a running driver), so one read per card is all that is ever needed.
+// would stall Allocate for every OTHER manufacturer on this node, not only for AMD. An
+// accelerator's topology is immutable for the life of the process (compute units, shader engines
+// and XCCs do not change under a running driver), so one read per accelerator is all that is ever
+// needed.
 //
 // The handle is memoized only on SUCCESS. Latching a transient initialization failure would refuse
 // every sliced allocation on the node until the device-manager restarts, which is a much longer
@@ -28,14 +29,14 @@ var (
 	topologyCache = map[string]Topology{}
 )
 
-// readTopology returns the HSA-reported topology of the card at pciBusID, whose accelerator UUID
-// is cardUUID.
+// readTopology returns the HSA-reported topology of the accelerator at pciBusID, whose accelerator
+// UUID is cardUUID.
 //
-// The card is matched to its agent by PCI BDF first and by UUID only as a fallback, which is how
-// the AMD detector pairs the two enumerations; the fallback exists because an agent that could not
-// report its BDF is keyed by its UUID instead. A card no agent answers for is an error naming the
-// card: a zero-valued Topology is a card with no compute units, and reporting one as a topology
-// would hand the arithmetic a shape it can only refuse for the wrong reason.
+// The accelerator is matched to its agent by PCI BDF first and by UUID only as a fallback, which is
+// how the AMD detector pairs the two enumerations; the fallback exists because an agent that could
+// not report its BDF is keyed by its UUID instead. An accelerator no agent answers for is an error
+// naming it: a zero-valued Topology is an accelerator with no compute units, and reporting one as a
+// topology would hand the arithmetic a shape it can only refuse for the wrong reason.
 //
 // The numeric fields arrive as whatever binding/hsa could read, an unreadable one as zero. Judging
 // them is Topology.Validate's job, not this one's.

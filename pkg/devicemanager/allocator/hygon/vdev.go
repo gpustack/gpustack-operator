@@ -16,8 +16,9 @@ import (
 )
 
 // Slot-pool bounds of the DTK hy-virtual scheme: at most 200 vdev ids per node and 20
-// pipe ids per card (the per-card ≤ 4-slice bound is enforced upstream by the sliced
-// token pool). A card's compute units are addressed as a 128-bit mask (two cu_mask words).
+// pipe ids per accelerator (the per-accelerator ≤ 4-slice bound is enforced upstream by the
+// sliced token pool). An accelerator's compute units are addressed as a 128-bit mask (two
+// cu_mask words).
 const (
 	maxVdevID  = 200
 	maxPipeID  = 20
@@ -31,7 +32,7 @@ const (
 // a vdev id.
 var allocMu sync.Mutex
 
-// cuMask is a card's 128-bit compute-unit bitmask, split into the two 64-bit words the
+// cuMask is an accelerator's 128-bit compute-unit bitmask, split into the two 64-bit words the
 // vdev.conf carries as `cu_mask`. Bit c marks compute unit c: word lo covers CU 0..63,
 // word hi covers CU 64..127.
 type cuMask struct {
@@ -61,8 +62,8 @@ func (m cuMask) count() int {
 	return bits.OnesCount64(m.lo) + bits.OnesCount64(m.hi)
 }
 
-// fullMask is the mask of every compute unit a card of the given CU count owns; a used
-// mask must be a subset of it (a bit beyond the card's CUs is a corrupt record).
+// fullMask is the mask of every compute unit an accelerator of the given CU count owns; a
+// used mask must be a subset of it (a bit beyond the accelerator's CUs is a corrupt record).
 func fullMask(cores int) cuMask {
 	var m cuMask
 	for cu := 0; cu < cores; cu++ {
@@ -71,15 +72,16 @@ func fullMask(cores int) cuMask {
 	return m
 }
 
-// sliceCUCount converts a compute percent to a CU count against the card's total CU
-// count: ceil so a positive percent never rounds down to zero, capped at the card total.
+// sliceCUCount converts a compute percent to a CU count against the accelerator's total CU
+// count: ceil so a positive percent never rounds down to zero, capped at the accelerator
+// total.
 func sliceCUCount(coresPct int, cores uint32) int {
 	return min(int(math.Ceil(float64(coresPct)*float64(cores)/100)), int(cores))
 }
 
 // packCUMask picks the cuCount lowest free compute units in [0, cores) not already set in
 // used, returning the new (disjoint) mask. It fails closed: a used mask referencing a CU
-// beyond the card, or fewer than cuCount free CUs, is an error rather than a silent
+// beyond the accelerator, or fewer than cuCount free CUs, is an error rather than a silent
 // overlap or short mask.
 func packCUMask(used cuMask, cuCount, cores int) (cuMask, error) {
 	if cores > 2*cuWordBits {
@@ -104,7 +106,7 @@ func packCUMask(used cuMask, cuCount, cores int) (cuMask, error) {
 	return m, nil
 }
 
-// vdevConf is one parsed vdev.conf record: a card's slice reservation the DTK/hyhal
+// vdevConf is one parsed vdev.conf record: an accelerator's slice reservation the DTK/hyhal
 // runtime reads and the on-disk scanner treats as occupied.
 type vdevConf struct {
 	pciBusID string
@@ -248,9 +250,9 @@ func scanVdevConfs(podsDir, selfPath string) ([]vdevConf, error) {
 	return confs, nil
 }
 
-// allocateVdev derives a card's vdev.conf slot from the on-disk scan and publishes it
+// allocateVdev derives an accelerator's vdev.conf slot from the on-disk scan and publishes it
 // atomically at selfPath. It is idempotent — re-allocating the same selfPath for the same
-// card reuses the existing record — and level-based: a dead pod's reclaimed work dir frees
+// accelerator reuses the existing record — and level-based: a dead pod's reclaimed work dir frees
 // its slot on the next scan, so no in-memory counter or Release callback is needed. The
 // whole scan -> validate -> allocate -> write runs under allocMu because concurrent
 // Allocates are not serialized upstream.
@@ -258,7 +260,7 @@ func allocateVdev(podsDir, selfPath, pciBusID string, cores uint32, coresPct int
 	allocMu.Lock()
 	defer allocMu.Unlock()
 
-	// Idempotent reuse of an existing self-config for the same card.
+	// Idempotent reuse of an existing self-config for the same accelerator.
 	if c, err := parseVdevConf(selfPath); err == nil && c.pciBusID == pciBusID {
 		return c, nil
 	}
@@ -268,7 +270,7 @@ func allocateVdev(podsDir, selfPath, pciBusID string, cores uint32, coresPct int
 		return vdevConf{}, err
 	}
 
-	// Aggregate the used slots: CU bits and pipe ids are per-card (same PCI bus id);
+	// Aggregate the used slots: CU bits and pipe ids are per-accelerator (same PCI bus id);
 	// vdev ids are node-wide.
 	var usedCU cuMask
 	usedVdev := make(map[int]bool, len(confs))

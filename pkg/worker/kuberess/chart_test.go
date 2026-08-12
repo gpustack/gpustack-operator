@@ -71,11 +71,12 @@ func TestChartManufacturersMatchNodeFeature(t *testing.T) {
 	var values struct {
 		Global struct {
 			Manufacturers map[string]struct {
-				PciVendorID          string `yaml:"pciVendorID"`
-				ResourceName         string `yaml:"resourceName"`
-				RuntimeName          string `yaml:"runtimeName"`
-				RuntimeInjectsDriver bool   `yaml:"runtimeInjectsDriver"`
-				PartitionKind        string `yaml:"partitionKind"`
+				PciVendorID           string `yaml:"pciVendorID"`
+				ResourceName          string `yaml:"resourceName"`
+				RuntimeName           string `yaml:"runtimeName"`
+				RuntimeInjectsDriver  bool   `yaml:"runtimeInjectsDriver"`
+				RuntimeInjectsDevices bool   `yaml:"runtimeInjectsDevices"`
+				PartitionKind         string `yaml:"partitionKind"`
 			} `yaml:"manufacturers"`
 		} `yaml:"global"`
 	}
@@ -105,25 +106,35 @@ func TestChartManufacturersMatchNodeFeature(t *testing.T) {
 				assert.NotEmpty(t, row.RuntimeName,
 					"a device-manager can only run under a runtime the row names")
 			}
+			if row.RuntimeInjectsDevices {
+				assert.NotEmpty(t, row.RuntimeName,
+					"a workload can only be sent to a runtime the row names")
+			}
 		})
 	}
 }
 
-// TestChartRuntimeClassesFollowTheDriverInjectors pins WHICH manufacturers the chart creates a
-// RuntimeClass for, which is the assertion that keeps two similar-looking fields apart.
-// `runtimeName` is the class the operator will use for a vendor; `runtimeInjectsDriver` marks a
-// vendor whose driver reaches a container only through that runtime, and only there can the
-// runtime's presence be inferred from the accelerators working at all.
+// TestChartRuntimeClassesFollowTheRuntimeInjectors pins WHICH manufacturers the chart creates a
+// RuntimeClass for, which is the assertion that keeps three similar-looking fields apart.
+// `runtimeName` is the class the operator will use for a vendor. The other two are separate claims
+// about what a container would be missing without that runtime, and either one is enough to infer
+// the runtime is installed, because a vendor missing either cannot work at all:
+//   - `runtimeInjectsDriver` — the user-space driver arrives only through the runtime, which also
+//     makes that vendor's device-manager run under the class.
+//   - `runtimeInjectsDevices` — the allocator contributes no device node of its own, so the runtime
+//     is the only thing that turns an allocation into `/dev` entries inside the container. Such a
+//     device-manager still reads its management library from a hostPath and does NOT need the class.
 //
-// Creating one anywhere else breaks the vendor it was meant to serve: InstanceReconciler attaches
-// a RuntimeClass whenever one exists, so a class no container runtime backs makes the kubelet
-// reject every Pod of that vendor — on a cluster where, without the class, they ran.
-func TestChartRuntimeClassesFollowTheDriverInjectors(t *testing.T) {
+// Creating a class anywhere else breaks the vendor it was meant to serve: InstanceReconciler
+// attaches a RuntimeClass whenever one exists, so a class no container runtime backs makes the
+// kubelet reject every Pod of that vendor — on a cluster where, without the class, they ran.
+func TestChartRuntimeClassesFollowTheRuntimeInjectors(t *testing.T) {
 	var values struct {
 		Global struct {
 			Manufacturers map[string]struct {
-				RuntimeName          string `yaml:"runtimeName"`
-				RuntimeInjectsDriver bool   `yaml:"runtimeInjectsDriver"`
+				RuntimeName           string `yaml:"runtimeName"`
+				RuntimeInjectsDriver  bool   `yaml:"runtimeInjectsDriver"`
+				RuntimeInjectsDevices bool   `yaml:"runtimeInjectsDevices"`
 			} `yaml:"manufacturers"`
 		} `yaml:"global"`
 	}
@@ -134,13 +145,13 @@ func TestChartRuntimeClassesFollowTheDriverInjectors(t *testing.T) {
 	want, useOnly := sets.New[string](), sets.New[string]()
 	for _, row := range values.Global.Manufacturers {
 		switch {
-		case row.RuntimeInjectsDriver:
+		case row.RuntimeInjectsDriver, row.RuntimeInjectsDevices:
 			want.Insert(row.RuntimeName)
 		case row.RuntimeName != "":
 			useOnly.Insert(row.RuntimeName)
 		}
 	}
-	require.NotEmpty(t, want, "some manufacturer's runtime injects its driver")
+	require.NotEmpty(t, want, "some manufacturer depends on its runtime to reach a container")
 	require.NotEmpty(t, useOnly, "some manufacturer names a runtime it does not create")
 
 	got := sets.New[string]()
@@ -151,7 +162,7 @@ func TestChartRuntimeClassesFollowTheDriverInjectors(t *testing.T) {
 	}
 
 	assert.Equal(t, sorted(want), sorted(got),
-		"the chart creates a RuntimeClass exactly where the runtime injects the driver")
+		"the chart creates a RuntimeClass exactly where a container cannot do without the runtime")
 	assert.Empty(t, sorted(useOnly.Intersection(got)),
 		"a runtime this chart does not install is never conjured, only used where it exists")
 }
@@ -186,7 +197,7 @@ func TestChartPciClassWhitelistMatchesNodeFeature(t *testing.T) {
 // TestChartKueueTransformationsMatchNodeFeature holds the credits mapping Kueue is configured
 // with equal to what pkg/nodefeature computes. The chart renders that mapping from
 // global.manufacturers through a template the vendored Kueue chart includes, so the constants it
-// is scored on — CreditsPerCard, SharedResourceMaxSize, ResourceMaxUnits — are restated in a
+// is scored on — CreditsPerAccelerator, SharedResourceMaxSize, ResourceMaxUnits — are restated in a
 // template and nothing but this test holds the two statements together.
 //
 // It renders the whole chart on purpose: the mapping only reaches Kueue if the helper, the patch
@@ -194,9 +205,9 @@ func TestChartPciClassWhitelistMatchesNodeFeature(t *testing.T) {
 // scheduling chain admitted nothing.
 func TestChartKueueTransformationsMatchNodeFeature(t *testing.T) {
 	const (
-		exclusiveCredits = nodefeature.CreditsPerCard
-		sharedCredits    = nodefeature.CreditsPerCard / nodefeature.SharedResourceMaxSize
-		unitCredits      = nodefeature.CreditsPerCard / nodefeature.ResourceMaxUnits
+		exclusiveCredits = nodefeature.CreditsPerAccelerator
+		sharedCredits    = nodefeature.CreditsPerAccelerator / nodefeature.SharedResourceMaxSize
+		unitCredits      = nodefeature.CreditsPerAccelerator / nodefeature.ResourceMaxUnits
 	)
 
 	var want []transformation

@@ -19,20 +19,20 @@ type InstanceTypeStatusApplyConfiguration struct {
 	Phase *string `json:"phase,omitempty"`
 	// PhaseMessage is the message of the phase.
 	PhaseMessage *string `json:"phaseMessage,omitempty"`
-	// Accelerator is the allocatable-as-exclusive view: whole cards that are
+	// Accelerator is the allocatable-as-exclusive view: whole accelerators that are
 	// entirely free, e.g. "1", "4".
 	Accelerator *InstanceTypeResourceApplyConfiguration `json:"accelerator,omitempty"`
-	// AcceleratorShared is the shareable view: per-card ownership shares (up to
-	// SharedResourceMaxSize owners per card) summed over free and already-shared
-	// cards.
+	// AcceleratorShared is the shareable view: per-accelerator ownership shares (up to
+	// SharedResourceMaxSize owners per accelerator) summed over free and already-shared
+	// accelerators.
 	AcceleratorShared *InstanceTypeResourceApplyConfiguration `json:"acceleratorShared,omitempty"`
-	// AcceleratorSliced is the sliceable view: per-card VRAM-percent units (one
-	// hundred per card) summed over free and already-sliced cards.
+	// AcceleratorSliced is the sliceable view: per-accelerator VRAM-percent units (one
+	// hundred per accelerator) summed over free and already-sliced accelerators.
 	AcceleratorSliced *InstanceTypeResourceApplyConfiguration `json:"acceleratorSliced,omitempty"`
-	// AcceleratorPartitioned is the hardware-partitionable view: the partition instances
-	// the pool's partitioned cards can still host, summed over those cards. It is disjoint
-	// from the three views above — a card in a partitioning mode can serve no other kind of
-	// claim — so a pool with no partitioned card reports zero here.
+	// AcceleratorPartitioned is the hardware-partitionable view: the partition instances the
+	// pool's partitioned accelerators can still host, summed over those accelerators. It is
+	// disjoint from the three views above — an accelerator in a partitioning mode can serve no
+	// other kind of claim — so a pool with no partitioned accelerator reports zero here.
 	AcceleratorPartitioned *InstanceTypePartitionedResourceApplyConfiguration `json:"acceleratorPartitioned,omitempty"`
 	// CPU is the CPU resource of the InstanceType, e.g. "4", "8".
 	CPU *InstanceTypeResourceApplyConfiguration `json:"cpu,omitempty"`

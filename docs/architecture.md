@@ -11,7 +11,7 @@ well-known Kubernetes projects:
   hardware features and system configuration, and publishes them as Node labels.
 - [Kueue](https://github.com/kubernetes-sigs/kueue): a Kubernetes-native job queueing system that
   manages workload admission and queuing across ClusterQueues, and — through its AdmissionCheck
-  extension point — lets an external controller gate admission on per-card feasibility.
+  extension point — lets an external controller gate admission on per-accelerator feasibility.
 
 Nothing else has to be deployed: NFD, Kueue and the two CSI drivers are vendored subcharts of the
 operator's own chart.
@@ -44,8 +44,8 @@ Details, and the startup ordering the worker must keep, are in [Internals](archi
    `.sliced.*` logical-slicing capacities and the `.partitioned.*` hardware-partitioning capacities).
 4. **Queue construction & admission** — Worker controllers materialize the labels into Kueue
    `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool, **no Cohort**) and a materialized
-   `InstanceType` CRD, and gate admission with a per-card `AdmissionCheck` read from the `Devices`
-   ledger.
+   `InstanceType` CRD, and gate admission with a per-accelerator `AdmissionCheck` read from the
+   `Devices` ledger.
 
 ```mermaid
 flowchart TD
@@ -85,21 +85,21 @@ the previous one cannot:
    `nvidia.com/gpu.sliced: 1` + `nvidia.com/gpu.sliced.memory-percentage: 50`.
    → [Accelerator Requests](accelerator-requests.md)
 2. **Gate 1 — Pod webhook.** Validates the seven request rules and folds the memory budget into
-   `nvidia.com/gpu.sliced.units`, the credit input, using the pool `InstanceType`'s per-card VRAM.
+   `nvidia.com/gpu.sliced.units`, the credit input, using the pool `InstanceType`'s per-accelerator VRAM.
    → [Admission](architecture/admission.md#gate-1--the-pod-webhook)
 3. **Gate 2 — Kueue.** Scores the pool ClusterQueue's `credits.gpustack.ai/nvidia` quota and reserves.
    A scalar total, so it can over-admit a fragmented pool.
    → [Admission](architecture/admission.md#gate-2--kueue-credits)
 4. **Gate 3 — AdmissionCheck.** Reads the assigned pool's `Devices` ledger and asks whether any single
-   card can really host the slice; holds the workload with `Retry` if not.
-   → [Admission](architecture/admission.md#gate-3--the-per-card-admissioncheck)
+   accelerator can really host the slice; holds the workload with `Retry` if not.
+   → [Admission](architecture/admission.md#gate-3--the-per-accelerator-admissioncheck)
 5. **Gate 4 — scheduler / kubelet.** Picks a node whose `.sliced.*` capacity keys still fit; the
-   kubelet then picks a card-bound token — *which is* the card — guided by the plugin's preference for
-   the most-occupied card that still has room.
+   kubelet then picks an accelerator-bound token — *which is* the accelerator — guided by the plugin's
+   preference for the most-occupied accelerator that still has room.
    → [Device Discovery](architecture/discovery.md#placement-is-a-preference-not-a-decision)
-6. **Gate 5 — allocator.** Refuses a card another mode holds, injects the vendor's runtime isolation
-   (preload library, compute/VRAM quota), and records the allocation in the `Devices` ledger. Only the
-   partitioned family's fungible tokens let it choose the card itself.
+6. **Gate 5 — allocator.** Refuses an accelerator another mode holds, injects the manufacturer's
+   runtime isolation (preload library, compute/VRAM quota), and records the allocation in the `Devices`
+   ledger. Only the partitioned family's fungible tokens let it choose the accelerator itself.
    → [Device Discovery](architecture/discovery.md#the-device-plugin-allocator)
 7. **Observe.** The `InstanceType.status` four-view moves; `kubectl get instancetype -w` shows the
    capacity change as the pod allocates, and back again when it exits.
@@ -107,14 +107,17 @@ the previous one cannot:
 
 ## Vocabulary
 
+The three hardware words — **Device**, **Accelerator**, **Resource** — and the layering between them
+are in [Device Discovery](architecture/discovery.md#device-accelerator-resource). The rest:
+
 | Term | Meaning |
 |---|---|
 | **pool** | one `(CPU key, [accelerator key,] os, arch)` group — one isolated `ClusterQueue` + one `InstanceType`, no Cohort and no borrowing |
 | **`gKey` / `aKey`** | the general(CPU) node key (e.g. `amd-epyc-7763`, or the `generic` sentinel) / the accelerator device key (e.g. `nvidia-a10g`) |
-| **family** | the two mutually exclusive ways to share a card: **logical slicing** (`.sliced*`, the vendor's own runtime facility budgets compute and VRAM) and **physical partitioning** (`.partitioned*`, NVIDIA MIG). A card serves exactly one |
-| **credits** | `credits.gpustack.ai/<manufacturer>`, the only accelerator quota a ClusterQueue carries; one whole card = `M = 1,600,000` credit units, so fractional shares stay integer-valued |
-| **four-view (EX/SH/SL/PT)** | the `InstanceType.status` projections: free whole cards / shareable slots / logically sliceable VRAM-percent units / hardware partition instances |
-| **`Devices` ledger** | the per-card `AcceleratorAllocation` accounting on the `Devices` CR — the single authoritative record of who holds what |
+| **family** | the two mutually exclusive ways to share an accelerator: **logical slicing** (`.sliced*`, the manufacturer's own runtime facility budgets compute and VRAM) and **physical partitioning** (`.partitioned*`, NVIDIA MIG). An accelerator serves exactly one |
+| **credits** | `credits.gpustack.ai/<manufacturer>`, the only accelerator quota a ClusterQueue carries; one whole accelerator = `M = 1,600,000` credit units, so fractional shares stay integer-valued |
+| **four-view (EX/SH/SL/PT)** | the `InstanceType.status` projections: free whole accelerators / shareable slots / logically sliceable VRAM-percent units / hardware partition instances |
+| **`Devices` ledger** | the per-accelerator `AcceleratorAllocation` accounting on the `Devices` CR — the single authoritative record of who holds what |
 | **entrance** | the per-namespace `LocalQueue` (`gpustack-fnv64-<hash>`) a workload submits against |
 
 ## Where to go next

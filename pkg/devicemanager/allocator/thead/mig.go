@@ -23,12 +23,12 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
-// markerName is the per-container-per-card partition ownership marker written under the pod work
-// dir. It is the restart-surviving record reclaim destroys the exact GPU/compute instance from,
-// and that lets a create tell a reusable unbound instance from a bound one.
+// markerName is the per-container-per-accelerator partition ownership marker written under the pod
+// work dir. It is the restart-surviving record reclaim destroys the exact GPU/compute instance
+// from, and that lets a create tell a reusable unbound instance from a bound one.
 const markerName = "thead-mig.json"
 
-// migPlacement is a memory-slice interval [Start, Start+Length) on a card — the platform-
+// migPlacement is a memory-slice interval [Start, Start+Length) on an accelerator — the platform-
 // independent placement geometry the slot-pick and marker use, so the pure core is testable
 // without the vendor library. The vendor placement type stays inside the _linux seam.
 type migPlacement struct {
@@ -36,7 +36,7 @@ type migPlacement struct {
 	Length int32
 }
 
-// migInstance is one live or freshly created partition on a card: its GPU-instance and
+// migInstance is one live or freshly created partition on an accelerator: its GPU-instance and
 // compute-instance ids, the raw vendor profile id the GPU instance was carved from, the
 // compute-slice count, the memory-slice placement, and the partition identity string a container
 // is given to address it.
@@ -54,11 +54,11 @@ type migInstance struct {
 	UUID          string
 }
 
-// migCardState is a card's live partition state read for one profile: the raw vendor profile id
-// the requested profile name resolves to on that card, the profile's legal empty-card placements,
-// and every live GPU instance on the card (across all profiles). The core subtracts the live
-// placements (occupied) from Possible to pick a free slot, and scans Live for a reusable unbound
-// instance of the same raw profile.
+// migCardState is an accelerator's live partition state read for one profile: the raw vendor
+// profile id the requested profile name resolves to on that accelerator, the profile's legal
+// empty-accelerator placements, and every live GPU instance on the accelerator (across all
+// profiles). The core subtracts the live placements (occupied) from Possible to pick a free slot,
+// and scans Live for a reusable unbound instance of the same raw profile.
 //
 // The profile id is resolved by the seam rather than by the core: the vendor keeps the upstream
 // numbering but does not assign it the upstream slice-count meaning, so an id is only ever read
@@ -75,9 +75,9 @@ type migCardState struct {
 // the platform-independent core and reclaim loop can test with errors.Is.
 var errInstanceInUse = errors.New("mig instance in use")
 
-// migLiveInstance is one live GPU instance enumerated globally for reclaim: its card id plus the
-// instance. It lets the orphan collector find a marker-less GPU instance on any card (including
-// one carrying no marker at all) without a per-card profile hint.
+// migLiveInstance is one live GPU instance enumerated globally for reclaim: its accelerator id
+// plus the instance. It lets the orphan collector find a marker-less GPU instance on any
+// accelerator (including one carrying no marker at all) without a per-accelerator profile hint.
 type migLiveInstance struct {
 	Card string
 	Inst migInstance
@@ -85,47 +85,52 @@ type migLiveInstance struct {
 
 // migDriver is the vendor management-library actuator seam behind a _linux.go/_other.go build tag:
 // the real implementation drives the vendor binding on linux; the non-linux stub errors, so the
-// pure marker/slot-pick core is table-tested with a fake driver. Every operation addresses a card
-// by its vendor UUID (the operator accelerator ID). CardState and CreateInstance take the
-// profile's name and geometry because a compute-slice count alone cannot pick the GPU-instance
+// pure marker/slot-pick core is table-tested with a fake driver. Every operation addresses an
+// accelerator by its vendor UUID (the operator accelerator ID). CardState and CreateInstance take
+// the profile's name and geometry because a compute-slice count alone cannot pick the GPU-instance
 // profile id — the seam matches the profile by name over a probe of every id.
 //
 // Every enumerating operation must return an error whenever it cannot prove its enumeration is
 // complete, and must never report partial state as success. A live partition that reads as absent
-// is not a harmless gap: its ownership marker is then removable as "already gone", its occupied
-// slot is handed out a second time, and a marker-less one leaks past the orphan collector.
+// is not a harmless gap:
+//
+//   - its ownership marker becomes removable as "already gone";
+//   - its occupied slot is handed out a second time;
+//   - a marker-less one leaks past the orphan collector.
 type migDriver interface {
-	// CardState reads the card's live partition state for the given profile: the raw vendor
-	// profile id the name resolves to, the profile's legal empty-card placements, and every live
-	// GPU instance on the card. It errors rather than describing a card it could not read whole.
+	// CardState reads the accelerator's live partition state for the given profile: the raw vendor
+	// profile id the name resolves to, the profile's legal empty-accelerator placements, and every
+	// live GPU instance on the accelerator. It errors rather than describing an accelerator it
+	// could not read whole.
 	CardState(cardUUID, profile string, computeSlices, memorySlices int32) (migCardState, error)
 	// CreateInstance materializes a GPU instance of the profile at slot plus its whole-GI compute
 	// instance, returning the created partition (ids, raw profile id, placement, identity).
 	CreateInstance(cardUUID, profile string, computeSlices, memorySlices int32, slot migPlacement) (migInstance, error)
 	// DestroyInstance tears down the partition's compute instance then its GPU instance, after
-	// re-verifying under the card lock that the instance still carries the identity it was
+	// re-verifying under the accelerator lock that the instance still carries the identity it was
 	// snapshotted with. It returns an error wrapping errInstanceInUse when a residual process
 	// blocks the destroy.
 	DestroyInstance(cardUUID string, inst migInstance) error
-	// ListInstances enumerates every live GPU instance across all partition-capable cards, each
-	// carrying its card id, so the orphan collector can find a marker-less instance on a drained
-	// card. A GPU instance carries no operator tag, so this is the only way to see an untracked
-	// one. It errors rather than returning a list it cannot prove complete.
+	// ListInstances enumerates every live GPU instance across all partition-capable accelerators,
+	// each carrying its accelerator id, so the orphan collector can find a marker-less instance on
+	// a drained accelerator. A GPU instance carries no operator tag, so this is the only way to see
+	// an untracked one. It errors rather than returning a list it cannot prove complete.
 	ListInstances() ([]migLiveInstance, error)
-	// CardInstances enumerates one card's live GPU instances, for the callers that already know
-	// which card they are deciding about. It exists so the reclaim loop's verification re-read does
-	// not have to walk the node: that read happens with the card's lock held, and the node-wide walk
-	// is a few thousand driver calls on a fully populated host, every one of which would block every
-	// allocation on the card meanwhile. It errors on the same terms as ListInstances.
+	// CardInstances enumerates one accelerator's live GPU instances, for the callers that already
+	// know which accelerator they are deciding about. It exists so the reclaim loop's verification
+	// re-read does not have to walk the node: that read happens with the accelerator's lock held,
+	// and the node-wide walk is a few thousand driver calls on a fully populated host, every one of
+	// which would block every allocation on the accelerator meanwhile. It errors on the same terms
+	// as ListInstances.
 	CardInstances(cardUUID string) ([]migInstance, error)
 }
 
-// cardLocks holds a per-card mutex guarding the create+marker-write (and reclaim destroy) critical
-// section, so concurrent allocations on the same card serialize their slot selection while sibling
-// cards proceed in parallel. It is keyed by card UUID.
+// cardLocks holds a per-accelerator mutex guarding the create+marker-write (and reclaim destroy)
+// critical section, so concurrent allocations on the same accelerator serialize their slot
+// selection while sibling accelerators proceed in parallel. It is keyed by accelerator UUID.
 var cardLocks sync.Map // cardUUID -> *sync.Mutex
 
-// lockCard locks the card's mutex and returns its unlock func.
+// lockCard locks the accelerator's mutex and returns its unlock func.
 func lockCard(cardUUID string) func() {
 	m, _ := cardLocks.LoadOrStore(cardUUID, &sync.Mutex{})
 	mu := m.(*sync.Mutex)
@@ -133,10 +138,15 @@ func lockCard(cardUUID string) func() {
 	return mu.Unlock
 }
 
-// migMarker is one parsed per-container-per-card ownership record: the pod<->partition correlation
-// reclaim keys its liveness decision on, and the create's idempotent-retry and reuse checks read.
-// It records the raw profile id beside the profile name, so a decision taken after a restart rests
-// on the driver's own identity rather than on a name that a normalization change could move.
+// migMarker is one parsed per-container-per-accelerator ownership record: the pod<->partition
+// correlation reclaim keys its liveness decision on, and the create's idempotent-retry and reuse
+// checks read. It records the raw profile id beside the profile name, so a decision taken after a
+// restart rests on the driver's own identity rather than on a name that a normalization change
+// could move.
+//
+// The Card field and its "card" json tag are an ON-DISK FORMAT, not vocabulary: markers written by
+// an earlier release are still on real nodes, and renaming either would make them unreadable and
+// break retry, visibility, adoption and reclamation. It holds the accelerator's UUID.
 type migMarker struct {
 	PodUID        string `json:"podUID"`
 	Container     string `json:"container"`
@@ -170,18 +180,19 @@ type markerEntry struct {
 	marker migMarker
 }
 
-// markerFileName is the per-card marker file name: thead-mig-<card>.json, so a container spanning
-// multiple cards keeps one independent marker per card, each guarded by that card's lock. Naming
-// the card in the file name is also what lets an unparseable marker still be attributed to its
-// card, and so kept from poisoning any other card's decisions.
+// markerFileName is the per-accelerator marker file name: thead-mig-<accelerator UUID>.json, so a
+// container spanning multiple accelerators keeps one independent marker per accelerator, each
+// guarded by that accelerator's lock. Naming the accelerator in the file name is also what lets an
+// unparseable marker still be attributed to its accelerator, and so kept from poisoning any other
+// accelerator's decisions.
 func markerFileName(cardUUID string) string {
 	return strings.TrimSuffix(markerName, ".json") + "-" + cardUUID + ".json"
 }
 
-// markerPath returns the marker file path for a partitioned container on a card, under an explicit
-// pods root. The root is a parameter rather than the shared package variable so a test writes to a
-// temporary directory without mutating process-wide state; the layout below it mirrors the shared
-// pod work directory, which the package test pins.
+// markerPath returns the marker file path for a partitioned container on an accelerator, under an
+// explicit pods root. The root is a parameter rather than the shared package variable so a test
+// writes to a temporary directory without mutating process-wide state; the layout below it mirrors
+// the shared pod work directory, which the package test pins.
 func markerPath(podsDir, podUID, container, cardUUID string) string {
 	return filepath.Join(podsDir, podUID, "c-"+container, markerFileName(cardUUID))
 }
@@ -190,14 +201,18 @@ func markerPath(podsDir, podUID, container, cardUUID string) string {
 // so the self-marker reuse and reclaim never silently mis-read a live partition. The raw profile
 // id is not checked for presence because 0 is a legal vendor id.
 //
-// The recorded card must be the card the file's own NAME encodes. A record that disagrees with its
-// name is internally inconsistent, and either reading of it is unsafe: the ownership set is grouped
-// by the recorded card, so the gpu instance the record owns would look unowned on the card the file
-// belongs to and a second Pod could adopt a partition another Pod is using; while the self-marker
-// rebind reads the record's ids against the card its path names, so it would rebind one card's
-// instance id onto another card. It is therefore refused here, which reports it to the scan as a
-// corrupt path — attributable to the card its name encodes, held closed on that card alone, and
-// retired once its Pod is gone, the same as any other unreadable record.
+// The recorded accelerator must be the accelerator the file's own NAME encodes. A record that
+// disagrees with its name is internally inconsistent, and either reading of it is unsafe:
+//
+//   - the ownership set is grouped by the recorded accelerator, so the gpu instance the record owns
+//     would look unowned on the accelerator the file belongs to, and a second Pod could adopt a
+//     partition another Pod is using;
+//   - the self-marker rebind reads the record's ids against the accelerator its path names, so it
+//     would rebind one accelerator's instance id onto another accelerator.
+//
+// It is therefore refused here, which reports it to the scan as a corrupt path — attributable to
+// the accelerator its name encodes, held closed on that accelerator alone, and retired once its Pod
+// is gone, the same as any other unreadable record.
 func parseMarker(path string) (migMarker, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -242,9 +257,9 @@ func writeMarker(path string, m migMarker) error {
 
 // scanMarkers parses every partition marker under podsDir. An unparseable marker is collected as a
 // corrupt path rather than failing the whole scan, so one bad file never blocks the node; the
-// callers narrow it through ownershipUnknownOnCard to the card the file name names, which is the
-// only scope where an unknowable ownership set can change a decision — or to every card when the
-// path names none.
+// callers narrow it through ownershipUnknownOnCard to the accelerator the file name names, which is
+// the only scope where an unknowable ownership set can change a decision — or to every accelerator
+// when the path names none.
 func scanMarkers(podsDir string) (entries []markerEntry, corrupt []string) {
 	_ = filepath.WalkDir(podsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -268,14 +283,14 @@ func scanMarkers(podsDir string) (entries []markerEntry, corrupt []string) {
 	return entries, corrupt
 }
 
-// isMarkerFile reports whether name is a partition marker file (thead-mig-<card>.json).
+// isMarkerFile reports whether name is a partition marker file (thead-mig-<accelerator UUID>.json).
 func isMarkerFile(name string) bool {
 	return strings.HasPrefix(name, strings.TrimSuffix(markerName, ".json")+"-") &&
 		strings.HasSuffix(name, ".json")
 }
 
-// ownedGiIDsOnCard returns the set of GPU-instance ids on cardUUID that any marker owns, so the
-// reuse check can tell a bound instance from a reusable unbound one.
+// ownedGiIDsOnCard returns the set of GPU-instance ids on the accelerator cardUUID that any marker
+// owns, so the reuse check can tell a bound instance from a reusable unbound one.
 func ownedGiIDsOnCard(entries []markerEntry, cardUUID string) map[uint32]bool {
 	owned := make(map[uint32]bool)
 	for i := range entries {
@@ -286,11 +301,12 @@ func ownedGiIDsOnCard(entries []markerEntry, cardUUID string) map[uint32]bool {
 	return owned
 }
 
-// cardFromMarkerPath returns the card UUID a marker file's NAME encodes (thead-mig-<card>.json),
-// which parses even when the file's contents do not — the property that keeps a corrupt marker's
-// blast radius down to one card. It reports ok=false when the base name is not a marker name at all
-// (a path a walk error collected, e.g. an unreadable directory) or encodes an empty card, because
-// such a path cannot be attributed to any one card.
+// cardFromMarkerPath returns the accelerator UUID a marker file's NAME encodes
+// (thead-mig-<accelerator UUID>.json), which parses even when the file's contents do not — the
+// property that keeps a corrupt marker's blast radius down to one accelerator. It reports ok=false
+// when the base name is not a marker name at all (a path a walk error collected, e.g. an unreadable
+// directory) or encodes an empty accelerator, because such a path cannot be attributed to any one
+// accelerator.
 func cardFromMarkerPath(path string) (string, bool) {
 	name := filepath.Base(path)
 	if !isMarkerFile(name) {
@@ -323,27 +339,31 @@ func podUIDFromMarkerPath(podsDir, path string) (string, bool) {
 	return parts[0], true
 }
 
-// ownershipUnknownOnCard reports whether any unparseable marker leaves cardUUID's ownership set
-// unknowable, in which case a leftover on that card cannot be proven unbound and every decision
-// resting on that proof must fail closed: adoption of an unmarked leftover, and the drained-card
-// verdict the reclaim loop's orphan collector destroys on. A card whose markers all parse is
-// unaffected, and so is a fresh create, whose occupancy comes from the driver's own complete
-// enumeration rather than from the markers.
+// ownershipUnknownOnCard reports whether any unparseable marker leaves the accelerator cardUUID's
+// ownership set unknowable, in which case a leftover on that accelerator cannot be proven unbound
+// and every decision resting on that proof must fail closed:
 //
-// Scoping is by the card the corrupt file's name encodes, so one bad file never darkens a sibling
-// card: failing closed node-wide would let a single truncated file deny a whole node's partition
-// capacity, while failing closed on the one card it names cannot.
+//   - adoption of an unmarked leftover;
+//   - the drained-accelerator verdict the reclaim loop's orphan collector destroys on.
 //
-// A corrupt path that names no card darkens every card, because the scope of what is unknown is
-// itself unknown — it may stand for markers of any card. Refusing adoption is not refusing capacity
-// (occupancy comes from the driver's live set, so a fresh create in a free slot still succeeds), and
-// a corrupt MARKER clears by itself: the reclaim loop retires it once the Pod its path names is
-// gone. A corrupt path that names no card, however, names no Pod either — a walk error over a pod
-// directory is the reachable case — so there is no liveness evidence to retire it on and the loop
-// deliberately keeps it. That hold is therefore permanent, not transient: no adoption anywhere on
-// the node and no orphan collected on any card, for as long as the path stays unreadable. It is a
-// filesystem fault an operator can repair, and the reclaim loop says so out loud at a retry bound
-// (reclaimMaxCorruptHoldMisses) rather than letting the node degrade silently.
+// An accelerator whose markers all parse is unaffected, and so is a fresh create, whose occupancy
+// comes from the driver's own complete enumeration rather than from the markers.
+//
+// Scoping is by the accelerator the corrupt file's name encodes, so one bad file never darkens a
+// sibling accelerator: failing closed node-wide would let a single truncated file deny a whole
+// node's partition capacity, while failing closed on the one accelerator it names cannot.
+//
+// A corrupt path that names no accelerator darkens every accelerator, because the scope of what is
+// unknown is itself unknown — it may stand for markers of any accelerator. Refusing adoption is not
+// refusing capacity (occupancy comes from the driver's live set, so a fresh create in a free slot
+// still succeeds), and a corrupt MARKER clears by itself: the reclaim loop retires it once the Pod
+// its path names is gone. A corrupt path that names no accelerator, however, names no Pod either —
+// a walk error over a pod directory is the reachable case — so there is no liveness evidence to
+// retire it on and the loop deliberately keeps it. That hold is therefore permanent, not transient:
+// no adoption anywhere on the node and no orphan collected on any accelerator, for as long as the
+// path stays unreadable. It is a filesystem fault an operator can repair, and the reclaim loop says
+// so out loud at a retry bound (reclaimMaxCorruptHoldMisses) rather than letting the node degrade
+// silently.
 func ownershipUnknownOnCard(corrupt []string, cardUUID string) bool {
 	for _, p := range corrupt {
 		card, ok := cardFromMarkerPath(p)
@@ -354,8 +374,8 @@ func ownershipUnknownOnCard(corrupt []string, cardUUID string) bool {
 	return false
 }
 
-// adoptUnboundInstance returns a live instance on the card that no marker owns and that was carved
-// from the same raw vendor profile as the request — a leftover a crashed create or an out-of-band
+// adoptUnboundInstance returns a live instance on the accelerator that no marker owns and that was
+// carved from the same raw vendor profile as the request — a leftover a crashed create or an out-of-band
 // tool left behind, which adopting avoids re-creating a colliding one over. It returns ok=false
 // when none is adoptable.
 //
@@ -385,8 +405,9 @@ func adoptUnboundInstance(state migCardState, owned map[uint32]bool, computeSlic
 }
 
 // pickPlacement returns the free placement with the smallest Start that overlaps no occupied
-// interval, and ok=false when the card is full. Deterministic (lowest slot first) so concurrent
-// creates on the same card under the per-card lock never pick the same slot.
+// interval, and ok=false when the accelerator is full. Deterministic (lowest slot first) so
+// concurrent creates on the same accelerator under the per-accelerator lock never pick the same
+// slot.
 func pickPlacement(possible, occupied []migPlacement) (migPlacement, bool) {
 	sorted := make([]migPlacement, len(possible))
 	copy(sorted, possible)
@@ -411,7 +432,7 @@ func placementOverlapsAny(slot migPlacement, occupied []migPlacement) bool {
 	return false
 }
 
-// findLiveInstance returns the live GPU instance with giID on the card, if any.
+// findLiveInstance returns the live GPU instance with giID on the accelerator, if any.
 func findLiveInstance(state migCardState, giID uint32) (migInstance, bool) {
 	for i := range state.Live {
 		if state.Live[i].GiID == giID {
@@ -437,17 +458,20 @@ const (
 	migRebound
 )
 
-// reserveMigInstance is the per-card partition allocation core, run under the card's lock. It (1)
-// reuses an existing self-marker on an exact (card, profile) match — verifying its instance still
-// lives and still carries the recorded identity — so a kubelet Allocate retry rebinds its own
-// partition instead of double-creating; (2) adopts an unowned leftover instance of the same raw
-// profile if one is present; (3) otherwise picks the lowest free placement and creates a new
-// GPU+compute instance. It writes the ownership marker inside the critical section, rolling back a
-// just-created instance if the marker write fails. The returned outcome tells the caller's rollback
-// exactly what to undo.
+// reserveMigInstance is the per-accelerator partition allocation core, run under the accelerator's
+// lock. In order, it:
 //
-// A card state the driver cannot prove complete is an error, never an empty card: reading a live
-// partition as absent would hand its slot out twice.
+//   - reuses an existing self-marker on an exact (accelerator, profile) match — verifying its
+//     instance still lives and still carries the recorded identity — so a kubelet Allocate retry
+//     rebinds its own partition instead of double-creating;
+//   - adopts an unowned leftover instance of the same raw profile if one is present;
+//   - otherwise picks the lowest free placement and creates a new GPU+compute instance.
+//
+// It writes the ownership marker inside the critical section, rolling back a just-created instance
+// if the marker write fails. The returned outcome tells the caller's rollback exactly what to undo.
+//
+// An accelerator state the driver cannot prove complete is an error, never an empty accelerator:
+// reading a live partition as absent would hand its slot out twice.
 //
 // The outcome is only meaningful when the returned error is nil. Several error paths return a non-zero
 // outcome — the value a rollback would act on if it trusted it — so a caller must check the error
@@ -534,10 +558,10 @@ func reserveMigInstance(
 	return inst, outcome, nil
 }
 
-// profileGeometry returns the per-card compute/memory slice geometry of a partition profile on the
-// allocated card, read from the card's detect-time capability in devs.Spec. It reports ok=false
-// when the card or profile is absent, so the caller fails the allocation rather than guessing
-// geometry.
+// profileGeometry returns the per-accelerator compute/memory slice geometry of a partition profile
+// on the allocated accelerator, read from the accelerator's detect-time capability in devs.Spec. It
+// reports ok=false when the accelerator or profile is absent, so the caller fails the allocation
+// rather than guessing geometry.
 func profileGeometry(devs *workercore.Devices, cardUUID, profile string) (computeSlices, memorySlices int32, ok bool) {
 	for i := range devs.Spec.Groups {
 		grp := &devs.Spec.Groups[i]
@@ -557,9 +581,10 @@ func profileGeometry(devs *workercore.Devices, cardUUID, profile string) (comput
 	return 0, 0, false
 }
 
-// allocatedCards returns the UUIDs of the allocated cards in devs order, so a container's
-// partition list and a co-allocating container's are assembled the same way and read the same.
-func allocatedCards(devs *workercore.Devices, allocated map[deviceplugin.Resource]int32) []string {
+// allocatedAccelerators returns the UUIDs of the allocated accelerators in devs order, so a
+// container's partition list and a co-allocating container's are assembled the same way and read
+// the same.
+func allocatedAccelerators(devs *workercore.Devices, allocated map[deviceplugin.Resource]int32) []string {
 	cards := make([]string, 0, len(allocated))
 	for i := range devs.Spec.Groups {
 		grp := &devs.Spec.Groups[i]
@@ -576,8 +601,8 @@ func allocatedCards(devs *workercore.Devices, allocated map[deviceplugin.Resourc
 	return cards
 }
 
-// resourceForCard returns the Resource (group:device) of the card with the given UUID.
-func resourceForCard(devs *workercore.Devices, cardUUID string) deviceplugin.Resource {
+// resourceForAccelerator returns the Resource (group:device) of the accelerator with the given UUID.
+func resourceForAccelerator(devs *workercore.Devices, cardUUID string) deviceplugin.Resource {
 	for i := range devs.Spec.Groups {
 		grp := &devs.Spec.Groups[i]
 		for j := range grp.Accelerators {
@@ -599,29 +624,32 @@ var (
 
 // The set of nodes below comes from the vendor's container-isolation documentation, whose own example
 // injects exactly the five a partitioned container is given here — the two shared control nodes, the
-// parent card's node, and the capability nodes of one GPU instance and its compute instance — and
+// parent accelerator's node, and the capability nodes of one GPU instance and its compute instance — and
 // describes the result as a container that can use that one partition and see no other device. There
 // is no environment-variable equivalent and no runtime hook: these nodes are the whole of the
 // container's access.
 //
 // How those nodes are NAMED is measured on hardware instead, because the documentation's naming rule does
-// not describe this driver. On a 16-card host every card's node is /dev/alixpu_ppu<ordinal> and its
-// capability subtree is /proc/driver/alixpu/capabilities/ppu<ordinal>, one ordinal for both, running
-// 0..15 with no ppu16; a live GPU instance created on the card at ordinal 14 appeared under ppu14.
+// not describe this driver. The name is built from the CARD ORDINAL — an addressing index, not the
+// accelerator's identity. On a 16-accelerator host every accelerator's node is
+// /dev/alixpu_ppu<ordinal> and its capability subtree is /proc/driver/alixpu/capabilities/ppu<ordinal>,
+// one ordinal for both, running 0..15 with no ppu16; a live GPU instance created on the accelerator at
+// card ordinal 14 appeared under ppu14.
 //
-// The kernel minor number each of those nodes carries is a different number, and it is the card's identity
-// rather than its name: it is what the detector records, and what proves an ordinal reaches the card that
-// record describes. On that host the two ran one apart, because the shared control node /dev/alixpu holds
-// minor 0 of the same character-device major as the per-card nodes — but that is an observation about one
-// host and one driver, not a rule this file may lean on. Nothing here computes either number from the
-// other, in either direction, and the addressing proof below holds at any offset or at none.
+// The kernel minor number each of those nodes carries is a different number, and it is the accelerator's
+// identity rather than its name: it is what the detector records, and what proves a card ordinal reaches
+// the accelerator that record describes. On that host the two ran one apart, because the shared control
+// node /dev/alixpu holds minor 0 of the same character-device major as the per-accelerator nodes — but
+// that is an observation about one host and one driver, not a rule this file may lean on. Nothing here
+// computes either number from the other, in either direction, and the addressing proof below holds at any
+// offset or at none.
 const (
 	// devControlName and devCtlName are the shared control nodes every container addressing any
-	// partition needs. They are not per card, so they are addressed by name alone.
+	// partition needs. They are not per accelerator, so they are addressed by name alone.
 	devControlName = "alixpu"
 	devCtlName     = "alixpu_ctl"
-	// devCardPrefix names a card's own device node, suffixed by the card's ORDINAL — its accelerator
-	// index — and never by the kernel minor number that node carries.
+	// devCardPrefix names an accelerator's own device node, suffixed by its CARD ORDINAL — the
+	// accelerator index — and never by the kernel minor number that node carries.
 	devCardPrefix = "alixpu_ppu"
 	// devCapDir and devCapPrefix name a capability node, which is addressed by its minor number
 	// alone — the number the driver publishes in procfs, never one computed here.
@@ -642,7 +670,7 @@ func sharedControlNodePaths() []string {
 	}
 }
 
-// cardNodePath returns the device node of the card with the given ordinal.
+// cardNodePath returns the device node named by the given card ordinal.
 func cardNodePath(ordinal uint32) string {
 	return filepath.Join(hostDevDir, devCardPrefix+strconv.FormatUint(uint64(ordinal), 10))
 }
@@ -652,18 +680,18 @@ func capNodePath(minor uint32) string {
 	return filepath.Join(hostDevDir, devCapDir, devCapPrefix+strconv.FormatUint(uint64(minor), 10))
 }
 
-// cardCapDir returns the procfs capability directory holding one card's partition access files. The card
-// is keyed by the same ordinal its device node is named after — the driver publishes both trees under
-// that one number — so the two paths cannot come to denote different cards and hand a container one
-// card's node with another card's capability. The suffix is always numeric, so this can never address the
-// tree's card-less branch — the driver's own config and monitor capabilities, which sit beside the
-// per-card directories rather than under one of them.
+// cardCapDir returns the procfs capability directory holding one accelerator's partition access files.
+// It is keyed by the same card ordinal its device node is named after — the driver publishes both trees
+// under that one number — so the two paths cannot come to denote different accelerators and hand a
+// container one accelerator's node with another's capability. The suffix is always numeric, so this can
+// never address the tree's ordinal-less branch — the driver's own config and monitor capabilities, which
+// sit beside the per-accelerator directories rather than under one of them.
 func cardCapDir(ordinal uint32) string {
 	return filepath.Join(hostProcDriverDir, procDriverName, "capabilities",
 		"ppu"+strconv.FormatUint(uint64(ordinal), 10), "mig")
 }
 
-// giAccessPath returns the procfs access file of a GPU instance on a card.
+// giAccessPath returns the procfs access file of a GPU instance on an accelerator.
 func giAccessPath(ordinal, giID uint32) string {
 	return filepath.Join(cardCapDir(ordinal), "gi"+strconv.FormatUint(uint64(giID), 10), "access")
 }
@@ -678,7 +706,7 @@ func ciAccessPath(ordinal, giID, ciID uint32) string {
 // closed on a file it cannot read or cannot find the field in.
 //
 // The number must be resolved at allocation time and must never be cached at detection time. The
-// vendor's numbering is neither per card nor sequential nor derivable from the instance ids — its
+// vendor's numbering is neither per accelerator nor sequential nor derivable from the instance ids — its
 // documented example places the first GPU instance's capability at 256 while another instance's sits
 // at 1280 and that instance's first compute instance at 1281, with unrelated capabilities numbered
 // before any partition exists — and the numbers are reassigned as partitions are created and
@@ -742,10 +770,10 @@ func newPartitionDeviceSpec(path string) *deviceplugin.DeviceSpec {
 // requireDeviceNode verifies a node the partition's device set needs and returns its specification.
 //
 // It deliberately does not use the shared device-spec helper, which returns nil for a path that does
-// not exist: the whole-card responder appends only what is non-nil, so reusing that helper here would
-// turn a missing node into a SUCCESSFUL allocation carrying a silently incomplete device set. A
-// partition needs every node in its set, so an absent one — or one that is not a character device —
-// fails the allocation.
+// not exist: the whole-accelerator responder appends only what is non-nil, so reusing that helper
+// here would turn a missing node into a SUCCESSFUL allocation carrying a silently incomplete device
+// set. A partition needs every node in its set, so an absent one — or one that is not a character
+// device — fails the allocation.
 func requireDeviceNode(path string) (*deviceplugin.DeviceSpec, error) {
 	if _, err := deviceNodeMinor(path); err != nil {
 		return nil, fmt.Errorf("device node %q: %w", path, err)
@@ -754,13 +782,14 @@ func requireDeviceNode(path string) (*deviceplugin.DeviceSpec, error) {
 }
 
 // requireNumberedDeviceNode verifies a node whose minor number is its identity: a capability node, whose
-// minor is the one procfs published for it, and a card's own node, whose minor is the one the detector
-// recorded for that card. A node carrying a different number is a /dev tree that disagrees with the
-// driver, so it fails the allocation rather than being handed over as if it were the right one.
+// minor is the one procfs published for it, and an accelerator's own node, whose minor is the one the
+// detector recorded for that accelerator. A node carrying a different number is a /dev tree that
+// disagrees with the driver, so it fails the allocation rather than being handed over as if it were the
+// right one.
 //
 // Only the two shared control nodes are verified by requireDeviceNode instead, with no number to
-// compare: they are addressed by name alone rather than per card, so there is nothing they could be
-// confused with.
+// compare: they are addressed by name alone rather than per accelerator, so there is nothing they
+// could be confused with.
 func requireNumberedDeviceNode(path string, wantMinor uint32) (*deviceplugin.DeviceSpec, error) {
 	minor, err := deviceNodeMinor(path)
 	if err != nil {
@@ -772,30 +801,30 @@ func requireNumberedDeviceNode(path string, wantMinor uint32) (*deviceplugin.Dev
 	return newPartitionDeviceSpec(path), nil
 }
 
-// requireCardNode returns the ordinal that names cardUUID's own device node and keys its procfs
-// capability subtree — the card's accelerator index — together with the verified specification of that
-// device node. It is the one definition of how a card is addressed on this vendor's node, so both the
-// whole-card and the partition responders reach a card through it and cannot come to address one
-// differently.
+// requireCardNode returns the card ordinal that names cardUUID's own device node and keys its procfs
+// capability subtree — the accelerator index — together with the verified specification of that device
+// node. It is the one definition of how an accelerator is addressed on this vendor's node, so both the
+// whole-accelerator and the partition responders reach an accelerator through it and cannot come to
+// address one differently.
 //
-// The ordinal is only usable once it is shown to reach the card the detector measured, and the proof is
-// the node's OWN kernel minor number against the minor number the detector recorded for that
-// accelerator: equal means this ordinal addresses that card. It asserts nothing about how the two numbers
-// relate. Whatever offset the driver's numbering puts between them belongs to the driver, and is not
-// reconstructed here: an offset assumed from one host's observation would address a card that departed
-// from it anyway, and would refuse every card on a host that numbered differently.
+// The ordinal is only usable once it is shown to reach the accelerator the detector measured, and the
+// proof is the node's OWN kernel minor number against the minor number the detector recorded for that
+// accelerator: equal means this ordinal addresses that accelerator. It asserts nothing about how the two
+// numbers relate. Whatever offset the driver's numbering puts between them belongs to the driver, and is
+// not reconstructed here: an offset assumed from one host's observation would address an accelerator that
+// departed from it anyway, and would refuse every accelerator on a host that numbered differently.
 //
 // The proof is what makes the accelerator index safe to name a path with, because the index is a
-// post-filter counter — it advances only for a card the detector accepted — so a card skipped
-// mid-enumeration shifts every later index onto its neighbor. A shifted index names a node whose minor
-// is not the one recorded for the accelerator, which is exactly what this refuses.
+// post-filter counter — it advances only for an accelerator the detector accepted — so an accelerator
+// skipped mid-enumeration shifts every later index onto its neighbor. A shifted index names a node whose
+// minor is not the one recorded for the accelerator, which is exactly what this refuses.
 //
 // It fails closed and never substitutes: an accelerator absent from devs, one carrying no recorded minor
 // number, a node that is missing or is not a character device, and a node whose minor disagrees with the
 // record are all errors. The detector is what makes the no-record refusal meaningful — it records nothing
-// when the driver cannot answer for a card's minor number, rather than substituting the enumeration
-// counter, because a substituted number is indistinguishable from a real one here and would let an
-// unprovable ordinal be handed over as a proven one.
+// when the driver cannot answer for an accelerator's minor number, rather than substituting the
+// enumeration counter, because a substituted number is indistinguishable from a real one here and would
+// let an unprovable ordinal be handed over as a proven one.
 func requireCardNode(devs *workercore.Devices, cardUUID string) (uint32, *deviceplugin.DeviceSpec, error) {
 	for i := range devs.Spec.Groups {
 		grp := &devs.Spec.Groups[i]
@@ -819,19 +848,19 @@ func requireCardNode(devs *workercore.Devices, cardUUID string) (uint32, *device
 }
 
 // partitionDeviceSpecs returns the device specifications a container needs to address exactly one
-// partition on one card: the parent card's node, then the capability nodes of the GPU instance and of
-// its compute instance. The shared control nodes are not included — they are per container rather than
-// per card, so the caller adds them once.
+// partition on one accelerator: the parent accelerator's node, then the capability nodes of the GPU
+// instance and of its compute instance. The shared control nodes are not included — they are per
+// container rather than per accelerator, so the caller adds them once.
 //
 // Every node is required. This vendor has no container-runtime hook, so the injected nodes are the
 // whole of the container's access: too few leaves the partition unusable, and a node belonging to
-// another card or another partition re-opens the isolation the partition exists to provide.
+// another accelerator or another partition re-opens the isolation the partition exists to provide.
 //
-// The card's own node arrives already verified, from the addressing guard the caller cleared before
-// reserving anything, and is passed through rather than re-derived here: the node handed to the container
-// is then the very node whose kernel minor was proven against the detector's record. The ordinal is that
-// guard's result too, so the capability subtree read below is the one belonging to the card that proof
-// addressed.
+// The accelerator's own node arrives already verified, from the addressing guard the caller cleared
+// before reserving anything, and is passed through rather than re-derived here: the node handed to the
+// container is then the very node whose kernel minor was proven against the detector's record. The card
+// ordinal is that guard's result too, so the capability subtree read below is the one belonging to the
+// accelerator that proof addressed.
 func partitionDeviceSpecs(
 	ordinal uint32,
 	card *deviceplugin.DeviceSpec,
@@ -855,16 +884,17 @@ func partitionDeviceSpecs(
 	return specs, nil
 }
 
-// ActuatePhysicalSliced materializes one partition of profile per allocated card, serialized per card
-// by the card lock, records each chosen placement upward for the ledger reconciler, and returns the
-// container response injecting the partitions' device nodes: the shared control nodes once, then each
-// card's own node and the capability nodes of its partition's GPU and compute instances.
+// ActuatePhysicalSliced materializes one partition of profile per allocated accelerator, serialized per
+// accelerator by the accelerator lock, records each chosen placement upward for the ledger reconciler,
+// and returns the container response injecting the partitions' device nodes: the shared control nodes
+// once, then each accelerator's own node and the capability nodes of its partition's GPU and compute
+// instances.
 //
 // Nothing is delegated to a container runtime here, so the response's device specifications are the
 // whole of the container's access and are assembled fail-closed — any node it cannot produce fails the
-// allocation. On any card's failure it rolls back exactly what this call did, per the per-card
-// reservation outcome, so no half-owned Pod persists and no partition a prior allocation owns is
-// touched.
+// allocation. On any accelerator's failure it rolls back exactly what this call did, per the
+// per-accelerator reservation outcome, so no half-owned Pod persists and no partition a prior allocation
+// owns is touched.
 //
 // This is one half of the physical-sliced responder capability; the compile-time assertion that the
 // server implements the whole of it belongs with the other half, the visibility response.
@@ -880,13 +910,14 @@ func (s *server) ActuatePhysicalSliced(
 		return nil, fmt.Errorf("mig actuator not configured")
 	}
 
-	cards := allocatedCards(devs, allocated)
+	cards := allocatedAccelerators(devs, allocated)
 	if len(cards) == 0 {
 		return nil, fmt.Errorf("no allocated card for physical-slice container %q", ctr.Name)
 	}
 
 	// The shared control nodes are verified before anything is reserved: they are needed by every
-	// card's partition, so a node set that cannot include them is a failure worth taking for free.
+	// accelerator's partition, so a node set that cannot include them is a failure worth taking for
+	// free.
 	sharedPaths := sharedControlNodePaths()
 	devices := make([]*deviceplugin.DeviceSpec, 0, len(sharedPaths)+3*len(cards))
 	for _, path := range sharedPaths {
@@ -897,10 +928,11 @@ func (s *server) ActuatePhysicalSliced(
 		devices = append(devices, spec)
 	}
 
-	placements := make(map[deviceplugin.Resource][]workercore.AcceleratorPhysicalPlacement, len(cards))
-	// results records how each card resolved so rollback undoes exactly this call's work under the same
-	// per-card lock the create took (so it never races a concurrent same-card allocation's state read,
-	// and never removes a marker or destroys an instance a prior allocation owns).
+	placements := make(map[deviceplugin.Resource][]workercore.AcceleratorPlacement, len(cards))
+	// results records how each accelerator resolved so rollback undoes exactly this call's work under
+	// the same per-accelerator lock the create took (so it never races a concurrent same-accelerator
+	// allocation's state read, and never removes a marker or destroys an instance a prior allocation
+	// owns).
 	type cardResult struct {
 		card    string
 		inst    migInstance
@@ -917,7 +949,7 @@ func (s *server) ActuatePhysicalSliced(
 				_ = os.Remove(markerPath(deviceplugin.OperatorPodsDir, string(pod.UID), ctr.Name, r.card))
 			case migBound:
 				// The instance was pre-existing (adopted), so only drop our ownership marker,
-				// returning it to the unbound pool; reclaim destroys it once the card drains.
+				// returning it to the unbound pool; reclaim destroys it once the accelerator drains.
 				_ = os.Remove(markerPath(deviceplugin.OperatorPodsDir, string(pod.UID), ctr.Name, r.card))
 			case migRebound:
 				// A prior allocation owns this marker and instance; leave both intact.
@@ -932,10 +964,10 @@ func (s *server) ActuatePhysicalSliced(
 			rollback()
 			return nil, fmt.Errorf("card %s has no physical-slice profile %q", cardUUID, profile)
 		}
-		// The card is addressed before the reservation, so a card whose ordinal cannot be shown to reach
-		// the card the detector measured costs no create: it is refused with a warning rather than
-		// addressed, since addressing it would carve a partition on one card and hand the container
-		// another card's node and capability tree.
+		// The accelerator is addressed before the reservation, so one whose card ordinal cannot be shown
+		// to reach the accelerator the detector measured costs no create: it is refused with a warning
+		// rather than addressed, since addressing it would carve a partition on one accelerator and hand
+		// the container another accelerator's node and capability tree.
 		ordinal, cardNode, aerr := requireCardNode(devs, cardUUID)
 		if aerr != nil {
 			s.Logger.Info("refusing a partition on a card whose device node cannot be shown to address it; "+
@@ -963,8 +995,8 @@ func (s *server) ActuatePhysicalSliced(
 		}
 		devices = append(devices, specs...)
 
-		res := resourceForCard(devs, cardUUID)
-		placements[res] = []workercore.AcceleratorPhysicalPlacement{
+		res := resourceForAccelerator(devs, cardUUID)
+		placements[res] = []workercore.AcceleratorPlacement{
 			{Start: inst.Placement.Start, Length: inst.Placement.Length},
 		}
 	}

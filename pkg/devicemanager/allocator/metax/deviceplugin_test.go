@@ -70,14 +70,14 @@ func allocateGPU0() map[deviceplugin.Resource]int32 {
 	return map[deviceplugin.Resource]int32{{Group: "c500", Device: "GPU-0"}: 1}
 }
 
-// A card whose drm indexes the detector could not read must not take the device plugin down with
-// it. The detector reads them from sysfs and records both numbers, the card number alone, or
+// An accelerator whose drm indexes the detector could not read must not take the device plugin down with
+// it. The detector reads them from sysfs and records both numbers, the accelerator number alone, or
 // nothing; this handler has no panic recovery, so indexing an absent one killed the process that
 // serves every allocation on the node — for every manufacturer — over one unreadable directory.
 // The nodes that cannot be named are left out instead.
 func TestGetContainerAllocateResponseWithoutDrmIndexes(t *testing.T) {
 	devs := metaxDevicesFixture()
-	// Neither number readable, and only the card number readable: the two shapes sysfs yields
+	// Neither number readable, and only the accelerator number readable: the two shapes sysfs yields
 	// besides the full pair.
 	devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = nil
 	devs.Spec.Groups[0].Accelerators[1].PhysicalIndexes = []uint32{1}
@@ -130,8 +130,8 @@ func TestSliced_PartialSlice(t *testing.T) {
 	assert.Equal(t, int64(32768), m.MemMiB)
 }
 
-// A whole-card slice (100% compute AND full VRAM) takes the native path: no sgpu
-// subdevice, no METAX_SGPUS, but an occupancy marker so the scanner sees the card taken.
+// A whole-accelerator slice (100% compute AND full VRAM) takes the native path: no sgpu
+// subdevice, no METAX_SGPUS, but an occupancy marker so the scanner sees the accelerator taken.
 func TestSliced_WholeCard(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
@@ -150,7 +150,7 @@ func TestSliced_WholeCard(t *testing.T) {
 }
 
 // An absent cores-percentage defaults to 100; combined with a partial memory request
-// this stays a partial slice (compute 100, VRAM < card), never a whole card.
+// this stays a partial slice (compute 100, VRAM < accelerator), never a whole accelerator.
 func TestSliced_DefaultCores(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
@@ -168,7 +168,7 @@ func TestSliced_DefaultCores(t *testing.T) {
 }
 
 // A sliced container with no memory dimension is rejected rather than silently given
-// the whole card.
+// the whole accelerator.
 func TestSliced_NoMemoryRejected(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := newSlicedServer(newFakeMgr())
@@ -179,7 +179,7 @@ func TestSliced_NoMemoryRejected(t *testing.T) {
 	require.Error(t, err)
 }
 
-// sgpu slicing is single-card: a multi-card sliced allocation is rejected loudly.
+// sgpu slicing is single-accelerator: a multi-accelerator sliced allocation is rejected loudly.
 func TestSliced_MultiCardRejected(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := newSlicedServer(newFakeMgr())

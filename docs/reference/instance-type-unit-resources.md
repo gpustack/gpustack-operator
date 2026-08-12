@@ -8,7 +8,7 @@
 
 When `instance-type-derived-from-node` is enabled, the operator summarizes a node's hardware into an
 `InstanceType` and stamps its **unit resources** — the CPU and RAM that go with *one unit* of that
-type. For an acceleratable type a unit is **one whole accelerator card**.
+type. For an acceleratable type a unit is **one whole accelerator**.
 
 This page lists the preset the operator picks per accelerator product, and the public host
 configuration each preset was taken from.
@@ -37,14 +37,16 @@ one an earlier version already created, is never touched.
 
 ## What the preset does and does not affect
 
-- **It is the default request.** An Instance that omits `cpu`/`ram` is sized from it — by card count
-  for a whole-card request, by memory percentage for a slice or a partition.
+- **It is the default request.** An Instance that omits `cpu`/`ram` is sized from it — by
+  accelerator count for a whole-accelerator request, by memory percentage for a slice or a
+  partition.
 - **It caps an explicit request.** An Instance that does set `cpu`/`ram` is capped against it.
 
 With `instance-general-resources-overcommit` enabled — the default — the preset is the container
 *limit*, and the scheduler sees a request of `100m` CPU per core and `128Mi` per Gi instead. An
-`xlarge` card therefore asks the scheduler for 1.2 CPU / 24Gi. Disable overcommit and the limit *is*
-the request, so check the presets against what your nodes actually provide per card.
+`xlarge` accelerator therefore asks the scheduler for 1.2 CPU / 24Gi. Disable overcommit and the
+limit *is* the request, so check the presets against what your nodes actually provide per
+accelerator.
 
 ## The tiers
 
@@ -63,12 +65,12 @@ always `1` CPU / `2Gi`.
 accelerator got before presets existed.
 
 A family's tier starts from its VRAM band, then drops to whatever the family's **lowest** published
-multi-card host configuration supports on both axes — single-card cloud tiers are ignored, since
-those track the instance size the buyer picked rather than the card. CPU stops growing at `12` on
-purpose: it is also the defaulted request, and with overcommit disabled a generous CPU number is the
-first thing that leaves single-card Pods `Pending`.
+multi-accelerator host configuration supports on both axes — single-accelerator cloud tiers are
+ignored, since those track the instance size the buyer picked rather than the accelerator. CPU stops
+growing at `12` on purpose: it is also the defaulted request, and with overcommit disabled a
+generous CPU number is the first thing that leaves single-accelerator Pods `Pending`.
 
-`Anchor` below is the published configuration the preset was taken from, per card.
+`Anchor` below is the published configuration the preset was taken from, per accelerator.
 
 ## NVIDIA
 
@@ -90,8 +92,8 @@ first thing that leaves single-card Pods `Pending`.
 | `nvidia-a800-80gb` | `large` | `12` | `128Gi` | Alibaba ebmgn7ex 16c/128g; Volcengine 16c/256g |
 | `nvidia-a800-40gb` | `medium` | `8` | `64Gi` | mirrors A100 40GB |
 | `nvidia-a30` | `small` | `8` | `32Gi` | Leafcloud / AceCloud 8c/32g |
-| `nvidia-a10` | `medium` | `8` | `64Gi` | AWS g5 multi-card 24c/96g |
-| `nvidia-a10g` | `medium` | `8` | `64Gi` | AWS g5 multi-card 24c/96g |
+| `nvidia-a10` | `medium` | `8` | `64Gi` | AWS g5 multi-accelerator 24c/96g |
+| `nvidia-a10g` | `medium` | `8` | `64Gi` | AWS g5 multi-accelerator 24c/96g |
 | `nvidia-l4` | `small` | `8` | `32Gi` | GCP g2 12c/48g |
 | `nvidia-l40` | `medium` | `8` | `64Gi` | CoreWeave 16c/128g |
 | `nvidia-l40s` | `large` | `12` | `128Gi` | AWS g6e 24c/192g; CoreWeave 16c/128g |
@@ -99,14 +101,14 @@ first thing that leaves single-card Pods `Pending`.
 | `nvidia-v100` | `small` | `8` | `32Gi` | AWS p3 8c/61g; Alibaba gn6v 8c/32g |
 | `nvidia-v100-32gb` | `medium` | `8` | `64Gi` | AWS p3dn 12c/96g |
 | `nvidia-v100s` | `small` | `8` | `32Gi` | Tencent GN10X 9c/40g; Huawei p2vs 8c/64g |
-| `nvidia-rtx-pro-4500` | `small` | `8` | `32Gi` | AWS g7 multi-card 24c/96g; RunPod workstation 12c/54g |
+| `nvidia-rtx-pro-4500` | `small` | `8` | `32Gi` | AWS g7 multi-accelerator 24c/96g; RunPod workstation 12c/54g |
 | `nvidia-rtx-6000` | `small` | `8` | `32Gi` | Lambda 14c/46g; DigitalOcean 8c/64g |
 | `nvidia-rtx-4000` | `small` | `8` | `32Gi` | DigitalOcean 8c/32g |
 | `nvidia-rtx-a6000` | `small` | `8` | `32Gi` | Paperspace 8c/45g |
 | `nvidia-rtx-a5000` | `small` | `8` | `32Gi` | Paperspace 8c/45g |
 | `nvidia-rtx-a4000` | `small` | `8` | `32Gi` | Paperspace 8c/45g |
 | `nvidia-rtx-3090` | `small` | `8` | `32Gi` | AutoDL / Featurize 8c/32g |
-| `nvidia-rtx-4090` | `medium` | `8` | `64Gi` | AutoDL / Matpool 10–16c/64g; 8-card boxes 24c/64g |
+| `nvidia-rtx-4090` | `medium` | `8` | `64Gi` | AutoDL / Matpool 10–16c/64g; 8-accelerator boxes 24c/64g |
 | `nvidia-rtx-5090` | `medium` | `8` | `64Gi` | Yotta Labs 14c/115g |
 
 `nvidia-rtx-6000` also covers `Quadro RTX 6000`; `nvidia-rtx-4090` also covers the 4090D.
@@ -135,8 +137,8 @@ first thing that leaves single-card Pods `Pending`.
 | `ascend-910-9391` | `xlarge` | `12` | `192Gi` | Atlas 800T A3 32c/256g |
 | `ascend-910-9392` | `xlarge` | `12` | `192Gi` | Atlas 800T A3 32c/256g |
 
-The 910B family is held one tier below its VRAM band because the KunLun G5680 V2 gives 64GB per card.
-`ascend-910b4` also covers `910B4-1`.
+The 910B family is held one tier below its VRAM band because the KunLun G5680 V2 gives 64GB per
+accelerator. `ascend-910b4` also covers `910B4-1`.
 
 ## AMD
 
@@ -155,11 +157,11 @@ The 910B family is held one tier below its VRAM band because the KunLun G5680 V2
 
 | Family | Tier | Unit CPU | Unit RAM | Anchor |
 |---|---|---|---|---|
-| `cambricon-mlu370` | `medium` | `8` | `64Gi` | Tianyi PCH1 16c/64g; 8-card server 7c/64g |
+| `cambricon-mlu370` | `medium` | `8` | `64Gi` | Tianyi PCH1 16c/64g; 8-accelerator server 7c/64g |
 | `cambricon-mlu590` | `medium` | `8` | `64Gi` | |
 
-`cambricon-mlu370` covers `MLU370` and its `-S4` / `-X4` / `-X8` variants. A card reporting the bare
-name `MLU` is the driver's unknown-card sentinel and is deliberately never matched.
+`cambricon-mlu370` covers `MLU370` and its `-S4` / `-X4` / `-X8` variants. An accelerator reporting
+the bare name `MLU` is the driver's unknown-accelerator sentinel and is deliberately never matched.
 
 ## Hygon
 
@@ -202,11 +204,11 @@ name `MLU` is the driver's unknown-card sentinel and is deliberately never match
 
 | Family | Tier | Unit CPU | Unit RAM | Anchor |
 |---|---|---|---|---|
-| `thead-ppu-zw810e` | `medium` | `8` | `64Gi` | 16 cards / 184 cores / 1.8TiB, i.e. 11.5c/112g |
+| `thead-ppu-zw810e` | `medium` | `8` | `64Gi` | 16 accelerators / 184 cores / 1.8TiB, i.e. 11.5c/112g |
 | `thead-ppu-zwm890` | `medium` | `8` | `64Gi` | inherited from ZW810E, which has no configuration of its own |
 
-The product strings for Iluvatar, MThreads and T-Head are taken from vendor knowledge and are not
-verified against a device sample in this repository.
+The product strings for Iluvatar, MThreads and T-Head are taken from manufacturer knowledge and are
+not verified against a device sample in this repository.
 
 ## Intel
 
@@ -224,7 +226,7 @@ not summarized into an accelerated `InstanceType` at all.
 
 | Family | Tier | Unit CPU | Unit RAM | Anchor |
 |---|---|---|---|---|
-| `kunlun-p800` | `medium` | `8` | `64Gi` | 8-card machine 8c/64g; Inspur R3418/R3428 8c/256g |
+| `kunlun-p800` | `medium` | `8` | `64Gi` | 8-accelerator machine 8c/64g; Inspur R3418/R3428 8c/256g |
 
 Not reachable yet: the operator has no manufacturer key for Kunlun.
 

@@ -7,7 +7,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
 
-// The two cards the conformance fixture was measured on, in
+// The two accelerators the conformance fixture was measured on, in
 // .claude/skills/gpustack-operator-xbuild-and-verify/references/amd-cumask-conformance.md.
 var (
 	// gfx1101: 60 CU / 30 WGP / 3 SE / 2 SA-per-SE / 1 XCC, RDNA.
@@ -18,7 +18,7 @@ var (
 	cdnaSingleXCC = Topology{Name: "gfx90a", CU: 104, SE: 4, SAPerSE: 1, XCC: 1}
 )
 
-// derivedMask is the whole production path for a percentage on an empty card: the length, the
+// derivedMask is the whole production path for a percentage on an empty accelerator: the length, the
 // placement and the rendered segment. The conformance tables' mask column is exactly this.
 func derivedMask(t *testing.T, topo Topology, pct int) string {
 	t.Helper()
@@ -32,7 +32,7 @@ func derivedMask(t *testing.T, topo Topology, pct int) string {
 
 // TestWindowCUs_ConformanceTableA reproduces the RDNA table row for row. The 25 % and 75 % rows are
 // the ones that matter: the naive derivation emits 0:0-14 and 0:0-44, and both measured the whole
-// card on hardware.
+// accelerator on hardware.
 func TestWindowCUs_ConformanceTableA(t *testing.T) {
 	testCases := []struct {
 		name string
@@ -85,7 +85,7 @@ func TestWindowCUs_ConformanceTableB(t *testing.T) {
 
 // TestWindowCUs_RefusesSubQuantumRequest covers table B's 1 % row and RDNA's sub-round request. A
 // sub-quantum mask fails open — it leaves the units it never mentions running unmasked — so it is
-// refused rather than clamped, and the message names the minimum the card can honor.
+// refused rather than clamped, and the message names the minimum the accelerator can honor.
 func TestWindowCUs_RefusesSubQuantumRequest(t *testing.T) {
 	testCases := []struct {
 		name     string
@@ -232,43 +232,43 @@ func TestValidate_DegenerateTopologies(t *testing.T) {
 	}
 }
 
-// TestPackWindow pins where a window lands on a card that already carries some.
+// TestPackWindow pins where a window lands on an accelerator that already carries some.
 func TestPackWindow(t *testing.T) {
 	testCases := []struct {
 		name      string
 		topology  Topology
 		length    int
-		occupied  []workercore.AcceleratorPhysicalPlacement
+		occupied  []workercore.AcceleratorPlacement
 		wantStart int32
 	}{
 		{
-			name:      "an empty card places at zero",
+			name:      "an empty accelerator places at zero",
 			topology:  rdna,
 			length:    12,
 			wantStart: 0,
 		},
 		{
-			name:      "a card carrying one window places the next after it",
+			name:      "an accelerator carrying one window places the next after it",
 			topology:  rdna,
 			length:    12,
-			occupied:  []workercore.AcceleratorPhysicalPlacement{{Start: 0, Length: 12}},
+			occupied:  []workercore.AcceleratorPlacement{{Start: 0, Length: 12}},
 			wantStart: 12,
 		},
 		{
 			name:     "a hole in the middle is reused ahead of the tail",
 			topology: rdna,
 			length:   6,
-			occupied: []workercore.AcceleratorPhysicalPlacement{
+			occupied: []workercore.AcceleratorPlacement{
 				{Start: 0, Length: 6},
 				{Start: 12, Length: 6},
 			},
 			wantStart: 6,
 		},
 		{
-			name:      "a full card takes the least-overlapped start",
+			name:      "a full accelerator takes the least-overlapped start",
 			topology:  rdna,
 			length:    42,
-			occupied:  []workercore.AcceleratorPhysicalPlacement{{Start: 0, Length: 30}},
+			occupied:  []workercore.AcceleratorPlacement{{Start: 0, Length: 30}},
 			wantStart: 18,
 		},
 		{
@@ -279,7 +279,7 @@ func TestPackWindow(t *testing.T) {
 			name:     "the same allocation twice does not bias the least-overlap choice",
 			topology: rdna,
 			length:   30,
-			occupied: []workercore.AcceleratorPhysicalPlacement{
+			occupied: []workercore.AcceleratorPlacement{
 				{Start: 0, Length: 60},
 				{Start: 0, Length: 30},
 				{Start: 0, Length: 30},
@@ -290,7 +290,7 @@ func TestPackWindow(t *testing.T) {
 			name:      "a CDNA window starts on an XCC atom boundary",
 			topology:  cdna,
 			length:    8,
-			occupied:  []workercore.AcceleratorPhysicalPlacement{{Start: 0, Length: 8}},
+			occupied:  []workercore.AcceleratorPlacement{{Start: 0, Length: 8}},
 			wantStart: 8,
 		},
 	}
@@ -308,30 +308,30 @@ func TestPackWindow(t *testing.T) {
 }
 
 // TestPackWindow_QuantisedOnBothAxes pins that every emitted window is a multiple of its branch's
-// quantum on both axes and stays on the card: an unquantised start splits a WGP pair on RDNA and
+// quantum on both axes and stays on the accelerator: an unquantised start splits a WGP pair on RDNA and
 // breaks XCC coverage on CDNA, and either loses the whole mask.
 func TestPackWindow_QuantisedOnBothAxes(t *testing.T) {
 	testCases := []struct {
 		name     string
 		topology Topology
-		occupied []workercore.AcceleratorPhysicalPlacement
+		occupied []workercore.AcceleratorPlacement
 	}{
 		{name: "RDNA, empty card", topology: rdna},
 		{
 			name:     "RDNA, partly occupied",
 			topology: rdna,
-			occupied: []workercore.AcceleratorPhysicalPlacement{{Start: 6, Length: 12}},
+			occupied: []workercore.AcceleratorPlacement{{Start: 6, Length: 12}},
 		},
 		{
-			name:     "RDNA, full card",
+			name:     "RDNA, full accelerator",
 			topology: rdna,
-			occupied: []workercore.AcceleratorPhysicalPlacement{{Start: 0, Length: 60}},
+			occupied: []workercore.AcceleratorPlacement{{Start: 0, Length: 60}},
 		},
 		{name: "CDNA, empty card", topology: cdna},
 		{
-			name:     "CDNA, full card",
+			name:     "CDNA, full accelerator",
 			topology: cdna,
-			occupied: []workercore.AcceleratorPhysicalPlacement{{Start: 0, Length: 304}},
+			occupied: []workercore.AcceleratorPlacement{{Start: 0, Length: 304}},
 		},
 		{name: "single-XCC CDNA, empty card", topology: cdnaSingleXCC},
 	}

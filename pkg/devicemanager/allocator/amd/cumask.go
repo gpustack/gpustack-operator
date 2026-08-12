@@ -9,23 +9,23 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/mathx"
 )
 
-// Topology describes the one card a mask is derived for, as the HSA agent-info API reports it.
+// Topology describes the one accelerator a mask is derived for, as the HSA agent-info API reports it.
 //
 // It carries no pointers and reads no device: every function below is closed-form integer
 // arithmetic over these five fields, which is what makes the derivation testable against the
 // conformance tables in
 // .claude/skills/gpustack-operator-xbuild-and-verify/references/amd-cumask-conformance.md rather
-// than against a card. Reading the fields is a platform seam and lives elsewhere.
+// than against an accelerator. Reading the fields is a platform seam and lives elsewhere.
 type Topology struct {
 	// Name is the HSA agent name, the gfx string ("gfx1101", "gfx942", "gfx90a"). It selects the
 	// arithmetic family, and an unrecognized one is refused rather than guessed at.
 	Name string
 
-	// CU is COMPUTE_UNIT_COUNT, the whole card's compute units. Mask bit indices are CU indices.
+	// CU is COMPUTE_UNIT_COUNT, the whole accelerator's compute units. Mask bit indices are CU indices.
 	CU int
 
-	// SE is NUM_SHADER_ENGINES. It is device-wide and already multiplied by the XCC count: a card
-	// reporting 32 with NUM_XCC=8 has four shader engines per XCC.
+	// SE is NUM_SHADER_ENGINES. It is device-wide and already multiplied by the XCC count: an
+	// accelerator reporting 32 with NUM_XCC=8 has four shader engines per XCC.
 	SE int
 
 	// SAPerSE is NUM_SHADER_ARRAYS_PER_SE. Recorded because the topology is read as a unit; no
@@ -37,7 +37,7 @@ type Topology struct {
 	XCC int
 }
 
-// Validate reports whether a mask can be derived for this card at all.
+// Validate reports whether a mask can be derived for this accelerator at all.
 //
 // binding/hsa turns an agent-info field it cannot read into a zero rather than an error, so
 // "absent" arrives here indistinguishable from "zero". Both must fail closed: a mask derived from a
@@ -82,8 +82,8 @@ func (t Topology) Validate() error {
 				t.Name, t.SE, t.CU/2)
 		}
 	}
-	// Windows tile only when the quantum divides the card: both a window's start and its length are
-	// multiples of it, so a remainder would leave a tail that no start can address.
+	// Windows tile only when the quantum divides the accelerator: both a window's start and its
+	// length are multiples of it, so a remainder would leave a tail that no start can address.
 	if q := t.Quantum(); t.CU%q != 0 {
 		return fmt.Errorf("cannot derive a CU mask for %q: its %d-CU quantum does not divide %d "+
 			"compute units", t.Name, q, t.CU)
@@ -91,7 +91,7 @@ func (t Topology) Validate() error {
 	return nil
 }
 
-// IsCDNAFamily reports whether the card takes the CDNA/GCN arithmetic.
+// IsCDNAFamily reports whether the accelerator takes the CDNA/GCN arithmetic.
 //
 // The branch is the ARCHITECTURE FAMILY, not the XCC count, and that distinction is the whole
 // correctness of this file. gfx90a — MI210, and each GCD of an MI250X — is CDNA silicon that
@@ -105,7 +105,7 @@ func (t Topology) IsCDNAFamily() bool {
 	return cdna
 }
 
-// Quantum is the smallest number of CUs a window may start at or span, on this card.
+// Quantum is the smallest number of CUs a window may start at or span, on this accelerator.
 //
 // On RDNA it is one full round-robin round of WGP pairs (2*SE): the kernel hands mask bits to
 // shader engines round-robin, and a start that is not on a round boundary splits a WGP pair, which
@@ -121,7 +121,7 @@ func (t Topology) Quantum() int {
 	return 2 * t.SE
 }
 
-// MinPercent is the smallest percentage this card can honor, i.e. the smallest integer whose
+// MinPercent is the smallest percentage this accelerator can honor, i.e. the smallest integer whose
 // window is one quantum rather than nothing. It is the actionable half of a refusal message.
 //
 // The result is meaningful only for a topology Validate accepts.
@@ -132,11 +132,12 @@ func (t Topology) MinPercent() int {
 	}
 	// The alignment keeps a request whose rounded unit count reaches one atom, and RoundDiv rounds
 	// half up, so the smallest such percentage is ceil((100*atom - 50) / units). It is always at
-	// least 1, because the numerator exceeds the denominator whenever the card has an atom at all.
+	// least 1, because the numerator exceeds the denominator whenever the accelerator has an atom
+	// at all.
 	return mathx.CeilDiv(100*atom-50, units)
 }
 
-// WindowCUs turns a requested percentage of the card into a window length in CUs.
+// WindowCUs turns a requested percentage of the accelerator into a window length in CUs.
 //
 // The two arithmetics share nothing and neither degrades safely into the other: carrying RDNA's
 // pairing rule onto CDNA does not fail, it doubles every slice; carrying CDNA's atom onto RDNA
@@ -170,7 +171,7 @@ func WindowCUs(t Topology, pct int) (int, error) {
 	// engines, so a WGP count that is not a multiple of SE yields no throughput for the remainder.
 	// The C reference implementation (rocm_cumask_check.c, derive_and_reexec) clamps a sub-round
 	// request UP to one round; this refuses instead, deliberately: a 1% request on a 60 CU / 3 SE
-	// card would otherwise take a 10% compute ceiling while Kueue charges 1%, and an accounting
+	// accelerator would otherwise take a 10% compute ceiling while Kueue charges 1%, and an accounting
 	// mismatch that silently favors the tenant is not better than a refusal naming the number.
 	wgps := t.CU / 2
 	n := mathx.RoundDiv(wgps*pct, 100) / t.SE * t.SE
@@ -182,28 +183,28 @@ func WindowCUs(t Topology, pct int) (int, error) {
 	return 2 * min(n, wgps), nil
 }
 
-// PackWindow chooses where a window of length CUs sits on a card already carrying occupied.
+// PackWindow chooses where a window of length CUs sits on an accelerator already carrying occupied.
 //
-// A mask is a position, not only a size: two containers handed the same window share it rather than
-// the card. So the lowest-indexed free quantised start wins, and only when the card is full does
-// the choice fall back to the quantised start overlapping the fewest covered CUs, ties broken by
-// the lowest start.
+// A mask is a position, not only a size: two containers handed the same window share it rather
+// than the accelerator. So the lowest-indexed free quantised start wins, and only when the
+// accelerator is full does the choice fall back to the quantised start overlapping the fewest
+// covered CUs, ties broken by the lowest start.
 //
 // The occupancy is merged before it is measured. The caller unions reservation intervals onto
 // annotation intervals, so a live allocation legitimately appears twice — harmless for a binary
 // overlap test, a systematic bias for anything that counts. What merging cannot preserve is tenant
 // multiplicity, so an already twice-shared window and a once-shared one look alike; that is
-// accepted for a fallback that only runs on a full card.
+// accepted for a fallback that only runs on a full accelerator.
 //
-// The window is always within [0, CU): a length beyond the card is clamped to it, since the caller
-// has no error to return here and an out-of-range mask bit is dropped silently by ROCr.
+// The window is always within [0, CU): a length beyond the accelerator is clamped to it, since the
+// caller has no error to return here and an out-of-range mask bit is dropped silently by ROCr.
 func PackWindow(
 	t Topology,
 	length int,
-	occupied []workercore.AcceleratorPhysicalPlacement,
-) workercore.AcceleratorPhysicalPlacement {
+	occupied []workercore.AcceleratorPlacement,
+) workercore.AcceleratorPlacement {
 	if length <= 0 || t.CU <= 0 {
-		return workercore.AcceleratorPhysicalPlacement{}
+		return workercore.AcceleratorPlacement{}
 	}
 	q := t.Quantum()
 	if q <= 0 {
@@ -217,7 +218,7 @@ func PackWindow(
 	for start := 0; start+length <= t.CU; start += q {
 		overlap := coveredCUs(covered, start, start+length)
 		if overlap == 0 {
-			return workercore.AcceleratorPhysicalPlacement{
+			return workercore.AcceleratorPlacement{
 				Start:  int32(start),
 				Length: int32(length),
 			}
@@ -226,15 +227,16 @@ func PackWindow(
 			best, bestOverlap = start, overlap
 		}
 	}
-	return workercore.AcceleratorPhysicalPlacement{
+	return workercore.AcceleratorPlacement{
 		Start:  int32(best),
 		Length: int32(length),
 	}
 }
 
-// Mask renders one card's window as an HSA_CU_MASK segment, "<index>:<lo>-<hi>", where index is the
-// card's position in ROCR_VISIBLE_DEVICES and lo/hi are the window's first and last CU bits.
-func Mask(index int, w workercore.AcceleratorPhysicalPlacement) string {
+// Mask renders one accelerator's window as an HSA_CU_MASK segment, "<index>:<lo>-<hi>", where
+// index is the accelerator's position in ROCR_VISIBLE_DEVICES and lo/hi are the window's first and
+// last CU bits.
+func Mask(index int, w workercore.AcceleratorPlacement) string {
 	return fmt.Sprintf("%d:%d-%d", index, w.Start, w.Start+w.Length-1)
 }
 
@@ -261,16 +263,16 @@ func (t Topology) xcc() int {
 
 // mergePlacements returns the occupied intervals clamped to [0, cu) as a sorted, disjoint set.
 func mergePlacements(
-	in []workercore.AcceleratorPhysicalPlacement,
+	in []workercore.AcceleratorPlacement,
 	cu int,
-) []workercore.AcceleratorPhysicalPlacement {
-	out := make([]workercore.AcceleratorPhysicalPlacement, 0, len(in))
+) []workercore.AcceleratorPlacement {
+	out := make([]workercore.AcceleratorPlacement, 0, len(in))
 	for _, p := range in {
 		start, end := max(int(p.Start), 0), min(int(p.Start)+int(p.Length), cu)
 		if end <= start {
 			continue
 		}
-		out = append(out, workercore.AcceleratorPhysicalPlacement{
+		out = append(out, workercore.AcceleratorPlacement{
 			Start:  int32(start),
 			Length: int32(end - start),
 		})
@@ -292,7 +294,7 @@ func mergePlacements(
 }
 
 // coveredCUs counts the CUs of [start, end) that the merged set covers.
-func coveredCUs(merged []workercore.AcceleratorPhysicalPlacement, start, end int) int {
+func coveredCUs(merged []workercore.AcceleratorPlacement, start, end int) int {
 	total := 0
 	for _, p := range merged {
 		lo, hi := max(int(p.Start), start), min(int(p.Start)+int(p.Length), end)

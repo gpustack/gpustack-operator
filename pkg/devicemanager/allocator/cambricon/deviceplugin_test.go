@@ -71,7 +71,7 @@ func allocateMLU0() map[deviceplugin.Resource]int32 {
 	return map[deviceplugin.Resource]int32{{Group: testGroupID, Device: "MLU-0"}: 1}
 }
 
-// A single-card slice creates one sMLU instance, records the correlation + profile marker,
+// A single-accelerator slice creates one sMLU instance, records the correlation + profile marker,
 // and injects VIRTUAL_DEVICES naming the instance's device node.
 func TestSliced_PartialSlice(t *testing.T) {
 	redirectLogicalSliceDirs(t)
@@ -95,7 +95,7 @@ func TestSliced_PartialSlice(t *testing.T) {
 	assert.Equal(t, int64(24576), m.MemMiB)
 }
 
-// An absent cores-percentage defaults to 100 (a whole-card-exclusive sMLU instance).
+// An absent cores-percentage defaults to 100 (a whole-accelerator-exclusive sMLU instance).
 func TestSliced_DefaultCores(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
@@ -112,7 +112,7 @@ func TestSliced_DefaultCores(t *testing.T) {
 }
 
 // A sliced container with no memory dimension is rejected rather than silently given the
-// whole card.
+// whole accelerator.
 func TestSliced_NoMemoryRejected(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := newSlicedServer(newFakeDriver())
@@ -123,7 +123,7 @@ func TestSliced_NoMemoryRejected(t *testing.T) {
 	require.Error(t, err)
 }
 
-// sMLU slicing is single-card: a multi-card sliced allocation is rejected loudly.
+// sMLU slicing is single-accelerator: a multi-accelerator sliced allocation is rejected loudly.
 func TestSliced_MultiCardRejected(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := newSlicedServer(newFakeDriver())

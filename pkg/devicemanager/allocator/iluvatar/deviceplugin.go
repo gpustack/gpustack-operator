@@ -31,9 +31,10 @@ func New(opts device.AllocatorOptions) device.Allocator {
 			newServer(logger, workercore.DeviceAllocationModeShared),
 		)
 	}
-	// The sliced server serves "<base>.sliced": a share of one card, enforced inside the container
-	// by the HAMi-core preload pair this operator's image stages, not by the driver. corex's
-	// ix-container-runtime still injects the card, so the slice needs no partition driver.
+	// The sliced server serves "<base>.sliced": a share of one accelerator, enforced inside the
+	// container by the HAMi-core preload pair this operator's image stages, not by the driver.
+	// corex's ix-container-runtime still injects the accelerator, so the slice needs no partition
+	// driver.
 	if !opts.NoSliced {
 		servers = append(servers,
 			newServer(logger, workercore.DeviceAllocationModeSliced),
@@ -106,8 +107,8 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) devicep
 	return s
 }
 
-// _AllocatedAccelerator pairs an allocated card with its group; the group carries the VRAM the
-// sliced path derives that card's own memory budget from.
+// _AllocatedAccelerator pairs an allocated accelerator with its group; the group carries the VRAM
+// the sliced path derives that accelerator's own memory budget from.
 type _AllocatedAccelerator struct {
 	group *workercore.DevicesGroup
 	accel *workercore.Accelerator
@@ -120,9 +121,9 @@ func (s *server) GetContainerAllocateResponse(
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
-	// Single pass over the allocated cards in devs order (= IX_VISIBLE_DEVICES /
+	// Single pass over the allocated accelerators in devs order (= IX_VISIBLE_DEVICES /
 	// CUDA_DEVICE_MEMORY_LIMIT_<i> order): collect the UUIDs and the accelerator/group
-	// pairs the sliced path needs for the per-card VRAM limit.
+	// pairs the sliced path needs for the per-accelerator VRAM limit.
 	var (
 		ids          = make([]string, 0, len(allocated))
 		accelerators []_AllocatedAccelerator
@@ -181,13 +182,14 @@ const (
 var hostVgpuLockPath = "/tmp/vgpulock"
 
 // getSlicedContainerAllocateResponse renders the HAMi-core logical-slicing injection for a sliced
-// container: a compute (SM) limit from the container's ".sliced.cores-percentage" and a per-card
-// VRAM limit from its ".sliced.memory-percentage"/".sliced.memory-mib" (independent dimensions, no
-// single ratio), plus the mounts that preload libvgpu.so and provide the shared lock/cache. The
-// card stays visible via IX_VISIBLE_DEVICES (corex's ix-container-runtime injects it); HAMi-core,
-// preloaded through /etc/ld.so.preload, enforces the limits at runtime. corex presents a single
-// CUDA-compatible driver level, so one operator-staged HAMi-core libvgpu serves every card — no
-// per-card CUDA-major reconciliation as in the NVIDIA branch.
+// container: a compute (SM) limit from the container's ".sliced.cores-percentage" and a
+// per-accelerator VRAM limit from its ".sliced.memory-percentage"/".sliced.memory-mib"
+// (independent dimensions, no single ratio), plus the mounts that preload libvgpu.so and provide
+// the shared lock/cache. The accelerator stays visible via IX_VISIBLE_DEVICES (corex's
+// ix-container-runtime injects it); HAMi-core, preloaded through /etc/ld.so.preload, enforces the
+// limits at runtime. corex presents a single CUDA-compatible driver level, so one
+// operator-staged HAMi-core libvgpu serves every accelerator — no per-accelerator CUDA-major
+// reconciliation as in the NVIDIA branch.
 func (s *server) getSlicedContainerAllocateResponse(
 	pod *core.Pod,
 	ctr *core.Container,
@@ -207,9 +209,9 @@ func (s *server) getSlicedContainerAllocateResponse(
 		}
 	}
 
-	// Envs: SM (compute) percent from .sliced.cores-percentage and a per-card VRAM limit (MiB)
-	// from .sliced.memory-percentage / .sliced.memory-mib (independent dimensions), plus the
-	// shared cache. Admission pins a logical slice to a single card, so the loop runs once and
+	// Envs: SM (compute) percent from .sliced.cores-percentage and a per-accelerator VRAM limit
+	// (MiB) from .sliced.memory-percentage / .sliced.memory-mib (independent dimensions), plus the
+	// shared cache. Admission pins a logical slice to a single accelerator, so the loop runs once and
 	// emits CUDA_DEVICE_MEMORY_LIMIT_0; it is written for several anyway, exactly as the NVIDIA
 	// branch's is.
 	coresRes := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer)

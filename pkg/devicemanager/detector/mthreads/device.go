@@ -40,16 +40,9 @@ func New(opts device.DetectorOptions) device.Detector {
 	}
 }
 
+// Name, DetectAccelerator and MonitorAccelerator implement device.Detector.
 func (in *mthreads) Name() string {
 	return Manufacturer
-}
-
-func (in *mthreads) init() {
-	in.once.Do(func() {
-		if ret := in.mtml.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize MTML library")
-		}
-	})
 }
 
 func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, err error) {
@@ -185,8 +178,8 @@ func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 			var status device.AcceleratorStatus
 			{
 				status.Unhealthy = memoryUnhealthy
-				// GPU logical slicing via the sGPU kmod + MTHREADS_QOS_* env; the per-card slice
-				// count is capped at 16. Compute is a relative weight (not a hard cap), so it is
+				// GPU logical slicing via the sGPU kmod + MTHREADS_QOS_* env; the per-accelerator
+				// slice count is capped at 16. Compute is a relative weight (not a hard cap), so it is
 				// not overcommitted.
 				status.LogicalSliced = device.AcceleratorLogicalSliced{
 					Count: 16,
@@ -368,4 +361,12 @@ func (in *mthreads) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 	}
 
 	return grpList, nil
+}
+
+func (in *mthreads) init() {
+	in.once.Do(func() {
+		if ret := in.mtml.Init(); !ret.IsSuccess() {
+			in.logger.Error(ret, "failed to initialize MTML library")
+		}
+	})
 }

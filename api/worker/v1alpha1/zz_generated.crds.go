@@ -82,7 +82,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 													},
 													Properties: map[string]v1.JSONSchemaProps{
 														"acceleratorSlicedDetail": {
-															Description: "AcceleratorSlicedDetail is the group's slicing capability, aggregated from its\naccelerators' per-card slicing status.",
+															Description: "AcceleratorSlicedDetail is the group's slicing capability, aggregated from its\naccelerators' per-accelerator slicing status.",
 															Type:        "object",
 															Properties: map[string]v1.JSONSchemaProps{
 																"logical": {
@@ -90,11 +90,11 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																	Type:        "object",
 																	Properties: map[string]v1.JSONSchemaProps{
 																		"coresPercentageOvercommit": {
-																			Description: "CoresPercentageOvercommit is a per-model property (uniform within a group), taken from\nany logically sliceable card; false and meaningless when no card is logically sliceable.",
+																			Description: "CoresPercentageOvercommit is a per-model property (uniform within a group), taken from\nany logically sliceable accelerator; false and meaningless when no accelerator is\nlogically sliceable.",
 																			Type:        "boolean",
 																		},
 																		"count": {
-																			Description: "Count is the sum of per-card LogicalSliced.Count across the group.",
+																			Description: "Count is the sum of per-accelerator LogicalSliced.Count across the group.",
 																			Type:        "integer",
 																			Format:      "int32",
 																		},
@@ -105,7 +105,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																	Type:        "object",
 																	Properties: map[string]v1.JSONSchemaProps{
 																		"count": {
-																			Description: "Count is the sum of per-card PhysicalSliced.Count across the group.",
+																			Description: "Count is the sum of per-accelerator PhysicalSliced.Count across the group.",
 																			Type:        "integer",
 																			Format:      "int32",
 																		},
@@ -120,12 +120,12 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																					},
 																					Properties: map[string]v1.JSONSchemaProps{
 																						"count": {
-																							Description: "Count is the sum of per-card Count for this profile name across the group.",
+																							Description: "Count is the sum of per-accelerator Count for this profile name across the group.",
 																							Type:        "integer",
 																							Format:      "int32",
 																						},
 																						"memoryMib": {
-																							Description: "MemoryMib is the memory of one instance of this profile, in MiB. It is uniform\nper profile name within a group, so it is carried through (not summed). It is the\nVRAM-anchored input the Pod webhook folds into \".sliced.units\" (MemoryMibToUnits)\nfor a MIG request, which is why the aggregate — reachable from the InstanceType\nDetail, unlike per-card Devices — must carry it. Optional in the schema (a real\nprofile always carries a non-zero value); the Pod webhook treats a not-yet-populated\ndetail as a retryable not-ready state rather than relying on schema-required presence.",
+																							Description: "MemoryMib is the memory of one instance of this profile, in MiB. It is uniform\nper profile name within a group, so it is carried through (not summed). It is the\nVRAM-anchored input the Pod webhook folds into \".sliced.units\" (MemoryMibToUnits)\nfor a MIG request, which is why the aggregate — reachable from the InstanceType\nDetail, unlike per-accelerator Devices — must carry it. Optional in the schema (a real\nprofile always carries a non-zero value); the Pod webhook treats a not-yet-populated\ndetail as a retryable not-ready state rather than relying on schema-required presence.",
 																							Type:        "integer",
 																							Format:      "int64",
 																						},
@@ -188,7 +188,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																			},
 																			Properties: map[string]v1.JSONSchemaProps{
 																				"logicalSliced": {
-																					Description: "LogicalSliced is the card's logical (software) slicing capability.",
+																					Description: "LogicalSliced is the accelerator's logical (software) slicing capability.",
 																					Type:        "object",
 																					Properties: map[string]v1.JSONSchemaProps{
 																						"coresPercentageOvercommit": {
@@ -196,23 +196,23 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																							Type:        "boolean",
 																						},
 																						"count": {
-																							Description: "Count is the maximum number of logical slices this card can host. A card whose MIG\nmode is currently enabled is always 0, which excludes it from the logical capacity\nkeys; a pending-enable card is not partitioned yet and still reports its logical count.",
+																							Description: "Count is the maximum number of logical slices this accelerator can host. An accelerator\nwhose MIG mode is currently enabled is always 0, which excludes it from the logical\ncapacity keys; a pending-enable accelerator is not partitioned yet and still reports\nits logical count.",
 																							Type:        "integer",
 																							Format:      "int32",
 																						},
 																					},
 																				},
 																				"physicalSliced": {
-																					Description: "PhysicalSliced is the card's physical (hardware) slicing capability.",
+																					Description: "PhysicalSliced is the accelerator's physical (hardware) slicing capability.",
 																					Type:        "object",
 																					Properties: map[string]v1.JSONSchemaProps{
 																						"count": {
-																							Description: "Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7\non A100, from 7x 1g.5gb). It sizes the device-plugin's bare \".partitioned\" token pool\nfor a partitioned card, which is the family that serves it; a partitioned card offers\nno logical slicing and so leaves the \".sliced\" pool entirely. Zero when Profiles is\nempty.",
+																							Description: "Count is the accelerator's physical-slice ceiling — the largest Count across Profiles\n(e.g. 7 on A100, from 7x 1g.5gb). It sizes the device-plugin's bare \".partitioned\"\ntoken pool for a partitioned accelerator, which is the family that serves it; a\npartitioned accelerator offers no logical slicing and so leaves the \".sliced\" pool\nentirely. Zero when Profiles is empty.",
 																							Type:        "integer",
 																							Format:      "int32",
 																						},
 																						"profiles": {
-																							Description: "Profiles is empty when the card does not support, or has not enabled, hard slicing.",
+																							Description: "Profiles is empty when the accelerator does not support, or has not enabled, hard\nslicing.",
 																							Type:        "array",
 																							Items: &v1.JSONSchemaPropsOrArray{
 																								Schema: &v1.JSONSchemaProps{
@@ -231,7 +231,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																											Format:      "int32",
 																										},
 																										"count": {
-																											Description: "Count is the maximum number of instances of this profile on a single card.",
+																											Description: "Count is the maximum number of instances of this profile on a single accelerator.",
 																											Type:        "integer",
 																											Format:      "int32",
 																										},
@@ -250,7 +250,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																											Type:        "string",
 																										},
 																										"placements": {
-																											Description: "Placements is the profile's full empty-card legal placement set (start:size in\nmemory-slice units), enumerated once at detect time. The reconciler subtracts the\noccupied intervals it reconstructs from Pod annotations from this cached set to\nderive the card's RemainingProfiles, so no device query runs per reconcile. Caching the\nfull empty-card set makes the subtraction correct regardless of whether the vendor's\npossible-placements query is itself occupancy-aware. Empty for a card with no\nphysical-slice profiles.",
+																											Description: "Placements is the profile's full empty-accelerator legal placement set (start:size in\nmemory-slice units), enumerated once at detect time. The reconciler subtracts the\noccupied intervals it reconstructs from Pod annotations from this cached set to derive\nthe accelerator's RemainingProfiles, so no device query runs per reconcile. Caching the\nfull empty-accelerator set makes the subtraction correct regardless of whether the\nmanufacturer's possible-placements query is itself occupancy-aware. Empty for an\naccelerator with no physical-slice profiles.",
 																											Type:        "array",
 																											Items: &v1.JSONSchemaPropsOrArray{
 																												Schema: &v1.JSONSchemaProps{
@@ -261,12 +261,12 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																													},
 																													Properties: map[string]v1.JSONSchemaProps{
 																														"length": {
-																															Description: "Length is the number of memory slices the interval spans; the interval is\n[Start, Start+Length). Named Length, not Size, to avoid colliding with the\nprotobuf-generated Size() method on this message.",
+																															Description: "Length is the number of units the run spans; the run is [Start, Start+Length).\nNamed Length, not Size, to avoid colliding with the protobuf-generated Size()\nmethod on this message.",
 																															Type:        "integer",
 																															Format:      "int32",
 																														},
 																														"start": {
-																															Description: "Start is the first memory slice the interval covers (0-based).",
+																															Description: "Start is the first unit the run covers (0-based).",
 																															Type:        "integer",
 																															Format:      "int32",
 																														},
@@ -439,8 +439,8 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																			Type:        "integer",
 																			Format:      "int32",
 																		},
-																		"allocatedPhysicalPlacements": {
-																			Description: "AllocatedPhysicalPlacements is the interval(s) the Pod occupies on this card. Its UNIT\ndepends on Mode, and the two readers are told apart by AllocatedPhysicalProfile:\n- Partitioned: memory-slice intervals, paired with a non-empty AllocatedPhysicalProfile.\nThe reconciler unions these across the node's Pods to derive RemainingProfiles.\n- Sliced: the compute geometry a logical slice holds (on AMD, CU-mask bit indexes\nexactly as they appear in HSA_CU_MASK), with AllocatedPhysicalProfile EMPTY. The\nphysical reader skips an entry with no profile, which is what lets one field carry\nboth ledgers; the logical reader requires that shape and keys by accelerator UUID.",
+																		"allocatedLogicalPlacements": {
+																			Description: "AllocatedLogicalPlacements is the per-Pod annotation TRANSPORT of the logical-slice\nledger: the compute geometry the Pod's logical slice holds on this accelerator, in the\nmanufacturer's own compute units (on AMD, CU-mask bit indexes exactly as they appear in\nHSA_CU_MASK). The device-plugin Allocate records it so a later placement decision reads\nwhat the node's live slices already occupy. Empty (omitted) in the aggregated\nDevices.Status, and for a manufacturer whose logical slice has no position.",
 																			Type:        "array",
 																			Items: &v1.JSONSchemaPropsOrArray{
 																				Schema: &v1.JSONSchemaProps{
@@ -451,12 +451,39 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																					},
 																					Properties: map[string]v1.JSONSchemaProps{
 																						"length": {
-																							Description: "Length is the number of memory slices the interval spans; the interval is\n[Start, Start+Length). Named Length, not Size, to avoid colliding with the\nprotobuf-generated Size() method on this message.",
+																							Description: "Length is the number of units the run spans; the run is [Start, Start+Length).\nNamed Length, not Size, to avoid colliding with the protobuf-generated Size()\nmethod on this message.",
 																							Type:        "integer",
 																							Format:      "int32",
 																						},
 																						"start": {
-																							Description: "Start is the first memory slice the interval covers (0-based).",
+																							Description: "Start is the first unit the run covers (0-based).",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																					},
+																				},
+																			},
+																			Nullable:  true,
+																			XListType: ptr.To[string]("atomic"),
+																		},
+																		"allocatedPhysicalPlacements": {
+																			Description: "AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition occupies\non this accelerator. The reconciler unions these across the node's Pods to derive\nRemainingProfiles.",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"start",
+																						"length",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"length": {
+																							Description: "Length is the number of units the run spans; the run is [Start, Start+Length).\nNamed Length, not Size, to avoid colliding with the protobuf-generated Size()\nmethod on this message.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																						"start": {
+																							Description: "Start is the first unit the run covers (0-based).",
 																							Type:        "integer",
 																							Format:      "int32",
 																						},
@@ -467,11 +494,11 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																			XListType: ptr.To[string]("atomic"),
 																		},
 																		"allocatedPhysicalProfile": {
-																			Description: "AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation\nTRANSPORT the reconciler consumes to build the ledger above — not status output. The\ndevice-plugin Allocate records, in the Pod's own allocation annotation, the single\nphysical partition that Pod holds on this card (e.g. an NVIDIA MIG instance): its\nprofile name and the memory-slice interval(s) it occupies. Both are empty (omitted) in\nthe aggregated Devices.Status. A Pod holds one instance of one profile per card.",
+																			Description: "AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation\nTRANSPORT the reconciler consumes to build the ledger above — not status output. The\ndevice-plugin Allocate records, in the Pod's own allocation annotation, the single\nphysical partition that Pod holds on this accelerator (e.g. an NVIDIA MIG instance):\nits profile name and the memory-slice interval(s) it occupies. Both are empty (omitted)\nin the aggregated Devices.Status. A Pod holds one instance of one profile per\naccelerator.",
 																			Type:        "string",
 																		},
 																		"allocatedProfiles": {
-																			Description: "AllocatedProfiles and RemainingProfiles are the per-card physical-slice ledger the\nAdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the per-Pod\nAllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below (unioning\nevery Pod's occupied slots on this card). Both are empty (omitted) for a card with no\nphysical-slice profiles, so it serializes byte-identically to before they existed.\nAllocatedProfiles lists, by profile name, how many instances are currently created\nand bound on this card (the count of the Pods' recorded placements).",
+																			Description: "AllocatedProfiles and RemainingProfiles are the per-accelerator physical-slice ledger\nthe AdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the\nper-Pod AllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below\n(unioning every Pod's occupied slots on this accelerator). Both are empty (omitted) for\nan accelerator with no physical-slice profiles, so it serializes byte-identically to\nbefore they existed.\nAllocatedProfiles lists, by profile name, how many instances are currently created\nand bound on this accelerator (the count of the Pods' recorded placements).",
 																			Type:        "array",
 																			Items: &v1.JSONSchemaPropsOrArray{
 																				Schema: &v1.JSONSchemaProps{
@@ -518,7 +545,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																			Format:      "int32",
 																		},
 																		"remainingProfiles": {
-																			Description: "RemainingProfiles lists, by profile name, how many more instances of each profile can\nstill be created given the card's occupied placement slots — the placement-aware\nremaining capacity (the per-profile analog of the scalar Remaining) the\nAdmissionCheck gates on.",
+																			Description: "RemainingProfiles lists, by profile name, how many more instances of each profile can\nstill be created given the accelerator's occupied placement slots — the placement-aware\nremaining capacity (the per-profile analog of the scalar Remaining) the\nAdmissionCheck gates on.",
 																			Type:        "array",
 																			Items: &v1.JSONSchemaPropsOrArray{
 																				Schema: &v1.JSONSchemaProps{
@@ -893,16 +920,16 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 													XIntOrString: true,
 												},
 												"acceleratorPartitionedProfile": {
-													Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a\npartition-offering InstanceType, e.g. \"3g.40gb\". A non-empty value makes this a\nrequest for one hardware partition of that shape, which is mutually exclusive with\nthe two slice percentages above: hardware partitioning and software slicing cannot\nboth apply to one card. It is ignored by InstanceTypes offering no partition.",
+													Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a\npartition-offering InstanceType, e.g. \"3g.40gb\". A non-empty value makes this a\nrequest for one hardware partition of that shape, which is mutually exclusive with\nthe two slice percentages above: hardware partitioning and software slicing cannot\nboth apply to one accelerator. It is ignored by InstanceTypes offering no partition.",
 													Type:        "string",
 												},
 												"acceleratorSlicedCoresPercentage": {
-													Description: "AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on\na sliced InstanceType, as a percentage in [0,100]. It is independent of\nAcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook\ncopies it to the other. It is ignored by non-sliced requests.",
+													Description: "AcceleratorSlicedCoresPercentage is the per-accelerator compute (SM) budget requested on\na sliced InstanceType, as a percentage in [0,100]. It is independent of\nAcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook\ncopies it to the other. It is ignored by non-sliced requests.",
 													Type:        "integer",
 													Format:      "int32",
 												},
 												"acceleratorSlicedMemoryPercentage": {
-													Description: "AcceleratorSlicedMemoryPercentage is the per-card VRAM budget requested on a\nsliced InstanceType, as a percentage in [0,100]. 0 disables slicing (the request\nbecomes an exclusive whole-card request). The Pod webhook folds it into the\nnormalized .sliced.units; it is ignored by non-sliced requests.",
+													Description: "AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a\nsliced InstanceType, as a percentage in [0,100]. 0 disables slicing (the request\nbecomes an exclusive whole-accelerator request). The Pod webhook folds it into the\nnormalized .sliced.units; it is ignored by non-sliced requests.",
 													Type:        "integer",
 													Format:      "int32",
 												},
@@ -1065,8 +1092,8 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 																			Type:        "integer",
 																			Format:      "int32",
 																		},
-																		"allocatedPhysicalPlacements": {
-																			Description: "AllocatedPhysicalPlacements is the interval(s) the Pod occupies on this card. Its UNIT\ndepends on Mode, and the two readers are told apart by AllocatedPhysicalProfile:\n- Partitioned: memory-slice intervals, paired with a non-empty AllocatedPhysicalProfile.\nThe reconciler unions these across the node's Pods to derive RemainingProfiles.\n- Sliced: the compute geometry a logical slice holds (on AMD, CU-mask bit indexes\nexactly as they appear in HSA_CU_MASK), with AllocatedPhysicalProfile EMPTY. The\nphysical reader skips an entry with no profile, which is what lets one field carry\nboth ledgers; the logical reader requires that shape and keys by accelerator UUID.",
+																		"allocatedLogicalPlacements": {
+																			Description: "AllocatedLogicalPlacements is the per-Pod annotation TRANSPORT of the logical-slice\nledger: the compute geometry the Pod's logical slice holds on this accelerator, in the\nmanufacturer's own compute units (on AMD, CU-mask bit indexes exactly as they appear in\nHSA_CU_MASK). The device-plugin Allocate records it so a later placement decision reads\nwhat the node's live slices already occupy. Empty (omitted) in the aggregated\nDevices.Status, and for a manufacturer whose logical slice has no position.",
 																			Type:        "array",
 																			Items: &v1.JSONSchemaPropsOrArray{
 																				Schema: &v1.JSONSchemaProps{
@@ -1077,12 +1104,39 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 																					},
 																					Properties: map[string]v1.JSONSchemaProps{
 																						"length": {
-																							Description: "Length is the number of memory slices the interval spans; the interval is\n[Start, Start+Length). Named Length, not Size, to avoid colliding with the\nprotobuf-generated Size() method on this message.",
+																							Description: "Length is the number of units the run spans; the run is [Start, Start+Length).\nNamed Length, not Size, to avoid colliding with the protobuf-generated Size()\nmethod on this message.",
 																							Type:        "integer",
 																							Format:      "int32",
 																						},
 																						"start": {
-																							Description: "Start is the first memory slice the interval covers (0-based).",
+																							Description: "Start is the first unit the run covers (0-based).",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																					},
+																				},
+																			},
+																			Nullable:  true,
+																			XListType: ptr.To[string]("atomic"),
+																		},
+																		"allocatedPhysicalPlacements": {
+																			Description: "AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition occupies\non this accelerator. The reconciler unions these across the node's Pods to derive\nRemainingProfiles.",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"start",
+																						"length",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"length": {
+																							Description: "Length is the number of units the run spans; the run is [Start, Start+Length).\nNamed Length, not Size, to avoid colliding with the protobuf-generated Size()\nmethod on this message.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																						"start": {
+																							Description: "Start is the first unit the run covers (0-based).",
 																							Type:        "integer",
 																							Format:      "int32",
 																						},
@@ -1093,11 +1147,11 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 																			XListType: ptr.To[string]("atomic"),
 																		},
 																		"allocatedPhysicalProfile": {
-																			Description: "AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation\nTRANSPORT the reconciler consumes to build the ledger above — not status output. The\ndevice-plugin Allocate records, in the Pod's own allocation annotation, the single\nphysical partition that Pod holds on this card (e.g. an NVIDIA MIG instance): its\nprofile name and the memory-slice interval(s) it occupies. Both are empty (omitted) in\nthe aggregated Devices.Status. A Pod holds one instance of one profile per card.",
+																			Description: "AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation\nTRANSPORT the reconciler consumes to build the ledger above — not status output. The\ndevice-plugin Allocate records, in the Pod's own allocation annotation, the single\nphysical partition that Pod holds on this accelerator (e.g. an NVIDIA MIG instance):\nits profile name and the memory-slice interval(s) it occupies. Both are empty (omitted)\nin the aggregated Devices.Status. A Pod holds one instance of one profile per\naccelerator.",
 																			Type:        "string",
 																		},
 																		"allocatedProfiles": {
-																			Description: "AllocatedProfiles and RemainingProfiles are the per-card physical-slice ledger the\nAdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the per-Pod\nAllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below (unioning\nevery Pod's occupied slots on this card). Both are empty (omitted) for a card with no\nphysical-slice profiles, so it serializes byte-identically to before they existed.\nAllocatedProfiles lists, by profile name, how many instances are currently created\nand bound on this card (the count of the Pods' recorded placements).",
+																			Description: "AllocatedProfiles and RemainingProfiles are the per-accelerator physical-slice ledger\nthe AdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the\nper-Pod AllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below\n(unioning every Pod's occupied slots on this accelerator). Both are empty (omitted) for\nan accelerator with no physical-slice profiles, so it serializes byte-identically to\nbefore they existed.\nAllocatedProfiles lists, by profile name, how many instances are currently created\nand bound on this accelerator (the count of the Pods' recorded placements).",
 																			Type:        "array",
 																			Items: &v1.JSONSchemaPropsOrArray{
 																				Schema: &v1.JSONSchemaProps{
@@ -1144,7 +1198,7 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 																			Format:      "int32",
 																		},
 																		"remainingProfiles": {
-																			Description: "RemainingProfiles lists, by profile name, how many more instances of each profile can\nstill be created given the card's occupied placement slots — the placement-aware\nremaining capacity (the per-profile analog of the scalar Remaining) the\nAdmissionCheck gates on.",
+																			Description: "RemainingProfiles lists, by profile name, how many more instances of each profile can\nstill be created given the accelerator's occupied placement slots — the placement-aware\nremaining capacity (the per-profile analog of the scalar Remaining) the\nAdmissionCheck gates on.",
 																			Type:        "array",
 																			Items: &v1.JSONSchemaPropsOrArray{
 																				Schema: &v1.JSONSchemaProps{
@@ -1421,7 +1475,7 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 									},
 									Properties: map[string]v1.JSONSchemaProps{
 										"accelerator": {
-											Description: "Accelerator is the allocatable-as-exclusive view: whole cards that are\nentirely free, e.g. \"1\", \"4\".",
+											Description: "Accelerator is the allocatable-as-exclusive view: whole accelerators that are\nentirely free, e.g. \"1\", \"4\".",
 											Type:        "object",
 											Properties: map[string]v1.JSONSchemaProps{
 												"capacity": {
@@ -1466,11 +1520,11 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 											},
 										},
 										"acceleratorPartitioned": {
-											Description: "AcceleratorPartitioned is the hardware-partitionable view: the partition instances\nthe pool's partitioned cards can still host, summed over those cards. It is disjoint\nfrom the three views above — a card in a partitioning mode can serve no other kind of\nclaim — so a pool with no partitioned card reports zero here.",
+											Description: "AcceleratorPartitioned is the hardware-partitionable view: the partition instances the\npool's partitioned accelerators can still host, summed over those accelerators. It is\ndisjoint from the three views above — an accelerator in a partitioning mode can serve no\nother kind of claim — so a pool with no partitioned accelerator reports zero here.",
 											Type:        "object",
 											Properties: map[string]v1.JSONSchemaProps{
 												"allocatedProfiles": {
-													Description: "AllocatedProfiles lists, by profile name, how many instances of each profile the pool's\npartitioned cards currently hold, summed over those cards. A profile holding nothing is\nabsent rather than listed at zero — unlike RemainingProfiles, where zero carries meaning.\nThe worker gateway ingests it per candidate and sums it by profile name into the fleet-wide\naggregate it serves, so changing its zero-handling or its presence changes that aggregate too.\nIts readers are the consumers of this status — the UI and the GPUStack app — which show what a\npool is running beside what it can still take, and which cannot derive it: RemainingProfiles\nalone cannot say whether a zero is \"occupied\" or merely \"squeezed out by a sibling profile\".",
+													Description: "AllocatedProfiles lists, by profile name, how many instances of each profile the pool's\npartitioned accelerators currently hold, summed over those accelerators. A profile holding\nnothing is absent rather than listed at zero — unlike RemainingProfiles, where zero carries\nmeaning.\nThe worker gateway ingests it per candidate and sums it by profile name into the fleet-wide\naggregate it serves, so changing its zero-handling or its presence changes that aggregate too.\nIts readers are the consumers of this status — the UI and the GPUStack app — which show what a\npool is running beside what it can still take, and which cannot derive it: RemainingProfiles\nalone cannot say whether a zero is \"occupied\" or merely \"squeezed out by a sibling profile\".",
 													Type:        "array",
 													Items: &v1.JSONSchemaPropsOrArray{
 														Schema: &v1.JSONSchemaProps{
@@ -1537,7 +1591,7 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 													XIntOrString: true,
 												},
 												"remainingProfiles": {
-													Description: "RemainingProfiles lists, by profile name, how many more instances of each profile the pool\ncan still host, summed over its partitioned cards.\nEvery profile the pool offers gets an entry, even at zero, so a profile whose room a\nsibling's instance consumed reads 0 instead of vanishing — a reader can tell \"offered but\ncurrently full\" from \"not offered at all\", and the wholesale status write does not churn the\nkey set on every carve and release.",
+													Description: "RemainingProfiles lists, by profile name, how many more instances of each profile the pool\ncan still host, summed over its partitioned accelerators.\nEvery profile the pool offers gets an entry, even at zero, so a profile whose room a\nsibling's instance consumed reads 0 instead of vanishing — a reader can tell \"offered but\ncurrently full\" from \"not offered at all\", and the wholesale status write does not churn the\nkey set on every carve and release.",
 													Type:        "array",
 													Items: &v1.JSONSchemaPropsOrArray{
 														Schema: &v1.JSONSchemaProps{
@@ -1567,7 +1621,7 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 											},
 										},
 										"acceleratorShared": {
-											Description: "AcceleratorShared is the shareable view: per-card ownership shares (up to\nSharedResourceMaxSize owners per card) summed over free and already-shared\ncards.",
+											Description: "AcceleratorShared is the shareable view: per-accelerator ownership shares (up to\nSharedResourceMaxSize owners per accelerator) summed over free and already-shared\naccelerators.",
 											Type:        "object",
 											Properties: map[string]v1.JSONSchemaProps{
 												"capacity": {
@@ -1612,7 +1666,7 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 											},
 										},
 										"acceleratorSliced": {
-											Description: "AcceleratorSliced is the sliceable view: per-card VRAM-percent units (one\nhundred per card) summed over free and already-sliced cards.",
+											Description: "AcceleratorSliced is the sliceable view: per-accelerator VRAM-percent units (one\nhundred per accelerator) summed over free and already-sliced accelerators.",
 											Type:        "object",
 											Properties: map[string]v1.JSONSchemaProps{
 												"capacity": {
@@ -1848,11 +1902,11 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 															Type:        "object",
 															Properties: map[string]v1.JSONSchemaProps{
 																"coresPercentageOvercommit": {
-																	Description: "CoresPercentageOvercommit is a per-model property (uniform within a group), taken from\nany logically sliceable card; false and meaningless when no card is logically sliceable.",
+																	Description: "CoresPercentageOvercommit is a per-model property (uniform within a group), taken from\nany logically sliceable accelerator; false and meaningless when no accelerator is\nlogically sliceable.",
 																	Type:        "boolean",
 																},
 																"count": {
-																	Description: "Count is the sum of per-card LogicalSliced.Count across the group.",
+																	Description: "Count is the sum of per-accelerator LogicalSliced.Count across the group.",
 																	Type:        "integer",
 																	Format:      "int32",
 																},
@@ -1863,7 +1917,7 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 															Type:        "object",
 															Properties: map[string]v1.JSONSchemaProps{
 																"count": {
-																	Description: "Count is the sum of per-card PhysicalSliced.Count across the group.",
+																	Description: "Count is the sum of per-accelerator PhysicalSliced.Count across the group.",
 																	Type:        "integer",
 																	Format:      "int32",
 																},
@@ -1878,12 +1932,12 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 																			},
 																			Properties: map[string]v1.JSONSchemaProps{
 																				"count": {
-																					Description: "Count is the sum of per-card Count for this profile name across the group.",
+																					Description: "Count is the sum of per-accelerator Count for this profile name across the group.",
 																					Type:        "integer",
 																					Format:      "int32",
 																				},
 																				"memoryMib": {
-																					Description: "MemoryMib is the memory of one instance of this profile, in MiB. It is uniform\nper profile name within a group, so it is carried through (not summed). It is the\nVRAM-anchored input the Pod webhook folds into \".sliced.units\" (MemoryMibToUnits)\nfor a MIG request, which is why the aggregate — reachable from the InstanceType\nDetail, unlike per-card Devices — must carry it. Optional in the schema (a real\nprofile always carries a non-zero value); the Pod webhook treats a not-yet-populated\ndetail as a retryable not-ready state rather than relying on schema-required presence.",
+																					Description: "MemoryMib is the memory of one instance of this profile, in MiB. It is uniform\nper profile name within a group, so it is carried through (not summed). It is the\nVRAM-anchored input the Pod webhook folds into \".sliced.units\" (MemoryMibToUnits)\nfor a MIG request, which is why the aggregate — reachable from the InstanceType\nDetail, unlike per-accelerator Devices — must carry it. Optional in the schema (a real\nprofile always carries a non-zero value); the Pod webhook treats a not-yet-populated\ndetail as a retryable not-ready state rather than relying on schema-required presence.",
 																					Type:        "integer",
 																					Format:      "int64",
 																				},

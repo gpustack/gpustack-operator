@@ -31,7 +31,7 @@ var _ runtime.Object = (*InstanceMetrics)(nil)
 // InstanceMetricsSample is a single utilization sampling point of an Instance.
 //
 // Every memory and storage figure is reported in MiB: the sources measure in different
-// units — the kubelet in bytes, the vendor device libraries in MiB — and the coarser one
+// units — the kubelet in bytes, the manufacturer's device libraries in MiB — and the coarser one
 // wins so that a consumer never has to mix units within one sample. A byte figure is
 // rounded up, so a measured usage below 1 MiB reads as 1 and 0 means no usage at all.
 type InstanceMetricsSample struct {
@@ -67,7 +67,7 @@ type InstanceMetricsSample struct {
 // InstanceAcceleratorMetrics is the metrics of one accelerator device
 // allocated to an Instance.
 //
-// All figures come from the vendor device libraries; a zero value may also
+// All figures come from the manufacturer's device libraries; a zero value may also
 // mean the library could not read that metric at sampling time.
 type InstanceAcceleratorMetrics struct {
 	// ID is the universally unique identifier of the accelerator device.

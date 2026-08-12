@@ -34,19 +34,19 @@ Manager's latest sample.
 | `sample.memoryWorkingSetMiB` | MiB | pod working-set memory |
 | `sample.rootfsUsedMiB` | MiB | containers' writable-layer usage — the disk gauge's numerator against `spec.resources.localStorage` |
 | `sample.ephemeralStorageUsedMiB` | MiB | writable layers + logs + emptyDir volumes |
-| `sample.accelerators[]` | — | one entry per allocated accelerator card (see below) |
+| `sample.accelerators[]` | — | one entry per allocated accelerator (see below) |
 
 Every memory and storage figure is in **MiB**. The sources do not agree on a unit — the kubelet
-measures in bytes, the vendor device libraries in MiB — so the sample reports the coarser one
-throughout rather than mixing units within one response. Byte figures are **rounded up**: an idle
-instance's working set and writable layer are routinely under 1 MiB, and they read as `1`, not
+measures in bytes, the manufacturers' device libraries in MiB — so the sample reports the coarser
+one throughout rather than mixing units within one response. Byte figures are **rounded up**: an
+idle instance's working set and writable layer are routinely under 1 MiB, and they read as `1`, not
 `0`. A `0` therefore means the source measured no usage, never that the figure was too small to
 show.
 
 Each `accelerators[]` entry carries `id`, `memoryMiB`, `memoryUsageMiB`,
 `memoryUtilizationPercent`, `coresUtilizationPercent`, `temperatureCelsius`, `powerUsageWatts`,
 `unhealthy`. Pointer fields are **absent when the source is unavailable**; accelerator zero values
-may also mean the vendor library could not read that metric.
+may also mean the manufacturer's library could not read that metric.
 
 ## Where each figure comes from
 
@@ -57,13 +57,13 @@ may also mean the vendor library could not read that metric.
   pod yet, `metrics.k8s.io` answers instead, if a metrics-server is deployed. That API carries no
   storage figures, so `rootfsUsedMiB` and `ephemeralStorageUsedMiB` are then absent. An entry
   measured before the pod existed (a previous incarnation of the same name) is rejected.
-- **Accelerator metrics** — the Device Manager pod of the Instance's node samples the vendor
+- **Accelerator metrics** — the Device Manager pod of the Instance's node samples the manufacturer's
   libraries every monitor period (default 15 s) and keeps only the latest snapshot, served at
   `/monitor/snapshot`. There is one Device Manager per manufacturer, each holding only its own
-  manufacturer's cards, so an allocation spanning two manufacturers is read from both — another
-  manufacturer's Device Manager is never substituted. Only the cards recorded in the pod's
-  allocation annotation are returned — an Instance never sees an accelerator it did not allocate.
-  A snapshot older than three monitor periods is treated as a failing monitor and dropped.
+  manufacturer's accelerators, so an allocation spanning two manufacturers is read from both —
+  another manufacturer's Device Manager is never substituted. Only the accelerators recorded in the
+  pod's allocation annotation are returned — an Instance never sees an accelerator it did not
+  allocate. A snapshot older than three monitor periods is treated as a failing monitor and dropped.
 
 ## Scoping and authorization
 
@@ -90,8 +90,8 @@ may also mean the vendor library could not read that metric.
 
 - **No history.** Charting requires polling this endpoint from the console; the operator retains
   nothing.
-- **Whole cards only.** A shared or sliced allocation shows the whole card's metrics; per-pod GPU
-  attribution does not exist.
+- **Whole accelerators only.** A shared or sliced allocation shows the whole accelerator's metrics;
+  per-pod GPU attribution does not exist.
 - **Pod-IP networking.** The worker dials the Device Manager pod directly with TLS verification
   skipped (self-signed certs) — accepted for v1; mTLS and a NetworkPolicy are on the hardening
   backlog. The endpoint is also unreachable for an out-of-cluster worker.

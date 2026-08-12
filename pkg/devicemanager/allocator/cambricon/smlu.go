@@ -49,7 +49,7 @@ const reclaimMaxMisses = 3
 // create-before-marker window and destroy a live instance.
 var allocMu sync.Mutex
 
-// smluInstance is one sMLU instance enumerated from the driver: the card it lives on,
+// smluInstance is one sMLU instance enumerated from the driver: the accelerator it lives on,
 // its operator-assigned name, the profile it was cut from, the compute/VRAM quota, and
 // its device node (injected into the container).
 type smluInstance struct {
@@ -62,27 +62,27 @@ type smluInstance struct {
 }
 
 // smluRef is the minimal identity the reclaim loop needs to destroy an instance: the
-// parent card and the instance name.
+// parent accelerator and the instance name.
 type smluRef struct {
 	card string
 	name string
 }
 
-// profileKey identifies an sMLU profile by its parent card and profile ID.
+// profileKey identifies an sMLU profile by its parent accelerator and profile ID.
 type profileKey struct {
 	card      string
 	profileID int32
 }
 
 // smluDriver is the injectable seam over the cnDev sMLU wrappers. The real impl (wired in
-// deviceplugin.go on linux) drives cnDev on a card addressed by PCI bus ID; the test impl
+// deviceplugin.go on linux) drives cnDev on an accelerator addressed by PCI bus ID; the test impl
 // is in-memory so the mapping / name-encoding / marker / reclaim logic is table-tested
 // without hardware. Profile reuse and refcount live above this seam (in reserveInstance /
 // reclaim) so they are testable; the seam itself is thin create/destroy/list over the
-// wrappers. ListInstances is global (every card's instances, each carrying its card) so
-// reclaim can catch a crash-orphan on a card that has no marker yet.
+// wrappers. ListInstances is global (every accelerator's instances, each carrying its own) so
+// reclaim can catch a crash-orphan on an accelerator that has no marker yet.
 type smluDriver interface {
-	// EnsureSMLUMode puts the card into sMLU mode.
+	// EnsureSMLUMode puts the accelerator into sMLU mode.
 	EnsureSMLUMode(card string) error
 	// CreateProfile creates a profile with the given compute (%) and VRAM (MiB) quota and
 	// returns its profile ID.
@@ -92,12 +92,12 @@ type smluDriver interface {
 	// CreateInstance instantiates a named instance from the profile and returns it,
 	// including the device node read back from the driver.
 	CreateInstance(card string, profileID int32, name string) (smluInstance, error)
-	// DestroyInstance destroys the named instance on the card. It is idempotent:
+	// DestroyInstance destroys the named instance on the accelerator. It is idempotent:
 	// destroying an already-absent instance is not an error.
 	DestroyInstance(card, name string) error
-	// ListInstances enumerates every sMLU instance across all cards.
+	// ListInstances enumerates every sMLU instance across all accelerators.
 	ListInstances() ([]smluInstance, error)
-	// ListProfiles enumerates every sMLU profile across all cards, so the reclaim loop
+	// ListProfiles enumerates every sMLU profile across all accelerators, so the reclaim loop
 	// can destroy a profile no instance references (including a crash orphan left when a
 	// create fell between the profile and its instance).
 	ListProfiles() ([]profileKey, error)
@@ -134,6 +134,11 @@ func decodeInstanceUID(name string) (string, bool) {
 
 // smluMarker is one parsed marker: the pod<->instance correlation and profile ledger a
 // scanner treats as occupied and the reclaim loop keys its liveness decision on.
+//
+// The Card field and its "card" JSON tag are an ON-DISK FORMAT, not vocabulary: markers
+// written before this package spoke of accelerators are still on real nodes, and renaming
+// either would make them unreadable and break retry, visibility, adoption and reclamation.
+// Both are frozen.
 type smluMarker struct {
 	PodUID    string `json:"podUID"`
 	Container string `json:"container"`
@@ -220,12 +225,12 @@ func scanMarkers(podsDir string) (entries []markerEntry, corrupt []string) {
 }
 
 // reserveInstance is the Allocate core. Under allocMu it: (1) reuses an existing
-// self-marker on an exact (card, cores%, memMiB) match, recovering the live instance's
-// device node, and fails closed on a mismatch (pod resource requests are immutable, so a
-// mismatch signals corruption); (2) otherwise ensures the card is in sMLU mode, reuses a
-// profile on an exact (cores%, memMiB) match on that card or creates one, instantiates a
-// named instance, and writes the marker (rolling back the instance + a freshly created
-// profile if the marker write fails).
+// self-marker on an exact (accelerator, cores%, memMiB) match, recovering the live
+// instance's device node, and fails closed on a mismatch (pod resource requests are
+// immutable, so a mismatch signals corruption); (2) otherwise ensures the accelerator is in
+// sMLU mode, reuses a profile on an exact (cores%, memMiB) match on that accelerator or
+// creates one, instantiates a named instance, and writes the marker (rolling back the
+// instance + a freshly created profile if the marker write fails).
 func reserveInstance(driver smluDriver, podUID, container, card string, coresPct int, memMiB int64) (smluInstance, error) {
 	allocMu.Lock()
 	defer allocMu.Unlock()
@@ -290,7 +295,7 @@ func reserveInstance(driver smluDriver, podUID, container, card string, coresPct
 	return inst, nil
 }
 
-// findOrCreateProfile reuses a profile on the card whose compute + VRAM quota exactly
+// findOrCreateProfile reuses a profile on the accelerator whose compute + VRAM quota exactly
 // matches the request (a differing quota would violate the requested isolation), or
 // creates a new one. It returns the profile ID and whether it was freshly created (so a
 // failed instance create can roll the new profile back).
@@ -307,7 +312,7 @@ func findOrCreateProfile(driver smluDriver, list []smluInstance, card string, co
 	return id, true, nil
 }
 
-// reclaimer is the level-based per-vendor reclaim loop's state. It is driven by the
+// reclaimer is the level-based per-manufacturer reclaim loop's state. It is driven by the
 // broadcast livePodUIDs AND a periodic resync ticker (deviceplugin.go wiring), so a
 // dropped broadcast tick never starves reclamation. Each reconcile re-lists the driver
 // and scans the markers, so it self-heals across restarts with no in-memory counter.
@@ -359,7 +364,7 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 	}
 
 	// Collect reclaim targets per pod UID: the marker files to remove and the instances
-	// to destroy. Markers contribute their (card, name, profileID); marker-less instances
+	// to destroy. Markers contribute their (accelerator, name, profileID); marker-less instances
 	// contribute theirs under their decoded UID (an undecodable name is foreign, skipped).
 	type target struct {
 		markers   []markerEntry

@@ -92,14 +92,14 @@ func mountByContainerPath(resp *deviceplugin.ContainerAllocateResponse, ctrPath 
 	return nil, false
 }
 
-// A card whose drm indexes the detector could not read must not take the device plugin down with
-// it. The detector reads them from sysfs and records both numbers, the card number alone, or
+// An accelerator whose drm indexes the detector could not read must not take the device plugin down with
+// it. The detector reads them from sysfs and records both numbers, the accelerator number alone, or
 // nothing; this handler has no panic recovery, so indexing an absent one killed the process that
 // serves every allocation on the node — for every manufacturer — over one unreadable directory.
 // The nodes that cannot be named are left out instead.
 func TestGetContainerAllocateResponseWithoutDrmIndexes(t *testing.T) {
 	devs := hygonDevicesFixture()
-	// Neither number readable, and only the card number readable: the two shapes sysfs yields
+	// Neither number readable, and only the accelerator number readable: the two shapes sysfs yields
 	// besides the full pair.
 	devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = nil
 	devs.Spec.Groups[0].Accelerators[1].PhysicalIndexes = []uint32{1}
@@ -165,8 +165,8 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 	assert.True(t, m.ReadOnly, "the tenant-facing slot ledger must be read-only")
 }
 
-// A whole-card slice (100% compute, full VRAM) still writes a full-mask / full-memory
-// vdev.conf occupancy marker, so the on-disk scanner never misses a taken card.
+// A whole-accelerator slice (100% compute, full VRAM) still writes a full-mask / full-memory
+// vdev.conf occupancy marker, so the on-disk scanner never misses a taken accelerator.
 func TestGetSlicedContainerAllocateResponse_WholeCardMarker(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
@@ -193,8 +193,8 @@ func TestGetSlicedContainerAllocateResponse_WholeCardMarker(t *testing.T) {
 	assert.Equal(t, want, string(body))
 }
 
-// A multi-card allocation writes one vdev<i>.conf per card, each independently slotted:
-// the node-wide vdev_id climbs while the per-card pipe_id resets on the second card.
+// A multi-accelerator allocation writes one vdev<i>.conf per accelerator, each independently slotted:
+// the node-wide vdev_id climbs while the per-accelerator pipe_id resets on the second accelerator.
 func TestGetSlicedContainerAllocateResponse_MultiCard(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
@@ -224,7 +224,7 @@ func TestGetSlicedContainerAllocateResponse_MultiCard(t *testing.T) {
 }
 
 // A sliced container with no memory dimension is rejected rather than silently given the
-// whole card's VRAM.
+// whole accelerator's VRAM.
 func TestGetSlicedContainerAllocateResponse_NoMemory(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()

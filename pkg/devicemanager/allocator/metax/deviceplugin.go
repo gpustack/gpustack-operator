@@ -53,7 +53,7 @@ type aggregated struct {
 	logger     klog.Logger
 	servers    []deviceplugin.Server
 	kubeSocket string
-	// sliced reports whether a Sliced server is registered, gating the per-vendor
+	// sliced reports whether a Sliced server is registered, gating the per-manufacturer
 	// stateful sgpu reclaim loop.
 	sliced bool
 }
@@ -161,11 +161,12 @@ func (s *server) GetContainerAllocateResponse(
 			}
 
 			// Each recorded index is guarded by its own length, as the sliced path below already
-			// does. The detector reads them from this vendor's sysfs drm directory, which yields
-			// both numbers, the card number alone, or nothing at all — so a pair is not something
-			// this can assume. Indexing an absent one panics, and no interceptor recovers a panic
-			// in this handler: the process that serves every allocation on the node dies with it,
-			// for every manufacturer, over one card whose drm directory could not be read.
+			// does. The detector reads them from this manufacturer's sysfs drm directory, which
+			// yields both numbers, the drm card<N> number alone, or nothing at all — so a pair is
+			// not something this can assume. Indexing an absent one panics, and no interceptor
+			// recovers a panic in this handler: the process that serves every allocation on the node
+			// dies with it, for every manufacturer, over one accelerator whose drm directory could
+			// not be read.
 			if len(devsAccelerator.PhysicalIndexes) > 0 {
 				if pDev := deviceplugin.NewRWDevicef("/dev/dri/card%d", devsAccelerator.PhysicalIndexes[0]); pDev != nil {
 					ctrResp.Devices = append(ctrResp.Devices, pDev)
@@ -191,15 +192,15 @@ func (s *server) GetContainerAllocateResponse(
 }
 
 // getSlicedContainerAllocateResponse renders the sgpu logical-slicing injection for a
-// sliced container: it reserves a per-card sgpu subdevice (fixed-share compute quota +
+// sliced container: it reserves a per-accelerator sgpu subdevice (fixed-share compute quota +
 // VRAM cap) via the sysfs seam, writing the correlation + slot marker under the pod
-// work dir, and returns METAX_SGPUS plus the control (/dev/mxcd) and per-card render
-// (/dev/dri/renderD*) device nodes. A whole-card slice takes the native path (no sgpu
+// work dir, and returns METAX_SGPUS plus the control (/dev/mxcd) and per-accelerator render
+// (/dev/dri/renderD*) device nodes. A whole-accelerator slice takes the native path (no sgpu
 // subdevice, no METAX_SGPUS) but still records an occupancy marker.
 //
-// MetaX sgpu slicing partitions a single card, and the per-container marker records
-// one card, so a multi-card sliced allocation is rejected (the Ascend single-card
-// pattern) rather than silently slicing only one.
+// MetaX sgpu slicing partitions a single accelerator, and the per-container marker records
+// one accelerator, so a multi-accelerator sliced allocation is rejected (the Ascend
+// single-accelerator pattern) rather than silently slicing only one.
 func (s *server) getSlicedContainerAllocateResponse(
 	pod *core.Pod,
 	ctr *core.Container,
@@ -257,7 +258,7 @@ func (s *server) getSlicedContainerAllocateResponse(
 			ctrResp.Devices = append(ctrResp.Devices, pDev)
 		}
 	}
-	// A partial slice injects METAX_SGPUS; a whole card takes the native path (no env).
+	// A partial slice injects METAX_SGPUS; a whole accelerator takes the native path (no env).
 	if !res.wholeCard {
 		ctrResp.Envs = map[string]string{"METAX_SGPUS": res.envValue}
 	}

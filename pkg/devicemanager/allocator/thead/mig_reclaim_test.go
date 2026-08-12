@@ -18,14 +18,15 @@ import (
 func noClaims() (map[string][]migPlacement, error) { return nil, nil }
 
 // hookedMigDriver wraps the package's fake driver with a hook that runs before each ListInstances,
-// so a case can mutate the driver's state in the window BETWEEN the pass's lock-free snapshot and the
-// destroy's re-read under the card lock. That window is the only thing that tells a re-read apart
-// from a snapshot, so without it "verified under the lock" would be an assertion about structure
-// rather than about behavior. It embeds the fake rather than replacing it: every other operation is
-// the same fake the reservation tests drive.
+// so a case can mutate the driver's state in the window BETWEEN the pass's lock-free snapshot and
+// the destroy's re-read under the accelerator lock. That window is the only thing that tells a
+// re-read apart from a snapshot, so without it "verified under the lock" would be an assertion
+// about structure rather than about behavior. It embeds the fake rather than replacing it: every
+// other operation is the same fake the reservation tests drive.
 //
-// onCreate, when set, runs before each CreateInstance, so a case can observe an allocation's mutating
-// call from the outside — the one moment at which a create is provably in flight on a card.
+// onCreate, when set, runs before each CreateInstance, so a case can observe an allocation's
+// mutating call from the outside — the one moment at which a create is provably in flight on an
+// accelerator.
 type hookedMigDriver struct {
 	*fakeMigDriver
 	onList   func()
@@ -37,9 +38,9 @@ func (h *hookedMigDriver) ListInstances() ([]migLiveInstance, error) {
 	return h.fakeMigDriver.ListInstances()
 }
 
-// CardInstances runs the same hook as ListInstances: the two are the node-wide read and the per-card
-// one, and a case arming on "the Nth enumeration of this run" is counting reads of the card's state
-// whichever seam they came through.
+// CardInstances runs the same hook as ListInstances: the two are the node-wide read and the
+// per-accelerator one, and a case arming on "the Nth enumeration of this run" is counting reads of
+// the accelerator's state whichever seam they came through.
 func (h *hookedMigDriver) CardInstances(cardUUID string) ([]migInstance, error) {
 	h.onList()
 	return h.fakeMigDriver.CardInstances(cardUUID)
@@ -54,32 +55,33 @@ func (h *hookedMigDriver) CreateInstance(
 	return h.fakeMigDriver.CreateInstance(cardUUID, profile, computeSlices, memorySlices, slot)
 }
 
-// markerRef names one ownership marker by its owner and card, so a case declares the markers it
-// expects to survive (or to be gone) without spelling out paths.
+// markerRef names one ownership marker by its owner and accelerator, so a case declares the markers
+// it expects to survive (or to be gone) without spelling out paths.
 type markerRef struct {
 	pod  string
 	card string
 }
 
-// corruptFixture describes an unparseable marker to plant before a case runs: the Pod whose work dir
-// holds it and the file name it carries (the name is what attributes it to a card, or to none). stray
-// puts it one level above the container dir, where its path names no Pod either.
+// corruptFixture describes an unparseable marker to plant before a case runs: the Pod whose work
+// dir holds it and the file name it carries (the name is what attributes it to an accelerator, or
+// to none). stray puts it one level above the container dir, where its path names no Pod either.
 type corruptFixture struct {
 	pod   string
 	file  string
 	stray bool
 }
 
-// seedMarkedInstance seeds a live partition on a card and writes its ownership marker, so the pair
-// models one Pod's created-and-recorded partition.
+// seedMarkedInstance seeds a live partition on an accelerator and writes its ownership marker, so
+// the pair models one Pod's created-and-recorded partition.
 func seedMarkedInstance(t *testing.T, drv *fakeMigDriver, podsDir, podUID, card string, giID uint32, slot migPlacement) {
 	t.Helper()
 	seedMarkedInstanceOf(t, drv, podsDir, podUID, "c", card, giID, slot)
 }
 
-// seedMarkedInstanceOf is seedMarkedInstance for a named container, so a Pod whose several containers
-// each carved a partition on ONE card is modeled with one marker per container — the shape the
-// ownership record is per container for, and the shape a per-marker driver enumeration multiplies.
+// seedMarkedInstanceOf is seedMarkedInstance for a named container, so a Pod whose several
+// containers each carved a partition on ONE accelerator is modeled with one marker per container —
+// the shape the ownership record is per container for, and the shape a per-marker driver
+// enumeration multiplies.
 func seedMarkedInstanceOf(
 	t *testing.T, drv *fakeMigDriver, podsDir, podUID, container, card string, giID uint32, slot migPlacement,
 ) {
@@ -94,15 +96,15 @@ func seedMarkedInstanceOf(
 	writeMarkerFixture(t, podsDir, m)
 }
 
-// migSeed is one live partition to seed on a card, as the orphan sweep sees it (no parseable marker
-// owns it).
+// migSeed is one live partition to seed on an accelerator, as the orphan sweep sees it (no
+// parseable marker owns it).
 type migSeed struct {
 	card string
 	giID uint32
 	slot migPlacement
 }
 
-// seedInstances seeds each migSeed as a live marker-less partition on its card.
+// seedInstances seeds each migSeed as a live marker-less partition on its accelerator.
 func seedInstances(drv *fakeMigDriver, seeds ...migSeed) {
 	for _, s := range seeds {
 		drv.seedLive(s.card, migInstance{
@@ -148,10 +150,9 @@ type reclaimCase struct {
 	corrupt *corruptFixture
 	// claims is the attribution self-check source; nil means no running Pod claims anything.
 	claims func() (map[string][]migPlacement, error)
-	// listHook runs before each driver read of the card state — the node-wide ListInstances a pass
-	// opens with and the per-card CardInstances the destroy re-reads under the lock — numbered from 1
-	// across the whole run, so a case
-	// can act inside the snapshot-to-lock window.
+	// listHook runs before each driver read of the accelerator state — the node-wide ListInstances a
+	// pass opens with and the per-accelerator CardInstances the destroy re-reads under the lock —
+	// numbered from 1 across the whole run, so a case can act inside the snapshot-to-lock window.
 	listHook        func(t *testing.T, drv *fakeMigDriver, podsDir string, call int)
 	live            []string
 	passes          int
@@ -258,11 +259,11 @@ func TestReclaim(t *testing.T) {
 			wantGoneMarkers: []markerRef{deadPodMarker},
 		},
 		{
-			name: "a gpu-instance id reused after the pass snapshot is retained (verified under the card lock)",
+			name: "a gpu-instance id reused after the pass snapshot is retained (verified under the accelerator lock)",
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
 				seedMarkedInstance(t, drv, podsDir, "pod-dead", testPPUUUID0, 1, migPlacement{0, 2})
 			},
-			// The 4th enumeration is the destroy's re-read under the card lock: three pass snapshots
+			// The 4th enumeration is the destroy's re-read under the accelerator lock: three pass snapshots
 			// precede it, and the third of them still matched the marker. Replacing the partition here
 			// models an out-of-band destroy plus id reuse inside exactly that window.
 			listHook: func(_ *testing.T, drv *fakeMigDriver, _ string, call int) {
@@ -278,7 +279,7 @@ func TestReclaim(t *testing.T) {
 			wantGoneMarkers: []markerRef{deadPodMarker},
 		},
 		{
-			name: "a marker-less partition on a card hosting a live pod is kept",
+			name: "a marker-less partition on an accelerator hosting a live pod is kept",
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
 				seedMarkedInstance(t, drv, podsDir, "pod-live", testPPUUUID0, 1, migPlacement{0, 2})
 				seedInstances(drv, migSeed{card: testPPUUUID0, giID: 2, slot: migPlacement{2, 2}})
@@ -287,10 +288,10 @@ func TestReclaim(t *testing.T) {
 			passes: reclaimMaxMisses + 3,
 		},
 		{
-			name: "a marker-less partition is kept while the card still carries any marker",
+			name: "a marker-less partition is kept while the accelerator still carries any marker",
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
-				// The marked pod is dead but its partition is wedged in use, so its marker cannot be
-				// removed and the card is never provably drained.
+				// The marked pod is dead but its partition is wedged in use, so its marker cannot be removed
+				// and the accelerator is never provably drained.
 				drv.inUseGiIDs = map[uint32]bool{1: true}
 				seedMarkedInstance(t, drv, podsDir, "pod-stuck", testPPUUUID0, 1, migPlacement{0, 2})
 				seedInstances(drv, migSeed{card: testPPUUUID0, giID: 2, slot: migPlacement{2, 2}})
@@ -299,14 +300,14 @@ func TestReclaim(t *testing.T) {
 			wantMarkers: []markerRef{{pod: "pod-stuck", card: testPPUUUID0}},
 		},
 		{
-			name: "a marker-less partition on a drained card survives the passes before the debounce",
+			name: "a marker-less partition on a drained accelerator survives the passes before the debounce",
 			setup: func(_ *testing.T, drv *fakeMigDriver, _ string) {
 				seedInstances(drv, migSeed{card: testPPUUUID0, giID: 2, slot: migPlacement{2, 2}})
 			},
 			passes: reclaimMaxMisses - 1,
 		},
 		{
-			name: "a marker-less partition on a drained card is collected at the debounce",
+			name: "a marker-less partition on a drained accelerator is collected at the debounce",
 			setup: func(_ *testing.T, drv *fakeMigDriver, _ string) {
 				seedInstances(drv, migSeed{card: testPPUUUID0, giID: 2, slot: migPlacement{2, 2}})
 			},
@@ -314,7 +315,7 @@ func TestReclaim(t *testing.T) {
 			wantDestroyed: []uint32{2},
 		},
 		{
-			name:    "an unparseable marker of a live pod holds its card off the orphan sweep",
+			name:    "an unparseable marker of a live pod holds its accelerator off the orphan sweep",
 			corrupt: &corruptFixture{pod: "pod-live", file: markerFileName(testPPUUUID0)},
 			setup: func(_ *testing.T, drv *fakeMigDriver, _ string) {
 				seedInstances(drv, migSeed{card: testPPUUUID0, giID: 1, slot: migPlacement{0, 2}})
@@ -323,7 +324,7 @@ func TestReclaim(t *testing.T) {
 			passes: reclaimMaxMisses*2 + 2,
 		},
 		{
-			name:    "an unparseable marker naming no card holds every card",
+			name:    "an unparseable marker naming no accelerator holds every accelerator",
 			corrupt: &corruptFixture{pod: "pod-live", file: markerFileName("")},
 			setup: func(_ *testing.T, drv *fakeMigDriver, _ string) {
 				seedInstances(drv,
@@ -334,7 +335,7 @@ func TestReclaim(t *testing.T) {
 			passes: reclaimMaxMisses*2 + 2,
 		},
 		{
-			name:    "a sibling card's marker-less partition is still collected",
+			name:    "a sibling accelerator's marker-less partition is still collected",
 			corrupt: &corruptFixture{pod: "pod-live", file: markerFileName(testPPUUUID1)},
 			setup: func(_ *testing.T, drv *fakeMigDriver, _ string) {
 				seedInstances(drv,
@@ -358,8 +359,8 @@ func TestReclaim(t *testing.T) {
 			setup: func(_ *testing.T, drv *fakeMigDriver, _ string) {
 				seedInstances(drv, migSeed{card: testPPUUUID0, giID: 1, slot: migPlacement{0, 2}})
 			},
-			// The pass that matures the card's debounce scanned a clean pods root; the marker lands
-			// after that scan and before the collector takes the card lock, so only the under-lock
+			// The pass that matures the accelerator's debounce scanned a clean pods root; the marker lands
+			// after that scan and before the collector takes the accelerator lock, so only the under-lock
 			// re-scan can see it.
 			listHook: func(t *testing.T, _ *fakeMigDriver, podsDir string, call int) {
 				if call != reclaimMaxMisses {
@@ -452,23 +453,25 @@ func TestReclaimBusyDestroyBoundedRetry(t *testing.T) {
 	assert.NoFileExists(t, markerPath(podsDir, "pod-dead", "c", testPPUUUID0))
 }
 
-// TestReclaimEnumeratesOncePerCard pins the reclaim pass's driver cost: one node-wide enumeration for
-// the pass itself, plus one under the card lock per DISTINCT card carrying dead markers — never one per
-// marker. The node-wide call probes every card's whole profile space and re-queries placements per
-// answered profile, so a Pod whose several containers each hold a partition on one card would multiply
-// thousands of driver round-trips by the number of its containers for no added evidence: the lock is
-// held across the group, so one re-read describes the card for all of them.
+// TestReclaimEnumeratesOncePerCard pins the reclaim pass's driver cost: one node-wide enumeration
+// for the pass itself, plus one under the accelerator lock per DISTINCT accelerator carrying dead
+// markers — never one per marker. The node-wide call probes every accelerator's whole profile space
+// and re-queries placements per answered profile, so a Pod whose several containers each hold a
+// partition on one accelerator would multiply thousands of driver round-trips by the number of its
+// containers for no added evidence: the lock is held across the group, so one re-read describes the
+// accelerator for all of them.
 func TestReclaimEnumeratesOncePerCard(t *testing.T) {
 	cases := []struct {
 		name  string
 		setup func(t *testing.T, drv *fakeMigDriver, podsDir string)
 		// wantInLockReads is the number of under-lock re-reads the destroying pass must make: one per
-		// distinct card carrying a dead pod's markers, however many markers that card carries.
+		// distinct accelerator carrying a dead pod's markers, however many markers that accelerator
+		// carries.
 		wantInLockReads int
 		wantDestroyed   []uint32
 	}{
 		{
-			name: "two containers of one dead pod on one card share a single re-read",
+			name: "two containers of one dead pod on one accelerator share a single re-read",
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
 				seedMarkedInstanceOf(t, drv, podsDir, "pod-dead", "main", testPPUUUID0, 1, migPlacement{0, 2})
 				seedMarkedInstanceOf(t, drv, podsDir, "pod-dead", "worker", testPPUUUID0, 2, migPlacement{2, 2})
@@ -477,7 +480,7 @@ func TestReclaimEnumeratesOncePerCard(t *testing.T) {
 			wantDestroyed:   []uint32{1, 2},
 		},
 		{
-			name: "a dead pod spanning two cards re-reads once per card",
+			name: "a dead pod spanning two accelerators re-reads once per accelerator",
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
 				seedMarkedInstance(t, drv, podsDir, "pod-dead", testPPUUUID0, 1, migPlacement{0, 2})
 				seedMarkedInstance(t, drv, podsDir, "pod-dead", testPPUUUID1, 2, migPlacement{0, 2})
@@ -510,18 +513,19 @@ func TestReclaimEnumeratesOncePerCard(t *testing.T) {
 	}
 }
 
-// TestReclaimUnattributableCorruptPathBoundedLog asserts the one hold this loop cannot release is not
-// silent: a corrupt path naming neither a Pod nor a card keeps failing closed node-wide forever (there
-// is no liveness evidence to retire it on), and the loop surfaces the operator-visible log naming the
-// path exactly once, at the bound — the same surface the busy-destroy path uses, because a status
-// condition would be stomped by the wholesale Devices.Status rebuild.
+// TestReclaimUnattributableCorruptPathBoundedLog asserts the one hold this loop cannot release is
+// not silent: a corrupt path naming neither a Pod nor an accelerator keeps failing closed node-wide
+// forever (there is no liveness evidence to retire it on), and the loop surfaces the
+// operator-visible log naming the path exactly once, at the bound — the same surface the
+// busy-destroy path uses, because a status condition would be stomped by the wholesale
+// Devices.Status rebuild.
 func TestReclaimUnattributableCorruptPathBoundedLog(t *testing.T) {
 	podsDir := t.TempDir()
 	drv := newFakeMigDriver()
 	drv.seedCard(testPPUUUID0)
 	seedInstances(drv, migSeed{card: testPPUUUID0, giID: 1, slot: migPlacement{0, 2}})
 	// A marker-named file one level above a container dir: its path names no Pod, and its own name is
-	// not attributable to a card either once the walk collected the directory it sits in.
+	// not attributable to an accelerator either once the walk collected the directory it sits in.
 	path := writeCorruptMarker(t,
 		corruptDir(podsDir, corruptFixture{pod: "pod-dead", stray: true}), markerFileName(""))
 
@@ -543,11 +547,11 @@ func TestReclaimUnattributableCorruptPathBoundedLog(t *testing.T) {
 }
 
 // TestReclaimLiveOwnersCorruptMarkerBoundedLog asserts the sibling hold is not silent either. An
-// unparseable record whose Pod is still running is kept — the Pod depends on the ownership it records —
-// and nothing in this loop can release it while that Pod lives, which is the case that reads as
-// transient and is not. So it earns the same surface: one operator-visible log naming the card, the Pod
-// and the path, at the bound and only there. What the record does is unchanged, before the bound and
-// after it.
+// unparseable record whose Pod is still running is kept — the Pod depends on the ownership it
+// records — and nothing in this loop can release it while that Pod lives, which is the case that
+// reads as transient and is not. So it earns the same surface: one operator-visible log naming the
+// accelerator, the Pod and the path, at the bound and only there. What the record does is
+// unchanged, before the bound and after it.
 func TestReclaimLiveOwnersCorruptMarkerBoundedLog(t *testing.T) {
 	podsDir := t.TempDir()
 	drv := newFakeMigDriver()
@@ -582,15 +586,17 @@ func TestReclaimLiveOwnersCorruptMarkerBoundedLog(t *testing.T) {
 	assert.Empty(t, drv.destroyed, "and its card stays off the orphan sweep throughout")
 }
 
-// TestReclaimRacesAllocationOnSameCard asserts a reclaim pass and an allocation on the SAME card do not
-// corrupt each other's partition, with the interleaving pinned rather than hoped for: the pass is parked
-// inside the card lock — after its under-lock re-read, before its destroy — and only then does the
-// allocating goroutine exist, so it cannot reach the card until the reclaim leaves.
+// TestReclaimRacesAllocationOnSameCard asserts a reclaim pass and an allocation on the SAME
+// accelerator do not corrupt each other's partition, with the interleaving pinned rather than hoped
+// for: the pass is parked inside the accelerator lock — after its under-lock re-read, before its
+// destroy — and only then does the allocating goroutine exist, so it cannot reach the accelerator
+// until the reclaim leaves.
 //
-// The freed slot is the assertion that proves the order actually held: the dead partition occupies the
-// lowest placement, so an allocation that ran before the destroy would have to take the next one. The
-// exclusion counter is the second, order-independent statement of the same thing — a create must never be
-// in flight on a card while a destroy holds that card's lock, whichever way the two goroutines interleave.
+// The freed slot is the assertion that proves the order actually held: the dead partition occupies
+// the lowest placement, so an allocation that ran before the destroy would have to take the next
+// one. The exclusion counter is the second, order-independent statement of the same thing — a
+// create must never be in flight on an accelerator while a destroy holds that accelerator's lock,
+// whichever way the two goroutines interleave.
 func TestReclaimRacesAllocationOnSameCard(t *testing.T) {
 	podsDir := t.TempDir()
 	drv := newFakeMigDriver()
@@ -605,15 +611,15 @@ func TestReclaimRacesAllocationOnSameCard(t *testing.T) {
 		listsWhenArmed int
 		enter          = make(chan struct{})
 		release        = make(chan struct{})
-		// parked is true exactly while the reclaim sits inside the card's critical section, and
-		// createdWhileParked counts the creates that got through anyway — which the card lock makes
-		// impossible, so any count above zero is the exclusion broken.
+		// parked is true exactly while the reclaim sits inside the accelerator's critical section, and
+		// createdWhileParked counts the creates that got through anyway — which the accelerator lock
+		// makes impossible, so any count above zero is the exclusion broken.
 		parked             atomic.Bool
 		createdWhileParked atomic.Int32
 	)
 	// The armed pass makes two enumerations: the pass's own lock-free one, then the destroy's re-read
-	// inside the card lock. Parking on the second is what puts the reclaim provably inside the critical
-	// section the allocation must wait for.
+	// inside the accelerator lock. Parking on the second is what puts the reclaim provably inside the
+	// critical section the allocation must wait for.
 	driver := &hookedMigDriver{
 		fakeMigDriver: drv,
 		onList: func() {
@@ -684,17 +690,17 @@ func TestReclaimRacesAllocationOnSameCard(t *testing.T) {
 
 // TestReclaimCorruptMarkerOfDeadPodConverges asserts the hold clears by itself instead of leaking a
 // partition for the node's lifetime: an unparseable marker whose Pod is gone is retired on that
-// evidence alone (its path names the Pod) after the same debounce every other decision here uses, and
-// the partition it shadowed then becomes a genuine marker-less orphan the collector takes once the
-// card's own debounce elapses. The retirement is observed by the next pass, never by the one that
-// removed the file.
+// evidence alone (its path names the Pod) after the same debounce every other decision here uses,
+// and the partition it shadowed then becomes a genuine marker-less orphan the collector takes once
+// the accelerator's own debounce elapses. The retirement is observed by the next pass, never by the
+// one that removed the file.
 func TestReclaimCorruptMarkerOfDeadPodConverges(t *testing.T) {
 	cases := []struct {
 		name string
 		file string
 	}{
-		{name: "an unparseable marker naming its card", file: markerFileName(testPPUUUID0)},
-		{name: "an unparseable marker naming no card", file: markerFileName("")},
+		{name: "an unparseable marker naming its accelerator", file: markerFileName(testPPUUUID0)},
+		{name: "an unparseable marker naming no accelerator", file: markerFileName("")},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

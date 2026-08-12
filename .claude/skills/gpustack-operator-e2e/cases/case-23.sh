@@ -336,6 +336,10 @@ profile_key() {
 # picked up by RESTARTING the DaemonSet. Deleting the Devices object is deliberately NOT done: an
 # existing group's capability is rewritten in place, and deleting it here would hide a regression of
 # that. Waits for the rollout and for the object to be present.
+# Both halves are measured, not assumed: on an 8-card node the flip alone left the object at the same
+# generation and resourceVersion, unchanged again minutes later, while each restart moved it exactly
+# one generation — logical to partitioned and back — with the object's uid and creationTimestamp never
+# changing. So the restart is required, and it is also sufficient.
 refresh_dm() {
   echo "[case-23]   refreshing Device Manager (rollout restart ${DM_DS}; the Devices object is kept)"
   kubectl -n "$NS" rollout restart "ds/${DM_DS}" >/dev/null 2>&1 || true
@@ -345,6 +349,10 @@ refresh_dm() {
 
 # set_mig_mode <0|1> — toggle the card's MIG mode over SSH and wait until it converges (or a reset pends).
 # Returns 0 on convergence, 1 otherwise (caller records the failure with guidance).
+# Converged here means only that the CARD reports the new mode. The toggle on its own is invisible to
+# the operator, so a caller that stops at this point asserts against the capability the card had
+# BEFORE the flip and reads a stale answer as a real one. Follow every successful toggle with
+# refresh_dm.
 set_mig_mode() {
   local want="$1" target; [ "$want" = 1 ] && target=Enabled || target=Disabled
   echo "[case-23]   nvidia-smi -i ${GPU_INDEX} -mig ${want} on ${MIG_NODE_SSH}"

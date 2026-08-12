@@ -17,14 +17,22 @@ Terraform, and merge the cluster's kubeconfig into your local `~/.kube/config`.
   that context/cluster/user.
 - For every node, fetches `/etc/docker/daemon.json` to the local machine and
   parses it locally with `jq` (the remote host is never required to have
-  `jq`). Any custom runtime found there (e.g. `ascend`) gets a matching k3s
-  containerd runtime class, written to both `config.toml.tmpl` and
+  `jq`). Any custom runtime found there (e.g. `ascend`, `amd`) gets a matching
+  k3s containerd runtime handler, written to both `config.toml.tmpl` and
   `config-v3.toml.tmpl` under `/var/lib/rancher/k3s/agent/etc/containerd/`
-  (containerd 2, the default on k3s v1.34+, prefers the v3 name). `nvidia` is
-  always dropped -- k3s auto-detects and wires it itself. A node with no
-  `daemon.json` or no non-`nvidia` runtimes is left alone; if a previously
-  written template disappears from `daemon.json`, it is removed and the
-  service restarted.
+  (containerd 2, the default on k3s v1.34+, reads the v3 name). The two files
+  get **different** content: containerd's CRI plugin is
+  `io.containerd.grpc.v1.cri` in config version 2 and
+  `io.containerd.cri.v1.runtime` in version 3, and containerd silently ignores a
+  runtime declared under the other version's path. `nvidia` is always dropped --
+  k3s auto-detects and wires it itself. A node with no `daemon.json` or no
+  non-`nvidia` runtimes is left alone; if a previously written template
+  disappears from `daemon.json`, it is removed and the service restarted.
+- Registers a `RuntimeClass` named after each of those runtimes, since a
+  containerd handler alone is not selectable by a Pod. Vendors whose accelerator
+  device nodes are injected by their runtime's OCI hook (AMD's
+  `amd-container-runtime` injects `/dev/kfd` and `/dev/dri`) get no devices at
+  all without one.
 
 ## Prerequisites
 

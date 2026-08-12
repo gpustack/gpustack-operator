@@ -124,9 +124,9 @@ passing, which is how to confirm the route is there.
 This is the way to see a decision logged above the verbosity the deployment runs. The device plugin
 is the sharpest case: its `ResourceServer`s are built with `Logger: logger.V(3)`
 (`pkg/devicemanager/allocator/allocator.go`) while the DaemonSet runs `-v=2`, so every `Allocate`
-and `GetPreferredAllocation` decision — including which card a slice was placed on — is discarded by
-default. Raise `v` **before** creating the workload you want to trace: those lines fire only on an
-allocation, so a quiet window after the fact proves nothing.
+and `GetPreferredAllocation` decision — including which accelerator a slice was placed on — is
+discarded by default. Raise `v` **before** creating the workload you want to trace: those lines fire
+only on an allocation, so a quiet window after the fact proves nothing.
 
 The `gpustack-operator-e2e` skill carries the same recipe as a triage step, in its in-cluster
 `kubectl exec` form and with the operational caveats — see its shared troubleshooting reference,

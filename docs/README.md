@@ -44,7 +44,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | Page | What it answers | Audience | Read time |
 |---|---|---|---|
 | [Architecture](architecture.md) | What the operator builds, the four stages, the life of one sliced-GPU request, the vocabulary | everyone | ~8 min |
-| [Device Discovery](architecture/discovery.md) | How NFD and the Device Manager turn hardware into labels and a per-card ledger; what the allocator injects | contributors | ~18 min |
+| [Device Discovery](architecture/discovery.md) | How NFD and the Device Manager turn hardware into labels and a per-accelerator ledger; what the allocator injects | contributors | ~18 min |
 | [Scheduling Chain](architecture/scheduling-chain.md) | How capacity labels become ResourceFlavors, ClusterQueues, LocalQueues and InstanceTypes | contributors | ~15 min |
 | [Admission](architecture/admission.md) | The five gates, the four-view status, which field answers "what can I still get" | contributors, operators | ~15 min |
 | [Two install modes](architecture/install-modes.md) | Chart mode vs image mode; which objects the worker must apply itself | operators, contributors | ~8 min |

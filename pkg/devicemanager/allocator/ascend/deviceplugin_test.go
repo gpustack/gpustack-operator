@@ -59,7 +59,7 @@ func ascendDevicesFixture() *workercore.Devices {
 
 // slicedPod builds a pending pod whose container requests the decoupled compute and
 // VRAM dimensions the allocator reads: ".sliced.cores-percentage" (aicore) and
-// ".sliced.memory-percentage" (per-card VRAM).
+// ".sliced.memory-percentage" (per-accelerator VRAM).
 func slicedPod(uid, ctrName string, coresPercent, memPercent int64) (*core.Pod, *core.Container) {
 	coresRes := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer)
 	memPctRes := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer)
@@ -255,7 +255,7 @@ func TestSlicedVirtualNPUIDAssignment(t *testing.T) {
 }
 
 // A sliced container with no memory dimension (neither .sliced.memory-percentage nor
-// .sliced.memory-mib) must be rejected rather than silently given the whole card.
+// .sliced.memory-mib) must be rejected rather than silently given the whole accelerator.
 func TestGetSlicedContainerAllocateResponse_NoMemoryRequest(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
@@ -270,8 +270,8 @@ func TestGetSlicedContainerAllocateResponse_NoMemoryRequest(t *testing.T) {
 	require.Error(t, err)
 }
 
-// vcann-rt is single-NPU: a multi-card sliced allocation must be rejected rather than
-// silently quota-isolating only the first card.
+// vcann-rt is single-NPU: a multi-accelerator sliced allocation must be rejected rather than
+// silently quota-isolating only the first accelerator.
 func TestGetSlicedContainerAllocateResponse_MultiCardRejected(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
@@ -297,7 +297,7 @@ func TestGetContainerAllocateResponse_Visibility(t *testing.T) {
 			Manufacturer:   Manufacturer,
 			AllocationMode: workercore.DeviceAllocationModeVisibility,
 		},
-		// Visibility co-allocates a second container onto its owner's card, so it drives the
+		// Visibility co-allocates a second container onto its owner's accelerator, so it drives the
 		// container-share seam too; here the flag is already on and only read.
 		share: &fakeShareDriver{enabled: map[[2]int32]bool{{0, 0}: true}},
 	}

@@ -49,7 +49,7 @@ func allocateSlice(t *testing.T, s *server, uid string) error {
 	return err
 }
 
-// A card already in container-share mode is read and left alone: the flag lives in the driver,
+// An accelerator already in container-share mode is read and left alone: the flag lives in the driver,
 // so re-writing it on every allocation would be a pointless host mutation.
 func TestEnsureShareEnabled_AlreadyOn(t *testing.T) {
 	redirectLogicalSliceDirs(t)
@@ -61,7 +61,7 @@ func TestEnsureShareEnabled_AlreadyOn(t *testing.T) {
 	assert.Empty(t, share.setCalls, "must not write a flag that is already on")
 }
 
-// A card with the mode off is turned on once, and a second allocation onto the same card sees
+// An accelerator with the mode off is turned on once, and a second allocation onto the same one sees
 // it on and writes nothing more.
 func TestEnsureShareEnabled_TurnsOnThenIdempotent(t *testing.T) {
 	redirectLogicalSliceDirs(t)
@@ -77,8 +77,8 @@ func TestEnsureShareEnabled_TurnsOnThenIdempotent(t *testing.T) {
 	assert.Len(t, share.getCalls, 2, "but still reads")
 }
 
-// A flag that cannot be turned on fails the allocation, naming the card and the manual remedy,
-// rather than admitting a pod whose workload would die on the device open.
+// A flag that cannot be turned on fails the allocation, naming the dcmi (card, device) pair and
+// the manual remedy, rather than admitting a pod whose workload would die on the device open.
 func TestEnsureShareEnabled_SetFails(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := newSlicedServerWithShare(&fakeShareDriver{
@@ -109,7 +109,7 @@ func TestEnsureShareEnabled_GetFails(t *testing.T) {
 }
 
 // An accelerator carrying no dcmi addressing cannot be targeted, so the allocation fails rather
-// than guessing a card.
+// than guessing a dcmi card.
 func TestEnsureShareEnabled_MissingPhysicalIndexes(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	share := &fakeShareDriver{enabled: map[[2]int32]bool{}}
@@ -125,8 +125,8 @@ func TestEnsureShareEnabled_MissingPhysicalIndexes(t *testing.T) {
 	assert.Empty(t, share.getCalls)
 }
 
-// Shared and visibility put a second container on a card, so both must turn the flag on the same
-// way a slice does -- and across every card they were granted, not just the first.
+// Shared and visibility put a second container on an accelerator, so both must turn the flag on the
+// same way a slice does -- and across every accelerator they were granted, not just the first.
 func TestSharedAndVisibilityEnableShare(t *testing.T) {
 	for _, mode := range []workercore.DeviceAllocationMode{
 		workercore.DeviceAllocationModeShared,

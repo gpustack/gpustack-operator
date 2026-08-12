@@ -110,7 +110,7 @@ func newInstanceTypeQueue(key string, acceleratable bool, groups ...kueue.Resour
 
 // creditsValue is the credits nominal quota a pool of `cards` whole cards materializes.
 func creditsValue(cards int64) int64 {
-	q := nodefeature.CardsToCredits(*resource.NewQuantity(cards, resource.DecimalSI))
+	q := nodefeature.AcceleratorsToCredits(*resource.NewQuantity(cards, resource.DecimalSI))
 	return q.Value()
 }
 
@@ -368,7 +368,7 @@ func TestNodeQueueReconciler_AggregatesCapacity(t *testing.T) {
 	for _, fq := range rg.Flavors {
 		total += fq.Resources[0].NominalQuota.Value()
 	}
-	want := nodefeature.CardsToCredits(*resource.NewQuantity(6, resource.DecimalSI))
+	want := nodefeature.AcceleratorsToCredits(*resource.NewQuantity(6, resource.DecimalSI))
 	assert.Equal(t, want.Value(), total, "summed credits nominal = (2+4) cards × M")
 }
 

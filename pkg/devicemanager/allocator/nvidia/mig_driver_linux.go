@@ -21,8 +21,8 @@ func newMigDriver() migDriver {
 	}
 }
 
-// nvmlMigDriver is the real migDriver, driving binding/nvml on a card addressed by GPU UUID
-// over the MIG GPU/compute-instance lifecycle wrappers. The exact create/reuse sequence and
+// nvmlMigDriver is the real migDriver, driving binding/nvml on an accelerator addressed by GPU
+// UUID over the MIG GPU/compute-instance lifecycle wrappers. The exact create/reuse sequence and
 // the MIG-device UUID resolution are validated on real hardware (F8 e2e); all unit tests use a
 // fake driver.
 type nvmlMigDriver struct {
@@ -31,21 +31,22 @@ type nvmlMigDriver struct {
 	// actionable root cause when the library failed to load/initialize.
 	initRet nvml.Return
 
-	// profiles caches each card's MIG profile catalogue under profilesMu. The catalogue is a property
-	// of the card and of its MIG mode, and both are fixed for this process's life: a mode change is
-	// only ever picked up by a reset and a restart. Caching it is worth the state because probing it
-	// walks the whole profile id space and that walk happens on every allocation and on every reclaim
-	// pass, the latter with a card's lock held.
+	// profiles caches each accelerator's MIG profile catalog under profilesMu. The catalog is a
+	// property of the accelerator and of its MIG mode, and both are fixed for this process's life: a
+	// mode change is only ever picked up by a reset and a restart. Caching it is worth the state
+	// because probing it walks the whole profile id space and that walk happens on every allocation
+	// and on every reclaim pass, the latter with an accelerator's lock held.
 	//
-	// An EMPTY catalogue is deliberately not cached. That is what a card reads as while MIG is off,
-	// and remembering it would outlive the restart that turns MIG on. The lock is real rather than
-	// theoretical: one driver value is shared by the partitioned and the visibility servers.
+	// An EMPTY catalog is deliberately not cached. That is what an accelerator reads as while MIG
+	// is off, and remembering it would outlive the restart that turns MIG on. The lock is real
+	// rather than theoretical: one driver value is shared by the partitioned and the visibility
+	// servers.
 	profilesMu sync.Mutex
 	profiles   map[string][]nvml.GpuInstanceProfileInfo_v3
 }
 
-// cardProfileCatalogue returns the card's MIG profile catalogue, probing NVML only the first time it
-// is asked for a card that offers any.
+// cardProfileCatalogue returns the accelerator's MIG profile catalog, probing NVML only the first
+// time it is asked for an accelerator that offers any.
 func (d *nvmlMigDriver) cardProfileCatalogue(dev nvml.Device, cardUUID string) ([]nvml.GpuInstanceProfileInfo_v3, error) {
 	d.profilesMu.Lock()
 	cached, ok := d.profiles[cardUUID]
@@ -68,9 +69,9 @@ func (d *nvmlMigDriver) cardProfileCatalogue(dev nvml.Device, cardUUID string) (
 	return probed, nil
 }
 
-// CardInstances enumerates one card's live GPU instances. It is the whole-node enumeration's unit of
-// work, and the reclaim loop's verification re-read calls it directly so that read costs one card
-// rather than the node while it holds that card's lock.
+// CardInstances enumerates one accelerator's live GPU instances. It is the whole-node
+// enumeration's unit of work, and the reclaim loop's verification re-read calls it directly so that
+// read costs one accelerator rather than the node while it holds that accelerator's lock.
 func (d *nvmlMigDriver) CardInstances(cardUUID string) ([]migInstance, error) {
 	dev, err := d.device(cardUUID)
 	if err != nil {
@@ -80,7 +81,8 @@ func (d *nvmlMigDriver) CardInstances(cardUUID string) ([]migInstance, error) {
 }
 
 // cardInstances is CardInstances over a handle the caller already resolved, so the whole-node walk
-// does not resolve every card twice. A card whose driver disclaims MIG contributes nothing.
+// does not resolve every accelerator twice. An accelerator whose driver disclaims MIG contributes
+// nothing.
 func (d *nvmlMigDriver) cardInstances(dev nvml.Device, cardUUID string) ([]migInstance, error) {
 	uuidByGI, err := d.migUUIDs(dev, cardUUID)
 	if err != nil {
@@ -104,7 +106,7 @@ func (d *nvmlMigDriver) device(cardUUID string) (nvml.Device, error) {
 	return dev, nil
 }
 
-// profileID matches profile by name against the card's probed GPU-instance profiles and
+// profileID matches profile by name against the accelerator's probed GPU-instance profiles and
 // returns its NVML GPU-instance profile id, skipping the +me/+gfx variants GPUStack does not
 // expose (the same filter the detector applies). It disambiguates the same-compute REV
 // profiles (1g.5gb vs 1g.10gb) a compute-slice count alone cannot.
@@ -139,15 +141,16 @@ func driverReportsAbsent(ret nvml.Return) bool {
 }
 
 // migUUIDs maps each live GPU-instance id on the device to its MIG-device UUID (the
-// NVIDIA_VISIBLE_DEVICES value), by enumerating the card's MIG device handles and reading each
-// one's owning GPU-instance id. A GI with no materialized MIG device yet is simply absent — that is
-// a GPU instance without its compute instance, which addresses nothing and which reclaim destroys.
+// NVIDIA_VISIBLE_DEVICES value), by enumerating the accelerator's MIG device handles and reading
+// each one's owning GPU-instance id. A GI with no materialized MIG device yet is simply absent —
+// that is a GPU instance without its compute instance, which addresses nothing and which reclaim
+// destroys.
 //
-// A card whose driver disclaims MIG devices altogether yields an empty map and no error: that is a
-// plain GPU, and the enumeration above it walks every card on the node. Every other failure IS an
-// error, because a handle in hand whose owner or identity cannot be read leaves the map missing a
-// live partition — and a missing identity is exactly what makes a live partition look reclaimable,
-// or makes a destroy verify against nothing.
+// An accelerator whose driver disclaims MIG devices altogether yields an empty map and no error:
+// that is a plain GPU, and the enumeration above it walks every accelerator on the node. Every
+// other failure IS an error, because a handle in hand whose owner or identity cannot be read leaves
+// the map missing a live partition — and a missing identity is exactly what makes a live partition
+// look reclaimable, or makes a destroy verify against nothing.
 func (d *nvmlMigDriver) migUUIDs(dev nvml.Device, cardUUID string) (map[uint32]string, error) {
 	count, ret := dev.GetMaxMigDeviceCount()
 	if !ret.IsSuccess() {
@@ -189,10 +192,10 @@ func (d *nvmlMigDriver) migUUIDs(dev nvml.Device, cardUUID string) (map[uint32]s
 	return out, nil
 }
 
-// cardProfiles probes every GPU-instance profile id on the card and returns the ones the driver
-// answered for. An id the driver disclaims is skipped as the answer it is; an id it could not read
-// fails the whole probe, because a profile missing from this set takes its live instances with it and
-// every caller here reads the result as complete.
+// cardProfiles probes every GPU-instance profile id on the accelerator and returns the ones the
+// driver answered for. An id the driver disclaims is skipped as the answer it is; an id it could
+// not read fails the whole probe, because a profile missing from this set takes its live instances
+// with it and every caller here reads the result as complete.
 func cardProfiles(dev nvml.Device, cardUUID string) ([]nvml.GpuInstanceProfileInfo_v3, error) {
 	var infos []nvml.GpuInstanceProfileInfo_v3
 	for id := uint32(0); id < nvml.GPU_INSTANCE_PROFILE_COUNT; id++ {
@@ -208,9 +211,10 @@ func cardProfiles(dev nvml.Device, cardUUID string) ([]nvml.GpuInstanceProfileIn
 	return infos, nil
 }
 
-// liveInstances enumerates every live GPU instance on the card across all profiles, each carrying its
-// compute-slice count, its placement and its MIG-device identity. Occupancy must span every profile,
-// because an instance of one profile occupies a placement another profile could otherwise use.
+// liveInstances enumerates every live GPU instance on the accelerator across all profiles, each
+// carrying its compute-slice count, its placement and its MIG-device identity. Occupancy must span
+// every profile, because an instance of one profile occupies a placement another profile could
+// otherwise use.
 //
 // A failed instance query is an error rather than a skipped profile. Two callers make that
 // load-bearing: the allocation path subtracts these placements to pick a free slot, so a profile
@@ -345,17 +349,18 @@ func (d *nvmlMigDriver) CreateInstance(
 	}, nil
 }
 
-// ListInstances enumerates every live GPU instance on every MIG-capable card, resolving each
-// one's MIG-device UUID, so reclaim's orphan GC can find a marker-less GI on a drained card. It
-// mirrors CardState's Live loop but across all cards and without the per-profile possible
+// ListInstances enumerates every live GPU instance on every MIG-capable accelerator, resolving each
+// one's MIG-device UUID, so reclaim's orphan GC can find a marker-less GI on a drained accelerator.
+// It mirrors CardState's Live loop but across all accelerators and without the per-profile possible
 // placements (orphan destroy needs only the ids + compute slices, not a slot to fill).
 //
-// A card the driver answers has no MIG devices holds no partition and contributes nothing; a card
-// whose handle, identity, profiles, mig devices or instances could not be READ fails the whole
-// enumeration. The difference matters because of what the callers do with absence: reclaim reads a
-// missing GPU instance as one already gone and removes its ownership marker, and reads a card
-// contributing nothing as a drained card whose orphans it may collect. A list quietly short of one
-// card's partitions therefore destroys or double-books exactly what it could not see.
+// An accelerator the driver answers has no MIG devices holds no partition and contributes nothing;
+// an accelerator whose handle, identity, profiles, mig devices or instances could not be READ fails
+// the whole enumeration. The difference matters because of what the callers do with absence:
+// reclaim reads a missing GPU instance as one already gone and removes its ownership marker, and
+// reads an accelerator contributing nothing as a drained accelerator whose orphans it may collect.
+// A list quietly short of one accelerator's partitions therefore destroys or double-books exactly
+// what it could not see.
 func (d *nvmlMigDriver) ListInstances() ([]migLiveInstance, error) {
 	if !d.initRet.IsSuccess() {
 		return nil, fmt.Errorf("nvml init failed: %w", d.initRet)
@@ -385,11 +390,12 @@ func (d *nvmlMigDriver) ListInstances() ([]migLiveInstance, error) {
 	return out, nil
 }
 
-// DestroyInstance tears down the MIG instance the caller snapshotted, under the card lock the caller
-// holds. It re-reads the card's live set inside that critical section and verifies the GPU-instance id
-// still carries the recorded identity before destroying anything: a destroyed instance's id can be
-// reassigned by NVML, so a snapshot that aged by one allocation can point at a different — possibly
-// live — instance. On a mismatch nothing is destroyed and the contradiction is returned.
+// DestroyInstance tears down the MIG instance the caller snapshotted, under the accelerator lock
+// the caller holds. It re-reads the accelerator's live set inside that critical section and
+// verifies the GPU-instance id still carries the recorded identity before destroying anything: a
+// destroyed instance's id can be reassigned by NVML, so a snapshot that aged by one allocation can
+// point at a different — possibly live — instance. On a mismatch nothing is destroyed and the
+// contradiction is returned.
 //
 // An id absent from a COMPLETE enumeration is an instance that is already gone, which is a success:
 // the reclaim loop's removal of the ownership marker depends on that idempotence. Which is exactly why

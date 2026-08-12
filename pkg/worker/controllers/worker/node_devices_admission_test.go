@@ -244,7 +244,7 @@ func physicalDevicesOf(manufacturer string, cards ...physicalCard) workercore.De
 	for i, c := range cards {
 		prof := workercore.AcceleratorPhysicalSlicedProfile{Name: "cap", Count: 7}
 		if c.placementsCached {
-			prof.Placements = []workercore.AcceleratorPhysicalPlacement{{Start: 0, Length: 1}}
+			prof.Placements = []workercore.AcceleratorPlacement{{Start: 0, Length: 1}}
 		}
 		specAccels[i] = workercore.Accelerator{
 			ID: c.id, Index: uint32(i),

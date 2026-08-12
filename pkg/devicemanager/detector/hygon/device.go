@@ -49,22 +49,9 @@ func New(opts device.DetectorOptions) device.Detector {
 	}
 }
 
+// Name, DetectAccelerator and MonitorAccelerator implement device.Detector.
 func (in *hygon) Name() string {
 	return Manufacturer
-}
-
-func (in *hygon) init() {
-	in.once.Do(func() {
-		if ret := in.amdgpu.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize AMDGPU library")
-		}
-		if ret := in.rsmi.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize RSMI library")
-		}
-		if ret := in.hsa.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize HSA library")
-		}
-	})
 }
 
 func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, err error) {
@@ -197,10 +184,10 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		var status device.AcceleratorStatus
 		{
 			status.Unhealthy = memoryUnhealthy
-			// DCU logical slicing via hy-virtual (vdev.conf + DTK/hyhal); the per-card slice count
-			// is capped at 4 (product default). The vdev.conf assigns each slice a disjoint CU
-			// bitmask, so compute is spatially partitioned (the sum stays within one card), not
-			// overcommitted.
+			// DCU logical slicing via hy-virtual (vdev.conf + DTK/hyhal); the per-accelerator slice
+			// count is capped at 4 (product default). The vdev.conf assigns each slice a disjoint CU
+			// bitmask, so compute is spatially partitioned (the sum stays within one accelerator),
+			// not overcommitted.
 			status.LogicalSliced = device.AcceleratorLogicalSliced{
 				Count: 4,
 			}
@@ -340,6 +327,20 @@ func (in *hygon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 	}
 
 	return grpList, nil
+}
+
+func (in *hygon) init() {
+	in.once.Do(func() {
+		if ret := in.amdgpu.Init(); !ret.IsSuccess() {
+			in.logger.Error(ret, "failed to initialize AMDGPU library")
+		}
+		if ret := in.rsmi.Init(); !ret.IsSuccess() {
+			in.logger.Error(ret, "failed to initialize RSMI library")
+		}
+		if ret := in.hsa.Init(); !ret.IsSuccess() {
+			in.logger.Error(ret, "failed to initialize HSA library")
+		}
+	})
 }
 
 func getDriverVersion() string {

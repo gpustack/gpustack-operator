@@ -141,6 +141,10 @@ part_require_mig_capable() {
 
 # set_mig_mode <index> <0|1> — toggle a card's partitioning mode and wait for it to converge.
 # Returns 0 on convergence, 1 otherwise (the caller records the failure with guidance).
+# Converged here means only that the CARD reports the new mode. The toggle on its own is invisible to
+# the operator, so a caller that stops at this point asserts against the capability the card had
+# BEFORE the flip and reads a stale answer as a real one. Follow every successful toggle with
+# refresh_dm.
 set_mig_mode() {
   local idx="$1" want="$2" target cur
   [ "$want" = 1 ] && target=Enabled || target=Disabled
@@ -159,6 +163,10 @@ set_mig_mode() {
 # mode flip is picked up by RESTARTING the DaemonSet. Deleting the Devices object is deliberately NOT
 # done: an existing group's capability is rewritten in place, and deleting it would hide a regression
 # of that.
+# Both halves are measured, not assumed: on an 8-card node the flip alone left the object at the same
+# generation and resourceVersion, unchanged again minutes later, while each restart moved it exactly
+# one generation — logical to partitioned and back — with the object's uid and creationTimestamp never
+# changing. So the restart is required, and it is also sufficient.
 refresh_dm() {
   echo "[case-${CASE_ID}]   refreshing Device Manager (rollout restart ${DM_DS}; the Devices object is kept)"
   kubectl -n "$NS" rollout restart "ds/${DM_DS}" >/dev/null 2>&1 || true
@@ -169,17 +177,30 @@ refresh_dm() {
 # node_gi_count — the number of live GPU instances the node's cards actually hold (ground truth from
 # the hardware, not from the ledger). grep -c prints "0" AND exits non-zero on no match, so the value
 # is captured (a bare `|| echo 0` would append a SECOND "0" under pipefail).
+# It prints the count and returns 0 only when the node actually answered. Two exit statuses are real
+# answers of "none" and are accepted as such: 0 with "No MIG-enabled devices found." when no card is
+# partitioned, and 6 with "No GPU instances found: Not Found" on a partitioned card holding none
+# (measured on an H100). Anything else — an unreachable node, a timeout, sudo refused — returns
+# non-zero, because a probe that never answered must never be read as an idle card.
 node_gi_count() {
-  local out
-  out="$(node_ssh sudo nvidia-smi mig -lgi 2>/dev/null | grep -cE '^\|[[:space:]]+[0-9]+')"
-  echo "${out:-0}"
+  local out rc
+  out="$(node_ssh sudo nvidia-smi mig -lgi 2>&1)"; rc=$?
+  case "$rc" in
+    0 | 6) ;;
+    *) return 1 ;;
+  esac
+  # grep -c prints "0" AND exits non-zero on no match, so the count is kept and the status discarded
+  # — otherwise "no instances" would be indistinguishable from "the node did not answer" again.
+  printf '%s\n' "$out" | grep -cE '^\|[[:space:]]+[0-9]+' || true
 }
 
 # wait_card_idle — poll until no live GPU instance is left, bounded ~120s. A mode switch needs an idle
-# card, so callers wait for the last workload's instance to reclaim before toggling.
+# card, so callers wait for the last workload's instance to reclaim before toggling. An unreadable
+# probe keeps the loop waiting rather than satisfying it: unknown is not idle.
 wait_card_idle() {
+  local n
   for _ in $(seq 1 40); do
-    [ "$(node_gi_count)" = 0 ] && return 0
+    n="$(node_gi_count)" && [ "$n" = 0 ] && return 0
     sleep 3
   done
   return 1
@@ -192,14 +213,35 @@ wait_card_idle() {
 part_discover() {
   GPU_NODE="${MIG_NODE_NAME:-}"
   if [ -z "$GPU_NODE" ]; then
-    local _nv=() _n
-    while IFS= read -r _n; do [ -n "$_n" ] && _nv+=("$_n"); done < <(kubectl get devices -o json 2>/dev/null | python3 -c "
+    local _nv=() _n _devs
+    # Read the ledger and the exit status separately. A kubectl that cannot reach the cluster still
+    # prints a parseable '{"items": []}' to stdout, so parsing its output alone cannot tell "no nvidia
+    # hardware" from "the query did not answer" — and this gate turns the first into a SKIP, which a
+    # summary table reads as coverage. So a failed query fails setup instead.
+    if ! _devs="$(kubectl get devices.worker.gpustack.ai -o json 2>&1)"; then
+      echo "== CASE ${CASE_ID} — FAILED (setup) =="
+      echo "Reading the Devices ledger failed, so this case cannot tell 'no nvidia hardware' from 'the"
+      echo "query did not answer'. It refuses to report a skip on either:"
+      printf '%s\n' "$_devs" | head -5
+      exit 1
+    fi
+    # Parse in a command substitution, not a process substitution: the latter discards the parser's
+    # exit status, so a parser that failed on a payload it could not read would be indistinguishable
+    # from a cluster that reports no accelerator — and this gate turns the second into a SKIP.
+    local _parsed
+    if ! _parsed="$(printf '%s' "$_devs" | python3 -c "
 import json,sys
 for d in json.load(sys.stdin).get('items',[]):
     for g in d.get('spec',{}).get('groups',[]):
         if g.get('manufacturer')=='nvidia' and g.get('accelerators'):
             print(d['metadata']['name']); break
-" 2>/dev/null)
+")"; then
+      echo "== CASE ${CASE_ID} — FAILED (setup) =="
+      echo "The Devices ledger was read but could not be parsed, so this case cannot tell 'no nvidia"
+      echo "hardware' from 'the answer was unreadable'. It refuses to report a skip on either."
+      exit 1
+    fi
+    while IFS= read -r _n; do [ -n "$_n" ] && _nv+=("$_n"); done <<<"$_parsed"
     if [ "${#_nv[@]}" -eq 0 ]; then
       part_skip "No Devices object reports an nvidia accelerator group — the operator chain is not observing a GPU node."
     fi
@@ -496,25 +538,44 @@ running() { [ "$(phase "$1")" = "Running" ]; }
 # wait_running <pod> [tries] — poll until the Pod is Running (default ~120s).
 wait_running() { local t="${2:-40}"; for _ in $(seq 1 "$t"); do running "$1" && return 0; sleep 3; done; return 1; }
 
-# pod_events <pod> — the reasons of the events recorded against a Pod, one per line.
+# pod_events <pod> — the reasons of the events recorded against THIS Pod, one per line.
+#
+# Scoped to the Pod's UID rather than to its name alone, because an event outlives the Pod it
+# describes — the API server keeps events for about an hour by default — while these cases reuse the
+# same Pod names every round. A name-only selector therefore reports a PREVIOUS round's events as
+# this Pod's, which is exactly how a run once recorded an admission failure that had happened to its
+# predecessor.
+#
+# Returns non-zero when the identity or the event query cannot be answered, so that a caller can
+# never read "the query failed" as "no such event".
 pod_events() {
-  kubectl -n default get events --field-selector involvedObject.name="$1" \
-    -o jsonpath='{range .items[*]}{.reason}{"\n"}{end}' 2>/dev/null
+  local uid
+  uid="$(kubectl -n default get pod "$1" -o jsonpath='{.metadata.uid}' 2>/dev/null)" || return 1
+  [ -n "$uid" ] || return 1
+  kubectl -n default get events \
+    --field-selector "involvedObject.name=$1,involvedObject.uid=${uid}" \
+    -o jsonpath='{range .items[*]}{.reason}{"\n"}{end}' 2>/dev/null || return 1
 }
 
 # pod_unexpected_admission <pod> — non-empty when the Pod hit the terminal device-plugin admission
-# failure this whole family split exists to remove.
+# failure this whole family split exists to remove. Prints "?" and returns non-zero when the Pod's
+# events could not be read at all, which a caller must not fold into "it did not happen".
 pod_unexpected_admission() {
-  local r
-  r="$(pod_events "$1" | grep -c 'UnexpectedAdmissionError')"
+  local out r
+  out="$(pod_events "$1")" || { echo "?"; return 1; }
+  r="$(printf '%s\n' "$out" | grep -c 'UnexpectedAdmissionError')"
   [ "${r:-0}" = 0 ] && echo "" || echo "$r"
 }
 
 # workload_refusal <pod> — the Pod's own Kueue Workload verdict, when an AdmissionCheck has actually
 # rendered one: "admission-check(<name>/<state>)" for Retry or Rejected, empty otherwise. This is the
 # product saying "I refuse to admit this", so it is conclusive the moment it appears.
+# Returns non-zero when the Workload list or its parse could not be answered, so a caller does not
+# read that as "no refusal was rendered".
 workload_refusal() {
-  kubectl -n default get workloads.kueue.x-k8s.io -o json 2>/dev/null | python3 -c "
+  local wls
+  wls="$(kubectl -n default get workloads.kueue.x-k8s.io -o json 2>/dev/null)" || return 1
+  printf '%s' "$wls" | python3 -c "
 import json,sys
 pod='$1'
 for wl in json.load(sys.stdin).get('items',[]):
@@ -534,16 +595,24 @@ for wl in json.load(sys.stdin).get('items',[]):
 # held_reason <pod> — a DECISIVE signal that the Pod was refused: a terminal failure, a device-plugin
 # admission refusal, an Unschedulable verdict, or an AdmissionCheck that declined it. Empty when none
 # is present. The bare Kueue scheduling gate is deliberately NOT among these — see assert_held.
+#
+# There are THREE answers, and the third one is why this is written out longhand. Exit 2 means "cannot
+# tell" — a phase, condition, event list or Workload that did not answer. It must never be printed as
+# though it were a reason: every caller treats a non-empty string as proof the claim was refused, so a
+# sentence like "events unreadable" would make an unreachable event API *pass* an assertion that the
+# product held the claim. Nor may it be folded into the empty case, which would assert the opposite.
 held_reason() {
   local p="$1" ph cond ev wl
-  ph="$(phase "$p")"
-  [ "$ph" = Failed ] && { echo "Failed/$(kubectl -n default get pod "$p" -o jsonpath='{.status.reason}' 2>/dev/null)"; return; }
-  cond="$(kubectl -n default get pod "$p" -o jsonpath='{.status.conditions[?(@.type=="PodScheduled")].reason}' 2>/dev/null)"
-  [ "$cond" = Unschedulable ] && { echo "Unschedulable"; return; }
-  ev="$(pod_events "$p" | grep -iE 'UnexpectedAdmissionError|FailedScheduling' | head -1)"
-  [ -n "$ev" ] && { echo "$ev"; return; }
-  wl="$(workload_refusal "$p")"
-  [ -n "$wl" ] && { echo "$wl"; return; }
+  ph="$(phase "$p")" || return 2
+  [ "$ph" = Failed ] && { echo "Failed/$(kubectl -n default get pod "$p" -o jsonpath='{.status.reason}' 2>/dev/null)"; return 0; }
+  cond="$(kubectl -n default get pod "$p" \
+    -o jsonpath='{.status.conditions[?(@.type=="PodScheduled")].reason}' 2>/dev/null)" || return 2
+  [ "$cond" = Unschedulable ] && { echo "Unschedulable"; return 0; }
+  ev="$(pod_events "$p")" || return 2
+  ev="$(printf '%s\n' "$ev" | grep -iE 'UnexpectedAdmissionError|FailedScheduling' | head -1)"
+  [ -n "$ev" ] && { echo "$ev"; return 0; }
+  wl="$(workload_refusal "$p")" || return 2
+  [ -n "$wl" ] && { echo "$wl"; return 0; }
   echo ""
 }
 
@@ -561,18 +630,33 @@ held_reason() {
 # The window is always polled to its end unless the Pod resolves, because the device-plugin's
 # UnexpectedAdmissionError backstop fires only AFTER Kueue clears the gate. Reaching Running at any
 # point returns empty: the Pod was never held.
+#
+# A poll that could not be answered (held_reason exit 2, or an unreadable gate list) never counts as
+# evidence and never satisfies the ENDURING grade either: it makes this return empty with status 2, so
+# the assertion fails as "cannot confirm" instead of passing on an API failure.
 assert_held() {
-  local p="$1" t="${2:-20}" hr gate last_gate="" gated_throughout=1
+  local p="$1" t="${2:-20}" hr rc gate last_gate="" gated_throughout=1 undetermined=0
   for _ in $(seq 1 "$t"); do
-    running "$p" && { echo ""; return; }
-    hr="$(held_reason "$p")"
-    [ -n "$hr" ] && { echo "$hr"; return; }
-    gate="$(kubectl -n default get pod "$p" -o jsonpath='{.spec.schedulingGates[*].name}' 2>/dev/null)"
-    if [ -n "$gate" ]; then last_gate="$gate"; else gated_throughout=0; fi
+    running "$p" && { echo ""; return 0; }
+    hr="$(held_reason "$p")"; rc=$?
+    if [ "$rc" -ge 2 ]; then
+      undetermined=1
+    elif [ -n "$hr" ]; then
+      echo "$hr"; return 0
+    fi
+    if gate="$(kubectl -n default get pod "$p" \
+      -o jsonpath='{.spec.schedulingGates[*].name}' 2>/dev/null)"; then
+      if [ -n "$gate" ]; then last_gate="$gate"; else gated_throughout=0; fi
+    else
+      undetermined=1
+    fi
     sleep 3
   done
+  if [ "$undetermined" = 1 ]; then
+    echo ""; return 2
+  fi
   [ "$gated_throughout" = 1 ] && [ -n "$last_gate" ] &&
-    { echo "scheduling-gated(${last_gate}) sustained across ${t} polls"; return; }
+    { echo "scheduling-gated(${last_gate}) sustained across ${t} polls"; return 0; }
   echo ""
 }
 

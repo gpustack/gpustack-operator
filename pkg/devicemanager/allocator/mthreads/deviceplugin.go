@@ -102,7 +102,7 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) devicep
 }
 
 // _AllocatedAccelerator pairs an allocated device with its group; the group carries the
-// VRAM that drives the sliced per-card memory cap.
+// VRAM that drives the sliced per-accelerator memory cap.
 type _AllocatedAccelerator struct {
 	group *workercore.DevicesGroup
 	accel *workercore.Accelerator
@@ -117,7 +117,7 @@ func (s *server) GetContainerAllocateResponse(
 ) (*deviceplugin.ContainerAllocateResponse, error) {
 	// Single pass over the allocated devices in devs order (= MTHREADS_VISIBLE_DEVICES
 	// order): collect the visible IDs and the accelerator/group pairs the sliced path
-	// needs for the per-card VRAM cap.
+	// needs for the per-accelerator VRAM cap.
 	var (
 		ids          = make([]string, 0, len(allocated))
 		accelerators []_AllocatedAccelerator
@@ -156,10 +156,10 @@ func (s *server) GetContainerAllocateResponse(
 }
 
 // getSlicedContainerAllocateResponse renders the MThreads QoS logical-slicing injection for
-// a sliced container: MTHREADS_QOS_MEMORY_LIMIT is a hard per-card VRAM cap (bytes)
+// a sliced container: MTHREADS_QOS_MEMORY_LIMIT is a hard per-accelerator VRAM cap (bytes)
 // derived from the container's ".sliced.memory-percentage"/".sliced.memory-mib", while
 // MTHREADS_QOS_COMPUTING_POWER_WEIGHT is a relative compute weight from
-// ".sliced.cores-percentage" (best-effort, not a hard cap). The card stays visible via
+// ".sliced.cores-percentage" (best-effort, not a hard cap). The accelerator stays visible via
 // MTHREADS_VISIBLE_DEVICES; the host sGPU kmod + MThreads container runtime enforce the
 // QoS at runtime, so no files, mounts, or device nodes are staged.
 func (s *server) getSlicedContainerAllocateResponse(
@@ -175,9 +175,9 @@ func (s *server) getSlicedContainerAllocateResponse(
 	coresRes := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer)
 	memPctRes := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer)
 	memMibRes := nodefeature.GetAcceleratableSlicedMemoryMibResourceName(Manufacturer)
-	// A sliced allocation is single-card, and every accelerator in a DevicesGroup shares the
-	// same VRAM (Memory is a group property), so the allocated card's group VRAM is the cap
-	// basis.
+	// A sliced allocation is single-accelerator, and every accelerator in a DevicesGroup shares
+	// the same VRAM (Memory is a group property), so the allocated accelerator's group VRAM is the
+	// cap basis.
 	memMib, err := deviceplugin.SlicedMemoryMib(ctr, memPctRes, memMibRes, int64(accels[0].group.Memory))
 	if err != nil {
 		return nil, fmt.Errorf("derive sliced memory limit: %w", err)

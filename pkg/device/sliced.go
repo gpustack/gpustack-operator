@@ -1,9 +1,12 @@
 package device
 
-// AggregateAcceleratorSlicedDetail derives a group's slicing detail from its cards' per-card
-// statuses: the logical count is summed across cards and the overcommit flag taken from any
-// logically sliceable card (uniform per model, meaningless when none is); the physical profiles are
-// summed by name and the physical ceiling summed across cards.
+// AggregateAcceleratorSlicedDetail derives a group's slicing detail from its accelerators'
+// per-accelerator statuses:
+//
+//   - the logical count is summed across accelerators, and the overcommit flag is taken from any
+//     logically sliceable accelerator (uniform per model, meaningless when none is);
+//   - the physical profiles are summed by name, and the physical ceiling is summed across
+//     accelerators.
 func AggregateAcceleratorSlicedDetail(accelerators []Accelerator) AcceleratorSlicedDetail {
 	var detail AcceleratorSlicedDetail
 	profileIndex := make(map[string]int)
@@ -32,7 +35,8 @@ func AggregateAcceleratorSlicedDetail(accelerators []Accelerator) AcceleratorSli
 	return detail
 }
 
-// SetGroupSlicedDetails fills each group's AcceleratorSlicedDetail from its cards' statuses.
+// SetGroupSlicedDetails fills each group's AcceleratorSlicedDetail from its accelerators'
+// statuses.
 // Detectors call it as the final step of accelerator detection.
 func SetGroupSlicedDetails(groups DevicesGroupList) {
 	for i := range groups {

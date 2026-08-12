@@ -43,16 +43,9 @@ func New(opts device.DetectorOptions) device.Detector {
 	}
 }
 
+// Name, DetectAccelerator and MonitorAccelerator implement device.Detector.
 func (in *cambricon) Name() string {
 	return Manufacturer
-}
-
-func (in *cambricon) init() {
-	in.once.Do(func() {
-		if ret := in.cndev.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize CNDev library")
-		}
-	})
 }
 
 func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, err error) {
@@ -167,8 +160,8 @@ func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLi
 		var status device.AcceleratorStatus
 		{
 			status.Unhealthy = memoryUnhealthy
-			// MLU logical slicing via the cnDev sMLU profile; the per-card slice count is capped
-			// at 16 (operationally confirmed). Compute is spatially partitioned, not overcommitted.
+			// MLU logical slicing via the cnDev sMLU profile; the per-accelerator slice count is
+			// capped at 16 (operationally confirmed). Compute is spatially partitioned, not overcommitted.
 			status.LogicalSliced = device.AcceleratorLogicalSliced{
 				Count: 16,
 			}
@@ -310,6 +303,14 @@ func (in *cambricon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupL
 	}
 
 	return grpList, nil
+}
+
+func (in *cambricon) init() {
+	in.once.Do(func() {
+		if ret := in.cndev.Init(); !ret.IsSuccess() {
+			in.logger.Error(ret, "failed to initialize CNDev library")
+		}
+	})
 }
 
 var versionRegexp = regexp.MustCompile(`\d+\.\d+\.\d+`)

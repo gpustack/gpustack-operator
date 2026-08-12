@@ -252,13 +252,14 @@ resource "null_resource" "agent" {
 
 # Give each node's k3s containerd the same custom runtimes (e.g. ascend) as its
 # Docker daemon.json, dropped for nvidia (k3s auto-detects and wires that one
-# itself). daemon.json is fetched over SSH to the local machine and parsed with
-# local jq (scripts/render-containerd-runtimes.sh), since the remote host is not
+# itself), and register a RuntimeClass for each so a workload can select it.
+# daemon.json is fetched over SSH to the local machine and parsed with local jq
+# (scripts/render-containerd-runtimes.sh), since the remote host is not
 # guaranteed to have jq. Re-derives whenever the node is (re)installed; an empty
 # result removes any previously-written templates and restarts only on change.
 resource "null_resource" "containerd_config" {
   for_each   = local.containerd_nodes
-  depends_on = [null_resource.server_init, null_resource.server_join, null_resource.agent]
+  depends_on = [null_resource.server_init, null_resource.server_join, null_resource.agent, null_resource.kubeconfig]
 
   triggers = {
     host       = each.key
@@ -278,7 +279,14 @@ resource "null_resource" "containerd_config" {
       daemon_json="$(ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
         -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
         '${self.triggers.user}@${self.triggers.host}' 'sudo cat /etc/docker/daemon.json 2>/dev/null' || true)"
-      rendered="$(printf '%s' "$daemon_json" | bash '${path.module}/scripts/render-containerd-runtimes.sh' || true)"
+      # Two renderings of the same runtimes: containerd's CRI plugin is named
+      # io.containerd.grpc.v1.cri in config version 2 but io.containerd.cri.v1.runtime in
+      # version 3, and containerd ignores a runtime declared under the other version's path
+      # without a word. One blob written to both templates therefore leaves whichever
+      # containerd the node actually runs (2.x, config version 3, on k3s v1.34+) with no such
+      # runtime at all, and every Pod selecting it fails to get a sandbox.
+      rendered="$(printf '%s' "$daemon_json" | bash '${path.module}/scripts/render-containerd-runtimes.sh' 2 || true)"
+      rendered_v3="$(printf '%s' "$daemon_json" | bash '${path.module}/scripts/render-containerd-runtimes.sh' 3 || true)"
       existing="$(ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
         -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
         '${self.triggers.user}@${self.triggers.host}' "sudo cat $dir/config.toml.tmpl 2>/dev/null" || true)"
@@ -286,8 +294,69 @@ resource "null_resource" "containerd_config" {
         -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
         '${self.triggers.user}@${self.triggers.host}' "sudo cat $dir/config-v3.toml.tmpl 2>/dev/null" || true)"
 
-      if [ "$rendered" = "$existing" ] && [ "$rendered" = "$existing_v3" ]; then
-        echo "containerd runtime template on ${self.triggers.host} unchanged"
+      # A handler in containerd is only half of it: a Pod picks a runtime through a
+      # RuntimeClass naming that handler, and a vendor whose device nodes reach the container
+      # only through its runtime hook (amd-container-runtime injects /dev/kfd and /dev/dri)
+      # gets none at all without one. The names are read back out of the rendered stanzas, so
+      # the classes can never name a runtime containerd was not given. Applied on every run
+      # rather than only on a change, so a deleted class comes back, and before the restart
+      # below, so the apiserver is still up when it happens.
+      # Every class this module creates is labelled, for two reasons. It is how a class belonging to a
+      # vendor's own operator is left untouched rather than adopted, and it is how a class whose handler
+      # this module has since stopped rendering can be pruned below without guessing at ownership.
+      owner_label='gpustack.ai/managed-by=testing-infra-k3s'
+      wanted=$(printf '%s\n' "$rendered_v3" | sed -n 's/^\[plugins\."[^"]*"\.containerd\.runtimes\.\([^.]*\)\]$/\1/p')
+
+      for name in $wanted; do
+        # A read that fails is not an answer. Treating a transient failure as "absent" would adopt — and
+        # later prune — a class another component owns, so it is retried and only a real answer decides.
+        for i in $(seq 1 12); do
+          if foreign=$(KUBECONFIG='${local.kubeconfig_path}' kubectl get runtimeclass.node.k8s.io "$name" \
+            -o 'jsonpath={.metadata.labels.gpustack\.ai/managed-by}' 2>/dev/null); then
+            break
+          fi
+          if KUBECONFIG='${local.kubeconfig_path}' kubectl get runtimeclass.node.k8s.io >/dev/null 2>&1; then
+            foreign=""   # the API answered and the class simply does not exist yet
+            break
+          fi
+          if [ "$i" = 12 ]; then
+            echo "cannot read RuntimeClass $name on ${self.triggers.host}" >&2
+            exit 1
+          fi
+          sleep 5
+        done
+        if [ -n "$foreign" ] && [ "$foreign" != 'testing-infra-k3s' ]; then
+          echo "RuntimeClass $name belongs to $foreign; left as found"
+          continue
+        fi
+        for i in $(seq 1 12); do
+          printf 'apiVersion: node.k8s.io/v1\nkind: RuntimeClass\nmetadata:\n  name: %s\n  labels:\n    %s: %s\nhandler: %s\n' \
+            "$name" 'gpustack.ai/managed-by' 'testing-infra-k3s' "$name" \
+            | KUBECONFIG='${local.kubeconfig_path}' kubectl apply -f - && break
+          if [ "$i" = 12 ]; then
+            echo "failed to register RuntimeClass $name for ${self.triggers.host}" >&2
+            exit 1
+          fi
+          sleep 5
+        done
+      done
+
+      # Prune ours whose handler is no longer rendered. A class outliving its handler is worse than no
+      # class: the kubelet rejects every Pod naming it, and nothing in the cluster says why.
+      if ours=$(KUBECONFIG='${local.kubeconfig_path}' kubectl get runtimeclass.node.k8s.io \
+        -l "$owner_label" -o name 2>/dev/null | sed 's|^.*/||'); then
+        for name in $ours; do
+          if ! printf '%s\n' "$wanted" | grep -qx "$name"; then
+            KUBECONFIG='${local.kubeconfig_path}' kubectl delete runtimeclass.node.k8s.io "$name" --ignore-not-found &&
+              echo "pruned RuntimeClass $name; its containerd handler is no longer rendered"
+          fi
+        done
+      else
+        echo "could not list this module's RuntimeClasses on ${self.triggers.host}; none pruned" >&2
+      fi
+
+      if [ "$rendered" = "$existing" ] && [ "$rendered_v3" = "$existing_v3" ]; then
+        echo "containerd runtime templates on ${self.triggers.host} unchanged"
         exit 0
       fi
 
@@ -305,11 +374,14 @@ resource "null_resource" "containerd_config" {
         '${self.triggers.user}@${self.triggers.host}' "sudo mkdir -p $dir"
       printf '%s\n' "$rendered" | ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
         -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
-        '${self.triggers.user}@${self.triggers.host}' "sudo tee $dir/config.toml.tmpl $dir/config-v3.toml.tmpl > /dev/null"
+        '${self.triggers.user}@${self.triggers.host}' "sudo tee $dir/config.toml.tmpl > /dev/null"
+      printf '%s\n' "$rendered_v3" | ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
+        -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
+        '${self.triggers.user}@${self.triggers.host}' "sudo tee $dir/config-v3.toml.tmpl > /dev/null"
       ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
         -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
         '${self.triggers.user}@${self.triggers.host}' "sudo systemctl restart ${self.triggers.service}"
-      echo "wrote containerd runtime template on ${self.triggers.host} and restarted ${self.triggers.service}"
+      echo "wrote containerd runtime templates on ${self.triggers.host} and restarted ${self.triggers.service}"
     EOT
   }
 }

@@ -29,65 +29,69 @@ skipped and only an explicit admin-set `managed` label is honored, so onboarding
 node-by-node.
 
 **`NodeCapacityReconciler`** (`node_capacity.go`) builds the capacity labels via
-`nodefeature.ConstructNodeCapacityLabels`, reading both the Node and the same-named `Devices` CR: the
-general(CPU) key presence marker plus the two accelerator families' per-card capacities.
+`nodefeature.ConstructNodeCapacityLabels`, reading both the Node and the same-named `Devices` CR:
+the general(CPU) key presence marker plus the two accelerator families' per-accelerator capacities.
 
 ### Logical-slicing capacities
 
 **For each accelerator model whose `.sliced` resource is present and > 0 in the Node capacity**, the
-four per-card logical-slicing capacities that the default scheduler / kubelet count at admission time:
+four per-accelerator logical-slicing capacities that the default scheduler / kubelet count at
+admission time:
 
 | Label suffix (`acceleratable.${prefix}${aKey}.…`) | Value |
 |----------------------------------------------------|--------|
-| `.sliced.units`             | `count × M` (M = 1,600,000 credit units per whole card) |
-| `.sliced.cores-percentage`  | `Σ per-card slices × 100` (compute overcommit) or `count × 100` (compute non-overcommittable) |
+| `.sliced.units`             | `count × M` (M = 1,600,000 credit units per whole accelerator) |
+| `.sliced.cores-percentage`  | `Σ per-accelerator slices × 100` (compute overcommit) or `count × 100` (compute non-overcommittable) |
 | `.sliced.memory-percentage` | `count × 100` |
 | `.sliced.memory-mib`        | `Σ count × per-model VRAM MiB` (weighted per model so mixed-VRAM models sum correctly) |
 
 ### Hardware-partitioning capacities
 
 Symmetrically, **for each model whose `.partitioned` resource is present and > 0**, the
-hardware-partitioning capacities — counted over the *disjoint* population of cards in a partitioning
-mode, so no card is ever counted by both families:
+hardware-partitioning capacities — counted over the *disjoint* population of accelerators in a
+partitioning mode, so no accelerator is ever counted by both families:
 
 | Label suffix (`acceleratable.${prefix}${aKey}.…`) | Value |
 |----------------------------------------------------|--------|
-| `.partitioned.units`               | `partitioned cards × M` (a partitioned card is worth a whole card's credits, exactly as a logically sliceable one is) |
-| `.partitioned.<kind>-<profile>`    | `Σ (allocated + remaining)` instances of that profile over the node's partitioned cards |
+| `.partitioned.units`               | `partitioned accelerators × M` (a partitioned accelerator is worth a whole accelerator's credits, exactly as a logically sliceable one is) |
+| `.partitioned.<kind>-<profile>`    | `Σ (allocated + remaining)` instances of that profile over the node's partitioned accelerators |
 
-The per-profile key is **geometry-aware and ledger-derived**, not a static ceiling: with one `3g.40gb`
-carved on an 80 GB card, `…partitioned.mig-7g.80gb` reads 0 while `…partitioned.mig-3g.40gb` still
-reads 1 free instance.
+The per-profile key is **geometry-aware and ledger-derived**, not a static ceiling: with one
+`3g.40gb` carved on an 80 GB accelerator, `…partitioned.mig-7g.80gb` reads 0 while
+`…partitioned.mig-3g.40gb` still reads 1 free instance.
 
-`<profile>` is the **published** profile name, which is not always the one the vendor's own CLI prints.
-A vendor that spells the geometry with no separator between its two numbers (T-Head writes `4g48gb`
-where NVIDIA writes `3g.40gb`) has the separator added on publication, so a partition of either vendor
-reads the same way in a Pod spec, and so does the `InstanceType`'s offered inventory and per-profile
-ledgers. Below that boundary the vendor's own spelling is kept everywhere — the `Devices` record, the
-device manager's on-disk ownership markers and every call into the vendor library — because a name the
-library does not report cannot create a partition. A name outside that two-number shape is published
-exactly as the driver reports it. See [T-Head PPU Partitioning
+`<profile>` is the **published** profile name, which is not always the one the manufacturer's own
+CLI prints. A manufacturer that spells the geometry with no separator between its two numbers
+(T-Head writes `4g48gb` where NVIDIA writes `3g.40gb`) has the separator added on publication, so a
+partition of either manufacturer reads the same way in a Pod spec, and so does the `InstanceType`'s
+offered inventory and per-profile ledgers. Below that boundary the manufacturer's own spelling is
+kept everywhere — the `Devices` record, the device manager's on-disk ownership markers and every
+call into the manufacturer's library — because a name the library does not report cannot create a
+partition. A name outside that two-number shape is published exactly as the driver reports it. See
+[T-Head PPU Partitioning
 Operations](../operation/thead-mig.md#how-partition-profiles-are-discovered).
 
-> **Why both terms** — the scheduler fits a Pod by subtracting the requests of the Pods already on the
-> node, so publishing bare `remaining` would subtract every live instance twice. A card whose ledger
-> has not been published yet falls back to its static per-profile ceiling rather than to zero, so a
-> fresh node advertises room instead of nothing.
+> **Why both terms** — the scheduler fits a Pod by subtracting the requests of the Pods already on
+> the node, so publishing bare `remaining` would subtract every live instance twice. An accelerator
+> whose ledger has not been published yet falls back to its static per-profile ceiling rather than
+> to zero, so a fresh node advertises room instead of nothing.
 
-### Per-card slice counts, per vendor
+### Per-accelerator slice counts, per manufacturer
 
-The per-card logical-slice count is the per-vendor maximum the Device Manager records on **each
-card's** `Status.LogicalSliced` (NVIDIA 128, Ascend 63, Cambricon 16, Hygon 4, MThreads 16, MetaX 16 —
-each bounded by the vendor runtime's per-device user-process limit, see
-`pkg/devicemanager/detector`); the group's `AcceleratorSlicedDetail` aggregates those per-card counts,
-and a MIG-enabled card reports zero logical count and its physical MIG profiles instead.
+The per-accelerator logical-slice count is the per-manufacturer maximum the Device Manager records
+on **each accelerator's** `Status.LogicalSliced` (NVIDIA 128, Ascend 63, Cambricon 16, Hygon 4,
+MThreads 16, MetaX 16 — each bounded by the manufacturer runtime's per-device user-process limit,
+see `pkg/devicemanager/detector`); the group's `AcceleratorSlicedDetail` aggregates those
+per-accelerator counts, and a MIG-enabled accelerator reports zero logical count and its physical
+MIG profiles instead.
 
-A vendor whose runtime time-shares compute (NVIDIA / Ascend) advertises `.sliced.cores-percentage =
-Σ per-card slice count × 100` — each slice may claim a full 100 % — while one whose compute is **not
-overcommittable** (Cambricon / Hygon / MThreads / MetaX) caps it at `count × 100`. The non-overcommit
-form varies by vendor: Hygon is a hard spatial partition (its `vdev.conf` assigns each slice a
-disjoint CU bitmask, so the sum stays within one card), whereas MThreads' `cores%` is a best-effort
-relative weight — not a hard partition — that is nonetheless accounted as non-overcommit.
+A manufacturer whose runtime time-shares compute (NVIDIA / Ascend) advertises
+`.sliced.cores-percentage = Σ per-accelerator slice count × 100` — each slice may claim a full 100 %
+— while one whose compute is **not overcommittable** (Cambricon / Hygon / MThreads / MetaX) caps it
+at `count × 100`. The non-overcommit form varies by manufacturer: Hygon is a hard spatial partition
+(its `vdev.conf` assigns each slice a disjoint CU bitmask, so the sum stays within one accelerator),
+whereas MThreads' `cores%` is a best-effort relative weight — not a hard partition — that is
+nonetheless accounted as non-overcommit.
 
 ### Presence-gating on capacity
 
@@ -95,19 +99,20 @@ Both families' counting keys are **presence-gated on capacity**: the reconciler 
 keys only while that family's bare pool (`.sliced` / `.partitioned`) is present and positive in
 `Node.status.capacity`, and reverse-patches (removes) them when it disappears or reaches 0 — so a
 model with no logical slicing gets none of the four `.sliced.*` capacities, and a model with no
-partitioned card gets no `.partitioned.*` key.
+partitioned accelerator gets no `.partitioned.*` key.
 
 > **Why capacity and not allocatable** — allocatable also falls to zero when a family is merely
 > saturated, which would delete the keys while instances are live.
 
 Stale cleanup covers all four `.sliced.*` suffixes, `.partitioned.units` and every per-profile
-partition key. Enabling or disabling hardware partitioning on a card is a manual vendor-CLI operation
-(`nvidia-smi` for NVIDIA, `ppu-smi mig` for T-Head) the operator only observes on the next Device Manager
-detection — see [NVIDIA MIG Operations](../operation/nvidia-mig.md), whose [three-configuration
+partition key. Enabling or disabling hardware partitioning on an accelerator is a manual operation
+with the manufacturer's CLI (`nvidia-smi` for NVIDIA, `ppu-smi mig` for T-Head) the operator only
+observes on the next Device Manager detection — see [NVIDIA MIG
+Operations](../operation/nvidia-mig.md), whose [three-configuration
 walkthrough](../operation/nvidia-mig.md#walkthrough-three-mig-configurations-on-one-node) shows the
-disjoint populations on a recorded 8-card node, including a **mixed** one where both families are
-advertised at once, and [T-Head PPU Partitioning Operations](../operation/thead-mig.md) for the same
-procedure on T-Head.
+disjoint populations on a recorded 8-accelerator node, including a **mixed** one where both families
+are advertised at once, and [T-Head PPU Partitioning Operations](../operation/thead-mig.md) for the
+same procedure on T-Head.
 
 ## The unit spec is not derived from node capacity
 
@@ -163,7 +168,7 @@ awareness is on), and the InstanceType defaulting webhook folds it back into the
 ```mermaid
 flowchart LR
     NODE["Node<br/>(general./acceleratable. capacity labels + gpustack.ai/managed)"]
-    DEV["Devices CR<br/>(per-card AcceleratorAllocation ledger)"]
+    DEV["Devices CR<br/>(per-accelerator AcceleratorAllocation ledger)"]
 
     subgraph controllers["WK controllers"]
         NFR["NodeFlavorReconciler"]
@@ -186,7 +191,7 @@ flowchart LR
     NS["Namespace (non-system)"] --> NQE
     NQE -- "one per Namespace<br/>named gpustack-fnv64-HASH" --> LQ["LocalQueue"]
     DEV --> AC
-    AC -- "per-card feasibility<br/>Retry when over-admitted" --> CQ
+    AC -- "per-accelerator feasibility<br/>Retry when over-admitted" --> CQ
 ```
 
 ### `NodeFlavorReconciler` (`node_flavor.go`)
@@ -195,8 +200,9 @@ Indexes managed nodes by `(key, os, arch, count)` and creates one `ResourceFlavo
 flavor pins workloads through `spec.nodeLabels` — the feature key
 `{general.|acceleratable.}feature.gpustack.ai/${key}=true`, `kubernetes.io/os|arch` (full), and a
 blanket `{Operator: Exists}` toleration (eligibility is by nodeLabels, not taints) — and carries the
-pool identity in labels (`.count`, `.capacity = contributing nodes × count`) plus the per-card VRAM and
-device descriptors in `note.gpustack.ai/*` annotations (device information only — no unit spec).
+pool identity in labels (`.count`, `.capacity = contributing nodes × count`) plus the
+per-accelerator VRAM and device descriptors in `note.gpustack.ai/*` annotations (device information
+only — no unit spec).
 
 A flavor whose group has **no** contributing node is **deleted** — there is no drain-tombstone anymore.
 The flavor identity is read from the first contributing node — every contributor to a flavor name
@@ -257,9 +263,10 @@ at the owning InstanceType).
 
 It fills the groups from the live flavors, smallest per-node count first so Kueue packs small nodes
 first — an accelerated queue advertises only `credits.gpustack.ai/${manufacturer}` (nominal =
-`capacity × M`, one whole card = `M = 1,600,000` credit units so Kueue's int64 accounting never rounds
-fractional shared/sliced credits up to 1), a non-accelerated queue only CPU — and references the
-`gpustack-node-devices` AdmissionCheck on an accelerated derived queue once it is Active.
+`capacity × M`, one whole accelerator = `M = 1,600,000` credit units so Kueue's int64 accounting
+never rounds fractional shared/sliced credits up to 1), a non-accelerated queue only CPU — and
+references the `gpustack-node-devices` AdmissionCheck on an accelerated derived queue once it is
+Active.
 
 A flavor Kueue is still **finalizing** (its nodes left, so `NodeFlavorReconciler` deleted it but Kueue
 holds its `resource-in-use` finalizer until no ClusterQueue references it) is treated as **absent**:
@@ -291,8 +298,8 @@ the full ClusterQueue name in the `schedule.gpustack.ai/queue` annotation.
 
 ### `NodeDevicesAdmissionReconciler` (`node_devices_admission.go`)
 
-Provides the per-card **AdmissionCheck** — the third of the five admission gates. Its behavior is
-described in [Admission](admission.md#gate-3--the-per-card-admissioncheck).
+Provides the per-accelerator **AdmissionCheck** — the third of the five admission gates. Its
+behavior is described in [Admission](admission.md#gate-3--the-per-accelerator-admissioncheck).
 
 ---
 

@@ -42,16 +42,10 @@ func New(opts device.DetectorOptions) device.Detector {
 	}
 }
 
+// The three methods below implement device.Detector, in its declaration order.
+
 func (in *thead) Name() string {
 	return Manufacturer
-}
-
-func (in *thead) init() {
-	in.once.Do(func() {
-		if ret := in.hgml.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize HGML library")
-		}
-	})
 }
 
 func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, err error) {
@@ -169,23 +163,23 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			grpIndex = len(grpList) - 1
 		}
 
-		// The recorded minor number is what PROVES that a device node addresses the card this record
-		// describes. The node is named after the card's ordinal, not after this number, and the
+		// The recorded minor number is what PROVES that a device node addresses the accelerator this
+		// record describes. The node is named after the card ordinal, not after this number, and the
 		// allocator stats the node the ordinal names and compares its kernel character-device minor
 		// against this value. So it is left ABSENT when the driver cannot answer for it rather than
 		// substituted by the enumeration index: a substituted value would make a wrong ordinal look
-		// proven, and a container would be handed whichever card happened to answer to it. An absent
-		// record is refusable; a plausible wrong one is not.
+		// proven, and a container would be handed whichever accelerator happened to answer to it. An
+		// absent record is refusable; a plausible wrong one is not.
 		var physicalIndexes []uint32
 		if minorNum, ret := dev.GetMinorNumber(); ret.IsSuccess() {
 			physicalIndexes = []uint32{minorNum}
 		} else {
-			// Behind a verbosity level, like every other per-card driver read that fails in this
-			// loop: the condition is static and the loop is periodic, so at default verbosity this
-			// would repeat for the life of the node without telling an operator anything the moment
-			// it matters. What it costs is reported where it bites instead — a card without this
-			// number is refused by EVERY allocation path, whole-card and partition alike, and that
-			// refusal carries the same reason to the Pod that asked for the card.
+			// Behind a verbosity level, like every other per-accelerator driver read that fails in
+			// this loop: the condition is static and the loop is periodic, so at default verbosity
+			// this would repeat for the life of the node without telling an operator anything the
+			// moment it matters. What it costs is reported where it bites instead — an accelerator
+			// without this number is refused by EVERY allocation path, whole-accelerator and
+			// partition alike, and that refusal carries the same reason to the Pod that asked for it.
 			logger.V(3).Info("recorded no minor number for a card whose driver could not answer for it; "+
 				"every allocation on it will be refused rather than addressed by an ordinal nothing "+
 				"can prove",
@@ -199,22 +193,22 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			status.Unhealthy = memoryUnhealthy
 
 			// Logical (software) and physical (partition) slicing are mutually exclusive per
-			// card, which is what keeps the two capacity-key families from both counting one
-			// card. A card currently in the partitioning mode is hard-partitioned and reports
-			// only its physical partition profiles; the capability is set solely when the driver
-			// actually offers one, so a mode-enabled card whose driver offers nothing reports
-			// no capability rather than an empty one. Every other card — mode off, mode
-			// unsupported, or the mode unreadable — offers logical slicing instead. A
-			// pending-mode transition is not partitioned yet and is re-detected after the
-			// administrator's DeviceManager restart, because the re-detect trigger does not
-			// include the partitioning mode.
+			// accelerator, which is what keeps the two capacity-key families from both counting
+			// one accelerator. An accelerator currently in the partitioning mode is
+			// hard-partitioned and reports only its physical partition profiles; the capability
+			// is set solely when the driver actually offers one, so a mode-enabled accelerator
+			// whose driver offers nothing reports no capability rather than an empty one. Every
+			// other accelerator — mode off, mode unsupported, or the mode unreadable — offers
+			// logical slicing instead. A pending-mode transition is not partitioned yet and is
+			// re-detected after the administrator's DeviceManager restart, because the re-detect
+			// trigger does not include the partitioning mode.
 			//
 			// A mode the driver could not read is treated as not-partitioned, as it always has
-			// been, but it is not treated in silence: since a card in the mode reports ONLY its
-			// partition profiles, an administrator who enabled the mode would otherwise see a
-			// card quietly advertising the logical slicing it cannot serve. A driver answering
-			// that the mode is unsupported is not a failure — that is a card which does not
-			// partition.
+			// been, but it is not treated in silence: since an accelerator in the mode reports
+			// ONLY its partition profiles, an administrator who enabled the mode would otherwise
+			// see an accelerator quietly advertising the logical slicing it cannot serve. A
+			// driver answering that the mode is unsupported is not a failure — that is an
+			// accelerator which does not partition.
 			migCurrent, _, migRet := dev.GetMigMode()
 			if !migRet.IsSuccess() && !driverReportsAbsent(migRet) {
 				logger.Error(migRet, "could not read a card's partitioning mode, so it is reported as "+
@@ -226,7 +220,7 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 				status.PhysicalSliced = physicalSliced(detectMigProfiles(dev, logger))
 			} else {
 				// Logical (software) slicing via the preload pair this image stages. Unlike
-				// CUDA, hgml.h documents no per-card user-process ceiling, so the count is a
+				// CUDA, hgml.h documents no per-accelerator user-process ceiling, so the count is a
 				// deliberately loose device-plugin token pool — the binding constraint on a
 				// slice request is its memory budget — set to the same 128 the NVIDIA detector
 				// publishes. Overcommit is true because the compute cap is a duty-cycle window
@@ -251,8 +245,8 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		index++
 	}
 
-	// Cards of one group must agree on what a profile name means before the aggregation below
-	// merges them by name, so any name they disagree on is withheld from the whole group.
+	// Accelerators of one group must agree on what a profile name means before the aggregation
+	// below merges them by name, so any name they disagree on is withheld from the whole group.
 	for i := range grpList {
 		for _, reason := range rejectDivergentGroupProfiles(&grpList[i]) {
 			in.logger.Info("withheld a partition profile the group's cards disagree on",
@@ -406,6 +400,14 @@ func (in *thead) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 	}
 
 	return grpList, nil
+}
+
+func (in *thead) init() {
+	in.once.Do(func() {
+		if ret := in.hgml.Init(); !ret.IsSuccess() {
+			in.logger.Error(ret, "failed to initialize HGML library")
+		}
+	})
 }
 
 func stringifyRuntimeVersion(rtVer int32) string {

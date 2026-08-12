@@ -12,9 +12,11 @@ node groups, and point your local kubeconfig at it.
   ingress rule (`TCP/22` from `0.0.0.0/0`) and an egress rule (allow all).
 - Creates a `nebius_mk8s_v1_cluster` with a public control-plane endpoint.
 - Creates a `cpu` `nebius_mk8s_v1_node_group` (shaped by `cpu_instance_types`),
-  plus one `gpu-<name>` group per `gpu_instance_types` key (each node gets a
-  public IP and cloud-init injecting an SSH user + key, same idiom as
-  `computes/nebius`).
+  plus one `gpu-<name>` group per `gpu_instance_types` key (every node gets
+  cloud-init injecting an SSH user + key, same idiom as `computes/nebius`).
+- Gives each **GPU** group's nodes a public IPv4 so they can be reached over SSH
+  (`public_ip`, default `true`); the CPU group takes none. See
+  [Public addresses](#public-addresses).
 - On every **GPU** node, installs `gpustack-node-prep.service` — a boot-time
   oneshot that moves the image's vendor device-plugin **static Pod** manifest
   out of `/etc/kubernetes/manifests/` and, on MIG-capable groups only, disables
@@ -94,6 +96,47 @@ for the one hosting the thing under test. The CPU group is always on-demand.
 `preemptible` is per group, so a cluster can mix both: below, an on-demand H100
 group and a preemptible L40S one.
 
+## Public addresses
+
+A public IPv4 is a **quota'd** resource: it is charged against the project's
+`vpc.ipv4-address.public.count` quota, the allowance is small (single digits by
+default), and it counts **allocations, not running instances** — a *stopped* VM
+still holds its address and still consumes the quota. Exhaust it and node-group
+creation fails at apply time with
+
+```
+code = ResourceExhausted desc = Quota limit exceeded ... quota vpc.ipv4-address.public.count
+```
+
+leaving the group `tainted` in state. Raise the quota (Administration → Limits →
+Quotas), release an address, or ask for fewer.
+
+The **flag** is per group; the **address, and so the quota unit, is per node**. A group of N nodes with
+`public_ip = true` takes N addresses. Every group this module creates carries `fixed_node_count = 1`, so
+today the two readings give the same number — but plan the quota per node, not per group, because that
+is what the provider charges. Only the groups that need an address take one:
+
+- **GPU groups: `public_ip = true` (default).** A GPU node is driven from outside
+  the cluster over SSH — the hardware-partition tests toggle MIG on the card that
+  way, and they take the node's address as a run-time input rather than guess it,
+  so a GPU node that cannot be reached cannot be partition-tested.
+- **The CPU group: none, always.** Nothing logs in to it.
+
+Set `public_ip = false` on a GPU group nobody has to log in to (a scale-out node,
+a second flavour that only has to schedule) to bring the requirement down
+further. Do it **before** the group exists: the provider's `public_ip_address` is
+optional-and-computed, so flipping the flag on an already-created group plans no
+change at all and the node keeps its address — the group has to be replaced
+(`terraform taint`, or remove and re-add it) for the release to happen.
+
+**Dropping the address does not cost the node its internet.** The network's
+default route table carries a `0.0.0.0/0` route whose next hop is Nebius' default
+egress gateway; for a resource with no public address that gateway NATs the
+traffic behind a dynamic address from a pool shared across the region. A
+private-only node still joins the cluster, pulls images and installs packages.
+What it loses is *inbound* reachability — SSH — which is why the flag tracks who
+needs to log in and nothing else.
+
 ## Prerequisites
 
 1. Install the [Nebius CLI](https://docs.nebius.com/cli), `terraform`, and
@@ -125,7 +168,7 @@ terraform apply -var='project_id=project-...'
 
 kubectl --context "$(terraform output -raw context_name)" get nodes
 kubectl --context "$(terraform output -raw context_name)" get nodes -o wide
-# ssh ubuntu@<ExternalIP> for any node
+# ssh ubuntu@<ExternalIP> for any node in a group with public_ip = true
 
 terraform destroy   # no -var needed -- project_id is carried across from the last apply
 ```
@@ -167,7 +210,8 @@ destroy` needs no vars.
 Node groups don't expose per-node IPs in Terraform state, so reach individual
 nodes via `kubectl ... get nodes -o wide` -> `ssh ubuntu@<ExternalIP>`; the SSH
 source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
-`computes/nebius`.
+`computes/nebius`. Only a group with `public_ip = true` has an `ExternalIP` at all
+— the CPU node has none ([public addresses](#public-addresses)).
 
 ## Variables
 
@@ -180,7 +224,7 @@ source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
 | `node_boot_disk_size_gb` | Node boot disk size, in GiB, for every node group | `100` |
 | `node_boot_disk_type` | Node boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |
 | `cpu_instance_types` | Instance type for the CPU node group: `{platform, preset, os}` | `{ platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }` |
-| `gpu_instance_types` | GPU node groups keyed by group name (each becomes `gpu-<name>`): `{platform, preset, os (optional), drivers_preset (optional), preemptible (optional), mig (optional)}`. `os`/`drivers_preset` default to the newest match from the compatibility matrix for `release`; `preemptible` defaults to `false` ([preemptible nodes](#preemptible-nodes)); `mig` defaults to whether the platform supports MIG ([groups that cannot be partitioned](#groups-that-cannot-be-partitioned)). | `{ h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" } }` |
+| `gpu_instance_types` | GPU node groups keyed by group name (each becomes `gpu-<name>`): `{platform, preset, os (optional), drivers_preset (optional), preemptible (optional), mig (optional), public_ip (optional)}`. `os`/`drivers_preset` default to the newest match from the compatibility matrix for `release`; `preemptible` defaults to `false` ([preemptible nodes](#preemptible-nodes)); `mig` defaults to whether the platform supports MIG ([groups that cannot be partitioned](#groups-that-cannot-be-partitioned)); `public_ip` defaults to `true`, so the node is SSH-reachable, at one public-address quota unit per node ([public addresses](#public-addresses)). | `{ h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" } }` |
 | `switch_kube_context` | Let `get-credentials` leave this cluster current; `false` restores the previous context | `true` |
 
 ## Outputs

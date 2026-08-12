@@ -45,16 +45,9 @@ func New(opts device.DetectorOptions) device.Detector {
 	}
 }
 
+// Name, DetectAccelerator and MonitorAccelerator implement device.Detector.
 func (in *metax) Name() string {
 	return Manufacturer
-}
-
-func (in *metax) init() {
-	in.once.Do(func() {
-		if ret := in.mxsml.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize MXSML library")
-		}
-	})
 }
 
 func (in *metax) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, err error) {
@@ -150,8 +143,8 @@ func (in *metax) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		var status device.AcceleratorStatus
 		{
 			status.Unhealthy = memoryUnhealthy
-			// GPU logical slicing via sysfs sgpu/create (+ METAX_SGPUS); the per-card slice count
-			// is capped at 16 (DefaultDevCnt, operationally confirmed). Compute is spatially
+			// GPU logical slicing via sysfs sgpu/create (+ METAX_SGPUS); the per-accelerator slice
+			// count is capped at 16 (DefaultDevCnt, operationally confirmed). Compute is spatially
 			// partitioned, not overcommitted.
 			status.LogicalSliced = device.AcceleratorLogicalSliced{
 				Count: 16,
@@ -292,6 +285,14 @@ func (in *metax) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 	}
 
 	return grpList, nil
+}
+
+func (in *metax) init() {
+	in.once.Do(func() {
+		if ret := in.mxsml.Init(); !ret.IsSuccess() {
+			in.logger.Error(ret, "failed to initialize MXSML library")
+		}
+	})
 }
 
 func getPhysicalIndexes(bdf string) []uint32 {

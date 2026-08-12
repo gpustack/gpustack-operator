@@ -22,13 +22,13 @@ func profileName(s string) [96]int8 {
 	return a
 }
 
-// placementsFrom builds a profile's legal empty-card placement set: count slots of the
-// given span, laid end to end from slot zero, which is the layout a card partitioned into
-// whole memory slices offers.
-func placementsFrom(span, count int32) []device.AcceleratorPhysicalPlacement {
-	out := make([]device.AcceleratorPhysicalPlacement, 0, count)
+// placementsFrom builds a profile's legal empty-accelerator placement set: count slots of
+// the given span, laid end to end from slot zero, which is the layout an accelerator
+// partitioned into whole memory slices offers.
+func placementsFrom(span, count int32) []device.AcceleratorPlacement {
+	out := make([]device.AcceleratorPlacement, 0, count)
 	for i := int32(0); i < count; i++ {
-		out = append(out, device.AcceleratorPhysicalPlacement{Start: i * span, Length: span})
+		out = append(out, device.AcceleratorPlacement{Start: i * span, Length: span})
 	}
 	return out
 }
@@ -48,7 +48,7 @@ func zw810eHardwareProfiles() []hgml.GpuInstanceProfileInfo_v3 {
 // zw810eProfiles is a documented-shape profile set of the same product (96 GiB over eight
 // memory slices): the "<compute>c.<memory>g" naming and the halving instance counts come from
 // the vendor's CLI documentation rather than from a host, so it exercises the derivation over a
-// wider profile set than the two a real card offers. zw810eHardwareProfiles is what hardware
+// wider profile set than the two a real accelerator offers. zw810eHardwareProfiles is what hardware
 // actually reported. Neither derives meaning from an id.
 func zw810eProfiles() []hgml.GpuInstanceProfileInfo_v3 {
 	return []hgml.GpuInstanceProfileInfo_v3{
@@ -59,8 +59,8 @@ func zw810eProfiles() []hgml.GpuInstanceProfileInfo_v3 {
 	}
 }
 
-func zw810ePlacements() map[uint32][]device.AcceleratorPhysicalPlacement {
-	return map[uint32][]device.AcceleratorPhysicalPlacement{
+func zw810ePlacements() map[uint32][]device.AcceleratorPlacement {
+	return map[uint32][]device.AcceleratorPlacement{
 		3: placementsFrom(1, 8),
 		5: placementsFrom(2, 4),
 		6: placementsFrom(4, 2),
@@ -72,7 +72,7 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 	testCases := []struct {
 		name           string
 		infos          []hgml.GpuInstanceProfileInfo_v3
-		placementsByID map[uint32][]device.AcceleratorPhysicalPlacement
+		placementsByID map[uint32][]device.AcceleratorPlacement
 		want           []device.AcceleratorPhysicalSlicedProfile
 		wantRejected   int
 	}{
@@ -104,11 +104,11 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 		{
 			// The set a real host reports. The recorded names keep the driver's own spelling:
 			// the record is what the driver seam matches a profile by and what the ownership
-			// marker and the per-card ledger are keyed by, so publishing the separator here
+			// marker and the per-accelerator ledger are keyed by, so publishing the separator here
 			// would leave every published profile unresolvable against the driver.
 			name:           "hardware profile set is recorded as the driver spells it",
 			infos:          zw810eHardwareProfiles(),
-			placementsByID: map[uint32][]device.AcceleratorPhysicalPlacement{5: placementsFrom(4, 2), 3: placementsFrom(8, 1)},
+			placementsByID: map[uint32][]device.AcceleratorPlacement{5: placementsFrom(4, 2), 3: placementsFrom(8, 1)},
 			want: []device.AcceleratorPhysicalSlicedProfile{
 				{
 					Name: "4g48gb", MemoryMib: 49152, ComputeSlices: 4, MemorySlices: 4, Count: 2,
@@ -121,7 +121,7 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 			},
 		},
 		{
-			// A card whose driver offers no profile yields no profile, so its caller
+			// An accelerator whose driver offers no profile yields no profile, so its caller
 			// reports no physical capability rather than an empty one.
 			name: "a driver offering no profile yields none",
 		},
@@ -223,7 +223,7 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 				{Id: 3, SliceCount: 1, InstanceCount: 8, MemorySizeMB: 12288, Name: profileName("1c.12g")},
 				{Id: 5, SliceCount: 2, InstanceCount: 4, MemorySizeMB: 24576, Name: profileName("2c.24g")},
 			},
-			placementsByID: map[uint32][]device.AcceleratorPhysicalPlacement{5: placementsFrom(2, 4)},
+			placementsByID: map[uint32][]device.AcceleratorPlacement{5: placementsFrom(2, 4)},
 			want: []device.AcceleratorPhysicalSlicedProfile{
 				{
 					Name: "2c.24g", MemoryMib: 24576, ComputeSlices: 2, MemorySlices: 2, Count: 4,
@@ -234,12 +234,12 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 		},
 		{
 			// The placement length is the span, whatever the profile's memory size implies
-			// about a card of some assumed slice count.
+			// about an accelerator of some assumed slice count.
 			name: "the placement length is the published span",
 			infos: []hgml.GpuInstanceProfileInfo_v3{
 				{Id: 5, SliceCount: 2, InstanceCount: 2, MemorySizeMB: 12288, Name: profileName("2c.12g")},
 			},
-			placementsByID: map[uint32][]device.AcceleratorPhysicalPlacement{5: placementsFrom(2, 2)},
+			placementsByID: map[uint32][]device.AcceleratorPlacement{5: placementsFrom(2, 2)},
 			want: []device.AcceleratorPhysicalSlicedProfile{
 				{
 					Name: "2c.12g", MemoryMib: 12288, ComputeSlices: 2, MemorySlices: 2, Count: 2,
@@ -254,7 +254,7 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 			infos: []hgml.GpuInstanceProfileInfo_v3{
 				{Id: 5, SliceCount: 2, InstanceCount: 4, MemorySizeMB: 24576, Name: profileName("2c.24g")},
 			},
-			placementsByID: map[uint32][]device.AcceleratorPhysicalPlacement{
+			placementsByID: map[uint32][]device.AcceleratorPlacement{
 				5: {{Start: 0, Length: 0}},
 			},
 			wantRejected: 1,
@@ -281,7 +281,7 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got, rejected := deriveSlicedProfiles(tc.infos, func(
 				id uint32,
-			) []device.AcceleratorPhysicalPlacement {
+			) []device.AcceleratorPlacement {
 				return tc.placementsByID[id]
 			})
 			assert.Equal(t, tc.want, got)
@@ -322,12 +322,12 @@ func TestDeriveSlicedProfilesRejectsCollisions(t *testing.T) {
 
 			got, rejected := deriveSlicedProfiles(
 				[]hgml.GpuInstanceProfileInfo_v3{base, collided, keeper},
-				func(id uint32) []device.AcceleratorPhysicalPlacement {
+				func(id uint32) []device.AcceleratorPlacement {
 					return zw810ePlacements()[id]
 				})
 
 			// The colliding name is withheld entirely — neither reading of it is
-			// trustworthy — while every other profile the card offers is unaffected.
+			// trustworthy — while every other profile the accelerator offers is unaffected.
 			require.Len(t, got, 1)
 			assert.Equal(t, "8c.96g", got[0].Name)
 			assert.Len(t, rejected, 1)
@@ -342,7 +342,7 @@ func TestDeriveSlicedProfilesRejectsCollisions(t *testing.T) {
 func TestDeriveSlicedProfilesSpanMatchesPlacements(t *testing.T) {
 	got, rejected := deriveSlicedProfiles(zw810eProfiles(), func(
 		id uint32,
-	) []device.AcceleratorPhysicalPlacement {
+	) []device.AcceleratorPlacement {
 		return zw810ePlacements()[id]
 	})
 	require.Empty(t, rejected)
@@ -367,7 +367,7 @@ func TestMigPlacementsByProfile(t *testing.T) {
 		infos        []hgml.GpuInstanceProfileInfo_v3
 		slots        map[uint32][]hgml.GpuInstancePlacement
 		wantAnswered []uint32
-		want         map[uint32][]device.AcceleratorPhysicalPlacement
+		want         map[uint32][]device.AcceleratorPlacement
 		wantErr      bool
 	}{
 		{
@@ -378,7 +378,7 @@ func TestMigPlacementsByProfile(t *testing.T) {
 				5: {{Start: 0, Size: 2}},
 			},
 			wantAnswered: []uint32{3, 5},
-			want: map[uint32][]device.AcceleratorPhysicalPlacement{
+			want: map[uint32][]device.AcceleratorPlacement{
 				3: {{Start: 0, Length: 1}, {Start: 1, Length: 1}},
 				5: {{Start: 0, Length: 2}},
 			},
@@ -389,15 +389,15 @@ func TestMigPlacementsByProfile(t *testing.T) {
 			name:         "an enumerated-none profile is kept with a nil placement set",
 			infos:        []hgml.GpuInstanceProfileInfo_v3{{Id: 3}},
 			wantAnswered: []uint32{3},
-			want:         map[uint32][]device.AcceleratorPhysicalPlacement{3: nil},
+			want:         map[uint32][]device.AcceleratorPlacement{3: nil},
 		},
 		{
 			// The driver failed to answer: publishing a span from unverified geometry
-			// would make an unreadable card indistinguishable from a placement-free one.
+			// would make an unreadable accelerator indistinguishable from a placement-free one.
 			name:         "a failed query withholds the profile and errors",
 			infos:        []hgml.GpuInstanceProfileInfo_v3{{Id: failing}},
 			wantAnswered: []uint32{},
-			want:         map[uint32][]device.AcceleratorPhysicalPlacement{},
+			want:         map[uint32][]device.AcceleratorPlacement{},
 			wantErr:      true,
 		},
 		{
@@ -407,7 +407,7 @@ func TestMigPlacementsByProfile(t *testing.T) {
 				3: {{Start: 0, Size: 1}},
 			},
 			wantAnswered: []uint32{3},
-			want:         map[uint32][]device.AcceleratorPhysicalPlacement{3: {{Start: 0, Length: 1}}},
+			want:         map[uint32][]device.AcceleratorPlacement{3: {{Start: 0, Length: 1}}},
 			wantErr:      true,
 		},
 	}
@@ -436,7 +436,7 @@ func TestMigPlacementsByProfile(t *testing.T) {
 
 func TestMigPlacementsFromHGML(t *testing.T) {
 	got := migPlacementsFromHGML([]hgml.GpuInstancePlacement{{Start: 0, Size: 2}, {Start: 2, Size: 2}})
-	assert.Equal(t, []device.AcceleratorPhysicalPlacement{{Start: 0, Length: 2}, {Start: 2, Length: 2}}, got)
+	assert.Equal(t, []device.AcceleratorPlacement{{Start: 0, Length: 2}, {Start: 2, Length: 2}}, got)
 	assert.Nil(t, migPlacementsFromHGML(nil))
 }
 
@@ -448,9 +448,9 @@ func TestMaxProfileCount(t *testing.T) {
 	assert.Zero(t, maxProfileCount(nil))
 }
 
-// TestPhysicalSliced asserts a mode-enabled card whose driver offers no profile reports no
-// physical capability rather than an empty one, and that a card with profiles carries the
-// ceiling they imply.
+// TestPhysicalSliced asserts a mode-enabled accelerator whose driver offers no profile reports
+// no physical capability rather than an empty one, and that an accelerator with profiles carries
+// the ceiling they imply.
 func TestPhysicalSliced(t *testing.T) {
 	assert.Equal(t, device.AcceleratorPhysicalSliced{}, physicalSliced(nil))
 	assert.Equal(t, device.AcceleratorPhysicalSliced{},
@@ -464,8 +464,8 @@ func TestPhysicalSliced(t *testing.T) {
 		physicalSliced(profiles))
 }
 
-// physicalCard builds one detected card carrying the given physical-slice profiles, with
-// the ceiling the card would have been detected with.
+// physicalCard builds one detected accelerator carrying the given physical-slice profiles,
+// with the ceiling the accelerator would have been detected with.
 func physicalCard(id string, profiles ...device.AcceleratorPhysicalSlicedProfile) device.Accelerator {
 	return device.Accelerator{
 		ID: id,
@@ -505,22 +505,22 @@ func TestRejectDivergentGroupProfiles(t *testing.T) {
 		wantRejected int
 	}{
 		{
-			// Cards of one group agreeing on a profile keep it, so the aggregation may
-			// sum their per-card counts.
-			name:         "agreeing cards keep every profile",
+			// Accelerators of one group agreeing on a profile keep it, so the aggregation
+			// may sum their per-accelerator counts.
+			name:         "agreeing accelerators keep every profile",
 			cards:        []device.Accelerator{physicalCard("a", narrow, whole), physicalCard("b", narrow, whole)},
 			wantProfiles: [][]string{{"1c.12g", "8c.96g"}, {"1c.12g", "8c.96g"}},
 			wantCounts:   []int32{8, 8},
 		},
 		{
-			name:         "differing memory under one name is rejected on every card",
+			name:         "differing memory under one name is rejected on every accelerator",
 			cards:        []device.Accelerator{physicalCard("a", narrow, whole), physicalCard("b", divergeMemory, whole)},
 			wantProfiles: [][]string{{"8c.96g"}, {"8c.96g"}},
 			wantCounts:   []int32{1, 1},
 			wantRejected: 1,
 		},
 		{
-			name:         "differing per-card count under one name is rejected",
+			name:         "differing per-accelerator count under one name is rejected",
 			cards:        []device.Accelerator{physicalCard("a", narrow, whole), physicalCard("b", divergeCount, whole)},
 			wantProfiles: [][]string{{"8c.96g"}, {"8c.96g"}},
 			wantCounts:   []int32{1, 1},
@@ -543,17 +543,17 @@ func TestRejectDivergentGroupProfiles(t *testing.T) {
 			wantRejected: 1,
 		},
 		{
-			// A card left with nothing reports no physical capability rather than an
-			// empty one, so its ceiling cannot outlive the profile it came from.
-			name:         "a card stripped of every profile reports no capability",
+			// An accelerator left with nothing reports no physical capability rather than
+			// an empty one, so its ceiling cannot outlive the profile it came from.
+			name:         "an accelerator stripped of every profile reports no capability",
 			cards:        []device.Accelerator{physicalCard("a", narrow), physicalCard("b", divergeMemory)},
 			wantProfiles: [][]string{nil, nil},
 			wantCounts:   []int32{0, 0},
 			wantRejected: 1,
 		},
 		{
-			// A single card cannot disagree with itself, so nothing is stripped.
-			name:         "a lone card is left alone",
+			// A single accelerator cannot disagree with itself, so nothing is stripped.
+			name:         "a lone accelerator is left alone",
 			cards:        []device.Accelerator{physicalCard("a", narrow, whole)},
 			wantProfiles: [][]string{{"1c.12g", "8c.96g"}},
 			wantCounts:   []int32{8},
@@ -583,9 +583,9 @@ func TestRejectDivergentGroupProfiles(t *testing.T) {
 	}
 }
 
-// The profile-id space is a fixed enumeration a card offers a handful of, so an id the driver
+// The profile-id space is a fixed enumeration an accelerator offers a handful of, so an id the driver
 // disclaims is inventory information and an id it could not answer for is a fault. Collapsing the two
-// is what made a transient read indistinguishable from a card that never had the profile: the
+// is what made a transient read indistinguishable from an accelerator that never had the profile: the
 // inventory is published either way, and everything downstream — the node's capacity keys, the
 // flavor, the InstanceType — is built from it.
 func TestProbeMigProfiles(t *testing.T) {
@@ -597,21 +597,21 @@ func TestProbeMigProfiles(t *testing.T) {
 		name string
 		// answered are the ids the driver reports a profile for; failed are the ids it returns a
 		// non-success for. Every id named in neither is disclaimed with ERROR_NOT_SUPPORTED, which
-		// is what the vast majority of the enumeration answers on any real card.
+		// is what the vast majority of the enumeration answers on any real accelerator.
 		answered   map[uint32]string
 		failed     map[uint32]hgml.Return
 		wantIDs    []uint32
 		wantErrIDs []uint32
 	}{
 		{
-			name:     "the profiles a card offers are returned and nothing is reported",
+			name:     "the profiles an accelerator offers are returned and nothing is reported",
 			answered: map[uint32]string{0: "1g.5gb", 5: "2g.10gb", 19: "7g.80gb"},
 			wantIDs:  []uint32{0, 5, 19},
 		},
 		{
-			// A card in the partitioning mode whose driver offers no profile at all: an empty
+			// An accelerator in the partitioning mode whose driver offers no profile at all: an empty
 			// inventory is an answer, not a failure.
-			name: "a card offering nothing is not a failure",
+			name: "an accelerator offering nothing is not a failure",
 		},
 		{
 			name:       "an id the driver could not answer for is reported",
@@ -621,8 +621,8 @@ func TestProbeMigProfiles(t *testing.T) {
 			wantErrIDs: []uint32{3},
 		},
 		{
-			// Every unanswered id is named, so a card losing several profiles at once is diagnosable
-			// as that rather than as one failure hiding the rest.
+			// Every unanswered id is named, so an accelerator losing several profiles at once is
+			// diagnosable as that rather than as one failure hiding the rest.
 			name:       "every unanswerable id is named",
 			answered:   map[uint32]string{0: "1g.5gb"},
 			failed:     map[uint32]hgml.Return{2: hgml.ERROR_GPU_IS_LOST, 7: hgml.ERROR_TIMEOUT, 11: hgml.ERROR_UNKNOWN},
@@ -631,7 +631,7 @@ func TestProbeMigProfiles(t *testing.T) {
 		},
 		{
 			// The three codes that mean "there is nothing here" stay silent even when they arrive at
-			// ids a card would otherwise offer.
+			// ids an accelerator would otherwise offer.
 			name:     "a disclaimed id is an answer, whichever way the driver disclaims it",
 			answered: map[uint32]string{0: "1g.5gb"},
 			failed: map[uint32]hgml.Return{

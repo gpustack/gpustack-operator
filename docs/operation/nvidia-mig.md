@@ -5,10 +5,10 @@
 > **Audience** operators, users requesting partitions · **Prerequisites** [Accelerator
 > Requests](../accelerator-requests.md) · **Read time** ~30 min
 
-GPUStack treats a card's NVIDIA **MIG** (Multi-Instance GPU) *mode* as a **manually managed** node property:
+GPUStack treats a GPU's NVIDIA **MIG** (Multi-Instance GPU) *mode* as a **manually managed** node property:
 the operator *observes* MIG geometry through the Device Manager and reflects it in the `Devices` ledger and the
 advertised partitioning capability; it never enables, disables, or reconfigures MIG *mode* on your behalf. Once a
-card is MIG-enabled, though, the operator **dynamically allocates** the hardware instances that back scheduled
+GPU is MIG-enabled, though, the operator **dynamically allocates** the hardware instances that back scheduled
 workloads — it materializes a GPU/compute instance of the requested profile when a Pod is admitted and reclaims
 it when the Pod exits (see [Requesting a MIG instance](#requesting-a-mig-instance)). This page is both the
 administrator runbook for changing MIG *mode* on a node of a Kubernetes cluster running GPUStack and the user
@@ -16,7 +16,7 @@ contract for requesting a MIG instance.
 
 MIG is GPUStack's one implemented **physical partitioning** backend. It is a resource family of its own
 (`nvidia.com/gpu.partitioned*`), disjoint from the logical (software) slicing family `nvidia.com/gpu.sliced*`:
-a MIG-enabled card serves *only* partition requests, and an unpartitioned card serves *only* whole-card, shared
+a MIG-enabled GPU serves *only* partition requests, and an unpartitioned GPU serves *only* whole-GPU, shared
 and logical-slice requests. The full key set and the normative request rules live in
 [Accelerator Requests](../accelerator-requests.md).
 
@@ -40,13 +40,13 @@ mode flips, no geometry rewrites, and no descheduling.
 
 ## Supported profiles
 
-A MIG-enabled card is partitioned into hardware instances drawn from a fixed profile set. Both A100-40GB and
+A MIG-enabled GPU is partitioned into hardware instances drawn from a fixed profile set. Both A100-40GB and
 H100-80GB expose **7 compute (SM) slices** and **8 memory slices**; one memory slice is 5 GB on A100-40GB and
 10 GB on H100-80GB.
 
 **A100-40GB**
 
-| Profile | Memory | Compute slices (of 7) | Memory slices (of 8) | Max instances/card |
+| Profile | Memory | Compute slices (of 7) | Memory slices (of 8) | Max instances/GPU |
 |---|---|---|---|---|
 | 1g.5gb  | 5 GB  | 1 | 1 | 7 |
 | 1g.10gb | 10 GB | 1 | 2 | 4 |
@@ -57,7 +57,7 @@ H100-80GB expose **7 compute (SM) slices** and **8 memory slices**; one memory s
 
 **H100-80GB**
 
-| Profile | Memory | Compute slices (of 7) | Memory slices (of 8) | Max instances/card |
+| Profile | Memory | Compute slices (of 7) | Memory slices (of 8) | Max instances/GPU |
 |---|---|---|---|---|
 | 1g.10gb | 10 GB | 1 | 1 | 7 |
 | 1g.20gb | 20 GB | 1 | 2 | 4 |
@@ -68,7 +68,7 @@ H100-80GB expose **7 compute (SM) slices** and **8 memory slices**; one memory s
 
 > **The `+me` / `+me.all` / `+gfx` variants are not supported.** A Kubernetes resource name may not contain
 > `+`, and GPUStack never rewrites a profile name to make it key-safe — a profile whose name is not already a
-> valid resource-name segment is **excluded** from the card's inventory instead, so that a key always maps back
+> valid resource-name segment is **excluded** from the GPU's inventory instead, so that a key always maps back
 > to its profile by a plain prefix strip. Those variants therefore do not appear in the `Devices` ledger, in the
 > node's capacity keys, or in the `InstanceType` inventory, and cannot be requested.
 
@@ -83,17 +83,17 @@ per slice differs. A combination is legal only when the occupied slot intervals 
 - size 4, the `4g` profiles (`4g.20gb` on A100; `4g.40gb` on H100) — start 0 only
 - size 8 (`7g.40gb` / `7g.80gb`) — start 0
 
-**A profile's slot count is its "max instances/card" from the tables above** — read that column as the
+**A profile's slot count is its "max instances/GPU" from the tables above** — read that column as the
 length of its placement list, which is what makes the two consistent.
 
 **Two profiles covering the same memory slices do not always get the same placement freedom.** A `4g`
 covers four slices exactly as a `3g` does, yet is offered only the one slot; a `2g` covers two exactly
 as the same-size `1g` does, yet is offered three slots to its four. The practical consequence is that a
-live instance can remove slots from profiles other than its own: a `3g` at slots 0–3 takes the card's
+live instance can remove slots from profiles other than its own: a `3g` at slots 0–3 takes the GPU's
 only `4g` slot with it, while still leaving room for a second `3g` at 4–7.
 
-The per-card `Devices` ledger reports each MIG card's profile inventory as static per-profile *counts* (the
-maximum instances of each profile the card could host) and, per profile, a **placement-aware `Remaining`**
+The per-GPU `Devices` ledger reports each MIG GPU's profile inventory as static per-profile *counts* (the
+maximum instances of each profile the GPU could host) and, per profile, a **placement-aware `Remaining`**
 count of how many instances still fit given what is already allocated — a `3g.40gb` at slots 0–3 removes the
 `1g.10gb` slots it overlaps (see [Requesting a MIG instance](#requesting-a-mig-instance)).
 
@@ -103,20 +103,20 @@ profiles), see NVIDIA's
 
 ## Requesting a MIG instance
 
-Once a card is MIG-enabled, a workload asks for **one hardware instance of a named profile**. GPUStack
+Once a GPU is MIG-enabled, a workload asks for **one hardware instance of a named profile**. GPUStack
 materializes that instance on demand and injects only the MIG device — there is no logical-slicing runtime
 (`libvgpu.so`) and no fractional translation.
 
-**Request shape.** A Pod requests one partitioned card plus the profile, one instance per Pod:
+**Request shape.** A Pod requests one partitioned GPU plus the profile, one instance per Pod:
 
 ```yaml
 resources:
   limits:
-    nvidia.com/gpu.partitioned: "1"              # always exactly 1 card
+    nvidia.com/gpu.partitioned: "1"              # always exactly 1 GPU
     nvidia.com/gpu.partitioned.mig-1g.10gb: "1"  # always exactly 1 instance of this profile
 ```
 
-`mig` is NVIDIA's own name for hardware partitioning, carried in the key as `<kind>`; another vendor's
+`mig` is NVIDIA's own name for hardware partitioning, carried in the key as `<kind>`; another manufacturer's
 partitioning would register its own kind under the same `.partitioned.<kind>-<profile>` shape.
 
 - **Name the exact profile** from the [Supported profiles](#supported-profiles) tables (e.g. `1g.10gb`); there
@@ -124,7 +124,7 @@ partitioning would register its own kind under the same `.partitioned.<kind>-<pr
 - Both `nvidia.com/gpu.partitioned` and the `mig-<profile>` key **must be exactly `1`**. A multi-partition
   workload asks for several Pods; the cap is a scope decision, not a hardware limit.
 - The partition family is **mutually exclusive** with every other accelerator family Pod-wide — a Pod
-  requesting both a partition and a whole card, a shared unit or a logical slice is rejected at admission.
+  requesting both a partition and a whole GPU, a shared unit or a logical slice is rejected at admission.
 - **One profile shape per Pod**, and the accelerator claims must sit in **one container group**. The full rule
   set, with an accepted and a rejected example each, is in
   [Accelerator Requests](../accelerator-requests.md#the-request-rules).
@@ -145,7 +145,7 @@ spec:
   image: ubuntu:24.04
   command: ["sleep", "86400"]
   resources:
-    accelerator: "1"                       # a partition is always one card
+    accelerator: "1"                       # a partition is always one GPU
     acceleratorPartitionedProfile: 3g.40gb
   volume:
     ephemeral:
@@ -155,20 +155,20 @@ spec:
 The profile is validated against the pool's observed inventory at admission: a profile the pool does not offer
 is rejected with the offered set in the message, rather than being admitted and left Pending forever. It is
 mutually exclusive with `acceleratorSlicedMemoryPercentage` / `acceleratorSlicedCoresPercentage` — hardware
-partitioning and software slicing cannot both apply to one card. The instance's host CPU and RAM are sized by
-the profile's share of the card's VRAM, so a `1g` partition does not ask for a whole card's worth of either.
+partitioning and software slicing cannot both apply to one GPU. The instance's host CPU and RAM are sized by
+the profile's share of the GPU's VRAM, so a `1g` partition does not ask for a whole GPU's worth of either.
 
-**Card selection is the plugin's, not the kubelet's.** Unlike the three card-bound families, a
-`.partitioned` token is a fungible count: the device plugin picks the card itself, against the live partition
-geometry, and records the card it actually used. It **packs** — the most-occupied card that still fits wins, so
-a sibling stays whole for a later whole-card profile — and a rejection from `Allocate` therefore means the
-whole node has no room, never that the kubelet offered the wrong card.
+**GPU selection is the plugin's, not the kubelet's.** Unlike the three GPU-bound families, a
+`.partitioned` token is a fungible count: the device plugin picks the GPU itself, against the live partition
+geometry, and records the GPU it actually used. It **packs** — the most-occupied GPU that still fits wins, so
+a sibling stays whole for a later whole-GPU profile — and a rejection from `Allocate` therefore means the
+whole node has no room, never that the kubelet offered the wrong GPU.
 
-**Scheduling and the `Remaining` ledger.** Each MIG card advertises, per profile, how many instances it
+**Scheduling and the `Remaining` ledger.** Each MIG GPU advertises, per profile, how many instances it
 accounts for — `allocated + remaining`, mirrored onto the node as the
 `nvidia.com/gpu.partitioned.mig-<profile>` extended resource. Both terms are needed: the scheduler fits a Pod
 by subtracting the requests of the Pods already on the node, so publishing only what is free would subtract
-every live instance twice. Admission is placement-aware: the per-card AdmissionCheck admits a Pod only while
+every live instance twice. Admission is placement-aware: the per-GPU AdmissionCheck admits a Pod only while
 the requested profile has a free placement slot, and returns a **retry** (never a hard reject) while the ledger
 has not yet been populated. Quota is charged on the manufacturer's `credits` resource, folded from
 `nvidia.com/gpu.partitioned.units` — a `3g.40gb` and a logical `40Gi` slice cost the same, so both families
@@ -176,31 +176,31 @@ share one credit scale.
 
 **Reclaim.** When the Pod exits, the operator destroys its compute instance then its GPU instance, and the
 profile's `Remaining` restores within one reclaim cycle. A destroy that races a residual process returns
-`NVML_ERROR_IN_USE`; the operator retries with bounds — never blocking sibling instances on the same card or
-allocations on any other card — and surfaces an operator-visible log if a straggler still holds the instance
+`NVML_ERROR_IN_USE`; the operator retries with bounds — never blocking sibling instances on the same GPU or
+allocations on any other GPU — and surfaces an operator-visible log if a straggler still holds the instance
 past the bound. The node key frees on **Pod deletion** while the instance survives up to a few reclaim misses,
 so a same-profile replacement scheduled inside that window can fail its allocation closed and is retried by
 Kueue; the window closes on its own.
 
-**An SSH-enabled `Instance` sees its partition, not the card.** With SSH enabled the workload runs in `main`
+**An SSH-enabled `Instance` sees its partition, not the GPU.** With SSH enabled the workload runs in `main`
 and the SSH server in an `sshd` sidecar that `nsenter`s into `main`, so the sidecar's own device allocation is
 a device-cgroup grant and nothing else — the session inherits `main`'s environment. That grant is **the MIG
-instance `main` holds**, never the parent card, which would otherwise expose every other partition carved on
+instance `main` holds**, never the parent GPU, which would otherwise expose every other partition carved on
 it. The identity comes from the same on-disk ownership marker the allocator writes when it materializes the
 instance — the record that already drives reuse and reclaim, and the one that survives a Device Manager
-restart — so the marker is the visibility path's authority too. The read is **liveness-checked under the card
+restart — so the marker is the visibility path's authority too. The read is **liveness-checked under the GPU
 lock** before anything is injected: the recorded GPU instance must still exist *and* still carry the recorded
 MIG UUID, since a destroyed instance's id can be reassigned to somebody else's partition. A marker that is
-missing, names a different card, records a profile the card no longer offers, or whose instance is gone or has
-been recreated fails the sidecar's allocation closed — there is no fallback to the card.
+missing, names a different GPU, records a profile the GPU no longer offers, or whose instance is gone or has
+been recreated fails the sidecar's allocation closed — there is no fallback to the GPU.
 
 ## Prerequisites
 
-Before switching a card's MIG mode (enable or disable):
+Before switching a GPU's MIG mode (enable or disable):
 
-- The card's instances must be **idle** — no Pod or process may be using the card whose mode you are changing
+- The GPU's instances must be **idle** — no Pod or process may be using the GPU whose mode you are changing
   (stop the using Pod first). Draining is not just the hardware's requirement: a family's tokens exist only
-  while the card's capability reports that family, so flipping the mode *removes* the old family's tokens.
+  while the GPU's capability reports that family, so flipping the mode *removes* the old family's tokens.
 - All daemons holding a driver handle (DCGM, `nvsm`, exporters, …) must be **stopped first**, or the switch
   hangs pending.
 - The `nvidia_drm` kernel module must **not** be loaded, or the GPU reset fails.
@@ -209,7 +209,7 @@ Before switching a card's MIG mode (enable or disable):
 
 Instance (GI/CI) create/destroy, once the mode is on, is dynamic and online: destroying a GPU/compute instance
 returns `IN_USE` only when *that* instance still has active processes — workloads on sibling instances of the
-same card are unaffected.
+same GPU are unaffected.
 
 ## Limitations
 
@@ -221,12 +221,12 @@ same card are unaffected.
   GPUStack will eventually delete it. Every node-level number — the per-profile capacity key, the partition
   token health and the AdmissionCheck — is derived from the allocation annotations the device plugin writes,
   and an instance created by hand with `nvidia-smi mig -cgi` produces none. So while any GPUStack workload
-  holds the card, the node keeps advertising room it does not have and, unlike a transient
+  holds the GPU, the node keeps advertising room it does not have and, unlike a transient
   over-advertisement, that **never converges**. Placement reads live NVML and so will not double-book such an
-  instance, but the accounting above it stays wrong. Then, once the card is fully drained of GPUStack
+  instance, but the accounting above it stays wrong. Then, once the GPU is fully drained of GPUStack
   workloads, the opposite happens: an instance no allocation accounts for is an orphan, and the reclaimer
   **destroys it** after its debounce — including one it never created, and including one your own process is
-  still using. Let GPUStack materialize the instances; it reuses any that already exist on a card it manages.
+  still using. Let GPUStack materialize the instances; it reuses any that already exist on a GPU it manages.
 - **A same-profile replacement submitted the instant its predecessor is deleted can fail to start.** Node
   accounting is rebuilt from Pod annotations, so a deleted Pod's slot reappears in the per-profile key and
   in the healthy token count **immediately**, while the reclaimer destroys the hardware instance on its
@@ -236,7 +236,7 @@ same card are unaffected.
   after the reclaim lands succeeds — but for a workload that recycles partitions rapidly, leave a gap
   between the delete and the replacement, or let the replacement's own restart handle it.
 - **A managed provider may health-check the GPUs and reboot the node for you.** Some managed Kubernetes
-  offerings probe the NVLink topology matrix and expect `N × (N-1)` healthy pairs; a card in a
+  offerings probe the NVLink topology matrix and expect `N × (N-1)` healthy pairs; a GPU in a
   partitioning mode drops out of that matrix, so the probe reads short and the provider's node agent can
   cordon and then restart the node. Check the provider's node conditions before blaming the operator when
   several workloads fail at once, and note that anything you merely *stopped* during node preparation
@@ -257,7 +257,7 @@ same card are unaffected.
   placement query failed. A profile's memory-slice span is read from its placement records and has no
   other source, so without them the span could only be guessed — and the span is what an instance's
   identity is matched by. Nothing is lost: the per-profile ledger is placement-aware, so such a profile
-  would be a requestable key whose allocation could never succeed. The card and profile ids are named in
+  would be a requestable key whose allocation could never succeed. The GPU and profile ids are named in
   a warning.
 - **The old per-profile key is gone.** A MIG profile used to be requested through the *logical* slicing
   family, as a `mig-<profile>` segment on `nvidia.com/gpu.sliced`; it is now
@@ -270,12 +270,12 @@ same card are unaffected.
 
 1. Satisfy the [Prerequisites](#prerequisites) above (stop the using Pod and driver-handle daemons on the
    node).
-2. Enable the mode with `nvidia-smi`, per card or for all cards:
+2. Enable the mode with `nvidia-smi`, per GPU or for all GPUs:
 
    ```console
-   # one card by index
+   # one GPU by index
    $ nvidia-smi -i <id> -mig 1
-   # all cards
+   # all GPUs
    $ nvidia-smi -mig 1
    ```
 
@@ -285,19 +285,19 @@ same card are unaffected.
    node's `Devices` object — the detector rewrites an existing group's capability in place — and you do **not**
    need to pre-create instances with `nvidia-smi mig -cgi`: the operator materializes each profile's instances
    on demand as workloads are admitted (it reuses any you did pre-create).
-5. Verify the `Devices` capability now reports the card's MIG profiles and **zero logical slicing** on those
-   cards (a MIG-enabled card is hardware-partitioned and offers no software slicing).
+5. Verify the `Devices` capability now reports the GPU's MIG profiles and **zero logical slicing** on those
+   GPUs (a MIG-enabled GPU is hardware-partitioned and offers no software slicing).
 
 ## Disabling MIG on a node
 
-Run the inverse sequence: ensure no Pod is using the card's instances, destroy the instances, then
+Run the inverse sequence: ensure no Pod is using the GPU's instances, destroy the instances, then
 
 ```console
-$ nvidia-smi -i <id> -mig 0   # or `-mig 0` for all cards
+$ nvidia-smi -i <id> -mig 0   # or `-mig 0` for all GPUs
 ```
 
 apply the same reset rules (Ampere reset / reboot; Hopper needs none), and restart the node's Device Manager
-pod so the ledger returns the card to its whole-card / logical-slice capability.
+pod so the ledger returns the GPU to its whole-GPU / logical-slice capability.
 
 ## Node reboot recovery
 
@@ -318,29 +318,29 @@ resubmitting is the clean recovery.
 A recorded run on a live Kubernetes cluster, in the same style as the
 [scheduling-chain walkthrough](../walkthrough.md): every command is the real `kubectl` (or on-node
 `nvidia-smi`) invocation and its real output. The node is genericized as `node-h100` — **eight**
-H100-80GB cards — and the operator runs the defaults.
+H100-80GB GPUs — and the operator runs the defaults.
 
-Eight cards is the point. A single-card node cannot show the property that matters most here: the two
-families are served by **disjoint card populations**, so partitioning *some* cards moves exactly those
-cards from one family to the other and leaves the rest untouched. The walkthrough therefore covers the
+Eight GPUs is the point. A single-GPU node cannot show the property that matters most here: the two
+families are served by **disjoint GPU populations**, so partitioning *some* GPUs moves exactly those
+GPUs from one family to the other and leaves the rest untouched. The walkthrough therefore covers the
 three configurations a node can be in:
 
-| | Configuration | Cards in a partitioning mode |
+| | Configuration | GPUs in a partitioning mode |
 |---|---|---|
-| **1** | [All-logical](#1-all-logical--every-card-mig-off) | none |
-| **2** | [All-physical](#2-all-physical--every-card-mig-on) | all 8 |
+| **1** | [All-logical](#1-all-logical--every-gpu-mig-off) | none |
+| **2** | [All-physical](#2-all-physical--every-gpu-mig-on) | all 8 |
 | **3** | [Mixed](#3-mixed--part-logical-part-physical) | 3 of 8 |
 
 The one column to keep in mind: `kubectl get instancetypes` shows the accelerator four-view
 **EX**clusive / **SH**ared / **SL**iced (logical) / **PT** (physically partitioned) as
-`onceMaxRequest/remaining` groups. A card feeds exactly one side of that split, so partitioning a card
+`onceMaxRequest/remaining` groups. A GPU feeds exactly one side of that split, so partitioning a GPU
 **moves** its capacity from the first three groups to the fourth rather than adding to it. The first
-three are credit-based (they track each card's per-card credit budget); `PT` counts hardware instances
-the cards can still host.
+three are credit-based (they track each GPU's per-GPU credit budget); `PT` counts hardware instances
+the GPUs can still host.
 
-### 1. All-logical — every card MIG off
+### 1. All-logical — every GPU MIG off
 
-Every card offers logical slicing and none offers partitions. The pool shows all three logical views
+Every GPU offers logical slicing and none offers partitions. The pool shows all three logical views
 populated and an empty partition view:
 
 ```console
@@ -350,8 +350,8 @@ gpustack--generic-linux-amd64                 gpustack-fnv64-3b93966fd73eb9ec   
 gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          8/8 80/80 100/800 0/0      0/0       Active
 ```
 
-Read the accelerated row as: **8** whole cards, **80** shares (10 per card), **800 %** of logical slice
-budget (100 % per card), and **no** partition capacity. The node advertises the logical key family and
+Read the accelerated row as: **8** whole GPUs, **80** shares (10 per GPU), **800 %** of logical slice
+budget (100 % per GPU), and **no** partition capacity. The node advertises the logical key family and
 `nvidia.com/gpu.partitioned` sits at 0, which is what keeps every `.partitioned.*` counting key absent:
 
 ```console
@@ -368,15 +368,15 @@ $ kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(se
 }
 ```
 
-Every number is per-card × 8: `1024 = 8 × 128` logical slices, `12800k = 8 × 1600k` credits,
-`655360 MiB = 8 × 81920`. The `Devices` capability (in `spec`; the per-card runtime ledger is in
-`status`) says the same thing card by card:
+Every number is per-GPU × 8: `1024 = 8 × 128` logical slices, `12800k = 8 × 1600k` credits,
+`655360 MiB = 8 × 81920`. The `Devices` capability (in `spec`; the per-GPU runtime ledger is in
+`status`) says the same thing GPU by GPU:
 
 ```console
 $ kubectl get devices node-h100 -o jsonpath='{.spec.groups[0].accelerators[*].status}' | jq -c
-group NVIDIA H100 80GB HBM3: 8 card(s); logically sliceable indices [0, 1, 2, 3, 4, 5, 6, 7]; partitioned indices -
-  card 0 logicalSliced: {"coresPercentageOvercommit": true, "count": 128}
-  …                     (cards 1-7 identical)
+group NVIDIA H100 80GB HBM3: 8 GPU(s); logically sliceable indices [0, 1, 2, 3, 4, 5, 6, 7]; partitioned indices -
+  GPU 0 logicalSliced: {"coresPercentageOvercommit": true, "count": 128}
+  …                    (GPUs 1-7 identical)
 
 $ kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64 -o jsonpath='{.status.detail.slicedDetail}' | jq
 {
@@ -385,7 +385,7 @@ $ kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64 -o jsonp
 }
 ```
 
-### 2. All-physical — every card MIG on
+### 2. All-physical — every GPU MIG on
 
 #### 2.1 Enable the mode, then re-detect
 
@@ -393,11 +393,11 @@ Following the [Enabling MIG on a node](#enabling-mig-on-a-node) runbook, flip th
 on the node itself (Hopper needs no GPU reset). GPUStack never runs this:
 
 ```console
-# On node-h100 (via SSH), the cards idle and driver-handle daemons stopped:
+# On node-h100 (via SSH), the GPUs idle and driver-handle daemons stopped:
 $ for i in $(seq 0 7); do sudo nvidia-smi -i "$i" -mig 1; done
 Enabled MIG Mode for GPU 00000000:8D:00.0
 All done.
-…                                                    (cards 1-7 identical)
+…                                                    (GPUs 1-7 identical)
 ```
 
 The cluster does **not** react yet — a capability change enters only through Device Manager
@@ -423,7 +423,7 @@ daemon set "gpustack-operator-device-manager-nvidia" successfully rolled out
 #### 2.2 The whole node changes families
 
 All three logical views drop to zero and the partition view takes over. This is not cosmetic: an
-exclusive tenant on a MIG-mode card would get a GPU CUDA cannot use, so the views now report what is
+exclusive tenant on a MIG-mode GPU would get a device CUDA cannot use, so the views now report what is
 actually servable.
 
 ```console
@@ -434,11 +434,11 @@ gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   
 ```
 
 `PT 1/56` reads: **1** is the most a single request can ask for — a partition request is validated to
-be exactly one instance on exactly one card, so any larger `onceMaxRequest` would advertise a value
+be exactly one instance on exactly one GPU, so any larger `onceMaxRequest` would advertise a value
 every ingress path rejects — and **56** is what the whole node can still host (`8 × 7`). Read `1` as
 "there is room", `0` as "there is none". The node's keys flip families wholesale — every
 `.sliced.*` key is gone, and one `partitioned.mig-<profile>` key appears per profile alongside
-`.partitioned.units`, which values a partitioned card at a whole card's credits exactly as
+`.partitioned.units`, which values a partitioned GPU at a whole GPU's credits exactly as
 `.sliced.units` valued a logically sliceable one:
 
 ```console
@@ -458,16 +458,16 @@ $ kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(se
 }
 ```
 
-Each per-profile key is 8 × that profile's per-card count from the
-[profile table](#supported-profiles) — `56 = 8 × 7` one-slice instances, `8 = 8 × 1` whole-card ones.
+Each per-profile key is 8 × that profile's per-GPU count from the
+[profile table](#supported-profiles) — `56 = 8 × 7` one-slice instances, `8 = 8 × 1` whole-GPU ones.
 `nvidia.com/gpu`, `.shared` and `.sliced` read `0` rather than disappearing: a device-plugin pool key
 zeroes out, it is never removed.
 
 ```console
 $ kubectl get devices node-h100 -o jsonpath='{.spec.groups[0].accelerators[*].status}' | jq -c
-group NVIDIA H100 80GB HBM3: 8 card(s); logically sliceable indices -; partitioned indices [0, 1, 2, 3, 4, 5, 6, 7]
-  card 0 partitioned: count=7 profiles=1g.10gb(7),1g.20gb(4),2g.20gb(3),3g.40gb(2),4g.40gb(1),7g.80gb(1)
-  …                   (cards 1-7 identical)
+group NVIDIA H100 80GB HBM3: 8 GPU(s); logically sliceable indices -; partitioned indices [0, 1, 2, 3, 4, 5, 6, 7]
+  GPU 0 partitioned: count=7 profiles=1g.10gb(7),1g.20gb(4),2g.20gb(3),3g.40gb(2),4g.40gb(1),7g.80gb(1)
+  …                  (GPUs 1-7 identical)
 ```
 
 #### 2.3 Request a MIG instance
@@ -493,12 +493,12 @@ spec:
       command: ["sleep", "86400"]
       resources:
         limits:
-          nvidia.com/gpu.partitioned: "1"              # one partitioned card
+          nvidia.com/gpu.partitioned: "1"              # one partitioned GPU
           nvidia.com/gpu.partitioned.mig-3g.40gb: "1"  # one 3g.40gb instance on it
 ```
 
 Kueue admits it, the node-devices AdmissionCheck confirms a free `3g.40gb` placement, and the device
-plugin **materializes** the GPU/compute instance on a card it selects, injecting only that MIG device:
+plugin **materializes** the GPU/compute instance pair on a GPU it selects, injecting only that MIG device:
 
 ```console
 $ kubectl get pod mig-demo
@@ -512,7 +512,7 @@ GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-950792bf-a01c-3f1a-e122-3473e67f54b2)
 
 #### 2.4 What one instance costs the node
 
-One `3g.40gb` occupies memory slices 0–3 of **one** card. Only that card's arithmetic changes, and it
+One `3g.40gb` occupies memory slices 0–3 of **one** GPU. Only that GPU's arithmetic changes, and it
 changes per profile according to the [placement rules](#supported-profiles):
 
 ```console
@@ -533,11 +533,11 @@ $ kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(se
 }
 ```
 
-Every one of those numbers is `Σ over cards of (allocated + remaining)`, which is what makes them
+Every one of those numbers is `Σ over GPUs of (allocated + remaining)`, which is what makes them
 subtract correctly — the scheduler fits a Pod by subtracting the requests of the Pods already on the
 node, so publishing bare *remaining* would subtract each live instance twice:
 
-| Profile | 7 untouched cards | the carved card | total |
+| Profile | 7 untouched GPUs | the carved GPU | total |
 |---|---|---|---|
 | `1g.10gb` | `7 × 7 = 49` | slices 4–7 free → 3 | **52** |
 | `1g.20gb` | `7 × 4 = 28` | slots `{4,2}`, `{6,2}` → 2 | **30** |
@@ -547,8 +547,8 @@ node, so publishing bare *remaining* would subtract each live instance twice:
 | `7g.80gb` | `7 × 1 = 7` | needs all 8 slices → 0 | **7** |
 
 Read the `3g.40gb` row as `allocated (1) + remaining (1)`: the scheduler subtracts `mig-demo`'s own
-request of 1 and correctly sees **one** more fitting on that card. `7g.80gb` and `4g.40gb` each lost
-exactly the carved card, while `3g.40gb` lost nothing at all — [2.5](#25-where-those-numbers-come-from)
+request of 1 and correctly sees **one** more fitting on that GPU. `7g.80gb` and `4g.40gb` each lost
+exactly the carved GPU, while `3g.40gb` lost nothing at all — [2.5](#25-where-those-numbers-come-from)
 walks why, one profile at a time.
 
 Deleting the Pod releases the credits immediately; the operator then destroys the compute instance and
@@ -560,16 +560,16 @@ the GPU instance, and the profile keys restore within one reclaim cycle.
 
 #### 2.5 Where those numbers come from
 
-Four kinds of number on this page count that one carved card, and they do not agree — deliberately.
+Four kinds of number on this page count that one carved GPU, and they do not agree — deliberately.
 Walking the arithmetic once makes the rest of the page read cleanly.
 
-**Per card it is interval overlap, nothing more.** A profile may only start at one of its hardcoded
-slots, and the slot count *is* its per-card maximum ([Supported profiles](#supported-profiles)). An
+**Per GPU it is interval overlap, nothing more.** A profile may only start at one of its hardcoded
+slots, and the slot count *is* its per-GPU maximum ([Supported profiles](#supported-profiles)). An
 instance still fits when its slot's interval overlaps nothing already taken — no device access and no
 driver call, just intervals:
 
 ```text
-the carved card's 8 memory slices
+the carved GPU's 8 memory slices
 
   [0][1][2][3]  taken by the live 3g.40gb          [4][5][6][7]  free
 ```
@@ -589,37 +589,37 @@ Two rows are worth reading twice. `2g.20gb` has three slots, not four, so it los
 `3g` that a `1g.20gb` survives. And `4g.40gb` contributes **0 allocated**, not 1: the ledger keys an
 allocation by the profile actually built, which is `3g.40gb`.
 
-**The four numbers, and what each one sums.** Take the whole node — seven untouched cards plus the
+**The four numbers, and what each one sums.** Take the whole node — seven untouched GPUs plus the
 carved one:
 
-| Number | Value here | Sums, over the node's partitioned cards | Why that shape |
+| Number | Value here | Sums, over the node's partitioned GPUs | Why that shape |
 |---|---|---|---|
 | `…partitioned.mig-<profile>` | the table above | that profile's `allocated + remaining` | the scheduler subtracts the node's existing requests, so the key must include them |
-| `nvidia.com/gpu.partitioned` | `53` | `allocated +` the card's **largest** per-profile free count | one pool key for the family, same scheduler-fit reason |
+| `nvidia.com/gpu.partitioned` | `53` | `allocated +` the GPU's **largest** per-profile free count | one pool key for the family, same scheduler-fit reason |
 | `InstanceType` `PT` remaining | `52` | that largest free count alone, **no allocated term** | a user-facing "how many more can I start" |
-| `InstanceType` `PT` onceMaxRequest | `1` | not a sum at all: `1` while any card can still host an instance, else `0` | one request builds exactly one instance on exactly one card, and both ingress paths reject any other count |
+| `InstanceType` `PT` onceMaxRequest | `1` | not a sum at all: `1` while any GPU can still host an instance, else `0` | one request builds exactly one instance on exactly one GPU, and both ingress paths reject any other count |
 
 `53` and `52` differ by exactly the one live instance — the pool key carries it, the user-facing view
 does not. And `onceMaxRequest` is `1`, not `52`, because no single request could ever consume the
 node's remainder — nor even two instances of it.
 
-**A card's contribution is a maximum, never a sum.** To those last three numbers the carved card
+**A GPU's contribution is a maximum, never a sum.** To those last three numbers the carved GPU
 contributes `3` — not `3 + 2 + 1 + 1 = 7`. Its profiles compete for the same physical slices, so
 creating an instance of one consumes placements of the others, and adding them would count the same
 hardware several times over. The largest per-profile free count is the honest answer to "how many more
-instances can this card host": three `1g.10gb`, or fewer larger ones instead — never both.
+instances can this GPU host": three `1g.10gb`, or fewer larger ones instead — never both.
 
 **The capability snapshot does not move at all.** `status.detail.slicedDetail` on the `InstanceType`
 still reports `physical.count: 56` and `4g.40gb: 8` after the carve, unchanged from
 [step 2.2](#22-the-whole-node-changes-families). It is derived only from the `Devices` **spec** — the
-detector's record of what these cards could host when empty — and never reads the runtime ledger. Every
+detector's record of what these GPUs could host when empty — and never reads the runtime ledger. Every
 number in the table above is instead a join of that spec capability with the `Devices` **status**
 ledger. Use `slicedDetail` to answer "what is this pool made of", and the node keys or the `PT` view to
 answer "what is still free". Reading the capability as a remainder is the easiest mistake to make here.
 
 ### 3. Mixed — part logical, part physical
 
-Disabling MIG on five of the eight cards leaves three partitioned. This is the configuration that shows
+Disabling MIG on five of the eight GPUs leaves three partitioned. This is the configuration that shows
 the disjoint populations directly, because **both** families are advertised by one node at once:
 
 ```console
@@ -645,8 +645,8 @@ NAME                                          ENTRANCE                          
 gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          5/5 50/50 100/500 7/21   0/0   Active
 ```
 
-`5/5 50/50 100/500` covers the **five** whole cards; `7/21` covers the **three** partitioned ones
-(`3 × 7`). No card is counted twice, and no card is missing:
+`5/5 50/50 100/500` covers the **five** whole GPUs; `7/21` covers the **three** partitioned ones
+(`3 × 7`). No GPU is counted twice, and no GPU is missing:
 
 ```console
 $ kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(select(.key|test("nvidia.com/gpu")))'
@@ -669,25 +669,25 @@ $ kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(se
 }
 ```
 
-Every logical number is now **five** cards' worth (`640 = 5 × 128`, `8M = 5 × 1600k`,
+Every logical number is now **five** GPUs' worth (`640 = 5 × 128`, `8M = 5 × 1600k`,
 `409600 MiB = 5 × 81920`) and every partition number **three** (`21 = 3 × 7`, `4800k = 3 × 1600k`). The
-`Devices` capability names which card is in which population:
+`Devices` capability names which GPU is in which population:
 
 ```console
 $ kubectl get devices node-h100 -o jsonpath='{.spec.groups[0].accelerators[*].status}' | jq -c
-group NVIDIA H100 80GB HBM3: 8 card(s); logically sliceable indices [3, 4, 5, 6, 7]; partitioned indices [0, 1, 2]
-  card 0 partitioned:    count=7 profiles=1g.10gb(7),1g.20gb(4),2g.20gb(3),3g.40gb(2),4g.40gb(1),7g.80gb(1)
-  card 1 partitioned:    count=7 profiles=1g.10gb(7),1g.20gb(4),2g.20gb(3),3g.40gb(2),4g.40gb(1),7g.80gb(1)
-  card 2 partitioned:    count=7 profiles=1g.10gb(7),1g.20gb(4),2g.20gb(3),3g.40gb(2),4g.40gb(1),7g.80gb(1)
-  card 3 logicalSliced:  {"coresPercentageOvercommit": true, "count": 128}
-  …                      (cards 4-7 identical)
+group NVIDIA H100 80GB HBM3: 8 GPU(s); logically sliceable indices [3, 4, 5, 6, 7]; partitioned indices [0, 1, 2]
+  GPU 0 partitioned:     count=7 profiles=1g.10gb(7),1g.20gb(4),2g.20gb(3),3g.40gb(2),4g.40gb(1),7g.80gb(1)
+  GPU 1 partitioned:     count=7 profiles=1g.10gb(7),1g.20gb(4),2g.20gb(3),3g.40gb(2),4g.40gb(1),7g.80gb(1)
+  GPU 2 partitioned:     count=7 profiles=1g.10gb(7),1g.20gb(4),2g.20gb(3),3g.40gb(2),4g.40gb(1),7g.80gb(1)
+  GPU 3 logicalSliced:   {"coresPercentageOvercommit": true, "count": 128}
+  …                      (GPUs 4-7 identical)
 ```
 
 #### 3.1 Both kinds of workload, side by side
 
-A partition request and a logical-slice request submitted together land on **different** cards, because
+A partition request and a logical-slice request submitted together land on **different** GPUs, because
 the resource names they carry are advertised by disjoint populations — the scheduler cannot even
-consider a card that does not offer the key:
+consider a GPU that does not offer the key:
 
 ```console
 $ kubectl get pods
@@ -703,14 +703,14 @@ $ kubectl exec mixed-logical -- nvidia-smi -L
 GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-4e24fa00-9f4f-68c4-bfcd-581cd3cb7de6)
 ```
 
-The partition workload sees **only its MIG device**; the logical-slice workload sees a **whole card**
+The partition workload sees **only its MIG device**; the logical-slice workload sees a **whole GPU**
 (capped at runtime by the preload library, not by what `nvidia-smi -L` lists). The allocation record
-names the card each landed on:
+names the GPU each landed on:
 
 ```console
 $ kubectl get pod <name> -o jsonpath='{.metadata.annotations.device\.gpustack\.ai/accelerator\.allocated}'
-mixed-partition  -> index=0  id=GPU-950792bf-…  profile=3g.40gb     # a PARTITIONED card
-mixed-logical    -> index=5  id=GPU-4e24fa00-…  profile=-           # a WHOLE card
+mixed-partition  -> index=0  id=GPU-950792bf-…  profile=3g.40gb     # a PARTITIONED GPU
+mixed-logical    -> index=5  id=GPU-4e24fa00-…  profile=-           # a WHOLE GPU
 ```
 
 Both views move, independently, in their own family:
@@ -721,9 +721,9 @@ NAME                                          ENTRANCE                          
 gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          4/4 40/40 100/450 7/17   0/0   Active
 ```
 
-- `EX 5→4` and `SH 50→40`: the logical slice put card 5 in use, so one fewer whole card can be claimed.
-- `SL 500→450`: the slice took 50 % of card 5; `450 = 4 × 100 + 50`.
-- `PT 21→17`: card 0 now holds a `3g.40gb`, leaving three `1g.10gb` slots; `17 = 2 × 7 + 3`.
+- `EX 5→4` and `SH 50→40`: the logical slice put GPU 5 in use, so one fewer whole GPU can be claimed.
+- `SL 500→450`: the slice took 50 % of GPU 5; `450 = 4 × 100 + 50`.
+- `PT 21→17`: GPU 0 now holds a `3g.40gb`, leaving three `1g.10gb` slots; `17 = 2 × 7 + 3`.
 
 ```console
 $ kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(select(.key|test("gpu\\.partitioned")))'
@@ -739,20 +739,20 @@ $ kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(se
 }
 ```
 
-Only the partitioned cards' keys moved — the five whole cards' `.sliced.*` keys are untouched, because
-the `3g.40gb` was carved on a card that is not in their population.
+Only the partitioned GPUs' keys moved — the five whole GPUs' `.sliced.*` keys are untouched, because
+the `3g.40gb` was carved on a GPU that is not in their population.
 
-The placement is not luck: a partition token only exists on a partitioned card and a `.sliced` token
+The placement is not luck: a partition token only exists on a partitioned GPU and a `.sliced` token
 only on a whole one, so the resource name rules out the wrong population before the kubelet is
 involved. This is the failure the split exists to remove — a single pool used to let the kubelet hand a
-partition request a token from a card that could not host one, and the Pod died with a terminal
+partition request a token from a GPU that could not host one, and the Pod died with a terminal
 `UnexpectedAdmissionError`.
 
 ### 4. Back to all-logical
 
-Reverse the runbook ([Disabling MIG on a node](#disabling-mig-on-a-node)): with the cards idle, flip the
+Reverse the runbook ([Disabling MIG on a node](#disabling-mig-on-a-node)): with the GPUs idle, flip the
 remaining modes off and re-detect. The `partitioned` keys go to zero, the logical capability keys
-return, and the pool is back to where [step 1](#1-all-logical--every-card-mig-off) started:
+return, and the pool is back to where [step 1](#1-all-logical--every-gpu-mig-off) started:
 
 ```console
 # On node-h100 (via SSH):
@@ -780,7 +780,7 @@ gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   
   the mode geometry.
 - It does not deschedule or evict Pods when MIG *mode* changes.
 - It does not account for an instance you carved by hand. (It *does* delete it: an instance no allocation
-  accounts for is reclaimed as an orphan once its card is idle — see [Limitations](#limitations).)
+  accounts for is reclaimed as an orphan once its GPU is idle — see [Limitations](#limitations).)
 
 A capability change reaches the cluster **only** through Device Manager restart or re-detection.
 

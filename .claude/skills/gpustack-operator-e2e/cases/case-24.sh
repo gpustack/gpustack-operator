@@ -66,6 +66,7 @@ echo "[case-24] node cards: ${ALL_INDEXES} (${NCARDS}); partitioning: ${MIXED_IN
 
 TOGGLED=""
 UAE_TOTAL=0
+UAE_UNREAD=0
 
 restore() {
   echo
@@ -186,9 +187,14 @@ for r in $(seq 1 "$ROUNDS"); do
     record FAIL "round ${r}: logical slice lands on a whole card" "${LP} running=${lrun}, allocated card(s)='${lcards:-<none>}', held reason='$(held_reason "$LP")' — the logical request did not run on the mixed node"
   fi
 
-  # The headline number: no terminal device-plugin admission failure, in either family.
+  # The headline number: no terminal device-plugin admission failure, in either family. A Pod whose
+  # events cannot be read is counted as unread rather than as zero — the difference between "it did
+  # not happen" and "we could not tell" is the whole value of this check.
   for p in "$PP" "$LP"; do
-    n="$(pod_unexpected_admission "$p")"
+    if ! n="$(pod_unexpected_admission "$p")"; then
+      UAE_UNREAD=$((UAE_UNREAD + 1))
+      continue
+    fi
     [ -n "$n" ] && UAE_TOTAL=$((UAE_TOTAL + n))
   done
 
@@ -196,7 +202,9 @@ for r in $(seq 1 "$ROUNDS"); do
   wait_card_idle || echo "[case-24]   warning: a live instance is still present entering the next round"
 done
 
-if [ "$UAE_TOTAL" = 0 ]; then
+if [ "$UAE_UNREAD" != 0 ]; then
+  record FAIL "zero UnexpectedAdmissionError across all rounds" "${UAE_TOTAL} event(s) counted, but ${UAE_UNREAD} Pod('s) events could not be read at all — this check is UNVERIFIED, which is not the same as passed"
+elif [ "$UAE_TOTAL" = 0 ]; then
   record PASS "zero UnexpectedAdmissionError across all rounds" "${ROUNDS} round(s) × 2 Pods, 0 UnexpectedAdmissionError events"
 else
   record FAIL "zero UnexpectedAdmissionError across all rounds" "${UAE_TOTAL} UnexpectedAdmissionError event(s) over ${ROUNDS} round(s) — a request was offered a token from the wrong card population"

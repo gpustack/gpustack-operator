@@ -38,37 +38,41 @@ const (
 
 const (
 	// SharedResourceNameSuffix is the coarse-grained shared counting key,
-	// advertised by the device-plugin (its value is the sharing ownership card count)
-	// and used for Kueue credits accounting.
+	// advertised by the device-plugin (its value is the sharing ownership accelerator
+	// count) and used for Kueue credits accounting.
 	SharedResourceNameSuffix = ".shared"
 	// SlicedResourceNameSuffix is the coarse sliced injection-token key, advertised
-	// by the device-plugin as a loose per-card token pool sized by the device group's
-	// max slice count (so node allocatable is cards*maxSlices, not the card count); it
-	// only triggers the allocator's Allocate() injection hook. The binding credits
-	// accounting lives on the fine-grained ".sliced.units" key.
+	// by the device-plugin as a loose per-accelerator token pool sized by the device
+	// group's max slice count (so node allocatable is accelerators*maxSlices, not the
+	// accelerator count); it only triggers the allocator's Allocate() injection hook.
+	// The binding credits accounting lives on the fine-grained ".sliced.units" key.
 	SlicedResourceNameSuffix = ".sliced"
 	// SlicedUnitsResourceNameSuffix is the fine-grained sliced counting key,
 	// reported per node via Patch Node and used for Kueue credits accounting.
 	SlicedUnitsResourceNameSuffix = ".sliced.units"
-	// SlicedCoresPercentageResourceNameSuffix is the per-card SM (compute) budget key
-	// for sliced allocations, reported per node by the NodeCapacityReconciler and sized
-	// from the device group's max slice count and compute-overcommit flag: overcommit
-	// grants each slice a full 100% (so the per-card budget scales with the slice count),
-	// otherwise the per-card compute stays a single 100%. It is a gate-2 node-level
-	// counting resource consumed by the default scheduler/kubelet and the device-plugin
-	// (CUDA_DEVICE_SM_LIMIT); it is never folded into Kueue credits.
+	// SlicedCoresPercentageResourceNameSuffix is the per-accelerator SM (compute) budget
+	// key for sliced allocations, reported per node by the NodeCapacityReconciler and
+	// sized from the device group's max slice count and compute-overcommit flag:
+	//
+	//   - With compute overcommit, each slice is granted a full 100%, so the
+	//     per-accelerator budget scales with the slice count.
+	//   - Without it, the per-accelerator compute stays a single 100%.
+	//
+	// It is a gate-2 node-level counting resource consumed by the default
+	// scheduler/kubelet and the device-plugin (CUDA_DEVICE_SM_LIMIT); it is never folded
+	// into Kueue credits.
 	SlicedCoresPercentageResourceNameSuffix = ".sliced.cores-percentage"
-	// SlicedMemoryPercentageResourceNameSuffix is the per-card VRAM-percentage budget
-	// key for sliced allocations, reported per node as count*100. Gate-2 node-level
+	// SlicedMemoryPercentageResourceNameSuffix is the per-accelerator VRAM-percentage
+	// budget key for sliced allocations, reported per node as count*100. Gate-2 node-level
 	// only (the webhook folds it into .sliced.units); never folded into Kueue credits.
 	SlicedMemoryPercentageResourceNameSuffix = ".sliced.memory-percentage"
-	// SlicedMemoryMibResourceNameSuffix is the per-card absolute VRAM budget key (MiB)
-	// for sliced allocations, reported per node as count*cardVRAMMib. Gate-2
+	// SlicedMemoryMibResourceNameSuffix is the per-accelerator absolute VRAM budget key
+	// (MiB) for sliced allocations, reported per node as count*cardVRAMMib. Gate-2
 	// node-level only (drives CUDA_DEVICE_MEMORY_LIMIT_IN_BYTES; the webhook folds it
 	// into .sliced.units via floor(mib/cardVRAM*M)); never folded into Kueue credits.
 	SlicedMemoryMibResourceNameSuffix = ".sliced.memory-mib"
 	// PartitionedResourceNameSuffix is the coarse physical-partition token key,
-	// advertised by the device-plugin for the cards put into a hardware partitioning
+	// advertised by the device-plugin for the accelerators put into a hardware partitioning
 	// mode. It only triggers the allocator's Allocate() hook, which places the
 	// instance itself; the counting lives on ".partitioned.units" and on the
 	// per-profile keys. It is advertised only by a manufacturer that has a partition
@@ -76,8 +80,8 @@ const (
 	PartitionedResourceNameSuffix = ".partitioned"
 	// PartitionedUnitsResourceNameSuffix is the fine-grained physical-partition counting
 	// key, reported per node via Patch Node and used for Kueue credits accounting. It
-	// values a partitioned card at whole-card units, mirroring ".sliced.units" for a
-	// logically sliceable card.
+	// values a partitioned accelerator at whole-accelerator units, mirroring
+	// ".sliced.units" for a logically sliceable accelerator.
 	PartitionedUnitsResourceNameSuffix = ".partitioned.units"
 
 	// VisibilityResourceNamePrefix and VisibilityResourceNameSuffix compose the device-only
@@ -93,20 +97,21 @@ const (
 
 const (
 	// ResourceMaxUnits is the global denominator D = 2^9 * 5^5 = 1600000 and the
-	// single per-card unit basis shared by every allocation mode: one whole card is
-	// worth D normalized units, Shared yields D/10 per ownership, and a card sliced
-	// into N partitions yields D/N units per slice. D keeps the 2^9 factor so every
-	// power-of-two partition size up to SlicedResourceMaxSize=512 divides it exactly,
-	// and the 5^5 factor (vs the former 12800 = 2^9 * 5^2) makes the memory-1% step
-	// D/100 = 16000 an integer for the per-card VRAM-percentage slice keys. It is also
-	// the integer credit base B = CreditsPerCard (one whole card = D credits), so the
-	// .sliced.units→credits Kueue factor is B/D = 1 and every per-mode credit value
-	// stays integer-valued. It also seeds the device-plugin per-card unit grid and the
-	// Devices CR AcceleratorAllocation ruler.
+	// single per-accelerator unit basis shared by every allocation mode: one whole
+	// accelerator is worth D normalized units, Shared yields D/10 per ownership, and an
+	// accelerator sliced into N partitions yields D/N units per slice. D keeps the 2^9
+	// factor so every power-of-two partition size up to SlicedResourceMaxSize=512 divides
+	// it exactly, and the 5^5 factor (vs the former 12800 = 2^9 * 5^2) makes the
+	// memory-1% step D/100 = 16000 an integer for the per-accelerator VRAM-percentage
+	// slice keys. It is also the integer credit base B = CreditsPerAccelerator (one whole
+	// accelerator = D credits), so the .sliced.units→credits Kueue factor is B/D = 1 and
+	// every per-mode credit value stays integer-valued. It also seeds the device-plugin
+	// per-accelerator unit grid and the Devices CR AcceleratorAllocation ruler.
 	ResourceMaxUnits = 1_600_000
-	// SharedResourceMaxSize is the maximum number of owners a card can be shared among.
+	// SharedResourceMaxSize is the maximum number of owners an accelerator can be shared
+	// among.
 	SharedResourceMaxSize = 10
-	// SlicedResourceMaxSize is the maximum number of partitions a card can be
+	// SlicedResourceMaxSize is the maximum number of partitions an accelerator can be
 	// sliced into (a power of two; the largest divisor of D below).
 	SlicedResourceMaxSize = 512
 )
@@ -205,7 +210,7 @@ func init() {
 	// overridable by GPUSTACK_<MANUFACTURER>_PARTITION_KIND.
 	_ManufacturerPartitionKindMap = map[string]string{
 		ManufacturerNVIDIA: "mig",
-		// T-Head PPU carves a card into GPU instances under the same feature name its
+		// T-Head PPU carves an accelerator into GPU instances under the same feature name its
 		// own management library and CLI use, so it shares the word rather than coining one.
 		ManufacturerTHead: "mig",
 	}
@@ -340,7 +345,7 @@ func GetAcceleratableSlicedUnitsResourceName(manufacturer string) core.ResourceN
 	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + SlicedUnitsResourceNameSuffix
 }
 
-// GetAcceleratableSlicedCoresPercentageResourceName returns the per-card SM budget
+// GetAcceleratableSlicedCoresPercentageResourceName returns the per-accelerator SM budget
 // key for the given manufacturer (e.g. "nvidia.com/gpu.sliced.cores-percentage").
 // It is a gate-2 node-level resource, distinct from the credits input returned by
 // GetAcceleratableSlicedUnitsResourceName.
@@ -348,14 +353,14 @@ func GetAcceleratableSlicedCoresPercentageResourceName(manufacturer string) core
 	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + SlicedCoresPercentageResourceNameSuffix
 }
 
-// GetAcceleratableSlicedMemoryPercentageResourceName returns the per-card
+// GetAcceleratableSlicedMemoryPercentageResourceName returns the per-accelerator
 // VRAM-percentage budget key for the given manufacturer
 // (e.g. "nvidia.com/gpu.sliced.memory-percentage"). Gate-2 node-level resource.
 func GetAcceleratableSlicedMemoryPercentageResourceName(manufacturer string) core.ResourceName {
 	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + SlicedMemoryPercentageResourceNameSuffix
 }
 
-// GetAcceleratableSlicedMemoryMibResourceName returns the per-card absolute VRAM
+// GetAcceleratableSlicedMemoryMibResourceName returns the per-accelerator absolute VRAM
 // budget key in MiB for the given manufacturer
 // (e.g. "nvidia.com/gpu.sliced.memory-mib"). Gate-2 node-level resource.
 func GetAcceleratableSlicedMemoryMibResourceName(manufacturer string) core.ResourceName {
@@ -380,7 +385,7 @@ func GetAcceleratablePartitionedUnitsResourceName(manufacturer string) core.Reso
 // PublishPartitionedProfileName, so the key always carries the published spelling whichever
 // spelling the caller holds, and VendorPartitionedProfileOf maps it back. Beyond that the
 // name is used verbatim: one that is not a valid resource-name segment is excluded upstream
-// when the card's inventory is built. It returns "" when the manufacturer has no partition
+// when the accelerator's inventory is built. It returns "" when the manufacturer has no partition
 // kind, or when the name would not yield a valid resource name.
 func GetAcceleratablePartitionedProfileResourceName(manufacturer, profile string) core.ResourceName {
 	prefix := _PartitionedProfileResourceNamePrefixMap[manufacturer]
@@ -551,9 +556,9 @@ const (
 	// ResourceFamilyNone is the classification of a resource name outside every
 	// accelerator family, e.g. "cpu" or a credits resource.
 	ResourceFamilyNone ResourceFamily = "none"
-	// ResourceFamilyExclusive is the whole-card family, "<base>".
+	// ResourceFamilyExclusive is the whole-accelerator family, "<base>".
 	ResourceFamilyExclusive ResourceFamily = "exclusive"
-	// ResourceFamilyShared is the card-sharing family, "<base>.shared".
+	// ResourceFamilyShared is the accelerator-sharing family, "<base>.shared".
 	ResourceFamilyShared ResourceFamily = "shared"
 	// ResourceFamilySliced is the logical (software injection) slicing family,
 	// "<base>.sliced" and its sub-keys.
@@ -628,16 +633,16 @@ func GetAcceleratableRuntimeName(manufacturer string) string {
 }
 
 // IsValidSlicedPartitions reports whether n is a usable slice partition count: a
-// power of two in [2, SlicedResourceMaxSize]. A single slice (n=1) is a whole card
-// and is not a valid slicing request.
+// power of two in [2, SlicedResourceMaxSize]. A single slice (n=1) is a whole
+// accelerator and is not a valid slicing request.
 func IsValidSlicedPartitions(n int64) bool {
 	return n >= 2 && n <= SlicedResourceMaxSize && n&(n-1) == 0
 }
 
-// QuantityToSliceCount converts a per-card credits quantity to the number of
-// slices it represents on a card sliced into `sliced` partitions: floor(q * sliced).
-// It is independent of the global denominator D (a whole card always yields
-// `sliced` slices), and floors to an integer count.
+// QuantityToSliceCount converts a per-accelerator credits quantity to the number of
+// slices it represents on an accelerator sliced into `sliced` partitions:
+// floor(q * sliced). It is independent of the global denominator D (a whole
+// accelerator always yields `sliced` slices), and floors to an integer count.
 func QuantityToSliceCount(q resource.Quantity, sliced int64) resource.Quantity {
 	if sliced <= 0 {
 		return q
@@ -646,13 +651,13 @@ func QuantityToSliceCount(q resource.Quantity, sliced int64) resource.Quantity {
 		return q
 	}
 	// Multiply-first (×sliced before ÷1e6) keeps full precision; inputs are
-	// per-card credits bounded by physical accelerator counts, so the int64
+	// per-accelerator credits bounded by physical accelerator counts, so the int64
 	// intermediate (q·1e6·sliced) never overflows in practice.
 	q.Set(q.ScaledValue(resource.Micro) * sliced / 1e6)
 	return q
 }
 
-// QuantityToAlignedValue converts a slice count to the normalized per-card unit
+// QuantityToAlignedValue converts a slice count to the normalized per-accelerator unit
 // value written to the `.sliced.units` resource: q * (D / sliced).
 func QuantityToAlignedValue(q resource.Quantity, sliced int64) resource.Quantity {
 	if sliced <= 0 {
@@ -666,8 +671,8 @@ func QuantityToAlignedValue(q resource.Quantity, sliced int64) resource.Quantity
 	return q
 }
 
-// MemoryMibToUnits converts an absolute per-card VRAM request in MiB to the
-// normalized per-card `.sliced.units` value: floor(mib / cardVRAMMib × D), where
+// MemoryMibToUnits converts an absolute per-accelerator VRAM request in MiB to the
+// normalized per-accelerator `.sliced.units` value: floor(mib / cardVRAMMib × D), where
 // D is ResourceMaxUnits. VRAM is the non-oversubscribable anchor, so the
 // conversion floors and never over-allocates. It returns 0 when cardVRAMMib is
 // non-positive (the caller treats that as "cannot compute").
@@ -678,7 +683,7 @@ func MemoryMibToUnits(mib, cardVRAMMib int64) int64 {
 	return mib * ResourceMaxUnits / cardVRAMMib
 }
 
-// QuantityToOriginalValue converts a normalized per-card unit value back to the
+// QuantityToOriginalValue converts a normalized per-accelerator unit value back to the
 // original slice count: q / (D / sliced).
 func QuantityToOriginalValue(q resource.Quantity, sliced int64) resource.Quantity {
 	if sliced <= 0 {
@@ -693,33 +698,33 @@ func QuantityToOriginalValue(q resource.Quantity, sliced int64) resource.Quantit
 }
 
 const (
-	// CreditsPerCard is the integer credit base B: one whole accelerator card is
+	// CreditsPerAccelerator is the integer credit base B: one whole accelerator is
 	// worth B credits. It equals the global denominator D (ResourceMaxUnits), so
-	// the finest sliced unit (1/SlicedResourceMaxSize of a card) maps to the
+	// the finest sliced unit (1/SlicedResourceMaxSize of an accelerator) maps to the
 	// integer B/SlicedResourceMaxSize (=3125) and the ".sliced.units"→credits Kueue
-	// factor is exactly B/D=1. Scoring credits as B×card-fraction keeps every
+	// factor is exactly B/D=1. Scoring credits as B×accelerator-fraction keeps every
 	// per-mode value an integer, so Kueue's ResourceValue int64 quantization
 	// (q.Value(), which ceils non-CPU resources) never rounds a fractional credit
 	// up to 1 — the failure that broke the sliced borrow accounting.
-	CreditsPerCard = ResourceMaxUnits
+	CreditsPerAccelerator = ResourceMaxUnits
 )
 
-// CardsToCredits scales a whole-card count to its integer credit value (cards×B).
-// It is used to build the Kueue ClusterQueue credits NominalQuota so the quota is
-// expressed on the same integer basis as the transformed credit requests.
-func CardsToCredits(cards resource.Quantity) resource.Quantity {
-	cards.Mul(CreditsPerCard)
-	return cards
+// AcceleratorsToCredits scales a whole-accelerator count to its integer credit value
+// (accelerators×B). It is used to build the Kueue ClusterQueue credits NominalQuota so
+// the quota is expressed on the same integer basis as the transformed credit requests.
+func AcceleratorsToCredits(accelerators resource.Quantity) resource.Quantity {
+	accelerators.Mul(CreditsPerAccelerator)
+	return accelerators
 }
 
-// CreditsToCards converts a credit quantity back to card units (credits÷B),
-// preserving the fraction at micro scale so the exclusive whole-card display and
+// CreditsToAccelerators converts a credit quantity back to accelerator units (credits÷B),
+// preserving the fraction at micro scale so the exclusive whole-accelerator display and
 // the sliced per-partition display (×partitions) stay exact. It first reads the
 // credit count via Value() — the same int64 quantization Kueue's ResourceValue
-// applies to non-CPU resources (Value() ceils) — so the operator's card view
+// applies to non-CPU resources (Value() ceils) — so the operator's accelerator view
 // always agrees with Kueue's accounting and a misconfigured fractional credit
 // degrades to a safe integer rather than a misleading fraction.
-func CreditsToCards(credits resource.Quantity) resource.Quantity {
-	credits.SetScaled(credits.Value()*1_000_000/CreditsPerCard, resource.Micro)
+func CreditsToAccelerators(credits resource.Quantity) resource.Quantity {
+	credits.SetScaled(credits.Value()*1_000_000/CreditsPerAccelerator, resource.Micro)
 	return credits
 }

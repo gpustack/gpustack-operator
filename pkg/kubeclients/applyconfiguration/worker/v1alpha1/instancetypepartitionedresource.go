@@ -13,15 +13,16 @@ import (
 // InstanceType: the scalar view every resource shares, plus the pool's per-profile ledger.
 //
 // The per-profile lists are what answers "which partition profiles can I still get". Neither of
-// the alternatives does: the scalar Remaining is the best case over a card's profiles rather
-// than a total (the profiles on one card compete for the same physical slices, so summing them
-// would multiply-count the same hardware), and Detail.SlicedDetail is the static capability
-// catalog, which by design does not move as instances are carved and released.
+// the alternatives does: the scalar Remaining is the best case over an accelerator's profiles
+// rather than a total (the profiles on one accelerator compete for the same physical slices, so
+// summing them would multiply-count the same hardware), and Detail.SlicedDetail is the static
+// capability catalog, which by design does not move as instances are carved and released.
 type InstanceTypePartitionedResourceApplyConfiguration struct {
 	InstanceTypeResourceApplyConfiguration `json:",inline"`
 	// AllocatedProfiles lists, by profile name, how many instances of each profile the pool's
-	// partitioned cards currently hold, summed over those cards. A profile holding nothing is
-	// absent rather than listed at zero — unlike RemainingProfiles, where zero carries meaning.
+	// partitioned accelerators currently hold, summed over those accelerators. A profile holding
+	// nothing is absent rather than listed at zero — unlike RemainingProfiles, where zero carries
+	// meaning.
 	//
 	// The worker gateway ingests it per candidate and sums it by profile name into the fleet-wide
 	// aggregate it serves, so changing its zero-handling or its presence changes that aggregate too.
@@ -30,7 +31,7 @@ type InstanceTypePartitionedResourceApplyConfiguration struct {
 	// alone cannot say whether a zero is "occupied" or merely "squeezed out by a sibling profile".
 	AllocatedProfiles []AcceleratorProfileCountApplyConfiguration `json:"allocatedProfiles,omitempty"`
 	// RemainingProfiles lists, by profile name, how many more instances of each profile the pool
-	// can still host, summed over its partitioned cards.
+	// can still host, summed over its partitioned accelerators.
 	//
 	// Every profile the pool offers gets an entry, even at zero, so a profile whose room a
 	// sibling's instance consumed reads 0 instead of vanishing — a reader can tell "offered but
