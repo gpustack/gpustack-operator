@@ -84,6 +84,22 @@ function strip_links(t,   m, txt) {
   }
   return t
 }
+function fence_line(l,   n, c) {
+  # Returns a fence marker as "<char><run-length>", or "" for a line that is not one. Markdown
+  # allows at most three spaces of indent before a fence; four makes it an indented code block.
+  # The character matters as much as the length: a ~~~ line inside a ``` block does not close it.
+  if (l !~ /^ {0,3}(`{3,}|~{3,})/) return ""
+  sub(/^ +/, "", l)
+  c = substr(l, 1, 1)
+  n = 0
+  while (substr(l, n + 1, 1) == c) n++
+  return c n
+}
+# Does this fence marker close one opened by "open"? Same character, and at least as long.
+function fence_closes(marker, open) {
+  return substr(marker, 1, 1) == substr(open, 1, 1) && \
+         (length(marker) - 1) + 0 >= (length(open) - 1) + 0
+}
 function slug(t,   a) {
   a = tolower(strip_links(t))
   gsub(/`|\*/, "", a)
@@ -112,7 +128,8 @@ normpath() {
 # Every heading as a GitHub anchor slug, duplicates suffixed the way GitHub does.
 anchors_of() {
   awk "$AWK_LIB"'
-    /^```/ { fence = !fence; next }
+    { fl = fence_line($0)
+      if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
     fence  { next }
     /^#{1,6} / {
       sub(/^#+ +/, "")
@@ -126,7 +143,8 @@ anchors_of() {
 # The ## headings only, as anchors, with "Contents" itself dropped.
 h2_anchors_of() {
   awk "$AWK_LIB"'
-    /^```/ { fence = !fence; next }
+    { fl = fence_line($0)
+      if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
     fence  { next }
     /^## / {
       sub(/^## +/, "")
@@ -138,7 +156,10 @@ h2_anchors_of() {
 
 # The anchors the "## Contents" list links to, in order.
 toc_anchors_of() {
-  awk '
+  awk "$AWK_LIB"'
+    { fl = fence_line($0)
+      if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
+    fence  { next }
     /^## Contents/ { intoc = 1; next }
     intoc && /^#{1,6} / { intoc = 0 }
     intoc && /^- \[/ {
@@ -149,8 +170,9 @@ toc_anchors_of() {
 
 # Every link target outside code fences, one per line.
 links_of() {
-  awk '
-    /^```/ { fence = !fence; next }
+  awk "$AWK_LIB"'
+    { fl = fence_line($0)
+      if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
     fence  { next }
     {
       line = $0
@@ -178,35 +200,43 @@ h1_of() { awk '/^# / { sub(/^# +/, ""); print; exit }' "$1"; }
 
 # How many "##" sections a page has, fenced blocks excluded.
 h2_count_of() {
-  awk '
-    /^[ \t]*```/ { fence = !fence; next }
+  awk "$AWK_LIB"'
+    { fl = fence_line($0)
+      if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
     fence  { next }
-    /^## /  { c++ }
+    /^## /  { if ($0 != "## Contents") c++ }
     END     { print c + 0 }
   ' "$1"
 }
 
-# Prose paragraphs over the cap, as "startline<TAB>lines<TAB>chars". Fenced blocks, headings, tables,
-# lists, blockquotes, indented continuations and the See also / Next footer are not prose: each ends
-# the paragraph it interrupts. Characters are counted on the rendered text, so a link costs its label.
+# Prose paragraphs over the cap, as "startline<TAB>lines<TAB>chars". A fenced block, a heading, a table
+# row, a list marker, a blockquote and the See also / Next footer are not prose, and each ends the
+# paragraph it interrupts. Indentation does not exempt anything: a paragraph nested under a list item
+# is prose a reader still has to get through, so it is measured on its dedented text. Characters are
+# counted on the rendered text, so a link costs its label, not its URL.
 long_paragraphs_of() {
   awk -v lcap="$PARA_LINE_CAP" -v ccap="$PARA_CHAR_CAP" "$AWK_LIB"'
     function flush() {
       if (n > 0 && (n > lcap || chars > ccap)) printf "%d\t%d\t%d\n", start, n, chars
       n = 0; chars = 0
     }
-    /^[ \t]*```/               { flush(); fence = !fence; next }
-    fence                      { next }
-    /^[ \t]*$/                 { flush(); next }
-    /^[ \t]/                   { flush(); next }
-    /^[#>|]/                   { flush(); next }
-    /^([-*+]|[0-9]+[.)]) /     { flush(); next }
-    /^\*\*(See also|Next)\*\*/ { flush(); footer = 1; next }
-    footer                     { next }
+    { fl = fence_line($0)
+      if (fl != "") { flush(); if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
+    fence                            { next }
+    /^[ \t]*$/                       { flush(); next }
+    # Four spaces or a tab is an indented code block in Markdown, not prose.
+    /^(    |\t)/                     { flush(); next }
+    /^[ \t]*[#>|]/                   { flush(); next }
+    /^[ \t]*([-*+]|[0-9]+[.)]) /     { flush(); next }
+    # The footer is a page-level construct at column 0; the same words indented are list prose.
+    /^\*\*(See also|Next)\*\*/       { flush(); footer = 1; next }
+    footer                           { next }
     {
+      line = $0
+      sub(/^[ \t]+/, "", line)
       if (n == 0) start = FNR
       n++
-      chars += length(strip_links($0)) + 1
+      chars += length(strip_links(line)) + 1
     }
     END { flush() }
   ' "$1"
@@ -223,6 +253,7 @@ index_labels() {
       label = m; sub(/^\[/, "", label); sub(/\]\([^)]*\)$/, "", label)
       target = m; sub(/^\[[^]]*\]\(/, "", target); sub(/\)$/, "", target)
       sub(/#.*$/, "", target)
+      sub(/^\.\//, "", target)
       print target "\t" label
     }
   ' docs/README.md
@@ -361,7 +392,7 @@ if [ "$errors" -gt 0 ]; then
   echo "FAIL: $errors problem(s)."
   exit 1
 fi
-summary="OK: $(printf '%s\n' "$PAGES" | wc -l | tr -d ' ') docs pages checked; links also verified across README.md, CLAUDE.md and .claude/skills."
+summary="OK: $(printf '%s\n' "$PAGES" | awk 'NF { n++ } END { print n + 0 }') docs pages checked; links also verified across README.md, CLAUDE.md and .claude/skills."
 [ "$warnings" -eq 0 ] || summary="$summary
 WARN: $warnings shape warning(s); rules 5-8 are advisory under --report."
 echo "$summary"

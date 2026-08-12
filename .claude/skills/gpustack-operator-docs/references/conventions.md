@@ -79,9 +79,14 @@ something that belongs in a list, a table, or another page.
 
 | Cap | Limit | Exempt |
 |---|---|---|
-| prose paragraph | 5 lines / 500 rendered characters | fenced blocks, tables, lists, `> **Why**` notes, the footer |
+| prose paragraph | 5 lines / 500 rendered characters | fenced blocks, table rows, list *markers*, `> **Why**` notes, the footer |
 | page length | 1000 lines | `docs/walkthrough.md`, `docs/operation/*` — recordings and runbooks |
-| `##` sections | 10 per page | `docs/README.md`, `docs/reference/*` — both are lookup tables |
+| `##` sections | 10 per page, `## Contents` not counted | `docs/README.md`, `docs/reference/*` — both are lookup tables |
+
+A paragraph nested under a list item is prose a reader still has to get through, so it is measured on
+its dedented text — the marker line is skipped, its continuation is not. The one indentation that does
+exempt is **four spaces or a tab**, which is Markdown's own indented code block. Continuations in this
+corpus align with their marker, at two or three spaces, so the two never collide.
 
 **The paragraph cap is the one that matters.** Length is not the defect; verbosity is. A long page that
 reads in short paragraphs and clear lists is a good page, and a short one that reads as a wall of text is
