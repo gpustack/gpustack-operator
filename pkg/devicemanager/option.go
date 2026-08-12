@@ -9,6 +9,7 @@ import (
 
 	"gpustack.ai/gpustack/pkg/devicemanager/allocator"
 	"gpustack.ai/gpustack/pkg/devicemanager/detector"
+	"gpustack.ai/gpustack/pkg/devicemanager/exporter"
 	"gpustack.ai/gpustack/pkg/manager"
 	"gpustack.ai/gpustack/pkg/webserver"
 )
@@ -120,5 +121,8 @@ func (o *Options) Complete(ctx context.Context) (*Config, error) {
 		ManagerConfig:   mgrConfig,
 		DetectorConfig:  detConfig,
 		AllocatorConfig: alcConfig,
+		// The exporter has no flags of its own: it samples on the detector's period, which
+		// Config.Apply hands it.
+		ExporterConfig: &exporter.Config{},
 	}, nil
 }

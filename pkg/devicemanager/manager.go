@@ -12,6 +12,7 @@ import (
 	"gpustack.ai/gpustack/pkg/devicemanager/allocator"
 	"gpustack.ai/gpustack/pkg/devicemanager/controllers"
 	"gpustack.ai/gpustack/pkg/devicemanager/detector"
+	"gpustack.ai/gpustack/pkg/devicemanager/exporter"
 	"gpustack.ai/gpustack/pkg/manager"
 	"gpustack.ai/gpustack/pkg/utils/gox"
 )
@@ -30,6 +31,7 @@ type Manager struct {
 	Manager   *manager.Manager
 	Detector  *detector.Detector
 	Allocator *allocator.Allocator
+	Exporter  *exporter.Poller
 }
 
 // Prepare prepares the runtime for the server,
@@ -66,6 +68,17 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 		klog.Info("starting allocator")
 		return m.Allocator.Start(ctx)
+	})
+	gp.Go(func(ctx context.Context) error {
+		// NB(thxCode): the poller lists Pods through the field index the controllers register,
+		// and through the informer cache, so it must not run before either exists.
+		klog.Info("waiting for manager ready")
+		err := m.Manager.WaitForReady(ctx)
+		if err != nil {
+			return fmt.Errorf("wait for manager ready: %w", err)
+		}
+		klog.Info("starting instance metrics exporter")
+		return m.Exporter.Start(ctx)
 	})
 	gp.Go(func(ctx context.Context) error {
 		klog.Info("starting controller manager")

@@ -534,7 +534,7 @@ alongside the code, snake_case multi-word file names, `make generate` after any 
       blast radius is one binary.
       Verify: `go test ./pkg/manager/... && go build ./...`
 
-- [ ] **T3 · Device Manager Instance sample poller**
+- [x] **T3 · Device Manager Instance sample poller**
       Blocked by: T1
       Owns: `pkg/devicemanager/exporter/**`, `pkg/devicemanager/manager.go`,
       `pkg/devicemanager/option.go`, `pkg/devicemanager/config.go`, `pkg/kubemetrics/**`
@@ -632,7 +632,7 @@ the release note rather than by a test.
 #### Unit tests
 
 - `pkg/kubemetrics` — one test file per source file, each beside the code it covers
-  (`sample_test.go`, `kubelet_test.go`, `metricsapi_test.go`): `2026-08-12` - `99.1%`. The
+  (`sample_test.go`, `kubelet_test.go`, `metricsapi_test.go`): `2026-08-12` - `99.2%`. The
   three uncovered statements are the second cache check inside the single-flight closure,
   which only fires in the window between one caller's outer check missing and another's store
   landing; reaching it from a test would mean a seam in production code, which costs more than
@@ -656,15 +656,23 @@ the release note rather than by a test.
   `ServiceUnavailable` with the reason named; accelerator merge and allocated-ID filtering;
   malformed allocation annotation. The degraded source's own branches are not re-tested here —
   they belong to `pkg/kubemetrics` now.
-- `pkg/manager`: a gather error yields 200 with the surviving metrics rather than 500.
-- `pkg/devicemanager/exporter`: the poller stores a snapshot per tick and drops it on failure;
-  terminating pods skipped; two pods sharing an Instance UID collapse to one; non-Instance pods
-  ignored; kubelet entries matched by UID; the single-exporter rule picks the lexicographically
-  first Ready manufacturer and hands over when that pod disappears; `Collect` performs no I/O
-  under `-race` with concurrent polling; the label set is exactly
-  namespace/instance_name/instance_uid/node (+ id/manufacturer); accelerator filtering by
-  allocated ID and own manufacturer; a stale snapshot yields none; success and duration gauges
-  track each source; exposition lints clean.
+- `pkg/manager`: a gather error yields 200 with the surviving metrics rather than 500, a clean
+  gather yields all of them, and a gather that produced nothing at all still fails.
+- `pkg/devicemanager/exporter`: `2026-08-12` - `98.4%` after T3. The poller stores a round per
+  tick and drops it on failure, including when a good round is followed by a bad one; what
+  counts as an Instance pod — terminating, unowned, owned by another kind, owned by an Instance
+  of another API group, and a part-of label disagreeing with the ownerReference are each
+  rejected; two pods of one Instance collapse to the newer, with the name breaking a same-second
+  tie so the choice is stable across polls; the kubelet's entries are matched by pod UID, so a
+  previous incarnation's figures are never served and a pod the kubelet does not carry is left
+  out; a missing field index is reported rather than published as an empty node; a repeated
+  failure is remembered rather than logged again; an unset node name degrades instead of failing
+  the process; and `Snapshot` is read under `-race` while the loop replaces it. Still to come
+  with the collector: the single-exporter rule picks the lexicographically first Ready
+  manufacturer and hands over when that pod disappears; `Collect` performs no I/O; the label set
+  is exactly namespace/instance_name/instance_uid/node (+ id/manufacturer); accelerator
+  filtering by allocated ID and own manufacturer; a stale snapshot yields none; success and
+  duration gauges track each source; exposition lints clean.
   Targets: all new and changed code covered; the iteration-1 suite rewritten in place.
 
 #### Integration tests

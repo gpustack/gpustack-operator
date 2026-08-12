@@ -206,6 +206,65 @@ func TestFetchPodSample(t *testing.T) {
 	})
 }
 
+func TestFetchPodSamples(t *testing.T) {
+	otherPod := func() *core.Pod {
+		p := testPod()
+		p.Name, p.UID = "other", "pod-uid-2"
+		return p
+	}
+
+	t.Run("returns a sample per measured pod, keyed by pod UID", func(t *testing.T) {
+		other := otherPod()
+		servePods(t, []kubeletstats.PodStats{
+			testPodStats(),
+			{
+				PodRef: kubeletstats.PodReference{Namespace: "default", Name: "other", UID: "pod-uid-2"},
+				CPU:    &kubeletstats.CPUStats{UsageNanoCores: ptr.To[uint64](1_000_000_000)},
+			},
+		})
+
+		samples, err := FetchPodSamples(context.Background(), testNode,
+			[]*core.Pod{testPod(), other}, 0)
+		require.NoError(t, err)
+		require.Len(t, samples, 2)
+		assert.Equal(t, uint64(500), *samples["pod-uid-1"].CPUUsedMilliCores)
+		assert.Equal(t, uint64(1000), *samples["pod-uid-2"].CPUUsedMilliCores)
+		assert.Equal(t, uint64(2000), samples["pod-uid-1"].CPUTotalMilliCores,
+			"the totals come from each pod's own limits")
+	})
+
+	t.Run("leaves out a pod the kubelet does not carry", func(t *testing.T) {
+		// The node-wide caller has no one to answer to for a single pod, so an absent entry
+		// beats one extra metrics.k8s.io request per pod per period.
+		servePods(t, []kubeletstats.PodStats{testPodStats()})
+
+		samples, err := FetchPodSamples(context.Background(), testNode,
+			[]*core.Pod{testPod(), otherPod()}, 0)
+		require.NoError(t, err)
+		require.Len(t, samples, 1)
+		assert.Contains(t, samples, types.UID("pod-uid-1"))
+	})
+
+	t.Run("errors when the node-wide readout failed", func(t *testing.T) {
+		// That one failure costs every pod its figures at once, so it is the caller's problem.
+		serveAPI(t, nodeProxyMux(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+		}))
+
+		_, err := FetchPodSamples(context.Background(), testNode, []*core.Pod{testPod()}, 0)
+		require.Error(t, err)
+	})
+
+	t.Run("asks the node once however many pods it is given", func(t *testing.T) {
+		calls := servePods(t, []kubeletstats.PodStats{testPodStats()})
+
+		_, err := FetchPodSamples(context.Background(), testNode,
+			[]*core.Pod{testPod(), otherPod(), testPod()}, 0)
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), calls.Load())
+	})
+}
+
 func TestFetchPodStatsFromKubelet(t *testing.T) {
 	t.Run("decodes the node's pod entries", func(t *testing.T) {
 		servePods(t, []kubeletstats.PodStats{testPodStats()})

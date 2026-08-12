@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	kubeletstats "k8s.io/kubelet/pkg/apis/stats/v1alpha1"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
@@ -81,6 +82,41 @@ func FetchPodSample(
 		sample.Timestamp = *ts
 	}
 	return sample, nil
+}
+
+// FetchPodSamples returns one utilization sample per given pod, keyed by pod UID.
+//
+// This is the node-wide counterpart of FetchPodSample, for a caller sampling every Instance of
+// a node at once. It takes the pods because a sample's totals come from their container limits,
+// which the kubelet readout does not carry, and it keys the result by UID because a sample
+// carries no identity of its own.
+//
+// The two differ in what they do about a pod the kubelet cannot account for. FetchPodSample
+// degrades that pod to metrics.k8s.io, because its caller was asked about that one pod and owes
+// an answer. Here the pod is simply left out: an exporter reporting a whole node has no one to
+// answer to for a single pod, and degrading each of them would cost one extra request per pod
+// per period. Only a failed node-wide readout is an error, since that one costs every pod its
+// figures at once.
+func FetchPodSamples(
+	ctx context.Context,
+	nodeName string,
+	pods []*core.Pod,
+	maxAge time.Duration,
+) (map[types.UID]*worker.InstanceMetricsSample, error) {
+	stats, err := fetchPodStatsFromKubelet(ctx, nodeName, maxAge)
+	if err != nil {
+		return nil, err
+	}
+
+	samples := make(map[types.UID]*worker.InstanceMetricsSample, len(pods))
+	for _, pod := range pods {
+		ps := podStatsOf(stats, pod)
+		if ps == nil {
+			continue
+		}
+		samples[pod.UID] = newSampleFromPodStats(pod, ps)
+	}
+	return samples, nil
 }
 
 // readTimeout bounds one node readout. A readout is deliberately detached from whichever
