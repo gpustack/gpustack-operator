@@ -43,9 +43,8 @@ Memory thus reaches the `credits` fold-down before Kueue scores it. The webhook 
 `.sliced.cores-percentage` to 100, prefers `.sliced.memory-percentage` over `.sliced.memory-mib`, and
 always recomputes the fold, since no trusted path sets it.
 
-It then validates the seven rules, each with an accepted and a rejected example there: one family per
-Pod in exactly one container group; every `.sliced` / `.partitioned` / per-profile key exactly 1; one
-profile shape; ≤ 1 slicing container; no accelerator on a restartable init container.
+It then validates the [seven request rules](../accelerator-requests.md#the-request-rules), which that
+page states with an accepted and a rejected example each.
 
 The divisor is the operator-owned **InstanceType**'s `spec.memory`, found via the
 `schedule.gpustack.ai/queue-entrance` label — **never** the user-writable LocalQueue. Its

@@ -106,18 +106,14 @@ are in [Device Discovery](architecture/device-discovery.md#device-accelerator-re
 
 ## Where to go next
 
-| Page | What it answers |
-|---|---|
-| [Device Discovery](architecture/device-discovery.md) | how hardware becomes labels, and what the allocator does at `Allocate` |
-| [Scheduling Chain](architecture/scheduling-chain.md) | how capacity labels become ResourceFlavors, ClusterQueues, LocalQueues, InstanceTypes |
-| [Admission](architecture/admission.md) | the five gates, the four-view status, and which field answers "what can I still get" |
-| [Two install modes](architecture/install-modes.md) | chart mode vs image mode, and which objects the worker applies itself |
-| [Internals](architecture/internals.md) | startup ordering, the gateway mirror, per-manufacturer packages, CGO bindings, the 63-char rule |
+- [Device Discovery](architecture/device-discovery.md) — stages 1 and 2, and what the allocator injects.
+- [Scheduling Chain](architecture/scheduling-chain.md) — stages 3 and 4.
+- [Admission](architecture/admission.md) — the five gates and the four-view status.
+- [Installation Modes](architecture/install-modes.md) — chart mode versus image mode.
+- [Internals](architecture/internals.md) — startup order and the invariants that fail silently.
+- [Walkthrough](walkthrough.md) — all of it recorded on a live cluster, with real output.
 
-For a **recorded end-to-end run on a live cluster**, see the [walkthrough](walkthrough.md): real YAML
-for the materialized `ResourceFlavor` / `ClusterQueue` / `InstanceType` / `LocalQueue`, removing and
-re-adding a node, a sliced-GPU request (`nvidia-smi` showing the capped VRAM), a custom `InstanceType`,
-and CPU-manufacturer awareness.
+Every page, with its audience and read time, is in the [documentation index](README.md).
 
 ---
 
