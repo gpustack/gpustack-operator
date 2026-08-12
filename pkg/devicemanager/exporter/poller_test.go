@@ -25,6 +25,7 @@ import (
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/devicemanager/detector"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
@@ -458,7 +459,7 @@ func TestPoller_GatherDuringPolling(t *testing.T) {
 
 	p := newTestPoller(nodeName, pod)
 	p.period = time.Millisecond
-	collector := NewCollector(p)
+	collector := NewCollector(p, func() *detector.MonitorSnapshot { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

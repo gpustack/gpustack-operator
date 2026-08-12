@@ -459,10 +459,14 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 	})
 }
 
+// TestFilterAllocatedAcceleratorMetrics covers what this package still owns: mapping the
+// device manager's own metrics onto the API type. The filtering behind it — the staleness bound
+// and the manufacturer-and-ID match — is pinned in pkg/devicemanager/detector, beside the
+// snapshot it reads.
 func TestFilterAllocatedAcceleratorMetrics(t *testing.T) {
 	allocGroups := deviceplugin.AllocatedAcceleratorGroupsOf(metricsTestPod())
 
-	t.Run("keeps only the allocated devices, in vendor-native MiB", func(t *testing.T) {
+	t.Run("maps the allocated device onto the API type, in vendor-native MiB", func(t *testing.T) {
 		got := filterAllocatedAcceleratorMetrics(metricsTestSnapshot(), allocGroups)
 		require.Len(t, got, 1)
 
@@ -470,26 +474,15 @@ func TestFilterAllocatedAcceleratorMetrics(t *testing.T) {
 		assert.Equal(t, "gpu-uuid-1", accel.ID)
 		assert.Equal(t, uint64(81920), *accel.MemoryTotalMiB)
 		assert.Equal(t, uint64(1024), *accel.MemoryUsedMiB)
+		assert.Equal(t, uint32(12), *accel.MemoryUtilizationPercent)
 		assert.Equal(t, uint32(34), *accel.CoresUtilizationPercent)
 		assert.Equal(t, uint32(42), *accel.TemperatureCelsius)
 		assert.Equal(t, uint32(120), *accel.PowerUsageWatts)
+		require.NotNil(t, accel.Unhealthy)
+		assert.False(t, *accel.Unhealthy)
 	})
 
-	t.Run("drops a stale snapshot", func(t *testing.T) {
-		snapshot := metricsTestSnapshot()
-		snapshot.Timestamp = time.Now().Add(-2 * time.Minute)
-		assert.Empty(t, filterAllocatedAcceleratorMetrics(snapshot, allocGroups))
-	})
-
-	t.Run("scales the staleness bound with the reported period", func(t *testing.T) {
-		// A 60s monitor period must not drop healthy 50s-old samples.
-		snapshot := metricsTestSnapshot()
-		snapshot.PeriodSeconds = 60
-		snapshot.Timestamp = time.Now().Add(-50 * time.Second)
-		assert.NotEmpty(t, filterAllocatedAcceleratorMetrics(snapshot, allocGroups))
-	})
-
-	t.Run("drops everything for a CPU instance", func(t *testing.T) {
+	t.Run("maps nothing when the filter yields nothing", func(t *testing.T) {
 		assert.Empty(t, filterAllocatedAcceleratorMetrics(metricsTestSnapshot(), nil))
 	})
 }

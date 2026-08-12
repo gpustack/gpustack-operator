@@ -24,6 +24,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/devicemanager"
+	"gpustack.ai/gpustack/pkg/devicemanager/detector"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/extensionapi"
 	"gpustack.ai/gpustack/pkg/kubemetrics"
@@ -58,10 +59,6 @@ const (
 	// including the kubelet read, the metrics API fallback, and one device manager fetch
 	// per allocated manufacturer.
 	_InstanceMetricsTimeout = 10 * time.Second
-
-	// _MonitorSnapshotMaxAge is the fallback accepted age of a device manager snapshot
-	// (three default monitor periods) when the snapshot does not report its period.
-	_MonitorSnapshotMaxAge = 45 * time.Second
 
 	// _MonitorSnapshotMaxBytes bounds a device manager snapshot readout, orders of
 	// magnitude above one node's accelerator metrics.
@@ -239,52 +236,26 @@ func allocatedManufacturers(allocGroups []workercore.DevicesAllocationGroup) []s
 	return manufacturers
 }
 
-// filterAllocatedAcceleratorMetrics filters a device manager snapshot to the metrics of the
-// devices recorded in the pod's allocation, keyed by manufacturer and device ID.
-// A snapshot older than three monitor periods means the monitor is failing — the detector
-// only replaces the snapshot after a successful non-empty sample — and yields nothing.
-// The bound scales with the period the snapshot reports, falling back to
-// _MonitorSnapshotMaxAge when the field is absent (older device managers).
+// filterAllocatedAcceleratorMetrics maps the snapshot's metrics for the allocated devices onto
+// the API type. The filtering itself — the staleness bound and the manufacturer-and-ID match —
+// belongs to the device manager that produced the snapshot, and is shared with its own exporter
+// so the two surfaces cannot report different cards for one Instance.
 func filterAllocatedAcceleratorMetrics(
 	snapshot *devicemanager.MonitorSnapshot,
 	allocGroups []workercore.DevicesAllocationGroup,
 ) []worker.InstanceAcceleratorMetrics {
-	if snapshot == nil {
+	allocated := detector.AllocatedAcceleratorMetricsOf(snapshot, allocGroups)
+	if len(allocated) == 0 {
+		// Nil rather than an empty list, though the response cannot tell the two apart: the
+		// field is omitempty, so both are omitted. What it therefore never distinguishes is
+		// "this Instance holds no card" from "the device manager could not be read" — both
+		// simply arrive carrying no accelerators.
 		return nil
-	}
-	maxAge := _MonitorSnapshotMaxAge
-	if snapshot.PeriodSeconds > 0 {
-		maxAge = time.Duration(snapshot.PeriodSeconds) * time.Second * 3
-	}
-	if time.Since(snapshot.Timestamp) > maxAge {
-		return nil
-	}
-	allocatedByManufacturer := make(map[string]map[string]struct{}, len(allocGroups))
-	for i := range allocGroups {
-		ids := allocatedByManufacturer[allocGroups[i].Manufacturer]
-		if ids == nil {
-			ids = make(map[string]struct{})
-			allocatedByManufacturer[allocGroups[i].Manufacturer] = ids
-		}
-		for j := range allocGroups[i].Accelerators {
-			ids[allocGroups[i].Accelerators[j].ID] = struct{}{}
-		}
 	}
 
-	var accelerators []worker.InstanceAcceleratorMetrics
-	for i := range snapshot.Groups {
-		grp := &snapshot.Groups[i]
-		allocated, ok := allocatedByManufacturer[grp.Manufacturer]
-		if !ok {
-			continue
-		}
-		for j := range grp.Accelerators {
-			am := &grp.Accelerators[j]
-			if _, ok = allocated[am.ID]; !ok {
-				continue
-			}
-			accelerators = append(accelerators, toInstanceAcceleratorMetrics(am))
-		}
+	accelerators := make([]worker.InstanceAcceleratorMetrics, 0, len(allocated))
+	for i := range allocated {
+		accelerators = append(accelerators, toInstanceAcceleratorMetrics(&allocated[i].Metrics))
 	}
 	return accelerators
 }

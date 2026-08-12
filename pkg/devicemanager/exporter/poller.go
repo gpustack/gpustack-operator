@@ -42,6 +42,12 @@ type InstanceSample struct {
 	UID       types.UID
 
 	Sample worker.InstanceMetricsSample
+
+	// Accelerators are the devices allocated to the Instance, as its backing Pod records them.
+	// Only the allocation is kept here; the figures come from the device manager's own monitor
+	// snapshot when a scrape joins the two, so they are as fresh as that snapshot rather than
+	// as this round.
+	Accelerators []workercore.DevicesAllocationGroup
 }
 
 // Snapshot is what a successful round measured.
@@ -307,6 +313,7 @@ func instanceSamples(
 		}
 		inst := pods[i].instance
 		inst.Sample = *sample
+		inst.Accelerators = deviceplugin.AllocatedAcceleratorGroupsOf(pods[i].pod)
 		out = append(out, inst)
 	}
 	return out

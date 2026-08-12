@@ -230,9 +230,12 @@ cluster.
   grouping by `instance` would silently group by scrape target. `instance_uid` keeps a
   deleted-and-recreated Instance of the same name from continuing the previous incarnation's
   series.
-- AC2.3: Accelerator families carry `id` and `manufacturer` in addition, and cover only the
-  device IDs recorded in that Instance's allocation annotation that belong to this Device
-  Manager's own manufacturer.
+- AC2.3: Accelerator families carry `id`, `index` and `manufacturer` in addition, and cover only
+  the device IDs recorded in that Instance's allocation annotation that belong to this Device
+  Manager's own manufacturer. `index` comes from the allocation, which is the only side that
+  records one — the monitor snapshot carries the ID alone — and is the ordinal the
+  manufacturer's own tools name the device by, so a figure lines up with what an operator sees
+  on the host.
 - AC2.4: Pod-level families are emitted only by the Device Manager whose `--manufacturer`
   sorts first among the **Ready** Device Manager pods on that node, so exactly one target
   carries them; when that pod goes away the next manufacturer takes the role over rather than
@@ -566,11 +569,12 @@ alongside the code, snake_case multi-word file names, `make generate` after any 
       node-name index. Per-source success and duration gauges.
       Verify: `go test -race ./pkg/devicemanager/...`
 
-- [ ] **T5 · Accelerator gauges from the monitor snapshot**
+- [x] **T5 · Accelerator gauges from the monitor snapshot**
       Blocked by: T4
-      Owns: `pkg/devicemanager/exporter/**`
+      Owns: `pkg/devicemanager/exporter/**`, `pkg/devicemanager/detector/snapshot*.go`,
+      `pkg/worker/extensionapis/worker/instance.metrics*.go`
       Gate: review
-      Acceptance: AC2.3, AC2.6. Accelerator families labelled additionally `id` and
+      Acceptance: AC2.3, AC2.6. Accelerator families labelled additionally `id`, `index` and
       `manufacturer`, covering only the allocated device IDs of this Device Manager's own
       manufacturer, emitted by every Device Manager since device IDs are disjoint. A snapshot
       older than three monitor periods yields none and sets its success gauge to 0.
@@ -676,8 +680,19 @@ the release note rather than by a test.
   by another device manager publishes none either; an unmeasured figure is left unpublished
   rather than reported as zero; and nothing sampled yet reads as `success 0` rather than
   silence. `Collect` performs no I/O, gathered under `-race` while the loop replaces the round.
-  Still to come with the accelerator families: filtering by allocated ID and own manufacturer,
-  and a stale monitor snapshot yielding none.
+  The accelerator families: published for the allocated cards against a fresh snapshot, and only
+  for those — a card of the same manufacturer allocated to someone else is not published, a
+  manufacturer the snapshot does not carry yields none, a stale snapshot yields none beside
+  `success{source="snapshot"} 0`, a failed round yields none either since it is the round that
+  knows what each Instance holds, and they are published by a device manager that is *not* the
+  pod-level exporter, because device IDs are disjoint.
+- `pkg/devicemanager/detector`: the staleness bound on its own — just stored, inside and outside
+  three periods, scaled to a reported period, the fallback bound for a snapshot reporting none,
+  and nothing stored yet; and the allocation match — the allocated card kept with its
+  manufacturer and the allocation's index travelling alongside, the fixture's index deliberately
+  not the card's position in the snapshot so a result reading the position fails, another
+  tenant's card of the same manufacturer dropped, a manufacturer the snapshot does not carry
+  yielding none, and a CPU-only Instance yielding none.
   Targets: all new and changed code covered; the iteration-1 suite rewritten in place.
 
 #### Integration tests
@@ -713,6 +728,12 @@ for the exporter's poller, plus the e2e cases below.
 - **Prometheus base units (`_bytes`, `_cores`, ratios).** Idiomatic, rejected anyway: two
   surfaces disagreeing by a unit conversion is a worse daily cost than one non-idiomatic
   suffix.
+- **Carry the accelerator `index` in the subresource too, so the two surfaces stay identical
+  field for field.** Rejected: the label exists to make downstream processing of the exposition
+  easier — grouping and joining by the ordinal an operator already sees on the host — while the
+  API identifies a device by its ID and needs no second key for that. The asymmetry is
+  deliberate, and it costs nothing that matters: every *figure* still comes from one
+  implementation, which is the property this spec set out to keep.
 - **Read the kubelet at scrape time, node-locally.** Rejected on two counts. It would send the
   Device Manager's `cluster-admin` ServiceAccount token to a peer whose serving certificate
   cannot be verified on most distributions — strictly worse than the existing credential-free
