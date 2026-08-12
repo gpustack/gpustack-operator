@@ -60,7 +60,7 @@ deployed Kueue Configuration's known behaviors.
 **Never** — the normative request contract itself. That is `accelerator-requests.md`; this page says
 where each rule is *enforced*.
 
-## `docs/architecture/install-modes.md`
+## `docs/architecture/installation-modes.md`
 
 **Owns** — chart mode vs image mode, `worker.disableApplications`, the exclusivity argument, the
 `deviceManager.enabled` / `worker.enabled` switches, and the chart-versus-worker custom-resource

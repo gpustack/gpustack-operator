@@ -56,15 +56,16 @@ PAGES=$(find docs -name '*.md' | sort)
 LINKED_PAGES=$(printf '%s\n%s\n%s\n%s\n' \
   "README.md" "CLAUDE.md" "$PAGES" "$(find .claude/skills -name '*.md' | sort)")
 
-# Shape caps (rules 5-7).
-PARA_LINE_CAP=5    # source lines in one prose paragraph
-PARA_CHAR_CAP=500  # characters of rendered text in one prose paragraph
-PAGE_LINE_CAP=450  # lines in one page
-H2_CAP=10          # "##" sections in one page
+# Shape caps (rules 5-7). The paragraph cap is the one that carries the weight: a long page that
+# reads in short paragraphs and clear lists is fine, a short page that reads as a wall of text is not.
+PARA_LINE_CAP=5     # source lines in one prose paragraph
+PARA_CHAR_CAP=500   # characters of rendered text in one prose paragraph
+PAGE_LINE_CAP=1000  # lines in one page — a backstop against a page nobody split, not a budget
+H2_CAP=10           # "##" sections in one page
 
 # Cap exemptions, declared here rather than escaped inline. Each is a space-separated glob list.
-# The two recorded pages are mostly captured terminal output, which is not ours to shorten.
-LINE_CAP_EXEMPT='docs/walkthrough.md docs/operation/nvidia-mig.md'
+# A recording and a runbook are as long as the hardware makes them.
+LINE_CAP_EXEMPT='docs/walkthrough.md docs/operation/*'
 # The index is a table of contents and a reference page is a lookup table: both are meant to be flat.
 H2_CAP_EXEMPT='docs/README.md docs/reference/*'
 

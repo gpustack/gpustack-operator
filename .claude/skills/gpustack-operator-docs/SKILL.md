@@ -29,7 +29,7 @@ one, not to widen the overview.
 | Device Manager detection, the `Devices` ledger, allocator injection, cross-mode exclusion, placement | `docs/architecture/device-discovery.md` |
 | Capacity labels, flavor/queue/InstanceType naming and grouping, the five reconcilers | `docs/architecture/scheduling-chain.md` |
 | Any admission gate, the four-view status, InstanceType/Instance/Pod webhook rules, drain-stop | `docs/architecture/admission.md` |
-| Chart mode vs image mode, `disableApplications`, what the worker applies itself | `docs/architecture/install-modes.md` |
+| Chart mode vs image mode, `disableApplications`, what the worker applies itself | `docs/architecture/installation-modes.md` |
 | Startup ordering, the gateway mirror, per-manufacturer packages, CGO bindings, the 63-char rule | `docs/architecture/internals.md` |
 | A resource key, a request rule, a request example | `docs/accelerator-requests.md` |
 | A `Setting` or a `GPUSTACK_*` variable | `docs/settings.md` |

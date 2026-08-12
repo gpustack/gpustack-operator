@@ -3,7 +3,7 @@
 > **Purpose** — the one-time ownership transfer that folds the runtime-installed Kueue / NFD / CSI
 > releases into the operator release, and the four things it changes permanently.
 > **Audience** operators on a v0.7.x-or-earlier install · **Prerequisites** [Two install
-> modes](../architecture/install-modes.md) · **Read time** ~9 min
+> modes](../architecture/installation-modes.md) · **Read time** ~9 min
 
 Through v0.7.x the chart deployed only the worker and device managers; the **worker installed**
 Kueue, Node Feature Discovery and the two CSI drivers at runtime, each its own Helm release:
@@ -317,8 +317,8 @@ kubectl get crd -o custom-columns=NAME:.metadata.name,DELETING:.metadata.deletio
 
 ---
 
-**See also** — [Two install modes](../architecture/install-modes.md) (what the two modes own after the
-transfer) · [High Availability](../operation/high-availability.md) (the replica knobs now live in one
+**See also** — [Installation Modes](../architecture/installation-modes.md) (what the two modes own after the
+transfer) · [High Availability Operations](../operation/high-availability.md) (the replica knobs now live in one
 `values.yaml`) · [Migrating from v0.5.x](from-v0.5.md)
 
 **Next** → [Settings](../settings.md) — the configuration surface the transfer unifies.

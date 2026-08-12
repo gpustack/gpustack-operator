@@ -64,7 +64,7 @@ shaped by the directory it lives in:
 
 | Directory | H1 form | Example |
 |---|---|---|
-| root, `architecture/` | `<Subject>` | `Install Modes` |
+| root, `architecture/` | `<Subject>` | `Installation Modes` |
 | `operation/` | `<Subject> Operations` | `High Availability Operations` |
 | `migration/` | `Migrating <from\|to> <what>` | `Migrating from v0.5.x` |
 | `reference/` | `<Subject> Reference` | `Instance Metrics Reference` |
@@ -80,8 +80,12 @@ something that belongs in a list, a table, or another page.
 | Cap | Limit | Exempt |
 |---|---|---|
 | prose paragraph | 5 lines / 500 rendered characters | fenced blocks, tables, lists, `> **Why**` notes, the footer |
-| page length | 450 lines | `docs/walkthrough.md`, `docs/operation/nvidia-mig.md` — recorded output |
+| page length | 1000 lines | `docs/walkthrough.md`, `docs/operation/*` — recordings and runbooks |
 | `##` sections | 10 per page | `docs/README.md`, `docs/reference/*` — both are lookup tables |
+
+**The paragraph cap is the one that matters.** Length is not the defect; verbosity is. A long page that
+reads in short paragraphs and clear lists is a good page, and a short one that reads as a wall of text is
+not. The line cap is a backstop against a page nobody split, not a budget to spend down.
 
 `docs/architecture.md` is capped tighter still, at 200 lines: it is the front door, and a front door that
 grows a mechanism has stopped being one.

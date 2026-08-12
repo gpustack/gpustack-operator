@@ -65,7 +65,7 @@ see that 8 accelerators each 50 %-sliced satisfy no 5-exclusive request.
 The worker's `Prepare()` applies the `gpustack-node-devices` AdmissionCheck last at startup, retrying
 until Kueue's CRD is established — the chart cannot ship it, since Kueue templates its own CRDs and
 nothing orders them ahead of a custom resource in the same render (see [Install
-modes](install-modes.md#the-chart-deploys-workloads-the-worker-applies-the-custom-resources)).
+modes](installation-modes.md#the-chart-deploys-workloads-the-worker-applies-the-custom-resources)).
 
 This reconciler keeps it `Active`; the accelerated queue references it in `spec.admissionChecksStrategy`
 only once it is ([`NodeQueueReconciler`](scheduling-chain.md#nodequeuereconciler-node_queuego)).
@@ -242,4 +242,4 @@ by `make generate chart`.
 [Device Discovery](device-discovery.md#the-device-plugin-allocator) (gate 5 in detail) ·
 [Walkthrough](../walkthrough.md) (the four views moving on a live cluster)
 
-**Next** → [Two install modes](install-modes.md) — how the chain gets deployed.
+**Next** → [Installation Modes](installation-modes.md) — how the chain gets deployed.

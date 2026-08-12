@@ -66,8 +66,8 @@ in the per-profile ledgers. Any other shape is published as the driver reports i
 
 Below that boundary every layer keeps the manufacturer's spelling — the `Devices` record, the on-disk
 ownership markers, every call into its library — since a name the library does not report cannot create
-a partition. See [T-Head PPU Partitioning
-Operations](../operation/thead-ppu-partitioning.md#how-partition-profiles-are-discovered).
+a partition. See [T-Head MIG
+Operations](../operation/thead-mig.md#how-partition-profiles-are-discovered).
 
 ### Per-accelerator slice counts, per manufacturer
 
@@ -106,7 +106,7 @@ The [three-configuration
 walkthrough](../operation/nvidia-mig.md#walkthrough-three-mig-configurations-on-one-node) in [NVIDIA MIG
 Operations](../operation/nvidia-mig.md) shows the disjoint populations on a recorded 8-accelerator node,
 including a **mixed** one advertising both families;
-[T-Head](../operation/thead-ppu-partitioning.md) covers the same procedure.
+[T-Head](../operation/thead-mig.md) covers the same procedure.
 
 ## The unit spec is not derived from node capacity
 
@@ -115,7 +115,7 @@ InstanceType default follows acceleratable-ness: `1c / 2Gi / 100Gi` non-accelera
 **per-product preset** keyed by the accelerator's manufacturer and product name, falling back to
 `4c / 16Gi / 100Gi`.
 
-The tier per product family is in [Instance Type Unit Resources Preset
+The tier per product family is in [Instance Type Unit Resources
 Reference](../reference/instance-type-unit-resources.md); an admin overrides it through the InstanceType
 API without touching any Node.
 

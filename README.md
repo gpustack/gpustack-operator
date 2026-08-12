@@ -182,7 +182,7 @@ ownership slots each) requests. What differs is whether one accelerator can be *
 - **Physical partitioning is hardware.** A driver-level configuration mode an administrator enables on
   the accelerator; the operator observes it, never flips it. See [NVIDIA MIG
   Operations](./docs/operation/nvidia-mig.md) and [T-Head MIG
-  Operations](./docs/operation/thead-ppu-partitioning.md).
+  Operations](./docs/operation/thead-mig.md).
 - Override any manufacturer's PCI vendor ID, resource name and runtime class — see [Settings &
   Environment Variables](./docs/settings.md#per-manufacturer-overrides).
 
@@ -218,7 +218,7 @@ The most-used pages, for running the operator, operating a cluster, and changing
 | [Walkthrough](./docs/walkthrough.md) | A recorded end-to-end run with real output |
 | [Settings & Environment Variables](./docs/settings.md) | Runtime settings and every `GPUSTACK_*` |
 | [NVIDIA MIG Operations](./docs/operation/nvidia-mig.md) | The MIG runbook, mode changes included |
-| [T-Head MIG Operations](./docs/operation/thead-ppu-partitioning.md) | The same runbook for T-Head's own partitioning |
+| [T-Head MIG Operations](./docs/operation/thead-mig.md) | The same runbook for T-Head's own partitioning |
 | [High Availability Operations](./docs/operation/high-availability.md) | The replica knob per component |
 | [Development](./docs/development.md) | Build, lint, test, code generation |
 

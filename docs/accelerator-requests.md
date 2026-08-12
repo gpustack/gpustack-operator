@@ -384,7 +384,7 @@ DaemonSet, then let the workloads reschedule.
   watches the device set and health, not the partitioning mode. Deleting the node's `Devices` object is
   **not** required — an existing group's capability is rewritten in place. Full procedure: [NVIDIA MIG
   Operations](./operation/nvidia-mig.md#enabling-mig-on-a-node) · [T-Head MIG
-  Operations](./operation/thead-ppu-partitioning.md#enabling-partitioning-on-a-node).
+  Operations](./operation/thead-mig.md#enabling-partitioning-on-a-node).
 - **A non-default `TopologyManager` policy can mis-align a partition.** The Partitioned resource reports
   no NUMA topology (the plugin may not use the accelerator the kubelet aligned to), so under
   `single-numa-node` the CPU and memory providers can settle on one socket while the only accelerator
@@ -394,7 +394,7 @@ DaemonSet, then let the workloads reschedule.
 
 **See also** — [NVIDIA MIG Operations](./operation/nvidia-mig.md) (the administrator runbook for an
 accelerator's partitioning mode, plus a recorded enable → request → reclaim → disable walkthrough) ·
-[T-Head MIG Operations](./operation/thead-ppu-partitioning.md) (the same runbook for T-Head's own
+[T-Head MIG Operations](./operation/thead-mig.md) (the same runbook for T-Head's own
 partitioning) · [Admission](./architecture/admission.md) (where these keys are checked) ·
 [Device Discovery](./architecture/device-discovery.md#the-device-plugin-allocator) (where they are served)
 

@@ -154,7 +154,7 @@ user-facing knobs, listed for completeness.
 ---
 
 **See also** — [Architecture](./architecture.md) (what each setting regroups) ·
-[Two install modes](./architecture/install-modes.md) (which flags a mode sets for you) ·
-[High Availability](./operation/high-availability.md)
+[Installation Modes](./architecture/installation-modes.md) (which flags a mode sets for you) ·
+[High Availability Operations](./operation/high-availability.md)
 
 **Next** → [Walkthrough](./walkthrough.md) — a setting flipped on a live cluster, before and after.

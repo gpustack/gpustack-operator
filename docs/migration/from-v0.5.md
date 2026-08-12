@@ -44,8 +44,7 @@ per-accelerator allocation ledger), so they update in place — nothing orphaned
 The v0.6.x operator indexes objects by their **new** names, so it never sees — never reconciles,
 never garbage-collects — the v0.5.x-named ResourceFlavors, ClusterQueues, Cohorts and LocalQueues.
 No hook cleans them: the chart's post-delete `cleanup.sh` fires only on `helm uninstall`, and the
-upgrade's own migration hooks address the pre-subchart release layout ([Migrating to the bundled
-subcharts](./to-subcharts.md)), not v0.5.x names.
+upgrade's own migration hooks address the pre-subchart release layout ([Migrating to Bundled Subcharts](./to-subcharts.md)), not v0.5.x names.
 
 An in-place upgrade therefore leaves **both sets**: the working v0.6.x one plus a leaked v0.5.x one
 — dead ResourceFlavors, ClusterQueues, Cohorts, a LocalQueue in every namespace, the Cohorts never
@@ -170,7 +169,7 @@ kubectl get nodes -o json | grep -oE '"[^"]*(\.z-[a-z]+|generic-ln-x64)[^"]*"' |
 
 ---
 
-**See also** — [Migrating to the bundled subcharts](to-subcharts.md) (the other one-time upgrade, from
+**See also** — [Migrating to Bundled Subcharts](to-subcharts.md) (the other one-time upgrade, from
 v0.7.x or earlier) · [Scheduling Chain](../architecture/scheduling-chain.md#naming-and-grouping) (the
 object names this upgrade moves to)
 

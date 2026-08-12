@@ -46,15 +46,14 @@ them as Resources.*
   The hardware layer never speaks it.
 - **card** — a manufacturer-hardware term, used only where a manufacturer's SDK models a card as
   something other than exactly one Accelerator: the Ascend DCMI card holding several devices, and the
-  T-Head device-node ordinal (see [T-Head PPU Partitioning](../operation/thead-ppu-partitioning.md)).
+  T-Head device-node ordinal (see [T-Head MIG Operations](../operation/thead-mig.md)).
 - **manufacturer** — the company. Its native code is *the manufacturer's library, SDK or binding*.
 
 The `pkg/device` package doc carries the same diagram.
 
 ## Stage 1: Node Feature Discovery (NFD)
 
-NFD comes from the `node-feature-discovery` subchart, or from the cluster itself (see [Two install
-modes](install-modes.md)). It performs three jobs.
+NFD comes from the `node-feature-discovery` subchart, or from the cluster itself (see [Installation Modes](installation-modes.md)). It performs three jobs.
 
 ### Job 1 — PCI vendor labels
 
@@ -143,7 +142,7 @@ corrects false negatives.
 
 Jobs 2 and 3 are the work of the `gpustack-cpu-info` **NodeFeatureRule**, applied by the worker at
 startup in every install mode (see [The chart deploys workloads, the worker applies the custom
-resources](install-modes.md#the-chart-deploys-workloads-the-worker-applies-the-custom-resources)).
+resources](installation-modes.md#the-chart-deploys-workloads-the-worker-applies-the-custom-resources)).
 Its two matcher lists come from facts that exist for other reasons:
 
 - the PCI vendor IDs of the manufacturers the worker manages — `--manufacturer`, filled by the chart
@@ -196,7 +195,7 @@ with a node selector on the NFD PCI label: a node labeled
 The Helm chart normally renders them (`deviceManager.enabled=true`, the default). With
 `deviceManager.enabled=false` it renders none and does not hand the install back to the worker: a
 worker deployed by this chart never installs applications at runtime. The worker installs them only
-where no chart deploys it, see [Two install modes](install-modes.md).
+where no chart deploys it, see [Installation Modes](installation-modes.md).
 
 ### Detection and the accelerator feature labels
 
@@ -269,8 +268,8 @@ The injection is just the device-visibility env (`NVIDIA_VISIBLE_DEVICES` / `ASC
 It materializes the requested hardware instance (NVIDIA MIG, or T-Head's own MIG-named partitioning)
 on an accelerator it selects itself, and injects only that instance — as device nodes rather than an
 environment variable for T-Head, which has no container-runtime hook; see [Accelerator
-Requests](../accelerator-requests.md), [NVIDIA MIG](../operation/nvidia-mig.md) and [T-Head PPU
-Partitioning](../operation/thead-ppu-partitioning.md).
+Requests](../accelerator-requests.md), [NVIDIA MIG](../operation/nvidia-mig.md) and [T-Head MIG
+Operations](../operation/thead-mig.md).
 
 ### Sliced (logical slicing)
 
@@ -472,7 +471,7 @@ carve one can name it).
 
 It reads the owner's durable node-local ownership record and proves the recorded instance still live
 before naming it — see [NVIDIA MIG](../operation/nvidia-mig.md#requesting-a-mig-instance) and
-[T-Head PPU Partitioning](../operation/thead-ppu-partitioning.md#requesting-a-partition).
+[T-Head MIG Operations](../operation/thead-mig.md#requesting-a-partition).
 
 A responder lacking that capability, or unable to substantiate the identity, fails the admission
 closed rather than widening the grant back to the accelerator.
@@ -599,8 +598,8 @@ vcann-rt's `npu_info.config` models a single physical NPU), so any future regres
 ---
 
 **See also** — [Accelerator Requests](../accelerator-requests.md) (the resource keys these families
-serve) · [NVIDIA MIG Operations](../operation/nvidia-mig.md) · [T-Head PPU Partitioning
-Operations](../operation/thead-ppu-partitioning.md) · [Settings](../settings.md)
+serve) · [NVIDIA MIG Operations](../operation/nvidia-mig.md) · [T-Head MIG
+Operations](../operation/thead-mig.md) · [Settings](../settings.md)
 
 **Next** → [Scheduling Chain](scheduling-chain.md) — how these labels and the ledger become Kueue
 objects.

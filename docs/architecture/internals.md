@@ -22,7 +22,7 @@
 
 - **`worker`** (alias `w`) runs an aggregated extension API server *and* a controller-runtime manager in
   one process, plus the scheduling-chain controllers ([Scheduling Chain](scheduling-chain.md)). It can
-  install the bundled operator chart itself ([Two install modes](install-modes.md)), but does not by
+  install the bundled operator chart itself ([Installation Modes](installation-modes.md)), but does not by
   default.
 - **`device-manager`** has subcommands `serve` / `detect` / `monitor`: it detects and monitors local
   accelerators, reports a `NodeFeature` + `Devices` CR, and runs the device-plugin allocator.
@@ -37,8 +37,8 @@ ordering when adding steps.
 
 The last two steps are the chain's two ends, and both **retry until their CRD is established** (5 min
 each): a worker booting alongside the rollout that brings those CRDs reaches them before they are
-served, so it waits instead of failing. They are in Go, not the chart, per the boundary in [Two install
-modes](install-modes.md#the-chart-deploys-workloads-the-worker-applies-the-custom-resources).
+served, so it waits instead of failing. They are in Go, not the chart, per the boundary in [Installation
+Modes](installation-modes.md#the-chart-deploys-workloads-the-worker-applies-the-custom-resources).
 
 ### Every `Prepare` step runs in every replica
 
@@ -129,6 +129,6 @@ Check this limit for any name that flows into a label value.
 ---
 
 **See also** — [Development](../development.md) (build, lint, test, code generation) ·
-[Two install modes](install-modes.md) · [Scheduling Chain](scheduling-chain.md)
+[Installation Modes](installation-modes.md) · [Scheduling Chain](scheduling-chain.md)
 
 **Next** → [Development](../development.md) — how to build and test what you just changed.

@@ -85,8 +85,8 @@ controller-owned status.
 
 ---
 
-**See also** — [Migrating to the bundled subcharts](../migration/to-subcharts.md) (the ownership
-transfer out of the pre-subchart layout) · [High Availability](../operation/high-availability.md) (more
+**See also** — [Migrating to Bundled Subcharts](../migration/to-subcharts.md) (the ownership
+transfer out of the pre-subchart layout) · [High Availability Operations](../operation/high-availability.md) (more
 than one replica per control-plane component) · [Development](../development.md#vendored-subcharts)
 
 **Next** → [Internals](internals.md) — startup ordering and the invariants a contributor must keep.

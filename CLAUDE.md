@@ -27,7 +27,7 @@ Cohort) → `LocalQueue` plus an `InstanceType` CRD. `pkg/nodefeature` holds the
 Read `docs/architecture.md` first: one page, the four stages, the life of a request, the vocabulary.
 Then the deep page under `docs/architecture/` for what you are touching — `device-discovery.md` (NFD,
 Device Manager, allocator), `scheduling-chain.md` (capacity labels, flavors/queues/InstanceTypes,
-`pkg/nodefeature`), `admission.md` (the five gates, webhooks, four-view status), `install-modes.md`,
+`pkg/nodefeature`), `admission.md` (the five gates, webhooks, four-view status), `installation-modes.md`,
 `internals.md` (startup order and the invariants that fail silently). `docs/README.md` indexes it all.
 
 ## Development

@@ -139,6 +139,6 @@ subcharts are staged the same way, for the same reason — see [Vendored subchar
 ---
 
 **See also** — [Internals](architecture/internals.md) (the invariants the code keeps) ·
-[Two install modes](architecture/install-modes.md) · [Settings](settings.md)
+[Installation Modes](architecture/installation-modes.md) · [Settings](settings.md)
 
 **Next** → [All documentation](README.md) — pick the next page on the contributor path.

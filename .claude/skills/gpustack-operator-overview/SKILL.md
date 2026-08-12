@@ -75,7 +75,7 @@ controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.
 - NFD labels, Device Manager detection, the `Devices` ledger, allocator injection → [architecture/device-discovery.md](../../../docs/architecture/device-discovery.md)
 - Capacity labels, flavor/queue/InstanceType naming, the five reconcilers → [architecture/scheduling-chain.md](../../../docs/architecture/scheduling-chain.md)
 - The five admission gates, webhook rules, the four-view status → [architecture/admission.md](../../../docs/architecture/admission.md)
-- Chart mode vs image mode, what the worker applies itself → [architecture/install-modes.md](../../../docs/architecture/install-modes.md)
+- Chart mode vs image mode, what the worker applies itself → [architecture/installation-modes.md](../../../docs/architecture/installation-modes.md)
 - Startup ordering, the gateway mirror, CGO bindings, the 63-char rule → [architecture/internals.md](../../../docs/architecture/internals.md)
 - The two accelerator families, their resource keys and request rules → [accelerator-requests.md](../../../docs/accelerator-requests.md)
 - Settings & `GPUSTACK_*` configuration knobs → [settings.md](../../../docs/settings.md)

@@ -36,8 +36,7 @@ Details, and the startup ordering the worker must keep, are in [Internals](archi
 
 ## How it works: four stages
 
-1. **Bootstrap** — deploy NFD and the Device Manager DaemonSets ([Two install
-   modes](architecture/install-modes.md)).
+1. **Bootstrap** — deploy NFD and the Device Manager DaemonSets ([Installation Modes](architecture/installation-modes.md)).
 2. **Device discovery** — the Device Manager detects accelerators, reports per-device feature labels and
    maintains the `Devices` CR ledger.
 3. **Capacity profiling** — the Worker derives per-node capacity labels: CPU cores, the four `.sliced.*`
@@ -109,7 +108,7 @@ are in [Device Discovery](architecture/device-discovery.md#device-accelerator-re
 - [Device Discovery](architecture/device-discovery.md) — stages 1 and 2, and what the allocator injects.
 - [Scheduling Chain](architecture/scheduling-chain.md) — stages 3 and 4.
 - [Admission](architecture/admission.md) — the five gates and the four-view status.
-- [Installation Modes](architecture/install-modes.md) — chart mode versus image mode.
+- [Installation Modes](architecture/installation-modes.md) — chart mode versus image mode.
 - [Internals](architecture/internals.md) — startup order and the invariants that fail silently.
 - [Walkthrough](walkthrough.md) — all of it recorded on a live cluster, with real output.
 

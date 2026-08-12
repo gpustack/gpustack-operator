@@ -3,7 +3,7 @@
 > **Purpose** — which replica knob to raise per control-plane component, what each subchart can and
 > cannot spread, and the one topology that must stay single-replica.
 > **Audience** operators · **Prerequisites** [Two install
-> modes](../architecture/install-modes.md) · **Read time** ~4 min
+> modes](../architecture/installation-modes.md) · **Read time** ~4 min
 
 Every control-plane component the chart deploys elects a leader, so extra replicas stand by: **they buy
 failover, not throughput.** A highly available install raises each replica count and turns on its
@@ -183,7 +183,7 @@ kubectl uncordon <node>
 
 ---
 
-**See also** — [Two install modes](../architecture/install-modes.md) (these knobs need chart mode; image
+**See also** — [Installation Modes](../architecture/installation-modes.md) (these knobs need chart mode; image
 mode has no user-values channel) ·
 [Internals](../architecture/internals.md#worker-startup-order-matters) · [Settings](../settings.md)
 
