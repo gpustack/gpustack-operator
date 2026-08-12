@@ -19,7 +19,7 @@
 
 - `make deps` — vendor patched k8s staging modules into `staging/` **and** upstream Helm charts into `deploy/gpustack-operator/chart/charts/`, then `go mod tidy && go mod download`; `make deps update` adds `go get -u ./...`.
 - `make generate` — the `gen/api` generators: deepcopy, register, apiservice, CRDs, conversion, protobuf, webhooks. `make generate binding` regenerates the CGO bindings in `binding/` via c-for-go.
-- `make lint` — golangci-lint (`.golangci.yaml`); `make lint dirty` also fails on a dirty tree. `make lint docs` checks the documentation contract instead (bash + awk, about a second, no Go toolchain) — see [the docs skill](../.claude/skills/gpustack-operator-docs/SKILL.md).
+- `make lint` — golangci-lint (`.golangci.yaml`); `make lint dirty` also fails on a dirty tree. `make lint docs` checks the documentation contract instead — bash and awk over the corpus, a second or two, and no cluster; see [the docs skill](../.claude/skills/gpustack-operator-docs/SKILL.md).
 - `make build` — cross-build `cmd/gpustack-operator` into `.dist/build/`, version ldflag-injected into `pkg/utils/version`; `VERSION=vX.y.z+l.m make build` sets it, `BUILD_PLATFORMS="linux/amd64 linux/arm64"` cross-compiles.
 - `make test` — `go test -v -failfast -race -cover -timeout=30m ./...`, coverage to `.dist/test/coverage.out`; trailing args are regexes of packages to **exclude**.
 - `make package` — images via `docker buildx` from `pack/*/Dockerfile` (Linux only).

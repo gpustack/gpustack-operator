@@ -40,8 +40,11 @@ Three skills carry the rest:
 - `gpustack-operator-docs` — when a change needs a doc change: routes the fact to the right page,
   checks the index, links and tables of contents.
 
-The `gpustack-operator-lint` hook dispatches on what a turn left dirty: `make lint` for Go, `make lint
-chart` for the chart, `make lint docs` for markdown. Run the matching one yourself too.
+The `gpustack-operator-lint` hook dispatches on what a turn left dirty. Run the matching one yourself too:
+
+- `*.go` → `make lint`
+- the chart → `make lint chart`
+- `*.md` → `make lint docs`
 
 ### Go conventions
 
