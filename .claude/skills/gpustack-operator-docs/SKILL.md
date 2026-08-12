@@ -66,17 +66,23 @@ reader's trust.
 | `README.md` Quick Start's four request shapes | `docs/accelerator-requests.md` — *The resource keys* and *Worked example per family* | nothing fails; the front page and the normative contract drift apart. This copy is the one sanctioned exception to "state a fact once" (the README is the shop window) — change both together |
 | `docs/settings.md` tables | `pkg/worker/settings` and the `GPUSTACK_*` readers | nothing fails; an operator configures something that no longer exists |
 | `docs/README.md` page table | the set of files under `docs/` | `check-docs.sh` fails |
+| `docs/README.md` page **labels** | each page's `#` H1, character for character | `check-docs.sh` fails; a page's file name, H1 and index label are one set of words |
 
 ## Before you finish
 
 ```bash
-bash .claude/skills/gpustack-operator-docs/scripts/check-docs.sh
+bash .claude/skills/gpustack-operator-docs/scripts/check-docs.sh            # the gate, as CI runs it
+bash .claude/skills/gpustack-operator-docs/scripts/check-docs.sh --report   # while writing
 ```
 
 It verifies relative links and `#anchor`s across `README.md`, `CLAUDE.md`, `docs/**` and
 `.claude/skills/**`; and — for `docs/**` only — each page's `## Contents` against its headings, the four
-header-block fields, a `**See also**` footer at the end, and registration in the `## All pages` table of
-`docs/README.md`. It does **not** read prose: everything below is still on you.
+header-block fields, a `**See also**` footer at the end, registration in the `## All pages` table of
+`docs/README.md`, the label there against the page's H1, and the three size caps (paragraph, page
+length, `##` count — see `references/conventions.md`). `--report` demotes the caps to warnings and
+prints the per-page metrics. `.github/workflows/docs.yml` runs the plain form on every markdown change.
+
+It still does **not** read prose: everything below is on you.
 
 - [ ] `wc -l docs/architecture.md` is still ≤ ~200.
 - [ ] The new fact is stated **once**; every other page links to it.

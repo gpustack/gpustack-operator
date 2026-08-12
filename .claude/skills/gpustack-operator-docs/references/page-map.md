@@ -105,10 +105,13 @@ dependencies.
 
 ## `docs/operation/*.md`
 
-**Owns** — administrator procedures: what to run, in what order, and how to verify. High availability
-and the NVIDIA MIG runbook today.
+**Owns** — administrator procedures: what to run, in what order, and how to verify. Today: high
+availability, the NVIDIA MIG runbook, and `thead-mig.md` — MIG is T-Head's own word for its
+partitioning, as `hgml.GetMigMode()` and the `alibabacloud.com/ppu.partitioned.mig-<profile>` key both
+show, so the page is named for it too.
 
-**Rule** — each page ends with a `## Verify` block of commands whose expected output is stated.
+**Rule** — a page with a `## Verify` block states the expected output of every command in it. These
+pages are exempt from the line cap: a runbook is as long as the hardware makes it.
 
 ## `docs/migration/*.md`
 
@@ -124,6 +127,8 @@ transition, so do not "modernize" its version numbers.
 
 **Pinned** — `instance-type-unit-resources.md` is matched row-by-row by `TestUnitResourcesPresetDocs`,
 by path. Do not rename it or reshape its tables.
+
+**Rule** — these pages are exempt from the ten-`##` cap: a lookup page is meant to be flat.
 
 ## `specs/` — not documentation
 
