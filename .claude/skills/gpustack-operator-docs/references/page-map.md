@@ -32,7 +32,7 @@ one clause and a link when a deep page grows.
 **Test** — a reader who knows Kubernetes but not this project should answer "what does it do, and what
 happens to my request" from this page alone, in under 10 minutes.
 
-## `docs/architecture/discovery.md` (stages 1–2)
+## `docs/architecture/device-discovery.md` (stages 1–2)
 
 **Owns** — NFD's three jobs, the general(CPU) node key, the `gpustack-cpu-info` rule and the
 manufacturer map, the Device Manager DaemonSets, the accelerator label table, the `Devices` ledger, the
@@ -49,7 +49,7 @@ is *allowed* (that is `admission.md`).
 capacity tables, per-vendor slice counts, presence-gating, the unit-spec default, the naming/grouping
 scheme, the controller diagram, and the five reconcilers' ownership split.
 
-**Never** — the ledger's internals (`discovery.md`) or gate behavior (`admission.md`). Cross-link both.
+**Never** — the ledger's internals (`device-discovery.md`) or gate behavior (`admission.md`). Cross-link both.
 
 ## `docs/architecture/admission.md`
 

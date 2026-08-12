@@ -25,8 +25,8 @@ one, not to widen the overview.
 
 | The change is about… | Page |
 |---|---|
-| NFD labels, the `gpustack-cpu-info` rule, the manufacturer map | `docs/architecture/discovery.md` |
-| Device Manager detection, the `Devices` ledger, allocator injection, cross-mode exclusion, placement | `docs/architecture/discovery.md` |
+| NFD labels, the `gpustack-cpu-info` rule, the manufacturer map | `docs/architecture/device-discovery.md` |
+| Device Manager detection, the `Devices` ledger, allocator injection, cross-mode exclusion, placement | `docs/architecture/device-discovery.md` |
 | Capacity labels, flavor/queue/InstanceType naming and grouping, the five reconcilers | `docs/architecture/scheduling-chain.md` |
 | Any admission gate, the four-view status, InstanceType/Instance/Pod webhook rules, drain-stop | `docs/architecture/admission.md` |
 | Chart mode vs image mode, `disableApplications`, what the worker applies itself | `docs/architecture/install-modes.md` |
@@ -62,7 +62,7 @@ reader's trust.
 |---|---|---|
 | `docs/reference/instance-type-unit-resources.md` | `pkg/nodefeature/unit_resources_preset.yaml` via `TestUnitResourcesPresetDocs` | the test matches a **whole table row** (`\| family \| tier \| cpu \| ram \|`) and the page **path**; do not rename the page or reshape that table |
 | `deploy/gpustack-operator/chart/README.md`, `values.schema.json` | `values.yaml` + `README.md.gotmpl` via `make generate chart` | generated — never hand-edit; a doc path quoted in a `values.yaml` comment needs a regenerate, and `chart.yml` fails on drift |
-| `README.md` accelerator matrix | `pkg/nodefeature/knowns.go` (resource names, `SharedResourceMaxSize`, `_ManufacturerPartitionKindMap`) and **whether** each `pkg/devicemanager/detector/<mfr>/device.go` sets `LogicalSliced` at all | nothing fails; the table silently lies about what a vendor can do. The matrix is deliberately ✅/— only — per-card slice counts and the per-vendor isolation mechanism live in `docs/architecture/discovery.md`, not on the front page |
+| `README.md` accelerator matrix | `pkg/nodefeature/knowns.go` (resource names, `SharedResourceMaxSize`, `_ManufacturerPartitionKindMap`) and **whether** each `pkg/devicemanager/detector/<mfr>/device.go` sets `LogicalSliced` at all | nothing fails; the table silently lies about what a vendor can do. The matrix is deliberately ✅/— only — per-card slice counts and the per-vendor isolation mechanism live in `docs/architecture/device-discovery.md`, not on the front page |
 | `README.md` Quick Start's four request shapes | `docs/accelerator-requests.md` — *The resource keys* and *Worked example per family* | nothing fails; the front page and the normative contract drift apart. This copy is the one sanctioned exception to "state a fact once" (the README is the shop window) — change both together |
 | `docs/settings.md` tables | `pkg/worker/settings` and the `GPUSTACK_*` readers | nothing fails; an operator configures something that no longer exists |
 | `docs/README.md` page table | the set of files under `docs/` | `check-docs.sh` fails |

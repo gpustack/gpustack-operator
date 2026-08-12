@@ -37,6 +37,6 @@
 //   - manufacturer — the company. Its native code is the manufacturer's library, SDK or
 //     binding.
 //
-// docs/architecture/discovery.md carries the same diagram for the reader coming from the
+// docs/architecture/device-discovery.md carries the same diagram for the reader coming from the
 // documentation rather than the code.
 package device

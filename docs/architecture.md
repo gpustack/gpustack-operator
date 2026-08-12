@@ -72,7 +72,7 @@ flowchart TD
     DM -- "Devices ledger feeds" --> IT
 ```
 
-Stages 1–2 are detailed in [Device Discovery](architecture/discovery.md), stages 3–4 in [Scheduling
+Stages 1–2 are detailed in [Device Discovery](architecture/device-discovery.md), stages 3–4 in [Scheduling
 Chain](architecture/scheduling-chain.md).
 
 ## Life of a sliced-GPU request
@@ -96,11 +96,11 @@ the previous one cannot:
 5. **Gate 4 — scheduler / kubelet.** Picks a node whose `.sliced.*` capacity keys still fit; the
    kubelet then picks an accelerator-bound token — *which is* the accelerator — guided by the plugin's
    preference for the most-occupied accelerator that still has room.
-   → [Device Discovery](architecture/discovery.md#placement-is-a-preference-not-a-decision)
+   → [Device Discovery](architecture/device-discovery.md#placement-is-a-preference-not-a-decision)
 6. **Gate 5 — allocator.** Refuses an accelerator another mode holds, injects the manufacturer's
    runtime isolation (preload library, compute/VRAM quota), and records the allocation in the `Devices`
    ledger. Only the partitioned family's fungible tokens let it choose the accelerator itself.
-   → [Device Discovery](architecture/discovery.md#the-device-plugin-allocator)
+   → [Device Discovery](architecture/device-discovery.md#the-device-plugin-allocator)
 7. **Observe.** The `InstanceType.status` four-view moves; `kubectl get instancetype -w` shows the
    capacity change as the pod allocates, and back again when it exits.
    → [Admission](architecture/admission.md#four-view-status)
@@ -108,7 +108,7 @@ the previous one cannot:
 ## Vocabulary
 
 The three hardware words — **Device**, **Accelerator**, **Resource** — and the layering between them
-are in [Device Discovery](architecture/discovery.md#device-accelerator-resource). The rest:
+are in [Device Discovery](architecture/device-discovery.md#device-accelerator-resource). The rest:
 
 | Term | Meaning |
 |---|---|
@@ -124,7 +124,7 @@ are in [Device Discovery](architecture/discovery.md#device-accelerator-resource)
 
 | Page | What it answers |
 |---|---|
-| [Device Discovery](architecture/discovery.md) | how NFD and the Device Manager turn hardware into labels, and what the allocator does at `Allocate` |
+| [Device Discovery](architecture/device-discovery.md) | how NFD and the Device Manager turn hardware into labels, and what the allocator does at `Allocate` |
 | [Scheduling Chain](architecture/scheduling-chain.md) | how capacity labels become ResourceFlavors, ClusterQueues, LocalQueues and InstanceTypes |
 | [Admission](architecture/admission.md) | the five gates, the four-view status, and which field answers "what can I still get" |
 | [Two install modes](architecture/install-modes.md) | chart mode vs image mode, and which objects the worker must apply itself |
@@ -140,4 +140,4 @@ and switching CPU-manufacturer awareness on — see the [walkthrough](walkthroug
 **See also** — [Accelerator Requests](accelerator-requests.md) (the request contract) ·
 [Settings](settings.md) · [Development](development.md) · [All documentation](README.md)
 
-**Next** → [Device Discovery](architecture/discovery.md) — stage 1 and 2 in detail.
+**Next** → [Device Discovery](architecture/device-discovery.md) — stage 1 and 2 in detail.

@@ -72,7 +72,7 @@ controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.
 
 - The whole map, with reading paths per role → [docs/README.md](../../../docs/README.md)
 - What the operator builds, in one page → [architecture.md](../../../docs/architecture.md)
-- NFD labels, Device Manager detection, the `Devices` ledger, allocator injection → [architecture/discovery.md](../../../docs/architecture/discovery.md)
+- NFD labels, Device Manager detection, the `Devices` ledger, allocator injection → [architecture/device-discovery.md](../../../docs/architecture/device-discovery.md)
 - Capacity labels, flavor/queue/InstanceType naming, the five reconcilers → [architecture/scheduling-chain.md](../../../docs/architecture/scheduling-chain.md)
 - The five admission gates, webhook rules, the four-view status → [architecture/admission.md](../../../docs/architecture/admission.md)
 - Chart mode vs image mode, what the worker applies itself → [architecture/install-modes.md](../../../docs/architecture/install-modes.md)

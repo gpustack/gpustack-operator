@@ -215,7 +215,7 @@ reading them costs one file per allocation and removes the assumption entirely.
 PPU selection, the fungible-token `Partitioned` family, the placement-aware `Remaining` ledger, quota on
 the shared `credits` resource, and reclaim on Pod deletion all work exactly as described for NVIDIA in
 [Requesting a MIG instance](nvidia-mig.md#requesting-a-mig-instance) and [Device
-Discovery](../architecture/discovery.md#the-partitioned-family-fungible-tokens) — including the SSH
+Discovery](../architecture/device-discovery.md#the-partitioned-family-fungible-tokens) — including the SSH
 sidecar seeing the partition rather than the parent PPU, and the reclaim race a same-profile replacement
 submitted the instant its predecessor is deleted can hit (see
 [Limitations](nvidia-mig.md#limitations)). The device-node injection above is the one place T-Head's
@@ -359,7 +359,7 @@ A capability change reaches the cluster **only** through Device Manager restart 
 
 **See also** — [NVIDIA MIG Operations](nvidia-mig.md) (the sibling runbook this page mirrors) ·
 [Accelerator Requests](../accelerator-requests.md) (the full key set and request rules, shared by both
-manufacturers) · [Device Discovery](../architecture/discovery.md#the-partitioned-family-fungible-tokens) (how a
+manufacturers) · [Device Discovery](../architecture/device-discovery.md#the-partitioned-family-fungible-tokens) (how a
 partition is placed and reclaimed)
 
 **Next** → [Accelerator Requests](../accelerator-requests.md) — the normative request contract.

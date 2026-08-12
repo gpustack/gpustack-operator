@@ -19,14 +19,14 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 3. [High Availability](operation/high-availability.md) — the replica knob per component.
 4. [Settings & Environment Variables](settings.md) — online-adjustable settings and every `GPUSTACK_*`.
 5. [NVIDIA MIG Operations](operation/nvidia-mig.md) — the runbook for enabling/disabling MIG on a node.
-6. [T-Head PPU Partitioning Operations](operation/thead-mig.md) — the same runbook for T-Head's own
+6. [T-Head PPU Partitioning Operations](operation/thead-ppu-partitioning.md) — the same runbook for T-Head's own
    MIG-named partitioning.
 7. Upgrading: [to the bundled subcharts](migration/to-subcharts.md) · [from
    v0.5.x](migration/from-v0.5.md).
 
 **I change the code** — read the overview first; it is the map for everything else.
 
-1. [Architecture](architecture.md) → [Device Discovery](architecture/discovery.md) → [Scheduling
+1. [Architecture](architecture.md) → [Device Discovery](architecture/device-discovery.md) → [Scheduling
    Chain](architecture/scheduling-chain.md) → [Admission](architecture/admission.md).
 2. [Internals](architecture/internals.md) — the invariants that break quietly if you miss them.
 3. [Development](development.md) — build, lint, test, code generation, vendored dependencies.
@@ -44,7 +44,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | Page | What it answers | Audience | Read time |
 |---|---|---|---|
 | [Architecture](architecture.md) | What the operator builds, the four stages, the life of one sliced-GPU request, the vocabulary | everyone | ~8 min |
-| [Device Discovery](architecture/discovery.md) | How NFD and the Device Manager turn hardware into labels and a per-accelerator ledger; what the allocator injects | contributors | ~18 min |
+| [Device Discovery](architecture/device-discovery.md) | How NFD and the Device Manager turn hardware into labels and a per-accelerator ledger; what the allocator injects | contributors | ~18 min |
 | [Scheduling Chain](architecture/scheduling-chain.md) | How capacity labels become ResourceFlavors, ClusterQueues, LocalQueues and InstanceTypes | contributors | ~15 min |
 | [Admission](architecture/admission.md) | The five gates, the four-view status, which field answers "what can I still get" | contributors, operators | ~15 min |
 | [Two install modes](architecture/install-modes.md) | Chart mode vs image mode; which objects the worker must apply itself | operators, contributors | ~8 min |
@@ -55,7 +55,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [Development](development.md) | Build, lint, test, code generation, vendored subcharts and dependencies | contributors | ~10 min |
 | [High Availability](operation/high-availability.md) | Which knob to raise per control-plane component, and the one topology that cannot be redundant | operators | ~8 min |
 | [NVIDIA MIG Operations](operation/nvidia-mig.md) | Enabling/disabling MIG, reboot recovery, and a recorded three-configuration walkthrough | operators | ~30 min |
-| [T-Head PPU Partitioning Operations](operation/thead-mig.md) | Enabling/disabling T-Head's own MIG-named partitioning, the busy-mode-change prerequisite, and reboot recovery | operators | ~15 min |
+| [T-Head PPU Partitioning Operations](operation/thead-ppu-partitioning.md) | Enabling/disabling T-Head's own MIG-named partitioning, the busy-mode-change prerequisite, and reboot recovery | operators | ~15 min |
 | [Migrating to the bundled subcharts](migration/to-subcharts.md) | The one-time ownership transfer from the runtime-installed releases | operators | ~15 min |
 | [Migrating from v0.5.x](migration/from-v0.5.md) | Upgrading across the scheduling-chain refactor | operators | ~10 min |
 | [Instance Type Unit Resources Preset Reference](reference/instance-type-unit-resources.md) | The per-product CPU/RAM tier a derived InstanceType is sized with, and where each tier came from | operators | reference |

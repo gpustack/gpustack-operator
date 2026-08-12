@@ -115,7 +115,7 @@ Platform-specific code is split into `_linux.go` / `_other.go` build-constrained
 The set of supported manufacturers and their PCI vendor IDs / resource names live in `pkg/nodefeature`
 (overridable via `GPUSTACK_*` env vars, which the chart fans out from `global.manufacturers`) — what each
 row of that map decides is in [Device
-Discovery](discovery.md#the-gpustack-cpu-info-nodefeaturerule).
+Discovery](device-discovery.md#the-gpustack-cpu-info-nodefeaturerule).
 
 ## CGO bindings (`binding/`)
 

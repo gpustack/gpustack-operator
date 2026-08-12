@@ -97,5 +97,5 @@ may also mean the manufacturer's library could not read that metric.
   backlog. The endpoint is also unreachable for an out-of-cluster worker.
 
 **See also** — [Architecture](../architecture.md) · [Device
-Discovery](../architecture/discovery.md) for how the Device Manager samples accelerators.
+Discovery](../architecture/device-discovery.md) for how the Device Manager samples accelerators.
 **Next** → [Settings & Environment Variables](../settings.md)

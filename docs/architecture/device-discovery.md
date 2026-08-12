@@ -54,7 +54,7 @@ manages Devices; Kubernetes consumes them as Resources.*
 - **card** — a manufacturer-hardware term, used only where a manufacturer's SDK models a card as
   something other than exactly one Accelerator: the Ascend DCMI card that contains several devices,
   and the T-Head device-node ordinal (see [T-Head PPU Partitioning
-  Operations](../operation/thead-mig.md)).
+  Operations](../operation/thead-ppu-partitioning.md)).
 - **manufacturer** — the company. Its native code is *the manufacturer's library, SDK or binding*.
 
 The `pkg/device` package doc carries the same diagram for a reader coming from the code.
@@ -278,7 +278,7 @@ It materializes the requested hardware instance (NVIDIA MIG, or T-Head's own MIG
 on an accelerator it selects itself and injects only that instance — as device nodes rather than an
 environment variable for T-Head, which has no container-runtime hook; see [Accelerator
 Requests](../accelerator-requests.md), [NVIDIA MIG Operations](../operation/nvidia-mig.md) and
-[T-Head PPU Partitioning Operations](../operation/thead-mig.md).
+[T-Head PPU Partitioning Operations](../operation/thead-ppu-partitioning.md).
 
 ### Sliced (logical slicing)
 
@@ -504,7 +504,7 @@ comes from the manufacturer responder's partition capability (`PhysicalSlicedRes
 interface that materializes a partition, so a responder able to carve one can always name it), which
 reads the owner's durable node-local ownership record and proves the recorded instance still live
 before naming it (see [NVIDIA MIG Operations](../operation/nvidia-mig.md#requesting-a-mig-instance)
-and [T-Head PPU Partitioning Operations](../operation/thead-mig.md#requesting-a-partition)). A
+and [T-Head PPU Partitioning Operations](../operation/thead-ppu-partitioning.md#requesting-a-partition)). A
 responder without that capability, or one that cannot substantiate the identity, fails the admission
 closed rather than widening the grant back to the accelerator.
 
@@ -628,7 +628,7 @@ since vcann-rt's `npu_info.config` models a single physical NPU), so any future 
 
 **See also** — [Accelerator Requests](../accelerator-requests.md) (the resource keys these families
 serve) · [NVIDIA MIG Operations](../operation/nvidia-mig.md) · [T-Head PPU Partitioning
-Operations](../operation/thead-mig.md) · [Settings](../settings.md)
+Operations](../operation/thead-ppu-partitioning.md) · [Settings](../settings.md)
 
 **Next** → [Scheduling Chain](scheduling-chain.md) — how these labels and the ledger become Kueue
 objects.

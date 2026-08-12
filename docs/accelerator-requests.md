@@ -29,7 +29,7 @@ An accelerator is shared in one of two physically incompatible ways, and GPUStac
 
 | Term | What it is | How isolation is enforced | Example |
 |---|---|---|---|
-| **Logical slicing** (`.sliced*`) | software slicing of a whole accelerator | the manufacturer's own sharing facility caps compute and VRAM per container — [which facility, per manufacturer](architecture/discovery.md#sliced-logical-slicing) | 50 % of an A10G |
+| **Logical slicing** (`.sliced*`) | software slicing of a whole accelerator | the manufacturer's own sharing facility caps compute and VRAM per container — [which facility, per manufacturer](architecture/device-discovery.md#sliced-logical-slicing) | 50 % of an A10G |
 | **Physical partitioning** (`.partitioned*`) | hardware partitioning of an accelerator put into a partitioning mode | the hardware itself; the operator materializes the instance | an NVIDIA MIG `3g.40gb` or a T-Head PPU partition |
 
 The two never apply to the same accelerator. An accelerator in a partitioning mode advertises
@@ -437,7 +437,7 @@ reschedule.
   not the partitioning mode, so nothing else picks the change up. Deleting the node's `Devices`
   object is **not** required — an existing group's capability is rewritten in place. The procedure
   end to end is in [NVIDIA MIG Operations](./operation/nvidia-mig.md#enabling-mig-on-a-node) and
-  [T-Head PPU Partitioning Operations](./operation/thead-mig.md#enabling-partitioning-on-a-node).
+  [T-Head PPU Partitioning Operations](./operation/thead-ppu-partitioning.md#enabling-partitioning-on-a-node).
 - **A non-default `TopologyManager` policy can mis-align a partition.** The Partitioned resource
   reports no NUMA topology (the plugin may not use the accelerator the kubelet aligned to), so under
   `single-numa-node` the CPU and memory providers can settle on one socket while the only
@@ -447,8 +447,8 @@ reschedule.
 
 **See also** — [NVIDIA MIG Operations](./operation/nvidia-mig.md) (the administrator runbook for a
 accelerator's partitioning mode, plus a recorded enable → request → reclaim → disable walkthrough) ·
-[T-Head PPU Partitioning Operations](./operation/thead-mig.md) (the same runbook for T-Head's own
+[T-Head PPU Partitioning Operations](./operation/thead-ppu-partitioning.md) (the same runbook for T-Head's own
 MIG-named partitioning) · [Admission](./architecture/admission.md) (where these keys are checked) ·
-[Device Discovery](./architecture/discovery.md#the-device-plugin-allocator) (where they are served)
+[Device Discovery](./architecture/device-discovery.md#the-device-plugin-allocator) (where they are served)
 
 **Next** → [Walkthrough](./walkthrough.md) — the same requests on a live cluster.

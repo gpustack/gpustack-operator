@@ -119,7 +119,7 @@ differs by family: for the accelerator-bound families the kubelet already chose 
 choosing the token, and the allocator only refuses one another mode holds; for the **partitioned**
 family the tokens are a fungible count, so the allocator picks the accelerator itself and
 materializes the hardware instance on it. Both paths, and the per-manufacturer isolation each slice
-gets, are in [Device Discovery](discovery.md#the-device-plugin-allocator).
+gets, are in [Device Discovery](device-discovery.md#the-device-plugin-allocator).
 
 Per-slice runtime isolation covers every sliceable manufacturer. `.sliced` and `.partitioned` are
 both capped at exactly **1** by the Pod webhook, so the manufacturer-specific multi-slice divergence
@@ -251,7 +251,7 @@ generated from `pkg/nodefeature` by `make generate chart`.
 ---
 
 **See also** — [Accelerator Requests](../accelerator-requests.md) (the normative request contract) ·
-[Device Discovery](discovery.md#the-device-plugin-allocator) (gate 5 in detail) ·
+[Device Discovery](device-discovery.md#the-device-plugin-allocator) (gate 5 in detail) ·
 [Walkthrough](../walkthrough.md) (the four views moving on a live cluster)
 
 **Next** → [Two install modes](install-modes.md) — how the chain gets deployed.

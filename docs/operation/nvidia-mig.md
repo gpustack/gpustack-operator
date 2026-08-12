@@ -788,7 +788,7 @@ A capability change reaches the cluster **only** through Device Manager restart 
 
 **See also** — [Accelerator Requests](../accelerator-requests.md) (the full key set and request rules) ·
 [Admission](../architecture/admission.md#capability-versus-availability) (which status field answers
-"what can I still get") · [Device Discovery](../architecture/discovery.md#the-partitioned-family-fungible-tokens)
+"what can I still get") · [Device Discovery](../architecture/device-discovery.md#the-partitioned-family-fungible-tokens)
 (how a partition is placed and reclaimed)
 
 **Next** → [Walkthrough](../walkthrough.md) — the logical-slicing counterpart on a live cluster.

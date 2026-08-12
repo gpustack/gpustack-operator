@@ -4,7 +4,7 @@
 > materialize those labels into a Kueue `ResourceFlavor` → `ClusterQueue` → `LocalQueue` chain plus an
 > `InstanceType` CRD.
 > **Audience** contributors · **Prerequisites** [Architecture](../architecture.md),
-> [Device Discovery](discovery.md) · **Read time** ~15 min
+> [Device Discovery](device-discovery.md) · **Read time** ~15 min
 
 This is stages 3 and 4 of the four-stage chain. What a request then has to pass to be admitted is in
 [Admission](admission.md).
@@ -69,7 +69,7 @@ kept everywhere — the `Devices` record, the device manager's on-disk ownership
 call into the manufacturer's library — because a name the library does not report cannot create a
 partition. A name outside that two-number shape is published exactly as the driver reports it. See
 [T-Head PPU Partitioning
-Operations](../operation/thead-mig.md#how-partition-profiles-are-discovered).
+Operations](../operation/thead-ppu-partitioning.md#how-partition-profiles-are-discovered).
 
 > **Why both terms** — the scheduler fits a Pod by subtracting the requests of the Pods already on
 > the node, so publishing bare `remaining` would subtract every live instance twice. An accelerator
@@ -111,7 +111,7 @@ observes on the next Device Manager detection — see [NVIDIA MIG
 Operations](../operation/nvidia-mig.md), whose [three-configuration
 walkthrough](../operation/nvidia-mig.md#walkthrough-three-mig-configurations-on-one-node) shows the
 disjoint populations on a recorded 8-accelerator node, including a **mixed** one where both families
-are advertised at once, and [T-Head PPU Partitioning Operations](../operation/thead-mig.md) for the
+are advertised at once, and [T-Head PPU Partitioning Operations](../operation/thead-ppu-partitioning.md) for the
 same procedure on T-Head.
 
 ## The unit spec is not derived from node capacity
@@ -303,7 +303,7 @@ behavior is described in [Admission](admission.md#gate-3--the-per-accelerator-ad
 
 ---
 
-**See also** — [Device Discovery](discovery.md) (where the capacity signals come from) ·
+**See also** — [Device Discovery](device-discovery.md) (where the capacity signals come from) ·
 [Walkthrough](../walkthrough.md) (the same objects on a live cluster) ·
 [Settings](../settings.md#online-adjustable-settings)
 
