@@ -4,7 +4,7 @@
 > materialize them into a Kueue `ResourceFlavor` → `ClusterQueue` → `LocalQueue` chain plus an
 > `InstanceType` CRD.
 > **Audience** contributors · **Prerequisites** [Architecture](../architecture.md),
-> [Device Discovery](device-discovery.md) · **Read time** ~7 min
+> [Device Discovery](device-discovery.md) · **Read time** ~9 min
 
 Stages 3 and 4 of the four-stage chain; what a request must then pass is in [Admission](admission.md).
 

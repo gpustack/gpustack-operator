@@ -3,7 +3,7 @@
 > **Purpose** — the normative request contract: every resource key a workload may set, the seven rules
 > admission enforces, and a worked example per family.
 > **Audience** users writing workloads, contributors touching the webhooks · **Prerequisites**
-> [Architecture](./architecture.md) · **Read time** ~12 min
+> [Architecture](./architecture.md) · **Read time** ~11 min
 
 Every rule below is checked at admission: a violating Pod is rejected at `CREATE`, never discovered at
 container start. They bind the **Kueue-managed path** — both Pod webhooks select on the
