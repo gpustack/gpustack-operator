@@ -2,6 +2,7 @@ package cambricon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -40,6 +41,29 @@ const smluHashLen = 12
 // live set for this many consecutive reconciles before its instance is reclaimed, so a
 // transient list gap never destroys a live slice.
 const reclaimMaxMisses = 3
+
+// errSMLUUnsupported marks a mode call that failed because this cnDev library or driver has no sMLU
+// API at all, as opposed to failing for something about the card or the moment. It is the one
+// failure that no retry, no write and no host command can get past, so the preflight refuses on it
+// without touching the card and without offering a remediation that could not work.
+var errSMLUUnsupported = errors.New("this cnDev library or driver has no sMLU API")
+
+// smluModeError renders a failed driver call on the sMLU-mode path, marking it with
+// errSMLUUnsupported when apiUnavailable says the call could not be made at all.
+//
+// The verdict arrives as a bool because only the build-tagged driver can read a cnDev return code,
+// while this file must stay importable by a darwin test binary. Splitting it that way is what puts
+// the marking itself under test: the seam keeps the one-line code-to-bool classification, and the
+// decision that hangs off it is exercised here.
+//
+// The card is deliberately not named. The caller knows the accelerator and its cnmon ordinal, so the
+// caller composes the operator-facing sentence.
+func smluModeError(what string, cause error, apiUnavailable bool) error {
+	if apiUnavailable {
+		return fmt.Errorf("%s: %w: %w", what, cause, errSMLUUnsupported)
+	}
+	return fmt.Errorf("%s: %w", what, cause)
+}
 
 // allocMu serializes the whole scan -> validate -> create -> write-marker cycle in
 // Allocate AND the scan -> destroy critical section in the reclaim loop. The
@@ -227,6 +251,66 @@ func scanMarkers(podsDir string) (entries []markerEntry, corrupt []string) {
 	return entries, corrupt
 }
 
+// ensureSMLUModeEnabled puts the accelerator a logical slice is about to land on into sMLU mode,
+// which the card needs before any profile or instance can exist on it. It reads first and writes only
+// when the mode is off, so an accelerator already carrying a slice costs one query, and it never
+// turns the mode off — that would strand the slices another pod is still running.
+//
+// It lives here rather than behind the driver seam so the read-then-write decision is exercised by
+// a fake that records which of the two actually happened; the seam itself only drives the hardware.
+//
+// The read is classified rather than swallowed. A read that reports the sMLU API missing from this
+// library or driver refuses the allocation without touching the card — including a card whose mode
+// is already on, since a library this package cannot query is one it cannot manage. Any other read
+// failure says nothing about whether the API exists, so the write is still attempted: the write is
+// what makes the mode known, and refusing over a timeout or a permissions hiccup would break a node
+// that works.
+//
+// card is the PCI bus ID cnDev addresses the accelerator by, and ordinal its cnDev device index,
+// which is what an operator needs to name the card to cnmon. Both identify the card in the failure,
+// because the ordinal's equality with cnmon's own -c index is not verified on hardware.
+//
+// Callers reach this from inside reserveInstance's critical section, and the position matters for two
+// reasons that have nothing to do with the mode itself: the marker-reuse fast path returns before it,
+// so a pod restarting onto its own live slice costs no driver call at all; and it runs only after the
+// request has been validated, so a corrupt marker is refused before the card is written to. Turning
+// the mode on twice would be harmless — the setter asserts a state rather than performing a
+// transition — so serialization is not what this placement buys.
+func ensureSMLUModeEnabled(driver smluDriver, card string, ordinal int, logger klog.Logger) error {
+	enabled, readErr := driver.GetSMLUMode(card)
+	switch {
+	case errors.Is(readErr, errSMLUUnsupported):
+		return fmt.Errorf("card %s (device index %d) cannot be sliced: %w", card, ordinal, readErr)
+	case readErr == nil && enabled:
+		return nil
+	}
+
+	err := driver.SetSMLUMode(card, true)
+	if err == nil {
+		if readErr != nil {
+			// The mode is on now, so the allocation stands — but a read this code could not trust
+			// will fail again on the next Allocate, re-writing host state every time, so it must not
+			// pass in silence.
+			logger.Info("enabled sMLU mode without a trustworthy read",
+				"card", card, "deviceIndex", ordinal, "readError", readErr.Error())
+		}
+		return nil
+	}
+	if readErr != nil {
+		err = fmt.Errorf("%w (the mode read failed too: %w)", err, readErr)
+	}
+	// The write can report the absence the read did not: cnDev looks the getter and the setter up
+	// independently. Offering a command in that case would send the operator after a fix that adds
+	// no missing symbol, so the two outcomes are told apart here as well.
+	if errors.Is(err, errSMLUUnsupported) {
+		return fmt.Errorf("card %s (device index %d) cannot be sliced: %w", card, ordinal, err)
+	}
+	return fmt.Errorf(
+		"card %s (device index %d): enable sMLU mode: %w; to enable it on the host for the card "+
+			"at this PCI address run `cnmon set -c %d -smlu on`, confirming the ordinal with `cnmon`",
+		card, ordinal, err, ordinal)
+}
+
 // reserveInstance is the Allocate core. Under allocMu it: (1) reuses an existing
 // self-marker on an exact (accelerator, cores%, memMiB) match, recovering the live
 // instance's device node, and fails closed on a mismatch (pod resource requests are
@@ -234,22 +318,9 @@ func scanMarkers(podsDir string) (entries []markerEntry, corrupt []string) {
 // sMLU mode, reuses a profile on an exact (cores%, memMiB) match on that accelerator or
 // creates one, instantiates a named instance, and writes the marker (rolling back the
 // instance + a freshly created profile if the marker write fails).
-// ensureSMLUMode puts the accelerator a logical slice is about to land on into sMLU mode, which the
-// card needs before any profile or instance can exist on it. It reads first and writes only when
-// the mode is off, so an accelerator already carrying a slice costs one query, and it never turns
-// the mode off — that would strand the slices another pod is still running.
-//
-// It lives here rather than behind the driver seam so the read-then-write decision is exercised by
-// a fake that records which of the two actually happened; the seam itself only drives the hardware.
-func ensureSMLUMode(driver smluDriver, card string) error {
-	enabled, err := driver.GetSMLUMode(card)
-	if err == nil && enabled {
-		return nil
-	}
-	return driver.SetSMLUMode(card, true)
-}
-
-func reserveInstance(driver smluDriver, podUID, container, card string, coresPct int, memMiB int64) (smluInstance, error) {
+func reserveInstance(driver smluDriver, podUID, container, card string, ordinal, coresPct int,
+	memMiB int64, logger klog.Logger,
+) (smluInstance, error) {
 	allocMu.Lock()
 	defer allocMu.Unlock()
 
@@ -278,8 +349,10 @@ func reserveInstance(driver smluDriver, podUID, container, card string, coresPct
 		return smluInstance{}, fmt.Errorf("read self marker %q: %w", self, err)
 	}
 
-	if err := ensureSMLUMode(driver, card); err != nil {
-		return smluInstance{}, fmt.Errorf("card %s: ensure smlu mode: %w", card, err)
+	// The preflight already names the card and carries its own remediation, so its error is
+	// returned as it stands rather than wrapped in a second mention of the same card.
+	if err := ensureSMLUModeEnabled(driver, card, ordinal, logger); err != nil {
+		return smluInstance{}, err
 	}
 
 	list, err := driver.ListInstances()

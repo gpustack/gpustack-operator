@@ -20,7 +20,20 @@ import (
 const (
 	testCard0 = "0000:5c:00.0"
 	testCard1 = "0000:5d:00.0"
+	// The cnDev device index the detector records for each test card, which is also the ordinal
+	// cnmon is expected to address it by.
+	testOrdinal0 = 0
+	testOrdinal1 = 1
 )
+
+// errString renders an error for a substring assertion, tolerating nil so a table row expecting no
+// failure can still declare which text must be absent.
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
 
 // redirectLogicalSliceDirs points the logical-slicing host paths at a temp dir for the test.
 func redirectLogicalSliceDirs(t *testing.T) {
@@ -254,53 +267,130 @@ func Test_marker_roundtrip_and_failClosed(t *testing.T) {
 	require.Error(t, err)
 }
 
-// The preflight reads the mode before it writes, so a card already in sMLU mode costs one query
-// and nothing else. Splitting the seam into a read and a write is what makes any of this
-// assertable: a single compound ensure call could only ever report that it had succeeded.
-func Test_ensureSMLUMode(t *testing.T) {
-	readErr := errors.New("driver mode read failed")
-	writeErr := errors.New("driver mode write failed")
+// The marking is the whole contract between the build-tagged driver and the core: the driver reads
+// the vendor code, and everything downstream reads only this sentinel. Without this test, dropping
+// the sentinel from smluModeError would leave every other test in this file green while production
+// silently lost the ability to refuse.
+func Test_smluModeError(t *testing.T) {
+	cause := errors.New("FUNCTION_NOT_FOUND")
+
+	marked := smluModeError("get smlu mode", cause, true)
+	assert.ErrorIs(t, marked, errSMLUUnsupported, "an unavailable API must carry the sentinel")
+	assert.ErrorIs(t, marked, cause, "and must keep the vendor's own reason")
+	assert.Contains(t, marked.Error(), "get smlu mode: FUNCTION_NOT_FOUND")
+
+	plain := smluModeError("get smlu mode", cause, false)
+	assert.NotErrorIs(t, plain, errSMLUUnsupported, "anything else must not carry it")
+	assert.ErrorIs(t, plain, cause)
+}
+
+// The preflight tells three outcomes apart, and the split seam is what makes each of them
+// assertable: a card already in sMLU mode costs one query; a card whose library has no sMLU API is
+// refused without the card being written to at all; and every other read failure still reaches the
+// write, so a timeout or a permissions hiccup cannot refuse an allocation the write would have
+// completed.
+func Test_ensureSMLUModeEnabled(t *testing.T) {
+	absentAPI := fmt.Errorf("get smlu mode: FUNCTION_NOT_FOUND: %w", errSMLUUnsupported)
+	transientRead := errors.New("get smlu mode: TIMEOUT")
+	refusedWrite := errors.New("set smlu mode: NOT_SUPPORTED")
 
 	testCases := []struct {
-		name       string
-		modeOn     bool
-		failRead   error
-		failWrite  error
-		wantErr    error
-		wantReads  int
-		wantWrites int
-		wantModeOn bool
+		name            string
+		ordinal         int
+		modeOn          bool
+		failRead        error
+		failWrite       error
+		wantErr         bool
+		wantContains    []string
+		wantNotContains []string
+		wantReads       int
+		wantWrites      int
+		wantModeOn      bool
 	}{
 		{
 			name:      "a card already in sMLU mode is left alone",
+			ordinal:   testOrdinal0,
 			modeOn:    true,
 			wantReads: 1, wantWrites: 0, wantModeOn: true,
 		},
 		{
 			name:      "a card with the mode off is turned on once",
+			ordinal:   testOrdinal0,
 			wantReads: 1, wantWrites: 1, wantModeOn: true,
 		},
 		{
-			// A read this preflight cannot trust falls through to the write, so a library whose
-			// getter is broken but whose setter works keeps working. T3 narrows this to the
-			// failures that are not a positively identified absent API.
-			name:      "a failed read still attempts the write",
-			failRead:  readErr,
+			// The one failure no command repairs, so the card is not written to and no command is
+			// offered: suggesting cnmon here would send the operator after a fix that cannot work.
+			name:            "an absent sMLU API is refused without a write",
+			ordinal:         testOrdinal0,
+			failRead:        absentAPI,
+			wantErr:         true,
+			wantContains:    []string{testCard0, "device index 0", "FUNCTION_NOT_FOUND"},
+			wantNotContains: []string{"cnmon"},
+			wantReads:       1, wantWrites: 0, wantModeOn: false,
+		},
+		{
+			// The refusal is decided by the read alone, so a card that is already on is refused
+			// too. That is the point: an absent API means this package cannot manage the mode at
+			// all, whatever state the card happens to be in.
+			name:         "an absent sMLU API is refused even on a card already on",
+			ordinal:      testOrdinal0,
+			modeOn:       true,
+			failRead:     absentAPI,
+			wantErr:      true,
+			wantContains: []string{testCard0},
+			wantReads:    1, wantWrites: 0, wantModeOn: true,
+		},
+		{
+			// A read that merely failed says nothing about the API's existence, so the write is
+			// still attempted rather than the allocation refused.
+			name:      "a transient read failure still attempts the write",
+			ordinal:   testOrdinal0,
+			failRead:  transientRead,
 			wantReads: 1, wantWrites: 1, wantModeOn: true,
 		},
 		{
-			// The read's answer is discarded when the read itself failed, so even a card that is
-			// already on gets written to.
-			name:      "a failed read on an already-on card still writes",
+			name:      "a transient read failure on an already-on card still writes",
+			ordinal:   testOrdinal0,
 			modeOn:    true,
-			failRead:  readErr,
+			failRead:  transientRead,
 			wantReads: 1, wantWrites: 1, wantModeOn: true,
 		},
 		{
-			name:      "a failed write is reported to the caller",
-			failWrite: writeErr,
-			wantErr:   writeErr,
+			// Both failures reach the operator: the write's own reason and the read that could not
+			// rule the write out beforehand.
+			name:      "a failed write carries the read failure and the remediation",
+			ordinal:   testOrdinal0,
+			failRead:  transientRead,
+			failWrite: refusedWrite,
+			wantErr:   true,
+			wantContains: []string{
+				testCard0, "device index 0", "set smlu mode: NOT_SUPPORTED",
+				"get smlu mode: TIMEOUT", "cnmon set -c 0 -smlu on", "confirm",
+			},
 			wantReads: 1, wantWrites: 1, wantModeOn: false,
+		},
+		{
+			// The driver's own reason is carried verbatim, and the remediation is phrased as
+			// something to try rather than as a promise that it will work.
+			name:         "a write the device refuses reports the device's own reason",
+			ordinal:      testOrdinal0,
+			failWrite:    refusedWrite,
+			wantErr:      true,
+			wantContains: []string{"set smlu mode: NOT_SUPPORTED", "cnmon set -c 0 -smlu on"},
+			wantReads:    1, wantWrites: 1, wantModeOn: false,
+		},
+		{
+			// cnDev looks the getter and the setter up independently, so the absence can surface on
+			// the write after a read that worked. Offering a command here would send the operator
+			// after a fix that adds no missing symbol.
+			name:            "an absent setter is refused without a command being offered",
+			ordinal:         testOrdinal0,
+			failWrite:       absentAPI,
+			wantErr:         true,
+			wantContains:    []string{testCard0, "cannot be sliced", "FUNCTION_NOT_FOUND"},
+			wantNotContains: []string{"cnmon"},
+			wantReads:       1, wantWrites: 1, wantModeOn: false,
 		},
 	}
 	for _, tc := range testCases {
@@ -309,11 +399,17 @@ func Test_ensureSMLUMode(t *testing.T) {
 			d.modes[testCard0] = tc.modeOn
 			d.failModeRead, d.failModeWrite = tc.failRead, tc.failWrite
 
-			err := ensureSMLUMode(d, testCard0)
-			if tc.wantErr != nil {
-				require.ErrorIs(t, err, tc.wantErr)
+			err := ensureSMLUModeEnabled(d, testCard0, tc.ordinal, logr.Discard())
+			if tc.wantErr {
+				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
+			}
+			for _, want := range tc.wantContains {
+				assert.Containsf(t, errString(err), want, "the message must name %q", want)
+			}
+			for _, unwanted := range tc.wantNotContains {
+				assert.NotContainsf(t, errString(err), unwanted, "the message must not carry %q", unwanted)
 			}
 
 			reads, writes := d.modeCalls()
@@ -324,19 +420,52 @@ func Test_ensureSMLUMode(t *testing.T) {
 	}
 }
 
+// A preflight that refuses leaves the card and the disk exactly as they were: an absent sMLU API
+// cannot be worked around, so nothing is cut and no marker claims it was.
+func Test_reserveInstance_absentSMLUAPILeavesNothingBehind(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	d := newFakeDriver()
+	d.failModeRead = fmt.Errorf("get smlu mode: FUNCTION_NOT_FOUND: %w", errSMLUUnsupported)
+
+	_, err := reserveInstance(d, "pod-a", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "cnmon", "no command can repair an absent API, so none is offered")
+
+	_, writes := d.modeCalls()
+	assert.Zero(t, writes, "a refused preflight never writes the mode")
+	assert.Zero(t, d.profileCreates, "no profile is cut")
+	assert.Zero(t, d.instanceCreates, "no instance is created")
+	assert.False(t, markerExists("pod-a", "train"), "no marker claims a slice that does not exist")
+}
+
+// A marker that disagrees with the request is caught before the mode is touched, so a corrupt
+// marker never leaves a card switched into sMLU mode on its way to failing.
+func Test_reserveInstance_mismatchedMarkerRefusedBeforeModeWrite(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	d := newFakeDriver()
+	seedMarker(t, "pod-a", "train", testCard0, encodeInstanceName("pod-a", "train"), 0, 50, 16384)
+
+	_, err := reserveInstance(d, "pod-a", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
+	require.Error(t, err)
+
+	reads, writes := d.modeCalls()
+	assert.Zero(t, reads, "the mismatch is decided before the mode is read")
+	assert.Zero(t, writes, "and before it is written")
+}
+
 // A marker-reuse retry never touches the mode: the fast path returns before the preflight, so a
 // pod restarting onto its own live slice costs no driver mode call at all.
 func Test_reserveInstance_markerReuseSkipsPreflight(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 
-	_, err := reserveInstance(d, "pod-a", "train", testCard0, 25, 16384)
+	_, err := reserveInstance(d, "pod-a", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
 	require.NoError(t, err)
 	reads, writes := d.modeCalls()
 	require.Equal(t, 1, reads, "the first reserve reads the mode once")
 	require.Equal(t, 1, writes, "the first reserve turns the mode on once")
 
-	_, err = reserveInstance(d, "pod-a", "train", testCard0, 25, 16384)
+	_, err = reserveInstance(d, "pod-a", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
 	require.NoError(t, err)
 
 	gotReads, gotWrites := d.modeCalls()
@@ -353,7 +482,7 @@ func Test_reserveInstance_corruptOtherMarkerDoesNotBlock(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(other), 0o777))
 	require.NoError(t, os.WriteFile(other, []byte("{garbage"), 0o600))
 
-	inst, err := reserveInstance(d, "uid-ok", "train", testCard0, 25, 16384)
+	inst, err := reserveInstance(d, "uid-ok", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
 	require.NoError(t, err)
 	assert.NotEmpty(t, inst.name)
 	assert.True(t, d.modeEnabled(testCard0), "sMLU mode ensured on first reserve")
@@ -363,19 +492,19 @@ func Test_reserveInstance_idempotentReuseAndFailClosed(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 
-	r0, err := reserveInstance(d, "uid-a", "train", testCard0, 25, 16384)
+	r0, err := reserveInstance(d, "uid-a", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
 	require.NoError(t, err)
 	assert.Equal(t, 1, d.instanceCreates)
 	assert.NotEmpty(t, r0.devNode)
 
 	// Re-Allocate the same pod+container+accelerator+cores+mem: reuse, no new instance.
-	r1, err := reserveInstance(d, "uid-a", "train", testCard0, 25, 16384)
+	r1, err := reserveInstance(d, "uid-a", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
 	require.NoError(t, err)
 	assert.Equal(t, r0.name, r1.name)
 	assert.Equal(t, 1, d.instanceCreates, "reuse must not create a second instance")
 
 	// A changed parameter (immutable requests) fails closed rather than mutating.
-	_, err = reserveInstance(d, "uid-a", "train", testCard0, 50, 16384)
+	_, err = reserveInstance(d, "uid-a", "train", testCard0, testOrdinal0, 50, 16384, logr.Discard())
 	require.Error(t, err)
 }
 
@@ -385,20 +514,20 @@ func Test_reserveInstance_exactMatchProfileReuse(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 
-	_, err := reserveInstance(d, "pod-a", "train", testCard0, 25, 16384)
+	_, err := reserveInstance(d, "pod-a", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
 	require.NoError(t, err)
-	_, err = reserveInstance(d, "pod-b", "train", testCard0, 25, 16384)
+	_, err = reserveInstance(d, "pod-b", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
 	require.NoError(t, err)
 	assert.Equal(t, 1, d.profileCreates, "identical quota reuses the profile")
 	assert.Equal(t, 2, d.instanceCreates)
 
 	// A different quota (here a smaller memory size) on the same accelerator creates a second profile.
-	_, err = reserveInstance(d, "pod-c", "train", testCard0, 25, 8192)
+	_, err = reserveInstance(d, "pod-c", "train", testCard0, testOrdinal0, 25, 8192, logr.Discard())
 	require.NoError(t, err)
 	assert.Equal(t, 2, d.profileCreates)
 
 	// The same quota on a DIFFERENT accelerator creates its own profile (reuse is per accelerator).
-	_, err = reserveInstance(d, "pod-d", "train", testCard1, 25, 16384)
+	_, err = reserveInstance(d, "pod-d", "train", testCard1, testOrdinal1, 25, 16384, logr.Discard())
 	require.NoError(t, err)
 	assert.Equal(t, 3, d.profileCreates)
 }
@@ -409,11 +538,11 @@ func Test_reserveInstance_reuseMissingInstanceFailsClosed(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 
-	inst, err := reserveInstance(d, "pod-a", "train", testCard0, 25, 16384)
+	inst, err := reserveInstance(d, "pod-a", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
 	require.NoError(t, err)
 	require.NoError(t, d.DestroyInstance(inst.card, inst.name)) // instance vanishes, marker remains
 
-	_, err = reserveInstance(d, "pod-a", "train", testCard0, 25, 16384)
+	_, err = reserveInstance(d, "pod-a", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing instance")
 }
@@ -424,7 +553,7 @@ func Test_reserveInstance_createFailureRollsBackProfile(t *testing.T) {
 	d := newFakeDriver()
 	d.failCard[testCard0] = true
 
-	_, err := reserveInstance(d, "pod-a", "train", testCard0, 25, 16384)
+	_, err := reserveInstance(d, "pod-a", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
 	require.Error(t, err)
 	assert.Len(t, d.destroyedProfs, 1, "the profile created for a failed instance is rolled back")
 	assert.False(t, markerExists("pod-a", "train"), "no marker on a failed reserve")
@@ -433,7 +562,7 @@ func Test_reserveInstance_createFailureRollsBackProfile(t *testing.T) {
 func Test_reclaim_deadPodDestroysAfterDebounce(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
-	inst, err := reserveInstance(d, "pod-dead", "train", testCard0, 25, 16384)
+	inst, err := reserveInstance(d, "pod-dead", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
 	require.NoError(t, err)
 
 	r := newReclaimer(d, deviceplugin.OperatorPodsDir, logr.Discard())
@@ -453,7 +582,7 @@ func Test_reclaim_deadPodDestroysAfterDebounce(t *testing.T) {
 func Test_reclaim_livePodPreserved(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
-	inst, err := reserveInstance(d, "pod-live", "train", testCard0, 25, 16384)
+	inst, err := reserveInstance(d, "pod-live", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
 	require.NoError(t, err)
 
 	r := newReclaimer(d, deviceplugin.OperatorPodsDir, logr.Discard())
@@ -572,9 +701,9 @@ func Test_reclaim_listErrorSkipsPass(t *testing.T) {
 func Test_reclaim_neverDestroysSharedProfile(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
-	_, err := reserveInstance(d, "pod-a", "train", testCard0, 25, 16384)
+	_, err := reserveInstance(d, "pod-a", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
 	require.NoError(t, err)
-	_, err = reserveInstance(d, "pod-b", "train", testCard0, 25, 16384) // shares profile 0
+	_, err = reserveInstance(d, "pod-b", "train", testCard0, testOrdinal0, 25, 16384, logr.Discard()) // shares profile 0
 	require.NoError(t, err)
 
 	r := newReclaimer(d, deviceplugin.OperatorPodsDir, logr.Discard())
@@ -597,9 +726,9 @@ func Test_reclaim_neverDestroysSharedProfile(t *testing.T) {
 func Test_reclaim_multiContainerPod(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
-	i1, err := reserveInstance(d, "pod-dead", "c1", testCard0, 25, 16384)
+	i1, err := reserveInstance(d, "pod-dead", "c1", testCard0, testOrdinal0, 25, 16384, logr.Discard())
 	require.NoError(t, err)
-	i2, err := reserveInstance(d, "pod-dead", "c2", testCard0, 25, 16384)
+	i2, err := reserveInstance(d, "pod-dead", "c2", testCard0, testOrdinal0, 25, 16384, logr.Discard())
 	require.NoError(t, err)
 
 	r := newReclaimer(d, deviceplugin.OperatorPodsDir, logr.Discard())
@@ -635,7 +764,7 @@ func Test_reserveInstance_reclaim_race(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			_, _ = reserveInstance(d,
-				fmt.Sprintf("pod-%d", i), "train", testCard0, 25, 16384)
+				fmt.Sprintf("pod-%d", i), "train", testCard0, testOrdinal0, 25, 16384, logr.Discard())
 		}(i)
 	}
 	for i := 0; i < 8; i++ {

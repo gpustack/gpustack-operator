@@ -2,8 +2,10 @@ package cambricon
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
@@ -25,9 +27,13 @@ func cambriconDevicesFixture() *workercore.Devices {
 				ID:           testGroupID,
 				Manufacturer: Manufacturer,
 				Memory:       49152, // MiB
+				// The cnDev device index deliberately differs from the logical Index: the detector
+				// derives them from different counters (Index skips a card that failed detection,
+				// PhysicalIndexes carries the raw cnDev loop position), so a fixture where they
+				// agree would let the responder read the wrong one and still pass.
 				Accelerators: []workercore.Accelerator{
-					{ID: "MLU-0", Index: 0, PhysicalIndexes: []uint32{0}, Topology: workercore.DeviceTopology{PciBusID: testCard0}},
-					{ID: "MLU-1", Index: 1, PhysicalIndexes: []uint32{1}, Topology: workercore.DeviceTopology{PciBusID: testCard1}},
+					{ID: "MLU-0", Index: 0, PhysicalIndexes: []uint32{3}, Topology: workercore.DeviceTopology{PciBusID: testCard0}},
+					{ID: "MLU-1", Index: 1, PhysicalIndexes: []uint32{7}, Topology: workercore.DeviceTopology{PciBusID: testCard1}},
 				},
 			}},
 		},
@@ -60,6 +66,9 @@ func slicedPod(uid, ctrName string, coresPercent, memPercent int64) (*core.Pod, 
 func newSlicedServer(driver smluDriver) *server {
 	return &server{
 		ResourceServer: deviceplugin.ResourceServer{
+			// Production always hands the responder a logger, and the preflight reports through it,
+			// so the fake carries one too rather than leaving the zero value behind.
+			Logger:         logr.Discard(),
 			Manufacturer:   Manufacturer,
 			AllocationMode: workercore.DeviceAllocationModeSliced,
 		},
@@ -151,6 +160,46 @@ func TestSliced_NoAllocatedAcceleratorRejected(t *testing.T) {
 		map[deviceplugin.Resource]int32{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no allocated accelerator")
+}
+
+// The responder hands the preflight the cnDev device index the detector recorded, so a mode failure
+// names the card an operator has to go and fix by both its PCI address and its index.
+//
+// The expected index is 3, the fixture's PhysicalIndexes[0], not 0, its logical Index: the two differ
+// in the fixture precisely so this test fails if the responder reads the wrong one.
+func TestSliced_ModeFailureNamesTheCard(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	d := newFakeDriver()
+	d.failModeWrite = errors.New("set smlu mode: NOT_SUPPORTED")
+	s := newSlicedServer(d)
+
+	pod, ctr := slicedPod("pod-mode-fail", "train", 25, 50)
+	_, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, cambriconDevicesFixture(), allocateMLU0())
+	require.Error(t, err)
+	for _, want := range []string{testCard0, "device index 3", "cnmon set -c 3 -smlu on"} {
+		assert.Containsf(t, err.Error(), want, "the message must name %q", want)
+	}
+}
+
+// The detector always records a cnDev device index, so a record without one is malformed. It is
+// rejected before the card is touched rather than allocated against a guessed index.
+func TestSliced_MissingDeviceIndexRejected(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	d := newFakeDriver()
+	s := newSlicedServer(d)
+
+	devs := cambriconDevicesFixture()
+	devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = nil
+
+	pod, ctr := slicedPod("pod-noindex", "train", 25, 50)
+	_, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocateMLU0())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "carries no cnDev device index")
+
+	reads, writes := d.modeCalls()
+	assert.Zero(t, reads, "a malformed record is rejected before the mode is read")
+	assert.Zero(t, writes, "and before it is written")
+	assert.False(t, markerExists("pod-noindex", "train"))
 }
 
 // A non-sliced (exclusive) responder never creates an instance or writes a marker: the
