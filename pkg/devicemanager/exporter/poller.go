@@ -44,16 +44,30 @@ type InstanceSample struct {
 	Sample worker.InstanceMetricsSample
 }
 
-// Snapshot is the latest round the poller completed.
+// Snapshot is what a successful round measured.
 type Snapshot struct {
 	// Timestamp is when the round was stored.
 	Timestamp time.Time
 	// PeriodSeconds is the poll period in effect when it was stored, so a consumer scales its
 	// staleness bound to the configured cadence rather than to a constant.
 	PeriodSeconds int64
+	// Exporting reports whether this device manager is the one publishing the node's
+	// per-Instance figures; see (*Poller).exporting for the rule.
+	Exporting bool
 	// Instances holds one entry per Instance the node kubelet measured, and is empty on a node
 	// running none.
 	Instances []InstanceSample
+}
+
+// Round is the poller's latest completed round. Its outcome is held together with what it
+// measured, so a reader cannot see one round's figures beside another round's verdict.
+type Round struct {
+	// Duration is how long the round took, whether it succeeded or not: a source that answers
+	// slowly is worth seeing before it starts failing outright.
+	Duration time.Duration
+	// Snapshot is what the round measured, or nil when it failed. A failed round keeps nothing:
+	// reporting the figures of several periods ago as current is worse than reporting none.
+	Snapshot *Snapshot
 }
 
 // Poller samples this node's Instances on a period and keeps only the latest round, so that a
@@ -63,7 +77,7 @@ type Poller struct {
 	nodeName string
 	period   time.Duration
 
-	snapshot datax.Snapshot[Snapshot]
+	round datax.Snapshot[Round]
 
 	// lastFailure carries the previous round's failure so a repeat is logged quietly. A poller
 	// whose source is down would otherwise repeat one line every period for the life of the
@@ -95,10 +109,19 @@ func New(c *Config) (*Poller, error) {
 	}, nil
 }
 
-// Snapshot returns the latest completed round, or nil when the last round failed or none has
-// run yet. The caller must not modify it.
-func (p *Poller) Snapshot() *Snapshot {
-	return p.snapshot.Load()
+// LastRound returns the latest completed round, or nil before the first one.
+// The caller must not modify it.
+func (p *Poller) LastRound() *Round {
+	return p.round.Load()
+}
+
+// snapshot returns what the latest round measured, or nil when it failed or none has run yet.
+// The collector reads the round itself; this is the nil-safe shorthand behind it.
+func (p *Poller) snapshot() *Snapshot {
+	if r := p.round.Load(); r != nil {
+		return r.Snapshot
+	}
+	return nil
 }
 
 // Start polls until the context is canceled. A failing round never stops the loop and never
@@ -123,27 +146,46 @@ var logger = klog.Background().WithName("instance-metrics-exporter")
 // poll runs one round: read this node's Instance pods from the informer, ask the kubelet what
 // it measured for them, and store the result.
 func (p *Poller) poll(ctx context.Context) {
-	pods, err := p.instancePods(ctx)
-	if err == nil {
-		var samples map[types.UID]*worker.InstanceMetricsSample
-		samples, err = kubemetrics.FetchPodSamples(ctx, p.nodeName, podsOf(pods), p.period)
-		if err == nil {
-			p.lastFailure = ""
-			p.snapshot.Store(&Snapshot{
-				Timestamp: time.Now(),
-				// Round up: truncating a sub-second remainder would understate the period and
-				// make consumers drop healthy samples as stale.
-				PeriodSeconds: int64((p.period + time.Second - 1) / time.Second),
-				Instances:     instanceSamples(pods, samples),
-			})
-			return
-		}
+	started := time.Now()
+
+	snapshot, err := p.measure(ctx)
+	if err != nil {
+		// Keep nothing: a scrape reporting the figures of several periods ago as current is
+		// worse than reporting none beside a failure gauge.
+		p.round.Store(&Round{Duration: time.Since(started)})
+		p.logFailure(err)
+		return
 	}
 
-	// Drop the round rather than keep the previous one: a scrape reporting the figures of
-	// several periods ago as current is worse than reporting none and a failure gauge.
-	p.snapshot.Store(nil)
-	p.logFailure(err)
+	p.lastFailure = ""
+	p.round.Store(&Round{Duration: time.Since(started), Snapshot: snapshot})
+}
+
+// measure runs the reads of one round.
+func (p *Poller) measure(ctx context.Context) (*Snapshot, error) {
+	pods, err := p.instancePods(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	exporting, err := p.exporting(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	samples, err := kubemetrics.FetchPodSamples(ctx, p.nodeName, podsOf(pods), p.period)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Snapshot{
+		Timestamp: time.Now(),
+		// Round up: truncating a sub-second remainder would understate the period and make
+		// consumers drop healthy samples as stale.
+		PeriodSeconds: int64((p.period + time.Second - 1) / time.Second),
+		Exporting:     exporting,
+		Instances:     instanceSamples(pods, samples),
+	}, nil
 }
 
 // logFailure reports a round's failure once, and repeats of it quietly.

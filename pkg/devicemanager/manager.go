@@ -42,6 +42,13 @@ func (m *Manager) Prepare(ctx context.Context) error {
 		return err
 	}
 
+	// Publish this node's Instance figures on the /metrics the shared manager already serves:
+	// no second route, no second port, no Prometheus of our own.
+	err = ctrlmetrics.Registry.Register(exporter.NewCollector(m.Exporter))
+	if err != nil {
+		return fmt.Errorf("register instance metrics collector: %w", err)
+	}
+
 	return nil
 }
 

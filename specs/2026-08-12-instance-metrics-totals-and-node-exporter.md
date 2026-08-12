@@ -554,7 +554,7 @@ alongside the code, snake_case multi-word file names, `make generate` after any 
       poll drops the snapshot and records the reason.
       Verify: `go test -race ./pkg/devicemanager/... && go build ./...`
 
-- [ ] **T4 · The collector: pod-level gauges and the single-exporter rule**
+- [x] **T4 · The collector: pod-level gauges and the single-exporter rule**
       Blocked by: T3
       Owns: `pkg/devicemanager/exporter/**`
       Gate: review
@@ -666,13 +666,18 @@ the release note rather than by a test.
   tie so the choice is stable across polls; the kubelet's entries are matched by pod UID, so a
   previous incarnation's figures are never served and a pod the kubelet does not carry is left
   out; a missing field index is reported rather than published as an empty node; a repeated
-  failure is remembered rather than logged again; an unset node name degrades instead of failing
-  the process; and `Snapshot` is read under `-race` while the loop replaces it. Still to come
-  with the collector: the single-exporter rule picks the lexicographically first Ready
-  manufacturer and hands over when that pod disappears; `Collect` performs no I/O; the label set
-  is exactly namespace/instance_name/instance_uid/node (+ id/manufacturer); accelerator
-  filtering by allocated ID and own manufacturer; a stale snapshot yields none; success and
-  duration gauges track each source; exposition lints clean.
+  failure is remembered rather than logged again; and an unset node name degrades instead of
+  failing the process. The single-exporter rule: a lone device manager exports, the
+  first-sorting manufacturer wins between two, an unready or terminating or other-node peer does
+  not hold the role, an unready self does not export, and a process that cannot tell which pod
+  it is reports that rather than guessing. The collector: the exposition of every family is
+  compared in full — name, unit suffix, HELP, GAUGE type, exact label set and value — plus the
+  client library's own lint; a failed round publishes its verdict and no figures; a round taken
+  by another device manager publishes none either; an unmeasured figure is left unpublished
+  rather than reported as zero; and nothing sampled yet reads as `success 0` rather than
+  silence. `Collect` performs no I/O, gathered under `-race` while the loop replaces the round.
+  Still to come with the accelerator families: filtering by allocated ID and own manufacturer,
+  and a stale monitor snapshot yielding none.
   Targets: all new and changed code covered; the iteration-1 suite rewritten in place.
 
 #### Integration tests

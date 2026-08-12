@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
@@ -48,6 +49,11 @@ func TestMain(m *testing.M) {
 	ctrlCli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
 	system.ConfigureLoopbackCtrlRuntime(ctrlCli, ctrlCli)
 
+	// The DaemonSet sets these from the downward API; the exporter role is resolved by finding
+	// this pod among its node's device manager pods.
+	_ = os.Setenv("KUBERNETES_POD_NAME", testSelfPodName)
+	_ = os.Setenv("KUBERNETES_POD_NAMESPACE", testSystemNamespace)
+
 	code := m.Run()
 	srv.Close()
 	os.Exit(code)
@@ -73,9 +79,41 @@ func serveNodeSummary(t *testing.T, nodeName string, summary *kubeletstats.Summa
 }
 
 const (
-	testNamespace   = "tenant"
-	testInstanceUID = "instance-uid-1"
+	testNamespace       = "tenant"
+	testInstanceUID     = "instance-uid-1"
+	testSystemNamespace = "gpustack-system"
+	testSelfPodName     = "dm-self"
 )
+
+// deviceManagerPodFixture builds a device manager pod as the chart rolls it: one DaemonSet per
+// manufacturer, each stamping the component and manufacturer labels the exporter role reads.
+func deviceManagerPodFixture(nodeName, name, manufacturer string, opts ...podOption) *core.Pod {
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: testSystemNamespace,
+			Name:      name,
+			UID:       types.UID("dm-" + name),
+			Labels: map[string]string{
+				_ComponentLabelKey:    _DeviceManagerComponent,
+				_ManufacturerLabelKey: manufacturer,
+			},
+		},
+		Spec: core.PodSpec{NodeName: nodeName},
+		Status: core.PodStatus{
+			Conditions: []core.PodCondition{
+				{Type: core.PodReady, Status: core.ConditionTrue},
+			},
+		},
+	}
+	for _, opt := range opts {
+		opt(pod)
+	}
+	return pod
+}
+
+func notReady() podOption {
+	return func(pod *core.Pod) { pod.Status.Conditions[0].Status = core.ConditionFalse }
+}
 
 // podOption tweaks a fixture pod away from the shape the Instance controller produces.
 type podOption func(*core.Pod)
@@ -158,8 +196,15 @@ func podStats(name, podUID string, cpuNanoCores uint64) kubeletstats.PodStats {
 	}
 }
 
-// newTestPoller builds a poller over a fake informer carrying the pods.
+// newTestPoller builds a poller over a fake informer carrying the pods, plus this process's own
+// device manager pod so the exporter role resolves to it.
 func newTestPoller(nodeName string, pods ...*core.Pod) *Poller {
+	return newTestPollerWith(nodeName,
+		append([]*core.Pod{deviceManagerPodFixture(nodeName, testSelfPodName, "nvidia")}, pods...)...)
+}
+
+// newTestPollerWith builds a poller over exactly the given pods.
+func newTestPollerWith(nodeName string, pods ...*core.Pod) *Poller {
 	builder := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
 		WithIndex(&core.Pod{}, deviceplugin.IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
 			return []string{obj.(*core.Pod).Spec.NodeName}
@@ -309,7 +354,7 @@ func TestPoller_poll(t *testing.T) {
 			p := newTestPoller(nodeName, tc.pods...)
 			p.poll(context.Background())
 
-			snapshot := p.Snapshot()
+			snapshot := p.snapshot()
 			if !tc.wantSnapshot {
 				assert.Nil(t, snapshot, "a failed round must leave no figures behind to report as current")
 				return
@@ -347,11 +392,11 @@ func TestPoller_dropsStaleRoundOnFailure(t *testing.T) {
 		Pods: []kubeletstats.PodStats{podStats("inst", "pod-uid-1", 500_000_000)},
 	})
 	p.poll(context.Background())
-	require.NotNil(t, p.Snapshot())
+	require.NotNil(t, p.snapshot())
 
 	serveNodeSummary(t, nodeName, nil)
 	p.poll(context.Background())
-	assert.Nil(t, p.Snapshot())
+	assert.Nil(t, p.snapshot())
 }
 
 // TestPoller_pollWithoutTheFieldIndex pins that the poller reports a broken informer instead of
@@ -365,7 +410,7 @@ func TestPoller_pollWithoutTheFieldIndex(t *testing.T) {
 	p.reader = ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
 	p.poll(context.Background())
 
-	assert.Nil(t, p.Snapshot())
+	assert.Nil(t, p.snapshot())
 	assert.Contains(t, p.lastFailure, deviceplugin.IndexingPodsByNodeName)
 }
 
@@ -402,9 +447,9 @@ func TestIsNewer(t *testing.T) {
 	assert.False(t, isNewer(first, second))
 }
 
-// TestPoller_SnapshotDuringPolling is the -race guard behind the whole design: a scrape reads
-// the snapshot while the poller replaces it, and must never touch the sources itself.
-func TestPoller_SnapshotDuringPolling(t *testing.T) {
+// TestPoller_GatherDuringPolling is the -race guard behind the whole design: a scrape gathers
+// while the poller replaces the round underneath it, and touches no source of its own.
+func TestPoller_GatherDuringPolling(t *testing.T) {
 	const nodeName = "node-race"
 	pod := instancePodFixture(nodeName, "inst", testInstanceUID, "pod-uid-1")
 	serveNodeSummary(t, nodeName, &kubeletstats.Summary{
@@ -413,6 +458,7 @@ func TestPoller_SnapshotDuringPolling(t *testing.T) {
 
 	p := newTestPoller(nodeName, pod)
 	p.period = time.Millisecond
+	collector := NewCollector(p)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -423,9 +469,9 @@ func TestPoller_SnapshotDuringPolling(t *testing.T) {
 
 	deadline := time.Now().Add(200 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		if s := p.Snapshot(); s != nil {
-			assert.LessOrEqual(t, len(s.Instances), 1)
-		}
+		// Non-zero throughout: the collector always reports on itself, even before the first
+		// round and after a failed one.
+		assert.NotZero(t, testutil.CollectAndCount(collector))
 	}
 
 	cancel()
@@ -445,5 +491,5 @@ func TestPoller_StartWithoutNodeName(t *testing.T) {
 	require.Empty(t, p.nodeName)
 
 	require.NoError(t, p.Start(context.Background()), "an unset node name must not fail the process")
-	assert.Nil(t, p.Snapshot())
+	assert.Nil(t, p.snapshot())
 }
