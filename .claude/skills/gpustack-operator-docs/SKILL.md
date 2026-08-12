@@ -25,11 +25,11 @@ one, not to widen the overview.
 
 | The change is about… | Page |
 |---|---|
-| NFD labels, the `gpustack-cpu-info` rule, the manufacturer map | `docs/architecture/discovery.md` |
-| Device Manager detection, the `Devices` ledger, allocator injection, cross-mode exclusion, placement | `docs/architecture/discovery.md` |
+| NFD labels, the `gpustack-cpu-info` rule, the manufacturer map | `docs/architecture/device-discovery.md` |
+| Device Manager detection, the `Devices` ledger, allocator injection, cross-mode exclusion, placement | `docs/architecture/device-discovery.md` |
 | Capacity labels, flavor/queue/InstanceType naming and grouping, the five reconcilers | `docs/architecture/scheduling-chain.md` |
 | Any admission gate, the four-view status, InstanceType/Instance/Pod webhook rules, drain-stop | `docs/architecture/admission.md` |
-| Chart mode vs image mode, `disableApplications`, what the worker applies itself | `docs/architecture/install-modes.md` |
+| Chart mode vs image mode, `disableApplications`, what the worker applies itself | `docs/architecture/installation-modes.md` |
 | Startup ordering, the gateway mirror, per-manufacturer packages, CGO bindings, the 63-char rule | `docs/architecture/internals.md` |
 | A resource key, a request rule, a request example | `docs/accelerator-requests.md` |
 | A `Setting` or a `GPUSTACK_*` variable | `docs/settings.md` |
@@ -62,21 +62,30 @@ reader's trust.
 |---|---|---|
 | `docs/reference/instance-type-unit-resources.md` | `pkg/nodefeature/unit_resources_preset.yaml` via `TestUnitResourcesPresetDocs` | the test matches a **whole table row** (`\| family \| tier \| cpu \| ram \|`) and the page **path**; do not rename the page or reshape that table |
 | `deploy/gpustack-operator/chart/README.md`, `values.schema.json` | `values.yaml` + `README.md.gotmpl` via `make generate chart` | generated — never hand-edit; a doc path quoted in a `values.yaml` comment needs a regenerate, and `chart.yml` fails on drift |
-| `README.md` accelerator matrix | `pkg/nodefeature/knowns.go` (resource names, `SharedResourceMaxSize`, `_ManufacturerPartitionKindMap`) and **whether** each `pkg/devicemanager/detector/<mfr>/device.go` sets `LogicalSliced` at all | nothing fails; the table silently lies about what a vendor can do. The matrix is deliberately ✅/— only — per-card slice counts and the per-vendor isolation mechanism live in `docs/architecture/discovery.md`, not on the front page |
+| `README.md` accelerator matrix | `pkg/nodefeature/knowns.go` (resource names, `SharedResourceMaxSize`, `_ManufacturerPartitionKindMap`) and **whether** each `pkg/devicemanager/detector/<mfr>/device.go` sets `LogicalSliced` at all | nothing fails; the table silently lies about what a vendor can do. The matrix is deliberately ✅/— only — per-card slice counts and the per-vendor isolation mechanism live in `docs/architecture/device-discovery.md`, not on the front page |
 | `README.md` Quick Start's four request shapes | `docs/accelerator-requests.md` — *The resource keys* and *Worked example per family* | nothing fails; the front page and the normative contract drift apart. This copy is the one sanctioned exception to "state a fact once" (the README is the shop window) — change both together |
 | `docs/settings.md` tables | `pkg/worker/settings` and the `GPUSTACK_*` readers | nothing fails; an operator configures something that no longer exists |
 | `docs/README.md` page table | the set of files under `docs/` | `check-docs.sh` fails |
+| `docs/README.md` page **labels** | each page's `#` H1, character for character | `check-docs.sh` fails; a page's file name, H1 and index label are one set of words |
 
 ## Before you finish
 
 ```bash
-bash .claude/skills/gpustack-operator-docs/scripts/check-docs.sh
+make lint docs                                                             # the gate, as CI runs it
+bash .claude/skills/gpustack-operator-docs/scripts/check-docs.sh --report   # while writing
 ```
 
 It verifies relative links and `#anchor`s across `README.md`, `CLAUDE.md`, `docs/**` and
 `.claude/skills/**`; and — for `docs/**` only — each page's `## Contents` against its headings, the four
-header-block fields, a `**See also**` footer at the end, and registration in the `## All pages` table of
-`docs/README.md`. It does **not** read prose: everything below is still on you.
+header-block fields, a `**See also**` footer at the end, registration in the `## All pages` table of
+`docs/README.md`, the label there against the page's H1, and the three size caps (paragraph, page
+length, `##` count — see `references/conventions.md`). `--report` demotes the caps to warnings and
+prints the per-page metrics.
+
+`make lint docs` is that same run, and it is the one entrypoint: `.github/workflows/docs.yml` invokes it
+on every markdown change, and the repo's Stop hook invokes it whenever a turn leaves a `.md` file dirty.
+
+It still does **not** read prose: everything below is on you.
 
 - [ ] `wc -l docs/architecture.md` is still ≤ ~200.
 - [ ] The new fact is stated **once**; every other page links to it.

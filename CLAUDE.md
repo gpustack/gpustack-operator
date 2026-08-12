@@ -24,20 +24,27 @@ nodes → the Device Manager detects accelerators → the worker profiles node c
 controllers materialize Kueue `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool, no
 Cohort) → `LocalQueue` plus an `InstanceType` CRD. `pkg/nodefeature` holds the label algebra.
 
-Read `docs/architecture.md` first — one page, the four stages, the life of a request, the vocabulary.
-Then the deep page for what you are touching: `docs/architecture/discovery.md` (NFD, Device Manager,
-allocator), `scheduling-chain.md` (capacity labels, flavors/queues/InstanceTypes, `pkg/nodefeature`),
-`admission.md` (the five gates, webhooks, four-view status), `install-modes.md`, `internals.md`
-(startup order and the invariants that fail silently). `docs/README.md` indexes all of it.
+Read `docs/architecture.md` first: one page, the four stages, the life of a request, the vocabulary.
+Then the deep page under `docs/architecture/` for what you are touching — `device-discovery.md` (NFD,
+Device Manager, allocator), `scheduling-chain.md` (capacity labels, flavors/queues/InstanceTypes,
+`pkg/nodefeature`), `admission.md` (the five gates, webhooks, four-view status), `installation-modes.md`,
+`internals.md` (startup order and the invariants that fail silently). `docs/README.md` indexes it all.
 
 ## Development
 
 See `docs/development.md` for build/lint/test commands, code generation, and vendored dependencies.
-For a guided tour of the directory layout and naming conventions, use the `gpustack-operator-overview` skill;
-after editing API types or webhooks, use the `gpustack-operator-generate` skill to run `make generate`;
-when a change needs a doc change, use the `gpustack-operator-docs` skill — it routes the fact to the
-right page and checks the index, links and tables of contents.
-The `gpustack-operator-lint` hook runs `make lint` after Go changes; run it yourself too when editing Go.
+Three skills carry the rest:
+
+- `gpustack-operator-overview` — a tour of the directory layout and naming conventions.
+- `gpustack-operator-generate` — runs `make generate` after you edit API types or webhooks.
+- `gpustack-operator-docs` — when a change needs a doc change: routes the fact to the right page,
+  checks the index, links and tables of contents.
+
+The `gpustack-operator-lint` hook dispatches on what a turn left dirty. Run the matching one yourself too:
+
+- `*.go` → `make lint`
+- the chart → `make lint chart`
+- `*.md` → `make lint docs`
 
 ### Go conventions
 

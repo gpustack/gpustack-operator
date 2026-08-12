@@ -2,41 +2,27 @@
 
 > **Purpose** — the two configuration surfaces: settings an administrator changes at runtime with
 > `kubectl`, and the `GPUSTACK_*` environment read once at process startup.
-> **Audience** operators · **Prerequisites** none · **Read time** ~10 min
+> **Audience** operators · **Prerequisites** none · **Read time** ~8 min
 
-GPUStack Operator is configured two ways, and the distinction matters operationally:
+GPUStack Operator is configured two ways, and the distinction matters operationally.
 
-- **[Online-adjustable Settings](#online-adjustable-settings)** — a fixed catalog of named values surfaced
-  as the `Setting` aggregated API resource (backed by a delegated Kubernetes Secret). An administrator
-  reads and changes them at runtime with `kubectl`; the operator picks the new value up on its next
-  reconcile. Each Setting is **seeded once** from a `GPUSTACK_*` environment variable on first deploy, then
-  lives in the cluster.
-- **[Deploy-time environment variables](#deploy-time-environment-variables)** — read **once at process
-  startup** via the environment. Changing one requires restarting/redeploying the affected component. The
-  Worker (WK) copies every `GPUSTACK_`-prefixed variable from its own Pod spec onto the Device Manager (DM)
-  DaemonSets, so setting a `GPUSTACK_*` variable on the Worker Deployment propagates to the DMs
-  automatically.
-
-> **First-deploy seeding vs. runtime changes.** On first deploy, `settings.Initialize` creates the
-> delegated Secret `gpustack-settings` (in the system namespace) and seeds every Setting from
-> `GPUSTACK_<UPPER_SNAKE_NAME>` — e.g. `node-management-manual` ← `GPUSTACK_NODE_MANAGEMENT_MANUAL` — or the
-> built-in default when that variable is unset. On later restarts the operator only **backfills Settings
-> missing** from the Secret; it **never overwrites** a value already stored there. So a `GPUSTACK_*`
-> variable is an *initial seed only* — after the first deploy, change a Setting through the `Setting`
-> resource (below), not by editing the environment (an env edit does not re-apply while a stored value
-> exists).
+> **First-deploy seeding vs. runtime changes.** On first deploy, `settings.Initialize` creates the delegated
+> Secret `gpustack-settings` in the system namespace and seeds every Setting from
+> `GPUSTACK_<UPPER_SNAKE_NAME>`, or the built-in default when that variable is unset. Later restarts only
+> **backfill missing** Settings and **never overwrite** a stored value: a `GPUSTACK_*` variable is an
+> *initial seed only*, so after the first deploy change the `Setting` resource, not the environment.
 
 ## Contents
 
-- [Online-Adjustable Settings](#online-adjustable-settings)
-- [Deploy-Time Environment Variables](#deploy-time-environment-variables)
+- [Online-adjustable settings](#online-adjustable-settings)
+- [Deploy-time environment variables](#deploy-time-environment-variables)
 
-## Online-Adjustable Settings
+## Online-adjustable settings
 
-Settings are exposed as the namespaced `Setting` resource (`gpustack.ai/v1`, short name `set`, category
-`gpustack`) in the system namespace, and persist in the delegated `gpustack-settings` Secret. The catalog is
-fixed — the resource serves `get,list,watch,apply,update,patch` (no create/delete); you edit a Setting's
-**value**, not its existence.
+A fixed catalog of named values, served as the namespaced `Setting` aggregated API resource
+(`gpustack.ai/v1`, short name `set`, category `gpustack`) and read at runtime with `kubectl`; the operator
+picks a new value up on its next reconcile. Fixed means the resource serves
+`get,list,watch,apply,update,patch`, no create/delete — you edit a Setting's **value**, not its existence.
 
 ```bash
 # List every setting and its current value
@@ -66,18 +52,17 @@ kubectl -n gpustack-system patch setting instance-type-derived-from-node --type 
 | `instance-type-drain-when-no-flavors` | `GPUSTACK_INSTANCE_TYPE_DRAIN_WHEN_NO_FLAVORS` | `true` | Whether a ClusterQueue whose pool has lost all its ResourceFlavors is drained (`HoldAndDrain`, so Kueue evicts admitted workloads) before its resource groups are emptied. When `true`, the queue is drained first; when `false`, the operator waits for the reservations to clear on their own, then empties. Either way the groups are emptied only once every reservation is zero, so Kueue's counters never go negative. Read per-reconcile. |
 | `instance-type-aware-cpu-manufacturer` | `GPUSTACK_INSTANCE_TYPE_AWARE_CPU_MANUFACTURER` | `false` | Whether the derived ClusterQueue/InstanceType/InstanceTypeFlavor aggregation splits by CPU manufacturer. When `false`, non-accelerated flavors collapse into one `generic` pool per os/arch and accelerated flavors pool per accelerator (CPU ignored); when `true`, every pool splits by the CPU key (`gpustack--${gKey}-…` / `gpustack--${gKey}--${aKey}-…`) and the InstanceType records the raw CPU detail. The `ResourceFlavor`s themselves are unaffected — they always carry the CPU key, so a flip only re-groups the aggregation layer. Read per-reconcile. |
 
-The last five (`node-management-manual`, `instance-type-mixed-on-node`, `instance-type-derived-from-node`,
-`instance-type-drain-when-no-flavors`, `instance-type-aware-cpu-manufacturer`) are read **per-reconcile**
-(`ShouldValueBool(ctx)`), so flipping one re-converges the scheduling chain on the next reconcile without
-restarting the operator.
+The last five — `node-management-manual`, `instance-type-mixed-on-node`, `instance-type-derived-from-node`,
+`instance-type-drain-when-no-flavors`, `instance-type-aware-cpu-manufacturer` — are read **per-reconcile**
+(`ShouldValueBool(ctx)`): flipping one re-converges the scheduling chain next reconcile, no restart.
 
-## Deploy-Time Environment Variables
+## Deploy-time environment variables
 
-These are read once at process startup; changing a value requires restarting the affected component. The
-Worker copies every `GPUSTACK_*` variable onto the Device Manager DaemonSets, so a `GPUSTACK_*` variable set
-on the Worker Deployment propagates to the DMs automatically.
+Read **once at process startup**, so changing one means restarting or redeploying the affected component.
+The Worker (WK) copies every `GPUSTACK_`-prefixed variable from its own Pod spec onto the Device Manager
+(DM) DaemonSets, so setting one on the Worker Deployment reaches the DMs automatically.
 
-### Configuration Knobs
+### Configuration knobs
 
 | Variable | Default | Component | Effect |
 |----------|---------|-----------|--------|
@@ -86,15 +71,21 @@ on the Worker Deployment propagates to the DMs automatically.
 | `GPUSTACK_PCI_CLASS_PREFIXES` | `02,03,0b,12` | DM | Comma-separated PCI class prefixes treated as display/accelerator devices (see the [PCI class registry](https://admin.pci-ids.ucw.cz/read/PD)). Applied to the DM's local sysfs PCI scan, and to nothing else. The same list appears twice more, and neither reads this variable: the chart value `node-feature-discovery.worker.config.sources.pci.deviceClassWhitelist` decides which classes NFD labels, and `pkg/nodefeature` is what the `gpustack-cpu-info` NodeFeatureRule matches (a Go test holds those two equal). Change one and change all three. |
 | `GPUSTACK_DEVICES_GROUP_ID_WITH_MEMORY` | `false` | DM | When `true`, the devices group ID gains a memory-size suffix (e.g. `nvidia-tesla-t4-16g` instead of `nvidia-tesla-t4`), so same-model devices with different VRAM sizes form distinct groups. |
 
-### Per-Manufacturer Overrides
+### Per-manufacturer overrides
 
-Three override patterns are expanded for every known manufacturer (`amd`, `ascend`, `cambricon`, `hygon`, `iluvatar`, `metax`, `mthreads`, `nvidia`, `thead`). They are read by both the WK and the DM, so the WK-to-DM propagation described above keeps the two sides consistent.
+Three override patterns expand for every known manufacturer (`amd`, `ascend`, `cambricon`, `hygon`,
+`iluvatar`, `metax`, `mthreads`, `nvidia`, `thead`); both the WK and the DM read them, so the propagation
+above keeps the two sides consistent.
 
-**When installed by the chart, set the `global.manufacturers` row instead of any of these variables.** Each of the four overrides in this section is a field of that row (`pciVendorID`, `resourceName`, `runtimeName`, `partitionKind`), and the chart fans every stated field out as the matching variable to the worker *and* to the device-managers. It also derives things a variable cannot reach: the DaemonSet node selectors, the RuntimeClasses it creates, and Kueue's credits mapping. Setting the variable alone therefore leaves those on the old value, and the chart's next render overwrites the variable itself.
+**Installed by the chart, set the `global.manufacturers` row, not these variables.** All four overrides
+here are fields of that row (`pciVendorID`, `resourceName`, `runtimeName`, `partitionKind`), which the
+chart fans out as the matching variable to the worker *and* the device-managers, along with what a variable
+cannot reach: the DaemonSet node selectors, the RuntimeClasses it creates, Kueue's credits mapping. The
+variable alone leaves those stale; the next render overwrites it.
 
-- `GPUSTACK_${MANUFACTURER}_PCI_VENDOR_ID` — overrides the PCI vendor ID used for NFD node selection and device scanning. Accepts either `${vendor}` or `${class}_${vendor}`.
-- `GPUSTACK_${MANUFACTURER}_ACCELERATABLE_RESOURCE_NAME` — overrides the extended resource name the scheduling chain allocates against.
-- `GPUSTACK_${MANUFACTURER}_ACCELERATABLE_RUNTIME_NAME` — overrides the container runtime class name used for accelerated workloads. A RuntimeClass of that name is attached to a workload only when one exists in the cluster; the chart creates it for the six manufacturers whose container runtime registers a handler by that name (see `global.manufacturers`), and never for `hygon` or `metax`, whose defaults below are honored only if something else created the class.
+- `GPUSTACK_${MANUFACTURER}_PCI_VENDOR_ID` — the PCI vendor ID used for NFD node selection and device scanning. Accepts `${vendor}` or `${class}_${vendor}`.
+- `GPUSTACK_${MANUFACTURER}_ACCELERATABLE_RESOURCE_NAME` — the extended resource name the scheduling chain allocates against.
+- `GPUSTACK_${MANUFACTURER}_ACCELERATABLE_RUNTIME_NAME` — the container runtime class name used for accelerated workloads. A RuntimeClass of that name is attached only when one exists in the cluster; the chart creates it for the six manufacturers whose container runtime registers such a handler (see `global.manufacturers`), never for `hygon` or `metax`, whose defaults below hold only if something else created the class.
 
 Defaults:
 
@@ -112,15 +103,18 @@ Defaults:
 
 > T-Head has no default runtime name, but `GPUSTACK_THEAD_ACCELERATABLE_RUNTIME_NAME` is still honored and can supply one.
 
-A fourth override is **not** expanded for every manufacturer — only for one that has hardware partitioning at all:
+A fourth override applies only to a manufacturer that has hardware partitioning at all:
 
-- `GPUSTACK_${MANUFACTURER}_PARTITION_KIND` — overrides the manufacturer's own name for hardware partitioning, which becomes the segment prefix of its per-profile resource key.
+- `GPUSTACK_${MANUFACTURER}_PARTITION_KIND` — the manufacturer's own name for hardware partitioning, which becomes the segment prefix of its per-profile resource key.
 
-`nvidia` is the only manufacturer with a default: `mig`, giving `nvidia.com/gpu.partitioned.mig-${profile}`. Setting the variable for any other manufacturer has no effect — one without hardware partitioning advertises no `.partitioned` family, so there is no key segment to rename.
+`nvidia` is the only one with a default — `mig`, giving `nvidia.com/gpu.partitioned.mig-${profile}`.
+Elsewhere the variable does nothing: without hardware partitioning there is no `.partitioned` family, so
+no key segment to rename.
 
-### Vendor Toolkit Paths
+### Manufacturer toolkit paths
 
-The DM device bindings locate vendor libraries through conventional toolkit-home variables. Each falls back to the listed default directory when unset.
+The DM device bindings locate manufacturer libraries through conventional toolkit-home variables, each
+falling back to the listed default when unset.
 
 | Variable | Default | Manufacturer | Effect |
 |----------|---------|--------------|--------|
@@ -135,9 +129,10 @@ The DM device bindings locate vendor libraries through conventional toolkit-home
 | `MACA_HOME` | `/opt/maca` | MetaX | MACA root, searched for `libmxsml.so`. |
 | `LD_LIBRARY_PATH` | — | all | Standard library search path, consulted as an additional source of candidate library directories. |
 
-### Kubernetes-Injected Variables
+### Kubernetes-injected variables
 
-These are populated by the Pod specs that GPUStack Operator itself renders (Downward API or Service environment). They are not user-facing knobs — listed here only for completeness.
+Populated by the Pod specs GPUStack Operator renders (Downward API or Service environment); not
+user-facing knobs, listed for completeness.
 
 | Variable | Default | Effect |
 |----------|---------|--------|
@@ -148,7 +143,7 @@ These are populated by the Pod specs that GPUStack Operator itself renders (Down
 | `KUBERNETES_SERVICE_NAME` | `gpustack-operator-worker` | Service name used for system routing. |
 | `KUBERNETES_SERVICE_HOST` | — | Standard in-cluster marker; its presence tells the embedded runner it is inside a cluster. |
 
-### Proxy and Internal Flags
+### Proxy and internal flags
 
 | Variable | Default | Effect |
 |----------|---------|--------|
@@ -159,7 +154,7 @@ These are populated by the Pod specs that GPUStack Operator itself renders (Down
 ---
 
 **See also** — [Architecture](./architecture.md) (what each setting regroups) ·
-[Two install modes](./architecture/install-modes.md) (which flags a mode sets for you) ·
-[High Availability](./operation/high-availability.md)
+[Installation Modes](./architecture/installation-modes.md) (which flags a mode sets for you) ·
+[High Availability Operations](./operation/high-availability.md)
 
 **Next** → [Walkthrough](./walkthrough.md) — a setting flipped on a live cluster, before and after.

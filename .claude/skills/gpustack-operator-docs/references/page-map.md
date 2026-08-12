@@ -32,7 +32,7 @@ one clause and a link when a deep page grows.
 **Test** — a reader who knows Kubernetes but not this project should answer "what does it do, and what
 happens to my request" from this page alone, in under 10 minutes.
 
-## `docs/architecture/discovery.md` (stages 1–2)
+## `docs/architecture/device-discovery.md` (stages 1–2)
 
 **Owns** — NFD's three jobs, the general(CPU) node key, the `gpustack-cpu-info` rule and the
 manufacturer map, the Device Manager DaemonSets, the accelerator label table, the `Devices` ledger, the
@@ -49,7 +49,7 @@ is *allowed* (that is `admission.md`).
 capacity tables, per-vendor slice counts, presence-gating, the unit-spec default, the naming/grouping
 scheme, the controller diagram, and the five reconcilers' ownership split.
 
-**Never** — the ledger's internals (`discovery.md`) or gate behavior (`admission.md`). Cross-link both.
+**Never** — the ledger's internals (`device-discovery.md`) or gate behavior (`admission.md`). Cross-link both.
 
 ## `docs/architecture/admission.md`
 
@@ -60,7 +60,7 @@ deployed Kueue Configuration's known behaviors.
 **Never** — the normative request contract itself. That is `accelerator-requests.md`; this page says
 where each rule is *enforced*.
 
-## `docs/architecture/install-modes.md`
+## `docs/architecture/installation-modes.md`
 
 **Owns** — chart mode vs image mode, `worker.disableApplications`, the exclusivity argument, the
 `deviceManager.enabled` / `worker.enabled` switches, and the chart-versus-worker custom-resource
@@ -105,10 +105,13 @@ dependencies.
 
 ## `docs/operation/*.md`
 
-**Owns** — administrator procedures: what to run, in what order, and how to verify. High availability
-and the NVIDIA MIG runbook today.
+**Owns** — administrator procedures: what to run, in what order, and how to verify. Today: high
+availability, the NVIDIA MIG runbook, and `thead-mig.md` — MIG is T-Head's own word for its
+partitioning, as `hgml.GetMigMode()` and the `alibabacloud.com/ppu.partitioned.mig-<profile>` key both
+show, so the page is named for it too.
 
-**Rule** — each page ends with a `## Verify` block of commands whose expected output is stated.
+**Rule** — a page with a `## Verify` block states the expected output of every command in it. These
+pages are exempt from the line cap: a runbook is as long as the hardware makes it.
 
 ## `docs/migration/*.md`
 
@@ -124,6 +127,8 @@ transition, so do not "modernize" its version numbers.
 
 **Pinned** — `instance-type-unit-resources.md` is matched row-by-row by `TestUnitResourcesPresetDocs`,
 by path. Do not rename it or reshape its tables.
+
+**Rule** — these pages are exempt from the ten-`##` cap: a lookup page is meant to be flat.
 
 ## `specs/` — not documentation
 

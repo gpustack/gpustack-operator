@@ -23,7 +23,7 @@ One or two sentences of orientation, if the purpose line is not enough. Optional
 
 ---
 
-**See also** — [Device Discovery](discovery.md) · [Walkthrough](../walkthrough.md)
+**See also** — [Device Discovery](device-discovery.md) · [Walkthrough](../walkthrough.md)
 
 **Next** → [Admission](admission.md) — the five gates a request passes.
 ```
@@ -55,6 +55,48 @@ awk '
 **Footer** — a `---` rule, then `**See also**` (sideways links, ` · `-separated, each with a
 parenthetical saying why) and `**Next** →` (the next page on this reader's path). `See also` is
 required; `Next` is expected wherever a next step exists.
+
+## Titles and file names
+
+The file name, the `#` H1 and the `docs/README.md` index label say the same words — `check-docs.sh`
+compares the last two character for character. The H1 is a Title-Case noun phrase of at most six words,
+shaped by the directory it lives in:
+
+| Directory | H1 form | Example |
+|---|---|---|
+| root, `architecture/` | `<Subject>` | `Installation Modes` |
+| `operation/` | `<Subject> Operations` | `High Availability Operations` |
+| `migration/` | `Migrating <from\|to> <what>` | `Migrating from v0.5.x` |
+| `reference/` | `<Subject> Reference` | `Instance Metrics Reference` |
+
+`##` and `###` headings are sentence case. GitHub lowercases anchors, so re-casing a heading keeps every
+inbound link; changing its *words* does not.
+
+## Size caps
+
+`check-docs.sh` enforces three caps. They are shape, not budget: a page over one of them is carrying
+something that belongs in a list, a table, or another page.
+
+| Cap | Limit | Exempt |
+|---|---|---|
+| prose paragraph | 5 lines / 500 rendered characters | fenced blocks, table rows, list *markers*, `> **Why**` notes, the footer |
+| page length | 1000 lines | `docs/walkthrough.md`, `docs/operation/*` — recordings and runbooks |
+| `##` sections | 10 per page, `## Contents` not counted | `docs/README.md`, `docs/reference/*` — both are lookup tables |
+
+A paragraph nested under a list item is prose a reader still has to get through, so it is measured on
+its dedented text — the marker line is skipped, its continuation is not. The one indentation that does
+exempt is **four spaces or a tab**, which is Markdown's own indented code block. Continuations in this
+corpus align with their marker, at two or three spaces, so the two never collide.
+
+**The paragraph cap is the one that matters.** Length is not the defect; verbosity is. A long page that
+reads in short paragraphs and clear lists is a good page, and a short one that reads as a wall of text is
+not. The line cap is a backstop against a page nobody split, not a budget to spend down.
+
+`docs/architecture.md` is capped tighter still, at 200 lines: it is the front door, and a front door that
+grows a mechanism has stopped being one.
+
+Run `scripts/check-docs.sh --report` while writing — it demotes the caps to warnings and prints the
+per-page metrics, so one page can be measured before the rest is done.
 
 ## Diátaxis, mapped onto this repository
 
@@ -91,7 +133,8 @@ Two consequences worth stating:
 - **State a fact once.** The second place links to the first. If you are tempted to restate it "for
   convenience", the two copies will disagree within two releases.
 - **Break a wall of text into named subsections.** If a paragraph carries more than one rule, it is
-  more than one paragraph. A `###` heading is cheap and becomes an anchor others can link to.
+  more than one paragraph — and past 5 lines it fails the paragraph cap. A `###` heading is cheap and
+  becomes an anchor others can link to.
 - **Prefer a table for anything enumerable** — modes, keys, vendors, gates, knobs.
 - **Name the code.** `pkg/nodefeature`, `node_queue.go`, `TestUnitResourcesPresetDocs` — a reader
   should be able to jump from the claim to the source. Do not paste code that will drift; name it.

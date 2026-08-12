@@ -26,13 +26,24 @@ run_lint() {
   fi
 }
 
+# dirty_matches <extended-regex>: does any porcelain line match? Fed by here-string rather than a
+# pipe, because `grep -q` exits at the first match and `set -o pipefail` would then turn the
+# writer's SIGPIPE into a false "no match" on a large status.
+dirty_matches() { grep -qE "$1" <<<"${dirty}"; }
+
 # Lint Go sources when at least one .go file is changed/added.
-if echo "${dirty}" | grep -qE '\.go$'; then
+if dirty_matches '\.go( -> |$)'; then
   run_lint "make lint" make lint
 fi
 
+# Check the documentation contract when any markdown, or the checker itself, is changed/added.
+# A docs-only turn touches no .go file, so without this branch nothing here would run at all.
+if dirty_matches '\.md( -> |$)|/check-docs\.sh( -> |$)'; then
+  run_lint "make lint docs" make lint docs
+fi
+
 # Lint the Helm chart when the chart or its helm tooling is changed/added.
-if echo "${dirty}" | grep -qE 'deploy/gpustack-operator/chart/|hack/lib/helm\.sh'; then
+if dirty_matches 'deploy/gpustack-operator/chart/|hack/lib/helm\.sh'; then
   run_lint "make lint chart" make lint chart
 fi
 
@@ -45,7 +56,7 @@ CHART_GENERATED=(
   deploy/gpustack-operator/chart/values.schema.json
   deploy/gpustack-operator/chart/values.yaml
 )
-if echo "${dirty}" | grep -qE 'deploy/gpustack-operator/chart/(values\.yaml|README\.md\.gotmpl|Chart\.yaml)'; then
+if dirty_matches 'deploy/gpustack-operator/chart/(values\.yaml|README\.md\.gotmpl|Chart\.yaml)'; then
   before="$(cat "${CHART_GENERATED[@]}" 2>/dev/null | cksum)"
   run_lint "make generate chart" make generate chart
   if [[ "$(cat "${CHART_GENERATED[@]}" 2>/dev/null | cksum)" != "${before}" ]]; then
@@ -60,8 +71,8 @@ fi
 # directory — does nothing at all until that tree is deleted. The tell is a dirty patch beside a
 # clean vendored tree. The path test is anchored past `git status --porcelain`'s three-character
 # status prefix, because the patch directory's own path ends in the tree path being looked for.
-if echo "${dirty}" | grep -qE 'hack/deps\.sh|hack/deploy/gpustack-operator/chart/charts/' &&
-  ! echo "${dirty}" | grep -qE '^...deploy/gpustack-operator/chart/charts/'; then
+if dirty_matches 'hack/deps\.sh|hack/deploy/gpustack-operator/chart/charts/' &&
+  ! dirty_matches '^...deploy/gpustack-operator/chart/charts/'; then
   echo "gpustack-operator-lint: a vendoring edit (hack/deps.sh or a chart patch) is dirty but no" \
     "vendored tree changed. make deps is a no-op on an up-to-date tree — rm -rf" \
     "deploy/gpustack-operator/chart/charts/<name> and re-run it, or the edit ships as nothing." >&2
