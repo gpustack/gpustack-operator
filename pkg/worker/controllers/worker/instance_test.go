@@ -20,6 +20,7 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/kubemetrics"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 )
@@ -821,6 +822,62 @@ func TestConvertPodFromInstance_SlicedSSHColocatesAcceleratorOnMain(t *testing.T
 	visQ, sshdHasVis := sshd.Resources.Limits[visRes]
 	assert.True(t, sshdHasVis, "sshd must carry the device-only visibility resource")
 	assert.Equal(t, "1", visQ.String(), "sidecar visibility quantity equals main's card count")
+}
+
+// TestConvertPodFromInstance_ContainerLimitsCarryTheDeclaredResources pins the denominator the
+// Instance metrics surfaces divide by. Those surfaces read the totals off the backing Pod's
+// container limits, which is only the Instance's declared size for as long as the Pod declares
+// nothing beyond it — the sshd sidecar is built with withGeneral=false today. A sidecar that
+// starts declaring general resources fails here, instead of silently inflating every utilization
+// percentage the API and /metrics report.
+func TestConvertPodFromInstance_ContainerLimitsCarryTheDeclaredResources(t *testing.T) {
+	cases := []struct {
+		name string
+
+		withSSH bool
+
+		wantContainers int
+	}{
+		{name: "workload container alone", wantContainers: 1},
+		{name: "workload container and the sshd sidecar", withSSH: true, wantContainers: 2},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cli := buildInstanceClient()
+			r := &InstanceReconciler{Client: cli, APIReader: cli}
+
+			inst := &workercore.Instance{
+				ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "inst"},
+				Spec: workercore.InstanceSpec{
+					Type: "generic-type",
+					InstanceTemplate: workercore.InstanceTemplate{
+						Image: "img",
+						Resources: &workercore.InstanceResources{
+							CPU:          qty("4"),
+							RAM:          qty("16Gi"),
+							LocalStorage: qty("32Gi"),
+						},
+					},
+					Volume: workercore.InstanceVolume{
+						Ephemeral: &workercore.InstanceEphemeralVolume{Capacity: qty("10Gi")},
+					},
+				},
+			}
+			if c.withSSH {
+				inst.Spec.SSHPublicKey = &core.LocalObjectReference{Name: "inst-ssh-key"}
+			}
+			instType := &worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: "generic-type"}}
+
+			pod := r.convertPodFromInstance(context.Background(), inst, instType)
+			require.Len(t, pod.Spec.Containers, c.wantContainers)
+
+			sample := kubemetrics.NewSample(pod)
+			assert.Equal(t, uint64(4000), sample.CPUTotalMilliCores, "spec.resources.cpu 4")
+			assert.Equal(t, uint64(16384), sample.MemoryTotalMiB, "spec.resources.ram 16Gi")
+			assert.Equal(t, uint64(32768), sample.StorageTotalMiB, "spec.resources.localStorage 32Gi")
+		})
+	}
 }
 
 // TestInstanceReconciler_AcceleratedDetailNotReadyRequeues pins the R3-High controller fail-safe:
