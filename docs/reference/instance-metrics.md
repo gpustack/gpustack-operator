@@ -151,8 +151,16 @@ in a log:
 | `gpustack_instance_metrics_collector_success` | `source="kubelet"`, `source="snapshot"` | whether that source's last sampling round succeeded |
 | `gpustack_instance_metrics_collector_duration_seconds` | `source="kubelet"` | how long the last poll took, whether it succeeded or not |
 
-A failed round publishes its verdict and **no figures at all**: reporting the figures of several
-periods ago as current is worse than reporting none beside a zeroed `success`.
+**One failed source never blanks the other.** A round whose kubelet read failed still publishes the
+accelerator families and the declared totals — the allocations come from the Pod and the readings
+from the monitor loop, neither of which the kubelet touches. Only the measured pod-level figures
+go absent, beside `success{source="kubelet"} 0`.
+
+What such a round never does is carry the previous one's measurements forward: reporting the
+figures of several periods ago as current is worse than reporting none.
+
+A round that failed outright publishes its verdict and **no figures at all**, because without it
+there is no list of this node's Instances, and every family here is labelled by one.
 
 ## Metric families
 

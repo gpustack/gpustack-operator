@@ -9,6 +9,8 @@
 package kubemetrics
 
 import (
+	"time"
+
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,10 +40,15 @@ func NewSample(pod *core.Pod) *worker.InstanceMetricsSample {
 func newSampleFromPodStats(pod *core.Pod, ps *kubeletstats.PodStats) *worker.InstanceMetricsSample {
 	sample := NewSample(pod)
 
+	// The kubelet times each block separately, and a partial entry can carry memory without CPU.
+	// Stamp the sample with the oldest of the times actually present, so the figure a consumer
+	// reads is never presented as fresher than the stalest measurement behind it; with no timed
+	// block at all the sample keeps the read time NewSample stamped.
+	if measured := oldestMeasurement(ps); !measured.IsZero() {
+		sample.Timestamp = meta.Time{Time: measured}
+	}
+
 	if ps.CPU != nil {
-		if !ps.CPU.Time.IsZero() {
-			sample.Timestamp = ps.CPU.Time
-		}
 		sample.CPUUsedMilliCores = nanoCoresToMilliCores(ps.CPU.UsageNanoCores)
 	}
 	if ps.Memory != nil {
@@ -56,6 +63,31 @@ func newSampleFromPodStats(pod *core.Pod, ps *kubeletstats.PodStats) *worker.Ins
 	}
 
 	return sample
+}
+
+// oldestMeasurement returns the earliest time the stat blocks that are present were measured at,
+// or the zero time when none of them carries one.
+func oldestMeasurement(ps *kubeletstats.PodStats) time.Time {
+	var oldest time.Time
+	consider := func(t meta.Time) {
+		if t.IsZero() {
+			return
+		}
+		if oldest.IsZero() || t.Time.Before(oldest) {
+			oldest = t.Time
+		}
+	}
+
+	if ps.CPU != nil {
+		consider(ps.CPU.Time)
+	}
+	if ps.Memory != nil {
+		consider(ps.Memory.Time)
+	}
+	if ps.EphemeralStorage != nil {
+		consider(ps.EphemeralStorage.Time)
+	}
+	return oldest
 }
 
 // setTotals fills the sample's declared ceilings from the backing Pod's container limits,

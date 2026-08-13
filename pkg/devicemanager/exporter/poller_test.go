@@ -335,11 +335,8 @@ func TestPoller_poll(t *testing.T) {
 			},
 			wantSnapshot: true,
 		},
-		{
-			name:    "a failed readout drops the round",
-			pods:    []*core.Pod{instancePodFixture("n", "inst", testInstanceUID, "pod-uid-1")},
-			summary: nil,
-		},
+		// A failed kubelet readout keeps the round and drops only the measured figures — see
+		// TestPoller_keepsTheRoundWhenOnlyTheKubeletFails, which asserts what survives it.
 	}
 
 	for i, tc := range testCases {
@@ -377,10 +374,10 @@ func TestPoller_poll(t *testing.T) {
 	}
 }
 
-// TestPoller_dropsStaleRoundOnFailure pins that a round which fails after a good one leaves
-// nothing behind: reporting the figures of several periods ago as current is worse than
-// reporting none.
-func TestPoller_dropsStaleRoundOnFailure(t *testing.T) {
+// TestPoller_dropsStaleFiguresOnFailure pins that a round which loses the kubelet after a good
+// one leaves none of that round's measurements behind: reporting the figures of several periods
+// ago as current is worse than reporting none. What survives is only what needs no measuring.
+func TestPoller_dropsStaleFiguresOnFailure(t *testing.T) {
 	const nodeName = "node-drop"
 	pod := instancePodFixture(nodeName, "inst", testInstanceUID, "pod-uid-1")
 	p := newTestPoller(nodeName, pod)
@@ -389,11 +386,19 @@ func TestPoller_dropsStaleRoundOnFailure(t *testing.T) {
 		Pods: []kubeletstats.PodStats{podStats("inst", "pod-uid-1", 500_000_000)},
 	})
 	p.poll(context.Background())
-	require.NotNil(t, p.snapshot())
+	first := p.snapshot()
+	require.NotNil(t, first)
+	require.NotNil(t, first.Instances[0].Sample.CPUUsedMilliCores)
 
 	serveNodeSummary(t, nodeName, nil)
 	p.poll(context.Background())
-	assert.Nil(t, p.snapshot())
+
+	second := p.snapshot()
+	require.NotNil(t, second)
+	assert.False(t, second.UsageMeasured)
+	require.Len(t, second.Instances, 1)
+	assert.Nil(t, second.Instances[0].Sample.CPUUsedMilliCores,
+		"the previous round's measurement must not be carried forward as current")
 }
 
 // TestPoller_readsAfreshEveryRound pins the cadence the exporter advertises. Rounds start one
@@ -453,6 +458,32 @@ func TestPoller_electionFailureKeepsTheRound(t *testing.T) {
 	assert.False(t, snapshot.Exporting, "an undecidable election never claims the role")
 	require.Len(t, snapshot.Instances, 1,
 		"the Instance and its allocation are still carried, so the accelerator families survive")
+}
+
+// TestPoller_keepsTheRoundWhenOnlyTheKubeletFails pins that one failed source does not blank the
+// other. The accelerator families are labeled by Instance but measured by the monitor loop, and
+// which Instances the node runs comes from the informer — so a kubelet that will not answer costs
+// the measured pod-level figures and nothing else. Dropping the round instead would take healthy
+// accelerator data with it while reporting the snapshot source as fine.
+func TestPoller_keepsTheRoundWhenOnlyTheKubeletFails(t *testing.T) {
+	const nodeName = "node-kubeletdown"
+	pod := instancePodFixture(nodeName, "inst", testInstanceUID, "pod-uid-1")
+	p := newTestPoller(nodeName, pod)
+	serveNodeSummary(t, nodeName, nil) // the node proxy answers 502
+
+	p.poll(context.Background())
+
+	snapshot := p.snapshot()
+	require.NotNil(t, snapshot, "the round carries what the kubelet has no part in")
+	assert.False(t, snapshot.UsageMeasured, "and says plainly that nothing was measured")
+	require.Len(t, snapshot.Instances, 1,
+		"the Instance and its allocation survive, so the accelerator families can publish")
+	inst := snapshot.Instances[0]
+	assert.Equal(t, uint64(2000), inst.Sample.CPUTotalMilliCores,
+		"the declared totals need no measurement")
+	assert.Nil(t, inst.Sample.CPUUsedMilliCores, "an unmeasured figure stays absent, never zero")
+	assert.Nil(t, inst.Sample.MemoryUsedMiB)
+	assert.Nil(t, inst.Sample.StorageUsedMiB)
 }
 
 // TestPoller_pollWithoutTheFieldIndex pins that the poller reports a broken informer instead of

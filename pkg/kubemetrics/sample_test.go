@@ -149,6 +149,39 @@ func TestNewSampleFromPodStats(t *testing.T) {
 			wantTimestamp:   &measuredAt,
 		},
 		{
+			// The kubelet times each block separately and a partial entry can carry memory
+			// without CPU. Stamping such a sample with the read time would present an hour-old
+			// figure as just measured — and a cached readout makes that the common case.
+			name: "an entry with no CPU block is stamped from the block it does have",
+			pod:  fullPod,
+			stats: &kubeletstats.PodStats{
+				Memory: &kubeletstats.MemoryStats{
+					Time:            measuredAt,
+					WorkingSetBytes: ptr.To[uint64](1 << 30),
+				},
+			},
+			wantMemoryUsed: ptr.To[uint64](1024),
+			wantTimestamp:  &measuredAt,
+		},
+		{
+			// Nothing may read fresher than the stalest measurement behind it.
+			name: "blocks measured at different times are stamped with the oldest",
+			pod:  fullPod,
+			stats: &kubeletstats.PodStats{
+				CPU: &kubeletstats.CPUStats{
+					Time:           meta.NewTime(measuredAt.Add(time.Minute)),
+					UsageNanoCores: ptr.To[uint64](500_000_000),
+				},
+				Memory: &kubeletstats.MemoryStats{
+					Time:            measuredAt,
+					WorkingSetBytes: ptr.To[uint64](1 << 30),
+				},
+			},
+			wantCPUUsed:    ptr.To[uint64](500),
+			wantMemoryUsed: ptr.To[uint64](1024),
+			wantTimestamp:  &measuredAt,
+		},
+		{
 			name: "the storage numerator is the pod-level aggregate, not the writable layers",
 			pod:  fullPod,
 			stats: &kubeletstats.PodStats{

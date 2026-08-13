@@ -54,6 +54,10 @@ type InstanceSample struct {
 type Snapshot struct {
 	// Timestamp is when the round was stored.
 	Timestamp time.Time
+	// UsageMeasured reports whether the node kubelet answered this round. When it did not, the
+	// Instances below carry their declared totals and no measured figures — the round is still
+	// worth keeping, because the accelerator families do not come from the kubelet.
+	UsageMeasured bool
 	// Exporting reports whether this device manager is the one publishing the node's
 	// per-Instance figures; see (*Poller).exporting for the rule.
 	Exporting bool
@@ -162,7 +166,12 @@ func (p *Poller) poll(ctx context.Context) {
 		return
 	}
 
-	p.lastFailure = ""
+	// Only a round that measured everything clears the repeat-log guard: a round kept despite a
+	// failed kubelet read has already reported that failure, and forgetting it here would log
+	// the same line every period.
+	if snapshot.UsageMeasured {
+		p.lastFailure = ""
+	}
 	p.round.Store(&Round{Duration: time.Since(started), Snapshot: snapshot})
 }
 
@@ -187,13 +196,24 @@ func (p *Poller) measure(ctx context.Context) (*Snapshot, error) {
 	// every other round — half the cadence, with nothing on the wire to show it.
 	samples, err := kubemetrics.FetchPodSamples(ctx, p.nodeName, podsOf(pods), 0)
 	if err != nil {
-		return nil, err
+		// The kubelet is one of two sources and the other one is untouched by this. Which
+		// Instances the node runs and which devices each holds come from the informer, so the
+		// accelerator families — which the kubelet has no part in — still have everything they
+		// need. Keep the round, carry the declared totals, and let the measured figures be
+		// absent beside a zeroed success gauge.
+		p.logFailure(err)
+		return &Snapshot{
+			Timestamp: time.Now(),
+			Exporting: exporting,
+			Instances: declaredSamples(pods),
+		}, nil
 	}
 
 	return &Snapshot{
-		Timestamp: time.Now(),
-		Exporting: exporting,
-		Instances: instanceSamples(pods, samples),
+		Timestamp:     time.Now(),
+		UsageMeasured: true,
+		Exporting:     exporting,
+		Instances:     instanceSamples(pods, samples),
 	}, nil
 }
 
@@ -321,10 +341,27 @@ func instanceSamples(
 		if !ok {
 			continue
 		}
-		inst := pods[i].instance
-		inst.Sample = *sample
-		inst.Accelerators = deviceplugin.AllocatedAcceleratorGroupsOf(pods[i].pod)
-		out = append(out, inst)
+		out = append(out, instanceSampleOf(&pods[i], sample))
 	}
 	return out
+}
+
+// declaredSamples is instanceSamples for a round whose kubelet read failed: every Instance is
+// kept, carrying only what its Pod declares. Dropping them here would be the rule for a pod the
+// kubelet answered about and did not carry, which is a different thing — nothing was measured at
+// all this round, and the accelerator families still need the allocations these entries hold.
+func declaredSamples(pods []instancePod) []InstanceSample {
+	out := make([]InstanceSample, 0, len(pods))
+	for i := range pods {
+		out = append(out, instanceSampleOf(&pods[i], kubemetrics.NewSample(pods[i].pod)))
+	}
+	return out
+}
+
+// instanceSampleOf joins one Instance's identity to a sample and to its Pod's allocation.
+func instanceSampleOf(pod *instancePod, sample *worker.InstanceMetricsSample) InstanceSample {
+	inst := pod.instance
+	inst.Sample = *sample
+	inst.Accelerators = deviceplugin.AllocatedAcceleratorGroupsOf(pod.pod)
+	return inst
 }

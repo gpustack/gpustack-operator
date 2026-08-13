@@ -63,8 +63,9 @@ func measuredRound() *Round {
 	return &Round{
 		Duration: 250 * time.Millisecond,
 		Snapshot: &Snapshot{
-			Timestamp: time.Now(),
-			Exporting: true,
+			Timestamp:     time.Now(),
+			UsageMeasured: true,
+			Exporting:     true,
 			Instances: []InstanceSample{{
 				Namespace: "tenant",
 				Name:      "inst",
@@ -319,6 +320,44 @@ gpustack_instance_accelerator_memory_used_mib{id="gpu-uuid-1",index="3",instance
 			families:   []string{"gpustack_instance_metrics_collector_success"},
 			wantAbsent: _AcceleratorFamilies,
 			wantExposition: `
+# HELP gpustack_instance_metrics_collector_success Whether the last sampling round of this source succeeded.
+# TYPE gpustack_instance_metrics_collector_success gauge
+gpustack_instance_metrics_collector_success{source="kubelet"} 0
+gpustack_instance_metrics_collector_success{source="snapshot"} 1
+`,
+		},
+		{
+			// One failed source must not blank the other. The kubelet has no part in the
+			// accelerator figures: the allocation comes from the Pod and the readings from the
+			// monitor loop, so both are still there to publish.
+			name: "a failed kubelet read still publishes the accelerator figures",
+			round: func() *Round {
+				r := measuredRound()
+				r.Snapshot.UsageMeasured = false
+				inst := &r.Snapshot.Instances[0]
+				inst.Sample.CPUUsedMilliCores = nil
+				inst.Sample.MemoryUsedMiB = nil
+				inst.Sample.StorageUsedMiB = nil
+				return r
+			}(),
+			monitor: monitorSnapshotFixture(0),
+			families: []string{
+				"gpustack_instance_accelerator_memory_used_mib",
+				"gpustack_instance_cpu_total_millicores",
+				"gpustack_instance_metrics_collector_success",
+			},
+			wantAbsent: []string{
+				"gpustack_instance_cpu_used_millicores",
+				"gpustack_instance_memory_used_mib",
+				"gpustack_instance_storage_used_mib",
+			},
+			wantExposition: `
+# HELP gpustack_instance_accelerator_memory_used_mib The used memory of the accelerator allocated to the Instance in MiB.
+# TYPE gpustack_instance_accelerator_memory_used_mib gauge
+gpustack_instance_accelerator_memory_used_mib{id="gpu-uuid-1",index="3",instance_name="inst",instance_uid="instance-uid-1",manufacturer="nvidia",namespace="tenant",node="node-1"} 1024
+# HELP gpustack_instance_cpu_total_millicores The CPU limit of the Instance in milli-cores.
+# TYPE gpustack_instance_cpu_total_millicores gauge
+gpustack_instance_cpu_total_millicores{instance_name="inst",instance_uid="instance-uid-1",namespace="tenant",node="node-1"} 2000
 # HELP gpustack_instance_metrics_collector_success Whether the last sampling round of this source succeeded.
 # TYPE gpustack_instance_metrics_collector_success gauge
 gpustack_instance_metrics_collector_success{source="kubelet"} 0

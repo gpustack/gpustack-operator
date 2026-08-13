@@ -688,16 +688,18 @@ the release note rather than by a test.
   not hold the role, an unready self does not export, and a process that cannot tell which pod
   it is reports that rather than guessing. The collector: the exposition of every family is
   compared in full — name, unit suffix, HELP, GAUGE type, exact label set and value — plus the
-  client library's own lint; a failed round publishes its verdict and no figures; a round taken
-  by another device manager publishes none either; an unmeasured figure is left unpublished
-  rather than reported as zero; and nothing sampled yet reads as `success 0` rather than
-  silence. `Collect` performs no I/O, gathered under `-race` while the loop replaces the round.
+  client library's own lint; a round that failed outright publishes its verdict and no figures,
+  while a round whose kubelet read alone failed keeps the declared totals and says so through
+  `success{source="kubelet"} 0`; a round taken by another device manager publishes none either;
+  an unmeasured figure is left unpublished rather than reported as zero; and nothing sampled yet
+  reads as `success 0` rather than silence. `Collect` performs no I/O, gathered under `-race` while the loop replaces the round.
   The accelerator families: published for the allocated cards against a fresh snapshot, and only
   for those — a card of the same manufacturer allocated to someone else is not published, a
   manufacturer the snapshot does not carry yields none, a stale snapshot yields none beside
-  `success{source="snapshot"} 0`, a failed round yields none either since it is the round that
-  knows what each Instance holds, and they are published by a device manager that is *not* the
-  pod-level exporter, because device IDs are disjoint.
+  `success{source="snapshot"} 0`, a round that failed outright yields none either since it is the
+  round that knows what each Instance holds — but a failed kubelet read does **not** cost them,
+  which is the whole point of keeping that round — and they are published by a device manager
+  that is *not* the pod-level exporter, because device IDs are disjoint.
 - `pkg/devicemanager/detector`: the staleness bound on its own — just stored, inside and outside
   three periods, scaled to a reported period, the fallback bound for a snapshot reporting none,
   and nothing stored yet; and the allocation match — the allocated card kept with its

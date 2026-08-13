@@ -187,12 +187,14 @@ func (c *instanceCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 
-	ch <- gauge(c.success, boolValue(round.Snapshot != nil), _SourceKubelet)
+	ch <- gauge(c.success, boolValue(round.Snapshot != nil && round.Snapshot.UsageMeasured), _SourceKubelet)
 	ch <- gauge(c.duration, round.Duration.Seconds(), _SourceKubelet)
 
-	// A failed round publishes its verdict and no figures at all — including no accelerator
-	// ones, since it is the round that knows which Instances this node runs and which devices
-	// each was allocated.
+	// A round that failed outright publishes its verdict and no figures: without it there is no
+	// list of this node's Instances, and every family here is labeled by one. A round whose
+	// kubelet read alone failed is not that round — it carries the Instances and their
+	// allocations, so the accelerator families below still publish, and only the measured
+	// pod-level figures are missing.
 	if round.Snapshot == nil {
 		return
 	}
