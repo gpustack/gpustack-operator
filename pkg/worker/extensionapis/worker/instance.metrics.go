@@ -12,28 +12,25 @@ import (
 
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apiserver/pkg/registry/rest"
 	klog "k8s.io/klog/v2"
-	kubeletstats "k8s.io/kubelet/pkg/apis/stats/v1alpha1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/devicemanager"
+	"gpustack.ai/gpustack/pkg/devicemanager/detector"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/extensionapi"
-	"gpustack.ai/gpustack/pkg/system"
+	"gpustack.ai/gpustack/pkg/kubemetrics"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/httpx"
 	"gpustack.ai/gpustack/pkg/utils/json"
-	"gpustack.ai/gpustack/pkg/utils/mathx"
-	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
@@ -48,24 +45,10 @@ const (
 	// deviceManager.securePort override keeps working.
 	_DeviceManagerSecurePortName = "https"
 
-	// _DeviceManagerComponentLabelValue selects the device manager pods.
-	_DeviceManagerComponentLabelValue = "device-manager"
-
-	// _DeviceManagerManufacturerLabelKey carries the manufacturer of a device manager pod.
-	_DeviceManagerManufacturerLabelKey = "gpustack.ai/manufacturer"
-
-	// _InstancePartOfLabelKey is the pod label carrying the backing Instance's UID,
-	// stamped by the Instance controller (pkg/worker/controllers/worker/instance.go).
-	_InstancePartOfLabelKey = "app.kubernetes.io/part-of"
-
 	// _InstanceMetricsTimeout bounds the whole metrics operation of one request,
 	// including the kubelet read, the metrics API fallback, and one device manager fetch
 	// per allocated manufacturer.
 	_InstanceMetricsTimeout = 10 * time.Second
-
-	// _MonitorSnapshotMaxAge is the fallback accepted age of a device manager snapshot
-	// (three default monitor periods) when the snapshot does not report its period.
-	_MonitorSnapshotMaxAge = 45 * time.Second
 
 	// _MonitorSnapshotMaxBytes bounds a device manager snapshot readout, orders of
 	// magnitude above one node's accelerator metrics.
@@ -99,11 +82,17 @@ type InstanceMetricsHandler struct {
 	extensionapi.GetOperation
 
 	APIReader ctrlcli.Reader
+
+	// MaxAge is the age of a node's kubelet readout this handler still serves. The readout is
+	// node-wide, so without it a client walking the Instances of one node re-reads the same
+	// payload once per Instance. The zero value reads afresh every request.
+	MaxAge time.Duration
 }
 
 func newInstanceMetricsHandler(parent rest.Scoper, opts extensionapi.SetupOptions) *InstanceMetricsHandler {
 	h := &InstanceMetricsHandler{
 		APIReader: opts.Manager.GetAPIReader(),
+		MaxAge:    kubemetrics.DefaultMaxAge,
 	}
 
 	// As storage.
@@ -152,17 +141,18 @@ func (h *InstanceMetricsHandler) OnGet(ctx context.Context, key types.Namespaced
 		}
 		return nil, err
 	}
-	if uid := pod.Labels[_InstancePartOfLabelKey]; uid != string(inst.UID) {
+	if uid := pod.Labels[deviceplugin.InstancePartOfLabelKey]; uid != string(inst.UID) {
 		// The controller has not replaced the previous incarnation's pod yet: transient
 		// backing state, same as an unscheduled Instance or a missing pod.
 		return nil, kerrors.NewServiceUnavailable(
 			fmt.Sprintf("backing pod of instance %s belongs to a previous incarnation", key))
 	}
 
-	// Current CPU/memory/storage usage of the backing Pod.
-	sample, err := h.currentPodUsage(ctx, nodeName, pod)
+	// Current CPU/memory/storage usage of the backing Pod. The error already names every
+	// source that failed and why, so it becomes the client-facing message unchanged.
+	sample, err := kubemetrics.FetchPodSample(ctx, nodeName, pod, h.MaxAge)
 	if err != nil {
-		return nil, err
+		return nil, kerrors.NewServiceUnavailable(err.Error())
 	}
 
 	// Best-effort merge of the allocated accelerators' latest metrics:
@@ -180,120 +170,6 @@ func (h *InstanceMetricsHandler) OnGet(ctx context.Context, key types.Namespaced
 		},
 		Sample: *sample,
 	}, nil
-}
-
-// currentPodUsage returns the backing pod's current usage from the node kubelet,
-// falling back to the metrics.k8s.io API (CPU/memory only) when the kubelet read fails
-// or when the kubelet does not know the pod yet.
-func (h *InstanceMetricsHandler) currentPodUsage(
-	ctx context.Context,
-	nodeName string,
-	pod *core.Pod,
-) (*worker.InstanceMetricsSample, error) {
-	summary, err := fetchKubeletSummaryViaNodeProxy(ctx, nodeName)
-	if err == nil {
-		for i := range summary.Pods {
-			ps := &summary.Pods[i]
-			// Match on the pod UID as well: the kubelet summary is node-wide, and a
-			// recreated pod must never leak the previous incarnation's figures.
-			if ps.PodRef.Namespace != pod.Namespace || ps.PodRef.Name != pod.Name ||
-				ps.PodRef.UID != string(pod.UID) {
-				continue
-			}
-			return podUsageFromStats(ps), nil
-		}
-		// The kubelet answered but does not carry the pod, e.g. its CRI stats provider has
-		// not picked it up after a restart. Fall back as well: an empty sample stamped with
-		// a measurement that never happened is worse than the degraded CPU/memory figures.
-		err = fmt.Errorf("node %s reports no stats for the pod", nodeName)
-	}
-
-	cpu, memory, ts, ferr := fetchPodUsageFromMetricsAPI(ctx, types.NamespacedName{
-		Namespace: pod.Namespace, Name: pod.Name,
-	})
-	// The metrics entry was measured before this pod existed: it belongs to a
-	// previous incarnation of the same name — never serve it.
-	previousIncarnation := ferr == nil && cpu != nil && ts != nil && ts.Time.Before(pod.CreationTimestamp.Time)
-
-	// Name the actual reason: "the metrics API failed", "it is not served here" and "it only
-	// knows a previous pod of this name" are three different operator actions.
-	switch {
-	case ferr != nil:
-		return nil, kerrors.NewServiceUnavailable(fmt.Sprintf(
-			"failed to read the usage of instance pod %s/%s from the kubelet (%v) and from the metrics API (%v)",
-			pod.Namespace, pod.Name, err, ferr))
-	case previousIncarnation:
-		return nil, kerrors.NewServiceUnavailable(fmt.Sprintf(
-			"failed to read the usage of instance pod %s/%s from the kubelet (%v); "+
-				"the metrics API only knows a previous incarnation of this pod name",
-			pod.Namespace, pod.Name, err))
-	case cpu == nil:
-		return nil, kerrors.NewServiceUnavailable(fmt.Sprintf(
-			"failed to read the usage of instance pod %s/%s from the kubelet (%v); "+
-				"the metrics.k8s.io API is not served in this cluster",
-			pod.Namespace, pod.Name, err))
-	}
-
-	sample := &worker.InstanceMetricsSample{
-		CPUUsageNanoCores:   cpu,
-		MemoryWorkingSetMiB: bytesToMiB(memory),
-	}
-	if ts != nil {
-		sample.Timestamp = *ts
-	} else {
-		sample.Timestamp = meta.Now()
-	}
-	return sample, nil
-}
-
-// bytesToMiB converts an optional byte figure to MiB, keeping absence absent.
-// The quotient rounds up so that any usage the kubelet measured stays visible: an idle
-// instance's working set and writable layer are routinely under 1 MiB, and truncating
-// them would present a measured figure as no usage at all.
-func bytesToMiB(bytes *uint64) *uint64 {
-	if bytes == nil {
-		return nil
-	}
-	mib := mathx.CeilDiv(*bytes, uint64(quantityx.Mi))
-	return &mib
-}
-
-// podUsageFromStats converts one kubelet pod stats entry into a metrics sample,
-// tolerating any nil stat field (the kubelet omits them e.g. for fresh pods).
-func podUsageFromStats(ps *kubeletstats.PodStats) *worker.InstanceMetricsSample {
-	sample := &worker.InstanceMetricsSample{Timestamp: meta.Now()}
-	if ps.CPU != nil {
-		if !ps.CPU.Time.IsZero() {
-			sample.Timestamp = ps.CPU.Time
-		}
-		if ps.CPU.UsageNanoCores != nil {
-			sample.CPUUsageNanoCores = ps.CPU.UsageNanoCores
-		}
-	}
-	if ps.Memory != nil {
-		sample.MemoryWorkingSetMiB = bytesToMiB(ps.Memory.WorkingSetBytes)
-	}
-	if ps.EphemeralStorage != nil {
-		sample.EphemeralStorageUsedMiB = bytesToMiB(ps.EphemeralStorage.UsedBytes)
-	}
-	// The summary carries no pod-level rootfs, aggregate the containers' write layers.
-	// If any container's figure is missing, the total would mislead — report it absent.
-	if len(ps.Containers) != 0 {
-		sum := uint64(0)
-		complete := true
-		for i := range ps.Containers {
-			r := ps.Containers[i].Rootfs
-			if r == nil || r.UsedBytes == nil {
-				complete = false
-				break
-			}
-			sum += *r.UsedBytes
-		}
-		if complete {
-			sample.RootfsUsedMiB = bytesToMiB(&sum)
-		}
-	}
-	return sample
 }
 
 // currentAcceleratorMetrics reads the device manager's latest snapshot and filters it to the
@@ -350,52 +226,26 @@ func allocatedManufacturers(allocGroups []workercore.DevicesAllocationGroup) []s
 	return manufacturers
 }
 
-// filterAllocatedAcceleratorMetrics filters a device manager snapshot to the metrics of the
-// devices recorded in the pod's allocation, keyed by manufacturer and device ID.
-// A snapshot older than three monitor periods means the monitor is failing — the detector
-// only replaces the snapshot after a successful non-empty sample — and yields nothing.
-// The bound scales with the period the snapshot reports, falling back to
-// _MonitorSnapshotMaxAge when the field is absent (older device managers).
+// filterAllocatedAcceleratorMetrics maps the snapshot's metrics for the allocated devices onto
+// the API type. The filtering itself — the staleness bound and the manufacturer-and-ID match —
+// belongs to the device manager that produced the snapshot, and is shared with its own exporter
+// so the two surfaces cannot report different cards for one Instance.
 func filterAllocatedAcceleratorMetrics(
 	snapshot *devicemanager.MonitorSnapshot,
 	allocGroups []workercore.DevicesAllocationGroup,
 ) []worker.InstanceAcceleratorMetrics {
-	if snapshot == nil {
+	allocated := detector.AllocatedAcceleratorMetricsOf(snapshot, allocGroups)
+	if len(allocated) == 0 {
+		// Nil rather than an empty list, though the response cannot tell the two apart: the
+		// field is omitempty, so both are omitted. What it therefore never distinguishes is
+		// "this Instance holds no card" from "the device manager could not be read" — both
+		// simply arrive carrying no accelerators.
 		return nil
-	}
-	maxAge := _MonitorSnapshotMaxAge
-	if snapshot.PeriodSeconds > 0 {
-		maxAge = time.Duration(snapshot.PeriodSeconds) * time.Second * 3
-	}
-	if time.Since(snapshot.Timestamp) > maxAge {
-		return nil
-	}
-	allocatedByManufacturer := make(map[string]map[string]struct{}, len(allocGroups))
-	for i := range allocGroups {
-		ids := allocatedByManufacturer[allocGroups[i].Manufacturer]
-		if ids == nil {
-			ids = make(map[string]struct{})
-			allocatedByManufacturer[allocGroups[i].Manufacturer] = ids
-		}
-		for j := range allocGroups[i].Accelerators {
-			ids[allocGroups[i].Accelerators[j].ID] = struct{}{}
-		}
 	}
 
-	var accelerators []worker.InstanceAcceleratorMetrics
-	for i := range snapshot.Groups {
-		grp := &snapshot.Groups[i]
-		allocated, ok := allocatedByManufacturer[grp.Manufacturer]
-		if !ok {
-			continue
-		}
-		for j := range grp.Accelerators {
-			am := &grp.Accelerators[j]
-			if _, ok = allocated[am.ID]; !ok {
-				continue
-			}
-			accelerators = append(accelerators, toInstanceAcceleratorMetrics(am))
-		}
+	accelerators := make([]worker.InstanceAcceleratorMetrics, 0, len(allocated))
+	for i := range allocated {
+		accelerators = append(accelerators, toInstanceAcceleratorMetrics(&allocated[i].Metrics))
 	}
 	return accelerators
 }
@@ -407,10 +257,10 @@ func filterAllocatedAcceleratorMetrics(
 func selectDeviceManagerPod(pods []core.Pod, manufacturer string) *core.Pod {
 	for i := range pods {
 		pod := &pods[i]
-		if pod.DeletionTimestamp != nil || pod.Status.PodIP == "" || !isPodReady(pod) {
+		if pod.DeletionTimestamp != nil || pod.Status.PodIP == "" || !deviceplugin.IsPodReady(pod) {
 			continue
 		}
-		if manufacturer != "" && pod.Labels[_DeviceManagerManufacturerLabelKey] != manufacturer {
+		if manufacturer != "" && pod.Labels[deviceplugin.ManufacturerLabelKey] != manufacturer {
 			continue
 		}
 		return pod
@@ -424,7 +274,7 @@ func (h *InstanceMetricsHandler) listNodeDeviceManagerPods(ctx context.Context, 
 	podList := &core.PodList{}
 	err := h.APIReader.List(ctx, podList,
 		ctrlcli.InNamespace(kuberess.SystemNamespaceName),
-		ctrlcli.MatchingLabels{"app.kubernetes.io/component": _DeviceManagerComponentLabelValue},
+		ctrlcli.MatchingLabels{deviceplugin.ComponentLabelKey: deviceplugin.DeviceManagerComponent},
 		ctrlcli.MatchingFieldsSelector{Selector: fields.OneTermEqualSelector("spec.nodeName", nodeName)},
 		ctrlclix.WithoutQuorum,
 		ctrlcli.UnsafeDisableDeepCopy,
@@ -433,87 +283,6 @@ func (h *InstanceMetricsHandler) listNodeDeviceManagerPods(ctx context.Context, 
 		return nil, fmt.Errorf("failed to list device manager pods on node %s: %w", nodeName, err)
 	}
 	return podList.Items, nil
-}
-
-// fetchKubeletSummaryViaNodeProxy reads the node kubelet's stats summary through the
-// API-server node proxy: no address resolution or kubelet TLS handling is needed, and the
-// worker's RBAC already covers it.
-func fetchKubeletSummaryViaNodeProxy(ctx context.Context, nodeName string) (*kubeletstats.Summary, error) {
-	raw, err := system.LoopbackKubeClient.Get().CoreV1().RESTClient().Get().
-		Resource("nodes").Name(nodeName).SubResource("proxy").
-		Suffix("stats", "summary").
-		DoRaw(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get kubelet stats summary of node %s: %w", nodeName, err)
-	}
-
-	summary := &kubeletstats.Summary{}
-	if err = json.Unmarshal(raw, summary); err != nil {
-		return nil, fmt.Errorf("failed to decode kubelet stats summary of node %s: %w", nodeName, err)
-	}
-	return summary, nil
-}
-
-// fetchPodUsageFromMetricsAPI reads the pod's CPU/memory from the metrics.k8s.io API via the
-// generic REST client (no k8s.io/metrics dependency). A nil-cpu return means the API is not
-// served in this cluster.
-func fetchPodUsageFromMetricsAPI(ctx context.Context, key types.NamespacedName) (*uint64, *uint64, *meta.Time, error) {
-	raw, err := system.LoopbackKubeClient.Get().CoreV1().RESTClient().Get().
-		AbsPath("/apis/metrics.k8s.io/v1beta1/namespaces/" + key.Namespace + "/pods/" + key.Name).
-		DoRaw(ctx)
-	if err != nil {
-		if kerrors.IsNotFound(err) {
-			return nil, nil, nil, nil
-		}
-		return nil, nil, nil, fmt.Errorf("failed to get pod metrics of %s: %w", key, err)
-	}
-	return parsePodMetricsUsage(raw)
-}
-
-// parsePodMetricsUsage decodes the metrics.k8s.io PodMetrics shape and sums the
-// containers' usage: CPU in nanocores, memory in bytes. The measurement timestamp
-// lets the caller reject entries that predate the pod (a previous incarnation).
-func parsePodMetricsUsage(raw []byte) (*uint64, *uint64, *meta.Time, error) {
-	var podMetrics struct {
-		Timestamp  meta.Time `json:"timestamp"`
-		Containers []struct {
-			Usage map[core.ResourceName]resource.Quantity `json:"usage"`
-		} `json:"containers"`
-	}
-	if err := json.Unmarshal(raw, &podMetrics); err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to decode pod metrics: %w", err)
-	}
-
-	// A response without containers carries no measurement: report it as unserved rather
-	// than as a genuine zero usage.
-	if len(podMetrics.Containers) == 0 {
-		return nil, nil, nil, nil
-	}
-
-	// Any adapter may serve metrics.k8s.io, so a negative or absurd quantity is possible;
-	// an unchecked unsigned conversion would turn it into exabytes of "current usage".
-	var cpu, memory uint64
-	for i := range podMetrics.Containers {
-		if q, ok := podMetrics.Containers[i].Usage[core.ResourceCPU]; ok {
-			cpu += nonNegative(q.ScaledValue(resource.Nano))
-		}
-		if q, ok := podMetrics.Containers[i].Usage[core.ResourceMemory]; ok {
-			memory += nonNegative(q.Value())
-		}
-	}
-	ts := &podMetrics.Timestamp
-	if ts.IsZero() {
-		ts = nil
-	}
-	return &cpu, &memory, ts, nil
-}
-
-// nonNegative clamps a signed measurement to an unsigned one.
-func nonNegative(v int64) uint64 {
-	if v < 0 {
-		return 0
-	}
-	return uint64(v)
 }
 
 // _monitorSnapshotClient is the shared client for device manager readouts: one keep-alive
@@ -562,24 +331,14 @@ func fetchMonitorSnapshot(ctx context.Context, url string) (*devicemanager.Monit
 	return snapshot, nil
 }
 
-// isPodReady reports whether the pod carries a true Ready condition.
-func isPodReady(pod *core.Pod) bool {
-	for i := range pod.Status.Conditions {
-		if pod.Status.Conditions[i].Type == core.PodReady {
-			return pod.Status.Conditions[i].Status == core.ConditionTrue
-		}
-	}
-	return false
-}
-
 // toInstanceAcceleratorMetrics converts the internal accelerator metrics to the API type,
 // keeping the vendor-native MiB memory figures.
 func toInstanceAcceleratorMetrics(am *device.AcceleratorMetrics) worker.InstanceAcceleratorMetrics {
 	result := worker.InstanceAcceleratorMetrics{
 		ID: am.ID,
 	}
-	result.MemoryMiB = &am.Memory
-	result.MemoryUsageMiB = &am.MemoryUsage
+	result.MemoryTotalMiB = &am.Memory
+	result.MemoryUsedMiB = &am.MemoryUsage
 	result.MemoryUtilizationPercent = &am.MemoryUtilization
 	result.CoresUtilizationPercent = &am.CoresUtilization
 	result.TemperatureCelsius = &am.Temperature

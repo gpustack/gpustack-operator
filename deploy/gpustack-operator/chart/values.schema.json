@@ -541,6 +541,38 @@
           "title": "image",
           "type": "object"
         },
+        "networkPolicy": {
+          "description": "Restrict who may reach the device-manager's secure port.\n\nThat port serves `/metrics`, which lists every Instance running on the node — names,\nnamespaces, declared sizes, live usage and accelerator IDs — to anything that can reach it,\nand it is unauthenticated. Enabling this is recommended on a multi-tenant cluster.",
+          "properties": {
+            "enabled": {
+              "default": false,
+              "description": "Deploy the NetworkPolicy.\n\nIt only takes effect on a CNI that enforces NetworkPolicy; on one that does not, the\nobject is inert rather than an error. On a CNI that enforces policy but does not exempt\nnode-local traffic it also cuts the kubelet's probes, which would take every\ndevice-manager NotReady — see `extraIngress`.",
+              "title": "enabled",
+              "type": "boolean"
+            },
+            "extraIngress": {
+              "description": "Whole ingress rules appended verbatim, for what `scrapers` cannot express.\n\nNetworkPolicy has no peer meaning \"the node this pod runs on\", and the kubelet's probes\ncome from the node's host network namespace. Mainstream CNIs exempt that traffic, but\nupstream leaves it implementation-defined — so on a CNI that does not, admit the node's\naddress range here, e.g. `[{from: [{ipBlock: {cidr: 10.0.0.0/8}}]}]`.",
+              "items": {
+                "required": [],
+                "type": "object"
+              },
+              "title": "extraIngress",
+              "type": "array"
+            },
+            "scrapers": {
+              "description": "Peers admitted to the secure port besides the worker, as NetworkPolicy `from` entries\n(`podSelector`, `namespaceSelector`, `ipBlock`). This is where a Prometheus living outside\nthe operator's namespace goes, e.g.\n`[{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}}]`.",
+              "items": {
+                "required": [],
+                "type": "object"
+              },
+              "title": "scrapers",
+              "type": "array"
+            }
+          },
+          "required": [],
+          "title": "networkPolicy",
+          "type": "object"
+        },
         "resources": {
           "description": "Resource requests and limits for each device-manager container.",
           "properties": {

@@ -67,11 +67,11 @@ message InstanceAcceleratorMetrics {
   // ID is the universally unique identifier of the accelerator device.
   optional string id = 1;
 
-  // MemoryMiB is the total memory of the accelerator in MiB.
-  optional uint64 memoryMiB = 2;
+  // MemoryTotalMiB is the total memory of the accelerator in MiB.
+  optional uint64 memoryTotalMiB = 2;
 
-  // MemoryUsageMiB is the used memory of the accelerator in MiB.
-  optional uint64 memoryUsageMiB = 3;
+  // MemoryUsedMiB is the used memory of the accelerator in MiB.
+  optional uint64 memoryUsedMiB = 3;
 
   // MemoryUtilizationPercent is the memory utilization of the accelerator in [0, 100].
   optional uint32 memoryUtilizationPercent = 4;
@@ -235,30 +235,42 @@ message InstanceMetrics {
 
 // InstanceMetricsSample is a single utilization sampling point of an Instance.
 //
-// Every memory and storage figure is reported in MiB: the sources measure in different
-// units — the kubelet in bytes, the manufacturer's device libraries in MiB — and the coarser one
-// wins so that a consumer never has to mix units within one sample. A byte figure is
-// rounded up, so a measured usage below 1 MiB reads as 1 and 0 means no usage at all.
+// Every figure is one half of a Total/Used pair reported in one unit, so that a consumer
+// computes a utilization percentage from one sample without reading the Instance's spec:
+// CPU in milli-cores, memory and storage in MiB. The sources measure in finer units — the
+// kubelet in nanocores and bytes, the manufacturer's device libraries in MiB — and the
+// coarser unit wins, because a percentage needs no more precision than that.
+//
+// A Total comes from the Instance's own declaration and is therefore always populated; a Used
+// figure is a measurement, and is absent when its source is unavailable. Every conversion
+// rounds up, so a measured usage below one unit reads as 1 and 0 means no usage at all.
 message InstanceMetricsSample {
   // Timestamp indicates when the CPU/memory/storage figures were measured by the kubelet.
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time timestamp = 1;
 
-  // CPUUsageNanoCores is the CPU usage of the Instance's Pod in nanocores
-  // (core-nanoseconds per second), averaged over the kubelet's sample window.
-  optional uint64 cpuUsageNanoCores = 2;
+  // CPUTotalMilliCores is the CPU limit of the Instance's Pod in milli-cores.
+  optional uint64 cpuTotalMilliCores = 2;
 
-  // MemoryWorkingSetMiB is the working set memory usage of the Instance's Pod in MiB.
-  optional uint64 memoryWorkingSetMiB = 3;
+  // CPUUsedMilliCores is the CPU usage of the Instance's Pod in milli-cores,
+  // averaged over the kubelet's sample window.
+  optional uint64 cpuUsedMilliCores = 3;
 
-  // RootfsUsedMiB is the used size of the Instance containers' writable layers in MiB,
-  // which accounts against the Instance's spec.resources.localStorage.
-  optional uint64 rootfsUsedMiB = 4;
+  // MemoryTotalMiB is the memory limit of the Instance's Pod in MiB.
+  optional uint64 memoryTotalMiB = 4;
 
-  // EphemeralStorageUsedMiB is the total ephemeral storage usage of the Instance's Pod
-  // in MiB, including containers' writable layers, logs and emptyDir-backed volumes.
-  // Absent when the figures came from the metrics.k8s.io fallback, which carries no
-  // storage metrics.
-  optional uint64 ephemeralStorageUsedMiB = 5;
+  // MemoryUsedMiB is the working set memory usage of the Instance's Pod in MiB.
+  optional uint64 memoryUsedMiB = 5;
+
+  // StorageTotalMiB is the ephemeral storage limit of the Instance's Pod in MiB.
+  optional uint64 storageTotalMiB = 6;
+
+  // StorageUsedMiB is the ephemeral storage usage of the Instance's Pod in MiB.
+  //
+  // This is the pod-level aggregate the kubelet evicts on — the containers' writable
+  // layers, their logs, and the local emptyDir volumes — so it is measured against the
+  // same ceiling StorageTotalMiB reports. Absent when the figures came from the
+  // metrics.k8s.io fallback, which carries no storage metrics.
+  optional uint64 storageUsedMiB = 7;
 
   // Accelerators holds the metrics of the accelerator devices allocated to the Instance,
   // keyed by device ID; absent when the Instance has no allocated accelerator or the
@@ -266,7 +278,7 @@ message InstanceMetricsSample {
   //
   // +listType=map
   // +listMapKey=id
-  repeated InstanceAcceleratorMetrics accelerators = 6;
+  repeated InstanceAcceleratorMetrics accelerators = 8;
 }
 
 // InstancePersistentVolume is the schema for worker.gpustack.ai.

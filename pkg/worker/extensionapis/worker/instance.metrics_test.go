@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
@@ -92,6 +93,11 @@ func metricsTestInstance() *workercore.Instance {
 }
 
 // metricsTestPod returns the backing pod of the test Instance, allocated one nvidia card.
+//
+// The containers mirror what the Instance controller writes: "main" carries the Instance's
+// spec.resources as its limits, and the sshd sidecar declares no general resources — so the
+// sum of the pod's limits, which is where the sample's totals come from, is exactly
+// 2 cores / 4Gi / 10Gi.
 func metricsTestPod() *core.Pod {
 	allocations := deviceplugin.PodAllocations{
 		"main": {
@@ -114,12 +120,37 @@ func metricsTestPod() *core.Pod {
 			Namespace: _metricsTestNS,
 			Name:      _metricsTestName,
 			UID:       _metricsTestPodUID,
-			Labels:    map[string]string{_InstancePartOfLabelKey: _metricsTestUID},
+			Labels:    map[string]string{deviceplugin.InstancePartOfLabelKey: _metricsTestUID},
 			Annotations: map[string]string{
 				deviceplugin.AllocatedAcceleratorAnnoKey: string(anno),
 			},
 		},
+		Spec: core.PodSpec{
+			Containers: []core.Container{
+				{
+					Name: "main",
+					Resources: core.ResourceRequirements{
+						Limits: core.ResourceList{
+							core.ResourceCPU:              resource.MustParse("2"),
+							core.ResourceMemory:           resource.MustParse("4Gi"),
+							core.ResourceEphemeralStorage: resource.MustParse("10Gi"),
+						},
+					},
+				},
+				{Name: "sshd"},
+			},
+		},
 	}
+}
+
+// assertTestPodTotals pins the sample's denominators to the backing pod's declared limits.
+// They come from the Instance's own declaration, so they hold whichever measurement source
+// answered — including the degraded metrics.k8s.io fallback.
+func assertTestPodTotals(t *testing.T, sample worker.InstanceMetricsSample) {
+	t.Helper()
+	assert.Equal(t, uint64(2000), sample.CPUTotalMilliCores)
+	assert.Equal(t, uint64(4096), sample.MemoryTotalMiB)
+	assert.Equal(t, uint64(10240), sample.StorageTotalMiB)
 }
 
 // metricsTestDMPod returns a Ready device manager pod on the test node.
@@ -129,8 +160,8 @@ func metricsTestDMPod() *core.Pod {
 			Namespace: _metricsTestDMNamespace,
 			Name:      "dm-nvidia-abc",
 			Labels: map[string]string{
-				"app.kubernetes.io/component":      _DeviceManagerComponentLabelValue,
-				_DeviceManagerManufacturerLabelKey: "nvidia",
+				deviceplugin.ComponentLabelKey:    deviceplugin.DeviceManagerComponent,
+				deviceplugin.ManufacturerLabelKey: "nvidia",
 			},
 		},
 		Spec: core.PodSpec{
@@ -297,7 +328,7 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 
 	t.Run("rejects a pod owned by a previous incarnation", func(t *testing.T) {
 		pod := metricsTestPod()
-		pod.Labels[_InstancePartOfLabelKey] = "stale-uid"
+		pod.Labels[deviceplugin.InstancePartOfLabelKey] = "stale-uid"
 		h := newMetricsTestHandlerWith(t, metricsTestInstance(), pod, nil)
 
 		_, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
@@ -332,58 +363,26 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 		require.True(t, ok)
 		sample := metrics.Sample
 
+		// Every figure is one half of a pair the consumer can divide.
+		assertTestPodTotals(t, sample)
+
 		// The UID-matched entry only: neither the other tenant's nor the stale incarnation's.
-		require.NotNil(t, sample.CPUUsageNanoCores)
-		assert.Equal(t, uint64(500_000_000), *sample.CPUUsageNanoCores)
-		// The kubelet measures in bytes, the sample reports MiB.
-		assert.Equal(t, uint64(1024), *sample.MemoryWorkingSetMiB)
-		assert.Equal(t, uint64(2048), *sample.RootfsUsedMiB)
-		assert.Equal(t, uint64(3072), *sample.EphemeralStorageUsedMiB)
+		require.NotNil(t, sample.CPUUsedMilliCores)
+		assert.Equal(t, uint64(500), *sample.CPUUsedMilliCores)
+		// The kubelet measures in nanocores and bytes, the sample reports the totals' units.
+		assert.Equal(t, uint64(1024), *sample.MemoryUsedMiB)
+		// The pod-level ephemeral aggregate, not the containers' 2Gi of writable layers.
+		assert.Equal(t, uint64(3072), *sample.StorageUsedMiB)
 
 		// The merged accelerator section: only the allocated card, vendor-native MiB.
 		require.Len(t, sample.Accelerators, 1)
 		assert.Equal(t, "gpu-uuid-1", sample.Accelerators[0].ID)
-		assert.Equal(t, uint64(81920), *sample.Accelerators[0].MemoryMiB)
+		assert.Equal(t, uint64(81920), *sample.Accelerators[0].MemoryTotalMiB)
 	})
 
-	t.Run("falls back when the kubelet does not carry the pod yet", func(t *testing.T) {
-		// The kubelet answers but its stats provider has no entry for the pod: degraded
-		// CPU/memory beats a sample stamped with a measurement that never happened.
-		mux := http.NewServeMux()
-		mux.HandleFunc("/api/v1/nodes/"+_metricsTestNode+"/proxy/stats/summary",
-			func(w http.ResponseWriter, _ *http.Request) {
-				bs, _ := json.Marshal(&kubeletstats.Summary{})
-				_, _ = w.Write(bs)
-			})
-		mux.HandleFunc("/apis/metrics.k8s.io/v1beta1/namespaces/"+_metricsTestNS+"/pods/"+_metricsTestName,
-			func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = w.Write([]byte(`{"kind":"PodMetrics","timestamp":"` +
-					time.Now().UTC().Format(time.RFC3339) +
-					`","containers":[{"name":"main","usage":{"cpu":"250m","memory":"512Mi"}}]}`))
-			})
-		useFakeAPI(t, mux)
-		h := newMetricsTestHandler(t, nil)
-
-		obj, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
-		require.NoError(t, err)
-
-		sample := obj.(*worker.InstanceMetrics).Sample
-		require.NotNil(t, sample.CPUUsageNanoCores)
-		assert.Equal(t, uint64(250_000_000), *sample.CPUUsageNanoCores)
-	})
-
-	t.Run("unavailable when the kubelet does not carry the pod and no metrics API exists", func(t *testing.T) {
-		serveSummary(t, &kubeletstats.Summary{}, nil)
-		h := newMetricsTestHandler(t, nil)
-
-		_, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
-		require.Error(t, err)
-		assert.True(t, kerrors.IsServiceUnavailable(err))
-		assert.Contains(t, err.Error(), "metrics.k8s.io API is not served",
-			"the message must name the actual reason, not a nil error")
-	})
-
-	t.Run("falls back to the metrics API when the kubelet read fails", func(t *testing.T) {
+	// The degraded source's own branches are pinned in pkg/kubemetrics; what the two cases
+	// below add is the round trip through the served object and the API error mapping.
+	t.Run("serves a degraded sample when the kubelet read fails", func(t *testing.T) {
 		serveSummaryAndFallback(t, fmt.Errorf("kubelet down"),
 			`{"kind":"PodMetrics","timestamp":"`+time.Now().UTC().Format(time.RFC3339)+`",`+
 				`"containers":[{"name":"main","usage":{"cpu":"250m","memory":"512Mi"}}]}`,
@@ -394,36 +393,24 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 		require.NoError(t, err)
 
 		sample := obj.(*worker.InstanceMetrics).Sample
-		require.NotNil(t, sample.CPUUsageNanoCores)
-		assert.Equal(t, uint64(250_000_000), *sample.CPUUsageNanoCores)
-		assert.Equal(t, uint64(512), *sample.MemoryWorkingSetMiB)
-		assert.Nil(t, sample.RootfsUsedMiB, "the fallback carries no disk figures")
-		assert.Nil(t, sample.EphemeralStorageUsedMiB)
+		require.NotNil(t, sample.CPUUsedMilliCores)
+		assert.Equal(t, uint64(250), *sample.CPUUsedMilliCores)
+		assert.Equal(t, uint64(512), *sample.MemoryUsedMiB)
+		assert.Nil(t, sample.StorageUsedMiB, "the fallback carries no disk figures")
+		// The totals come from the Instance's declaration, so they survive the fallback —
+		// a consumer still has a denominator for the two figures it did get.
+		assertTestPodTotals(t, sample)
 	})
 
-	t.Run("unavailable when both sources fail", func(t *testing.T) {
+	t.Run("reports an unreadable usage as unavailable, naming why", func(t *testing.T) {
 		serveSummaryAndFallback(t, fmt.Errorf("kubelet down"), "", http.StatusNotFound)
 		h := newMetricsTestHandler(t, nil)
 
 		_, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
 		require.Error(t, err)
 		assert.True(t, kerrors.IsServiceUnavailable(err))
-	})
-
-	t.Run("rejects a fallback entry measured before this pod existed", func(t *testing.T) {
-		// A recreated pod keeps the name; the metrics API may still serve the
-		// previous incarnation's entry — it must not be presented as current.
-		pod := metricsTestPod()
-		pod.CreationTimestamp = meta.Now()
-		serveSummaryAndFallback(t, fmt.Errorf("kubelet down"),
-			`{"kind":"PodMetrics","timestamp":"`+time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)+`",`+
-				`"containers":[{"name":"main","usage":{"cpu":"250m","memory":"512Mi"}}]}`,
-			http.StatusOK)
-		h := newMetricsTestHandlerWith(t, metricsTestInstance(), pod, nil)
-
-		_, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
-		require.Error(t, err)
-		assert.True(t, kerrors.IsServiceUnavailable(err))
+		assert.Contains(t, err.Error(), "metrics.k8s.io API is not served",
+			"the client-facing message must name the actual reason, not a nil error")
 	})
 
 	t.Run("keeps the pod stats when the device manager is unreachable", func(t *testing.T) {
@@ -440,9 +427,9 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 
 		sample := obj.(*worker.InstanceMetrics).Sample
 		assert.Empty(t, sample.Accelerators)
-		require.NotNil(t, sample.CPUUsageNanoCores)
-		assert.Equal(t, uint64(500_000_000), *sample.CPUUsageNanoCores)
-		assert.Equal(t, uint64(1024), *sample.MemoryWorkingSetMiB)
+		require.NotNil(t, sample.CPUUsedMilliCores)
+		assert.Equal(t, uint64(500), *sample.CPUUsedMilliCores)
+		assert.Equal(t, uint64(1024), *sample.MemoryUsedMiB)
 	})
 
 	t.Run("keeps the pod stats when no device manager pod is ready", func(t *testing.T) {
@@ -454,7 +441,7 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 
 		sample := obj.(*worker.InstanceMetrics).Sample
 		assert.Empty(t, sample.Accelerators)
-		assert.NotNil(t, sample.CPUUsageNanoCores)
+		assert.NotNil(t, sample.CPUUsedMilliCores)
 	})
 
 	t.Run("keeps the pod stats when the allocation annotation is malformed", func(t *testing.T) {
@@ -468,88 +455,34 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 
 		sample := obj.(*worker.InstanceMetrics).Sample
 		assert.Empty(t, sample.Accelerators)
-		assert.NotNil(t, sample.CPUUsageNanoCores)
-	})
-
-	t.Run("keeps a sub-MiB measurement visible", func(t *testing.T) {
-		// An idle instance's working set and writable layer are routinely under 1 MiB;
-		// truncating them to 0 would present a measured figure as no usage at all.
-		summary := metricsTestSummary()
-		mem, eph, rootfs := uint64(585_728), uint64(20_480), uint64(12_288)
-		summary.Pods[0].Memory.WorkingSetBytes = &mem
-		summary.Pods[0].EphemeralStorage.UsedBytes = &eph
-		summary.Pods[0].Containers[0].Rootfs.UsedBytes = &rootfs
-		serveSummary(t, summary, nil)
-		h := newMetricsTestHandler(t, nil)
-
-		obj, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
-		require.NoError(t, err)
-
-		sample := obj.(*worker.InstanceMetrics).Sample
-		assert.Equal(t, uint64(1), *sample.MemoryWorkingSetMiB)
-		assert.Equal(t, uint64(1), *sample.EphemeralStorageUsedMiB)
-		assert.Equal(t, uint64(1), *sample.RootfsUsedMiB)
-	})
-
-	t.Run("reports zero only when the source measured no usage", func(t *testing.T) {
-		summary := metricsTestSummary()
-		zero := uint64(0)
-		summary.Pods[0].Memory.WorkingSetBytes = &zero
-		serveSummary(t, summary, nil)
-		h := newMetricsTestHandler(t, nil)
-
-		obj, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
-		require.NoError(t, err)
-
-		assert.Equal(t, uint64(0), *obj.(*worker.InstanceMetrics).Sample.MemoryWorkingSetMiB)
-	})
-
-	t.Run("reports rootfs absent when any container's figure is missing", func(t *testing.T) {
-		summary := metricsTestSummary()
-		summary.Pods[0].Containers[0].Rootfs = nil
-		serveSummary(t, summary, nil)
-		h := newMetricsTestHandler(t, nil)
-
-		obj, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
-		require.NoError(t, err)
-
-		sample := obj.(*worker.InstanceMetrics).Sample
-		assert.Nil(t, sample.RootfsUsedMiB, "a partial rootfs total would mislead")
-		assert.NotNil(t, sample.CPUUsageNanoCores)
+		assert.NotNil(t, sample.CPUUsedMilliCores)
 	})
 }
 
+// TestFilterAllocatedAcceleratorMetrics covers what this package still owns: mapping the
+// device manager's own metrics onto the API type. The filtering behind it — the staleness bound
+// and the manufacturer-and-ID match — is pinned in pkg/devicemanager/detector, beside the
+// snapshot it reads.
 func TestFilterAllocatedAcceleratorMetrics(t *testing.T) {
 	allocGroups := deviceplugin.AllocatedAcceleratorGroupsOf(metricsTestPod())
 
-	t.Run("keeps only the allocated devices, in vendor-native MiB", func(t *testing.T) {
+	t.Run("maps the allocated device onto the API type, in vendor-native MiB", func(t *testing.T) {
 		got := filterAllocatedAcceleratorMetrics(metricsTestSnapshot(), allocGroups)
 		require.Len(t, got, 1)
 
 		accel := got[0]
 		assert.Equal(t, "gpu-uuid-1", accel.ID)
-		assert.Equal(t, uint64(81920), *accel.MemoryMiB)
-		assert.Equal(t, uint64(1024), *accel.MemoryUsageMiB)
+		assert.Equal(t, uint64(81920), *accel.MemoryTotalMiB)
+		assert.Equal(t, uint64(1024), *accel.MemoryUsedMiB)
+		assert.Equal(t, uint32(12), *accel.MemoryUtilizationPercent)
 		assert.Equal(t, uint32(34), *accel.CoresUtilizationPercent)
 		assert.Equal(t, uint32(42), *accel.TemperatureCelsius)
 		assert.Equal(t, uint32(120), *accel.PowerUsageWatts)
+		require.NotNil(t, accel.Unhealthy)
+		assert.False(t, *accel.Unhealthy)
 	})
 
-	t.Run("drops a stale snapshot", func(t *testing.T) {
-		snapshot := metricsTestSnapshot()
-		snapshot.Timestamp = time.Now().Add(-2 * time.Minute)
-		assert.Empty(t, filterAllocatedAcceleratorMetrics(snapshot, allocGroups))
-	})
-
-	t.Run("scales the staleness bound with the reported period", func(t *testing.T) {
-		// A 60s monitor period must not drop healthy 50s-old samples.
-		snapshot := metricsTestSnapshot()
-		snapshot.PeriodSeconds = 60
-		snapshot.Timestamp = time.Now().Add(-50 * time.Second)
-		assert.NotEmpty(t, filterAllocatedAcceleratorMetrics(snapshot, allocGroups))
-	})
-
-	t.Run("drops everything for a CPU instance", func(t *testing.T) {
+	t.Run("maps nothing when the filter yields nothing", func(t *testing.T) {
 		assert.Empty(t, filterAllocatedAcceleratorMetrics(metricsTestSnapshot(), nil))
 	})
 }
@@ -558,7 +491,7 @@ func TestSelectDeviceManagerPod(t *testing.T) {
 	amdPod := func() *core.Pod {
 		pod := metricsTestDMPod()
 		pod.Name = "dm-amd-abc"
-		pod.Labels[_DeviceManagerManufacturerLabelKey] = "amd"
+		pod.Labels[deviceplugin.ManufacturerLabelKey] = "amd"
 		pod.Status.PodIP = "10.0.0.10"
 		return pod
 	}
@@ -646,42 +579,5 @@ func TestFetchMonitorSnapshot(t *testing.T) {
 
 		_, err := fetchMonitorSnapshot(context.Background(), srv.URL+devicemanager.MonitorSnapshotPath)
 		require.Error(t, err)
-	})
-}
-
-func TestParsePodMetricsUsage(t *testing.T) {
-	t.Run("sums the containers' usage", func(t *testing.T) {
-		raw := []byte(`{"kind":"PodMetrics","timestamp":"2026-08-07T01:02:03Z","containers":[
-			{"name":"main","usage":{"cpu":"250m","memory":"512Mi"}},
-			{"name":"sshd","usage":{"cpu":"2500000n","memory":"65536Ki"}}]}`)
-
-		cpu, memory, ts, err := parsePodMetricsUsage(raw)
-		require.NoError(t, err)
-		// 250m + 2500000n = 252500000 nanocores.
-		assert.Equal(t, uint64(252_500_000), *cpu)
-		// 512Mi + 64Mi, in bytes — the caller scales to MiB.
-		assert.Equal(t, uint64(576<<20), *memory)
-		assert.NotNil(t, ts)
-	})
-
-	t.Run("clamps a negative quantity instead of wrapping it", func(t *testing.T) {
-		// Any adapter may serve metrics.k8s.io; an unchecked conversion would turn
-		// -250m into 1.8e19 nanocores of "current usage".
-		raw := []byte(`{"kind":"PodMetrics","timestamp":"2026-08-07T01:02:03Z","containers":[
-			{"name":"main","usage":{"cpu":"-250m","memory":"-1Gi"}}]}`)
-
-		cpu, memory, _, err := parsePodMetricsUsage(raw)
-		require.NoError(t, err)
-		assert.Equal(t, uint64(0), *cpu)
-		assert.Equal(t, uint64(0), *memory)
-	})
-
-	t.Run("reports an empty container list as unserved", func(t *testing.T) {
-		cpu, memory, ts, err := parsePodMetricsUsage(
-			[]byte(`{"kind":"PodMetrics","timestamp":"2026-08-07T01:02:03Z","containers":[]}`))
-		require.NoError(t, err)
-		assert.Nil(t, cpu, "no containers means no measurement, not a genuine zero")
-		assert.Nil(t, memory)
-		assert.Nil(t, ts)
 	})
 }

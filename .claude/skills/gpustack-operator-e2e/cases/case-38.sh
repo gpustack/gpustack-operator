@@ -749,13 +749,13 @@ print('count', len(acc), wn)
 print('ids', ','.join(sorted(a.get('id','') for a in acc)) or '-', ','.join(sorted(want)))
 bad_mem=[]; bad_util=[]; tp=[]
 for a in acc:
-    m=a.get('memoryMiB')
+    m=a.get('memoryTotalMiB')
     if m is None or abs(int(m)-mem)>64: bad_mem.append('%s=%s'%(a.get('id'),m))
     for k in ('memoryUtilizationPercent','coresUtilizationPercent'):
         v=a.get(k)
         if v is None or not (0<=int(v)<=100): bad_util.append('%s.%s=%s'%(a.get('id'),k,v))
     tp.append('%s:%s:%s'%(a.get('id'), a.get('temperatureCelsius'), a.get('powerUsageWatts')))
-print('mem', ','.join('%s=%sMiB'%(a.get('id'),a.get('memoryMiB')) for a in acc) or '-', ','.join(bad_mem) or '-')
+print('mem', ','.join('%s=%sMiB'%(a.get('id'),a.get('memoryTotalMiB')) for a in acc) or '-', ','.join(bad_mem) or '-')
 print('util', ','.join('%s/%s'%(a.get('memoryUtilizationPercent'),a.get('coresUtilizationPercent')) for a in acc) or '-', ','.join(bad_util) or '-')
 print('tp', ','.join(tp) or '-')
 ")
@@ -1048,9 +1048,9 @@ if not acc:
     print('the accelerators array is ABSENT on a sliced Instance'); sys.exit(0)
 parts=[]
 for a in acc:
-    m=a.get('memoryMiB')
+    m=a.get('memoryTotalMiB')
     scope='WHOLE-ACCELERATOR' if m is not None and abs(int(m)-mem)<=64 else 'slice-scoped-or-other'
-    parts.append('%s memoryMiB=%s (%s) memUtil=%s coresUtil=%s temp=%s power=%s'%(
+    parts.append('%s memoryTotalMiB=%s (%s) memUtil=%s coresUtil=%s temp=%s power=%s'%(
         a.get('id'), m, scope, a.get('memoryUtilizationPercent'),
         a.get('coresUtilizationPercent'), a.get('temperatureCelsius'), a.get('powerUsageWatts')))
 print('the array is PRESENT with %d entries: %s'%(len(acc), '; '.join(parts)))

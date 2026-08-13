@@ -30,30 +30,42 @@ var _ runtime.Object = (*InstanceMetrics)(nil)
 
 // InstanceMetricsSample is a single utilization sampling point of an Instance.
 //
-// Every memory and storage figure is reported in MiB: the sources measure in different
-// units — the kubelet in bytes, the manufacturer's device libraries in MiB — and the coarser one
-// wins so that a consumer never has to mix units within one sample. A byte figure is
-// rounded up, so a measured usage below 1 MiB reads as 1 and 0 means no usage at all.
+// Every figure is one half of a Total/Used pair reported in one unit, so that a consumer
+// computes a utilization percentage from one sample without reading the Instance's spec:
+// CPU in milli-cores, memory and storage in MiB. The sources measure in finer units — the
+// kubelet in nanocores and bytes, the manufacturer's device libraries in MiB — and the
+// coarser unit wins, because a percentage needs no more precision than that.
+//
+// A Total comes from the Instance's own declaration and is therefore always populated; a Used
+// figure is a measurement, and is absent when its source is unavailable. Every conversion
+// rounds up, so a measured usage below one unit reads as 1 and 0 means no usage at all.
 type InstanceMetricsSample struct {
 	// Timestamp indicates when the CPU/memory/storage figures were measured by the kubelet.
 	Timestamp meta.Time `json:"timestamp" protobuf:"bytes,1,opt,name=timestamp"`
 
-	// CPUUsageNanoCores is the CPU usage of the Instance's Pod in nanocores
-	// (core-nanoseconds per second), averaged over the kubelet's sample window.
-	CPUUsageNanoCores *uint64 `json:"cpuUsageNanoCores,omitempty" protobuf:"varint,2,opt,name=cpuUsageNanoCores"`
+	// CPUTotalMilliCores is the CPU limit of the Instance's Pod in milli-cores.
+	CPUTotalMilliCores uint64 `json:"cpuTotalMilliCores" protobuf:"varint,2,opt,name=cpuTotalMilliCores"`
 
-	// MemoryWorkingSetMiB is the working set memory usage of the Instance's Pod in MiB.
-	MemoryWorkingSetMiB *uint64 `json:"memoryWorkingSetMiB,omitempty" protobuf:"varint,3,opt,name=memoryWorkingSetMiB"`
+	// CPUUsedMilliCores is the CPU usage of the Instance's Pod in milli-cores,
+	// averaged over the kubelet's sample window.
+	CPUUsedMilliCores *uint64 `json:"cpuUsedMilliCores,omitempty" protobuf:"varint,3,opt,name=cpuUsedMilliCores"`
 
-	// RootfsUsedMiB is the used size of the Instance containers' writable layers in MiB,
-	// which accounts against the Instance's spec.resources.localStorage.
-	RootfsUsedMiB *uint64 `json:"rootfsUsedMiB,omitempty" protobuf:"varint,4,opt,name=rootfsUsedMiB"`
+	// MemoryTotalMiB is the memory limit of the Instance's Pod in MiB.
+	MemoryTotalMiB uint64 `json:"memoryTotalMiB" protobuf:"varint,4,opt,name=memoryTotalMiB"`
 
-	// EphemeralStorageUsedMiB is the total ephemeral storage usage of the Instance's Pod
-	// in MiB, including containers' writable layers, logs and emptyDir-backed volumes.
-	// Absent when the figures came from the metrics.k8s.io fallback, which carries no
-	// storage metrics.
-	EphemeralStorageUsedMiB *uint64 `json:"ephemeralStorageUsedMiB,omitempty" protobuf:"varint,5,opt,name=ephemeralStorageUsedMiB"`
+	// MemoryUsedMiB is the working set memory usage of the Instance's Pod in MiB.
+	MemoryUsedMiB *uint64 `json:"memoryUsedMiB,omitempty" protobuf:"varint,5,opt,name=memoryUsedMiB"`
+
+	// StorageTotalMiB is the ephemeral storage limit of the Instance's Pod in MiB.
+	StorageTotalMiB uint64 `json:"storageTotalMiB" protobuf:"varint,6,opt,name=storageTotalMiB"`
+
+	// StorageUsedMiB is the ephemeral storage usage of the Instance's Pod in MiB.
+	//
+	// This is the pod-level aggregate the kubelet evicts on — the containers' writable
+	// layers, their logs, and the local emptyDir volumes — so it is measured against the
+	// same ceiling StorageTotalMiB reports. Absent when the figures came from the
+	// metrics.k8s.io fallback, which carries no storage metrics.
+	StorageUsedMiB *uint64 `json:"storageUsedMiB,omitempty" protobuf:"varint,7,opt,name=storageUsedMiB"`
 
 	// Accelerators holds the metrics of the accelerator devices allocated to the Instance,
 	// keyed by device ID; absent when the Instance has no allocated accelerator or the
@@ -61,7 +73,7 @@ type InstanceMetricsSample struct {
 	//
 	// +listType=map
 	// +listMapKey=id
-	Accelerators []InstanceAcceleratorMetrics `json:"accelerators,omitempty" protobuf:"bytes,6,rep,name=accelerators"`
+	Accelerators []InstanceAcceleratorMetrics `json:"accelerators,omitempty" protobuf:"bytes,8,rep,name=accelerators"`
 }
 
 // InstanceAcceleratorMetrics is the metrics of one accelerator device
@@ -73,11 +85,11 @@ type InstanceAcceleratorMetrics struct {
 	// ID is the universally unique identifier of the accelerator device.
 	ID string `json:"id" protobuf:"bytes,1,opt,name=id"`
 
-	// MemoryMiB is the total memory of the accelerator in MiB.
-	MemoryMiB *uint64 `json:"memoryMiB,omitempty" protobuf:"varint,2,opt,name=memoryMiB"`
+	// MemoryTotalMiB is the total memory of the accelerator in MiB.
+	MemoryTotalMiB *uint64 `json:"memoryTotalMiB,omitempty" protobuf:"varint,2,opt,name=memoryTotalMiB"`
 
-	// MemoryUsageMiB is the used memory of the accelerator in MiB.
-	MemoryUsageMiB *uint64 `json:"memoryUsageMiB,omitempty" protobuf:"varint,3,opt,name=memoryUsageMiB"`
+	// MemoryUsedMiB is the used memory of the accelerator in MiB.
+	MemoryUsedMiB *uint64 `json:"memoryUsedMiB,omitempty" protobuf:"varint,3,opt,name=memoryUsedMiB"`
 
 	// MemoryUtilizationPercent is the memory utilization of the accelerator in [0, 100].
 	MemoryUtilizationPercent *uint32 `json:"memoryUtilizationPercent,omitempty" protobuf:"varint,4,opt,name=memoryUtilizationPercent"`

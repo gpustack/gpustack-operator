@@ -12,6 +12,7 @@ import (
 	"gpustack.ai/gpustack/pkg/devicemanager/allocator"
 	"gpustack.ai/gpustack/pkg/devicemanager/controllers"
 	"gpustack.ai/gpustack/pkg/devicemanager/detector"
+	"gpustack.ai/gpustack/pkg/devicemanager/exporter"
 	"gpustack.ai/gpustack/pkg/manager"
 	"gpustack.ai/gpustack/pkg/utils/gox"
 )
@@ -30,6 +31,7 @@ type Manager struct {
 	Manager   *manager.Manager
 	Detector  *detector.Detector
 	Allocator *allocator.Allocator
+	Exporter  *exporter.Poller
 }
 
 // Prepare prepares the runtime for the server,
@@ -38,6 +40,14 @@ func (m *Manager) Prepare(ctx context.Context) error {
 	err := m.Manager.Prepare(ctx)
 	if err != nil {
 		return err
+	}
+
+	// Publish this node's Instance figures on the /metrics the shared manager already serves:
+	// no second route, no second port, no Prometheus of our own.
+	err = ctrlmetrics.Registry.Register(
+		exporter.NewCollector(m.Exporter, m.Detector.MonitorSnapshot))
+	if err != nil {
+		return fmt.Errorf("register instance metrics collector: %w", err)
 	}
 
 	return nil
@@ -66,6 +76,17 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 		klog.Info("starting allocator")
 		return m.Allocator.Start(ctx)
+	})
+	gp.Go(func(ctx context.Context) error {
+		// NB(thxCode): the poller lists Pods through the field index the controllers register,
+		// and through the informer cache, so it must not run before either exists.
+		klog.Info("waiting for manager ready")
+		err := m.Manager.WaitForReady(ctx)
+		if err != nil {
+			return fmt.Errorf("wait for manager ready: %w", err)
+		}
+		klog.Info("starting instance metrics exporter")
+		return m.Exporter.Start(ctx)
 	})
 	gp.Go(func(ctx context.Context) error {
 		klog.Info("starting controller manager")

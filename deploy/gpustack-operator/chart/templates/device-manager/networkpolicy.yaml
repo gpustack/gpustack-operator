@@ -1,0 +1,44 @@
+{{- if and .Values.deviceManager.enabled .Values.deviceManager.networkPolicy.enabled }}
+{{- $securePort := .Values.deviceManager.securePort | default 32443 }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "gpustack-operator.deviceManager.fullname" . }}
+  namespace: {{ include "gpustack-operator.namespace" . }}
+  labels:
+    {{- include "gpustack-operator.deviceManager.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  # Every manufacturer's DaemonSet shares these selector labels, so one policy covers the
+  # node's device-managers however many vendors it carries.
+  podSelector:
+    matchLabels:
+      {{- include "gpustack-operator.deviceManager.selectorLabels" . | nindent 6 }}
+  # Ingress only. The device-manager has to reach the API server and its node's devices, and
+  # nothing here is trying to contain what it talks to — only who talks to it.
+  policyTypes:
+    - Ingress
+  ingress:
+    # The worker reads the accelerator snapshot to answer the Instance metrics subresource.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "gpustack-operator.worker.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ $securePort }}
+    {{- with .Values.deviceManager.networkPolicy.scrapers }}
+    # Whoever scrapes /metrics.
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ $securePort }}
+    {{- end }}
+    {{- with .Values.deviceManager.networkPolicy.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

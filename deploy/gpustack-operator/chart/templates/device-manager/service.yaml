@@ -8,7 +8,11 @@ metadata:
     {{- include "gpustack-operator.deviceManager.labels" . | nindent 4 }}
   annotations:
     prometheus.io/scrape: "true"
-    prometheus.io/port: "443"
+    # The container's port, not this Service's. Under endpoint-role discovery the target
+    # address is already podIP:securePort, and the conventional annotation relabel overwrites
+    # its port with whatever this says — so naming 443 here pointed every scrape at a port
+    # nothing listens on.
+    prometheus.io/port: {{ .Values.deviceManager.securePort | default 32443 | quote }}
     prometheus.io/path: "/metrics"
     prometheus.io/scheme: "https"
     {{- with .Values.commonAnnotations }}

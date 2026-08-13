@@ -5,6 +5,7 @@ import (
 
 	"gpustack.ai/gpustack/pkg/devicemanager/allocator"
 	"gpustack.ai/gpustack/pkg/devicemanager/detector"
+	"gpustack.ai/gpustack/pkg/devicemanager/exporter"
 	"gpustack.ai/gpustack/pkg/manager"
 	"gpustack.ai/gpustack/pkg/webserver"
 )
@@ -14,6 +15,7 @@ type Config struct {
 	ManagerConfig   *manager.Config
 	DetectorConfig  *detector.Config
 	AllocatorConfig *allocator.Config
+	ExporterConfig  *exporter.Config
 }
 
 func (c *Config) Apply(ctx context.Context) (*Manager, error) {
@@ -35,9 +37,16 @@ func (c *Config) Apply(ctx context.Context) (*Manager, error) {
 		return nil, err
 	}
 
+	c.ExporterConfig.MonitorPeriod = c.DetectorConfig.MonitorPeriod
+	exp, err := c.ExporterConfig.Apply(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Manager{
 		Manager:   mgr,
 		Detector:  det,
 		Allocator: alc,
+		Exporter:  exp,
 	}, nil
 }

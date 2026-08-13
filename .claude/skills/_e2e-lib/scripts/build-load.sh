@@ -39,6 +39,11 @@ if [ -n "${E2E_BUILDER_SSH:-}" ]; then
   IMAGE="${NSP}/gpustack-operator:${TAG}"
   SHA="$(git rev-parse HEAD)"
   bssh() { ssh -o StrictHostKeyChecking=no -o BatchMode=yes "$E2E_BUILDER_SSH" "$@"; }
+  # ssh joins its arguments with spaces and hands the result to the remote shell, so the
+  # quoting of a multi-argument `bssh bash -lc "cd X && Y"` is gone by the time it lands: the
+  # login shell runs a bare `cd`, sits in $HOME, and everything after the && runs in the wrong
+  # directory. Give the login shell exactly one argument, quoted so it survives the join.
+  blogin() { bssh "bash -lc $(printf '%q' "$1")"; }
 
   echo "== remote build on the configured builder =="
   echo "commit ${SHA}  ->  ${IMAGE}  (repo dir ${DIR})"
@@ -65,14 +70,14 @@ if [ -n "${E2E_BUILDER_SSH:-}" ]; then
   # PACKAGE_NAMESPACE retags only what this build produces; the operator's own
   # GPUSTACK_CONTAINER_NAMESPACE is deliberately left alone so the images the
   # operator installs still resolve upstream.
-  bssh bash -lc "cd '${DIR}' && PACKAGE_TAG='${TAG}' PACKAGE_PUSH=true PACKAGE_NAMESPACE='${NSP}' make package" || {
+  blogin "cd '${DIR}' && PACKAGE_TAG='${TAG}' PACKAGE_PUSH=true PACKAGE_NAMESPACE='${NSP}' make package" || {
     echo "remote package failed"; exit 1; }
 
   echo
   echo "== resolve the pushed digest =="
   # A same-tag rebuild is invisible to a kubelet holding an IfNotPresent cache
   # entry for that tag. Deploy by digest when reusing a tag.
-  DIGEST="$(bssh bash -lc "docker buildx imagetools inspect '${IMAGE}' --format '{{.Manifest.Digest}}' 2>/dev/null" | tr -d '\r')"
+  DIGEST="$(blogin "docker buildx imagetools inspect '${IMAGE}' --format '{{.Manifest.Digest}}' 2>/dev/null" | tr -d '\r')"
   echo
   if [ -n "$DIGEST" ]; then
     echo "built & pushed: ${IMAGE}"

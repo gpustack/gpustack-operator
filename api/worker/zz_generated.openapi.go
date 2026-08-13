@@ -552,16 +552,16 @@ func schema_gpustack_api_worker_v1_InstanceAcceleratorMetrics(ref common.Referen
 							Format:      "",
 						},
 					},
-					"memoryMiB": {
+					"memoryTotalMiB": {
 						SchemaProps: spec.SchemaProps{
-							Description: "MemoryMiB is the total memory of the accelerator in MiB.",
+							Description: "MemoryTotalMiB is the total memory of the accelerator in MiB.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
 					},
-					"memoryUsageMiB": {
+					"memoryUsedMiB": {
 						SchemaProps: spec.SchemaProps{
-							Description: "MemoryUsageMiB is the used memory of the accelerator in MiB.",
+							Description: "MemoryUsedMiB is the used memory of the accelerator in MiB.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
@@ -1005,7 +1005,7 @@ func schema_gpustack_api_worker_v1_InstanceMetricsSample(ref common.ReferenceCal
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "InstanceMetricsSample is a single utilization sampling point of an Instance.\n\nEvery memory and storage figure is reported in MiB: the sources measure in different units — the kubelet in bytes, the manufacturer's device libraries in MiB — and the coarser one wins so that a consumer never has to mix units within one sample. A byte figure is rounded up, so a measured usage below 1 MiB reads as 1 and 0 means no usage at all.",
+				Description: "InstanceMetricsSample is a single utilization sampling point of an Instance.\n\nEvery figure is one half of a Total/Used pair reported in one unit, so that a consumer computes a utilization percentage from one sample without reading the Instance's spec: CPU in milli-cores, memory and storage in MiB. The sources measure in finer units — the kubelet in nanocores and bytes, the manufacturer's device libraries in MiB — and the coarser unit wins, because a percentage needs no more precision than that.\n\nA Total comes from the Instance's own declaration and is therefore always populated; a Used figure is a measurement, and is absent when its source is unavailable. Every conversion rounds up, so a measured usage below one unit reads as 1 and 0 means no usage at all.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"timestamp": {
@@ -1014,30 +1014,47 @@ func schema_gpustack_api_worker_v1_InstanceMetricsSample(ref common.ReferenceCal
 							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
 						},
 					},
-					"cpuUsageNanoCores": {
+					"cpuTotalMilliCores": {
 						SchemaProps: spec.SchemaProps{
-							Description: "CPUUsageNanoCores is the CPU usage of the Instance's Pod in nanocores (core-nanoseconds per second), averaged over the kubelet's sample window.",
+							Description: "CPUTotalMilliCores is the CPU limit of the Instance's Pod in milli-cores.",
+							Default:     0,
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
 					},
-					"memoryWorkingSetMiB": {
+					"cpuUsedMilliCores": {
 						SchemaProps: spec.SchemaProps{
-							Description: "MemoryWorkingSetMiB is the working set memory usage of the Instance's Pod in MiB.",
+							Description: "CPUUsedMilliCores is the CPU usage of the Instance's Pod in milli-cores, averaged over the kubelet's sample window.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
 					},
-					"rootfsUsedMiB": {
+					"memoryTotalMiB": {
 						SchemaProps: spec.SchemaProps{
-							Description: "RootfsUsedMiB is the used size of the Instance containers' writable layers in MiB, which accounts against the Instance's spec.resources.localStorage.",
+							Description: "MemoryTotalMiB is the memory limit of the Instance's Pod in MiB.",
+							Default:     0,
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
 					},
-					"ephemeralStorageUsedMiB": {
+					"memoryUsedMiB": {
 						SchemaProps: spec.SchemaProps{
-							Description: "EphemeralStorageUsedMiB is the total ephemeral storage usage of the Instance's Pod in MiB, including containers' writable layers, logs and emptyDir-backed volumes. Absent when the figures came from the metrics.k8s.io fallback, which carries no storage metrics.",
+							Description: "MemoryUsedMiB is the working set memory usage of the Instance's Pod in MiB.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"storageTotalMiB": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StorageTotalMiB is the ephemeral storage limit of the Instance's Pod in MiB.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"storageUsedMiB": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StorageUsedMiB is the ephemeral storage usage of the Instance's Pod in MiB.\n\nThis is the pod-level aggregate the kubelet evicts on — the containers' writable layers, their logs, and the local emptyDir volumes — so it is measured against the same ceiling StorageTotalMiB reports. Absent when the figures came from the metrics.k8s.io fallback, which carries no storage metrics.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
@@ -1065,7 +1082,7 @@ func schema_gpustack_api_worker_v1_InstanceMetricsSample(ref common.ReferenceCal
 						},
 					},
 				},
-				Required: []string{"timestamp"},
+				Required: []string{"timestamp", "cpuTotalMilliCores", "memoryTotalMiB", "storageTotalMiB"},
 			},
 		},
 		Dependencies: []string{

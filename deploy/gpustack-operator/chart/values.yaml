@@ -280,6 +280,41 @@ deviceManager:
   # -- Per-device-manager image overrides (`repository`/`tag`/`pullPolicy`); unset keys
   # fall back to the chart-level `image`.
   image: {}
+  # -- Restrict who may reach the device-manager's secure port.
+  #
+  # That port serves `/metrics`, which lists every Instance running on the node — names,
+  # namespaces, declared sizes, live usage and accelerator IDs — to anything that can reach it,
+  # and it is unauthenticated. Enabling this is recommended on a multi-tenant cluster.
+  networkPolicy:
+    # -- Deploy the NetworkPolicy.
+    #
+    # It only takes effect on a CNI that enforces NetworkPolicy; on one that does not, the
+    # object is inert rather than an error. On a CNI that enforces policy but does not exempt
+    # node-local traffic it also cuts the kubelet's probes, which would take every
+    # device-manager NotReady — see `extraIngress`.
+    enabled: false
+    # @schema
+    # type: array
+    # items:
+    #   type: object
+    # @schema
+    # -- Peers admitted to the secure port besides the worker, as NetworkPolicy `from` entries
+    # (`podSelector`, `namespaceSelector`, `ipBlock`). This is where a Prometheus living outside
+    # the operator's namespace goes, e.g.
+    # `[{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}}]`.
+    scrapers: []
+    # @schema
+    # type: array
+    # items:
+    #   type: object
+    # @schema
+    # -- Whole ingress rules appended verbatim, for what `scrapers` cannot express.
+    #
+    # NetworkPolicy has no peer meaning "the node this pod runs on", and the kubelet's probes
+    # come from the node's host network namespace. Mainstream CNIs exempt that traffic, but
+    # upstream leaves it implementation-defined — so on a CNI that does not, admit the node's
+    # address range here, e.g. `[{from: [{ipBlock: {cidr: 10.0.0.0/8}}]}]`.
+    extraIngress: []
   # -- Create a RuntimeClass for every manufacturer whose `global.manufacturers` row sets
   # `runtimeInjectsDriver` or `runtimeInjectsDevices`, where the cluster does not already have
   # one. That is the set whose container runtime is certain to be installed, since without it
