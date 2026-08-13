@@ -165,6 +165,10 @@ func (l Device) GetVersionInfo() (VersionInfo, Return) {
 	}
 
 	var versionInfo VersionInfo
+	// Version is an input: cnDev rejects a versioned struct that does not declare which layout the
+	// caller speaks, and every other wrapper in this file sets it. Leaving it zero made a conforming
+	// driver answer ERROR_UNSUPPORTED_API_VERSION instead of the version.
+	versionInfo.Version = VERSION_6
 	ret := cndevGetVersionInfo(&versionInfo, l.handle)
 	return versionInfo, ret
 }
