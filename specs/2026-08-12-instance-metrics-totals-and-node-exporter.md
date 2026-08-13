@@ -1,6 +1,6 @@
 # Spec: Instance Metrics Totals and Node-Local Prometheus Exporter
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -262,9 +262,12 @@ cluster.
   the shared handler serves partial results instead of discarding everything on a gather
   error.
 - AC3.4: `gpustack_instance_metrics_collector_success{source="kubelet"|"snapshot"}` is `1`
-  on success and `0` on failure, and
-  `gpustack_instance_metrics_collector_duration_seconds{source=…}` reports each source's
-  latency, so a silently degraded exporter is visible in Prometheus itself.
+  on success and `0` on failure, so a silently degraded exporter is visible in Prometheus
+  itself. `gpustack_instance_metrics_collector_duration_seconds` carries `source="kubelet"`
+  alone: it is the poll round's own latency, and the snapshot source has none to report —
+  the collector reads it from memory, and its health is an age rather than a latency, which
+  its `success` already answers by comparing the snapshot's own timestamp against three
+  monitor periods.
 - AC3.5: The failure reason is logged at a level that does not spam once per period
   indefinitely.
 

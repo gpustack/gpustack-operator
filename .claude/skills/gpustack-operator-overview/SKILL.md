@@ -38,6 +38,9 @@ pkg/
   devicemanager/                  device-manager subcommand (per-node DaemonSet)
     detector/<mfr>/               per-manufacturer accelerator detection
     allocator/<mfr>/              per-manufacturer device-plugin allocation
+    exporter/                     this node's Instances as Prometheus gauges on /metrics
+  kubemetrics/                    Instance utilization from the kubelet, behind both surfaces
+                                  (the metrics subresource and the exporter above)
   nodefeature/                    label algebra (node keys, flavors, queues, credits)
   extensionapi/                   generic aggregated-apiserver storage plumbing
 api/
