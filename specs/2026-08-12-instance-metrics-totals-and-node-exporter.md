@@ -390,10 +390,19 @@ cluster.
   ClusterRole does not silently blank every node's pod-level gauges.
 - The node readout cache is process-wide state that could grow one entry per node and could
   serve a figure older than the caller expects → entries aged past the caller's stated age are
-  swept on every store, so the map holds only the nodes read inside the window; the age is a
-  parameter rather than a constant, so the Device Manager's `--monitor-period` is never capped
-  by it; and a sample is stamped with the kubelet's own measurement time, so a cached read
-  reports its real age rather than the time it was served.
+  swept on every store, and past `maxCachedNodes` the oldest are dropped, so one burst across a
+  large cluster cannot hold every node's decoded summary at once; a sample is stamped with the
+  kubelet's own measurement time, so a cached read reports its real age rather than the time it
+  was served; and a caller that misses the pod inside a cached readout re-reads once before
+  degrading, since the readout can simply predate the pod.
+- **A caller sampling on a fixed period must not hand that period to the cache.** Its rounds
+  start exactly one period apart while an entry is stamped mid-round, so the entry is always
+  younger than the period when the next round asks: it would read the source every second round
+  and republish the one between, at half the cadence it advertises and with nothing on the wire
+  to show it → the exporter passes 0 and reads afresh every round; the cache serves the
+  request-driven subresource, which is what it was built for. Pinned by a regression test, and
+  the observation that found it — the collector's own round-duration gauge alternating between a
+  real read and a cache hit — is what a repeat would look like.
 - A cache alone would not deduplicate concurrent misses: a client asking about N Instances of
   one node on a cold cache would fire N node-proxy reads, halving a steady polling load rather
   than collapsing it → concurrent misses for one node collapse onto a single in-flight read.
@@ -636,7 +645,7 @@ the release note rather than by a test.
 #### Unit tests
 
 - `pkg/kubemetrics` — one test file per source file, each beside the code it covers
-  (`sample_test.go`, `kubelet_test.go`, `metricsapi_test.go`): `2026-08-12` - `99.2%`. The
+  (`sample_test.go`, `kubelet_test.go`, `metricsapi_test.go`): `2026-08-13` - `99.3%`. The
   three uncovered statements are the second cache check inside the single-flight closure,
   which only fires in the window between one caller's outer check missing and another's store
   landing; reaching it from a test would mean a seam in production code, which costs more than
@@ -662,7 +671,7 @@ the release note rather than by a test.
   they belong to `pkg/kubemetrics` now.
 - `pkg/manager`: a gather error yields 200 with the surviving metrics rather than 500, a clean
   gather yields all of them, and a gather that produced nothing at all still fails.
-- `pkg/devicemanager/exporter`: `2026-08-12` - `98.4%` after T3. The poller stores a round per
+- `pkg/devicemanager/exporter`: `2026-08-13` - `98.2%`. The poller stores a round per
   tick and drops it on failure, including when a good round is followed by a bad one; what
   counts as an Instance pod — terminating, unowned, owned by another kind, owned by an Instance
   of another API group, and a part-of label disagreeing with the ownerReference are each

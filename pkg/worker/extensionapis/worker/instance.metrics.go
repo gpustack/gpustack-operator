@@ -45,16 +45,6 @@ const (
 	// deviceManager.securePort override keeps working.
 	_DeviceManagerSecurePortName = "https"
 
-	// _DeviceManagerComponentLabelValue selects the device manager pods.
-	_DeviceManagerComponentLabelValue = "device-manager"
-
-	// _DeviceManagerManufacturerLabelKey carries the manufacturer of a device manager pod.
-	_DeviceManagerManufacturerLabelKey = "gpustack.ai/manufacturer"
-
-	// _InstancePartOfLabelKey is the pod label carrying the backing Instance's UID,
-	// stamped by the Instance controller (pkg/worker/controllers/worker/instance.go).
-	_InstancePartOfLabelKey = "app.kubernetes.io/part-of"
-
 	// _InstanceMetricsTimeout bounds the whole metrics operation of one request,
 	// including the kubelet read, the metrics API fallback, and one device manager fetch
 	// per allocated manufacturer.
@@ -151,7 +141,7 @@ func (h *InstanceMetricsHandler) OnGet(ctx context.Context, key types.Namespaced
 		}
 		return nil, err
 	}
-	if uid := pod.Labels[_InstancePartOfLabelKey]; uid != string(inst.UID) {
+	if uid := pod.Labels[deviceplugin.InstancePartOfLabelKey]; uid != string(inst.UID) {
 		// The controller has not replaced the previous incarnation's pod yet: transient
 		// backing state, same as an unscheduled Instance or a missing pod.
 		return nil, kerrors.NewServiceUnavailable(
@@ -267,10 +257,10 @@ func filterAllocatedAcceleratorMetrics(
 func selectDeviceManagerPod(pods []core.Pod, manufacturer string) *core.Pod {
 	for i := range pods {
 		pod := &pods[i]
-		if pod.DeletionTimestamp != nil || pod.Status.PodIP == "" || !isPodReady(pod) {
+		if pod.DeletionTimestamp != nil || pod.Status.PodIP == "" || !deviceplugin.IsPodReady(pod) {
 			continue
 		}
-		if manufacturer != "" && pod.Labels[_DeviceManagerManufacturerLabelKey] != manufacturer {
+		if manufacturer != "" && pod.Labels[deviceplugin.ManufacturerLabelKey] != manufacturer {
 			continue
 		}
 		return pod
@@ -284,7 +274,7 @@ func (h *InstanceMetricsHandler) listNodeDeviceManagerPods(ctx context.Context, 
 	podList := &core.PodList{}
 	err := h.APIReader.List(ctx, podList,
 		ctrlcli.InNamespace(kuberess.SystemNamespaceName),
-		ctrlcli.MatchingLabels{"app.kubernetes.io/component": _DeviceManagerComponentLabelValue},
+		ctrlcli.MatchingLabels{deviceplugin.ComponentLabelKey: deviceplugin.DeviceManagerComponent},
 		ctrlcli.MatchingFieldsSelector{Selector: fields.OneTermEqualSelector("spec.nodeName", nodeName)},
 		ctrlclix.WithoutQuorum,
 		ctrlcli.UnsafeDisableDeepCopy,
@@ -339,16 +329,6 @@ func fetchMonitorSnapshot(ctx context.Context, url string) (*devicemanager.Monit
 		return nil, fmt.Errorf("failed to decode monitor snapshot: %w", err)
 	}
 	return snapshot, nil
-}
-
-// isPodReady reports whether the pod carries a true Ready condition.
-func isPodReady(pod *core.Pod) bool {
-	for i := range pod.Status.Conditions {
-		if pod.Status.Conditions[i].Type == core.PodReady {
-			return pod.Status.Conditions[i].Status == core.ConditionTrue
-		}
-	}
-	return false
 }
 
 // toInstanceAcceleratorMetrics converts the internal accelerator metrics to the API type,

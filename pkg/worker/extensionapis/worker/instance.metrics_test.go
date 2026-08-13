@@ -120,7 +120,7 @@ func metricsTestPod() *core.Pod {
 			Namespace: _metricsTestNS,
 			Name:      _metricsTestName,
 			UID:       _metricsTestPodUID,
-			Labels:    map[string]string{_InstancePartOfLabelKey: _metricsTestUID},
+			Labels:    map[string]string{deviceplugin.InstancePartOfLabelKey: _metricsTestUID},
 			Annotations: map[string]string{
 				deviceplugin.AllocatedAcceleratorAnnoKey: string(anno),
 			},
@@ -160,8 +160,8 @@ func metricsTestDMPod() *core.Pod {
 			Namespace: _metricsTestDMNamespace,
 			Name:      "dm-nvidia-abc",
 			Labels: map[string]string{
-				"app.kubernetes.io/component":      _DeviceManagerComponentLabelValue,
-				_DeviceManagerManufacturerLabelKey: "nvidia",
+				deviceplugin.ComponentLabelKey:    deviceplugin.DeviceManagerComponent,
+				deviceplugin.ManufacturerLabelKey: "nvidia",
 			},
 		},
 		Spec: core.PodSpec{
@@ -328,7 +328,7 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 
 	t.Run("rejects a pod owned by a previous incarnation", func(t *testing.T) {
 		pod := metricsTestPod()
-		pod.Labels[_InstancePartOfLabelKey] = "stale-uid"
+		pod.Labels[deviceplugin.InstancePartOfLabelKey] = "stale-uid"
 		h := newMetricsTestHandlerWith(t, metricsTestInstance(), pod, nil)
 
 		_, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
@@ -491,7 +491,7 @@ func TestSelectDeviceManagerPod(t *testing.T) {
 	amdPod := func() *core.Pod {
 		pod := metricsTestDMPod()
 		pod.Name = "dm-amd-abc"
-		pod.Labels[_DeviceManagerManufacturerLabelKey] = "amd"
+		pod.Labels[deviceplugin.ManufacturerLabelKey] = "amd"
 		pod.Status.PodIP = "10.0.0.10"
 		return pod
 	}

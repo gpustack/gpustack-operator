@@ -54,9 +54,6 @@ type InstanceSample struct {
 type Snapshot struct {
 	// Timestamp is when the round was stored.
 	Timestamp time.Time
-	// PeriodSeconds is the poll period in effect when it was stored, so a consumer scales its
-	// staleness bound to the configured cadence rather than to a constant.
-	PeriodSeconds int64
 	// Exporting reports whether this device manager is the one publishing the node's
 	// per-Instance figures; see (*Poller).exporting for the rule.
 	Exporting bool
@@ -85,10 +82,12 @@ type Poller struct {
 
 	round datax.Snapshot[Round]
 
-	// lastFailure carries the previous round's failure so a repeat is logged quietly. A poller
-	// whose source is down would otherwise repeat one line every period for the life of the
-	// process. Only the poll loop touches it, so it needs no synchronization.
-	lastFailure string
+	// lastFailure and lastRoleFailure carry the previous round's failure and the previous failed
+	// election, so a repeat of either is logged quietly. A poller whose source is down would
+	// otherwise repeat one line every period for the life of the process. Only the poll loop
+	// touches them, so they need no synchronization.
+	lastFailure     string
+	lastRoleFailure string
 }
 
 // New returns a poller for this node's Instances.
@@ -174,23 +173,27 @@ func (p *Poller) measure(ctx context.Context) (*Snapshot, error) {
 		return nil, err
 	}
 
+	// A failed election costs the pod-level families and nothing else: accelerator figures are
+	// not subject to the rule, since device IDs are disjoint across manufacturers. Failing the
+	// round over it would drop figures the election has no say in.
 	exporting, err := p.exporting(ctx)
 	if err != nil {
-		return nil, err
+		p.logRoleFailure(err)
+		exporting = false
 	}
 
-	samples, err := kubemetrics.FetchPodSamples(ctx, p.nodeName, podsOf(pods), p.period)
+	// Read afresh, never from the cache: rounds start exactly one period apart while an entry is
+	// stamped mid-round, so passing the period here would serve the previous round's readout
+	// every other round — half the cadence, with nothing on the wire to show it.
+	samples, err := kubemetrics.FetchPodSamples(ctx, p.nodeName, podsOf(pods), 0)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Snapshot{
 		Timestamp: time.Now(),
-		// Round up: truncating a sub-second remainder would understate the period and make
-		// consumers drop healthy samples as stale.
-		PeriodSeconds: int64((p.period + time.Second - 1) / time.Second),
-		Exporting:     exporting,
-		Instances:     instanceSamples(pods, samples),
+		Exporting: exporting,
+		Instances: instanceSamples(pods, samples),
 	}, nil
 }
 
@@ -203,6 +206,19 @@ func (p *Poller) logFailure(err error) {
 	}
 	logger.V(2).Info("polling instance metrics still failing",
 		"node", p.nodeName, "reason", p.lastFailure)
+}
+
+// logRoleFailure reports a failed election once, and repeats of it quietly. It is tracked apart
+// from a round's own failure so that neither silences the first report of the other.
+func (p *Poller) logRoleFailure(err error) {
+	if reason := err.Error(); reason != p.lastRoleFailure {
+		p.lastRoleFailure = reason
+		logger.Error(err, "deciding whether to export instance metrics, not exporting them",
+			"node", p.nodeName)
+		return
+	}
+	logger.V(2).Info("still cannot decide whether to export instance metrics",
+		"node", p.nodeName, "reason", p.lastRoleFailure)
 }
 
 // instancePod pairs an Instance pod with the identity of the Instance behind it.
@@ -261,7 +277,7 @@ func instanceOf(pod *core.Pod) (InstanceSample, bool) {
 		schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind).Group != workercore.GroupName {
 		return InstanceSample{}, false
 	}
-	if pod.Labels[_InstancePartOfLabelKey] != string(ref.UID) {
+	if pod.Labels[deviceplugin.InstancePartOfLabelKey] != string(ref.UID) {
 		return InstanceSample{}, false
 	}
 
@@ -272,14 +288,8 @@ func instanceOf(pod *core.Pod) (InstanceSample, bool) {
 	}, true
 }
 
-const (
-	// _InstanceKind is the owner kind an Instance pod carries.
-	_InstanceKind = "Instance"
-
-	// _InstancePartOfLabelKey is the pod label carrying the backing Instance's UID, stamped by
-	// the Instance controller (pkg/worker/controllers/worker/instance.go).
-	_InstancePartOfLabelKey = "app.kubernetes.io/part-of"
-)
+// _InstanceKind is the owner kind an Instance pod carries.
+const _InstanceKind = "Instance"
 
 // isNewer reports whether a was created after b, falling back to the pod name so that two pods
 // stamped in the same second still resolve the same way on every poll.

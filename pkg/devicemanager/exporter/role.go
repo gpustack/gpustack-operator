@@ -12,16 +12,6 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
-const (
-	// _ComponentLabelKey and _DeviceManagerComponent select this node's device manager pods.
-	_ComponentLabelKey      = "app.kubernetes.io/component"
-	_DeviceManagerComponent = "device-manager"
-
-	// _ManufacturerLabelKey carries the manufacturer a device manager pod was rolled for. The
-	// chart rolls one DaemonSet per manufacturer and stamps this on each.
-	_ManufacturerLabelKey = "gpustack.ai/manufacturer"
-)
-
 // exporting reports whether this device manager is the one publishing the node's per-Instance
 // figures.
 //
@@ -44,11 +34,18 @@ func (p *Poller) exporting(ctx context.Context) (bool, error) {
 	if podName == "" {
 		return false, fmt.Errorf("environment variable KUBERNETES_POD_NAME is not set")
 	}
+	// An empty namespace is not "this pod's namespace" but every namespace: the election would
+	// then compare this pod against the device managers of any other install of the operator
+	// that happens to run on the node, and could defer to one of theirs.
+	podNamespace := osx.Getenv("KUBERNETES_POD_NAMESPACE")
+	if podNamespace == "" {
+		return false, fmt.Errorf("environment variable KUBERNETES_POD_NAMESPACE is not set")
+	}
 
 	podList := &core.PodList{}
 	err := p.reader.List(ctx, podList,
-		ctrlcli.InNamespace(osx.Getenv("KUBERNETES_POD_NAMESPACE")),
-		ctrlcli.MatchingLabels{_ComponentLabelKey: _DeviceManagerComponent},
+		ctrlcli.InNamespace(podNamespace),
+		ctrlcli.MatchingLabels{deviceplugin.ComponentLabelKey: deviceplugin.DeviceManagerComponent},
 		ctrlcli.MatchingFieldsSelector{
 			Selector: fields.OneTermEqualSelector(deviceplugin.IndexingPodsByNodeName, p.nodeName),
 		},
@@ -65,16 +62,16 @@ func (p *Poller) exporting(ctx context.Context) (bool, error) {
 	for i := range podList.Items {
 		pod := &podList.Items[i]
 		if pod.Name == podName {
-			mine = pod.Labels[_ManufacturerLabelKey]
+			mine = pod.Labels[deviceplugin.ManufacturerLabelKey]
 		}
-		if pod.DeletionTimestamp != nil || !isPodReady(pod) {
+		if pod.DeletionTimestamp != nil || !deviceplugin.IsPodReady(pod) {
 			continue
 		}
 		// A pod that does not say which manufacturer it serves is not in the running. An empty
 		// label sorts before every real one, so counting it as the winner would leave the node
 		// with no exporter at all: the labeled pods would defer to it, and it could not
 		// recognize itself as the winner either.
-		manufacturer := pod.Labels[_ManufacturerLabelKey]
+		manufacturer := pod.Labels[deviceplugin.ManufacturerLabelKey]
 		if manufacturer == "" {
 			continue
 		}
@@ -86,14 +83,4 @@ func (p *Poller) exporting(ctx context.Context) (bool, error) {
 	// Not Ready yet, or not in the cache yet: whichever peer is Ready exports until this one is,
 	// and a pod that is not Ready is not being scraped anyway.
 	return mine != "" && mine == first, nil
-}
-
-// isPodReady reports whether the pod carries a true Ready condition.
-func isPodReady(pod *core.Pod) bool {
-	for i := range pod.Status.Conditions {
-		if pod.Status.Conditions[i].Type == core.PodReady {
-			return pod.Status.Conditions[i].Status == core.ConditionTrue
-		}
-	}
-	return false
 }

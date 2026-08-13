@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -190,6 +191,33 @@ func TestFetchPodSample(t *testing.T) {
 		_, err := FetchPodSample(context.Background(), testNode, testPod(), 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "metrics.k8s.io API is not served")
+	})
+
+	t.Run("re-reads once before concluding the kubelet does not know the pod", func(t *testing.T) {
+		// A cached readout can simply predate the pod. Degrading on it costs the storage
+		// figures, and where the metrics API still holds the pod name's previous incarnation it
+		// answers a live pod with "only a previous incarnation" — a diagnosis pointing at the
+		// wrong thing entirely.
+		var calls atomic.Int64
+		serveAPI(t, nodeProxyMux(func(w http.ResponseWriter, _ *http.Request) {
+			// The first readout predates the pod; every later one carries it.
+			var pods []kubeletstats.PodStats
+			if calls.Add(1) > 1 {
+				pods = []kubeletstats.PodStats{testPodStats()}
+			}
+			bs, _ := json.Marshal(&kubeletstats.Summary{Pods: pods})
+			_, _ = w.Write(bs)
+		}))
+
+		// Prime the cache with the readout that predates the pod, then ask within its window.
+		_, err := fetchPodStatsFromKubelet(context.Background(), testNode, time.Minute)
+		require.NoError(t, err)
+
+		sample, err := FetchPodSample(context.Background(), testNode, testPod(), time.Minute)
+		require.NoError(t, err, "the pod is live and the kubelet knows it")
+		require.NotNil(t, sample.CPUUsedMilliCores)
+		assert.Equal(t, uint64(500), *sample.CPUUsedMilliCores)
+		assert.Equal(t, int64(2), calls.Load(), "exactly one extra read, only on the miss")
 	})
 
 	t.Run("rejects a degraded entry measured before this pod existed", func(t *testing.T) {
@@ -399,18 +427,42 @@ func TestFetchPodStatsFromKubelet_Cache(t *testing.T) {
 			"the caller must leave on its own deadline, not the read's")
 	})
 
-	t.Run("drops entries that aged out instead of holding one per node forever", func(t *testing.T) {
-		// Without the sweep the map would keep one readout per node the process was ever
-		// asked about, for its whole life.
+	t.Run("drops entries past the retention horizon, not ones the caller happens not to want",
+		func(t *testing.T) {
+			// Two rules in one: without a sweep the map would keep one readout per node the
+			// process was ever asked about, for its whole life — and sweeping by the *caller's*
+			// maxAge instead would let a caller that accepts only very fresh data evict entries
+			// still perfectly good for everyone else.
+			c := podStatsStore{entries: map[string]podStatsEntry{
+				"node-past":  {pods: []kubeletstats.PodStats{testPodStats()}, fetchedAt: time.Now().Add(-2 * cacheRetention)},
+				"node-fresh": {pods: []kubeletstats.PodStats{testPodStats()}, fetchedAt: time.Now().Add(-time.Minute)},
+			}}
+
+			// A caller wanting nothing older than a millisecond.
+			c.store("node-new", []kubeletstats.PodStats{testPodStats()}, time.Millisecond)
+
+			c.mu.RLock()
+			defer c.mu.RUnlock()
+			assert.NotContains(t, c.entries, "node-past", "past the retention horizon")
+			assert.Contains(t, c.entries, "node-fresh",
+				"a minute-old entry survives a caller that would not have accepted it")
+			assert.Contains(t, c.entries, "node-new")
+		})
+
+	t.Run("bounds how many nodes it holds at once, oldest first", func(t *testing.T) {
+		// The age sweep alone does not bound it: a client walking every Instance of a large
+		// cluster inside one window reads every node, and each entry is a whole decoded summary.
 		c := podStatsStore{entries: map[string]podStatsEntry{}}
-		c.store("node-1", []kubeletstats.PodStats{testPodStats()}, time.Millisecond)
-		time.Sleep(5 * time.Millisecond)
-		c.store("node-2", []kubeletstats.PodStats{testPodStats()}, time.Millisecond)
+		for i := range maxCachedNodes + 10 {
+			c.store("node-"+strconv.Itoa(i), []kubeletstats.PodStats{testPodStats()}, time.Minute)
+		}
 
 		c.mu.RLock()
 		defer c.mu.RUnlock()
-		assert.Len(t, c.entries, 1)
-		assert.Contains(t, c.entries, "node-2")
+		assert.Len(t, c.entries, maxCachedNodes)
+		assert.NotContains(t, c.entries, "node-0", "the oldest entry goes first")
+		assert.Contains(t, c.entries, "node-"+strconv.Itoa(maxCachedNodes+9),
+			"the newest entry stays")
 	})
 }
 

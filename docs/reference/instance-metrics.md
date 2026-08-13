@@ -85,7 +85,9 @@ Two caveats come with the pairs:
   carry.
 - **One read per node, not per Instance** — a node's summary is cached for the caller's freshness
   bound (15 s for the subresource) and concurrent readers of one node share a single in-flight
-  read, so a console polling many Instances of a node still costs the kubelet one request.
+  read, so a console polling many Instances of a node still costs the kubelet one request. The
+  exporter below reads afresh instead: it already samples on a period, and a cache on top of a
+  fixed cadence only serves the previous round back.
 - **CPU / memory fallback** — if that read fails, or the kubelet does not know the pod yet,
   `metrics.k8s.io` answers where a metrics-server is deployed. It has no storage figures, so
   `storageUsedMiB` is absent; an entry predating the pod is rejected.

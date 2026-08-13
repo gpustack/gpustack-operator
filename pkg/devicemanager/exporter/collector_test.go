@@ -42,8 +42,7 @@ func collectorFixture(round *Round, monitor *detector.MonitorSnapshot) prometheu
 // card and one the Instance was not allocated.
 func monitorSnapshotFixture(age time.Duration) *detector.MonitorSnapshot {
 	return &detector.MonitorSnapshot{
-		Timestamp:     time.Now().Add(-age),
-		PeriodSeconds: 15,
+		Timestamp: time.Now().Add(-age),
 		Groups: device.MetricsGroupList{{
 			Manufacturer: "nvidia",
 			Timestamp:    time.Now().Add(-age),
@@ -64,9 +63,8 @@ func measuredRound() *Round {
 	return &Round{
 		Duration: 250 * time.Millisecond,
 		Snapshot: &Snapshot{
-			Timestamp:     time.Now(),
-			PeriodSeconds: 15,
-			Exporting:     true,
+			Timestamp: time.Now(),
+			Exporting: true,
 			Instances: []InstanceSample{{
 				Namespace: "tenant",
 				Name:      "inst",

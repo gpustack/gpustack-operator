@@ -116,6 +116,18 @@ func TestPoller_exporting(t *testing.T) {
 		require.Error(t, err)
 	})
 
+	t.Run("refuses to decide without a namespace to compare within", func(t *testing.T) {
+		// An empty namespace does not mean "this pod's own" — it means every namespace, so the
+		// election would weigh this pod against the device managers of any other install of the
+		// operator running on the node and could defer to one of theirs.
+		t.Setenv("KUBERNETES_POD_NAMESPACE", "")
+
+		p := newTestPoller(nodeName)
+		_, err := p.exporting(context.Background())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "KUBERNETES_POD_NAMESPACE")
+	})
+
 	t.Run("a device manager the informer has not seen yet stays quiet", func(t *testing.T) {
 		p := newTestPollerWith(nodeName, deviceManagerPodFixture(nodeName, "dm-amd", "amd"))
 

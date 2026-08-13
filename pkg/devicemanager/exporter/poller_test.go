@@ -95,8 +95,8 @@ func deviceManagerPodFixture(nodeName, name, manufacturer string, opts ...podOpt
 			Name:      name,
 			UID:       types.UID("dm-" + name),
 			Labels: map[string]string{
-				_ComponentLabelKey:    _DeviceManagerComponent,
-				_ManufacturerLabelKey: manufacturer,
+				deviceplugin.ComponentLabelKey:    deviceplugin.DeviceManagerComponent,
+				deviceplugin.ManufacturerLabelKey: manufacturer,
 			},
 		},
 		Spec: core.PodSpec{NodeName: nodeName},
@@ -129,7 +129,7 @@ func instancePodFixture(nodeName, name, instUID, podUID string, opts ...podOptio
 			Name:              name,
 			UID:               types.UID(podUID),
 			CreationTimestamp: meta.NewTime(time.Now()),
-			Labels:            map[string]string{_InstancePartOfLabelKey: instUID},
+			Labels:            map[string]string{deviceplugin.InstancePartOfLabelKey: instUID},
 			OwnerReferences: []meta.OwnerReference{{
 				APIVersion: workercore.GroupVersion.String(),
 				Kind:       _InstanceKind,
@@ -179,7 +179,7 @@ func ownedByAnotherGroup() podOption {
 }
 
 func partOfAnotherInstance() podOption {
-	return func(pod *core.Pod) { pod.Labels[_InstancePartOfLabelKey] = "some-other-uid" }
+	return func(pod *core.Pod) { pod.Labels[deviceplugin.InstancePartOfLabelKey] = "some-other-uid" }
 }
 
 func createdAt(ts time.Time) podOption {
@@ -361,8 +361,6 @@ func TestPoller_poll(t *testing.T) {
 				return
 			}
 			require.NotNil(t, snapshot)
-			assert.Equal(t, int64(15), snapshot.PeriodSeconds,
-				"the round reports the cadence a consumer scales its staleness bound to")
 
 			require.Len(t, snapshot.Instances, len(tc.wantInstances))
 			for j := range tc.wantInstances {
@@ -386,8 +384,6 @@ func TestPoller_dropsStaleRoundOnFailure(t *testing.T) {
 	const nodeName = "node-drop"
 	pod := instancePodFixture(nodeName, "inst", testInstanceUID, "pod-uid-1")
 	p := newTestPoller(nodeName, pod)
-	// Read afresh every round, so the second one actually reaches the failing source.
-	p.period = 0
 
 	serveNodeSummary(t, nodeName, &kubeletstats.Summary{
 		Pods: []kubeletstats.PodStats{podStats("inst", "pod-uid-1", 500_000_000)},
@@ -398,6 +394,65 @@ func TestPoller_dropsStaleRoundOnFailure(t *testing.T) {
 	serveNodeSummary(t, nodeName, nil)
 	p.poll(context.Background())
 	assert.Nil(t, p.snapshot())
+}
+
+// TestPoller_readsAfreshEveryRound pins the cadence the exporter advertises. Rounds start one
+// period apart while a cached readout is stamped mid-round, so a poller that handed its period
+// to the readout cache would find every second round's entry still young enough, republish the
+// round before it, and reach the kubelet only every other period — at half the cadence, with
+// nothing on the wire to show it. Two back-to-back rounds over a changed source must see the
+// change.
+func TestPoller_readsAfreshEveryRound(t *testing.T) {
+	const nodeName = "node-afresh"
+	pod := instancePodFixture(nodeName, "inst", testInstanceUID, "pod-uid-1")
+	p := newTestPoller(nodeName, pod)
+
+	serveNodeSummary(t, nodeName, &kubeletstats.Summary{
+		Pods: []kubeletstats.PodStats{podStats("inst", "pod-uid-1", 500_000_000)},
+	})
+	p.poll(context.Background())
+	first := p.snapshot()
+	require.NotNil(t, first)
+	require.Len(t, first.Instances, 1)
+	require.NotNil(t, first.Instances[0].Sample.CPUUsedMilliCores)
+	assert.Equal(t, uint64(500), *first.Instances[0].Sample.CPUUsedMilliCores)
+
+	// The very next round, well inside the poller's own period.
+	serveNodeSummary(t, nodeName, &kubeletstats.Summary{
+		Pods: []kubeletstats.PodStats{podStats("inst", "pod-uid-1", 900_000_000)},
+	})
+	p.poll(context.Background())
+	second := p.snapshot()
+	require.NotNil(t, second)
+	require.Len(t, second.Instances, 1)
+	require.NotNil(t, second.Instances[0].Sample.CPUUsedMilliCores)
+	assert.Equal(t, uint64(900), *second.Instances[0].Sample.CPUUsedMilliCores,
+		"the round must reach the kubelet, not republish the previous round's readout")
+}
+
+// TestPoller_electionFailureKeepsTheRound pins that a failed election costs the pod-level
+// families and nothing else. Accelerator figures are not subject to the rule — device IDs are
+// disjoint across manufacturers — so failing the whole round over it would drop figures the
+// election has no say in, and a device manager whose pod name is missing from its environment
+// would publish nothing at all rather than everything but the pod-level families.
+func TestPoller_electionFailureKeepsTheRound(t *testing.T) {
+	const nodeName = "node-noelection"
+	pod := instancePodFixture(nodeName, "inst", testInstanceUID, "pod-uid-1")
+	p := newTestPoller(nodeName, pod)
+	serveNodeSummary(t, nodeName, &kubeletstats.Summary{
+		Pods: []kubeletstats.PodStats{podStats("inst", "pod-uid-1", 500_000_000)},
+	})
+
+	// The one input the election cannot do without.
+	t.Setenv("KUBERNETES_POD_NAME", "")
+
+	p.poll(context.Background())
+
+	snapshot := p.snapshot()
+	require.NotNil(t, snapshot, "the round still measured what it was asked to measure")
+	assert.False(t, snapshot.Exporting, "an undecidable election never claims the role")
+	require.Len(t, snapshot.Instances, 1,
+		"the Instance and its allocation are still carried, so the accelerator families survive")
 }
 
 // TestPoller_pollWithoutTheFieldIndex pins that the poller reports a broken informer instead of

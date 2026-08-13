@@ -17,8 +17,12 @@ import (
 )
 
 // DefaultMaxAge is the accepted age of a cached node readout for a caller with no sampling
-// cadence of its own, matching the device manager's default monitor period. A caller that
-// samples on a period of its own should pass that period instead, so the cache never caps it.
+// cadence of its own — a request-driven one, whose bursts this bounds to one readout per node.
+//
+// A caller that samples on a fixed period must pass 0 rather than its period. Its rounds start
+// exactly one period apart while an entry is stamped mid-round, so an entry is always younger
+// than the period when the next round asks: it would read the source every other round and
+// republish the round between, at half the cadence it advertises.
 const DefaultMaxAge = 15 * time.Second
 
 // FetchPodSample returns one Instance pod's utilization sample: the totals it declared, and
@@ -44,6 +48,16 @@ func FetchPodSample(
 	if err == nil {
 		if ps := podStatsOf(pods, pod); ps != nil {
 			return newSampleFromPodStats(pod, ps), nil
+		}
+		// A cached readout can simply predate the pod. Re-read once before concluding the
+		// kubelet does not know it: degrading on a stale readout costs the storage figures, and
+		// can even report the pod as gone when the metrics API still holds its predecessor.
+		if maxAge > 0 {
+			if fresh, ferr := refetchPodStatsFromKubelet(ctx, nodeName, maxAge); ferr == nil {
+				if ps := podStatsOf(fresh, pod); ps != nil {
+					return newSampleFromPodStats(pod, ps), nil
+				}
+			}
 		}
 		// The kubelet answered but does not carry the pod. Degrade as well: a sample stamped
 		// with a measurement that never happened is worse than degraded CPU/memory figures.
@@ -149,15 +163,43 @@ func fetchPodStatsFromKubelet(
 	nodeName string,
 	maxAge time.Duration,
 ) ([]kubeletstats.PodStats, error) {
-	if pods, ok := podStatsCache.load(nodeName, maxAge); ok {
-		return pods, nil
+	return podStatsFromKubelet(ctx, nodeName, maxAge, true)
+}
+
+// refetchPodStatsFromKubelet reads past a cached readout the caller found unusable — one taken
+// before the pod it is asking about existed — and caches what it reads under maxAge like any
+// other readout. Reading past the cache without replacing it would leave the stale entry in place
+// for the rest of its window, so every caller behind this one would repeat the same extra read.
+func refetchPodStatsFromKubelet(
+	ctx context.Context,
+	nodeName string,
+	maxAge time.Duration,
+) ([]kubeletstats.PodStats, error) {
+	return podStatsFromKubelet(ctx, nodeName, maxAge, false)
+}
+
+// podStatsFromKubelet performs the readout, optionally serving it from the cache first. Whether
+// the cache is consulted and whether the result is cached are two different questions: a forced
+// re-read skips the lookup and still stores what it read.
+func podStatsFromKubelet(
+	ctx context.Context,
+	nodeName string,
+	maxAge time.Duration,
+	useCache bool,
+) ([]kubeletstats.PodStats, error) {
+	if useCache {
+		if pods, ok := podStatsCache.load(nodeName, maxAge); ok {
+			return pods, nil
+		}
 	}
 
 	ch := podStatsFlight.DoChan(nodeName, func() (any, error) {
 		// A caller can arrive in the gap between the leader storing its readout and its
 		// flight being forgotten, and would otherwise re-read what is already cached.
-		if pods, ok := podStatsCache.load(nodeName, maxAge); ok {
-			return pods, nil
+		if useCache {
+			if pods, ok := podStatsCache.load(nodeName, maxAge); ok {
+				return pods, nil
+			}
 		}
 		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), readTimeout)
 		defer cancel()
@@ -213,6 +255,19 @@ func podStatsOf(pods []kubeletstats.PodStats, pod *core.Pod) *kubeletstats.PodSt
 	return nil
 }
 
+// maxCachedNodes bounds how many nodes' readouts are held at once. The age sweep alone does not:
+// a client walking every Instance of a large cluster inside one window reads every node, and each
+// entry is a full decoded summary of every pod on that node. Past this many, the oldest go first —
+// they are the ones closest to expiring anyway.
+const maxCachedNodes = 64
+
+// cacheRetention is how long an entry is kept regardless of who asks for it. The sweep is
+// deliberately not the asking caller's maxAge: a caller that accepts only very fresh readouts
+// would otherwise evict entries still perfectly good for every other caller. Nothing stale can be
+// served either way — load compares each entry against the age its own caller stated — so this
+// only decides what is worth keeping, and maxCachedNodes is what bounds the memory.
+const cacheRetention = 5 * time.Minute
+
 // podStatsCache holds the latest successful readout per node, so several pods of one node
 // cost one node-proxy request between them instead of one each.
 var podStatsCache = podStatsStore{entries: map[string]podStatsEntry{}}
@@ -248,9 +303,10 @@ func (c *podStatsStore) load(nodeName string, maxAge time.Duration) ([]kubeletst
 	return e.pods, true
 }
 
-// store caches the node's readout, dropping every entry that has aged past maxAge on the way.
-// Without that sweep the map would hold one readout per node ever asked about for the life of
-// the process; with it, it holds only the nodes read inside the window.
+// store caches the node's readout, dropping every entry past cacheRetention on the way, then the
+// oldest of whatever is left until at most maxCachedNodes remain. Without the sweep the map would
+// hold one readout per node ever asked about for the life of the process; without the bound, one
+// burst across a large cluster would hold them all at once.
 func (c *podStatsStore) store(nodeName string, pods []kubeletstats.PodStats, maxAge time.Duration) {
 	if maxAge <= 0 {
 		return
@@ -261,9 +317,25 @@ func (c *podStatsStore) store(nodeName string, pods []kubeletstats.PodStats, max
 
 	now := time.Now()
 	for name, e := range c.entries {
-		if now.Sub(e.fetchedAt) >= maxAge {
+		if now.Sub(e.fetchedAt) >= cacheRetention {
 			delete(c.entries, name)
 		}
 	}
 	c.entries[nodeName] = podStatsEntry{pods: pods, fetchedAt: now}
+	c.evictOldest()
+}
+
+// evictOldest drops entries, oldest first, until the store is back within maxCachedNodes.
+// The caller holds the write lock.
+func (c *podStatsStore) evictOldest() {
+	for len(c.entries) > maxCachedNodes {
+		var oldestName string
+		var oldestAt time.Time
+		for name, e := range c.entries {
+			if oldestName == "" || e.fetchedAt.Before(oldestAt) {
+				oldestName, oldestAt = name, e.fetchedAt
+			}
+		}
+		delete(c.entries, oldestName)
+	}
 }
