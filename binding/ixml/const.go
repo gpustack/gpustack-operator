@@ -21,7 +21,7 @@
 package ixml
 
 /*
-#cgo LDFLAGS: -Wl,--export-dynamic -Wl,--unresolved-symbols=ignore-in-object-files
+#cgo linux LDFLAGS: -Wl,--export-dynamic -Wl,--unresolved-symbols=ignore-in-object-files
 #cgo darwin LDFLAGS: -Wl,-undefined,dynamic_lookup
 #cgo CFLAGS: -w
 #include "ixml.h"

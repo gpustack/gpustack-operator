@@ -1,14 +1,6 @@
 // SPDX-FileCopyrightText: 2026 GPUStack, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-// This package's cgo LDFLAGS (const.go, ixml.go) pass -Wl,--export-dynamic and
-// -Wl,--unresolved-symbols=ignore-in-object-files, which only GNU ld accepts, so linking a test
-// binary on darwin fails in the linker before a single test runs. The tag keeps the module's test
-// command green on a darwin workstation and exercises the table on linux, where the device-manager
-// actually runs.
-
-//go:build linux
-
 package ixml
 
 import (
