@@ -15,7 +15,9 @@ var errStubDriver = errors.New("cndev sMLU driver is not available on this platf
 
 type stubSMLUDriver struct{}
 
-func (stubSMLUDriver) EnsureSMLUMode(string) error { return errStubDriver }
+func (stubSMLUDriver) GetSMLUMode(string) (bool, error) { return false, errStubDriver }
+
+func (stubSMLUDriver) SetSMLUMode(string, bool) error { return errStubDriver }
 
 func (stubSMLUDriver) CreateProfile(string, int, int64) (int32, error) { return 0, errStubDriver }
 

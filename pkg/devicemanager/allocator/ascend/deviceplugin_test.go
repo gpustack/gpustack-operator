@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
@@ -89,6 +90,9 @@ func newSlicedServer() *server {
 func newSlicedServerWithShare(share shareDriver) *server {
 	return &server{
 		ResourceServer: deviceplugin.ResourceServer{
+			// Production always hands the responder a logger, and the preflight reports through it,
+			// so the fake carries one too rather than leaving the zero value behind.
+			Logger:         logr.Discard(),
 			Manufacturer:   Manufacturer,
 			AllocationMode: workercore.DeviceAllocationModeSliced,
 		},

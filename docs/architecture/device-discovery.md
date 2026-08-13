@@ -334,11 +334,16 @@ allocator reads the flag through `binding/dcmi`, writing only when off, so an ac
 carrying a tenant costs one query. One whose flag cannot be set fails `Allocate` naming both
 accelerator and flag, rather than admitting a pod that cannot use its device.
 
-> **Why the flag is not optional** — without it the driver admits one container per device: the
-> *second* pod on an accelerator starts, then dies inside the container at `acl.rt.set_device` with
-> `507899` (`ACL_ERROR_RT_DRV_INTERNAL_ERROR`), naming neither the accelerator nor the flag.
+The read is classified, not treated as fatal on its own. A read reporting the dcmi entry point missing
+— or a libdcmi that never loaded — refuses the allocation without writing, since no `npu-smi` command
+adds an API the driver lacks, and that holds even for a device whose flag is already on.
 
-Two properties:
+Any other read failure still writes: the write is what makes the flag known, so a timeout cannot
+refuse an allocation the write completes — it is logged instead. dcmi resolves each symbol
+independently, so the absence can surface on the write rather than the read; that is refused the same
+way, without a command. A write that fails for any other reason carries both reasons and the remedy.
+
+Two properties of the flag:
 
 - **Whole-accelerator allocation is unaffected** — measured on a 910B2 in both flag states, an
   exclusive container starts, sees full VRAM and opens the device identically.
@@ -351,6 +356,33 @@ Two properties:
 
 The flag persists in the driver, so an accelerator that has hosted a tenant stays shareable until the
 host reboots or an operator clears it with `npu-smi set -t device-share`.
+
+**Cambricon needs the card in sMLU mode before a slice can exist on it**, and the allocator turns it
+on — only for `sliced`, unlike Ascend's flag, since a whole-card tenant has no use for it. It reads
+through `binding/cndev` and writes only when the mode is off, so a card already carrying a slice costs
+one query, and it never turns the mode back off: that would strand the slices another pod is running.
+
+A card whose library or driver has no sMLU API at all is refused, and without a command being
+offered — none adds an API that is not there. The read normally reports it, so the card is never
+written to; but cnDev looks the getter and the setter up independently, so the absence can surface on
+the write instead, and that is refused the same way. Every other read failure still reaches the
+write, the write being what makes the mode known; the read that could not be trusted is logged.
+
+A write that fails for any other reason names the card by PCI address and cnDev index and hands over
+`cnmon set -c <index> -smlu on`, telling the operator to confirm the ordinal with `cnmon` because that
+equality is unverified. The mode then persists: once on, it stays on until an admin clears it with
+`cnmon`.
+
+Sliced Cambricon capacity is advertised on every card, whatever the host's driver or library can do.
+Unlike Ascend, whose count depends on a vcann-rt runtime the image either ships for that family or
+does not, Cambricon slicing needs nothing from GPUStack's own image — so there is nothing for the
+detector to gate on, and a card whose mode is merely off must be offered anyway or the preflight that
+turns it on could never run. Withholding is silent; an `Allocate` failure is loud.
+
+So an advertised card is not a promise it can slice: the mode API and the profile API are looked up
+independently, the `cntoolkit` userspace version is not readable from where the detector runs, and the
+mode's effect on a whole-card tenant is unmeasured — Ascend's flag was measured benign in both states,
+and no Cambricon equivalent exists. Each of those surfaces at `Allocate`, with the message above.
 
 **AMD splits the two dimensions across two enforcers, alone among the manufacturers.** Memory is a
 preload library like the others, accounting in a per-container region named by `VROCM_LEDGER_PATH`.

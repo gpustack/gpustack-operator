@@ -212,21 +212,27 @@ func (s *server) getSlicedContainerAllocateResponse(
 		return nil, fmt.Errorf("derive sliced memory limit: %w", err)
 	}
 
-	card := accel.Topology.PciBusID
-	inst, err := reserveInstance(s.smlu, string(pod.UID), ctr.Name, card, coresPct, memMib)
+	// The Cambricon detector records the cnDev device index in PhysicalIndexes, and it names both
+	// the accelerator's char devices and the card an operator repairing the sMLU mode by hand has to
+	// address. A record without it is malformed rather than degraded, so it is rejected here — as
+	// the Ascend responder rejects one missing its dcmi addressing — instead of guessing an index
+	// that would send the operator to another card.
+	if len(accel.PhysicalIndexes) == 0 {
+		return nil, fmt.Errorf("accelerator %q carries no cnDev device index", accel.ID)
+	}
+	card, slot := accel.Topology.PciBusID, accel.PhysicalIndexes[0]
+
+	inst, err := reserveInstance(s.smlu, string(pod.UID), ctr.Name, card, int(slot), coresPct, memMib, s.Logger)
 	if err != nil {
 		return nil, fmt.Errorf("reserve cambricon smlu instance: %w", err)
 	}
 
 	ctrResp := &deviceplugin.ContainerAllocateResponse{}
-	if len(accel.PhysicalIndexes) >= 1 {
-		slot := accel.PhysicalIndexes[0]
-		if pDev := deviceplugin.NewRWDevicef("/dev/cambricon_dev%d", slot); pDev != nil {
-			ctrResp.Devices = append(ctrResp.Devices, pDev)
-		}
-		if pDev := deviceplugin.NewRWDevicef("/dev/cambricon_ipcm%d", slot); pDev != nil {
-			ctrResp.Devices = append(ctrResp.Devices, pDev)
-		}
+	if pDev := deviceplugin.NewRWDevicef("/dev/cambricon_dev%d", slot); pDev != nil {
+		ctrResp.Devices = append(ctrResp.Devices, pDev)
+	}
+	if pDev := deviceplugin.NewRWDevicef("/dev/cambricon_ipcm%d", slot); pDev != nil {
+		ctrResp.Devices = append(ctrResp.Devices, pDev)
 	}
 	if inst.devNode != "" {
 		if pDev := deviceplugin.NewRWDevice(inst.devNode); pDev != nil {

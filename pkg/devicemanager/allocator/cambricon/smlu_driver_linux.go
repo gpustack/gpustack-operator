@@ -31,25 +31,39 @@ type cndevSMLUDriver struct {
 
 func (d *cndevSMLUDriver) device(card string) (cndev.Device, error) {
 	if !d.initRet.IsSuccess() {
-		return cndev.Device{}, fmt.Errorf("cndev init failed: %w", d.initRet)
+		// A library that never loaded offers no sMLU API either, so the mode preflight must read
+		// this the same way it reads an absent entry point rather than trying to write past it.
+		return cndev.Device{}, smluModeError("cndev init failed", d.initRet, d.initRet.IsAPIUnavailable())
 	}
+	// The handle lookup is looked up in the library like everything else, so its failure carries the
+	// same distinction: an absent entry point here is an absent API, not a passing condition.
 	dev, ret := d.lib.GetDeviceHandleByPciBusId(card)
 	if !ret.IsSuccess() {
-		return cndev.Device{}, fmt.Errorf("get cndev handle for %s: %w", card, ret)
+		return cndev.Device{}, smluModeError(
+			fmt.Sprintf("get cndev handle for %s", card), ret, ret.IsAPIUnavailable())
 	}
 	return dev, nil
 }
 
-func (d *cndevSMLUDriver) EnsureSMLUMode(card string) error {
+func (d *cndevSMLUDriver) GetSMLUMode(card string) (bool, error) {
+	dev, err := d.device(card)
+	if err != nil {
+		return false, err
+	}
+	mode, ret := dev.GetSMLUMode()
+	if !ret.IsSuccess() {
+		return false, smluModeError("get smlu mode", ret, ret.IsAPIUnavailable())
+	}
+	return mode.SmluMode == uint32(cndev.FEATURE_ENABLED), nil
+}
+
+func (d *cndevSMLUDriver) SetSMLUMode(card string, enabled bool) error {
 	dev, err := d.device(card)
 	if err != nil {
 		return err
 	}
-	if mode, ret := dev.GetSMLUMode(); ret.IsSuccess() && mode.SmluMode == uint32(cndev.FEATURE_ENABLED) {
-		return nil
-	}
-	if ret := dev.SetSMLUMode(true); !ret.IsSuccess() {
-		return fmt.Errorf("card %s: set smlu mode: %w", card, ret)
+	if ret := dev.SetSMLUMode(enabled); !ret.IsSuccess() {
+		return smluModeError("set smlu mode", ret, ret.IsAPIUnavailable())
 	}
 	return nil
 }
