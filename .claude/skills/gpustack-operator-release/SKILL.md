@@ -137,12 +137,18 @@ This triggers `ci.yml` and `chart.yml`. Per the note-generation contract, `ci.ym
 
 ### Phase 4 — Monitor CI (read-only)
 
-Watch **every** run for the tag (both workflows) to completion. Tag pushes show up with the tag name as the head branch.
+Watch **every** run for the tag (both workflows) to completion. Tag pushes show up with the tag name as the head branch. `chart.yml` finishes in about a minute; `ci.yml` takes ~20 (multi-arch image, vendor SDK build stages) — so this phase is almost entirely waiting.
+
+Enumerate the runs, then chain both watches into **one backgrounded command** and wait for its completion notification:
 
 ```bash
 gh run list --branch "$VER" --limit 20              # enumerate ci.yml + chart.yml runs
-gh run watch <run-id> --exit-status --compact       # per run, blocks until it finishes
+# one command, both runs, run_in_background: true — each watch blocks until its run finishes
+gh run watch <chart-run-id> --exit-status --compact > /tmp/w-chart.log 2>&1; echo "CHART-EXIT=$?" >> /tmp/w-chart.log
+gh run watch <ci-run-id>    --exit-status --compact > /tmp/w-ci.log    2>&1; echo "CI-EXIT=$?"    >> /tmp/w-ci.log
 ```
+
+**Do not also poll in the foreground.** A `sleep 300; gh run list` blocks the whole turn doing nothing and duplicates the watcher already tracking the same runs. Wait for the background task's notification, then read the `*-EXIT=` lines — the chained command's own exit code is the trailing `echo`, not the watch, so judge each run by its marker. If a status check is genuinely needed mid-flight, one bare `gh run list` is enough; never a multi-minute `sleep`.
 
 Report per-workflow status. On any failure: `gh run view <run-id> --log-failed`, triage, and **stop — do not promote**. Offer (each gated by a confirm) to fix forward, or to delete and retry:
 
