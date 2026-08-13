@@ -343,11 +343,7 @@ refuse an allocation the write completes — it is logged instead. dcmi resolves
 independently, so the absence can surface on the write rather than the read; that is refused the same
 way, without a command. A write that fails for any other reason carries both reasons and the remedy.
 
-> **Why the flag is not optional** — without it the driver admits one container per device: the
-> *second* pod on an accelerator starts, then dies inside the container at `acl.rt.set_device` with
-> `507899` (`ACL_ERROR_RT_DRV_INTERNAL_ERROR`), naming neither the accelerator nor the flag.
-
-Two properties:
+Two properties of the flag:
 
 - **Whole-accelerator allocation is unaffected** — measured on a 910B2 in both flag states, an
   exclusive container starts, sees full VRAM and opens the device identically.
