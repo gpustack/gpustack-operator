@@ -17,11 +17,18 @@
 #              env the runtime injected, and each vendor injects its own variable name — deriving that
 #              here would duplicate a mapping the allocators already own, and drift from it.
 # Inputs:      All real, nothing mocked — INST_A + INST_B (each a 40% memory slice, cores%=100), then
-#              INST_C (a third 40% slice = 120% over one card), on the sliceable pool.
+#              INST_C (a third 40% slice = 120% over one card), on the sliceable pool. Optionally
+#              E2E_SLICE_LOAD_IMAGE (+ E2E_SLICE_LOAD_COMMAND) gives A a workload that allocates device
+#              memory inside its slice; B stays idle either way.
 # Expected:    - both 40% slices reach Running on the SAME physical card (combined 80% <= 100%),
 #                compared on the card the runtime confined each to, not on the node;
 #              - the over-budget third is held (not Running);
-#              - A and B stay Running after C's rejected admission (no self-eviction on sibling re-evaluation).
+#              - A and B stay Running after C's rejected admission (no self-eviction on sibling re-evaluation);
+#              - each Instance's metrics entry is ITS OWN: mode Sliced, the memory quota it was
+#                granted (the same for both, since both asked for the same share), and a stated
+#                utilization that agrees with the pair beside it. With a load image, A's used figure
+#                is non-zero and differs from idle B's — two slices of one card reporting one number
+#                between them is what a card-wide figure looks like, and this is what tells them apart.
 # Cleanup:     Trap deletes the three test Instances.
 set -uo pipefail
 
@@ -29,6 +36,14 @@ NS="${1:?usage: case-14.sh <NS>}"
 INST_A=gpustack-e2e-coexist-a
 INST_B=gpustack-e2e-coexist-b
 INST_C=gpustack-e2e-coexist-c
+
+# A workload that allocates device memory inside its slice, so the per-slice figures step 4 reads are
+# measurements. Optional: unset, the slices stay idle and step 4 drops to its structural assertions.
+# Any image that can allocate on the card will do; the default was run against an H100 and a 4090.
+# dcgmproftester is NOT a substitute — it cannot initialize DCGM inside a MIG instance, and on a
+# logical slice it measures the whole card rather than the share.
+LOAD_IMAGE="${E2E_SLICE_LOAD_IMAGE:-}"
+LOAD_COMMAND="${E2E_SLICE_LOAD_COMMAND:-[\"python\", \"-c\", \"import torch,time;h=torch.empty(1024**3//2,dtype=torch.float16,device='cuda');h.fill_(1.0);print('allocated',torch.cuda.memory_allocated()//1024**2,'MiB',flush=True);\\nwhile True: time.sleep(5)\"]}"
 
 # --- Skip gate: real sliced accelerator required. ---
 sliced_node=$(kubectl get nodes -o json 2>/dev/null | python3 -c "
@@ -96,15 +111,15 @@ FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
-mkslice() { # mkslice <name> <mem-pct>
+mkslice() { # mkslice <name> <mem-pct> [image] [command-json]
   cat <<EOF | kubectl apply -f - >/dev/null
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: Instance
 metadata: { name: $1, namespace: default }
 spec:
   type: ${IT}
-  image: ubuntu:24.04
-  command: ["sleep", "infinity"]
+  image: ${3:-ubuntu:24.04}
+  command: ${4:-[\"sleep\", \"infinity\"]}
   resources:
     cpu: "1"
     ram: "4Gi"
@@ -137,8 +152,18 @@ visible_card() {
 }
 
 # 1. Two 40% slices (combined 80% <= 100%): both must run on the same card.
+#
+# A carries a workload that actually allocates device memory when one is supplied, so step 4 can read a
+# MEASUREMENT rather than a plumbed zero; B stays idle on purpose, because "each slice reads its own
+# figure" is only proven by two slices of one card reading DIFFERENT figures. Unset, both stay idle and
+# step 4 asserts the structural half alone.
 echo "[case-14] creating two 40% slices (${INST_A}, ${INST_B})"
-mkslice "$INST_A" 40
+if [ -n "$LOAD_IMAGE" ]; then
+  echo "[case-14] ${INST_A} carries a device-memory load from ${LOAD_IMAGE}"
+  mkslice "$INST_A" 40 "$LOAD_IMAGE" "$LOAD_COMMAND"
+else
+  mkslice "$INST_A" 40
+fi
 mkslice "$INST_B" 40
 a_ok=1; wait_running "$INST_A" || a_ok=0
 b_ok=1; wait_running "$INST_B" || b_ok=0
@@ -183,6 +208,93 @@ if [ "$ra" = "Running" ] && [ "$rb" = "Running" ]; then
   record PASS "A and B stay admitted after C's rejection" "${INST_A}=${ra} ${INST_B}=${rb} — no self-eviction on sibling re-evaluation"
 else
   record FAIL "A and B stay admitted after C's rejection" "${INST_A}=${ra:-?} ${INST_B}=${rb:-?} — a sibling's admission attempt evicted an already-running slice"
+fi
+
+# 4. Each slice's metrics are ITS OWN, not the card's. Two slices of one card is the only fixture that
+# can tell those apart: a surface reporting the card would give both the same number, and one reporting
+# a plumbed zero would give both zero even while a workload holds memory.
+accel_json() { # accel_json <instance> — the first accelerator entry, or empty
+  kubectl get --raw \
+    "/apis/worker.gpustack.ai/v1/namespaces/default/instances/$1/metrics" 2>/dev/null |
+    python3 -c '
+import json, sys
+try:
+    s = json.load(sys.stdin).get("sample", {})
+except Exception:
+    sys.exit(0)
+acc = (s.get("accelerators") or [None])[0]
+if acc is None:
+    sys.exit(0)
+print(json.dumps({
+    "id": acc.get("id"),
+    "mode": acc.get("mode"),
+    "totalMiB": acc.get("memoryTotalMiB"),
+    "usedMiB": acc.get("memoryUsedMiB"),          # absent stays absent, never 0
+    "utilPct": acc.get("memoryUtilizationPercent"),
+    "coresPct": acc.get("coresUtilizationPercent"),
+}))' 2>/dev/null
+}
+
+sa=""; sb=""
+for _ in $(seq 1 12); do
+  sa=$(accel_json "$INST_A")
+  sb=$(accel_json "$INST_B")
+  [ -n "$sa" ] && [ -n "$sb" ] && break
+  sleep 5   # the producer publishes on its monitor period, so the first read can precede the section
+done
+
+if [ -z "$sa" ] || [ -z "$sb" ]; then
+  record FAIL "each slice reports its own share" \
+    "no accelerator entry served for A ($([ -n "$sa" ] && echo present || echo absent)) or B ($([ -n "$sb" ] && echo present || echo absent)) — a running sliced Instance must carry one"
+else
+  echo "[case-14] ${INST_A} accelerator: ${sa}"
+  echo "[case-14] ${INST_B} accelerator: ${sb}"
+  verdict=$(LOADED="$LOAD_IMAGE" python3 -c '
+import json, os, sys
+
+a, b = json.loads(sys.argv[1]), json.loads(sys.argv[2])
+loaded = bool(os.environ.get("LOADED"))
+bad = []
+
+for name, s in (("A", a), ("B", b)):
+    if s["mode"] != "Sliced":
+        bad.append("%s mode=%r" % (name, s["mode"]))
+    if not s["totalMiB"]:
+        bad.append("%s carries no memory grant" % name)
+    # The percentage is stated rather than left to the caller, so it must agree with the pair it
+    # comes from; a disagreement means two sources where the API promises one.
+    if s["usedMiB"] is not None and s["totalMiB"]:
+        want = int(s["usedMiB"] * 100 / s["totalMiB"])
+        if s["utilPct"] != want:
+            bad.append("%s utilization=%r, but %s/%s is %d" % (
+                name, s["utilPct"], s["usedMiB"], s["totalMiB"], want))
+    elif s["utilPct"] is not None:
+        bad.append("%s states a utilization with nothing measured" % name)
+
+# Both asked for the same 40%%, so both were granted the same quota. A grant that came from the CARD
+# rather than from the allocation would show up here as the card capacity in both entries — which is
+# also what the loaded comparison below rules out from the other side.
+if a["totalMiB"] and b["totalMiB"] and a["totalMiB"] != b["totalMiB"]:
+    bad.append("A and B asked for the same share but were granted %s and %s MiB" % (
+        a["totalMiB"], b["totalMiB"]))
+
+# Two slices reading ONE figure between them is what a card-wide number looks like, and it is the
+# confusion this surface exists to remove. It is compared BETWEEN the two Instances, which is the
+# comparison that stays honest whichever of them holds the card memory.
+if loaded:
+    if not a["usedMiB"]:
+        bad.append("A holds a workload but its usedMiB is %r" % (a["usedMiB"],))
+    if a["usedMiB"] and a["usedMiB"] == b["usedMiB"]:
+        bad.append("A and B report the same usedMiB (%s) though only A is loaded" % a["usedMiB"])
+
+print(("FAIL " + "; ".join(bad)) if bad else "PASS")
+' "$sa" "$sb" 2>/dev/null)
+  case "$verdict" in
+    PASS) record PASS "each slice reports its own share" \
+      "A=${sa} B=${sb}$([ -n "$LOAD_IMAGE" ] && echo ' (A loaded, B idle)' || echo ' (both idle: structure only)')" ;;
+    FAIL*) record FAIL "each slice reports its own share" "${verdict#FAIL }" ;;
+    *) record FAIL "each slice reports its own share" "could not compare (python3 missing?)" ;;
+  esac
 fi
 
 echo
