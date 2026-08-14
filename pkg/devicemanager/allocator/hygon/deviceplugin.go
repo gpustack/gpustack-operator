@@ -152,10 +152,6 @@ func (s *server) GetContainerAllocateResponse(
 				"named and are not injected",
 				"card", devsAccelerator.ID)
 		}
-		if len(ctrResp.Devices) == 1 {
-			continue
-		}
-
 		if len(devsAccelerator.PhysicalIndexes) > 1 {
 			if pDev := deviceplugin.NewRWDevicef("/dev/dri/renderD%d", devsAccelerator.PhysicalIndexes[1]); pDev != nil {
 				ctrResp.Devices = append(ctrResp.Devices, pDev)
