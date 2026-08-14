@@ -123,42 +123,6 @@ const (
 // arithmetic that must stay testable with no accelerator and no ROCm.
 var readTopologyFn = readTopology
 
-// _AllocatedAccelerator pairs a granted accelerator with the group carrying its VRAM figure.
-type _AllocatedAccelerator struct {
-	group *workercore.DevicesGroup
-	accel *workercore.Accelerator
-}
-
-// allocatedAccelerators lists the accelerators this container was granted, in the Devices spec's
-// own order.
-//
-// That order is load-bearing rather than incidental: it is the order ROCR_VISIBLE_DEVICES is emitted
-// in, and ROCr applies that variable before it enumerates agents — so it is also the index space
-// HSA_CU_MASK's GPU_list and VROCM_DEVICE_MEMORY_LIMIT_<i> both live in. Every consumer below walks
-// this one slice, because three consumers walking their own order is exactly how the tuple
-// misaligns, and a misaligned tuple caps and masks an accelerator the container was never given.
-func allocatedAccelerators(
-	devs *workercore.Devices,
-	allocated map[deviceplugin.Resource]int32,
-) []_AllocatedAccelerator {
-	accels := make([]_AllocatedAccelerator, 0, len(allocated))
-	for i := range devs.Spec.Groups {
-		devGroup := &devs.Spec.Groups[i]
-		for j := range devGroup.Accelerators {
-			devsAccelerator := &devGroup.Accelerators[j]
-			res := deviceplugin.Resource{
-				Group:  devGroup.ID,
-				Device: devsAccelerator.ID,
-			}
-			if _, existed := allocated[res]; !existed {
-				continue
-			}
-			accels = append(accels, _AllocatedAccelerator{group: devGroup, accel: devsAccelerator})
-		}
-	}
-	return accels
-}
-
 // acceleratorIDPrefix is what the detector puts in front of an accelerator's ASIC serial to form its
 // ID. The ROCm runtime wants the whole thing; the container runtime wants the serial alone.
 const acceleratorIDPrefix = "GPU-"
@@ -166,12 +130,16 @@ const acceleratorIDPrefix = "GPU-"
 // rocrVisibleDevices is the value ROCR_VISIBLE_DEVICES carries: the accelerator IDs as the detector
 // recorded them, which is byte-for-byte the "GPU-<serial>" UUID ROCr matches an agent by.
 //
-// Its order is load-bearing beyond this variable: HSA_CU_MASK's GPU_list index is a position in this
-// list, so every producer below has to walk the same slice in the same order.
-func rocrVisibleDevices(accels []_AllocatedAccelerator) string {
+// Its order is load-bearing beyond this variable: ROCr applies it before enumerating agents, so it
+// is also the index space HSA_CU_MASK's GPU_list and VROCM_DEVICE_MEMORY_LIMIT_<i> both live in.
+// Every producer here walks the one collected slice, because three producers walking their own order
+// is exactly how the tuple misaligns — and a misaligned tuple caps and masks an accelerator the
+// container was never given. This vendor therefore holds together under any order the collector
+// picks; it needs the collector to keep one, not to keep a particular one.
+func rocrVisibleDevices(accels []deviceplugin.AllocatedAccelerator) string {
 	ids := make([]string, 0, len(accels))
 	for i := range accels {
-		ids = append(ids, accels[i].accel.ID)
+		ids = append(ids, accels[i].Accel.ID)
 	}
 	return strings.Join(ids, ",")
 }
@@ -190,10 +158,10 @@ func rocrVisibleDevices(accels []_AllocatedAccelerator) string {
 //
 // The serial rather than the index, deliberately: an index is only meaningful in the enumeration the
 // runtime happens to use, and this host's DRM ordering already runs opposite to the vendor tool's.
-func runtimeVisibleDevices(accels []_AllocatedAccelerator) string {
+func runtimeVisibleDevices(accels []deviceplugin.AllocatedAccelerator) string {
 	serials := make([]string, 0, len(accels))
 	for i := range accels {
-		serials = append(serials, strings.TrimPrefix(accels[i].accel.ID, acceleratorIDPrefix))
+		serials = append(serials, strings.TrimPrefix(accels[i].Accel.ID, acceleratorIDPrefix))
 	}
 	return strings.Join(serials, ",")
 }
@@ -205,15 +173,15 @@ func (s *server) GetContainerAllocateResponse(
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
-	accels := allocatedAccelerators(devs, allocated)
+	accels := deviceplugin.AllocatedAccelerators(devs, allocated)
 	// Refuse an accelerator with no identity, for the same reason the sliced path does: this variable
 	// is the only filter the container is given, and an empty entry widens it to every accelerator on
 	// the node rather than narrowing it to the granted one. Failing the claim visibly is the safe
 	// direction — the alternative is a container quietly running against hardware nobody granted it.
 	for i := range accels {
-		if accels[i].accel.ID == "" {
+		if accels[i].Accel.ID == "" {
 			return nil, fmt.Errorf("card at index %d reports no unique id, so it cannot be granted",
-				accels[i].accel.Index)
+				accels[i].Accel.Index)
 		}
 	}
 	// Delegate to container runtime for device injection, naming the accelerators the way that
@@ -241,7 +209,7 @@ func (s *server) PlaceLogicalSliced(
 	allocated map[deviceplugin.Resource]int32,
 	occupied deviceplugin.Placements,
 ) (deviceplugin.Placements, error) {
-	accels := allocatedAccelerators(devs, allocated)
+	accels := deviceplugin.AllocatedAccelerators(devs, allocated)
 	if len(accels) == 0 {
 		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
 	}
@@ -251,13 +219,13 @@ func (s *server) PlaceLogicalSliced(
 
 	placed := make(deviceplugin.Placements, len(accels))
 	for i := range accels {
-		accel := accels[i].accel
+		accel := accels[i].Accel
 		if accel.ID == "" {
 			// The ID is the identity both visible-devices variables carry; an empty one would
 			// widen the container to every accelerator on the node rather than narrow it to this one.
 			return nil, fmt.Errorf("card at index %d reports no unique id, so it cannot be sliced", accel.Index)
 		}
-		res := deviceplugin.Resource{Group: accels[i].group.ID, Device: accel.ID}
+		res := deviceplugin.Resource{Group: accels[i].Group.ID, Device: accel.ID}
 		topo, err := readTopologyFn(accel.Topology.PciBusID, accel.ID)
 		if err != nil {
 			return nil, fmt.Errorf("read topology of card %s: %w", accel.ID, err)
@@ -296,7 +264,7 @@ func (s *server) GetLogicalSlicedResponse(
 	allocated map[deviceplugin.Resource]int32,
 	placements deviceplugin.Placements,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
-	accels := allocatedAccelerators(devs, allocated)
+	accels := deviceplugin.AllocatedAccelerators(devs, allocated)
 	if len(accels) == 0 {
 		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
 	}
@@ -327,17 +295,17 @@ func (s *server) GetLogicalSlicedResponse(
 
 	masks := make([]string, 0, len(accels))
 	for i := range accels {
-		accel := accels[i].accel
+		accel := accels[i].Accel
 
 		// The MiB figure carries no unit suffix, unlike the NVIDIA branch's "…m": HAMi-core parses
 		// a suffix, this shim parses a bare MiB integer.
-		memMib, err := deviceplugin.SlicedMemoryMib(ctr, memPctRes, memMibRes, int64(accels[i].group.Memory))
+		memMib, err := deviceplugin.SlicedMemoryMib(ctr, memPctRes, memMibRes, int64(accels[i].Group.Memory))
 		if err != nil {
 			return nil, fmt.Errorf("derive sliced memory limit: %w", err)
 		}
 		envs["VROCM_DEVICE_MEMORY_LIMIT_"+strconv.Itoa(i)] = strconv.FormatInt(memMib, 10)
 
-		res := deviceplugin.Resource{Group: accels[i].group.ID, Device: accel.ID}
+		res := deviceplugin.Resource{Group: accels[i].Group.ID, Device: accel.ID}
 		window, ok := placements[res]
 		if !ok || len(window) == 0 {
 			return nil, fmt.Errorf("no compute window was placed for card %s", accel.ID)

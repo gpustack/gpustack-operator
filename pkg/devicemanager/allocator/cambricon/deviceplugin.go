@@ -135,20 +135,12 @@ func (s *server) GetContainerAllocateResponse(
 		return s.getSlicedContainerAllocateResponse(pod, ctr, devs, allocated)
 	}
 
-	indexes := make([]string, 0, len(allocated))
-	for i := range devs.Spec.Groups {
-		devGroup := &devs.Spec.Groups[i]
-		for j := range devGroup.Accelerators {
-			devsAccelerator := &devGroup.Accelerators[j]
-			res := deviceplugin.Resource{
-				Group:  devGroup.ID,
-				Device: devsAccelerator.ID,
-			}
-			if _, existed := allocated[res]; !existed {
-				continue
-			}
-			indexes = append(indexes, strconvx.FormatUint(devsAccelerator.Index, 10))
-		}
+	// The allocated accelerators, ordered the way the container numbers them, as the driver
+	// indexes CAMBRICON_VISIBLE_DEVICES carries.
+	accelerators := deviceplugin.AllocatedAccelerators(devs, allocated)
+	indexes := make([]string, 0, len(accelerators))
+	for i := range accelerators {
+		indexes = append(indexes, strconvx.FormatUint(accelerators[i].Accel.Index, 10))
 	}
 
 	// Delegate to container runtime for device injection,

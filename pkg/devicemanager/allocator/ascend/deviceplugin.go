@@ -122,14 +122,6 @@ func newServer(
 	return s
 }
 
-// _AllocatedAccelerator pairs an allocated accelerator with its group; the group
-// carries the memory + runtime version + family that drive the sliced quota and the
-// library subdir.
-type _AllocatedAccelerator struct {
-	group *workercore.DevicesGroup
-	accel *workercore.Accelerator
-}
-
 func (s *server) GetContainerAllocateResponse(
 	_ context.Context,
 	pod *core.Pod,
@@ -137,27 +129,14 @@ func (s *server) GetContainerAllocateResponse(
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
-	// Single pass over the allocated accelerators: collect the visible indexes and
-	// the accelerator/group pairs the sliced path needs for quota and library subdir.
-	var (
-		indexes      = make([]string, 0, len(allocated))
-		accelerators []_AllocatedAccelerator
-	)
-	for i := range devs.Spec.Groups {
-		devsGroup := &devs.Spec.Groups[i]
-		for j := range devsGroup.Accelerators {
-			devsAccelerator := &devsGroup.Accelerators[j]
-			res := deviceplugin.Resource{
-				Group:  devsGroup.ID,
-				Device: devsAccelerator.ID,
-			}
-			if _, existed := allocated[res]; !existed {
-				continue
-			}
-			indexes = append(indexes, strconvx.FormatUint(devsAccelerator.Index, 10))
-			accelerators = append(accelerators, _AllocatedAccelerator{group: devsGroup, accel: devsAccelerator})
-		}
-		// TODO: mount HCCL topo file for 950.
+	// The allocated accelerators, ordered the way the container numbers them, plus the driver
+	// indexes ASCEND_VISIBLE_DEVICES carries; the pairs also feed the sliced path's quota and
+	// library subdir.
+	// TODO: mount HCCL topo file for 950.
+	accelerators := deviceplugin.AllocatedAccelerators(devs, allocated)
+	indexes := make([]string, 0, len(accelerators))
+	for i := range accelerators {
+		indexes = append(indexes, strconvx.FormatUint(accelerators[i].Accel.Index, 10))
 	}
 
 	// Sliced containers get real logical-slicing isolation (vcann-rt preload + quota); every
@@ -175,7 +154,7 @@ func (s *server) GetContainerAllocateResponse(
 	switch s.AllocationMode {
 	case workercore.DeviceAllocationModeShared, workercore.DeviceAllocationModeVisibility:
 		for i := range accelerators {
-			if err := s.ensureShareEnabled(accelerators[i].accel); err != nil {
+			if err := s.ensureShareEnabled(accelerators[i].Accel); err != nil {
 				return nil, err
 			}
 		}
@@ -217,7 +196,7 @@ func (s *server) getSlicedContainerAllocateResponse(
 	pod *core.Pod,
 	ctr *core.Container,
 	indexes []string,
-	accels []_AllocatedAccelerator,
+	accels []deviceplugin.AllocatedAccelerator,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
 	if len(accels) == 0 {
 		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
@@ -230,7 +209,7 @@ func (s *server) getSlicedContainerAllocateResponse(
 	}
 
 	// vcann-rt is single-NPU; configure the first allocated accelerator.
-	group, accel := accels[0].group, accels[0].accel
+	group, accel := accels[0].Group, accels[0].Accel
 
 	// SM (aicore) and VRAM are independent dimensions (no single ratio).
 	coresPct := deviceplugin.SlicedCoresPercent(ctr,

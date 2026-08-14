@@ -168,14 +168,6 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode, mig mig
 	return s
 }
 
-// _AllocatedAccelerator pairs an allocated GPU with its group; the group carries the
-// memory + CUDA runtime version that drive the sliced per-accelerator limits and the libvgpu
-// subdir.
-type _AllocatedAccelerator struct {
-	group *workercore.DevicesGroup
-	accel *workercore.Accelerator
-}
-
 func (s *server) GetContainerAllocateResponse(
 	_ context.Context,
 	pod *core.Pod,
@@ -183,33 +175,13 @@ func (s *server) GetContainerAllocateResponse(
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
-	// Single pass over the allocated GPUs in devs order (= NVIDIA_VISIBLE_DEVICES /
-	// per-accelerator CUDA_DEVICE_MEMORY_LIMIT_<i> order): collect the UUIDs and the
-	// accelerator/group pairs the sliced path needs for the per-accelerator limits.
-	var (
-		ids          = make([]string, 0, len(allocated))
-		accelerators []_AllocatedAccelerator
-	)
-	for i := range devs.Spec.Groups {
-		devsGroup := &devs.Spec.Groups[i]
-		for j := range devsGroup.Accelerators {
-			devsAccelerator := &devsGroup.Accelerators[j]
-			res := deviceplugin.Resource{
-				Group:  devsGroup.ID,
-				Device: devsAccelerator.ID,
-			}
-			if _, existed := allocated[res]; !existed {
-				continue
-			}
-			ids = append(ids, devsAccelerator.ID)
-			accelerators = append(accelerators,
-				_AllocatedAccelerator{
-					group: devsGroup,
-					accel: devsAccelerator,
-				},
-			)
-		}
-	}
+	// The allocated GPUs in the order the container will number them, which for this vendor is by
+	// ascending PCI bus id: NVML enumerates the visible cards that way, and CUDA is held to the
+	// same order by the PCI_BUS_ID injected below. That is what each positional
+	// CUDA_DEVICE_MEMORY_LIMIT_<i> is read against, so emitting them in any other order caps a
+	// card at another card's budget.
+	accelerators := deviceplugin.AllocatedAccelerators(devs, allocated)
+	ids := deviceplugin.AllocatedAcceleratorIDs(accelerators)
 
 	// Sliced containers get real logical-slicing isolation (HAMi-core preload + quota);
 	// exclusive/shared keep the plain device-visibility response below.
@@ -252,7 +224,7 @@ func (s *server) getSlicedContainerAllocateResponse(
 	pod *core.Pod,
 	ctr *core.Container,
 	ids []string,
-	accels []_AllocatedAccelerator,
+	accels []deviceplugin.AllocatedAccelerator,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
 	if len(accels) == 0 {
 		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
@@ -279,11 +251,33 @@ func (s *server) getSlicedContainerAllocateResponse(
 		"CUDA_DEVICE_MEMORY_SHARED_CACHE": ctrVgpuSharedCache,
 	}
 	for i := range accels {
-		limit, err := deviceplugin.SlicedMemoryMib(ctr, memPctRes, memMibRes, int64(accels[i].group.Memory))
+		limit, err := deviceplugin.SlicedMemoryMib(ctr, memPctRes, memMibRes, int64(accels[i].Group.Memory))
 		if err != nil {
 			return nil, fmt.Errorf("derive sliced memory limit: %w", err)
 		}
 		envs["CUDA_DEVICE_MEMORY_LIMIT_"+strconv.Itoa(i)] = strconv.FormatInt(limit, 10) + "m"
+	}
+
+	// The per-accelerator limits above are keyed by position, and HAMi-core fills its limit
+	// table from those keys in NVML enumeration order but reads a limit back by the CUDA
+	// ordinal of the calling context. Those two numberings coincide only under PCI_BUS_ID:
+	// CUDA's default orders by a performance heuristic, which on a node carrying more than
+	// one accelerator model can hand a card the budget computed for another. The same
+	// invariant governs any integer a workload derives from an NVML index and hands to CUDA,
+	// CUDA_VISIBLE_DEVICES included. A workload that declares its own ordering keeps it: the
+	// value it sets on its own container reaches CUDA either way, so overwriting it here
+	// would hide the choice rather than settle it.
+	// Keeping it is not the same as tolerating it once a slice can hold several accelerators. A
+	// declared FASTEST_FIRST would then transpose the caps among the accelerators the container
+	// holds, and a cap that lands on a SHARED accelerator lets its holder consume past its
+	// entitlement and starve the co-tenant — an isolation hole, not merely a mis-served tenant.
+	// Admission holds a slice to one accelerator today, and one visible accelerator is ordinal 0
+	// under either ordering, so there is nothing to transpose. Whoever lifts that gate has to make
+	// the ordering an admission requirement and REFUSE a conflicting declaration: injecting it
+	// harder cannot work, because the kubelet appends the container's own environment after this
+	// one and the runtime lets the later value win.
+	if !deviceplugin.ContainerEnvDeclared(ctr, "CUDA_DEVICE_ORDER") {
+		envs["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 	}
 
 	// Quiet HAMi-core's per-call interception logging by default: its LIBCUDA_LOG_LEVEL
@@ -297,9 +291,9 @@ func (s *server) getSlicedContainerAllocateResponse(
 	// libvgpu.so is mounted at a single fixed container path, so every allocated GPU
 	// must share the same CUDA runtime major; reject a mix (e.g. GPUs from groups with
 	// different CUDA majors) rather than mounting a libvgpu incompatible with some.
-	cudaDir := nvidiaCUDADir(accels[0].group.RuntimeVersion)
+	cudaDir := nvidiaCUDADir(accels[0].Group.RuntimeVersion)
 	for i := range accels {
-		if d := nvidiaCUDADir(accels[i].group.RuntimeVersion); d != cudaDir {
+		if d := nvidiaCUDADir(accels[i].Group.RuntimeVersion); d != cudaDir {
 			return nil, fmt.Errorf("sliced container %q spans CUDA majors %s and %s; a single libvgpu cannot serve both", ctr.Name, cudaDir, d)
 		}
 	}

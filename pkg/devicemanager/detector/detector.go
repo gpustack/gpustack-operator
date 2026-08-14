@@ -1,11 +1,14 @@
 package detector
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -446,6 +449,15 @@ func controlOnNodeWithoutBlock(obj kubemeta.MetaObject, nd *core.Node) {
 func alignDeviceGroups(
 	aGroups, eGroups device.DevicesGroupList, allowedManufacturers sets.Set[string],
 ) (groups device.DevicesGroupList, changed bool) {
+	// Merge canonical forms of both sides, so the order a detector happened to report its
+	// accelerators in is never mistaken for a content change — which would rewrite the ledger with
+	// identical content on every detect pass. The stored list is kept as it was read, because it is
+	// what the result has to be judged against: an off-canonical stored order IS a change, and the
+	// only one that heals it.
+	stored := aGroups
+	aGroups = canonicalDeviceGroups(aGroups)
+	eGroups = canonicalDeviceGroups(eGroups)
+
 	// Index the existing groups by multi-keys: manufacturer and id.
 	devGrpIndex := make(map[_DeviceGroupKey]*_DeviceGroupValue)
 	for i := range aGroups {
@@ -484,7 +496,63 @@ func alignDeviceGroups(
 		}
 		groups = append(groups, v.Group)
 	}
-	return groups, changed
+
+	// The passes above append newly detected groups ahead of the ones the ledger already carried,
+	// so the stored order would otherwise record which detection pass first saw each group rather
+	// than anything about the hardware — and, since the passes preserve that stored order, a ledger
+	// written in one order would keep it forever.
+	groups = canonicalDeviceGroups(groups)
+
+	return groups, changed || !kubemeta.DeepEqual(stored, groups)
+}
+
+// canonicalDeviceGroups returns the groups ordered by the hardware they describe: each group's
+// accelerators by the enumeration index their detector recorded, and the groups themselves by
+// manufacturer and then by the first accelerator each holds. Each manufacturer numbers its own
+// accelerators from zero, which is why the manufacturer leads — ordering on the index alone would
+// interleave them. A group holding no accelerator sorts last among its manufacturer's, and the group
+// ID breaks any remaining tie, so the result is a total order over any input.
+//
+// The input is left untouched: the accelerators of a group reached through a copied group value
+// still share one backing array with it, so sorting in place would reorder the caller's list as
+// well — and a caller comparing the two would then find them equal.
+//
+// A consumer must not read a positional meaning into the result regardless. Both lists are declared
+// as maps keyed by identity, so their order carries no API meaning and a server-side apply may
+// reorder them; a consumer that needs a position orders what it reads. What this buys is a stored
+// list that is a function of the hardware alone, so it neither drifts on unchanged content nor
+// records the pass that first saw a group.
+func canonicalDeviceGroups(groups device.DevicesGroupList) device.DevicesGroupList {
+	byIndex := func(a, b device.Accelerator) int { return cmp.Compare(a.Index, b.Index) }
+
+	out := slices.Clone(groups)
+	for i := range out {
+		out[i].Accelerators = slices.Clone(out[i].Accelerators)
+		slices.SortStableFunc(out[i].Accelerators, byIndex)
+	}
+	slices.SortStableFunc(out, func(a, b device.DevicesGroup) int {
+		if c := cmp.Compare(a.Manufacturer, b.Manufacturer); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(firstAcceleratorIndex(a), firstAcceleratorIndex(b)); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
+
+	return out
+}
+
+// firstAcceleratorIndex returns the lowest enumeration index a group holds, or the maximum index
+// when it holds no accelerator at all — which sorts such a group last rather than ahead of every
+// populated one.
+func firstAcceleratorIndex(grp device.DevicesGroup) uint32 {
+	if len(grp.Accelerators) == 0 {
+		return math.MaxUint32
+	}
+	return slices.MinFunc(grp.Accelerators, func(a, b device.Accelerator) int {
+		return cmp.Compare(a.Index, b.Index)
+	}).Index
 }
 
 // acceleratableDevicesSelectorLabels builds the selector labels stamped on a node's Devices object

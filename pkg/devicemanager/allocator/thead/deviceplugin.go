@@ -173,13 +173,6 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode, mig mig
 	return s
 }
 
-// _AllocatedAccelerator pairs an allocated accelerator with its group; the group carries the VRAM
-// the sliced path derives that accelerator's own memory budget from.
-type _AllocatedAccelerator struct {
-	group *workercore.DevicesGroup
-	accel *workercore.Accelerator
-}
-
 func (s *server) GetContainerAllocateResponse(
 	_ context.Context,
 	pod *core.Pod,
@@ -204,39 +197,21 @@ func (s *server) GetContainerAllocateResponse(
 		ctrResp.Devices = append(ctrResp.Devices, pDev)
 	}
 
-	// Mount specified devices. The pass also collects each allocated accelerator with its group, in
-	// devs order, which is the order the sliced path indexes its per-accelerator memory figures by.
-	var accelerators []_AllocatedAccelerator
-	for i := range devs.Spec.Groups {
-		devGroup := &devs.Spec.Groups[i]
-		for j := range devGroup.Accelerators {
-			devsAccelerator := &devGroup.Accelerators[j]
-			res := deviceplugin.Resource{
-				Group:  devGroup.ID,
-				Device: devsAccelerator.ID,
-			}
-			if _, existed := allocated[res]; !existed {
-				continue
-			}
-
-			// The vendor names an accelerator's device node after its card ordinal — the accelerator index —
-			// and that the ordinal reaches the accelerator the detector measured is proven rather than
-			// assumed, through the same guard the partition path uses: the node it names must carry the
-			// minor number the detector recorded for this accelerator. An accelerator that cannot be proven
-			// is refused rather than answered with a device set that is silently short of its own node, or
-			// that carries a neighboring accelerator's node.
-			_, cardNode, err := requireCardNode(devs, devsAccelerator.ID)
-			if err != nil {
-				return nil, err
-			}
-			ctrResp.Devices = append(ctrResp.Devices, cardNode)
-			accelerators = append(accelerators,
-				_AllocatedAccelerator{
-					group: devGroup,
-					accel: devsAccelerator,
-				},
-			)
+	// Mount specified devices, walking the allocated accelerators in the order the sliced path
+	// indexes its per-accelerator memory figures by.
+	accelerators := deviceplugin.AllocatedAccelerators(devs, allocated)
+	for i := range accelerators {
+		// The vendor names an accelerator's device node after its card ordinal — the accelerator index —
+		// and that the ordinal reaches the accelerator the detector measured is proven rather than
+		// assumed, through the same guard the partition path uses: the node it names must carry the
+		// minor number the detector recorded for this accelerator. An accelerator that cannot be proven
+		// is refused rather than answered with a device set that is silently short of its own node, or
+		// that carries a neighboring accelerator's node.
+		_, cardNode, err := requireCardNode(devs, accelerators[i].Accel.ID)
+		if err != nil {
+			return nil, err
 		}
+		ctrResp.Devices = append(ctrResp.Devices, cardNode)
 	}
 
 	// A sliced container gets that same device set plus the shim's preload and quota; every other
@@ -269,7 +244,7 @@ func (s *server) getSlicedContainerAllocateResponse(
 	pod *core.Pod,
 	ctr *core.Container,
 	devices []*deviceplugin.DeviceSpec,
-	accels []_AllocatedAccelerator,
+	accels []deviceplugin.AllocatedAccelerator,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
 	if len(accels) == 0 {
 		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
@@ -304,7 +279,7 @@ func (s *server) getSlicedContainerAllocateResponse(
 	for i := range accels {
 		// The MiB figure carries no unit suffix, unlike the NVIDIA branch's "…m": HAMi-core parses
 		// a suffix, the shim parses a bare MiB integer.
-		memMib, err := deviceplugin.SlicedMemoryMib(ctr, memPctRes, memMibRes, int64(accels[i].group.Memory))
+		memMib, err := deviceplugin.SlicedMemoryMib(ctr, memPctRes, memMibRes, int64(accels[i].Group.Memory))
 		if err != nil {
 			return nil, fmt.Errorf("derive sliced memory limit: %w", err)
 		}

@@ -133,55 +133,33 @@ func (s *server) GetContainerAllocateResponse(
 	}
 
 	// Mount specified devices.
-	for i := range devs.Spec.Groups {
-		devGroup := &devs.Spec.Groups[i]
-		for j := range devGroup.Accelerators {
-			devsAccelerator := &devGroup.Accelerators[j]
-			res := deviceplugin.Resource{
-				Group:  devGroup.ID,
-				Device: devsAccelerator.ID,
-			}
-			if _, existed := allocated[res]; !existed {
-				continue
-			}
+	for _, allocatedAccel := range deviceplugin.AllocatedAccelerators(devs, allocated) {
+		devsAccelerator := allocatedAccel.Accel
 
-			// Each recorded index is guarded by its own length, as the sliced path below already
-			// does. The detector reads them from this manufacturer's sysfs drm directory, which
-			// yields both numbers, the drm card<N> number alone, or nothing at all — so a pair is
-			// not something this can assume. Indexing an absent one panics, and no interceptor
-			// recovers a panic in this handler: the process that serves every allocation on the node
-			// dies with it, for every manufacturer, over one accelerator whose drm directory could
-			// not be read.
-			if len(devsAccelerator.PhysicalIndexes) > 0 {
-				if pDev := deviceplugin.NewRWDevicef("/dev/dri/card%d", devsAccelerator.PhysicalIndexes[0]); pDev != nil {
-					ctrResp.Devices = append(ctrResp.Devices, pDev)
-				}
-			} else {
-				s.Logger.Info("no recorded drm index for an allocated card; its device nodes cannot be "+
-					"named and are not injected",
-					"card", devsAccelerator.ID)
+		// Each recorded index is guarded by its own length, as the sliced path below already
+		// does. The detector reads them from this manufacturer's sysfs drm directory, which
+		// yields both numbers, the drm card<N> number alone, or nothing at all — so a pair is
+		// not something this can assume. Indexing an absent one panics, and no interceptor
+		// recovers a panic in this handler: the process that serves every allocation on the node
+		// dies with it, for every manufacturer, over one accelerator whose drm directory could
+		// not be read.
+		if len(devsAccelerator.PhysicalIndexes) > 0 {
+			if pDev := deviceplugin.NewRWDevicef("/dev/dri/card%d", devsAccelerator.PhysicalIndexes[0]); pDev != nil {
+				ctrResp.Devices = append(ctrResp.Devices, pDev)
 			}
-			if len(ctrResp.Devices) == 1 {
-				continue
-			}
-
-			if len(devsAccelerator.PhysicalIndexes) > 1 {
-				if pDev := deviceplugin.NewRWDevicef("/dev/dri/renderD%d", devsAccelerator.PhysicalIndexes[1]); pDev != nil {
-					ctrResp.Devices = append(ctrResp.Devices, pDev)
-				}
+		} else {
+			s.Logger.Info("no recorded drm index for an allocated card; its device nodes cannot be "+
+				"named and are not injected",
+				"card", devsAccelerator.ID)
+		}
+		if len(devsAccelerator.PhysicalIndexes) > 1 {
+			if pDev := deviceplugin.NewRWDevicef("/dev/dri/renderD%d", devsAccelerator.PhysicalIndexes[1]); pDev != nil {
+				ctrResp.Devices = append(ctrResp.Devices, pDev)
 			}
 		}
 	}
 
 	return ctrResp, nil
-}
-
-// _AllocatedAccelerator pairs an allocated DCU with its group; the group carries the CU
-// count + VRAM that drive the sliced CU mask and memory cap, and the accelerator carries
-// the PCI bus id + DRM indexes for the vdev.conf and its device nodes.
-type _AllocatedAccelerator struct {
-	group *workercore.DevicesGroup
-	accel *workercore.Accelerator
 }
 
 // In-container paths + host DTK/hyhal runtime dirs the vdev.conf slice needs.
@@ -205,22 +183,9 @@ func (s *server) getSlicedContainerAllocateResponse(
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
-	// Collect the allocated DCUs in devs order (= vdev0.conf, vdev1.conf, ... order).
-	var accels []_AllocatedAccelerator
-	for i := range devs.Spec.Groups {
-		devsGroup := &devs.Spec.Groups[i]
-		for j := range devsGroup.Accelerators {
-			devsAccelerator := &devsGroup.Accelerators[j]
-			res := deviceplugin.Resource{
-				Group:  devsGroup.ID,
-				Device: devsAccelerator.ID,
-			}
-			if _, existed := allocated[res]; !existed {
-				continue
-			}
-			accels = append(accels, _AllocatedAccelerator{group: devsGroup, accel: devsAccelerator})
-		}
-	}
+	// The allocated DCUs, ordered the way the container numbers them, which is also
+	// vdev0.conf, vdev1.conf, ... order.
+	accels := deviceplugin.AllocatedAccelerators(devs, allocated)
 	if len(accels) == 0 {
 		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
 	}
@@ -261,12 +226,23 @@ func (s *server) getSlicedContainerAllocateResponse(
 	// One vdev.conf per allocated accelerator, each independently slotted; a whole-accelerator
 	// slice (cores% >= 100 && memMiB >= accelerator VRAM) resolves to a full-mask / full-memory
 	// conf. The loop index i is the container-local device_id (the DTK device_id semantics are a
-	// hardware-validation item). A partial failure part-way through a multi-accelerator
+	// hardware-validation item).
+	//
+	// This position is the one that OUTLIVES its allocation: it names a file on the host, and
+	// allocateVdev reuses a slot only when the file at that path already names the same
+	// accelerator. Admission holds a sliced request to exactly one accelerator, so the path is
+	// always vdev0.conf and the accelerator it names cannot move. Whoever lifts that gate has to
+	// keep an existing path-to-accelerator assignment rather than re-deriving it from the order
+	// here: a retry that renumbers finds a sibling conf holding the accelerator it is now placing,
+	// counts it as occupied, and either refuses a full slice or grants a second quota beside the
+	// first.
+	//
+	// A partial failure part-way through a multi-accelerator
 	// allocation leaves the earlier accelerators' confs on disk: intentional under the
 	// level-based design — an idempotent kubelet retry reuses them and podDirGC reclaims them
 	// once the pod is gone, so no rollback is attempted.
 	for i := range accels {
-		group, accel := accels[i].group, accels[i].accel
+		group, accel := accels[i].Group, accels[i].Accel
 		memMib, err := deviceplugin.SlicedMemoryMib(ctr, memPctRes, memMibRes, int64(group.Memory))
 		if err != nil {
 			return nil, fmt.Errorf("derive sliced memory limit: %w", err)

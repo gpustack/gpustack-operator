@@ -107,13 +107,6 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) devicep
 	return s
 }
 
-// _AllocatedAccelerator pairs an allocated accelerator with its group; the group carries the VRAM
-// the sliced path derives that accelerator's own memory budget from.
-type _AllocatedAccelerator struct {
-	group *workercore.DevicesGroup
-	accel *workercore.Accelerator
-}
-
 func (s *server) GetContainerAllocateResponse(
 	_ context.Context,
 	pod *core.Pod,
@@ -121,33 +114,11 @@ func (s *server) GetContainerAllocateResponse(
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
-	// Single pass over the allocated accelerators in devs order (= IX_VISIBLE_DEVICES /
-	// CUDA_DEVICE_MEMORY_LIMIT_<i> order): collect the UUIDs and the accelerator/group
-	// pairs the sliced path needs for the per-accelerator VRAM limit.
-	var (
-		ids          = make([]string, 0, len(allocated))
-		accelerators []_AllocatedAccelerator
-	)
-	for i := range devs.Spec.Groups {
-		devGroup := &devs.Spec.Groups[i]
-		for j := range devGroup.Accelerators {
-			devsAccelerator := &devGroup.Accelerators[j]
-			res := deviceplugin.Resource{
-				Group:  devGroup.ID,
-				Device: devsAccelerator.ID,
-			}
-			if _, existed := allocated[res]; !existed {
-				continue
-			}
-			ids = append(ids, devsAccelerator.ID)
-			accelerators = append(accelerators,
-				_AllocatedAccelerator{
-					group: devGroup,
-					accel: devsAccelerator,
-				},
-			)
-		}
-	}
+	// The allocated accelerators, ordered the way the container numbers them, and their UUIDs —
+	// the IX_VISIBLE_DEVICES value. A sliced request here is single-accelerator, so the order
+	// carries nothing extra for the memory limit; it is the same collection either way.
+	accelerators := deviceplugin.AllocatedAccelerators(devs, allocated)
+	ids := deviceplugin.AllocatedAcceleratorIDs(accelerators)
 
 	// Sliced containers get real logical-slicing isolation (HAMi-core preload + quota);
 	// exclusive/shared/visibility keep the plain device-visibility response below.
@@ -194,7 +165,7 @@ func (s *server) getSlicedContainerAllocateResponse(
 	pod *core.Pod,
 	ctr *core.Container,
 	ids []string,
-	accels []_AllocatedAccelerator,
+	accels []deviceplugin.AllocatedAccelerator,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
 	if len(accels) == 0 {
 		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
@@ -223,7 +194,7 @@ func (s *server) getSlicedContainerAllocateResponse(
 		"CUDA_DEVICE_MEMORY_SHARED_CACHE": ctrVgpuSharedCache,
 	}
 	for i := range accels {
-		limit, err := deviceplugin.SlicedMemoryMib(ctr, memPctRes, memMibRes, int64(accels[i].group.Memory))
+		limit, err := deviceplugin.SlicedMemoryMib(ctr, memPctRes, memMibRes, int64(accels[i].Group.Memory))
 		if err != nil {
 			return nil, fmt.Errorf("derive sliced memory limit: %w", err)
 		}

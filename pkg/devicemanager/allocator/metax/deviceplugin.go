@@ -148,42 +148,28 @@ func (s *server) GetContainerAllocateResponse(
 	}
 
 	// Mount specified devices.
-	for i := range devs.Spec.Groups {
-		devGroup := &devs.Spec.Groups[i]
-		for j := range devGroup.Accelerators {
-			devsAccelerator := &devGroup.Accelerators[j]
-			res := deviceplugin.Resource{
-				Group:  devGroup.ID,
-				Device: devsAccelerator.ID,
-			}
-			if _, existed := allocated[res]; !existed {
-				continue
-			}
+	for _, allocatedAccel := range deviceplugin.AllocatedAccelerators(devs, allocated) {
+		devsAccelerator := allocatedAccel.Accel
 
-			// Each recorded index is guarded by its own length, as the sliced path below already
-			// does. The detector reads them from this manufacturer's sysfs drm directory, which
-			// yields both numbers, the drm card<N> number alone, or nothing at all — so a pair is
-			// not something this can assume. Indexing an absent one panics, and no interceptor
-			// recovers a panic in this handler: the process that serves every allocation on the node
-			// dies with it, for every manufacturer, over one accelerator whose drm directory could
-			// not be read.
-			if len(devsAccelerator.PhysicalIndexes) > 0 {
-				if pDev := deviceplugin.NewRWDevicef("/dev/dri/card%d", devsAccelerator.PhysicalIndexes[0]); pDev != nil {
-					ctrResp.Devices = append(ctrResp.Devices, pDev)
-				}
-			} else {
-				s.Logger.Info("no recorded drm index for an allocated card; its device nodes cannot be "+
-					"named and are not injected",
-					"card", devsAccelerator.ID)
+		// Each recorded index is guarded by its own length, as the sliced path below already
+		// does. The detector reads them from this manufacturer's sysfs drm directory, which
+		// yields both numbers, the drm card<N> number alone, or nothing at all — so a pair is
+		// not something this can assume. Indexing an absent one panics, and no interceptor
+		// recovers a panic in this handler: the process that serves every allocation on the node
+		// dies with it, for every manufacturer, over one accelerator whose drm directory could
+		// not be read.
+		if len(devsAccelerator.PhysicalIndexes) > 0 {
+			if pDev := deviceplugin.NewRWDevicef("/dev/dri/card%d", devsAccelerator.PhysicalIndexes[0]); pDev != nil {
+				ctrResp.Devices = append(ctrResp.Devices, pDev)
 			}
-			if len(ctrResp.Devices) == 1 {
-				continue
-			}
-
-			if len(devsAccelerator.PhysicalIndexes) > 1 {
-				if pDev := deviceplugin.NewRWDevicef("/dev/dri/renderD%d", devsAccelerator.PhysicalIndexes[1]); pDev != nil {
-					ctrResp.Devices = append(ctrResp.Devices, pDev)
-				}
+		} else {
+			s.Logger.Info("no recorded drm index for an allocated card; its device nodes cannot be "+
+				"named and are not injected",
+				"card", devsAccelerator.ID)
+		}
+		if len(devsAccelerator.PhysicalIndexes) > 1 {
+			if pDev := deviceplugin.NewRWDevicef("/dev/dri/renderD%d", devsAccelerator.PhysicalIndexes[1]); pDev != nil {
+				ctrResp.Devices = append(ctrResp.Devices, pDev)
 			}
 		}
 	}
@@ -207,28 +193,13 @@ func (s *server) getSlicedContainerAllocateResponse(
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
-	var (
-		group *workercore.DevicesGroup
-		accel *workercore.Accelerator
-		count int
-	)
-	for i := range devs.Spec.Groups {
-		g := &devs.Spec.Groups[i]
-		for j := range g.Accelerators {
-			a := &g.Accelerators[j]
-			if _, existed := allocated[deviceplugin.Resource{Group: g.ID, Device: a.ID}]; !existed {
-				continue
-			}
-			count++
-			group, accel = g, a
-		}
-	}
-	if count == 0 {
+	accels := deviceplugin.AllocatedAccelerators(devs, allocated)
+	if count := len(accels); count == 0 {
 		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
-	}
-	if count > 1 {
+	} else if count > 1 {
 		return nil, fmt.Errorf("sliced container %q allocated %d cards, but MetaX sgpu slicing is single-card", ctr.Name, count)
 	}
+	group, accel := accels[0].Group, accels[0].Accel
 
 	// Compute and VRAM are independent dimensions (no single ratio); both come straight
 	// from the shared helpers (the percent is used directly, no CU conversion).
