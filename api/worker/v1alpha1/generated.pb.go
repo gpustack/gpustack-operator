@@ -193,6 +193,11 @@ func (m *AcceleratorAllocation) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.AllocatedPhysicalID)
+	copy(dAtA[i:], m.AllocatedPhysicalID)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.AllocatedPhysicalID)))
+	i--
+	dAtA[i] = 0x5a
 	if len(m.AllocatedLogicalPlacements) > 0 {
 		for iNdEx := len(m.AllocatedLogicalPlacements) - 1; iNdEx >= 0; iNdEx-- {
 			{
@@ -2602,6 +2607,8 @@ func (m *AcceleratorAllocation) Size() (n int) {
 			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
+	l = len(m.AllocatedPhysicalID)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -3455,6 +3462,7 @@ func (this *AcceleratorAllocation) String() string {
 		`AllocatedPhysicalProfile:` + fmt.Sprintf("%v", this.AllocatedPhysicalProfile) + `,`,
 		`AllocatedPhysicalPlacements:` + repeatedStringForAllocatedPhysicalPlacements + `,`,
 		`AllocatedLogicalPlacements:` + repeatedStringForAllocatedLogicalPlacements + `,`,
+		`AllocatedPhysicalID:` + fmt.Sprintf("%v", this.AllocatedPhysicalID) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -4656,6 +4664,38 @@ func (m *AcceleratorAllocation) Unmarshal(dAtA []byte) error {
 			if err := m.AllocatedLogicalPlacements[len(m.AllocatedLogicalPlacements)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
+			iNdEx = postIndex
+		case 11:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AllocatedPhysicalID", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.AllocatedPhysicalID = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

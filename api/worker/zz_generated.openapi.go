@@ -2186,6 +2186,13 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref common.Refere
 							},
 						},
 					},
+					"allocatedPhysicalID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AllocatedPhysicalID is the partition's own identifier, as the driver named it at the moment it was created (an NVIDIA MIG UUID, a T-Head PPU MIG UUID). Part of the same annotation TRANSPORT, empty (omitted) in the aggregated Devices.Status.\n\nIt is recorded because the allocator holds it already and the reader would otherwise have to EARN it back: without it, naming a partition means translating the recorded profile name into a driver profile id, enumerating every instance of that profile, and matching on the placement — dozens of driver calls per card per monitor period, to recover something that was in hand at Allocate time. So it is also the ONLY way a partition is addressed: an allocation carrying none is reported as an absence rather than derived.\n\nIt is NOT a generation marker. These UUIDs are name-based, derived from the parent device and the instance's own identity, so destroying a partition and creating another at the same placement yields the SAME identifier. Treat a recorded id as a fast way to FIND the partition, never as proof that the one found is the one that was granted.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 					"allocatedLogicalPlacements": {
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{

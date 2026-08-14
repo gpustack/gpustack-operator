@@ -809,7 +809,9 @@ func (s *ResourceServer) decideAllocation(
 	// Actuation runs after the mutex is released and overwrites the intent with what the hardware
 	// actually gave.
 	if len(placements) > 0 {
-		applyPhysicalPlacements(&d.Status, d.Profile, placements)
+		// No identifier yet: this is the intent, and the partition it names may not exist until the
+		// actuator runs. The post-actuation call below records what the hardware actually gave.
+		applyPhysicalPlacements(&d.Status, d.Profile, placements, nil)
 	}
 
 	// Reserve the accelerators in-process before releasing the mutex: the accelerator is taken the
@@ -1348,11 +1350,13 @@ func applyLogicalPlacements(status *workercore.DevicesStatus, placements Placeme
 
 // applyPhysicalPlacements records the actuator's chosen per-accelerator placement into the
 // allocation status accelerators, so the annotation patch carries the physical ledger's occupied
-// source (AllocatedPhysicalProfile + AllocatedPhysicalPlacements, unioned by the reconciler).
+// source (AllocatedPhysicalProfile + AllocatedPhysicalPlacements, unioned by the reconciler), plus
+// the partition's own identifier for a later reader to address it by.
 func applyPhysicalPlacements(
 	status *workercore.DevicesStatus,
 	profile string,
 	placements Placements,
+	ids map[Resource]string,
 ) {
 	for i := range status.Groups {
 		grp := &status.Groups[i]
@@ -1362,6 +1366,7 @@ func applyPhysicalPlacements(
 			if p, ok := placements[res]; ok {
 				acc.AllocatedPhysicalProfile = profile
 				acc.AllocatedPhysicalPlacements = p
+				acc.AllocatedPhysicalID = ids[res]
 			}
 		}
 	}
@@ -1400,7 +1405,7 @@ func (s *ResourceServer) actuatePartition(
 
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "actuate partition: %v", err)
 	}
-	applyPhysicalPlacements(&d.Status, physical.Profile, physical.Placements)
+	applyPhysicalPlacements(&d.Status, physical.Profile, physical.Placements, physical.IDs)
 	s.Reconciler.reserveDevices(d.Pod.UID, d.Container.Name, d.Status, deviceIDs)
 
 	return physical, nil

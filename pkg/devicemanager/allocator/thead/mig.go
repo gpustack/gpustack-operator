@@ -929,6 +929,7 @@ func (s *server) ActuatePhysicalSliced(
 	}
 
 	placements := make(map[deviceplugin.Resource][]workercore.AcceleratorPlacement, len(cards))
+	ids := make(map[deviceplugin.Resource]string, len(cards))
 	// results records how each accelerator resolved so rollback undoes exactly this call's work under
 	// the same per-accelerator lock the create took (so it never races a concurrent same-accelerator
 	// allocation's state read, and never removes a marker or destroys an instance a prior allocation
@@ -999,11 +1000,15 @@ func (s *server) ActuatePhysicalSliced(
 		placements[res] = []workercore.AcceleratorPlacement{
 			{Start: inst.Placement.Start, Length: inst.Placement.Length},
 		}
+		// Recorded even though the container is addressed by device node rather than by identifier:
+		// the reader names the partition by it, and this is the only moment it is known for free.
+		ids[res] = inst.UUID
 	}
 
 	return &deviceplugin.PhysicalSlicedAllocation{
 		Profile:    profile,
 		Placements: placements,
+		IDs:        ids,
 		Response:   &deviceplugin.ContainerAllocateResponse{Devices: devices},
 		Rollback:   rollback,
 	}, nil

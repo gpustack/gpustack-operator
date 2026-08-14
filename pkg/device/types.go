@@ -175,25 +175,38 @@ const (
 // Structures for hardware-partition usage.
 //
 // A hardware partition is measured on the partition's OWN device handle rather than on the parent
-// card's, and it is identified by what the allocation recorded — a profile name and the placement
-// the partition occupies — rather than by which partition happens to hold a process of ours. That is
-// what lets an idle partition report zero: a partition with no process is still a partition that can
-// be named, while a process-first lookup would find nothing and have to publish an absence.
+// card's, and it is addressed by the identifier the allocation recorded rather than by which
+// partition happens to hold a process of ours. That is what lets an idle partition report zero: a
+// partition with no process is still a partition that can be named, while a process-first lookup
+// would find nothing and have to publish an absence.
 //
 // So these carry no process ids at all, and the request carries no tenant identity either: which Pod
 // and container holds a partition is the caller's join, made where the Pod list already is.
 type (
 	// AcceleratorPartitionRequest names one hardware partition to read, as the allocation recorded
-	// it: the parent accelerator, the profile, and the placement the partition occupies.
+	// it: the parent accelerator and the partition's own identifier, plus the profile and placement
+	// an answer is echoed back with.
 	AcceleratorPartitionRequest struct {
-		// DeviceID is the universally unique identifier of the PARENT accelerator, which is what an
-		// allocation records; the partition's own handle is resolved from the two fields below.
+		// DeviceID is the universally unique identifier of the PARENT accelerator, which is what
+		// groups the requests by the card each one is read from.
 		DeviceID string
-		// Profile is the partition profile's name, e.g. "1g.10gb".
+		// ID is the partition's own identifier as the allocation recorded it, and the ONLY thing a
+		// partition is addressed by. Empty for an allocation made before the device plugin recorded
+		// it, which is answered as an absence with a reason rather than derived: deriving means
+		// translating the profile name below into a driver profile id, which costs a walk of the
+		// manufacturer's whole profile catalog — 17 ids on one partitioning manufacturer and 85 on
+		// the other — every card, every period, to recover what the allocator held for free.
+		//
+		// It is a way to FIND a partition, never proof of which one was granted. These identifiers
+		// are name-based, derived from the parent and the instance's own identity, so destroying a
+		// partition and creating another at the same placement returns the same one.
+		ID string
+		// Profile is the partition profile's name, e.g. "1g.10gb". Carried for the answer to echo
+		// and for a log to name the grant, not to resolve anything.
 		Profile string
 		// Placements is the run(s) the partition occupies on the parent, in the manufacturer's own
-		// slice units. It is what distinguishes two partitions of the SAME profile on one card, so
-		// a partition is matched on the profile and the placement together and on nothing else.
+		// slice units — one run, for every partitioning manufacturer today. Carried for the same
+		// reason as Profile.
 		Placements []AcceleratorPlacement
 	}
 
@@ -247,8 +260,8 @@ type (
 	// processes hold a card, this one asks what one partition of it holds, and a manufacturer can
 	// serve either without the other.
 	AcceleratorPartitionDetector interface {
-		// MonitorAcceleratorPartitions reads the partitions named by requests, resolving each one's
-		// handle from the recorded profile and placement.
+		// MonitorAcceleratorPartitions reads the partitions named by requests, addressing each one's
+		// handle by the identifier its allocation recorded.
 		//
 		// The result carries an answer for each request and for no others. If noPciCheck is true,
 		// the detector will skip PCI checks, exactly as the Detector methods do.

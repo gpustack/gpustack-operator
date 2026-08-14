@@ -489,6 +489,7 @@ func partitionTargetsOf(pods []core.Pod) map[string][]partitionTarget {
 						container: container,
 						request: device.AcceleratorPartitionRequest{
 							DeviceID: accelerator.ID,
+							ID:       accelerator.AllocatedPhysicalID,
 							Profile:  accelerator.AllocatedPhysicalProfile,
 							// device.AcceleratorPlacement is an alias of the recorded type, so the
 							// placements travel as they were recorded and nothing can rewrite them
