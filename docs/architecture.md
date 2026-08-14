@@ -42,7 +42,7 @@ Details, and the startup ordering the worker must keep, are in [Internals](archi
 3. **Capacity profiling** — the Worker derives per-node capacity labels: CPU cores, the four `.sliced.*`
    logical-slicing capacities and the `.partitioned.*` hardware-partitioning capacities.
 4. **Queue construction & admission** — Worker controllers materialize those labels into Kueue
-   `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool, **no Cohort**) and an `InstanceType`
+   `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool) and an `InstanceType`
    CRD, and gate admission with a per-accelerator `AdmissionCheck` read from the `Devices` ledger.
 
 ```mermaid
@@ -95,7 +95,7 @@ are in [Device Discovery](architecture/device-discovery.md#device-accelerator-re
 
 | Term | Meaning |
 |---|---|
-| **pool** | one `(CPU key, [accelerator key,] os, arch)` group — one isolated `ClusterQueue` + one `InstanceType`, no Cohort and no borrowing |
+| **pool** | one `(CPU key, [accelerator key,] os, arch)` group — one isolated `ClusterQueue` + one `InstanceType`, no borrowing |
 | **`gKey` / `aKey`** | the general(CPU) node key (e.g. `amd-epyc-7763`, or the `generic` sentinel) / the accelerator device key (e.g. `nvidia-a10g`) |
 | **family** | the two mutually exclusive ways to share an accelerator: **logical slicing** (`.sliced*`, the manufacturer's own runtime facility budgets compute and VRAM) and **physical partitioning** (`.partitioned*`, NVIDIA MIG). An accelerator serves exactly one |
 | **credits** | `credits.gpustack.ai/<manufacturer>`, the only accelerator quota a ClusterQueue carries; one whole accelerator = `M = 1,600,000` credit units, so fractional shares stay integer-valued |

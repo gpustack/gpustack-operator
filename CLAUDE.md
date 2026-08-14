@@ -21,8 +21,8 @@ accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 
 Three subcommands (`worker`, `worker-gateway`, `device-manager`) drive a four-stage chain: NFD labels
 nodes → the Device Manager detects accelerators → the worker profiles node capacity → five
-controllers materialize Kueue `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool, no
-Cohort) → `LocalQueue` plus an `InstanceType` CRD. `pkg/nodefeature` holds the label algebra.
+controllers materialize Kueue `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool)
+→ `LocalQueue` plus an `InstanceType` CRD. `pkg/nodefeature` holds the label algebra.
 
 Read `docs/architecture.md` first: one page, the four stages, the life of a request, the vocabulary.
 Then the deep page under `docs/architecture/` for what you are touching — `device-discovery.md` (NFD,
