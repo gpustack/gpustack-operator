@@ -466,6 +466,10 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																			Nullable:  true,
 																			XListType: ptr.To[string]("atomic"),
 																		},
+																		"allocatedPhysicalID": {
+																			Description: "AllocatedPhysicalID is the partition's own identifier, as the driver named it at the moment\nit was created (an NVIDIA MIG UUID, a T-Head PPU MIG UUID). Part of the same annotation\nTRANSPORT, empty (omitted) in the aggregated Devices.Status.\nIt is recorded because the allocator holds it already and the reader would otherwise have to\nEARN it back: without it, naming a partition means translating the recorded profile name\ninto a driver profile id, enumerating every instance of that profile, and matching on the\nplacement — dozens of driver calls per card per monitor period, to recover something that\nwas in hand at Allocate time. So it is also the ONLY way a partition is addressed: an\nallocation carrying none is reported as an absence rather than derived.\nIt is NOT a generation marker. These UUIDs are name-based, derived from the parent device\nand the instance's own identity, so destroying a partition and creating another at the same\nplacement yields the SAME identifier. Treat a recorded id as a fast way to FIND the\npartition, never as proof that the one found is the one that was granted.",
+																			Type:        "string",
+																		},
 																		"allocatedPhysicalPlacements": {
 																			Description: "AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition occupies\non this accelerator. The reconciler unions these across the node's Pods to derive\nRemainingProfiles.",
 																			Type:        "array",
@@ -1118,6 +1122,10 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 																			},
 																			Nullable:  true,
 																			XListType: ptr.To[string]("atomic"),
+																		},
+																		"allocatedPhysicalID": {
+																			Description: "AllocatedPhysicalID is the partition's own identifier, as the driver named it at the moment\nit was created (an NVIDIA MIG UUID, a T-Head PPU MIG UUID). Part of the same annotation\nTRANSPORT, empty (omitted) in the aggregated Devices.Status.\nIt is recorded because the allocator holds it already and the reader would otherwise have to\nEARN it back: without it, naming a partition means translating the recorded profile name\ninto a driver profile id, enumerating every instance of that profile, and matching on the\nplacement — dozens of driver calls per card per monitor period, to recover something that\nwas in hand at Allocate time. So it is also the ONLY way a partition is addressed: an\nallocation carrying none is reported as an absence rather than derived.\nIt is NOT a generation marker. These UUIDs are name-based, derived from the parent device\nand the instance's own identity, so destroying a partition and creating another at the same\nplacement yields the SAME identifier. Treat a recorded id as a fast way to FIND the\npartition, never as proof that the one found is the one that was granted.",
+																			Type:        "string",
 																		},
 																		"allocatedPhysicalPlacements": {
 																			Description: "AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition occupies\non this accelerator. The reconciler unions these across the node's Pods to derive\nRemainingProfiles.",

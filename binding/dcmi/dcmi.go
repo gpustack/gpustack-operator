@@ -320,6 +320,21 @@ func dcmiGetDevicePowerInfo(CardId int32, DeviceId int32, Power *int32) int32 {
 	return __v
 }
 
+// dcmiGetDeviceResourceInfo function as declared in dcmi/dcmi_wrapper.h:42
+func dcmiGetDeviceResourceInfo(CardId int32, DeviceId int32, ProcInfo *ProcMemInfo, ProcNum *int32) int32 {
+	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
+	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
+	cProcInfo, cProcInfoAllocMap := ProcInfo.PassRef()
+	cProcNum, cProcNumAllocMap := (*C.int)(unsafe.Pointer(ProcNum)), cgoAllocsUnknown
+	__ret := C.w_dcmi_get_device_resource_info(cCardId, cDeviceId, cProcInfo, cProcNum)
+	runtime.KeepAlive(cProcNumAllocMap)
+	runtime.KeepAlive(cProcInfoAllocMap)
+	runtime.KeepAlive(cDeviceIdAllocMap)
+	runtime.KeepAlive(cCardIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
 // dcmiGetDeviceShareEnable function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceShareEnable(CardId int32, DeviceId int32, EnableFlag *int32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown

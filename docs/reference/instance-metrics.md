@@ -14,11 +14,15 @@ exporter publishes every Instance of one node for a scrape.
 
 - [The subresource](#the-subresource)
 - [The sample](#the-sample)
+- [One accelerator entry, whatever the mode](#one-accelerator-entry-whatever-the-mode)
 - [Where each figure comes from](#where-each-figure-comes-from)
+- [Which manufacturers measure a share](#which-manufacturers-measure-a-share)
+- [Why a share's figure is absent](#why-a-shares-figure-is-absent)
 - [Scoping and authorization](#scoping-and-authorization)
 - [Degradation rules](#degradation-rules)
 - [The node exporter](#the-node-exporter)
 - [Metric families](#metric-families)
+- [Querying it](#querying-it)
 - [Scraping it](#scraping-it)
 - [Restricting who may scrape](#restricting-who-may-scrape)
 - [Limits](#limits)
@@ -58,9 +62,10 @@ Memory and storage are in **MiB** throughout: the kubelet measures bytes, the ma
 libraries MiB, so the coarser unit is reported rather than mixed in one response. Byte figures
 are **rounded up** — a sub-1 MiB working set reads `1`, never `0`.
 
-An `accelerators[]` entry carries `id`, `memoryTotalMiB`, `memoryUsedMiB`,
+An `accelerators[]` entry carries `id`, `mode`, `memoryTotalMiB`, `memoryUsedMiB`,
 `memoryUtilizationPercent`, `coresUtilizationPercent`, `temperatureCelsius`, `powerUsageWatts`
-and `unhealthy`. Each is **absent when the manufacturer's library did not produce it**.
+and `unhealthy`. Every figure is **the Instance's own**, whatever the allocation did to the card —
+see [One accelerator entry, whatever the mode](#one-accelerator-entry-whatever-the-mode).
 
 Two caveats come with the pairs:
 
@@ -76,6 +81,61 @@ Two caveats come with the pairs:
 > layer alone against the Instance's storage limit, which put two different quantities on the two
 > sides of one percentage. The kubelet evicts on the pod-level aggregate, so that aggregate is
 > the only numerator the limit can be read against, and it is the one `storageUsedMiB` carries.
+
+## One accelerator entry, whatever the mode
+
+**Every mode reports the same fields with the same meaning.** An Instance holding a whole device
+reads the device's own figures, because the device is what it was granted; one holding a **logical
+slice** (`Sliced`) or a **hardware partition** (`Partitioned`) reads that share's quota and that
+share's usage. So "how much memory is this Instance using, and how close is it to its ceiling" is the
+same two fields whatever the allocation did, and a consumer never has to know.
+
+| Field | Unit | Meaning |
+|---|---|---|
+| `id` | — | what the Instance holds: the device's identifier, or under `Partitioned` the **partition's own** — a MIG UUID rather than the parent card's |
+| `mode` | — | how the grant was made: `Exclusive`, `Shared`, `Sliced`, `Partitioned` or `Visibility`. The **name**, spelled the same here and on the `mode` label of every exporter family |
+| `memoryTotalMiB` | MiB | the memory granted: the device's own, a slice's quota, or a partition's own capacity |
+| `memoryUsedMiB` | MiB | the memory measured held **of that grant** |
+| `memoryUtilizationPercent` | 0–100 | `memoryUsedMiB` over `memoryTotalMiB` |
+| `coresUtilizationPercent` | 0–100 | how much of the Instance's **own compute allowance** it was measured using |
+
+> **One entry per grant, not per card.** A card serves one grant in every mode but `Partitioned`,
+> where an Instance may hold several of its partitions at once — one per container. Each is its own
+> entry, keyed by its own `id`, because collapsing them would report one tenant of a card as the card.
+> Two *logical* slices of one card cannot be two entries: a slice has no identity of its own, so both
+> would carry the parent card's `id`. An Instance in that shape reports the card once, with no figures
+> of its own.
+| `temperatureCelsius` | °C | the **whole device's** — a share has none of its own |
+| `powerUsageWatts` | W | the whole device's |
+| `unhealthy` | bool | the whole device's — an unhealthy card carries every share of it down |
+
+A **total comes from the allocation** and is present whenever the allocation can state it. A **used
+figure is a measurement**, and is **absent rather than zero** when nothing on this node could measure
+it. A carved share whose usage could not be measured therefore reports **no usage at all** rather
+than the device's, whose figure counts every other tenant on the card.
+
+Four properties are worth knowing before reading a number off an entry:
+
+- **A used figure may exceed its total, and is not clamped.** It measures the hardware while the
+  total is the quota, so an overshoot is an anomaly to investigate — a leaking quota, a floor in the
+  quota's unit conversion, or driver accounting overhead — and clamping it would present every
+  leaking quota as a perfectly enforced one.
+- **`coresUtilizationPercent` is against the Instance's own allowance, so it may exceed 100 too.** A
+  slice capped at a fifth of a card and saturating that fifth reads `100`, not `20`; one whose shim
+  let it burst past its cap reads above `100`, which is the cap not being enforced and exactly what
+  clamping would hide.
+- **That same denominator makes it coarse under a small cap.** The manufacturers measure the card in
+  whole percent, so a 5% cap can only ever yield multiples of 20 here.
+- **A partition names and sizes itself.** Its identity and its capacity are read on the partition's
+  **own** device handle, so a `1g.10gb` of an H100 reports 9856 MiB — what the driver says — rather
+  than the 10240 the profile name rounds to, or an eighth of the card folded out of the allocation's
+  units. An idle partition reports `0` — measured — rather than an absence. It never reports compute
+  utilization: no manufacturer serves a per-partition figure today.
+
+> **Why** the card's own figures are not reported beside the share's — they answer a different
+> question ("is this card hot"), and putting both in one entry is what made the earlier revision hard
+> to consume: a reader had to know the mode to know which of two places held its own number. The
+> card-wide view belongs to a node- or device-scoped surface, not to the per-Instance one.
 
 ## Where each figure comes from
 
@@ -97,6 +157,72 @@ Two caveats come with the pairs:
   manufacturer's accelerators, so an allocation spanning two is read from both, never
   substituted. Only accelerators in the pod's allocation annotation are returned.
 
+## Which manufacturers measure a share
+
+A carved share's usage exists only where the manufacturer's own library answers a **per-process**
+query. So the totals are available on every backend that can carve a share, while the measurements
+vary by what the vendor exposes — and by whether we have been able to run it against real hardware.
+
+| Manufacturer | `memoryUsedMiB` | `coresUtilizationPercent` | On hardware |
+|---|---|---|---|
+| NVIDIA | ✅ | ✅ | ✅ logical · ✅ MIG partition |
+| AMD | ✅ | ⚠️ driver-dependent | ✅ |
+| T-Head | ✅ | ✅ logical · — MIG partition | ✅ logical · — MIG partition |
+| Ascend | ✅ | — | ✅ |
+| Hygon | ✅ | ⚠️ driver-dependent | — |
+| Cambricon | ✅ | ✅ | — |
+| Iluvatar | ✅ | — | — |
+| Metax | ✅ | — | — |
+
+- **A `—` in one of the first two columns is a capability, not a fault.** The vendor's library
+  offers no entry point for that figure on that backend, so the field is permanently absent there and
+  the [capability gauge](#metric-families) says `unsupported` rather than leaving it unexplained.
+  Ascend is the sharpest case: its per-vNPU compute is not reachable from either published header, so
+  its partitioned NPUs report memory alone.
+- **⚠️ means the entry point exists and your hardware decides.** AMD and Hygon read compute from
+  `cu_occupancy`, which a GFX revision may not measure at all: an RDNA3 GPU returned the invalidation
+  sentinel for every process while reporting memory normally. The figure is then absent per process,
+  with its reason, and the memory beside it is unaffected — never a zero, because a zero would read as
+  idle.
+- **The last column is about evidence, not code.** Every backend is covered by unit tests over
+  recorded vendor payloads; the ones marked `—` have never been run against a driver, because the
+  project has no such card. Read their figures as untested rather than as wrong.
+- **A partition is addressed by the identifier its allocation recorded**, and by nothing else, on
+  both partitioning manufacturers. The alternative is translating the recorded profile name back into
+  a driver profile id, which walks the vendor's whole profile catalog — 17 ids on NVIDIA, 85 on
+  T-Head — on every card of every monitor period. A partition allocated by a Device Manager older
+  than that field therefore reports an absence with a reason until its Pod is allocated again; the
+  parent card's figures are every tenant's, so reporting them as this Instance's would be worse.
+
+## Why a share's figure is absent
+
+An absent figure always has a reason, and the reason is discoverable — on the exporter's
+[capability gauge](#metric-families) and in the Device Manager's log under
+`instance-accelerator-metrics`. The entry itself carries no reason field, which keeps the response
+minimal.
+
+The device's own query decides most of it:
+
+| Reason | Meaning |
+|---|---|
+| `unsupported` | the library serves no such query on this backend — permanent |
+| `permission` | the driver refused the query to the Device Manager's user |
+| `transient_driver_error` | the query failed this pass; the next one tries again |
+| `truncated` | the driver reported more rows than the read accepted; a partial list is never published as a complete one |
+| `invalid_data` | the vendor's own rows contradict the card — a figure above its physical capacity |
+| `bounded` | the node's records exceeded the snapshot's size bound, so this device's were dropped whole |
+| `version_skew` | the Device Manager predates this consumer's schema, so its section cannot be read as what it is |
+
+The rest is attribution. The vendor libraries report **host** process ids, which the Device Manager
+maps to a Pod and container through `/proc/<pid>/cgroup`. A row it cannot place — a process that
+exited mid-read, a host process, a mediating daemon, a Pod the node's index does not carry — makes
+every figure of **that whole device** absent for that sample, with `no_pod_component`, `mediated`,
+`unknown_pod`, `exited` or one of their siblings as the reason.
+
+> **Why** one unplaceable row costs the whole device rather than only itself — dropping the row would
+> publish a partial sum as a complete one, and if the dropped row was the Instance's only process, it
+> would publish a plausible measured zero. A number that is quietly wrong is worse than no number.
+
 ## Scoping and authorization
 
 - Only the named Instance's data is returned: the backing pod matches by name, namespace and the
@@ -107,10 +233,19 @@ Two caveats come with the pairs:
 
 ## Degradation rules
 
-- Unscheduled Instance, no backing pod, or a pod from a previous incarnation of the name → `503
-  ServiceUnavailable`, not partial data; all three are transient, so retry.
+- An Instance **none of whose containers has ever started** → `200` with its declared totals and
+  every measurement zero. Unscheduled, no pod rendered yet, stopped, or holding only a previous
+  incarnation's pod are all this same state: nothing has run, so nothing has been used, and that is
+  an answer rather than a failure. It replaces the three `503`s this surface used to return, so a
+  console needs no branch for an Instance that is merely starting up or stopped.
+- The gate is **"has started", not "is ready"**. A pod can be running with a failing readiness
+  probe, an unready sidecar, or a termination already begun while its main container still holds
+  accelerator memory — reporting zero for that would fabricate an idle measurement. Every trace a
+  container leaves opens the gate: a restart, a previous termination, an init or ephemeral container.
 - Kubelet unreachable and no metrics-server → `503 ServiceUnavailable`, the message naming which
-  source failed and how, so "not served here" is never confused with "returned an error".
+  source failed and how, so "not served here" is never confused with "returned an error". This is the
+  one condition still served as unavailable: something did start, so its usage is a measurement, and
+  no source could take it.
 - Device Manager unreachable, no Ready Device Manager pod for the allocated manufacturer, or a
   stale snapshot → the sample still returns CPU/memory/storage, `accelerators` simply absent; the
   worker logs the reason under `instance-metrics`.
@@ -165,7 +300,7 @@ there is no list of this node's Instances, and every family here is labelled by 
 ## Metric families
 
 Pod-level families carry `namespace`, `instance_name`, `instance_uid` and `node`. Accelerator
-families carry those plus `id`, `index` and `manufacturer` — `index` being the ordinal the
+families carry those plus `id`, `index`, `manufacturer` and `mode` — `index` being the ordinal the
 manufacturer's own tools name the device by, so a figure here lines up with what `nvidia-smi` or
 `rocm-smi` shows on the host. All are gauges.
 
@@ -185,8 +320,24 @@ manufacturer's own tools name the device by, so a figure here lines up with what
 | `gpustack_instance_accelerator_power_usage_watts` | W | `accelerators[].powerUsageWatts` |
 | `gpustack_instance_accelerator_unhealthy` | 0 or 1 | `accelerators[].unhealthy` |
 
-An unmeasured `used` figure is **not published**, exactly as it is absent from the sample. A
-`total` is always published.
+An unmeasured `used` figure is **not published**, exactly as it is absent from the sample. A `total`
+is published whenever the allocation can state it.
+
+One more family explains the absences, and is the only one here that carries **no Instance labels**:
+
+| Family | Labels | Meaning |
+|---|---|---|
+| `gpustack_accelerator_process_capability` | `node`, `manufacturer`, `id`, `entry_point`, `reason` | whether the per-process query answered on this node's driver, `1` or `0` |
+
+`entry_point` is `memory` or `cores`, because a driver commonly serves process memory while refusing
+process utilization; `reason` is empty when the query answered and otherwise one of the
+[reasons above](#why-a-shares-figure-is-absent). It is a property of the node's driver and one of its
+cards rather than of any tenant, so two Instances sharing a card have one answer between them —
+giving it Instance labels would publish that one answer twice.
+
+> **Why** an absent measurement publishes no sample at all rather than a zero — a Prometheus gauge
+> cannot say "unknown", and a zero would read as idle. `rate()` and `avg_over_time()` over a series
+> that disappears are honest about the gap; over a fabricated zero they are not.
 
 The Instance is labeled `instance_name`, **not `instance`**: Prometheus attaches its own
 `instance` target label, and under the default `honor_labels: false` a colliding exposed label is
@@ -197,6 +348,43 @@ target.
 > idiom (bytes, cores, ratios) — they mirror the API fields above one for one, so the two
 > surfaces reporting the same figure can never disagree by a rounding step. The unit is in every
 > name, so nothing is ambiguous, only unidiomatic.
+
+## Querying it
+
+"What is this Instance using" is **one metric name**, in every mode:
+
+```promql
+gpustack_instance_accelerator_memory_used_mib
+gpustack_instance_accelerator_cores_utilization_percent
+```
+
+and "how close is it to its ceiling" is the pair beside them:
+
+```promql
+gpustack_instance_accelerator_memory_utilization_percent
+```
+
+Nothing branches on how the Instance holds the card. `mode` is there to **group or filter** by, not
+to choose a metric with:
+
+```promql
+# The busiest logical slices on the fleet.
+topk(10, gpustack_instance_accelerator_cores_utilization_percent{mode="Sliced"})
+
+# Slices whose compute cap is not being enforced.
+gpustack_instance_accelerator_cores_utilization_percent{mode="Sliced"} > 100
+```
+
+`Shared` is the one mode with no quota to read a ceiling against: the device is granted whole to
+several holders with nothing dividing it, so its entry reports the device's own figures and
+`memoryUtilizationPercent` is a share of the device rather than of anything that Instance was
+promised.
+
+> **Why** `mode` is a label rather than a family of its own — every series in these families is one
+> quantity, "what this Instance was granted and is using", so a label partitions it correctly and
+> `sum by (mode)` is meaningful. Splitting into `…_slice_*` families was the earlier revision's
+> mistake: it made the metric name depend on the allocation, so every dashboard needed a fallback
+> and every `sum()` risked counting a carved Instance twice.
 
 ## Scraping it
 
@@ -262,9 +450,14 @@ changes no existing behaviour; enabling it is recommended on a multi-tenant clus
 Three properties decide whether it does what you expect:
 
 - **It guards a port, not a route.** NetworkPolicy is L3/L4, and `/metrics`, `/monitor/snapshot`,
-  `/readyz`, `/livez` and `/debug/*` all share 32443. Admitting a scraper therefore admits it to
-  `/monitor/snapshot` too — which leaks nothing further, since node-level card metrics are
-  strictly less than what `/metrics` already gave it.
+  `/readyz`, `/livez` and `/debug/*` all share 32443, so admitting a scraper admits it to the
+  snapshot too — and since per-slice reporting the snapshot carries **more** than `/metrics` does:
+  one record per (Pod UID, container, device) for every carved share on the node, plus the
+  diagnostics behind each figure.
+
+  It carries no process ids — those never leave the producer — but it does name which Pod holds
+  which share of which card. Enabling the policy is recommended on a multi-tenant cluster for that
+  reason, and the recommendation is stronger than it was before this surface existed.
 - **It has no peer for "the node".** `ingress.from` accepts only `podSelector`,
   `namespaceSelector` and `ipBlock`, while the kubelet's probes come from the node's host network
   namespace, and upstream leaves node-to-pod traffic implementation-defined.
@@ -287,8 +480,16 @@ it is accepted and never enforced, so the port stays open.
 ## Limits
 
 - **No history.** Both surfaces report the current sample; charting means polling.
-- **Whole accelerators only.** A shared or sliced allocation shows the whole accelerator's
-  figures; per-pod GPU attribution does not exist.
+- **A shared allocation has no ceiling to report.** `Shared` hands a whole card to several Instances
+  with no per-Instance quota, so its entry reports the card's own figures and its utilization is a
+  share of the card rather than of anything that Instance was promised.
+- **An accelerator two containers of one Pod were separately granted reports no figures of its own.**
+  One `accelerators[]` entry cannot hold two grants, and picking one or summing them would report a
+  quota nobody was granted; the card's temperature, power and health still publish. A `Visibility`
+  sidecar is not a second grant — it sees what its sibling holds — and does not trigger this.
+- **An Instance on a node with no accelerators has no accelerator series on the exporter** — the
+  exporter lives where the accelerators are. The subresource still answers for it, and for a
+  stopped Instance: the exporter publishes nothing at all for one, rather than a row of zeros.
 - **Pod-IP networking.** The worker dials the Device Manager pod directly with TLS verification
   skipped, accepted for the self-signed serving certificate. Neither surface is reachable from an
   out-of-cluster worker.

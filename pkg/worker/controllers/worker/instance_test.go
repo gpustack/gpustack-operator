@@ -876,6 +876,16 @@ func TestConvertPodFromInstance_ContainerLimitsCarryTheDeclaredResources(t *test
 			assert.Equal(t, uint64(4000), sample.CPUTotalMilliCores, "spec.resources.cpu 4")
 			assert.Equal(t, uint64(16384), sample.MemoryTotalMiB, "spec.resources.ram 16Gi")
 			assert.Equal(t, uint64(32768), sample.StorageTotalMiB, "spec.resources.localStorage 32Gi")
+
+			// The Pod-less path must total the same declared ceilings as the Pod-derived path
+			// for the same spec.resources, with no Pod involved at all, and measure nothing.
+			fromResources := kubemetrics.NewSampleFromResources(*inst.Spec.Resources)
+			assert.Equal(t, sample.CPUTotalMilliCores, fromResources.CPUTotalMilliCores, "CPU total matches the Pod-derived total")
+			assert.Equal(t, sample.MemoryTotalMiB, fromResources.MemoryTotalMiB, "memory total matches the Pod-derived total")
+			assert.Equal(t, sample.StorageTotalMiB, fromResources.StorageTotalMiB, "storage total matches the Pod-derived total")
+			assert.Nil(t, fromResources.CPUUsedMilliCores, "the Pod-less path measures nothing")
+			assert.Nil(t, fromResources.MemoryUsedMiB, "the Pod-less path measures nothing")
+			assert.Nil(t, fromResources.StorageUsedMiB, "the Pod-less path measures nothing")
 		})
 	}
 }

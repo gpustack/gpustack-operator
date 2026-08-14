@@ -32,6 +32,12 @@
 #              drains the derived flavor, so the InstanceType + ClusterQueue self-tear-down.
 set -uo pipefail
 
+# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
+# on transport alone, and a check that takes such a failure for an answer reports a verdict
+# about the network rather than about the operator.
+E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
+[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+
 NS="${1:?usage: case-6.sh <NS>}"
 NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
 AKEY=nvidia-e2emock                                # non-colliding fake key (never a real product) so the mocked pool

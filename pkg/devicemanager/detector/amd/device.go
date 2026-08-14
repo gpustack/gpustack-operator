@@ -15,6 +15,7 @@ import (
 	"gpustack.ai/gpustack/binding/amdgpu"
 	"gpustack.ai/gpustack/binding/amdsmi"
 	"gpustack.ai/gpustack/binding/hsa"
+	"gpustack.ai/gpustack/binding/rsmi"
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/loggerx"
@@ -34,6 +35,12 @@ type amd struct {
 	once   sync.Once
 	amdgpu *amdgpu.AMDGPU
 	amdsmi *amdsmi.AMDSMI
+	// rsmi serves the per-process query alone. AMD SMI is this backend's library for everything
+	// else, but its per-process device membership entry point answers INVAL on a live process id
+	// (measured on ROCm 7.2.0 / AMD SMI 26.2.1), and without membership a row cannot be told from
+	// another card's — while ROCm SMI answers the same question per device, which is the shape the
+	// figure needs. It is the route rocm-smi itself takes on this stack.
+	rsmi   *rsmi.RSMI
 	hsa    *hsa.HSA
 	logger klog.Logger
 }
@@ -44,6 +51,7 @@ func New(opts device.DetectorOptions) device.Detector {
 	return &amd{
 		amdgpu: amdgpu.New(binding.WithLogger(logger)),
 		amdsmi: amdsmi.New(binding.WithLogger(logger)),
+		rsmi:   rsmi.New(binding.WithLogger(logger)),
 		hsa:    hsa.New(binding.WithLogger(logger)),
 		logger: logger,
 	}
@@ -341,6 +349,13 @@ func (in *amd) init() {
 	in.once.Do(func() {
 		if ret := in.amdgpu.Init(); !ret.IsSuccess() {
 			in.logger.Error(ret, "failed to initialize AMDGPU library")
+		}
+		// ROCm SMI IS LOADED BEFORE AMD SMI, AND THE ORDER IS NOT INTERCHANGEABLE. Measured on
+		// ROCm 7.2.0: with AMD SMI loaded first, the dlopen of ROCm SMI aborts the process with
+		// SIGBUS inside dlopen itself, while this order leaves both libraries working and agreeing
+		// on every accelerator's identity. Whoever reorders these will not find out from a test.
+		if ret := in.rsmi.Init(); !ret.IsSuccess() {
+			in.logger.Error(ret, "failed to initialize ROCm SMI library")
 		}
 		if ret := in.amdsmi.Init(); !ret.IsSuccess() {
 			in.logger.Error(ret, "failed to initialize AMDSMI library")

@@ -23,10 +23,18 @@
 #              - each total equals the sum of the backing pod's container limits, since a total is
 #              the Instance's declaration rather than a measurement;
 #              - the used figures belong to the backing pod (cpu moves after a load burst);
+#              - once stopped, and so holding no Pod at all, the same call still answers: the declared
+#              totals with zero measurements rather than an error, since nothing has run;
 #              - a caller without the instances/metrics grant is denied
 #              (kubectl auth can-i ... --as an unprivileged identity says no).
 # Cleanup:     Trap deletes the test Instance.
 set -uo pipefail
+
+# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
+# on transport alone, and a check that takes such a failure for an answer reports a verdict
+# about the network rather than about the operator.
+E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
+[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
 
 NS="${1:?usage: case-37.sh <NS>}"
 INST=gpustack-e2e-metrics
@@ -192,7 +200,61 @@ else
   record FAIL "used figures track the backing pod" "cpuUsedMilliCores did not rise under load (before=${before} after=${after})"
 fi
 
-# 5. Authorization: an unprivileged identity must not hold get on instances/metrics.
+# 5. An Instance that has started nothing is answered, not refused. Stopping it takes its Pod away,
+# which is the same state as never-scheduled and as a previous incarnation's Pod: nothing has run, so
+# nothing has been used. The surface must serve its DECLARED totals with zero measurements rather than
+# an error — a console reading it should need no branch for an Instance that is merely stopped.
+echo "[case-37] stopping ${INST} to read the no-Pod answer"
+# The field is spec.stop. A merge patch of a field the CRD does not have is accepted, pruned and
+# only WARNED about, so a wrong name here does not fail — the Instance simply keeps running, its Pod
+# never goes away, and this step then reports the surface refusing a stopped Instance that was never
+# stopped. So the patch is verified by reading the field back rather than by its exit code.
+kubectl -n default patch instance "$INST" --type=merge -p '{"spec":{"stop":true}}' >/dev/null 2>&1
+stopped_json=""
+stop_err=""
+if [ "$(kubectl -n default get instance "$INST" -o jsonpath='{.spec.stop}' 2>/dev/null)" != "true" ]; then
+  stop_err="spec.stop did not take — the Instance was never stopped, so this step proves nothing"
+else
+  for _ in $(seq 1 20); do
+    if ! kubectl -n default get pod "$INST" >/dev/null 2>&1; then
+      # Keep stderr: an empty body from a failed request is not the surface refusing to answer, and
+      # reporting it as one blames the operator for the transport.
+      stopped_json=$(kubectl get --raw "$RAW" 2>/dev/null) && [ -n "$stopped_json" ] && break
+      stopped_json=""
+    fi
+    sleep 3
+  done
+  [ -z "$stopped_json" ] && stop_err="GET ${RAW} returned nothing once the Pod was gone — a stopped Instance must still be served"
+fi
+if [ -n "$stop_err" ]; then
+  record FAIL "a stopped instance is answered, not refused" "$stop_err"
+else
+  gate=$(echo "$stopped_json" | python3 -c '
+import json, sys
+
+s = json.load(sys.stdin).get("sample", {})
+bad = []
+for total in ("cpuTotalMilliCores", "memoryTotalMiB", "storageTotalMiB"):
+    if not s.get(total):
+        bad.append("%s is %r, but a total is a declaration and survives having nothing to measure"
+                   % (total, s.get(total)))
+for used in ("cpuUsedMilliCores", "memoryUsedMiB", "storageUsedMiB"):
+    # PRESENT and zero, not omitted: nothing has run, so the usage is known to be none — which is a
+    # measurement this surface can state. An omitted field would say "nobody could measure it", and
+    # accepting that here would let the regression this case exists to catch pass.
+    if s.get(used) != 0:
+        bad.append("%s is %r, but nothing has run so it must be a present zero" % (used, s.get(used)))
+print(("FAIL " + "; ".join(bad)) if bad else "PASS")
+' 2>/dev/null)
+  case "$gate" in
+    PASS) record PASS "a stopped instance is answered, not refused" \
+      "declared totals served with zero measurements, no 503" ;;
+    FAIL*) record FAIL "a stopped instance is answered, not refused" "${gate#FAIL }" ;;
+    *) record FAIL "a stopped instance is answered, not refused" "could not parse the served sample" ;;
+  esac
+fi
+
+# 6. Authorization: an unprivileged identity must not hold get on instances/metrics.
 deny=$(kubectl auth can-i get instances.worker.gpustack.ai/metrics -n default \
   --as system:serviceaccount:default:default 2>/dev/null)
 if [ "$deny" = "no" ]; then

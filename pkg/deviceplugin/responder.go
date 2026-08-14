@@ -141,6 +141,11 @@ type PhysicalSlicedAllocation struct {
 	// occupies. The server folds these into the allocation annotation as the reconciler
 	// ledger's occupied source.
 	Placements Placements
+	// IDs maps each allocated accelerator to its partition's own driver identifier (a MIG UUID).
+	// The allocator reads it when it creates or reuses the partition, and the server folds it into
+	// the allocation annotation so a later reader can address the partition directly instead of
+	// re-deriving it from the profile and the placement.
+	IDs map[Resource]string
 	// Response carries the vendor visible-devices env for the partitions (no logical-slice
 	// artifacts). The server returns it in place of GetContainerAllocateResponse.
 	Response *ContainerAllocateResponse

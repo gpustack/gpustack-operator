@@ -29,11 +29,17 @@
 #              - exactly ONE device manager target on the node carries the pod-level families,
 #                however many manufacturers the node runs;
 #              - every target reports on itself: collector success/duration for source=kubelet;
-#              - accelerator families, where present, carry id and manufacturer beside the
+#              - accelerator families, where present, carry id, manufacturer and mode beside the
 #                Instance's labels.
 # Cleanup:     Trap deletes the test Instance and restores the InstanceType unit spec it patched
 #              when there was one to restore; idempotent, runs on pass AND fail.
 set -uo pipefail
+
+# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
+# on transport alone, and a check that takes such a failure for an answer reports a verdict
+# about the network rather than about the operator.
+E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
+[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
 
 NS="${1:?usage: case-40.sh <NS>}"
 INST=gpustack-e2e-exporter
@@ -246,17 +252,20 @@ VERDICTS
   # 7. Accelerator families, when the node runs an accelerated Instance. A CPU-only node has none,
   #    which is not a failure of anything — say so rather than pass vacuously.
   acc=$(printf '%s' "$SCRAPE" | grep -m1 "^gpustack_instance_accelerator_memory_total_mib{")
-  ACC_WANT="id,index,instance_name,instance_uid,manufacturer,namespace,node"
+  # mode is part of the set: every accelerator family reports the Instance's own grant and usage
+  # whatever the allocation did, and mode is what a query groups or filters by rather than what it
+  # picks a metric name with.
+  ACC_WANT="id,index,instance_name,instance_uid,manufacturer,mode,namespace,node"
   if [ -z "$acc" ]; then
-    record SKIP "accelerator families carry id, index and manufacturer" \
+    record SKIP "accelerator families carry id, index, manufacturer and mode" \
       "no accelerator series on ${NODE}: no Instance here holds an accelerator, so there is none to label"
   else
     acc_labels=$(printf '%s' "$acc" | sed -e 's/^[^{]*{//' -e 's/}.*$//' \
       | tr ',' '\n' | cut -d= -f1 | sort | tr '\n' ',')
     if [ "${acc_labels%,}" = "$ACC_WANT" ]; then
-      record PASS "accelerator families carry id, index and manufacturer" "${acc_labels%,}"
+      record PASS "accelerator families carry id, index, manufacturer and mode" "${acc_labels%,}"
     else
-      record FAIL "accelerator families carry id, index and manufacturer" \
+      record FAIL "accelerator families carry id, index, manufacturer and mode" \
         "label set is ${acc_labels%,}, expected ${ACC_WANT}"
     fi
   fi

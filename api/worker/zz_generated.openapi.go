@@ -541,12 +541,20 @@ func schema_gpustack_api_worker_v1_InstanceAcceleratorMetrics(ref common.Referen
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "InstanceAcceleratorMetrics is the metrics of one accelerator device allocated to an Instance.\n\nAll figures come from the manufacturer's device libraries; a zero value may also mean the library could not read that metric at sampling time.",
+				Description: "InstanceAcceleratorMetrics is one accelerator an Instance holds, reported in the Instance's OWN terms: what it was granted on that accelerator, and what it was measured using of the grant.\n\nEVERY MODE REPORTS THE SAME FIELDS WITH THE SAME MEANING. An Instance holding a whole device reads the device's figures because the device is the grant; one holding a carved share — a logical slice or a hardware partition — reads that share's quota and that share's usage. So a consumer asking \"how much memory is this Instance using, and how close is it to its ceiling\" reads the same two fields whatever the allocation did, and never has to know. Mode says how the grant was made, for a consumer that wants to group by it; nothing else changes shape with it.\n\nA Total comes from the allocation and is present whenever the allocation can state it. A Used figure is a measurement, and is absent — never zero — when nothing on this node could measure it: a manufacturer serving no per-process device query, a driver answering NOT_SUPPORTED, a process on the device that could not be attributed to its container. Absence means \"not measurable here\", and the Device Manager's capability gauge names which of those it was; zero means measured and idle. A carved share whose usage could not be measured therefore reports NO usage rather than the device's, whose figure counts every other tenant on the card.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"id": {
 						SchemaProps: spec.SchemaProps{
-							Description: "ID is the universally unique identifier of the accelerator device.",
+							Description: "ID is the universally unique identifier of the accelerator the Instance holds.\n\nUnder Partitioned this is the PARTITION's own identifier — a MIG UUID rather than the parent card's — because the partition is what the Instance was granted and what every figure below describes. It is also what keeps two partitions of one card, held by one Instance, from collapsing into a single entry under the card's shared identifier.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"mode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Mode is how this accelerator was granted to the Instance: the whole device, a logical slice of it, or a hardware partition of it. It does not change what the figures below mean — it names the mechanism behind them, so that a consumer can group or filter by it.\n\nIt carries the mode's NAME — \"Exclusive\", \"Sliced\", \"Partitioned\" — rather than the enum's wire value, because a name is the only form that says anything to the reader of a metric, and because it is what this same field already reads as on the Device Manager's Prometheus surface. A consumer must never have to translate between the two.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -554,55 +562,55 @@ func schema_gpustack_api_worker_v1_InstanceAcceleratorMetrics(ref common.Referen
 					},
 					"memoryTotalMiB": {
 						SchemaProps: spec.SchemaProps{
-							Description: "MemoryTotalMiB is the total memory of the accelerator in MiB.",
+							Description: "MemoryTotalMiB is the memory the Instance was granted on this accelerator, in MiB: the device's own memory when it holds the device, the quota the allocation charged when it holds a logical slice, and the partition's own memory when it holds a partition.\n\nA slice's quota is folded back from the units the allocation charged — the same memory-anchored basis admission counted credits on — so this denominator can never disagree with what was granted. Absent when nothing could state the grant: a partition whose geometry the driver would not disclose, or a device whose capacity did not reach this sample.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
 					},
 					"memoryUsedMiB": {
 						SchemaProps: spec.SchemaProps{
-							Description: "MemoryUsedMiB is the used memory of the accelerator in MiB.",
+							Description: "MemoryUsedMiB is the memory the Instance was measured holding of that grant, in MiB.\n\nIt measures the hardware rather than any bookkeeping, so it MAY EXCEED MemoryTotalMiB and is not clamped: clamping would present a leaking quota as a perfectly enforced one. Read an overshoot as an anomaly to investigate rather than as proof — the quota's unit conversion floors, and driver accounting overhead can produce one too.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
 					},
 					"memoryUtilizationPercent": {
 						SchemaProps: spec.SchemaProps{
-							Description: "MemoryUtilizationPercent is the memory utilization of the accelerator in [0, 100].",
+							Description: "MemoryUtilizationPercent is MemoryUsedMiB over MemoryTotalMiB, in percent. It is stated rather than left to the consumer so that the percentage and the pair it comes from can never disagree, and it is absent whenever either of them is.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
 					},
 					"coresUtilizationPercent": {
 						SchemaProps: spec.SchemaProps{
-							Description: "CoresUtilizationPercent is the cores utilization of the accelerator in [0, 100].",
+							Description: "CoresUtilizationPercent is how much of the Instance's OWN compute allowance it was measured using, in percent — the device's utilization when it holds the device, and the measured share of the card over the enforced cap when it holds a logical slice. A slice capped at a fifth of a card and saturating that fifth reads 100, not 20.\n\nTWO CONSEQUENCES OF THAT DENOMINATOR, both deliberate. It MAY EXCEED 100, for the same reason the memory pair may: a shim that lets a slice burst past its cap while the card is idle is reporting a cap that is not being enforced, and clamping would hide exactly that. And it is COARSE under a small cap — the manufacturers measure the card in whole percent, so a cap of 5% can only ever yield multiples of 20 here.\n\nAbsent for a hardware partition: no manufacturer serves a per-partition compute figure today.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
 					},
 					"temperatureCelsius": {
 						SchemaProps: spec.SchemaProps{
-							Description: "TemperatureCelsius is the temperature of the accelerator in Celsius.",
+							Description: "TemperatureCelsius is the temperature of the accelerator in Celsius.\n\nWHOLE-DEVICE, in every mode: a carved share has no temperature of its own, and the device's is the only honest answer to what the Instance's hardware is doing thermally.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
 					},
 					"powerUsageWatts": {
 						SchemaProps: spec.SchemaProps{
-							Description: "PowerUsageWatts is the power usage of the accelerator in Watts.",
+							Description: "PowerUsageWatts is the power usage of the accelerator in Watts. Whole-device in every mode, for the reason TemperatureCelsius is.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
 					},
 					"unhealthy": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Unhealthy indicates whether the accelerator is unhealthy.",
+							Description: "Unhealthy indicates whether the accelerator is unhealthy. Whole-device in every mode: an unhealthy card carries every share of it down.",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
 					},
 				},
-				Required: []string{"id"},
+				Required: []string{"id", "mode"},
 			},
 		},
 	}
@@ -1069,7 +1077,7 @@ func schema_gpustack_api_worker_v1_InstanceMetricsSample(ref common.ReferenceCal
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Accelerators holds the metrics of the accelerator devices allocated to the Instance, keyed by device ID; absent when the Instance has no allocated accelerator or the device manager is unreachable.",
+							Description: "Accelerators holds the metrics of the accelerators allocated to the Instance, keyed by the identifier of what it was granted — a device, or a hardware partition of one; absent when the Instance has no allocated accelerator or the device manager is unreachable.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -2184,6 +2192,13 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref common.Refere
 									},
 								},
 							},
+						},
+					},
+					"allocatedPhysicalID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AllocatedPhysicalID is the partition's own identifier, as the driver named it at the moment it was created (an NVIDIA MIG UUID, a T-Head PPU MIG UUID). Part of the same annotation TRANSPORT, empty (omitted) in the aggregated Devices.Status.\n\nIt is recorded because the allocator holds it already and the reader would otherwise have to EARN it back: without it, naming a partition means translating the recorded profile name into a driver profile id, enumerating every instance of that profile, and matching on the placement — dozens of driver calls per card per monitor period, to recover something that was in hand at Allocate time. So it is also the ONLY way a partition is addressed: an allocation carrying none is reported as an absence rather than derived.\n\nIt is NOT a generation marker. These UUIDs are name-based, derived from the parent device and the instance's own identity, so destroying a partition and creating another at the same placement yields the SAME identifier. Treat a recorded id as a fast way to FIND the partition, never as proof that the one found is the one that was granted.",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 					"allocatedLogicalPlacements": {

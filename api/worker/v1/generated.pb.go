@@ -262,6 +262,11 @@ func (m *InstanceAcceleratorMetrics) MarshalToSizedBuffer(dAtA []byte) (int, err
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.Mode)
+	copy(dAtA[i:], m.Mode)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Mode)))
+	i--
+	dAtA[i] = 0x4a
 	if m.Unhealthy != nil {
 		i--
 		if *m.Unhealthy {
@@ -1782,6 +1787,8 @@ func (m *InstanceAcceleratorMetrics) Size() (n int) {
 	if m.Unhealthy != nil {
 		n += 2
 	}
+	l = len(m.Mode)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -2339,6 +2346,7 @@ func (this *InstanceAcceleratorMetrics) String() string {
 		`TemperatureCelsius:` + valueToStringGenerated(this.TemperatureCelsius) + `,`,
 		`PowerUsageWatts:` + valueToStringGenerated(this.PowerUsageWatts) + `,`,
 		`Unhealthy:` + valueToStringGenerated(this.Unhealthy) + `,`,
+		`Mode:` + fmt.Sprintf("%v", this.Mode) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -3362,6 +3370,38 @@ func (m *InstanceAcceleratorMetrics) Unmarshal(dAtA []byte) error {
 			}
 			b := bool(v != 0)
 			m.Unhealthy = &b
+		case 9:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Mode", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Mode = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

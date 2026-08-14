@@ -28,6 +28,12 @@
 # theirs, by design; reach the new cluster with kube-context.sh instead.
 set -uo pipefail
 
+# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
+# on transport alone, and a check that takes such a failure for an answer reports a verdict
+# about the network rather than about the operator.
+E2E_SHIM_DIR="$(cd "$(dirname "$0")/kubectl-shim" 2>/dev/null && pwd)"
+[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+
 MOD="${1:?usage: provision.sh <eks|k3s|nebius> [terraform args...]}"
 shift
 DIR="testing/infra/clusters/${MOD}"

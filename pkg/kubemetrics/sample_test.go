@@ -11,6 +11,8 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubeletstats "k8s.io/kubelet/pkg/apis/stats/v1alpha1"
 	"k8s.io/utils/ptr"
+
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
 
 // podWithLimits builds a pod whose containers carry the given limits, in the shape the
@@ -98,6 +100,55 @@ func TestNewSample(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			sample := NewSample(c.pod)
+
+			assert.Equal(t, c.wantCPUMilliCores, sample.CPUTotalMilliCores)
+			assert.Equal(t, c.wantMemoryMiB, sample.MemoryTotalMiB)
+			assert.Equal(t, c.wantStorageMiB, sample.StorageTotalMiB)
+
+			// A totals-only sample leaves every measurement absent for the caller to fill.
+			assert.Nil(t, sample.CPUUsedMilliCores)
+			assert.Nil(t, sample.MemoryUsedMiB)
+			assert.Nil(t, sample.StorageUsedMiB)
+			assert.False(t, sample.Timestamp.IsZero(), "a sample is always stamped")
+		})
+	}
+}
+
+func TestNewSampleFromResources(t *testing.T) {
+	cases := []struct {
+		name string
+
+		resources workercore.InstanceResources
+
+		wantCPUMilliCores uint64
+		wantMemoryMiB     uint64
+		wantStorageMiB    uint64
+	}{
+		{
+			name: "the declared resources of an Instance",
+			resources: workercore.InstanceResources{
+				CPU:          resource.MustParse("4"),
+				RAM:          resource.MustParse("16Gi"),
+				LocalStorage: resource.MustParse("32Gi"),
+			},
+			wantCPUMilliCores: 4000,
+			wantMemoryMiB:     16384,
+			wantStorageMiB:    32768,
+		},
+		{
+			name: "a sub-MiB size rounds up",
+			resources: workercore.InstanceResources{
+				RAM:          resource.MustParse("512Ki"),
+				LocalStorage: resource.MustParse("1500Ki"),
+			},
+			wantMemoryMiB:  1,
+			wantStorageMiB: 2,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sample := NewSampleFromResources(c.resources)
 
 			assert.Equal(t, c.wantCPUMilliCores, sample.CPUTotalMilliCores)
 			assert.Equal(t, c.wantMemoryMiB, sample.MemoryTotalMiB)

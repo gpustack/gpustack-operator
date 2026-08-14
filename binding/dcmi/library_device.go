@@ -371,3 +371,62 @@ func (l Device) SetShareEnabled(enabled bool) Return {
 	}
 	return Return(dcmiSetDeviceShareEnable(l.cardId, l.deviceId, enableFlag))
 }
+
+const (
+	// maxProcMemInfoRows is how many process rows one read of a device accepts. It is far above
+	// any real workload — a handful of processes hold an accelerator, not hundreds — and the
+	// margin is deliberate, because the library cannot be told where the buffer ends.
+	maxProcMemInfoRows = 256
+	// procMemInfoGuardRows is the tail allocated past maxProcMemInfoRows and left for the library
+	// to overrun into. Its whole purpose is that the overrun lands in memory this package owns.
+	//
+	// It is far larger than the list this read accepts, and that asymmetry is the point: the tail
+	// cannot PREVENT an overrun — nothing can, while the count is output-only — it can only be wide
+	// enough that a plausible one stays inside this allocation. A row is a handful of bytes, so the
+	// whole buffer costs tens of kilobytes per read and buys the difference between a refused read
+	// and corrupted memory elsewhere in the process. The count the driver writes is still checked
+	// against the accepted rows, so widening this never widens what a caller is handed.
+	procMemInfoGuardRows = 4096
+	// procMemInfoGuard marks an unwritten guard row. Process ids are positive, so the library
+	// writing anything at all over a guard row changes it.
+	procMemInfoGuard int32 = -1
+)
+
+// GetProcessMemoryUsage returns one row per process holding memory on the device, with
+// Mem_usage in bytes as the library reports it.
+//
+// The count is an OUTPUT ONLY parameter — measured against driver 25.5.1, a count of 0 passed in
+// still had the first row written and the count overwritten with the real one — so there is no way
+// to tell the library how large the buffer is, and a device with more processes than the buffer
+// holds would have it write past the end. The buffer is therefore over-allocated with a guard tail
+// the library is not expected to reach: a written guard row means the device held more processes
+// than a read accepts, which returns ERROR_LIST_TRUNCATED rather than a shorter list, and the
+// overrun is confined to memory this function owns.
+//
+// A truncated read is an incomplete read, not a small one. Returning the rows that did fit would
+// present part of a device's processes as all of them, which is how a per-tenant figure computed
+// from these rows would come out plausible and wrong.
+func (l Device) GetProcessMemoryUsage() ([]ProcMemInfo, Return) {
+	rows := make([]ProcMemInfo, maxProcMemInfoRows+procMemInfoGuardRows)
+	for i := maxProcMemInfoRows; i < len(rows); i++ {
+		rows[i].Id = procMemInfoGuard
+	}
+
+	var procNum int32
+	ret := Return(dcmiGetDeviceResourceInfo(l.cardId, l.deviceId, &rows[0], &procNum))
+	if !ret.IsSuccess() {
+		return nil, ret
+	}
+
+	for i := maxProcMemInfoRows; i < len(rows); i++ {
+		if rows[i].Id != procMemInfoGuard {
+			return nil, ERROR_LIST_TRUNCATED
+		}
+	}
+	// The count is checked as well as the guard: a library that reports more than it wrote would
+	// otherwise have the rows beyond what it filled read as processes holding no memory.
+	if procNum < 0 || procNum > maxProcMemInfoRows {
+		return nil, ERROR_LIST_TRUNCATED
+	}
+	return rows[:procNum], ret
+}

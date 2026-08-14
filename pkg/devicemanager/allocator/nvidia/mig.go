@@ -566,6 +566,7 @@ func (s *server) ActuatePhysicalSliced(
 	}
 
 	placements := make(map[deviceplugin.Resource][]workercore.AcceleratorPlacement, len(cards))
+	ids := make(map[deviceplugin.Resource]string, len(cards))
 	uuids := make([]string, 0, len(cards))
 	// results records how each accelerator resolved so rollback undoes exactly this call's work
 	// under the same per-accelerator lock the create took (so it never races a concurrent
@@ -613,12 +614,14 @@ func (s *server) ActuatePhysicalSliced(
 		results = append(results, cardResult{card: cardUUID, inst: inst, outcome: outcome})
 		res := resourceForAccelerator(devs, cardUUID)
 		placements[res] = []workercore.AcceleratorPlacement{{Start: inst.Placement.Start, Length: inst.Placement.Length}}
+		ids[res] = inst.UUID
 		uuids = append(uuids, inst.UUID)
 	}
 
 	return &deviceplugin.PhysicalSlicedAllocation{
 		Profile:    profile,
 		Placements: placements,
+		IDs:        ids,
 		Response: &deviceplugin.ContainerAllocateResponse{
 			Envs: map[string]string{"NVIDIA_VISIBLE_DEVICES": strings.Join(uuids, ",")},
 		},

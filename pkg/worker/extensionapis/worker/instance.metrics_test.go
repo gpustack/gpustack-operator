@@ -21,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	kubeletstats "k8s.io/kubelet/pkg/apis/stats/v1alpha1"
+	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -28,9 +29,12 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/devicemanager"
+	"gpustack.ai/gpustack/pkg/devicemanager/detector"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/kubemetrics"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/utils/json"
 )
@@ -44,6 +48,10 @@ const (
 )
 
 var _metricsTestPodUID = types.UID("pod-uid-1")
+
+// _metricsTestCoresResName is the compute-budget request key a sliced nvidia container carries,
+// and the value the slice block reports as its compute quota.
+var _metricsTestCoresResName = nodefeature.GetAcceleratableSlicedCoresPercentageResourceName("nvidia")
 
 // metricsAPIHandler dispatches the fake API server for the metrics tests:
 // the handler reads the backing pod's stats through the loopback Kubernetes
@@ -78,13 +86,24 @@ func useFakeAPI(t *testing.T, h http.Handler) {
 	})
 }
 
-// metricsTestInstance returns a scheduled Instance backed by the test pod.
+// metricsTestInstance returns a scheduled Instance backed by the test pod, declaring the same
+// resources the backing pod's containers carry as limits — so the totals hold whether they are
+// read off the pod or, with no pod at all, off the declaration.
 func metricsTestInstance() *workercore.Instance {
 	return &workercore.Instance{
 		ObjectMeta: meta.ObjectMeta{
 			Namespace: _metricsTestNS,
 			Name:      _metricsTestName,
 			UID:       types.UID(_metricsTestUID),
+		},
+		Spec: workercore.InstanceSpec{
+			InstanceTemplate: workercore.InstanceTemplate{
+				Resources: &workercore.InstanceResources{
+					CPU:          resource.MustParse("2"),
+					RAM:          resource.MustParse("4Gi"),
+					LocalStorage: resource.MustParse("10Gi"),
+				},
+			},
 		},
 		Status: workercore.InstanceStatus{
 			NodeName: _metricsTestNode,
@@ -107,7 +126,7 @@ func metricsTestPod() *core.Pod {
 						ID:           "gpu-group",
 						Manufacturer: "nvidia",
 						Accelerators: []workercore.AcceleratorAllocation{
-							{ID: "gpu-uuid-1"},
+							{ID: "gpu-uuid-1", Mode: workercore.DeviceAllocationModeExclusive},
 						},
 					},
 				},
@@ -140,7 +159,68 @@ func metricsTestPod() *core.Pod {
 				{Name: "sshd"},
 			},
 		},
+		Status: core.PodStatus{
+			Phase: core.PodRunning,
+			ContainerStatuses: []core.ContainerStatus{
+				{
+					Name:  "main",
+					Ready: true,
+					State: core.ContainerState{Running: &core.ContainerStateRunning{}},
+				},
+				{Name: "sshd", State: core.ContainerState{Running: &core.ContainerStateRunning{}}},
+			},
+		},
 	}
+}
+
+// metricsTestSlicedPod returns the backing pod holding a QUARTER of the same card, with the
+// compute cap the allocator enforced on it — the shape the slice block is read off.
+func metricsTestSlicedPod() *core.Pod {
+	pod := metricsTestPod()
+	pod.Spec.Containers[0].Resources.Limits[_metricsTestCoresResName] = *resource.NewQuantity(25, resource.DecimalSI)
+	setPodAllocations(pod, deviceplugin.PodAllocations{
+		"main": {
+			Devices: workercore.DevicesStatus{
+				Groups: []workercore.DevicesAllocationGroup{
+					{
+						ID:           "gpu-group",
+						Manufacturer: "nvidia",
+						Accelerators: []workercore.AcceleratorAllocation{
+							{
+								ID:        "gpu-uuid-1",
+								Mode:      workercore.DeviceAllocationModeSliced,
+								Allocated: nodefeature.ResourceMaxUnits / 4,
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	return pod
+}
+
+// setPodAllocations rewrites the pod's per-container allocation annotation.
+func setPodAllocations(pod *core.Pod, allocations deviceplugin.PodAllocations) {
+	anno, _ := json.Marshal(allocations)
+	pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey] = string(anno)
+}
+
+// metricsTestUnstartedPod returns the backing pod before anything of it has run: it is scheduled
+// and it already holds the card, and no container has started.
+func metricsTestUnstartedPod() *core.Pod {
+	pod := metricsTestSlicedPod()
+	pod.Status = core.PodStatus{
+		Phase: core.PodPending,
+		ContainerStatuses: []core.ContainerStatus{
+			{
+				Name:  "main",
+				State: core.ContainerState{Waiting: &core.ContainerStateWaiting{Reason: "PullingImage"}},
+			},
+			{Name: "sshd", State: core.ContainerState{Waiting: &core.ContainerStateWaiting{}}},
+		},
+	}
+	return pod
 }
 
 // assertTestPodTotals pins the sample's denominators to the backing pod's declared limits.
@@ -180,6 +260,64 @@ func metricsTestDMPod() *core.Pod {
 			},
 		},
 	}
+}
+
+// dmPodAt returns a Ready device manager pod advertising the given loopback server as the
+// endpoint its snapshot is read from.
+func dmPodAt(t *testing.T, srv *httptest.Server) *core.Pod {
+	t.Helper()
+	port, err := strconv.Atoi(strings.TrimPrefix(srv.URL, "https://127.0.0.1:"))
+	require.NoError(t, err)
+
+	pod := metricsTestDMPod()
+	pod.Status.PodIP = "127.0.0.1"
+	pod.Spec.Containers[0].Ports[0].ContainerPort = int32(port)
+	return pod
+}
+
+// denyUpstream stands up all three upstream sources this handler can read — the kubelet stats
+// summary and metrics.k8s.io, both through the API server, and one device manager snapshot — as
+// fakes that FAIL THE TEST when they are called, and returns the device manager pod pointing at
+// the third. It is what turns "the closed gate performs no upstream read" from a claim into an
+// assertion: the handler swallows a device manager failure, so only the served side can catch a
+// call.
+//
+// The handlers under test are built with a zero MaxAge, so the process-wide kubelet readout cache
+// cannot answer a read in place of these fakes and hide it.
+func denyUpstream(t *testing.T) []core.Pod {
+	t.Helper()
+
+	useFakeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("no upstream read is allowed, the API server was asked for %s", r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("no upstream read is allowed, the device manager was asked for %s", r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	return []core.Pod{*dmPodAt(t, srv)}
+}
+
+// assertUnstartedSample pins the answer the closed gate serves: the declared totals, and the
+// three used figures present and zero — a measurement, since nothing has started that could
+// consume anything — with no accelerator section at all.
+func assertUnstartedSample(t *testing.T, sample worker.InstanceMetricsSample) {
+	t.Helper()
+
+	assertTestPodTotals(t, sample)
+	for name, v := range map[string]*uint64{
+		"cpu":     sample.CPUUsedMilliCores,
+		"memory":  sample.MemoryUsedMiB,
+		"storage": sample.StorageUsedMiB,
+	} {
+		require.NotNilf(t, v, "%s usage is measured as zero, not absent", name)
+		assert.Zerof(t, *v, "%s usage", name)
+	}
+	assert.Empty(t, sample.Accelerators)
+	assert.False(t, sample.Timestamp.IsZero())
 }
 
 // metricsTestSummary returns a kubelet summary holding the test pod's stats,
@@ -235,6 +373,30 @@ func metricsTestSnapshot() *devicemanager.MonitorSnapshot {
 				},
 			},
 		},
+	}
+}
+
+// metricsTestSliceSection returns a slice section that measured the allocated card, carrying the
+// given record for the sliced test pod's own container.
+func metricsTestSliceSection(usages ...detector.SliceUsage) *detector.MonitorSliceSection {
+	return &detector.MonitorSliceSection{
+		SchemaVersion: detector.MonitorSliceSchemaVersion,
+		Usages:        usages,
+		Devices: []detector.SliceDeviceDiagnostics{
+			{Manufacturer: "nvidia", DeviceID: "gpu-uuid-1", RowsReturned: uint32(len(usages)), RowsAttributed: uint32(len(usages))},
+		},
+	}
+}
+
+// metricsTestSliceUsage returns the section's record for the sliced test pod's own container.
+func metricsTestSliceUsage(memoryMiB *uint64, coresPercent *uint32) detector.SliceUsage {
+	return detector.SliceUsage{
+		Manufacturer:            "nvidia",
+		PodUID:                  string(_metricsTestPodUID),
+		Container:               "main",
+		DeviceID:                "gpu-uuid-1",
+		MemoryUsedMiB:           memoryMiB,
+		CoresUtilizationPercent: coresPercent,
 	}
 }
 
@@ -307,34 +469,101 @@ func metricsTestKey() types.NamespacedName {
 }
 
 func TestInstanceMetricsHandler_OnGet(t *testing.T) {
-	t.Run("unavailable when unscheduled", func(t *testing.T) {
+	t.Run("answers with zeros, and reads nothing, when no container has started", func(t *testing.T) {
+		dmPods := denyUpstream(t)
+		h := newMetricsTestHandlerWith(t, metricsTestInstance(), metricsTestUnstartedPod(), dmPods)
+
+		obj, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
+		require.NoError(t, err)
+		// The pod already holds a card, so a measuring path would have had something to read
+		// and a neighbour's figures to report as this Instance's.
+		assertUnstartedSample(t, obj.(*worker.InstanceMetrics).Sample)
+	})
+
+	t.Run("measures a running instance whose readiness probe fails", func(t *testing.T) {
+		serveSummary(t, metricsTestSummary(), nil)
+		pod := metricsTestPod()
+		pod.Status.ContainerStatuses[0].Ready = false
+		h := newMetricsTestHandlerWith(t, metricsTestInstance(), pod, nil)
+
+		obj, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
+		require.NoError(t, err)
+
+		// The case the gate's predicate exists for: this pod can be holding accelerator memory,
+		// so it is measured rather than reported idle.
+		sample := obj.(*worker.InstanceMetrics).Sample
+		require.NotNil(t, sample.CPUUsedMilliCores)
+		assert.Equal(t, uint64(500), *sample.CPUUsedMilliCores)
+	})
+
+	t.Run("answers from the declaration when the instance has no pod", func(t *testing.T) {
+		dmPods := denyUpstream(t)
+		builder := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+			WithObjects(metricsTestInstance()).
+			WithIndex(&core.Pod{}, "spec.nodeName", func(obj ctrlcli.Object) []string {
+				return []string{obj.(*core.Pod).Spec.NodeName}
+			})
+		for i := range dmPods {
+			builder = builder.WithObjects(&dmPods[i])
+		}
+		h := &InstanceMetricsHandler{APIReader: builder.Build()}
+
+		obj, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
+		require.NoError(t, err)
+		// The totals come from spec.resources, and match what the rendered pod would have said.
+		assertUnstartedSample(t, obj.(*worker.InstanceMetrics).Sample)
+	})
+
+	t.Run("answers from the declaration when unscheduled", func(t *testing.T) {
+		denyUpstream(t)
 		inst := metricsTestInstance()
 		inst.Status.NodeName = ""
 		h := newMetricsTestHandlerWith(t, inst, metricsTestPod(), nil)
 
-		_, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
-		require.Error(t, err)
-		assert.True(t, kerrors.IsServiceUnavailable(err))
+		obj, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
+		require.NoError(t, err)
+		assertUnstartedSample(t, obj.(*worker.InstanceMetrics).Sample)
 	})
 
-	t.Run("unavailable without a backing pod", func(t *testing.T) {
-		cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(metricsTestInstance()).Build()
+	t.Run("answers from the declaration when the pod belongs to a previous incarnation", func(t *testing.T) {
+		dmPods := denyUpstream(t)
+		pod := metricsTestPod()
+		pod.Labels[deviceplugin.InstancePartOfLabelKey] = "stale-uid"
+		h := newMetricsTestHandlerWith(t, metricsTestInstance(), pod, dmPods)
+
+		obj, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
+		require.NoError(t, err)
+		// The previous incarnation's figures are never served, and its pod is not this
+		// Instance's to measure — so this Instance has no pod, and answers as one.
+		assertUnstartedSample(t, obj.(*worker.InstanceMetrics).Sample)
+	})
+
+	t.Run("totals zero when the instance declares no resources", func(t *testing.T) {
+		denyUpstream(t)
+		inst := metricsTestInstance()
+		inst.Spec.Resources = nil
+		inst.Status.NodeName = ""
+		h := newMetricsTestHandlerWith(t, inst, metricsTestPod(), nil)
+
+		obj, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
+		require.NoError(t, err)
+
+		sample := obj.(*worker.InstanceMetrics).Sample
+		assert.Zero(t, sample.CPUTotalMilliCores)
+		assert.Zero(t, sample.MemoryTotalMiB)
+		assert.Zero(t, sample.StorageTotalMiB)
+		require.NotNil(t, sample.CPUUsedMilliCores)
+		assert.Zero(t, *sample.CPUUsedMilliCores)
+	})
+
+	t.Run("propagates a missing instance as not found", func(t *testing.T) {
+		denyUpstream(t)
+		cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
 		h := &InstanceMetricsHandler{APIReader: cli}
 
 		_, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
 		require.Error(t, err)
-		assert.True(t, kerrors.IsServiceUnavailable(err))
-	})
-
-	t.Run("rejects a pod owned by a previous incarnation", func(t *testing.T) {
-		pod := metricsTestPod()
-		pod.Labels[deviceplugin.InstancePartOfLabelKey] = "stale-uid"
-		h := newMetricsTestHandlerWith(t, metricsTestInstance(), pod, nil)
-
-		_, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
-		require.Error(t, err)
-		// Transient backing state, like an unscheduled Instance: the caller should retry.
-		assert.True(t, kerrors.IsServiceUnavailable(err))
+		assert.True(t, kerrors.IsNotFound(err), "a gate that is not open must not turn 404 into 200")
 	})
 
 	t.Run("returns the current instance-scoped sample", func(t *testing.T) {
@@ -349,12 +578,7 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 			_, _ = w.Write(bs)
 		}))
 		t.Cleanup(dmSrv.Close)
-		dmPort, _ := strconv.Atoi(strings.TrimPrefix(dmSrv.URL, "https://127.0.0.1:"))
-		dmPod := metricsTestDMPod()
-		dmPod.Status.PodIP = "127.0.0.1"
-		dmPod.Spec.Containers[0].Ports[0].ContainerPort = int32(dmPort)
-
-		h := newMetricsTestHandler(t, []core.Pod{*dmPod})
+		h := newMetricsTestHandler(t, []core.Pod{*dmPodAt(t, dmSrv)})
 
 		obj, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
 		require.NoError(t, err)
@@ -377,7 +601,97 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 		// The merged accelerator section: only the allocated card, vendor-native MiB.
 		require.Len(t, sample.Accelerators, 1)
 		assert.Equal(t, "gpu-uuid-1", sample.Accelerators[0].ID)
-		assert.Equal(t, uint64(81920), *sample.Accelerators[0].MemoryTotalMiB)
+		assert.Equal(t, workercore.DeviceAllocationModeExclusive.String(), sample.Accelerators[0].Mode)
+		assert.Equal(t, uint64(81920), *sample.Accelerators[0].MemoryTotalMiB,
+			"the device is the grant, so the device's own capacity is the total")
+	})
+
+	t.Run("carries a sliced instance's own share of the card", func(t *testing.T) {
+		serveSummary(t, metricsTestSummary(), nil)
+
+		snapshot := metricsTestSnapshot()
+		snapshot.Slices = metricsTestSliceSection(
+			metricsTestSliceUsage(ptr.To[uint64](6144), ptr.To[uint32](18)))
+		dmSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			bs, _ := json.Marshal(snapshot)
+			_, _ = w.Write(bs)
+		}))
+		t.Cleanup(dmSrv.Close)
+
+		h := newMetricsTestHandlerWith(t, metricsTestInstance(), metricsTestSlicedPod(),
+			[]core.Pod{*dmPodAt(t, dmSrv)})
+
+		obj, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
+		require.NoError(t, err)
+
+		accelerators := obj.(*worker.InstanceMetrics).Sample.Accelerators
+		require.Len(t, accelerators, 1)
+
+		// Every figure is the Instance's own: the quarter it was granted, what it holds of that
+		// quarter, and the 18% of the card it was measured using restated against its 25% cap.
+		// The card's own 1024 MiB — every tenant on it — appears nowhere.
+		got := accelerators[0]
+		assert.Equal(t, "gpu-uuid-1", got.ID)
+		assert.Equal(t, workercore.DeviceAllocationModeSliced.String(), got.Mode)
+		assert.Equal(t, ptr.To[uint64](20480), got.MemoryTotalMiB, "a quarter of the card")
+		assert.Equal(t, ptr.To[uint64](6144), got.MemoryUsedMiB)
+		assert.Equal(t, ptr.To[uint32](30), got.MemoryUtilizationPercent)
+		assert.Equal(t, ptr.To[uint32](72), got.CoresUtilizationPercent)
+		// The whole card's own readings, which a share has none of.
+		assert.Equal(t, ptr.To[uint32](42), got.TemperatureCelsius)
+	})
+
+	// The partition path end to end, including the wire: the record travels in the snapshot's own
+	// list, so this also pins that the new list survives the encoding the device manager publishes
+	// through. The Pod still carries a compute request, and the cap must not come from it.
+	t.Run("carries a partitioned instance's own share of the card", func(t *testing.T) {
+		serveSummary(t, metricsTestSummary(), nil)
+
+		snapshot := metricsTestSnapshot()
+		snapshot.Slices = &detector.MonitorSliceSection{
+			SchemaVersion: detector.MonitorSliceSchemaVersion,
+			Partitions: []detector.SlicePartition{{
+				Manufacturer: "nvidia", PodUID: string(_metricsTestPodUID), Container: "main",
+				DeviceID: "gpu-uuid-1",
+				// The partition names and sizes itself, off its own handle.
+				ID:             "MIG-aaa",
+				MemoryTotalMiB: ptr.To[uint64](9856),
+				MemoryUsedMiB:  ptr.To[uint64](0),
+				CoresReason:    device.AcceleratorProcessReasonUnsupported,
+			}},
+		}
+		dmSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			bs, _ := json.Marshal(snapshot)
+			_, _ = w.Write(bs)
+		}))
+		t.Cleanup(dmSrv.Close)
+
+		pod := slicedAllocationPod(t, workercore.AcceleratorAllocation{
+			ID: "gpu-uuid-1", Mode: workercore.DeviceAllocationModePartitioned,
+			Allocated:                   nodefeature.ResourceMaxUnits / 8,
+			AllocatedPhysicalProfile:    "1g.10gb",
+			AllocatedPhysicalPlacements: []workercore.AcceleratorPlacement{{Start: 0, Length: 1}},
+		})
+		h := newMetricsTestHandlerWith(t, metricsTestInstance(), pod,
+			[]core.Pod{*dmPodAt(t, dmSrv)})
+
+		obj, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
+		require.NoError(t, err)
+
+		accelerators := obj.(*worker.InstanceMetrics).Sample.Accelerators
+		require.Len(t, accelerators, 1)
+
+		got := accelerators[0]
+		assert.Equal(t, "MIG-aaa", got.ID, "the partition is what the Instance was granted")
+		assert.Equal(t, workercore.DeviceAllocationModePartitioned.String(), got.Mode)
+		assert.Equal(t, ptr.To[uint64](9856), got.MemoryTotalMiB,
+			"the partition's own capacity, not an eighth of the card folded out of the units")
+		// Measured and idle, which is the figure a process-first lookup could not have taken.
+		assert.Equal(t, ptr.To[uint64](0), got.MemoryUsedMiB)
+		assert.Equal(t, ptr.To[uint32](0), got.MemoryUtilizationPercent)
+		assert.Nil(t, got.CoresUtilizationPercent, "no manufacturer serves one per partition")
 	})
 
 	// The degraded source's own branches are pinned in pkg/kubemetrics; what the two cases
@@ -464,10 +778,14 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 // and the manufacturer-and-ID match — is pinned in pkg/devicemanager/detector, beside the
 // snapshot it reads.
 func TestFilterAllocatedAcceleratorMetrics(t *testing.T) {
-	allocGroups := deviceplugin.AllocatedAcceleratorGroupsOf(metricsTestPod())
+	pod := metricsTestPod()
+	allocGroups := deviceplugin.AllocatedAcceleratorGroupsOf(pod)
+	allocations, err := deviceplugin.AllocatedAcceleratorsOf(pod)
+	require.NoError(t, err)
+	grants := kubemetrics.NewAcceleratorGrants(pod, allocations)
 
 	t.Run("maps the allocated device onto the API type, in vendor-native MiB", func(t *testing.T) {
-		got := filterAllocatedAcceleratorMetrics(metricsTestSnapshot(), allocGroups)
+		got := filterAllocatedAcceleratorMetrics(metricsTestSnapshot(), allocGroups, grants)
 		require.Len(t, got, 1)
 
 		accel := got[0]
@@ -483,8 +801,44 @@ func TestFilterAllocatedAcceleratorMetrics(t *testing.T) {
 	})
 
 	t.Run("maps nothing when the filter yields nothing", func(t *testing.T) {
-		assert.Empty(t, filterAllocatedAcceleratorMetrics(metricsTestSnapshot(), nil))
+		assert.Empty(t, filterAllocatedAcceleratorMetrics(metricsTestSnapshot(), nil, grants))
 	})
+}
+
+// slicedAllocationPod returns the sliced test pod with its recorded allocation replaced, so a case
+// states only what it varies.
+func slicedAllocationPod(t *testing.T, accelerators ...workercore.AcceleratorAllocation) *core.Pod {
+	t.Helper()
+	pod := metricsTestSlicedPod()
+	setPodAllocations(pod, deviceplugin.PodAllocations{
+		"main": {
+			Devices: workercore.DevicesStatus{
+				Groups: []workercore.DevicesAllocationGroup{
+					{ID: "gpu-group", Manufacturer: "nvidia", Accelerators: accelerators},
+				},
+			},
+		},
+	})
+	return pod
+}
+
+// TestSliceSectionDistinguishesAbsences pins the one decision the served response cannot carry: two
+// absences reach a client identically — the JSON key is simply omitted — but they are different
+// claims, and the section is where they stay apart. "This device was measured and the figure was not
+// obtainable" answers, while "this section cannot speak for this device" does not answer at all.
+// Whoever adds a reason to the API reads them from here.
+//
+// The resolution those absences flow through is pinned in pkg/kubemetrics, beside the index that
+// makes it; what this package owns is the round trip below.
+func TestSliceSectionDistinguishesAbsences(t *testing.T) {
+	unmeasurable := metricsTestSliceSection(metricsTestSliceUsage(nil, nil))
+	figures, ok := unmeasurable.Figures("nvidia", string(_metricsTestPodUID), "main", "gpu-uuid-1")
+	assert.True(t, ok, "the device was measured")
+	assert.Nil(t, figures.MemoryUsedMiB)
+
+	unanswerable := &detector.MonitorSliceSection{SchemaVersion: detector.MonitorSliceSchemaVersion}
+	_, ok = unanswerable.Figures("nvidia", string(_metricsTestPodUID), "main", "gpu-uuid-1")
+	assert.False(t, ok, "the section carries no such device")
 }
 
 func TestSelectDeviceManagerPod(t *testing.T) {

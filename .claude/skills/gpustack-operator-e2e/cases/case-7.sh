@@ -19,6 +19,12 @@
 # Cleanup:     Trap deletes the test Instance.
 set -uo pipefail
 
+# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
+# on transport alone, and a check that takes such a failure for an answer reports a verdict
+# about the network rather than about the operator.
+E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
+[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+
 NS="${1:?usage: case-7.sh <NS>}"
 INST=gpustack-e2e-portless
 IT=$(kubectl get instancetypes.worker.gpustack.ai \

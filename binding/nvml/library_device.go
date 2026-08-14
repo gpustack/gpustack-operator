@@ -3,6 +3,7 @@ package nvml
 import "C"
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"unsafe"
 
@@ -1128,4 +1129,221 @@ func (l Device) GetGpuInstanceRemainingCapacity(profileId uint32) (uint32, Retur
 	var count uint32
 	ret := nvmlDeviceGetGpuInstanceRemainingCapacity(l.handle, profileId, &count)
 	return count, ret
+}
+
+// maxProcessQueryAttempts bounds a count-then-fill read. The row count a driver reports can grow
+// between the probe and the fill as processes come and go, so a fill that comes back short is
+// retried at the size the driver then asks for. The bound is what makes the retry terminate, and
+// exhausting it reports the insufficiency instead of the buffer the last attempt filled: a
+// truncated list read as a complete one turns processes that exist into processes that do not.
+const maxProcessQueryAttempts = 3
+
+// maxProcessRows caps how many rows a per-process read will allocate for. The count comes from the
+// driver, and a driver whose ABI does not match the header it was generated against — or one that
+// is simply broken — can report a count that has nothing to do with any process list; allocating it
+// would take the whole process down before the attempt bound ever came into play. No real node
+// comes near this many rows: it is thousands of processes on a single accelerator, well past what a
+// node's own process table holds. A count past the ceiling is treated as a read that cannot be
+// completed, exactly like a buffer the driver keeps outgrowing.
+const maxProcessRows uint32 = 4096
+
+// invalidInstanceId is NVML_INVALID_GPU_INSTANCE_ID (nvml.h), the value NVML itself writes for a
+// GPU or compute instance id that does not apply. It is not exported by the generated constants.
+const invalidInstanceId uint32 = 0xFFFFFFFF
+
+// readProcessRows runs the count-then-fill protocol of a per-process query to completion and
+// returns only a complete list. fill is called with no rows to probe the count, then with a sized
+// buffer to fill it, and reports through the count how many rows the driver wrote or now needs.
+//
+// The returned rows are exactly what the driver wrote, in the driver's own units.
+func readProcessRows[T any](fill func(count *uint32, rows []T) Return) ([]T, Return) {
+	// A probe with no buffer reports how many rows the driver holds. The driver answers a
+	// zero-sized buffer with the short-buffer code, which is the probe working, not failing.
+	var count uint32
+	if ret := fill(&count, nil); !ret.IsSuccess() && ret != ERROR_INSUFFICIENT_SIZE {
+		return nil, ret
+	}
+
+	for range maxProcessQueryAttempts {
+		if count == 0 {
+			return nil, SUCCESS
+		}
+		// Refuse a count no process list can have rather than allocating it.
+		if count > maxProcessRows {
+			return nil, ERROR_INSUFFICIENT_SIZE
+		}
+
+		rows := make([]T, count)
+		written := count
+		ret := fill(&written, rows)
+		switch {
+		case ret == ERROR_INSUFFICIENT_SIZE:
+			// The list grew between the probe and the fill. Retry at the size the driver now
+			// asks for; growth has to be strict for the retry to make progress, so a driver
+			// that repeats the size we just tried is stepped past rather than tried again.
+			if written > count {
+				count = written
+			} else {
+				count++
+			}
+		case !ret.IsSuccess():
+			return nil, ret
+		default:
+			// Clamp to the buffer we sized, so a driver reporting more rows written than it was
+			// given cannot drive a slice-out-of-range panic.
+			if written > count {
+				written = count
+			}
+			return rows[:written], ret
+		}
+	}
+
+	return nil, ERROR_INSUFFICIENT_SIZE
+}
+
+// UsedGpuMemoryAvailable reports whether UsedGpuMemory holds a byte count at all.
+//
+// NVML writes VALUE_NOT_AVAILABLE into the field when the driver does not manage the memory it
+// would have to measure. That is a sentinel, not a number: the field is unsigned, so read as a
+// number it is the largest memory figure representable, and a caller that sums or compares it
+// reports an unmeasurable process as a saturated one.
+func (p ProcessInfo) UsedGpuMemoryAvailable() bool {
+	var notAvailable int64 = VALUE_NOT_AVAILABLE
+	return p.UsedGpuMemory != uint64(notAvailable)
+}
+
+// GetComputeRunningProcesses returns one row per compute process running on this device, with
+// UsedGpuMemory in bytes as NVML reports it — see UsedGpuMemoryAvailable for the sentinel it
+// writes when the memory of a process cannot be measured, which is never rewritten to zero here.
+//
+// Pids are host pids: a containerized process is named by the pid the host sees, not the pid it
+// sees itself, and no translation happens here.
+//
+// The driver's newest layout is preferred and older ones are accepted in order, so that a driver
+// missing the versioned symbol degrades instead of failing. The two older layouts carry fewer
+// fields than they are returned in: the v1 layout has no instance ids at all, so those come back
+// as NVML's own invalid-instance value rather than as instance 0.
+func (l Device) GetComputeRunningProcesses() ([]ProcessInfo, Return) {
+	switch {
+	case l.so.Lookup("nvmlDeviceGetComputeRunningProcesses_v3") == nil:
+		return readProcessRows(func(count *uint32, rows []ProcessInfo) Return {
+			if len(rows) == 0 {
+				return nvmlDeviceGetComputeRunningProcesses_v3(l.handle, count, nil)
+			}
+			return nvmlDeviceGetComputeRunningProcesses_v3(l.handle, count, &rows[0])
+		})
+	case l.so.Lookup("nvmlDeviceGetComputeRunningProcesses_v2") == nil:
+		return readProcessRows(func(count *uint32, rows []ProcessInfo) Return {
+			if len(rows) == 0 {
+				return nvmlDeviceGetComputeRunningProcesses_v2(l.handle, count, nil)
+			}
+			// The v2 and v3 layouts hold the same fields, but they are distinct struct types, so
+			// the driver fills a v2 buffer and the fields are copied across by name rather than
+			// the bytes being reinterpreted.
+			buf := make([]ProcessInfo_v2, len(rows))
+			ret := nvmlDeviceGetComputeRunningProcesses_v2(l.handle, count, &buf[0])
+			if !ret.IsSuccess() {
+				return ret
+			}
+			for i := range buf[:min(int(*count), len(buf))] {
+				rows[i] = ProcessInfo{
+					Pid:               buf[i].Pid,
+					UsedGpuMemory:     buf[i].UsedGpuMemory,
+					GpuInstanceId:     buf[i].GpuInstanceId,
+					ComputeInstanceId: buf[i].ComputeInstanceId,
+				}
+			}
+			return ret
+		})
+	case l.so.Lookup("nvmlDeviceGetComputeRunningProcesses") == nil:
+		return readProcessRows(func(count *uint32, rows []ProcessInfo) Return {
+			if len(rows) == 0 {
+				return nvmlDeviceGetComputeRunningProcesses(l.handle, count, nil)
+			}
+			buf := make([]ProcessInfo_v1, len(rows))
+			ret := nvmlDeviceGetComputeRunningProcesses(l.handle, count, &buf[0])
+			if !ret.IsSuccess() {
+				return ret
+			}
+			for i := range buf[:min(int(*count), len(buf))] {
+				rows[i] = ProcessInfo{
+					Pid:               buf[i].Pid,
+					UsedGpuMemory:     buf[i].UsedGpuMemory,
+					GpuInstanceId:     invalidInstanceId,
+					ComputeInstanceId: invalidInstanceId,
+				}
+			}
+			return ret
+		})
+	}
+	return nil, ERROR_FUNCTION_NOT_FOUND
+}
+
+// GetProcessUtilization returns the per-process utilization samples NVML has recorded since
+// lastSeenTimeStamp, a CPU timestamp in microseconds; zero asks for every sample the driver still
+// holds. Sm, Mem, Enc and Dec are percentages as the driver reports them.
+//
+// The samples are returned raw, because collapsing them would destroy what they mean. NVML emits
+// one row per process per sample period, only for a process that had non-zero utilization in that
+// period, so a process can appear many times with different timestamps and a process that was
+// idle throughout does not appear at all. Which of a pid's rows counts is the caller's decision.
+//
+// A pid absent from the result is therefore not a pid at zero, and ERROR_NOT_FOUND — no sample at
+// all since lastSeenTimeStamp — is returned as itself rather than as an empty list. NVML does not
+// support this query on a MIG-enabled device, which surfaces as ERROR_NOT_SUPPORTED.
+//
+// Two symbols carry this query and the newer one is preferred, so a driver that exposes only one of
+// them still reports. Both are read through the sample fields they share; the newer layout's JPEG
+// and OFA utilization are not surfaced by this method at all, which is their absence rather than a
+// zero reading.
+func (l Device) GetProcessUtilization(lastSeenTimeStamp uint64) ([]ProcessUtilizationSample, Return) {
+	switch {
+	case l.so.Lookup("nvmlDeviceGetProcessesUtilizationInfo") == nil:
+		return readProcessRows(func(count *uint32, rows []ProcessUtilizationSample) Return {
+			// This symbol carries the count inside the versioned struct rather than beside it,
+			// and a nil array is how it is asked for a count.
+			buf := make([]ProcessUtilizationInfo_v1, len(rows))
+			info := ProcessesUtilizationInfo{
+				ProcessSamplesCount: *count,
+				LastSeenTimeStamp:   lastSeenTimeStamp,
+			}
+			info.Version = STRUCT_VERSION(info, 1)
+			if len(rows) > 0 {
+				// The struct passed to C carries a pointer to this Go array, which the cgo pointer
+				// rules forbid unless the array is pinned: the checker refuses the call outright,
+				// and it is right to — an unpinned array may be moved while the driver holds its
+				// address. Pinning for the length of the call is what makes the layout legal, and
+				// the array must stay Go memory because the caller reads the rows back out of it.
+				var pinner runtime.Pinner
+				pinner.Pin(&buf[0])
+				defer pinner.Unpin()
+
+				info.ProcUtilArray = &buf[0]
+			}
+			ret := nvmlDeviceGetProcessesUtilizationInfo(l.handle, &info)
+			*count = info.ProcessSamplesCount
+			if !ret.IsSuccess() || len(rows) == 0 {
+				return ret
+			}
+			for i := range buf[:min(int(info.ProcessSamplesCount), len(buf))] {
+				rows[i] = ProcessUtilizationSample{
+					Pid:       buf[i].Pid,
+					TimeStamp: buf[i].TimeStamp,
+					SmUtil:    buf[i].SmUtil,
+					MemUtil:   buf[i].MemUtil,
+					EncUtil:   buf[i].EncUtil,
+					DecUtil:   buf[i].DecUtil,
+				}
+			}
+			return ret
+		})
+	case l.so.Lookup("nvmlDeviceGetProcessUtilization") == nil:
+		return readProcessRows(func(count *uint32, rows []ProcessUtilizationSample) Return {
+			if len(rows) == 0 {
+				return nvmlDeviceGetProcessUtilization(l.handle, nil, count, lastSeenTimeStamp)
+			}
+			return nvmlDeviceGetProcessUtilization(l.handle, &rows[0], count, lastSeenTimeStamp)
+		})
+	}
+	return nil, ERROR_FUNCTION_NOT_FOUND
 }

@@ -204,6 +204,10 @@ ownership slots each) requests. What differs is whether one accelerator can be *
   catalog surfaces every pool's hardware profile.
 - **SSH-enabled Instances** — launch a workload with an SSH sidecar that shares its sliced accelerator
   through a capability-stripped shell: interactive development on a slice.
+- **Per-slice utilization, not just per-card** — an Instance holding a carved share reads *its own*
+  memory and compute against *its own* quota, on both the `instances/<name>/metrics` subresource and
+  the node's Prometheus exporter, with every unmeasurable figure absent rather than zeroed — see
+  [Instance Metrics](./docs/reference/instance-metrics.md).
 - **Multi-cluster aggregation** — the `worker-gateway` aggregates InstanceTypes and capacity across
   upstream clusters into a single view.
 
@@ -216,6 +220,7 @@ The most-used pages, for running the operator, operating a cluster, and changing
 | [Architecture](./docs/architecture.md) | What the operator builds, and the vocabulary the rest assumes |
 | [Accelerator Requests](./docs/accelerator-requests.md) | Every resource key, and the rules admission enforces |
 | [Walkthrough](./docs/walkthrough.md) | A recorded end-to-end run with real output |
+| [Instance Metrics](./docs/reference/instance-metrics.md) | Every figure the two metrics surfaces report, per card and per slice |
 | [Settings & Environment Variables](./docs/settings.md) | Runtime settings and every `GPUSTACK_*` |
 | [NVIDIA MIG Operations](./docs/operation/nvidia-mig.md) | The MIG runbook, mode changes included |
 | [T-Head MIG Operations](./docs/operation/thead-mig.md) | The same runbook for T-Head's own partitioning |

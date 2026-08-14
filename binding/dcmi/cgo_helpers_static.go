@@ -124,3 +124,12 @@ func (info *PcieInfoAll) PassRef() (*C.struct_dcmi_pcie_info_all, *cgoAllocMap) 
 func (x *MultiUtilizationInfo) PassRef() (*C.struct_dcmi_multi_utilization_info, *cgoAllocMap) {
 	return (*C.struct_dcmi_multi_utilization_info)(unsafe.Pointer(x)), cgoAllocsUnknown
 }
+
+// PassRef returns a reference to C object as it is or allocates a new C object of this type.
+//
+// It hands over the Go object's own address rather than a copy, which is what lets a caller pass
+// the first element of a slice and have the library fill the elements after it. That matters here
+// because this is the only struct the library writes as an array.
+func (x *ProcMemInfo) PassRef() (*C.struct_dcmi_proc_mem_info, *cgoAllocMap) {
+	return (*C.struct_dcmi_proc_mem_info)(unsafe.Pointer(x)), cgoAllocsUnknown
+}
