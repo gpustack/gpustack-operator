@@ -8,6 +8,12 @@
 # before any mutation. This script NEVER switches context and NEVER mutates.
 set -uo pipefail
 
+# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
+# on transport alone, and a check that takes such a failure for an answer reports a verdict
+# about the network rather than about the operator.
+E2E_SHIM_DIR="$(cd "$(dirname "$0")/kubectl-shim" 2>/dev/null && pwd)"
+[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+
 echo "== required host tools =="
 command -v kubectl helm docker || echo "MISSING a required tool (kubectl / helm / docker)"
 

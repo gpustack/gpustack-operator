@@ -103,6 +103,12 @@
 #              tolerates an already-settled ledger.
 set -uo pipefail
 
+# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
+# on transport alone, and a check that takes such a failure for an answer reports a verdict
+# about the network rather than about the operator.
+E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
+[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+
 NS="${1:?usage: case-38.sh <NS>}"
 
 # AMD's resource family. Hardcoded rather than derived: the case is gated on the amd manufacturer

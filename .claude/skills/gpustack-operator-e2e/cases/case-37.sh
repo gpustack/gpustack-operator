@@ -30,6 +30,12 @@
 # Cleanup:     Trap deletes the test Instance.
 set -uo pipefail
 
+# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
+# on transport alone, and a check that takes such a failure for an answer reports a verdict
+# about the network rather than about the operator.
+E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
+[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+
 NS="${1:?usage: case-37.sh <NS>}"
 INST=gpustack-e2e-metrics
 IT=$(kubectl get instancetypes.worker.gpustack.ai \
@@ -199,18 +205,29 @@ fi
 # nothing has been used. The surface must serve its DECLARED totals with zero measurements rather than
 # an error — a console reading it should need no branch for an Instance that is merely stopped.
 echo "[case-37] stopping ${INST} to read the no-Pod answer"
-kubectl -n default patch instance "$INST" --type=merge -p '{"spec":{"stopped":true}}' >/dev/null 2>&1
+# The field is spec.stop. A merge patch of a field the CRD does not have is accepted, pruned and
+# only WARNED about, so a wrong name here does not fail — the Instance simply keeps running, its Pod
+# never goes away, and this step then reports the surface refusing a stopped Instance that was never
+# stopped. So the patch is verified by reading the field back rather than by its exit code.
+kubectl -n default patch instance "$INST" --type=merge -p '{"spec":{"stop":true}}' >/dev/null 2>&1
 stopped_json=""
-for _ in $(seq 1 20); do
-  if ! kubectl -n default get pod "$INST" >/dev/null 2>&1; then
-    stopped_json=$(kubectl get --raw "$RAW" 2>/dev/null)
-    [ -n "$stopped_json" ] && break
-  fi
-  sleep 3
-done
-if [ -z "$stopped_json" ]; then
-  record FAIL "a stopped instance is answered, not refused" \
-    "GET ${RAW} returned nothing once the Pod was gone — a stopped Instance must still be served"
+stop_err=""
+if [ "$(kubectl -n default get instance "$INST" -o jsonpath='{.spec.stop}' 2>/dev/null)" != "true" ]; then
+  stop_err="spec.stop did not take — the Instance was never stopped, so this step proves nothing"
+else
+  for _ in $(seq 1 20); do
+    if ! kubectl -n default get pod "$INST" >/dev/null 2>&1; then
+      # Keep stderr: an empty body from a failed request is not the surface refusing to answer, and
+      # reporting it as one blames the operator for the transport.
+      stopped_json=$(kubectl get --raw "$RAW" 2>/dev/null) && [ -n "$stopped_json" ] && break
+      stopped_json=""
+    fi
+    sleep 3
+  done
+  [ -z "$stopped_json" ] && stop_err="GET ${RAW} returned nothing once the Pod was gone — a stopped Instance must still be served"
+fi
+if [ -n "$stop_err" ]; then
+  record FAIL "a stopped instance is answered, not refused" "$stop_err"
 else
   gate=$(echo "$stopped_json" | python3 -c '
 import json, sys

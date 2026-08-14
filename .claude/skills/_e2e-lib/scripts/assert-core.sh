@@ -12,6 +12,12 @@
 # then append their skill-specific assertions.
 set -uo pipefail
 
+# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
+# on transport alone, and a check that takes such a failure for an answer reports a verdict
+# about the network rather than about the operator.
+E2E_SHIM_DIR="$(cd "$(dirname "$0")/kubectl-shim" 2>/dev/null && pwd)"
+[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+
 NS="${1:?usage: assert-core.sh <NS> [RELEASE]}"
 RELEASE="${2:-gpustack-operator}"
 WORKER=deploy/gpustack-operator-worker
@@ -60,12 +66,21 @@ for api in v1.gpustack.ai v1.worker.gpustack.ai; do
   fi
 done
 
-# 4. CRDs established.
+# 4. CRDs established. A query that FAILED is not an answer of "absent": against a remote endpoint
+#    the read can die on transport alone, and swallowing stderr turns that into a verdict blaming
+#    the operator for the network. Retry the transport, stop at once on a real NotFound, and report
+#    whatever actually came back.
 for crd in instances.worker.gpustack.ai devices.worker.gpustack.ai; do
-  if kubectl get crd "$crd" >/dev/null 2>&1; then
+  err="" ok=no
+  for _ in 1 2 3 4 5; do
+    err=$(kubectl get crd "$crd" -o name 2>&1 >/dev/null) && { ok=yes; break; }
+    case "$err" in *NotFound*) break ;; esac
+    sleep 3
+  done
+  if [ "$ok" = yes ]; then
     record PASS "crd established" "$crd"
   else
-    record FAIL "crd established" "$crd missing"
+    record FAIL "crd established" "$crd unreadable: ${err:-missing}"
   fi
 done
 

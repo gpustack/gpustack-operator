@@ -21,9 +21,10 @@
 #   E2E_KUBECTL_REAL      path to the real kubectl, instead of searching PATH
 #
 # Two deliberate restrictions:
-#   - Only READ-ONLY verbs are retried. Re-running a create/patch/delete that already reached the
-#     server would turn a network blip into an AlreadyExists or a conflict — a worse failure than
-#     the one being papered over.
+#   - Only READ-ONLY verbs and `apply` are retried — `apply` because it declares a desired state, so
+#     re-sending it converges on the same object. Re-running a create/patch/delete that already
+#     reached the server would instead turn a network blip into an AlreadyExists or a conflict — a
+#     worse failure than the one being papered over.
 #   - Only a TRANSPORT failure is retried, matched on stderr. A NotFound is a real answer, and the
 #     poll loops that ask for one are the hottest calls in the suite; retrying those would add
 #     seconds to every iteration.
@@ -59,12 +60,20 @@ for arg in "$@"; do
   case "$BOUND_VERBS" in *" $arg "*) VERB="$arg"; break ;; esac
 done
 
-# A followed log stream is neither bounded nor retried.
-if [ "$VERB" = logs ]; then
-  for arg in "$@"; do
-    case "$arg" in -f | --follow | --follow=true) VERB="" ;; esac
-  done
-fi
+# A followed log stream and a watched get are streams, not requests: they are meant to stay open,
+# so neither a timeout nor a retry applies to them.
+case "$VERB" in
+  logs)
+    for arg in "$@"; do
+      case "$arg" in -f | --follow | --follow=true) VERB="" ;; esac
+    done
+    ;;
+  get)
+    for arg in "$@"; do
+      case "$arg" in -w | --watch | --watch=true | --watch-only | --watch-only=true) VERB="" ;; esac
+    done
+    ;;
+esac
 
 # Nothing to do for an unrecognized, streaming or waiting call: hand it over untouched, so stdin,
 # stdout, stderr and the exit code are the real kubectl's.
@@ -78,21 +87,46 @@ case " $* " in
   *) ARGS+=("--request-timeout=$TIMEOUT") ;;
 esac
 
-case "$READ_VERBS" in
-  *" $VERB "*) : ;;
-  *) exec "$REAL" "${ARGS[@]}" ;; # bounded, but a mutation is never re-sent
+# `apply` is the one mutation that is idempotent by construction: it declares a desired state, so a
+# second send converges on the same object whether or not the first one arrived. It is also the call
+# a case cannot afford to lose — it is how every test object is created, and a lost one is reported
+# later as the operator failing to admit a workload that was never submitted. Every other mutation
+# stays single-shot: re-running a `create` or a `patch` that did reach the server would turn a
+# network blip into an AlreadyExists or a conflict — a worse failure than the one being papered over.
+SPOOL=""
+case "$VERB" in
+  apply)
+    # `apply -f -` reads the manifest from stdin, which the first attempt consumes. Spool it so every
+    # attempt gets the same bytes; without this the retry would apply an empty document.
+    case " $* " in
+      *" -f - "* | *" --filename=- "*)
+        SPOOL="$(mktemp)"
+        cat >"$SPOOL"
+        ;;
+    esac
+    ;;
+  *)
+    case "$READ_VERBS" in
+      *" $VERB "*) : ;;
+      *) exec "$REAL" "${ARGS[@]}" ;; # bounded, but a mutation is never re-sent
+    esac
+    ;;
 esac
 
-# A read-only verb: retry only a transport failure.
+# Retry only a transport failure.
 transient() {
   grep -qiE 'Unable to connect to the server|connection refused|connection reset|no such host|i/o timeout|TLS handshake timeout|context deadline exceeded|Client\.Timeout|unexpected EOF|getting credentials|exec plugin|http2:|EOF$' "$1"
 }
 
 errf="$(mktemp)"
-trap 'rm -f "$errf"' EXIT
+trap 'rm -f "$errf" "${SPOOL:-}"' EXIT
 attempt=0
 while :; do
-  "$REAL" "${ARGS[@]}" 2>"$errf"
+  if [ -n "$SPOOL" ]; then
+    "$REAL" "${ARGS[@]}" <"$SPOOL" 2>"$errf"
+  else
+    "$REAL" "${ARGS[@]}" 2>"$errf"
+  fi
   rc=$?
   [ "$rc" -eq 0 ] && break
   [ "$attempt" -ge "$RETRIES" ] && break

@@ -25,6 +25,12 @@
 #              return to Active so a following case still finds a healthy chain.
 set -uo pipefail
 
+# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
+# on transport alone, and a check that takes such a failure for an answer reports a verdict
+# about the network rather than about the operator.
+E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
+[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+
 NS="${1:?usage: case-3.sh <NS>}"
 # Target the general (CPU) pool: non-accelerated (no GPU needed) and fed by every managed node, so
 # the case behaves the same on a 1-node local cluster and an N-node real one.

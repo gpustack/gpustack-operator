@@ -32,6 +32,12 @@
 # See gpustack-operator-e2e/references/packaged-image-deploy.md for the package<->chart image contract.
 set -uo pipefail
 
+# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
+# on transport alone, and a check that takes such a failure for an answer reports a verdict
+# about the network rather than about the operator.
+E2E_SHIM_DIR="$(cd "$(dirname "$0")/kubectl-shim" 2>/dev/null && pwd)"
+[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+
 NS="${1:?usage: deploy.sh <NS> <TAG> [extra --set args...]}"
 TAG="${2:?usage: deploy.sh <NS> <TAG> [extra --set args...]}"
 shift 2
@@ -42,9 +48,40 @@ CHART="deploy/gpustack-operator/chart"
 HELM=helm
 [ -x .sbin/helm ] && HELM=.sbin/helm
 
-echo "== helm install gpustack-operator into ${NS} (image tag ${TAG}) =="
-"$HELM" install gpustack-operator "$CHART" \
-  -n "$NS" --create-namespace \
-  --set image.tag="$TAG" \
-  --set image.pullPolicy=IfNotPresent \
-  "$@"
+# An install that does not complete is the expensive failure here, not one that fails outright:
+# helm creates the subcharts' cluster-scoped RBAC early, and if the run is interrupted — a jittery
+# API endpoint, a cancelled command, a control-plane restart — `helm uninstall` has no release
+# record naming those objects, so the NEXT install refuses to adopt them and the harness is wedged
+# until somebody removes them by hand. So each attempt cleans up after itself before the next one.
+#
+# Only the whole install is retried, never a partial resume: helm has no resumable install, and
+# `--atomic` would roll back on the first jitter and cost the same time again.
+ATTEMPTS="${E2E_DEPLOY_ATTEMPTS:-3}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+for attempt in $(seq 1 "$ATTEMPTS"); do
+  echo "== helm install gpustack-operator into ${NS} (image tag ${TAG})${attempt:+  [attempt ${attempt}/${ATTEMPTS}]} =="
+  # The status is captured from the install itself, never from an `if` around it: a compound
+  # command whose condition fails and which has no `else` branch exits 0, so `rc=$?` after
+  # `if helm install; then exit 0; fi` reads 0 on every failure — and the last attempt would
+  # then exit 0 too, reporting a wholly failed install as a successful one.
+  "$HELM" install gpustack-operator "$CHART" \
+    -n "$NS" --create-namespace \
+    --set image.tag="$TAG" \
+    --set image.pullPolicy=IfNotPresent \
+    "$@"
+  rc=$?
+  [ "$rc" -eq 0 ] && exit 0
+
+  if [ "$attempt" -ge "$ATTEMPTS" ]; then
+    echo "install failed after ${ATTEMPTS} attempt(s)" >&2
+    exit "$rc"
+  fi
+
+  # Clear whatever the failed attempt left: the release record if one exists, and the orphaned
+  # cluster-scoped objects that block re-adoption. teardown.sh is the same cleanup the suite ends
+  # with, so this needs no second implementation to drift from it.
+  echo "-- attempt ${attempt} failed; clearing its residue before retrying" >&2
+  bash "${HERE}/teardown.sh" "$NS" >/dev/null 2>&1 || true
+  sleep "${E2E_DEPLOY_BACKOFF:-20}"
+done

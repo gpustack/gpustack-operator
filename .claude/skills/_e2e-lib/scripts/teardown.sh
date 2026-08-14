@@ -16,6 +16,12 @@
 # Terminating on the orphaned aggregated APIServices).
 set -uo pipefail
 
+# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
+# on transport alone, and a check that takes such a failure for an answer reports a verdict
+# about the network rather than about the operator.
+E2E_SHIM_DIR="$(cd "$(dirname "$0")/kubectl-shim" 2>/dev/null && pwd)"
+[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+
 NS="${1:?usage: teardown.sh <NS>}"
 # Prefer the client hack/lib/helm.sh pins (3.21+). A PATH helm can be old enough to lack
 # flags this suite needs — a 3.13 client has no --take-ownership at all.
@@ -67,6 +73,54 @@ for r in apiservice mutatingwebhookconfigurations validatingwebhookconfiguration
   kubectl get "$r" -o name 2>/dev/null \
     | grep -Ei "$gpustack_pattern" \
     | xargs -r -I{} kubectl delete {} --ignore-not-found 2>/dev/null || true
+done
+
+# 3b. Delete the cluster-scoped RBAC of the operator and its subcharts, which `helm uninstall`
+#     leaves behind whenever the install that created it did not complete. A HALF-INSTALLED release
+#     is the case this exists for: helm creates the subcharts' ClusterRoles early, a later step
+#     fails or is interrupted, and `helm uninstall` then has no release record naming them. The next
+#     install refuses to adopt them —
+#
+#       Error: ClusterRole "kueue-batch-admin-role" exists and cannot be imported into the current
+#       release: invalid ownership metadata; missing key "meta.helm.sh/release-name"
+#
+#     — so the harness is wedged until they are removed by hand. Nothing else in this script reaches
+#     them: the label sweeps below match only what carries our own part-of label, and these carry
+#     the subchart's.
+#
+#     A ClusterRole belonging to somebody ELSE's Helm release is never touched: only one owned by
+#     the release under teardown, or one owned by no release at all (which is what an interrupted
+#     install leaves), is deleted. That is what keeps a cluster running its own Kueue safe from a
+#     name match.
+for r in clusterroles clusterrolebindings; do
+  kubectl get "$r" -o json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+import re
+pattern = re.compile(r"gpustack|kueue|nfd|node-feature", re.I)
+release = sys.argv[1]
+for o in doc.get("items", []):
+    meta = o.get("metadata", {})
+    name = meta.get("name", "")
+    if not pattern.search(name):
+        continue
+    owner = (meta.get("annotations") or {}).get("meta.helm.sh/release-name")
+    if owner == release:
+        print(name)
+        continue
+    # An object with no Helm ownership annotation is the wedge this sweep exists for — but it is
+    # also what a cluster whose Kueue was installed from raw manifests looks like, and deleting
+    # that would destroy RBAC belonging to somebody else on a name match alone. Helm labels
+    # everything it creates, so requiring its label keeps the sweep to objects Helm made and lost.
+    if owner in (None, ""):
+        labels = meta.get("labels") or {}
+        if labels.get("app.kubernetes.io/managed-by") == "Helm":
+            print(name)
+' gpustack-operator 2>/dev/null \
+    | xargs -r -I{} kubectl delete "$r" {} --ignore-not-found 2>/dev/null || true
 done
 
 # 4. Strip the finalizers that pin objects once their controllers are gone. Kueue pins

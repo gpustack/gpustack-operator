@@ -28,6 +28,12 @@
 #                      command, never in a file.
 set -uo pipefail
 
+# Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
+# on transport alone, and a check that takes such a failure for an answer reports a verdict
+# about the network rather than about the operator.
+E2E_SHIM_DIR="$(cd "$(dirname "$0")/kubectl-shim" 2>/dev/null && pwd)"
+[ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
+
 TAG="${1:?usage: build-load.sh <TAG>   (e.g. dev-$(git rev-parse --short HEAD))}"
 
 ##############################################################################
@@ -52,16 +58,62 @@ if [ -n "${E2E_BUILDER_SSH:-}" ]; then
   # Sync the EXACT commit. The builder is not a clone that follows this branch:
   # a bare `make package` there builds whatever it happens to have checked out,
   # which silently produces an image of the wrong revision and only surfaces
-  # later as assert-core.sh's stale-image guard. A bundle carries the objects
-  # without needing the builder to have a remote or credentials.
+  # later as assert-core.sh's stale-image guard.
+  #
+  # THE WORKING TREE IS SYNCED BY rsync, AND THE REF IS MOVED WITHOUT A CHECKOUT.
+  # `git checkout -f` here would be destructive: this repo routes *.so through
+  # git-lfs, and a builder without git-lfs installed has no smudge filter, so a
+  # checkout writes the 128-byte POINTER TEXT into the two vendor libraries the
+  # image ships (pack/.../gpustack/{libhgml,libuki}.so). The image would then
+  # carry text files pretending to be shared libraries, and nothing downstream
+  # would notice. rsync carries the real bytes from this machine, which does
+  # have them materialized.
+  #
+  # The ref still has to move, because the image stamps GPUSTACK_GIT_COMMIT from
+  # `git rev-parse HEAD` run ON THE BUILDER — a stale ref makes the pushed image
+  # lie about its provenance.
+  echo "-- mirroring the tracked tree (rsync; no checkout, no --delete)"
+  FILES="$(mktemp "${TMPDIR:-/tmp}/e2e-files-XXXXXX")"
+  git ls-files -z > "$FILES" || { echo "git ls-files failed"; exit 1; }
+  # --files-from sends only tracked paths, so the builder's own untracked state
+  # (worktrees, terraform state) is never touched; --delete is deliberately NOT
+  # used for the same reason. Deletions this branch made are handled below.
+  rsync -az --from0 --files-from="$FILES" --filter='P .git' ./ "${E2E_BUILDER_SSH}:${DIR}/" || {
+    echo "rsync to the builder failed"; rm -f "$FILES"; exit 1; }
+  rm -f "$FILES"
+
+  # A file this branch DELETED would linger on the builder and can break the
+  # build (a stale .go file in a package still compiles). rsync --delete cannot
+  # be used here, so the deletions are applied explicitly, from the diff against
+  # whatever the builder currently has checked out.
+  PREV="$(bssh "cd '${DIR}' && git rev-parse HEAD 2>/dev/null" | tr -d '\r')"
+  if [ -n "$PREV" ] && git cat-file -e "${PREV}^{commit}" 2>/dev/null; then
+    STALE="$(git diff --name-only --diff-filter=D "$PREV" HEAD)"
+    if [ -n "$STALE" ]; then
+      echo "-- removing $(printf '%s\n' "$STALE" | wc -l | tr -d ' ') path(s) this branch deleted"
+      printf '%s\n' "$STALE" | bssh "cd '${DIR}' && xargs -r rm -f --"
+    fi
+  else
+    echo "-- builder's HEAD is unknown here; skipping the stale-path sweep"
+  fi
+
+  # Carry the objects so the ref can be moved to a commit the builder has never
+  # seen. A bundle needs no remote and no credentials on that host.
   BUNDLE="$(mktemp "${TMPDIR:-/tmp}/e2e-XXXXXX").bundle"
   git bundle create "$BUNDLE" HEAD >/dev/null 2>&1 || { echo "git bundle failed"; exit 1; }
   scp -q -o StrictHostKeyChecking=no "$BUNDLE" "${E2E_BUILDER_SSH}:/tmp/e2e-head.bundle" || exit 1
   rm -f "$BUNDLE"
-  # Chain with ';' not '&&': a repo-local LFS post-checkout hook that cannot find
-  # git-lfs exits non-zero and would abort the rest of an '&&' chain, leaving the
-  # fetch silently unperformed.
-  bssh "cd '${DIR}' ; git fetch /tmp/e2e-head.bundle HEAD ; git checkout -f ${SHA} ; git rev-parse HEAD" || exit 1
+  # fetch + update-ref + symbolic-ref + a MIXED reset: every one of these moves
+  # refs or the index only. None of them writes a working-tree file, which is
+  # the whole point. `git reset -q` without --hard refreshes the index so
+  # `git status` is meaningful afterwards.
+  BR="e2e/$(git rev-parse --short HEAD)"
+  bssh "cd '${DIR}' && \
+        git fetch -q /tmp/e2e-head.bundle HEAD && \
+        git update-ref refs/heads/${BR} ${SHA} && \
+        git symbolic-ref HEAD refs/heads/${BR} && \
+        git reset -q && \
+        git rev-parse HEAD" || { echo "moving the builder's ref failed"; exit 1; }
 
   echo
   echo "== remote package + push =="
