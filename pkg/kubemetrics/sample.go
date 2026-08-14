@@ -4,8 +4,10 @@
 //
 // It is the single implementation behind the two surfaces reporting these figures — the
 // Instance "metrics" subresource and the device manager's Prometheus exporter — so the two
-// can never drift apart by a unit or a rounding step. The accelerator half of a sample comes
-// from the device manager's own monitor snapshot and is not this package's concern.
+// can never drift apart by a unit or a rounding step. The measured accelerator figures come from
+// the device manager's own monitor snapshot and are not this package's concern; what is, beside
+// the pod-level figures, are the two decisions the surfaces must make identically: whether a pod
+// has started anything at all, and what quota a carved share of an accelerator was granted.
 package kubemetrics
 
 import (
@@ -17,6 +19,7 @@ import (
 	kubeletstats "k8s.io/kubelet/pkg/apis/stats/v1alpha1"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/utils/mathx"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
 )
@@ -30,6 +33,25 @@ import (
 func NewSample(pod *core.Pod) *worker.InstanceMetricsSample {
 	sample := &worker.InstanceMetricsSample{Timestamp: meta.Now()}
 	setTotals(sample, pod)
+	return sample
+}
+
+// NewSampleFromResources returns a sample carrying only what the Instance declared in
+// spec.resources — its CPU, memory and storage ceilings — stamped with the current time and
+// with every measured figure absent. It is the totals-only path for the moment a caller holds
+// an Instance but no backing Pod: before the controller has ever rendered one, there is nothing
+// to read container limits off, yet the declared totals are still a fact worth reporting.
+//
+// It produces byte-identical totals to NewSample given the Pod the controller renders for the
+// same spec.resources: both funnel through the same rounding arithmetic.
+func NewSampleFromResources(resources workercore.InstanceResources) *worker.InstanceMetricsSample {
+	sample := &worker.InstanceMetricsSample{Timestamp: meta.Now()}
+	setTotalsFromMilliCoresAndBytes(
+		sample,
+		resources.CPU.ScaledValue(resource.Milli),
+		resources.RAM.Value(),
+		resources.LocalStorage.Value(),
+	)
 	return sample
 }
 
@@ -112,6 +134,12 @@ func setTotals(sample *worker.InstanceMetricsSample, pod *core.Pod) {
 		}
 	}
 
+	setTotalsFromMilliCoresAndBytes(sample, cpuMilliCores, memoryBytes, storageBytes)
+}
+
+// setTotalsFromMilliCoresAndBytes applies the rounding discipline shared by every totals path:
+// CPU passes through unchanged, memory and storage round up to the nearest MiB.
+func setTotalsFromMilliCoresAndBytes(sample *worker.InstanceMetricsSample, cpuMilliCores, memoryBytes, storageBytes int64) {
 	sample.CPUTotalMilliCores = uint64(cpuMilliCores)
 	sample.MemoryTotalMiB = mathx.CeilDiv(uint64(memoryBytes), uint64(quantityx.Mi))
 	sample.StorageTotalMiB = mathx.CeilDiv(uint64(storageBytes), uint64(quantityx.Mi))
