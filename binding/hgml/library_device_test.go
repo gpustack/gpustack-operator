@@ -156,3 +156,38 @@ func TestV2LayoutMisreadAtV3Offsets(t *testing.T) {
 	assert.NotEmpty(t, odd.GetName(),
 		"one MiB more and the misread produces a name, which is why a test on the name alone is not enough")
 }
+
+// TestEntryPointRefused pins which answers are worth trying the other symbol for. The distinction is
+// the whole point of the fallback: a symbol declining the query is a fact about that symbol, while a
+// transient failure is a fact about the attempt, and treating the second as the first would double
+// every such failure into two calls of a library that just failed one.
+func TestEntryPointRefused(t *testing.T) {
+	cases := []struct {
+		ret  Return
+		want bool
+	}{
+		// The measured case: a versioned symbol that is exported and serves nothing.
+		{ERROR_NOT_SUPPORTED, true},
+		// The struct version this build hands it is not one it knows — the other symbol takes none.
+		{ERROR_ARGUMENT_VERSION_MISMATCH, true},
+		{ERROR_FUNCTION_NOT_FOUND, true},
+		// The stack, not the symbol: the other entry point lives in the same library, behind the same
+		// driver, so trying it spends a call to fail identically and buries the actionable error.
+		{ERROR_LIB_RM_VERSION_MISMATCH, false},
+		{ERROR_LIBRARY_NOT_FOUND, false},
+		{ERROR_DRIVER_NOT_LOADED, false},
+		// Answers about this attempt, not about the entry point.
+		{SUCCESS, false},
+		{ERROR_NOT_FOUND, false},
+		{ERROR_INSUFFICIENT_SIZE, false},
+		{ERROR_NO_PERMISSION, false},
+		{ERROR_UNKNOWN, false},
+		{ERROR_GPU_IS_LOST, false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.ret.String(), func(t *testing.T) {
+			assert.Equal(t, c.want, entryPointRefused(c.ret))
+		})
+	}
+}

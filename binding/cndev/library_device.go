@@ -416,3 +416,116 @@ func (l Device) GetSMluProfileIds() ([]int32, Return) {
 	copy(ids, info.ProfileId[:n])
 	return ids, ret
 }
+
+// maxProcessQueryAttempts bounds a count-then-fill read. The row count the library reports can grow
+// between the probe and the fill as processes come and go, so a fill that comes back short is
+// retried at the size the library then asks for. The bound is what makes the retry terminate, and
+// exhausting it reports the insufficiency instead of the buffer the last attempt filled: a
+// truncated list read as a complete one turns processes that exist into processes that do not.
+const maxProcessQueryAttempts = 3
+
+// maxProcessRows caps how many rows a per-process read will allocate for. The count comes from the
+// library, and a library whose ABI does not match the header it was generated against — or one that
+// is simply broken — can report a count that has nothing to do with any process list; allocating it
+// would take the whole process down before the attempt bound ever came into play. No real node
+// comes near this many rows: it is thousands of processes on a single accelerator, well past what a
+// node's own process table holds. A count past the ceiling is treated as a read that cannot be
+// completed, exactly like a buffer the library keeps outgrowing.
+const maxProcessRows uint32 = 4096
+
+// readProcessRows runs the count-then-fill protocol of a per-process query to completion and
+// returns only a complete list. fill is called with no rows to probe the count, then with a sized
+// buffer to fill it, and reports through the count how many rows the library wrote or now needs.
+// Because every cnDev struct declares its own layout, stamping the version of each row is part of
+// fill rather than of this loop, which re-runs fill on every attempt.
+//
+// The returned rows are exactly what the library wrote, in the library's own units.
+func readProcessRows[T any](fill func(count *uint32, rows []T) Return) ([]T, Return) {
+	// A probe with no buffer reports how many rows the library holds. It answers a zero-sized
+	// buffer with the short-buffer code, which is the probe working, not failing.
+	var count uint32
+	if ret := fill(&count, nil); !ret.IsSuccess() && ret != ERROR_INSUFFICIENT_SPACE {
+		return nil, ret
+	}
+
+	for range maxProcessQueryAttempts {
+		if count == 0 {
+			return nil, SUCCESS
+		}
+		// Refuse a count no process list can have rather than allocating it.
+		if count > maxProcessRows {
+			return nil, ERROR_INSUFFICIENT_SPACE
+		}
+
+		rows := make([]T, count)
+		written := count
+		ret := fill(&written, rows)
+		switch {
+		case ret == ERROR_INSUFFICIENT_SPACE:
+			// The list grew between the probe and the fill. Retry at the size the library now
+			// asks for; growth has to be strict for the retry to make progress, so a library
+			// that repeats the size we just tried is stepped past rather than tried again.
+			if written > count {
+				count = written
+			} else {
+				count++
+			}
+		case !ret.IsSuccess():
+			return nil, ret
+		default:
+			// Clamp to the buffer we sized, so a library reporting more rows written than it was
+			// given cannot drive a slice-out-of-range panic.
+			if written > count {
+				written = count
+			}
+			return rows[:written], ret
+		}
+	}
+
+	return nil, ERROR_INSUFFICIENT_SPACE
+}
+
+// GetProcessInfo returns one row per process running on this device, with PhysicalMemoryUsed and
+// VirtualMemoryUsed in the KiB the library reports them in — no unit is converted here.
+//
+// Pids are host pids: a containerized process is named by the pid the host sees, not the pid it
+// sees itself, and no translation happens here.
+func (l Device) GetProcessInfo() ([]ProcessInfo, Return) {
+	if l.so.Lookup("cndevGetProcessInfo") != nil {
+		return nil, ERROR_FUNCTION_NOT_FOUND
+	}
+
+	return readProcessRows(func(count *uint32, rows []ProcessInfo) Return {
+		if len(rows) == 0 {
+			return cndevGetProcessInfo(count, nil, l.handle)
+		}
+		// Version is an input: cnDev rejects a versioned struct that does not declare which
+		// layout the caller expects, and every row in the buffer carries its own version word.
+		for i := range rows {
+			rows[i].Version = VERSION_6
+		}
+		return cndevGetProcessInfo(count, &rows[0], l.handle)
+	})
+}
+
+// GetProcessUtilization returns one row per process running on this device, with IpuUtil, JpuUtil,
+// VpuDecUtil, VpuEncUtil and MemUtil as the percentages the library reports.
+//
+// A process the library does not report is absent from the result rather than present at zero, and
+// ERROR_NOT_SUPPORTED — the device cannot account utilization per process at all — is returned as
+// itself rather than as an empty list.
+func (l Device) GetProcessUtilization() ([]ProcessUtilization, Return) {
+	if l.so.Lookup("cndevGetProcessUtilization") != nil {
+		return nil, ERROR_FUNCTION_NOT_FOUND
+	}
+
+	return readProcessRows(func(count *uint32, rows []ProcessUtilization) Return {
+		if len(rows) == 0 {
+			return cndevGetProcessUtilization(count, nil, l.handle)
+		}
+		for i := range rows {
+			rows[i].Version = VERSION_6
+		}
+		return cndevGetProcessUtilization(count, &rows[0], l.handle)
+	})
+}
