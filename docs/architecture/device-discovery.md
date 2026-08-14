@@ -302,13 +302,11 @@ reports its HBM **quota** and the slice's usage instead of the whole accelerator
 NVIDIA gives, where `nvidia-smi` shows the virtual VRAM total while power and temperature stay
 accelerator-wide.
 
-NVIDIA takes one more under the same rule, `CUDA_DEVICE_ORDER=PCI_BUS_ID`: the per-accelerator
-`CUDA_DEVICE_MEMORY_LIMIT_<i>` keys address a card by position, and HAMi-core fills its limit table
-from them in NVML enumeration order but reads a limit back by CUDA ordinal.
-
-Those two numberings coincide only under `PCI_BUS_ID` — CUDA's default orders by a performance
-heuristic — and the same invariant governs any integer a workload derives from an NVML index and
-hands to CUDA, `CUDA_VISIBLE_DEVICES` included.
+NVIDIA takes one more under the same rule, `CUDA_DEVICE_ORDER=PCI_BUS_ID`. HAMi-core fills its limit
+table from the `CUDA_DEVICE_MEMORY_LIMIT_<i>` keys in NVML enumeration order but reads a limit back by
+CUDA ordinal, and the two coincide only under `PCI_BUS_ID` — CUDA's default orders by a performance
+heuristic. The same invariant governs any integer a workload derives from an NVML index and hands to
+CUDA, `CUDA_VISIBLE_DEVICES` included.
 
 > **NVML is unaffected by it** — NVML always enumerates by PCI bus id, so the `Index` the DM reports
 > matches `nvidia-smi` whether or not the variable is set. The ordering is stated where the injection
@@ -316,6 +314,39 @@ hands to CUDA, `CUDA_VISIBLE_DEVICES` included.
 
 > **Never-overwrite reads the container's own `env:` entries** — an `envFrom:`-sourced value is
 > invisible to the allocator, so opting out that way needs an explicit `env:`.
+
+### The order a positional injection is emitted in
+
+A key addressed by position — `CUDA_DEVICE_MEMORY_LIMIT_<i>`, `HGGC_DEVICE_MEMORY_LIMIT_<i>`,
+`VROCM_DEVICE_MEMORY_LIMIT_<i>`, `HSA_CU_MASK`'s `GPU_list` — is read against the numbering the
+container itself uses, so every allocator emits its entries in one order: **ascending accelerator
+index**, the enumeration the detector recorded.
+
+Which vendors that order matters to differs, because it depends on who decides the container's
+numbering:
+
+| Vendor | Numbers the container's accelerators by | So the order is |
+|---|---|---|
+| NVIDIA | NVML/CUDA re-enumerating the visible cards by PCI bus id | **load-bearing** — the emission must match it |
+| T-Head | the SDK renumbering the injected nodes by ascending card ordinal (measured) | **load-bearing** |
+| AMD | `ROCR_VISIBLE_DEVICES`, which the injection itself states | self-consistent under any one order |
+| Hygon | a `device_id` the operator itself writes into each `vdev<i>.conf` — meaning not yet established on hardware | positional, but **persisted**; see below |
+| Ascend, Cambricon, MetaX, MThreads | not by position at all — the driver index travels as a value, or the request is single-accelerator | immaterial |
+
+Hygon is the one whose position outlives the allocation: its figures go into `vdev<i>.conf` files on
+the host, and a slot is reused only when the file at that path already names the same accelerator. A
+sliced request is admitted for exactly one accelerator today, so the path is always `vdev0.conf` and
+the mapping cannot move; if that gate is ever lifted, the order becomes a migration concern rather
+than only a correctness one, because the files predate the allocation being retried.
+
+The `Devices` ledger cannot be walked for that order. It keeps one group per accelerator model, so a
+walk over groups is in enumeration order only within a group, and interleaves the models of a
+container holding two. The group order is not part of the API either — both lists are declared as
+maps keyed by identity.
+
+The reconcile still stores them canonically (accelerators by index, groups by manufacturer and then
+first accelerator), which keeps the stored list a function of the hardware rather than of which
+detection pass first saw each group. The allocators order what they read regardless.
 
 ## Logical slicing per manufacturer
 

@@ -276,6 +276,45 @@ func TestGetSlicedContainerAllocateResponse_MultiCard(t *testing.T) {
 	assert.Equal(t, "6144m", resp.Envs["CUDA_DEVICE_MEMORY_LIMIT_1"])
 }
 
+// A positional CUDA_DEVICE_MEMORY_LIMIT_<i> is read by the container's own device number, so
+// the entries must be emitted in the order the container numbers its cards — ascending
+// recorded index — and not in the order the ledger happens to store them. The ledger groups
+// by model and memory, so an allocation spanning two groups is where the two orders diverge:
+// here the second group holds the lower-indexed card, and each group carries a different VRAM
+// budget, so a group-ordered emission would cap each card at the other's budget.
+func TestGetSlicedContainerAllocateResponse_MultiCardAcrossGroupsOrdersByIndex(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	s := newSlicedServer()
+	devs := &workercore.Devices{
+		Spec: workercore.DevicesSpec{
+			Groups: []workercore.DevicesGroup{
+				{
+					ID: "a10g", Manufacturer: Manufacturer, Memory: 24576, RuntimeVersion: "12.4",
+					Accelerators: []workercore.Accelerator{{ID: testGPUUUID1, Index: 1}},
+				},
+				{
+					ID: "l4", Manufacturer: Manufacturer, Memory: 8192, RuntimeVersion: "12.4",
+					Accelerators: []workercore.Accelerator{{ID: testGPUUUID0, Index: 0}},
+				},
+			},
+		},
+	}
+	pod, ctr := slicedPod("pod-uid-crossgroup", "train", 50, 25) // SM 50%, VRAM 25%
+	allocated := map[deviceplugin.Resource]int32{
+		{Group: "a10g", Device: testGPUUUID1}: 1,
+		{Group: "l4", Device: testGPUUUID0}:   1,
+	}
+
+	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocated)
+	require.NoError(t, err)
+
+	assert.Equal(t, testGPUUUID0+","+testGPUUUID1, resp.Envs["NVIDIA_VISIBLE_DEVICES"])
+	// Index 0 is the 8192 MiB card: floor(8192 * 25%) = 2048 MiB, and index 1 the 24576 MiB
+	// one: floor(24576 * 25%) = 6144 MiB.
+	assert.Equal(t, "2048m", resp.Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
+	assert.Equal(t, "6144m", resp.Envs["CUDA_DEVICE_MEMORY_LIMIT_1"])
+}
+
 // The libvgpu.so mount tracks the accelerator's CUDA runtime major (default cuda-12).
 func TestGetSlicedContainerAllocateResponse_CUDADir(t *testing.T) {
 	redirectLogicalSliceDirs(t)

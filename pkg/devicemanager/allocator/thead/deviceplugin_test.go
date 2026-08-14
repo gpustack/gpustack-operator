@@ -697,6 +697,48 @@ func TestGetSlicedContainerAllocateResponseQuota(t *testing.T) {
 			},
 		},
 		{
+			// Measured on PPU hardware: the SDK numbers a container's accelerators by ascending card
+			// ordinal, whatever order their device nodes were injected in — two cards injected 5 then 2
+			// came back as 0=card 2, 1=card 5. So the figures are read against the ordinal, and the
+			// ledger's own group order is not it: the groups here hold the higher-ordinal card first,
+			// and the emission still has to lead with the lower one. Same expectations as the case
+			// above, whose ledger happens to already be in that order.
+			name:         "the figures follow the card ordinal, not the order the ledger stores its groups in",
+			coresPercent: 50,
+			memPercent:   25,
+			devs: func() (*workercore.Devices, map[deviceplugin.Resource]int32) {
+				devs := &workercore.Devices{
+					Spec: workercore.DevicesSpec{
+						Groups: []workercore.DevicesGroup{
+							{
+								ID: "ppu-49", Manufacturer: Manufacturer, Memory: 49152,
+								Accelerators: []workercore.Accelerator{{
+									ID: testPPUUUID1, Index: testPPUIndex1,
+									PhysicalIndexes: []uint32{testPPUMinor1},
+								}},
+							},
+							{
+								ID: "ppu-98", Manufacturer: Manufacturer, Memory: 98304,
+								Accelerators: []workercore.Accelerator{{
+									ID: testPPUUUID0, Index: testPPUIndex0,
+									PhysicalIndexes: []uint32{testPPUMinor0},
+								}},
+							},
+						},
+					},
+				}
+				return devs, map[deviceplugin.Resource]int32{
+					{Group: "ppu-49", Device: testPPUUUID1}: 1,
+					{Group: "ppu-98", Device: testPPUUUID0}: 1,
+				}
+			},
+			wantQuota: map[string]string{
+				"HGGC_DEVICE_SM_LIMIT":       "50",
+				"HGGC_DEVICE_MEMORY_LIMIT_0": "24576",
+				"HGGC_DEVICE_MEMORY_LIMIT_1": "12288",
+			},
+		},
+		{
 			// The addressing guard runs before any injection, so an accelerator that cannot be proven fails
 			// the allocation rather than being quota-capped and then handed a neighbour's node.
 			name:         "an accelerator whose minor number cannot be proven is refused before anything is injected",

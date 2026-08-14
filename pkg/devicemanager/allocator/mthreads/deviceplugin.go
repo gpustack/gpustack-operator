@@ -101,13 +101,6 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) devicep
 	return s
 }
 
-// _AllocatedAccelerator pairs an allocated device with its group; the group carries the
-// VRAM that drives the sliced per-accelerator memory cap.
-type _AllocatedAccelerator struct {
-	group *workercore.DevicesGroup
-	accel *workercore.Accelerator
-}
-
 func (s *server) GetContainerAllocateResponse(
 	_ context.Context,
 	pod *core.Pod,
@@ -115,28 +108,10 @@ func (s *server) GetContainerAllocateResponse(
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
-	// Single pass over the allocated devices in devs order (= MTHREADS_VISIBLE_DEVICES
-	// order): collect the visible IDs and the accelerator/group pairs the sliced path
-	// needs for the per-accelerator VRAM cap.
-	var (
-		ids          = make([]string, 0, len(allocated))
-		accelerators []_AllocatedAccelerator
-	)
-	for i := range devs.Spec.Groups {
-		devsGroup := &devs.Spec.Groups[i]
-		for j := range devsGroup.Accelerators {
-			devsAccelerator := &devsGroup.Accelerators[j]
-			res := deviceplugin.Resource{
-				Group:  devsGroup.ID,
-				Device: devsAccelerator.ID,
-			}
-			if _, existed := allocated[res]; !existed {
-				continue
-			}
-			ids = append(ids, devsAccelerator.ID)
-			accelerators = append(accelerators, _AllocatedAccelerator{group: devsGroup, accel: devsAccelerator})
-		}
-	}
+	// The allocated devices, ordered the way the container numbers them, and their IDs — the
+	// MTHREADS_VISIBLE_DEVICES value.
+	accelerators := deviceplugin.AllocatedAccelerators(devs, allocated)
+	ids := deviceplugin.AllocatedAcceleratorIDs(accelerators)
 
 	// Sliced containers get real per-slice QoS isolation (a hard VRAM cap + a relative
 	// compute weight); exclusive/shared/visibility keep the plain device-visibility
@@ -166,7 +141,7 @@ func (s *server) getSlicedContainerAllocateResponse(
 	_ *core.Pod,
 	ctr *core.Container,
 	ids []string,
-	accels []_AllocatedAccelerator,
+	accels []deviceplugin.AllocatedAccelerator,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
 	if len(accels) == 0 {
 		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
@@ -178,7 +153,7 @@ func (s *server) getSlicedContainerAllocateResponse(
 	// A sliced allocation is single-accelerator, and every accelerator in a DevicesGroup shares
 	// the same VRAM (Memory is a group property), so the allocated accelerator's group VRAM is the
 	// cap basis.
-	memMib, err := deviceplugin.SlicedMemoryMib(ctr, memPctRes, memMibRes, int64(accels[0].group.Memory))
+	memMib, err := deviceplugin.SlicedMemoryMib(ctr, memPctRes, memMibRes, int64(accels[0].Group.Memory))
 	if err != nil {
 		return nil, fmt.Errorf("derive sliced memory limit: %w", err)
 	}
