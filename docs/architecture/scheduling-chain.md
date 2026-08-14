@@ -128,9 +128,8 @@ API without touching any Node.
 ## Stage 4: the Kueue chain
 
 The capacity labels drive a Kueue chain built by `pkg/worker/controllers/worker`. **One isolated
-ClusterQueue per pool, no Cohort**: with exclusive / shared / sliced / partitioned in one queue there is
-no cross-queue borrowing to broker, so `spec.cohortName` is empty and the old `CohortReconciler` /
-`z-cohort` are gone.
+ClusterQueue per pool**: with exclusive / shared / sliced / partitioned in one queue there is
+no cross-queue borrowing to broker, so `spec.cohortName` stays empty.
 
 ## Naming and grouping
 
