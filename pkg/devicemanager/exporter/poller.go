@@ -47,7 +47,18 @@ type InstanceSample struct {
 	// Only the allocation is kept here; the figures come from the device manager's own monitor
 	// snapshot when a scrape joins the two, so they are as fresh as that snapshot rather than
 	// as this round.
+	//
+	// It is empty for an Instance none of whose containers has started: nothing of it holds a
+	// card yet, so the card's figures are somebody else's.
 	Accelerators []workercore.DevicesAllocationGroup
+
+	// Grants carries what the Pod was granted on each allocated accelerator, so a scrape can state
+	// every figure in the Instance's own terms. It is nil exactly when Accelerators is empty.
+	//
+	// The index is built here, where the Pod is in hand, because a logical slice's compute cap is
+	// read off the container the allocation was enforced on — which the Pod-wide view above cannot
+	// say.
+	Grants *kubemetrics.AcceleratorGrants
 }
 
 // Snapshot is what a successful round measured.
@@ -191,10 +202,26 @@ func (p *Poller) measure(ctx context.Context) (*Snapshot, error) {
 		exporting = false
 	}
 
+	// The gate: an Instance none of whose containers has started consumes nothing, so its usage
+	// is zero by reasoning rather than by measurement. It sits above the read below, not beside
+	// it — measuring an Instance that has started nothing could only report a neighbour's
+	// figures as its own — and a node whose Instances have all started nothing performs no read
+	// at all.
+	started, unstarted := splitOnStartedContainer(pods)
+	if len(started) == 0 {
+		return &Snapshot{
+			Timestamp: time.Now(),
+			// Nothing was left unmeasured: every Instance's usage is known, by reasoning.
+			UsageMeasured: true,
+			Exporting:     exporting,
+			Instances:     unstartedSamples(unstarted),
+		}, nil
+	}
+
 	// Read afresh, never from the cache: rounds start exactly one period apart while an entry is
 	// stamped mid-round, so passing the period here would serve the previous round's readout
 	// every other round — half the cadence, with nothing on the wire to show it.
-	samples, err := kubemetrics.FetchPodSamples(ctx, p.nodeName, podsOf(pods), 0)
+	samples, err := kubemetrics.FetchPodSamples(ctx, p.nodeName, podsOf(started), 0)
 	if err != nil {
 		// The kubelet is one of two sources and the other one is untouched by this. Which
 		// Instances the node runs and which devices each holds come from the informer, so the
@@ -205,7 +232,7 @@ func (p *Poller) measure(ctx context.Context) (*Snapshot, error) {
 		return &Snapshot{
 			Timestamp: time.Now(),
 			Exporting: exporting,
-			Instances: declaredSamples(pods),
+			Instances: append(declaredSamples(started), unstartedSamples(unstarted)...),
 		}, nil
 	}
 
@@ -213,8 +240,21 @@ func (p *Poller) measure(ctx context.Context) (*Snapshot, error) {
 		Timestamp:     time.Now(),
 		UsageMeasured: true,
 		Exporting:     exporting,
-		Instances:     instanceSamples(pods, samples),
+		Instances:     append(instanceSamples(started, samples), unstartedSamples(unstarted)...),
 	}, nil
+}
+
+// splitOnStartedContainer partitions this node's Instance pods on the gate both surfaces apply,
+// so that what is measured and what is answered by reasoning are decided once per round.
+func splitOnStartedContainer(pods []instancePod) (started, unstarted []instancePod) {
+	for i := range pods {
+		if kubemetrics.HasStartedContainer(pods[i].pod) {
+			started = append(started, pods[i])
+			continue
+		}
+		unstarted = append(unstarted, pods[i])
+	}
+	return started, unstarted
 }
 
 // logFailure reports a round's failure once, and repeats of it quietly.
@@ -358,10 +398,41 @@ func declaredSamples(pods []instancePod) []InstanceSample {
 	return out
 }
 
+// unstartedSamples is instanceSamples for the Instances the gate closed on: the declared totals
+// and a measured zero for each usage, with no accelerator at all — the same answer, field for
+// field, that the metrics subresource gives for the same Instance.
+func unstartedSamples(pods []instancePod) []InstanceSample {
+	out := make([]InstanceSample, 0, len(pods))
+	for i := range pods {
+		inst := pods[i].instance
+		// The Pod is in hand, so its container limits are the totals; the Instance's own
+		// spec.resources are the surface the subresource falls back to and this one cannot reach.
+		inst.Sample = *kubemetrics.NewUnstartedSample(pods[i].pod, nil)
+		out = append(out, inst)
+	}
+	return out
+}
+
 // instanceSampleOf joins one Instance's identity to a sample and to its Pod's allocation.
 func instanceSampleOf(pod *instancePod, sample *worker.InstanceMetricsSample) InstanceSample {
 	inst := pod.instance
 	inst.Sample = *sample
-	inst.Accelerators = deviceplugin.AllocatedAcceleratorGroupsOf(pod.pod)
+
+	allocations, err := deviceplugin.AllocatedAcceleratorsOf(pod.pod)
+	if err != nil {
+		// An unreadable annotation names no device: the pod-level figures above are unaffected,
+		// and reporting the cards it might hold would be a guess.
+		logger.V(2).Error(err, "reading a pod's allocated accelerators",
+			"pod", pod.pod.Namespace+"/"+pod.pod.Name)
+	}
+	inst.Accelerators = allocations.Aggregate().Groups
+
+	// Left nil when the Pod holds no accelerator — which is both the field's stated invariant and
+	// the sentinel the collector reads as "nothing here can say whose a card's figures are". An
+	// index built over no allocation would answer for nothing while making that check pass, so the
+	// guard it protects could never fire again.
+	if len(inst.Accelerators) > 0 {
+		inst.Grants = kubemetrics.NewAcceleratorGrants(pod.pod, allocations)
+	}
 	return inst
 }

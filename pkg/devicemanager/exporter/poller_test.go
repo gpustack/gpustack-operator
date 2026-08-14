@@ -25,10 +25,12 @@ import (
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/devicemanager/detector"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/utils/json"
 )
@@ -151,11 +153,52 @@ func instancePodFixture(nodeName, name, instUID, podUID string, opts ...podOptio
 				},
 			}},
 		},
+		// Running, which is the state of a pod whose Instance is there to be measured. The gate
+		// above every measurement is whether any container has started, so a fixture that has
+		// not is a case of its own — see unstarted().
+		Status: core.PodStatus{
+			Phase: core.PodRunning,
+			ContainerStatuses: []core.ContainerStatus{{
+				Name:    "main",
+				Started: ptr.To(true),
+				State: core.ContainerState{
+					Running: &core.ContainerStateRunning{StartedAt: meta.Now()},
+				},
+			}},
+		},
 	}
 	for _, opt := range opts {
 		opt(pod)
 	}
 	return pod
+}
+
+// unstarted returns the pod before anything of it has run: it is scheduled and it already holds
+// its card, and no container has started.
+func unstarted() podOption {
+	return func(pod *core.Pod) {
+		pod.Status = core.PodStatus{
+			Phase: core.PodPending,
+			ContainerStatuses: []core.ContainerStatus{{
+				Name:    "main",
+				Started: ptr.To(false),
+				State: core.ContainerState{
+					Waiting: &core.ContainerStateWaiting{Reason: "ContainerCreating"},
+				},
+			}},
+		}
+	}
+}
+
+// refuseUpstream fails the test if anything reaches the API server, which is where both the
+// kubelet readout and the metrics API are proxied from.
+func refuseUpstream(t *testing.T) {
+	t.Helper()
+	apiHandler.Store(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("no upstream read was allowed, got %s", r.URL.Path)
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	t.Cleanup(func() { apiHandler.Store(http.NotFoundHandler()) })
 }
 
 func terminating() podOption {
@@ -372,6 +415,196 @@ func TestPoller_poll(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPoller_gateOnStartedContainer pins the gate both surfaces apply: an Instance none of whose
+// containers has started consumes nothing, so its usage is zero by reasoning — and reading a
+// source for it could only report a neighbour's figures as its own.
+func TestPoller_gateOnStartedContainer(t *testing.T) {
+	const nodeName = "node-unstarted"
+	pod := instancePodFixture(nodeName, "inst", testInstanceUID, "pod-uid-1", unstarted())
+	p := newTestPoller(nodeName, pod)
+
+	// Not a stubbed source: a read of any kind fails the test, which is what makes "no upstream
+	// I/O" an assertion rather than a claim.
+	refuseUpstream(t)
+
+	p.poll(context.Background())
+
+	snapshot := p.snapshot()
+	require.NotNil(t, snapshot)
+	assert.True(t, snapshot.UsageMeasured, "nothing was left unmeasured: the usage is known")
+	require.Len(t, snapshot.Instances, 1)
+
+	inst := snapshot.Instances[0]
+	assert.Equal(t, uint64(2000), inst.Sample.CPUTotalMilliCores, "the declared totals still stand")
+	// Zero here is a measurement: nothing has started, so nothing exists that could consume.
+	require.NotNil(t, inst.Sample.CPUUsedMilliCores)
+	assert.Zero(t, *inst.Sample.CPUUsedMilliCores)
+	require.NotNil(t, inst.Sample.MemoryUsedMiB)
+	assert.Zero(t, *inst.Sample.MemoryUsedMiB)
+	require.NotNil(t, inst.Sample.StorageUsedMiB)
+	assert.Zero(t, *inst.Sample.StorageUsedMiB)
+	// Nothing of it holds a card yet, so the card's figures are somebody else's.
+	assert.Empty(t, inst.Accelerators)
+	assert.Nil(t, inst.Grants)
+}
+
+// TestPoller_gateSpares only the instances that have started nothing: a node with one of each
+// still reads the kubelet once, and the two Instances answer differently.
+func TestPoller_gateSparesOnlyTheUnstarted(t *testing.T) {
+	const nodeName = "node-mixed"
+	running := instancePodFixture(nodeName, "running", testInstanceUID, "pod-uid-1")
+	pending := instancePodFixture(nodeName, "pending", "instance-uid-2", "pod-uid-2", unstarted())
+	p := newTestPoller(nodeName, running, pending)
+
+	serveNodeSummary(t, nodeName, &kubeletstats.Summary{Pods: []kubeletstats.PodStats{
+		podStats("running", "pod-uid-1", 500_000_000),
+		// The kubelet carries the unstarted pod too; it is the gate, not the source, that
+		// decides — the pod's own figures are never read.
+		podStats("pending", "pod-uid-2", 900_000_000),
+	}})
+
+	p.poll(context.Background())
+
+	snapshot := p.snapshot()
+	require.NotNil(t, snapshot)
+	require.Len(t, snapshot.Instances, 2)
+
+	byName := make(map[string]InstanceSample, 2)
+	for _, inst := range snapshot.Instances {
+		byName[inst.Name] = inst
+	}
+
+	require.NotNil(t, byName["running"].Sample.CPUUsedMilliCores)
+	assert.Equal(t, uint64(500), *byName["running"].Sample.CPUUsedMilliCores)
+	require.NotNil(t, byName["pending"].Sample.CPUUsedMilliCores)
+	assert.Zero(t, *byName["pending"].Sample.CPUUsedMilliCores,
+		"a measurement the kubelet happens to carry is not this Instance's to report")
+}
+
+// TestPoller_gateSurvivesAFailedKubelet pins that a source failure cannot flip the gate's answer:
+// the Instances that started nothing still report zeros, which needed no source at all.
+func TestPoller_gateSurvivesAFailedKubelet(t *testing.T) {
+	const nodeName = "node-unstarted-down"
+	running := instancePodFixture(nodeName, "running", testInstanceUID, "pod-uid-1")
+	pending := instancePodFixture(nodeName, "pending", "instance-uid-2", "pod-uid-2", unstarted())
+	p := newTestPoller(nodeName, running, pending)
+	serveNodeSummary(t, nodeName, nil) // the node proxy answers 502
+
+	p.poll(context.Background())
+
+	snapshot := p.snapshot()
+	require.NotNil(t, snapshot)
+	require.Len(t, snapshot.Instances, 2)
+	for _, inst := range snapshot.Instances {
+		if inst.Name == "pending" {
+			require.NotNil(t, inst.Sample.CPUUsedMilliCores)
+			assert.Zero(t, *inst.Sample.CPUUsedMilliCores)
+			continue
+		}
+		assert.Nil(t, inst.Sample.CPUUsedMilliCores, "a measurement that failed stays absent")
+	}
+}
+
+// TestPoller_leavesGrantsNilWithoutAnAccelerator pins the field's stated invariant — Grants is nil
+// exactly when Accelerators is empty — because the collector reads that nil as "nothing here can say
+// whose a card's figures are". An index built for a Pod holding no card would satisfy the guard while
+// answering for nothing, and the guard could never fire again.
+func TestPoller_leavesGrantsNilWithoutAnAccelerator(t *testing.T) {
+	const nodeName = "node-cpu-only"
+	// A started Instance, so it goes through the full sample path rather than the gate's shortcut.
+	p := newTestPoller(nodeName, instancePodFixture(nodeName, "cpu", testInstanceUID, "pod-uid-1"))
+	serveNodeSummary(t, nodeName, &kubeletstats.Summary{Pods: []kubeletstats.PodStats{
+		podStats("cpu", "pod-uid-1", 500_000_000),
+	}})
+
+	p.poll(context.Background())
+
+	snapshot := p.snapshot()
+	require.NotNil(t, snapshot)
+	require.Len(t, snapshot.Instances, 1)
+
+	inst := snapshot.Instances[0]
+	require.NotNil(t, inst.Sample.CPUUsedMilliCores, "the pod-level figures are unaffected")
+	assert.Empty(t, inst.Accelerators)
+	assert.Nil(t, inst.Grants)
+}
+
+// TestPoller_carriesTheCarvedShare pins that the round carries the quota half of the join, read
+// off the container the allocation was enforced on — the scrape supplies the measured half.
+func TestPoller_carriesTheCarvedShare(t *testing.T) {
+	const nodeName = "node-sliced"
+	pod := instancePodFixture(nodeName, "inst", testInstanceUID, "pod-uid-1")
+	coresResName := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName("nvidia")
+	pod.Spec.Containers[0].Resources.Limits[coresResName] = *resource.NewQuantity(25, resource.DecimalSI)
+	setPodAllocation(pod, workercore.AcceleratorAllocation{
+		ID:        "gpu-uuid-1",
+		Index:     3,
+		Mode:      workercore.DeviceAllocationModeSliced,
+		Allocated: nodefeature.ResourceMaxUnits / 4,
+	})
+
+	p := newTestPoller(nodeName, pod)
+	serveNodeSummary(t, nodeName, &kubeletstats.Summary{
+		Pods: []kubeletstats.PodStats{podStats("inst", "pod-uid-1", 500_000_000)},
+	})
+	p.poll(context.Background())
+
+	snapshot := p.snapshot()
+	require.NotNil(t, snapshot)
+	require.Len(t, snapshot.Instances, 1)
+	inst := snapshot.Instances[0]
+	require.Len(t, inst.Accelerators, 1)
+	require.NotNil(t, inst.Grants)
+
+	// The card's own readings come from the monitor snapshot at scrape time, so the resolution is
+	// asked with them here.
+	resolved := inst.Grants.Resolve(nil, "nvidia", &device.AcceleratorMetrics{ID: "gpu-uuid-1", Memory: 81920})
+	require.Len(t, resolved, 1, "one logical slice of one card is one grant")
+	got := resolved[0]
+	assert.Equal(t, workercore.DeviceAllocationModeSliced.String(), got.Mode)
+	assert.Equal(t, ptr.To[uint64](20480), got.MemoryTotalMiB, "a quarter of the card is the grant")
+	assert.Nil(t, got.MemoryUsedMiB, "no producer answered, so nothing measured the usage")
+	assert.Nil(t, got.CoresUtilizationPercent)
+}
+
+// TestPoller_unreadableAllocationKeepsThePodFigures pins that a pod whose allocation annotation
+// cannot be read names no card rather than a guessed one, and keeps its pod-level figures.
+func TestPoller_unreadableAllocationKeepsThePodFigures(t *testing.T) {
+	const nodeName = "node-badanno"
+	pod := instancePodFixture(nodeName, "inst", testInstanceUID, "pod-uid-1")
+	pod.Annotations = map[string]string{deviceplugin.AllocatedAcceleratorAnnoKey: "{not-json"}
+
+	p := newTestPoller(nodeName, pod)
+	serveNodeSummary(t, nodeName, &kubeletstats.Summary{
+		Pods: []kubeletstats.PodStats{podStats("inst", "pod-uid-1", 500_000_000)},
+	})
+	p.poll(context.Background())
+
+	snapshot := p.snapshot()
+	require.NotNil(t, snapshot)
+	require.Len(t, snapshot.Instances, 1)
+	assert.Empty(t, snapshot.Instances[0].Accelerators)
+	require.NotNil(t, snapshot.Instances[0].Sample.CPUUsedMilliCores)
+}
+
+// setPodAllocation records one container's allocation on the pod, as the device plugin writes it.
+func setPodAllocation(pod *core.Pod, accelerators ...workercore.AcceleratorAllocation) {
+	allocations := deviceplugin.PodAllocations{
+		"main": {
+			Devices: workercore.DevicesStatus{
+				Groups: []workercore.DevicesAllocationGroup{
+					{ID: "grp", Manufacturer: "nvidia", Accelerators: accelerators},
+				},
+			},
+		},
+	}
+	anno, _ := json.Marshal(allocations)
+	if pod.Annotations == nil {
+		pod.Annotations = map[string]string{}
+	}
+	pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey] = string(anno)
 }
 
 // TestPoller_dropsStaleFiguresOnFailure pins that a round which loses the kubelet after a good

@@ -22,7 +22,6 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
-	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/devicemanager"
 	"gpustack.ai/gpustack/pkg/devicemanager/detector"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
@@ -124,33 +123,28 @@ func (h *InstanceMetricsHandler) OnGet(ctx context.Context, key types.Namespaced
 	if err != nil {
 		return nil, err
 	}
-	nodeName := inst.Status.NodeName
-	if nodeName == "" {
-		return nil, kerrors.NewServiceUnavailable(
-			fmt.Sprintf("instance %s is not scheduled to any node yet", key))
-	}
-
-	// Get the backing Pod, which must still belong to this very Instance
-	// (a deleted-and-recreated Instance must not read the previous one's metrics).
-	pod := &core.Pod{}
-	err = h.APIReader.Get(ctx, key, pod, ctrlclix.WithoutQuorum)
+	// Get the backing Pod of this very Instance. A Pod that does not exist yet, and one still
+	// belonging to a previous incarnation, are both "this Instance has no Pod": the previous
+	// one's figures are never this one's to serve.
+	pod, err := h.backingPod(ctx, key, inst)
 	if err != nil {
-		if kerrors.IsNotFound(err) {
-			return nil, kerrors.NewServiceUnavailable(
-				fmt.Sprintf("instance %s has no backing pod yet", key))
-		}
 		return nil, err
 	}
-	if uid := pod.Labels[deviceplugin.InstancePartOfLabelKey]; uid != string(inst.UID) {
-		// The controller has not replaced the previous incarnation's pod yet: transient
-		// backing state, same as an unscheduled Instance or a missing pod.
-		return nil, kerrors.NewServiceUnavailable(
-			fmt.Sprintf("backing pod of instance %s belongs to a previous incarnation", key))
+
+	// The gate: an Instance none of whose containers has started consumes nothing, so its usage
+	// is zero by reasoning. It sits above every read below — the kubelet, the metrics API and
+	// every device manager — because measuring here could only produce a neighbour's figures or
+	// a 503, and because a client should not need a branch for an Instance that is merely
+	// starting up or stopped.
+	if !kubemetrics.HasStartedContainer(pod) {
+		return newInstanceMetrics(inst, kubemetrics.NewUnstartedSample(pod, inst.Spec.Resources)), nil
 	}
 
 	// Current CPU/memory/storage usage of the backing Pod. The error already names every
-	// source that failed and why, so it becomes the client-facing message unchanged.
-	sample, err := kubemetrics.FetchPodSample(ctx, nodeName, pod, h.MaxAge)
+	// source that failed and why, so it becomes the client-facing message unchanged. This is the
+	// one condition still served as unavailable: something did start, so its usage is a
+	// measurement, and no source could take it.
+	sample, err := kubemetrics.FetchPodSample(ctx, inst.Status.NodeName, pod, h.MaxAge)
 	if err != nil {
 		return nil, kerrors.NewServiceUnavailable(err.Error())
 	}
@@ -158,10 +152,53 @@ func (h *InstanceMetricsHandler) OnGet(ctx context.Context, key types.Namespaced
 	// Best-effort merge of the allocated accelerators' latest metrics:
 	// the pod usage above is authoritative, a device manager failure only
 	// drops the accelerator section.
-	if allocGroups := deviceplugin.AllocatedAcceleratorGroupsOf(pod); len(allocGroups) != 0 {
-		sample.Accelerators = h.currentAcceleratorMetrics(ctx, nodeName, allocGroups)
+	allocations, aerr := deviceplugin.AllocatedAcceleratorsOf(pod)
+	if aerr != nil {
+		metricsLogger.Error(aerr, "reading the allocated accelerators", "instance", key)
+	}
+	if allocGroups := allocations.Aggregate().Groups; len(allocGroups) != 0 {
+		sample.Accelerators = h.currentAcceleratorMetrics(
+			ctx, inst.Status.NodeName, allocGroups, kubemetrics.NewAcceleratorGrants(pod, allocations))
 	}
 
+	return newInstanceMetrics(inst, sample), nil
+}
+
+// backingPod returns the Pod backing this very Instance, or nil when the Instance has none: not
+// scheduled anywhere, no Pod rendered yet, or only a previous incarnation's Pod — which is not this
+// Instance's to measure and must never be served as if it were.
+//
+// A nil Pod is a state, not a failure. The Instance's own declaration still says what it asked
+// for, so the caller answers from that rather than making every client branch on a 503.
+func (h *InstanceMetricsHandler) backingPod(
+	ctx context.Context,
+	key types.NamespacedName,
+	inst *workercore.Instance,
+) (*core.Pod, error) {
+	if inst.Status.NodeName == "" {
+		return nil, nil
+	}
+
+	pod := &core.Pod{}
+	err := h.APIReader.Get(ctx, key, pod, ctrlclix.WithoutQuorum)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if pod.Labels[deviceplugin.InstancePartOfLabelKey] != string(inst.UID) {
+		return nil, nil
+	}
+	return pod, nil
+}
+
+// newInstanceMetrics wraps a sample as the served object, identified by the Instance rather than
+// by whatever produced the figures.
+func newInstanceMetrics(
+	inst *workercore.Instance,
+	sample *worker.InstanceMetricsSample,
+) *worker.InstanceMetrics {
 	return &worker.InstanceMetrics{
 		ObjectMeta: meta.ObjectMeta{
 			Namespace: inst.Namespace,
@@ -169,7 +206,7 @@ func (h *InstanceMetricsHandler) OnGet(ctx context.Context, key types.Namespaced
 			UID:       inst.UID,
 		},
 		Sample: *sample,
-	}, nil
+	}
 }
 
 // currentAcceleratorMetrics reads the device manager's latest snapshot and filters it to the
@@ -178,6 +215,7 @@ func (h *InstanceMetricsHandler) currentAcceleratorMetrics(
 	ctx context.Context,
 	nodeName string,
 	allocGroups []workercore.DevicesAllocationGroup,
+	grants *kubemetrics.AcceleratorGrants,
 ) []worker.InstanceAcceleratorMetrics {
 	pods, err := h.listNodeDeviceManagerPods(ctx, nodeName)
 	if err != nil {
@@ -205,7 +243,8 @@ func (h *InstanceMetricsHandler) currentAcceleratorMetrics(
 				"node", nodeName, "manufacturer", manufacturer, "pod", ctrlcli.ObjectKeyFromObject(pod))
 			continue
 		}
-		accelerators = append(accelerators, filterAllocatedAcceleratorMetrics(snapshot, allocGroups)...)
+		accelerators = append(accelerators,
+			filterAllocatedAcceleratorMetrics(snapshot, allocGroups, grants)...)
 	}
 	return accelerators
 }
@@ -229,10 +268,12 @@ func allocatedManufacturers(allocGroups []workercore.DevicesAllocationGroup) []s
 // filterAllocatedAcceleratorMetrics maps the snapshot's metrics for the allocated devices onto
 // the API type. The filtering itself — the staleness bound and the manufacturer-and-ID match —
 // belongs to the device manager that produced the snapshot, and is shared with its own exporter
-// so the two surfaces cannot report different cards for one Instance.
+// so the two surfaces cannot report different cards for one Instance. So is the resolution of what
+// each entry says, which is the grants index's, for the same reason.
 func filterAllocatedAcceleratorMetrics(
 	snapshot *devicemanager.MonitorSnapshot,
 	allocGroups []workercore.DevicesAllocationGroup,
+	grants *kubemetrics.AcceleratorGrants,
 ) []worker.InstanceAcceleratorMetrics {
 	allocated := detector.AllocatedAcceleratorMetricsOf(snapshot, allocGroups)
 	if len(allocated) == 0 {
@@ -245,7 +286,10 @@ func filterAllocatedAcceleratorMetrics(
 
 	accelerators := make([]worker.InstanceAcceleratorMetrics, 0, len(allocated))
 	for i := range allocated {
-		accelerators = append(accelerators, toInstanceAcceleratorMetrics(&allocated[i].Metrics))
+		// One card can yield several entries: an Instance holding two hardware partitions of it
+		// holds two grants, each with its own identity and its own figures.
+		accelerators = append(accelerators, grants.Resolve(
+			snapshot.Slices, allocated[i].Manufacturer, &allocated[i].Metrics)...)
 	}
 	return accelerators
 }
@@ -329,20 +373,4 @@ func fetchMonitorSnapshot(ctx context.Context, url string) (*devicemanager.Monit
 		return nil, fmt.Errorf("failed to decode monitor snapshot: %w", err)
 	}
 	return snapshot, nil
-}
-
-// toInstanceAcceleratorMetrics converts the internal accelerator metrics to the API type,
-// keeping the vendor-native MiB memory figures.
-func toInstanceAcceleratorMetrics(am *device.AcceleratorMetrics) worker.InstanceAcceleratorMetrics {
-	result := worker.InstanceAcceleratorMetrics{
-		ID: am.ID,
-	}
-	result.MemoryTotalMiB = &am.Memory
-	result.MemoryUsedMiB = &am.MemoryUsage
-	result.MemoryUtilizationPercent = &am.MemoryUtilization
-	result.CoresUtilizationPercent = &am.CoresUtilization
-	result.TemperatureCelsius = &am.Temperature
-	result.PowerUsageWatts = &am.PowerUsage
-	result.Unhealthy = &am.Unhealthy
-	return result
 }
