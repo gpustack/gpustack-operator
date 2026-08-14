@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/devicemanager/kuberess"
+	"gpustack.ai/gpustack/pkg/devicemanager/procattr"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -41,6 +43,12 @@ type Detector struct {
 	monitorPeriod           time.Duration
 	monitorSnapshot         datax.Snapshot[MonitorSnapshot]
 	detectedManufacturersCh chan<- sets.Set[string]
+
+	// podLister and procResolver are the two node-local reads the slice section needs: which Pods
+	// this node runs, and which of them a host process belongs to. They are fields rather than
+	// direct calls so the pass tests against a fake Pod list and a fake /proc tree.
+	podLister    func(ctx context.Context) ([]core.Pod, error)
+	procResolver *procattr.Resolver
 }
 
 // MonitorSnapshot is the latest accelerator metrics sample stored by the monitor loop.
@@ -58,6 +66,11 @@ type MonitorSnapshot struct {
 	// Groups is the latest accelerator metrics sample,
 	// empty before the first monitor tick.
 	Groups device.MetricsGroupList `json:"groups"`
+	// Slices is what each Instance holds of the accelerators the groups above describe as wholes,
+	// absent when the pass could not measure — which is not the same claim as an empty section,
+	// and is why the field is a pointer. Its SchemaVersion is what lets a consumer tell a
+	// producer that predates slice reporting from hardware that cannot be measured.
+	Slices *MonitorSliceSection `json:"slices,omitempty"`
 }
 
 // New creates a Detector with the given configuration.
@@ -76,14 +89,19 @@ func New(c *Config) (*Detector, error) {
 		detectors = append(detectors, creators[i](createOpts))
 	}
 
-	return &Detector{
+	d := &Detector{
 		noPCICheck:              noPCICheck,
 		manufacturers:           manufacturers,
 		noFastFailed:            c.NoFastFailed,
 		detectors:               detectors,
 		monitorPeriod:           c.MonitorPeriod,
 		detectedManufacturersCh: c.DetectedManufacturersCh,
-	}, nil
+	}
+	d.podLister = d.listNodePods
+	// The device manager runs with hostPID, so its own /proc lists the host's processes — the
+	// namespace the vendor libraries report their pids in.
+	d.procResolver = procattr.New(os.DirFS("/proc"))
+	return d, nil
 }
 
 // DetectAccelerator detects the accelerators on the node and returns a list of device groups once.
@@ -204,12 +222,18 @@ func (d *Detector) Start(ctx context.Context) error {
 
 			metricsGrpList := d.MonitorAccelerator(ctx)
 			if len(metricsGrpList) != 0 {
+				// The per-process pass runs beside the card pass and is stamped with the same
+				// store time. It is a second enumeration of the same devices, so the card and
+				// process readings are milliseconds apart rather than interleaved — which costs
+				// a consumer nothing, since neither figure is derived from the other, and buys
+				// that the raw rows cannot reach the snapshot by construction.
 				d.monitorSnapshot.Store(&MonitorSnapshot{
 					Timestamp: time.Now(),
 					// Round up: truncating a sub-second remainder would understate the period
 					// and make consumers drop healthy samples as stale.
 					PeriodSeconds: int64((d.monitorPeriod + time.Second - 1) / time.Second),
 					Groups:        metricsGrpList,
+					Slices:        d.collectSlices(ctx, metricsGrpList),
 				})
 			}
 

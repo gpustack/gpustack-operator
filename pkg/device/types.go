@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/sets"
 	klog "k8s.io/klog/v2"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -88,6 +89,175 @@ type (
 	MetricsGroupList = []MetricsGroup
 )
 
+// Structures for per-process device usage.
+//
+// These rows are producer-internal: they name host processes, so they are aggregated per Pod and
+// container before anything is published and never travel on a wire themselves.
+type (
+	// AcceleratorProcessReason names why a per-process figure could not be produced. The values
+	// are stable strings because they are published as a label beside the absence they explain,
+	// and an absence without a named reason is indistinguishable from an idle device.
+	AcceleratorProcessReason string
+
+	// AcceleratorProcess is one process the manufacturer reports holding an accelerator.
+	//
+	// The figures are pointers because a manufacturer that cannot measure one of them must not be
+	// read as measuring zero: the vendor libraries carry sentinels for exactly this, and a
+	// sentinel taken as a number is the largest figure the field can hold.
+	AcceleratorProcess struct {
+		// PID is the process's HOST pid, as the vendor library reports it. A containerized
+		// process is named by the pid the host sees, never by the pid it sees itself.
+		PID uint32
+		// MemoryBytes is the device memory the process holds, in bytes — the vendor's native
+		// unit rather than MiB, so that a sum of sub-MiB rows is taken before any conversion
+		// rounds it. Nil when the vendor reported a sentinel in place of a number.
+		MemoryBytes *uint64
+		// CoresPercent is the share of the whole accelerator's compute the process was last
+		// measured using, in [0,100].
+		//
+		// NIL MEANS NOT MEASURABLE, exactly as it does for the memory above, and an adapter that
+		// means "measured and idle" must say so with a pointer to zero. The distinction cannot be
+		// left to the consumer: on one library a process missing from the sample list is idle,
+		// because the library reports only non-zero samples; on another a row carries a sentinel
+		// because that hardware revision cannot measure occupancy at all. Both arrive here as one
+		// field, so the adapter is the only place that knows which of the two it is holding.
+		CoresPercent *uint32
+	}
+
+	// AcceleratorProcesses is one accelerator's per-process rows, together with why an entry
+	// point produced no rows at all.
+	//
+	// The two reasons are independent: a driver commonly serves process memory while refusing
+	// process utilization, and collapsing them into one would hide half of what it does answer.
+	// An empty Processes list with no reason set is a complete read of an idle device.
+	AcceleratorProcesses struct {
+		// ID is the universally unique identifier of the accelerator these rows belong to, the
+		// same identifier AcceleratorMetrics carries.
+		ID string
+		// MemoryReason is why no row carries usable memory, empty when memory was read.
+		MemoryReason AcceleratorProcessReason
+		// CoresReason is why no row carries usable utilization, empty when it was read.
+		CoresReason AcceleratorProcessReason
+		// Processes is one row per process the device reports.
+		Processes []AcceleratorProcess
+	}
+
+	// AcceleratorProcessesGroup is one manufacturer's per-process rows for every accelerator it
+	// enumerated in one pass.
+	AcceleratorProcessesGroup struct {
+		// Manufacturer is the name of the device manufacturer.
+		Manufacturer string
+		// Timestamp is the time when the rows were collected.
+		Timestamp time.Time
+		// Accelerators is the list of per-accelerator rows in this group.
+		Accelerators []AcceleratorProcesses
+	}
+)
+
+const (
+	// AcceleratorProcessReasonNone is the absence of a refusal: the entry point answered.
+	AcceleratorProcessReasonNone AcceleratorProcessReason = ""
+	// AcceleratorProcessReasonUnsupported means the driver does not serve this query for this
+	// device. It is a property of the node, not of this sample.
+	AcceleratorProcessReasonUnsupported AcceleratorProcessReason = "unsupported"
+	// AcceleratorProcessReasonPermission means the query needs privileges the process does not
+	// have. Like the reason above it will not clear on its own.
+	AcceleratorProcessReasonPermission AcceleratorProcessReason = "permission"
+	// AcceleratorProcessReasonDriverError means the query failed for a reason that may not
+	// repeat, so support is not disproven by it and the next sample is worth taking.
+	AcceleratorProcessReasonDriverError AcceleratorProcessReason = "transient_driver_error"
+	// AcceleratorProcessReasonTruncated means the driver kept asking for a larger buffer than
+	// the read would accept, so the row list could not be completed. A truncated list read as a
+	// complete one turns processes that exist into processes that do not.
+	AcceleratorProcessReasonTruncated AcceleratorProcessReason = "truncated"
+)
+
+// Structures for hardware-partition usage.
+//
+// A hardware partition is measured on the partition's OWN device handle rather than on the parent
+// card's, and it is identified by what the allocation recorded — a profile name and the placement
+// the partition occupies — rather than by which partition happens to hold a process of ours. That is
+// what lets an idle partition report zero: a partition with no process is still a partition that can
+// be named, while a process-first lookup would find nothing and have to publish an absence.
+//
+// So these carry no process ids at all, and the request carries no tenant identity either: which Pod
+// and container holds a partition is the caller's join, made where the Pod list already is.
+type (
+	// AcceleratorPartitionRequest names one hardware partition to read, as the allocation recorded
+	// it: the parent accelerator, the profile, and the placement the partition occupies.
+	AcceleratorPartitionRequest struct {
+		// DeviceID is the universally unique identifier of the PARENT accelerator, which is what an
+		// allocation records; the partition's own handle is resolved from the two fields below.
+		DeviceID string
+		// Profile is the partition profile's name, e.g. "1g.10gb".
+		Profile string
+		// Placements is the run(s) the partition occupies on the parent, in the manufacturer's own
+		// slice units. It is what distinguishes two partitions of the SAME profile on one card, so
+		// a partition is matched on the profile and the placement together and on nothing else.
+		Placements []AcceleratorPlacement
+	}
+
+	// AcceleratorPartition is one requested partition's answer. It echoes the request's three
+	// identifying fields so a caller can match it back without depending on the order of the reply.
+	//
+	// Every request is answered, whether or not anything could be read from it: an answer carrying a
+	// nil figure and a reason is what keeps a partition that could not be read from being read as
+	// idle, which an omitted answer would become the moment the caller reports a measured device.
+	AcceleratorPartition struct {
+		// DeviceID, Profile and Placements are the request's own, echoed unchanged.
+		DeviceID   string
+		Profile    string
+		Placements []AcceleratorPlacement
+
+		// ID is the PARTITION's own universally unique identifier — a MIG UUID, not the parent card's.
+		// It is what the partition is reported under, because the partition rather than the card is
+		// what its holder was granted. Empty when the partition's handle could not be reached, which
+		// is the same failure that leaves the two figures below nil.
+		ID string
+
+		// MemoryTotalBytes is the partition's OWN memory capacity, as its handle reports it, in the
+		// vendor's native unit. It comes from the driver rather than from the profile name because the
+		// name rounds: a "1g.10gb" partition carries 9856 MiB, not 10240.
+		MemoryTotalBytes *uint64
+		// MemoryUsedBytes is the device memory held on the partition's own handle, in the vendor's
+		// native unit. Nil when the figure was not readable, for the reason below.
+		MemoryUsedBytes *uint64
+
+		// MemoryReason is why the two memory figures are nil, empty when they were read.
+		MemoryReason AcceleratorProcessReason
+		// CoresReason is why no compute utilization accompanies the partition. No manufacturer serves
+		// a per-partition one today, so it is always populated.
+		CoresReason AcceleratorProcessReason
+	}
+
+	// AcceleratorPartitionsGroup is one manufacturer's answers for every partition it was asked
+	// about in one pass.
+	AcceleratorPartitionsGroup struct {
+		// Manufacturer is the name of the device manufacturer.
+		Manufacturer string
+		// Timestamp is the time when the partitions were read.
+		Timestamp time.Time
+		// Partitions holds one answer per request, in any order.
+		Partitions []AcceleratorPartition
+	}
+
+	// AcceleratorPartitionDetector is an optional companion to Detector, implemented only by the
+	// manufacturers whose library answers for a hardware partition's own handle. It is separate from
+	// AcceleratorProcessDetector because the two ask different questions: that one asks which
+	// processes hold a card, this one asks what one partition of it holds, and a manufacturer can
+	// serve either without the other.
+	AcceleratorPartitionDetector interface {
+		// MonitorAcceleratorPartitions reads the partitions named by requests, resolving each one's
+		// handle from the recorded profile and placement.
+		//
+		// The result carries an answer for each request and for no others. If noPciCheck is true,
+		// the detector will skip PCI checks, exactly as the Detector methods do.
+		MonitorAcceleratorPartitions(
+			noPciCheck bool, requests []AcceleratorPartitionRequest,
+		) (AcceleratorPartitionsGroup, error)
+	}
+)
+
 type (
 	// DetectorOptions represents the options for configuring the detector.
 	DetectorOptions struct {
@@ -110,6 +280,30 @@ type (
 		// If noPciCheck is true, the detector will skip PCI checks when monitoring accelerators.
 		// This is useful for platforms where PCI information is not available or not reliable.
 		MonitorAccelerator(noPciCheck bool) (MetricsGroupList, error)
+	}
+
+	// AcceleratorProcessDetector is an optional companion to Detector, implemented only by the
+	// manufacturers whose library answers which processes hold a device and how much of it.
+	//
+	// It is deliberately not part of Detector. A detector that cannot answer simply does not
+	// implement it, which keeps the nine implementations and every test fake unchanged, and keeps
+	// "this manufacturer serves no per-process query" a compile-time fact rather than a method
+	// that has to return an error at runtime.
+	AcceleratorProcessDetector interface {
+		// MonitorAcceleratorProcesses returns the per-process rows of the accelerators named by
+		// deviceIDs, in the vendor's own units and with the vendor's own semantics preserved.
+		//
+		// Only those accelerators are queried, and the result carries an entry for each of them
+		// and for no others. The caller names the devices because a per-process query only means
+		// something on a device carrying a carved allocation: querying the rest would spend
+		// vendor and /proc work on figures nobody can ask for, and would let a process on a card
+		// nobody sliced make that card's figures unmeasurable for no one's benefit.
+		//
+		// If noPciCheck is true, the detector will skip PCI checks, exactly as the two Detector
+		// methods do.
+		MonitorAcceleratorProcesses(
+			noPciCheck bool, deviceIDs sets.Set[string],
+		) (AcceleratorProcessesGroup, error)
 	}
 )
 
