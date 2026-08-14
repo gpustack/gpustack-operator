@@ -19,6 +19,7 @@
     X(int, dcmi_get_device_memory_info_v2, (int card_id, int device_id, struct dcmi_memory_info *memory_info), (card_id, device_id, memory_info)) \
     X(int, dcmi_get_device_memory_info_v3, (int card_id, int device_id, struct dcmi_get_memory_info_stru *memory_info), (card_id, device_id, memory_info)) \
     X(int, dcmi_get_device_ecc_info, (int card_id, int device_id, enum dcmi_device_type input_type, struct dcmi_ecc_info *device_ecc_info), (card_id, device_id, input_type, device_ecc_info)) \
+    X(int, dcmi_get_device_resource_info, (int card_id, int device_id, struct dcmi_proc_mem_info *proc_info, int *proc_num), (card_id, device_id, proc_info, proc_num)) \
     X(int, dcmi_get_affinity_cpu_info_by_device_id, (int card_id, int device_id, char *affinity_cpu, int *length), (card_id, device_id, affinity_cpu, length)) \
     X(int, dcmi_get_topo_info_by_device_id, (int card_id1, int device_id1, int card_id2, int device_id2, int *topo_type), (card_id1, device_id1, card_id2, device_id2, topo_type)) \
     X(int, dcmi_get_device_ip, (int card_id, int device_id, enum dcmi_port_type input_type, int port_id, struct dcmi_ip_addr *ip, struct dcmi_ip_addr *mask), (card_id, device_id, input_type, port_id, ip, mask)) \
