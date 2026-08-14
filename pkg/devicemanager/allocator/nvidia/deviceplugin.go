@@ -286,6 +286,28 @@ func (s *server) getSlicedContainerAllocateResponse(
 		envs["CUDA_DEVICE_MEMORY_LIMIT_"+strconv.Itoa(i)] = strconv.FormatInt(limit, 10) + "m"
 	}
 
+	// The per-accelerator limits above are keyed by position, and HAMi-core fills its limit
+	// table from those keys in NVML enumeration order but reads a limit back by the CUDA
+	// ordinal of the calling context. Those two numberings coincide only under PCI_BUS_ID:
+	// CUDA's default orders by a performance heuristic, which on a node carrying more than
+	// one accelerator model can hand a card the budget computed for another. The same
+	// invariant governs any integer a workload derives from an NVML index and hands to CUDA,
+	// CUDA_VISIBLE_DEVICES included. A workload that declares its own ordering keeps it: the
+	// value it sets on its own container reaches CUDA either way, so overwriting it here
+	// would hide the choice rather than settle it.
+	// Keeping it is not the same as tolerating it once a slice can hold several accelerators. A
+	// declared FASTEST_FIRST would then transpose the caps among the accelerators the container
+	// holds, and a cap that lands on a SHARED accelerator lets its holder consume past its
+	// entitlement and starve the co-tenant — an isolation hole, not merely a mis-served tenant.
+	// Admission holds a slice to one accelerator today, and one visible accelerator is ordinal 0
+	// under either ordering, so there is nothing to transpose. Whoever lifts that gate has to make
+	// the ordering an admission requirement and REFUSE a conflicting declaration: injecting it
+	// harder cannot work, because the kubelet appends the container's own environment after this
+	// one and the runtime lets the later value win.
+	if !deviceplugin.ContainerEnvDeclared(ctr, "CUDA_DEVICE_ORDER") {
+		envs["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+	}
+
 	// Quiet HAMi-core's per-call interception logging by default: its LIBCUDA_LOG_LEVEL
 	// defaults to 1, which prints [HAMI-core Msg ...] init/cleanup lines on every intercepted
 	// call. A container that sets LIBCUDA_LOG_LEVEL itself keeps its value — the debugging

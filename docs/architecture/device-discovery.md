@@ -302,6 +302,18 @@ reports its HBM **quota** and the slice's usage instead of the whole accelerator
 NVIDIA gives, where `nvidia-smi` shows the virtual VRAM total while power and temperature stay
 accelerator-wide.
 
+NVIDIA takes one more under the same rule, `CUDA_DEVICE_ORDER=PCI_BUS_ID`: the per-accelerator
+`CUDA_DEVICE_MEMORY_LIMIT_<i>` keys address a card by position, and HAMi-core fills its limit table
+from them in NVML enumeration order but reads a limit back by CUDA ordinal.
+
+Those two numberings coincide only under `PCI_BUS_ID` — CUDA's default orders by a performance
+heuristic — and the same invariant governs any integer a workload derives from an NVML index and
+hands to CUDA, `CUDA_VISIBLE_DEVICES` included.
+
+> **NVML is unaffected by it** — NVML always enumerates by PCI bus id, so the `Index` the DM reports
+> matches `nvidia-smi` whether or not the variable is set. The ordering is stated where the injection
+> is consumed, not where accelerators are detected.
+
 > **Never-overwrite reads the container's own `env:` entries** — an `envFrom:`-sourced value is
 > invisible to the allocator, so opting out that way needs an explicit `env:`.
 
