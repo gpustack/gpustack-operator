@@ -404,9 +404,12 @@ type (
 		// TRANSPORT the reconciler consumes to build the ledger above — not status output. The
 		// device-plugin Allocate records, in the Pod's own allocation annotation, the single
 		// physical partition that Pod holds on this accelerator (e.g. an NVIDIA MIG instance):
-		// its profile name and the memory-slice interval(s) it occupies. Both are empty (omitted)
-		// in the aggregated Devices.Status. A Pod holds one instance of one profile per
-		// accelerator.
+		// its profile name and the memory-slice interval(s) it occupies. A Pod holds one instance of
+		// one profile per accelerator.
+		//
+		// Every field in this transport group is omitted from the aggregated Devices.Status — but
+		// none of them is hidden: Instance.status.allocations reports each Pod's own record
+		// verbatim, and that is where an operator reads which partition their Instance holds.
 		AllocatedPhysicalProfile string `json:"allocatedPhysicalProfile,omitempty" yaml:"allocatedPhysicalProfile,omitempty" protobuf:"bytes,8,opt,name=allocatedPhysicalProfile"` // nolint: lll
 
 		// AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition occupies
