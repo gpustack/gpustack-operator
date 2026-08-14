@@ -498,7 +498,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																			XListType: ptr.To[string]("atomic"),
 																		},
 																		"allocatedPhysicalProfile": {
-																			Description: "AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation\nTRANSPORT the reconciler consumes to build the ledger above — not status output. The\ndevice-plugin Allocate records, in the Pod's own allocation annotation, the single\nphysical partition that Pod holds on this accelerator (e.g. an NVIDIA MIG instance):\nits profile name and the memory-slice interval(s) it occupies. Both are empty (omitted)\nin the aggregated Devices.Status. A Pod holds one instance of one profile per\naccelerator.",
+																			Description: "AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation\nTRANSPORT the reconciler consumes to build the ledger above — not status output. The\ndevice-plugin Allocate records, in the Pod's own allocation annotation, the single\nphysical partition that Pod holds on this accelerator (e.g. an NVIDIA MIG instance):\nits profile name and the memory-slice interval(s) it occupies. A Pod holds one instance of\none profile per accelerator.\nEvery field in this transport group is omitted from the aggregated Devices.Status — but\nnone of them is hidden: Instance.status.allocations reports each Pod's own record\nverbatim, and that is where an operator reads which partition their Instance holds.",
 																			Type:        "string",
 																		},
 																		"allocatedProfiles": {
@@ -1155,7 +1155,7 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 																			XListType: ptr.To[string]("atomic"),
 																		},
 																		"allocatedPhysicalProfile": {
-																			Description: "AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation\nTRANSPORT the reconciler consumes to build the ledger above — not status output. The\ndevice-plugin Allocate records, in the Pod's own allocation annotation, the single\nphysical partition that Pod holds on this accelerator (e.g. an NVIDIA MIG instance):\nits profile name and the memory-slice interval(s) it occupies. Both are empty (omitted)\nin the aggregated Devices.Status. A Pod holds one instance of one profile per\naccelerator.",
+																			Description: "AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation\nTRANSPORT the reconciler consumes to build the ledger above — not status output. The\ndevice-plugin Allocate records, in the Pod's own allocation annotation, the single\nphysical partition that Pod holds on this accelerator (e.g. an NVIDIA MIG instance):\nits profile name and the memory-slice interval(s) it occupies. A Pod holds one instance of\none profile per accelerator.\nEvery field in this transport group is omitted from the aggregated Devices.Status — but\nnone of them is hidden: Instance.status.allocations reports each Pod's own record\nverbatim, and that is where an operator reads which partition their Instance holds.",
 																			Type:        "string",
 																		},
 																		"allocatedProfiles": {

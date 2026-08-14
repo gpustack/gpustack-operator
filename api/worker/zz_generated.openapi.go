@@ -2170,7 +2170,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref common.Refere
 					},
 					"allocatedPhysicalProfile": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation TRANSPORT the reconciler consumes to build the ledger above — not status output. The device-plugin Allocate records, in the Pod's own allocation annotation, the single physical partition that Pod holds on this accelerator (e.g. an NVIDIA MIG instance): its profile name and the memory-slice interval(s) it occupies. Both are empty (omitted) in the aggregated Devices.Status. A Pod holds one instance of one profile per accelerator.",
+							Description: "AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation TRANSPORT the reconciler consumes to build the ledger above — not status output. The device-plugin Allocate records, in the Pod's own allocation annotation, the single physical partition that Pod holds on this accelerator (e.g. an NVIDIA MIG instance): its profile name and the memory-slice interval(s) it occupies. A Pod holds one instance of one profile per accelerator.\n\nEvery field in this transport group is omitted from the aggregated Devices.Status — but none of them is hidden: Instance.status.allocations reports each Pod's own record verbatim, and that is where an operator reads which partition their Instance holds.",
 							Type:        []string{"string"},
 							Format:      "",
 						},

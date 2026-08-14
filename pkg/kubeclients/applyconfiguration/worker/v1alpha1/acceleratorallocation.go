@@ -40,14 +40,33 @@ type AcceleratorAllocationApplyConfiguration struct {
 	// TRANSPORT the reconciler consumes to build the ledger above — not status output. The
 	// device-plugin Allocate records, in the Pod's own allocation annotation, the single
 	// physical partition that Pod holds on this accelerator (e.g. an NVIDIA MIG instance):
-	// its profile name and the memory-slice interval(s) it occupies. Both are empty (omitted)
-	// in the aggregated Devices.Status. A Pod holds one instance of one profile per
-	// accelerator.
+	// its profile name and the memory-slice interval(s) it occupies. A Pod holds one instance of
+	// one profile per accelerator.
+	//
+	// Every field in this transport group is omitted from the aggregated Devices.Status — but
+	// none of them is hidden: Instance.status.allocations reports each Pod's own record
+	// verbatim, and that is where an operator reads which partition their Instance holds.
 	AllocatedPhysicalProfile *string `json:"allocatedPhysicalProfile,omitempty"`
 	// AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition occupies
 	// on this accelerator. The reconciler unions these across the node's Pods to derive
 	// RemainingProfiles.
 	AllocatedPhysicalPlacements []AcceleratorPlacementApplyConfiguration `json:"allocatedPhysicalPlacements,omitempty"`
+	// AllocatedPhysicalID is the partition's own identifier, as the driver named it at the moment
+	// it was created (an NVIDIA MIG UUID, a T-Head PPU MIG UUID). Part of the same annotation
+	// TRANSPORT, empty (omitted) in the aggregated Devices.Status.
+	//
+	// It is recorded because the allocator holds it already and the reader would otherwise have to
+	// EARN it back: without it, naming a partition means translating the recorded profile name
+	// into a driver profile id, enumerating every instance of that profile, and matching on the
+	// placement — dozens of driver calls per card per monitor period, to recover something that
+	// was in hand at Allocate time. So it is also the ONLY way a partition is addressed: an
+	// allocation carrying none is reported as an absence rather than derived.
+	//
+	// It is NOT a generation marker. These UUIDs are name-based, derived from the parent device
+	// and the instance's own identity, so destroying a partition and creating another at the same
+	// placement yields the SAME identifier. Treat a recorded id as a fast way to FIND the
+	// partition, never as proof that the one found is the one that was granted.
+	AllocatedPhysicalID *string `json:"allocatedPhysicalID,omitempty"`
 	// AllocatedLogicalPlacements is the per-Pod annotation TRANSPORT of the logical-slice
 	// ledger: the compute geometry the Pod's logical slice holds on this accelerator, in the
 	// manufacturer's own compute units (on AMD, CU-mask bit indexes exactly as they appear in
@@ -147,6 +166,14 @@ func (b *AcceleratorAllocationApplyConfiguration) WithAllocatedPhysicalPlacement
 		}
 		b.AllocatedPhysicalPlacements = append(b.AllocatedPhysicalPlacements, *values[i])
 	}
+	return b
+}
+
+// WithAllocatedPhysicalID sets the AllocatedPhysicalID field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AllocatedPhysicalID field is set to the value of the last call.
+func (b *AcceleratorAllocationApplyConfiguration) WithAllocatedPhysicalID(value string) *AcceleratorAllocationApplyConfiguration {
+	b.AllocatedPhysicalID = &value
 	return b
 }
 
