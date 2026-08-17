@@ -385,12 +385,21 @@ func (c *Client) newInstall(
 //
 // It is always atomic: an upgrade acts on a live release, so a failed one must be rolled
 // back to the revision that was serving before it.
+//
+// It patches, and never replaces. Helm's force option replaces each object with the rendered
+// manifest — a read of the live object followed by a write of the whole of it — which
+// concedes two properties this chart depends on. The write is versioned on that read, so it
+// holds only for as long as nothing else writes the same object; and it carries only what the
+// chart renders, so it drops whatever a controller put there. The bundled Kueue owns both
+// ends of that: it runs its own cert controller, and the chart renders its CRDs with no
+// caBundle for the controller to fill in. A patch leaves a field the chart never rendered
+// where it stands and needs no version to hold, so the upgrade converges whether or not Kueue
+// is reconciling those CRDs at the time.
 func (c *Client) newUpgrade(config *helmaction.Configuration, chart *Chart) *helmaction.Upgrade {
 	u := helmaction.NewUpgrade(config)
 	u.Timeout = c.timeout
 	u.Atomic = true
 	u.Recreate = true
-	u.Force = true
 	chart.configureUpgrade(u)
 
 	return u

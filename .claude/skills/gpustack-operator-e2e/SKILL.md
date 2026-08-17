@@ -85,6 +85,7 @@ Each case is self-contained; its header (see **Case header contract**) states go
 | 38 | AMD accelerator claims over both carriers: exclusive whole cards, logical slices, and the Instance metrics array | `pkg/devicemanager/allocator/amd/**`, `pkg/devicemanager/detector/amd/device.go`, `binding/amdsmi/**`, `csrc/amd/rocm-slicing-shim/**`, `pkg/worker/extensionapis/worker/instance.metrics.go` | yes (confirm) | real AMD, logical slicing |
 | 39 | T-Head PPU: a pinned claim lands exactly where it was told, and a logical slice is capped inside the container | `pkg/devicemanager/allocator/thead/**`, `pkg/devicemanager/detector/thead/device.go`, `binding/hgml/**`, `pkg/deviceplugin/{controller,server}.go`, `csrc/thead/ppu-slicing-shim/**` | yes (confirm) | real T-Head, >=2 accelerators idle + node host context (else `PPU_NODE_SSH`) |
 | 40 | The device manager exports this node's Instances as Prometheus gauges, from exactly one target | `pkg/devicemanager/exporter/**`, `pkg/devicemanager/detector/snapshot.go`, `pkg/kubemetrics/**`, `pkg/manager/metrics.go` | yes (confirm) | any node running a device manager |
+| 41 | The slice pass reads only the carved cards: a whole card on the same node is never queried | `pkg/devicemanager/detector/slice.go`, `pkg/devicemanager/detector/snapshot.go`, `pkg/devicemanager/snapshot.go` | yes (confirm) | real GPU, >=2 logically sliceable cards on one node |
 
 Each note below is something the **lead** must act on before or around a run. What a case *does* — its goal, environment, inputs, assertions and cleanup — lives in its own header, which the **Case header contract** below requires to be readable on its own; the index never restates it.
 
@@ -98,6 +99,21 @@ Each note below is something the **lead** must act on before or around a run. Wh
   - Each partitions a card only if none is partitioned yet and restores exactly the card it toggled, so one up-front `nvidia-smi -i 0 -mig 1` plus a Device Manager rollout restart lets most of them run back to back — but **CASE 27 requires the opposite** and skips if any card is already partitioned. That ordering — **27 first, then 24, then the rest** — is what `run-partition-block.sh` encodes; drive the family with it.
   - Optional environment, all with defaults: `MIG_NODE_NAME`, `MIG_NODE_SSH_OPTS`, `MIG_GPU_INDEX` (0), `MIG_SSH_TIMEOUT` (90), `IMAGE`, `MIG_MIXED_INDEXES` / `MIG_MIXED_ROUNDS` (CASE 24), `MIG_WRITE_IDLE_WINDOW` (CASE 25), `MIG_MAX_FILL` (CASE 27), `F11_IMAGE` / `F11_EXPECT` (CASE 28), `MIG_RECLAIM_BOUND` (CASE 31), `MIG_OOB_WINDOW` (CASE 32).
 - **CASE 24 is the headline regression guard** for the failure the two-family split exists to remove: a single token pool used to let the kubelet hand a partition request a token from a card that cannot be partitioned, and the Pod died with a terminal `UnexpectedAdmissionError`.
+- **CASE 14 and CASES 11/22/41 want opposite POOL shapes.** CASE 14's over-budget assertion needs a pool
+  of a **single** logically sliceable card — with a free sibling the third slice simply lands there
+  instead of being held — so it auto-skips on a multi-card pool. CASES 11, 22 and 41 need **two or
+  more**. The incompatibility is between pools, not nodes: one node carrying a single-card pool of one
+  accelerator model beside a multi-card pool of another satisfies both. But CASE 14 takes the **first**
+  sliceable pool it finds rather than seeking a single-card one, so even that node can leave it
+  skipping — check which pool it picked before reading the skip as a hardware verdict. What genuinely
+  cannot be arranged is hiding a card: the `*_VISIBLE_DEVICES` variables are what the allocators inject
+  into a workload container, not a filter on what the device manager detects.
+- **CASE 40's accelerator sub-check cannot execute on its own Instance.** The case creates a **CPU**
+  Instance on the general pool, which holds no accelerator, so the accelerator-family label set —
+  including `mode` — always skips, on any hardware. Reading it needs an accelerated Instance, and no
+  case does it on this surface: **CASE 14** asserts the `mode` spelling on the Instance metrics
+  subresource, but the Prometheus accelerator-label path is **uncovered** — CASE 41 and CASE 37 read
+  neither `mode` nor those labels.
 - **CASE 40's "exactly one target" only bites on a multi-vendor node.** A node running one device
   manager satisfies it trivially; the rule it guards — that a node's Instances are published by one
   device manager, never by each — is only exercised where two manufacturers are present. Read a PASS

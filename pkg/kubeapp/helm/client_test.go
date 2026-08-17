@@ -183,11 +183,23 @@ func Test_Client_newInstall(t *testing.T) {
 
 // Test_Client_newUpgrade holds the upgrade atomic: it acts on a live release, so a failure
 // must roll back to the revision that was serving before it.
+//
+// It also holds the upgrade unforced. A forced upgrade replaces every object rather than
+// patching it, and a replace is a read of the live object followed by a write of the whole
+// rendered one. Two things follow, both measured against a cluster. The write carries the
+// resourceVersion the read returned, so a write by anyone else inside that window fails the
+// upgrade with "the object has been modified" — and with the upgrade atomic, a release that
+// has never had a successful revision cannot roll back, so it stays failed and every retry
+// re-enters the same operation. And the object written is the rendered manifest, so a field
+// the chart does not render is dropped: the bundled Kueue runs its own cert controller and
+// the chart renders no caBundle, so a forced upgrade strips the conversion-webhook CA off
+// Kueue's CRDs, which is what makes that window contested on every pass.
 func Test_Client_newUpgrade(t *testing.T) {
 	cli := &Client{timeout: time.Hour}
 
 	u := cli.newUpgrade(&helmaction.Configuration{}, &Chart{Name: "kueue", Release: "gpustack-kueue"})
 	assert.True(t, u.Atomic)
+	assert.False(t, u.Force)
 	assert.Equal(t, time.Hour, u.Timeout)
 }
 

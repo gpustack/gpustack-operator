@@ -161,7 +161,7 @@ func (ch Chart) configureInstall(i *helmaction.Install) {
 // configureUpgrade applies the chart-declared options to the given upgrade action.
 //
 // Only the options the Chart declares are set; the caller still owns the action's
-// timeout, atomicity and force/recreate policy.
+// timeout, atomicity and recreate policy.
 func (ch Chart) configureUpgrade(u *helmaction.Upgrade) {
 	u.TakeOwnership = ch.TakeOwnership
 }
