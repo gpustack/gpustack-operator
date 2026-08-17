@@ -86,20 +86,31 @@ fi
 N="$NCARDS"; [ "$N" -gt 4 ] && N=4
 echo "[case-11] target: ${SLICE_NODE} with ${NCARDS} logically sliceable card(s); ${N} x ${SPREADPCT}%, then 100%/50%/30%"
 
-# The sliceable accelerated InstanceType whose POOL this node belongs to (its name carries the node's
-# accelerator group id, e.g. "tesla-t4"), its entrance LocalQueue, and its per-card memory (MiB). This
-# must match the target node, or the queue would route the slice to a different pool's nodes.
-read -r IT LQ CARDMEM MANUF <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | GID="$GROUPID" python3 -c "
+# The sliceable accelerated InstanceType whose POOL this node belongs to, its entrance LocalQueue, and
+# its per-card memory (MiB). This must match the target node, or the queue would route the slice to a
+# different pool's nodes. Selected by whether the pool BACKS this node — see the index's note on pool
+# lookup — plus the accelerator group the gate above targeted.
+read -r IT LQ CARDMEM MANUF <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | NODE_GID="$GROUPID" NODE_JSON="$(kubectl get node "$SLICE_NODE" -o json 2>/dev/null)" python3 -c "
 import json,sys,os
-gid=os.environ.get('GID','')
+gid=os.environ.get('NODE_GID','')
+nl=(json.loads(os.environ.get('NODE_JSON') or '{}').get('metadata',{}) or {}).get('labels',{}) or {}
+# A pool BACKS this node when every discriminator it carries is a label the node carries too. Those are
+# the schedule labels the webhook stamps from PoolScheduleLabels, so this is the pool's whole identity —
+# os/arch, the acceleratable boolean, the accelerator group and, under CPU-aware grouping, the general
+# group. schedule.gpustack.ai/* is the pool's own bookkeeping and never a node label.
+def backs(it):
+    d={k:v for k,v in (it['metadata'].get('labels') or {}).items() if not k.startswith('schedule.gpustack.ai/')}
+    return bool(d) and all(nl.get(k)==v for k,v in d.items())
+def in_group(s):
+    return bool(gid) and (s.get('acceleratorGroup') or '').endswith('-'+gid)
 for it in json.load(sys.stdin).get('items',[]):
     s=it.get('spec',{}); name=it['metadata']['name']; st=it.get('status',{}); d=st.get('detail',{}); sd=d.get('slicedDetail',{})
     # LOGICALLY sliceable only: a hardware-partitioned card serves no logical slice.
     sliceable=(sd.get('logical',{}).get('count',0) or 0)>0
-    if s.get('acceleratable') and sliceable and gid and gid in name:
+    if s.get('acceleratable') and sliceable and in_group(s) and backs(it):
         print(name, st.get('entrance',''), d.get('memory',''), d.get('manufacturer','')); break
 ")"
-[ -n "$IT" ] && [ -n "$LQ" ] || { echo "no sliceable accelerated InstanceType with an entrance LocalQueue found"; exit 1; }
+[ -n "$IT" ] && [ -n "$LQ" ] || { echo "no sliceable accelerated InstanceType with an entrance LocalQueue backs ${SLICE_NODE} in group '${GROUPID}'"; exit 1; }
 PHYS_MIB=$(python3 -c "
 import re
 m=re.match(r'\s*(\d+)\s*([GM])i?', '${CARDMEM}')

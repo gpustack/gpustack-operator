@@ -246,22 +246,34 @@ bdf_of() {
   printf '%s\n' "$CARD_TABLE" | awk -v id="$1" '$1==id {print $3; exit}'
 }
 
-# The accelerated InstanceType whose POOL this node belongs to (its name carries the node's
-# accelerator group id), its entrance LocalQueue, and the unit resources it sizes a whole-accelerator
-# request by. Must match the target node, or the queue would route the claim to another pool.
-read -r IT LQ UNIT_CPU UNIT_RAM <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | GID="$GROUPID" python3 -c "
+# The accelerated InstanceType whose POOL this node belongs to, its entrance LocalQueue, and the unit
+# resources it sizes a whole-accelerator request by. Must match the target node, or the queue would route
+# the claim to another pool. Matched on the pool's identity tuple — accelerator group plus os/arch — see
+# the index's note on pool lookup.
+read -r IT LQ UNIT_CPU UNIT_RAM <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | NODE_GID="$GROUPID" NODE_JSON="$(kubectl get node "$NODE" -o json 2>/dev/null)" python3 -c "
 import json,sys,os
-gid=os.environ.get('GID','')
+gid=os.environ.get('NODE_GID','')
+nl=(json.loads(os.environ.get('NODE_JSON') or '{}').get('metadata',{}) or {}).get('labels',{}) or {}
+# A pool BACKS this node when every discriminator it carries is a label the node carries too. Those are
+# the schedule labels the webhook stamps from PoolScheduleLabels, so this is the pool's whole identity —
+# os/arch, the acceleratable boolean, the accelerator group and, under CPU-aware grouping, the general
+# group. schedule.gpustack.ai/* is the pool's own bookkeeping and never a node label.
+def backs(it):
+    d={k:v for k,v in (it['metadata'].get('labels') or {}).items() if not k.startswith('schedule.gpustack.ai/')}
+    return bool(d) and all(nl.get(k)==v for k,v in d.items())
+def in_group(s):
+    return bool(gid) and (s.get('acceleratorGroup') or '').endswith('-'+gid)
 for it in json.load(sys.stdin).get('items',[]):
     s=it.get('spec',{}); name=it['metadata']['name']; st=it.get('status',{})
     sd=(st.get('detail',{}) or {}).get('slicedDetail',{}) or {}
-    if s.get('acceleratable') and ((sd.get('logical',{}) or {}).get('count',0) or 0)>0 and gid and gid in name:
+    if s.get('acceleratable') and ((sd.get('logical',{}) or {}).get('count',0) or 0)>0 \
+       and in_group(s) and backs(it):
         u=s.get('unitResources',{}) or {}
         print(name, st.get('entrance',''), u.get('cpu','') or '-', u.get('ram','') or '-'); break
 ")"
 [ -n "${IT:-}" ] && [ -n "${LQ:-}" ] || {
   echo "== CASE 38 — FAILED (setup) =="
-  echo "No logically sliceable ${MANUF} InstanceType with an entrance LocalQueue fronts group"
+  echo "No logically sliceable InstanceType with an entrance LocalQueue backs ${NODE} in group"
   echo "'${GROUPID}'. Run the CPU-only chain case first to confirm the scheduling chain materialized."
   exit 1
 }

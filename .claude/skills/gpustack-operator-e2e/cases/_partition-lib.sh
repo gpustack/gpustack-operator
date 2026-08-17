@@ -260,13 +260,24 @@ for g in json.load(sys.stdin).get('spec',{}).get('groups',[]):
         print(g.get('id','')); break
 " 2>/dev/null)
 
-  read -r IT LQ MANUF <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | NODEGID="$GROUPID" python3 -c "
+  read -r IT LQ MANUF <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | NODE_GID="$GROUPID" NODE_JSON="$(kubectl get node "$GPU_NODE" -o json 2>/dev/null)" python3 -c "
 import json,sys,os
-gid=os.environ.get('NODEGID','')
+gid=os.environ.get('NODE_GID','')
+nl=(json.loads(os.environ.get('NODE_JSON') or '{}').get('metadata',{}) or {}).get('labels',{}) or {}
+# A pool BACKS this node when every discriminator it carries is a label the node carries too. Those are
+# the schedule labels the webhook stamps from PoolScheduleLabels, so this is the pool's whole identity —
+# os/arch, the acceleratable boolean, the accelerator group and, under CPU-aware grouping, the general
+# group. schedule.gpustack.ai/* is the pool's own bookkeeping and never a node label.
+def backs(it):
+    d={k:v for k,v in (it['metadata'].get('labels') or {}).items() if not k.startswith('schedule.gpustack.ai/')}
+    return bool(d) and all(nl.get(k)==v for k,v in d.items())
+def in_group(s):
+    return bool(gid) and (s.get('acceleratorGroup') or '').endswith('-'+gid)
 items=json.load(sys.stdin).get('items',[])
+# The pool identity this node belongs to, not its rendered name — see the index's note on pool lookup.
 for it in items:
     s=it.get('spec',{}); st=it.get('status',{})
-    if s.get('acceleratable') and gid and gid in it['metadata']['name'] and st.get('entrance'):
+    if s.get('acceleratable') and in_group(s) and backs(it) and st.get('entrance'):
         print(it['metadata']['name'], st['entrance'], s.get('manufacturer','nvidia')); sys.exit(0)
 for it in items:
     s=it.get('spec',{}); st=it.get('status',{})

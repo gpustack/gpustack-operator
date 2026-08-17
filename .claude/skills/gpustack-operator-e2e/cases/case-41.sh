@@ -105,22 +105,31 @@ if [ -z "$NODE" ] || [ "${NCARDS:-0}" -lt 2 ]; then
 fi
 echo "[case-41] target: ${NODE} with ${NCARDS} logically sliceable ${MANUF} card(s)"
 
-# The sliceable accelerated InstanceType whose POOL this node belongs to, matched on
-# spec.acceleratorGroup — the identity the controller writes, "<manufacturer>-<group id>". The
-# InstanceType NAME is not that contract, and a bare group id can read as a substring of another
-# manufacturer's name, which on a multi-vendor cluster silently selects the wrong pool. Both Instances
-# go to this one type: the whole card and the slice have to be drawn from the same pool for "different
-# cards of one node" to be the thing measured.
-read -r IT CARDMEM <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | GRP="${MANUF}-${GROUPID}" python3 -c "
+# The sliceable accelerated InstanceType whose POOL this node belongs to, matched on the pool's identity
+# tuple — spec.acceleratorGroup ("<manufacturer>-<group id>") plus spec.os/spec.arch, which is what the
+# controller keys a pool by. See the index's note on pool lookup for what a looser match selects. Both
+# Instances go to this one type: the whole card and the slice have to be drawn from the same pool for
+# "different cards of one node" to be the thing measured.
+read -r IT CARDMEM <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | NODE_GID="$GROUPID" NODE_JSON="$(kubectl get node "$NODE" -o json 2>/dev/null)" python3 -c "
 import json,sys,os
-grp=os.environ.get('GRP','')
+gid=os.environ.get('NODE_GID','')
+nl=(json.loads(os.environ.get('NODE_JSON') or '{}').get('metadata',{}) or {}).get('labels',{}) or {}
+# A pool BACKS this node when every discriminator it carries is a label the node carries too. Those are
+# the schedule labels the webhook stamps from PoolScheduleLabels, so this is the pool's whole identity —
+# os/arch, the acceleratable boolean, the accelerator group and, under CPU-aware grouping, the general
+# group. schedule.gpustack.ai/* is the pool's own bookkeeping and never a node label.
+def backs(it):
+    d={k:v for k,v in (it['metadata'].get('labels') or {}).items() if not k.startswith('schedule.gpustack.ai/')}
+    return bool(d) and all(nl.get(k)==v for k,v in d.items())
+def in_group(s):
+    return bool(gid) and (s.get('acceleratorGroup') or '').endswith('-'+gid)
 for it in json.load(sys.stdin).get('items',[]):
     s=it.get('spec',{}); d=it.get('status',{}).get('detail',{})
     sliceable=(d.get('slicedDetail',{}).get('logical',{}).get('count',0) or 0)>0
-    if s.get('acceleratable') and sliceable and grp and s.get('acceleratorGroup')==grp:
+    if s.get('acceleratable') and sliceable and in_group(s) and backs(it):
         print(it['metadata']['name'], d.get('memory','')); break
 ")"
-[ -n "$IT" ] || { echo "no sliceable accelerated InstanceType carries acceleratorGroup '${MANUF}-${GROUPID}'"; exit 1; }
+[ -n "$IT" ] || { echo "no sliceable accelerated InstanceType backs ${NODE} in group '${GROUPID}'"; exit 1; }
 echo "[case-41] pool InstanceType ${IT} (card ${CARDMEM:-<empty>})"
 
 # The device manager of this node and this manufacturer serves the snapshot. Several manufacturers can

@@ -141,28 +141,39 @@ else
   echo "[case-22] no sliced companion advertised — variants C/D will skip"
 fi
 
-# The accelerated pool that actually backs THIS node's cards. Match the InstanceType whose name carries
-# the node's accelerator group id (robust against leftover mock/sibling pools that another case may
-# have left behind with zero capacity), requiring an entrance LocalQueue AND real whole-card capacity. Fall
-# back to the highest-capacity acceleratable pool with an entrance queue. Capacity feeds the ledger
-# freshness / cards-freed waits.
+# The accelerated pool that actually backs THIS node's cards. Match the InstanceType on the pool
+# identity this node belongs to — accelerator group plus os/arch (robust against leftover mock/sibling
+# pools that another case may have left behind with zero capacity), requiring an entrance LocalQueue AND
+# real whole-card capacity. Fall back to the highest-capacity acceleratable pool with an entrance queue.
+# Capacity feeds the ledger freshness / cards-freed waits.
 GROUPID=$(kubectl get devices "$GPU_NODE" -o json 2>/dev/null | python3 -c "
 import json,sys
 for g in json.load(sys.stdin).get('spec',{}).get('groups',[]):
     if g.get('accelerators'):
         print(g.get('id','')); break
 " 2>/dev/null)
-read -r IT LQ CAP <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | NODEGID="$GROUPID" python3 -c "
+read -r IT LQ CAP <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | NODE_GID="$GROUPID" NODE_JSON="$(kubectl get node "$GPU_NODE" -o json 2>/dev/null)" python3 -c "
 import json,sys,os
-gid=os.environ.get('NODEGID','')
+gid=os.environ.get('NODE_GID','')
+nl=(json.loads(os.environ.get('NODE_JSON') or '{}').get('metadata',{}) or {}).get('labels',{}) or {}
+# A pool BACKS this node when every discriminator it carries is a label the node carries too. Those are
+# the schedule labels the webhook stamps from PoolScheduleLabels, so this is the pool's whole identity —
+# os/arch, the acceleratable boolean, the accelerator group and, under CPU-aware grouping, the general
+# group. schedule.gpustack.ai/* is the pool's own bookkeeping and never a node label.
+def backs(it):
+    d={k:v for k,v in (it['metadata'].get('labels') or {}).items() if not k.startswith('schedule.gpustack.ai/')}
+    return bool(d) and all(nl.get(k)==v for k,v in d.items())
+def in_group(s):
+    return bool(gid) and (s.get('acceleratorGroup') or '').endswith('-'+gid)
 items=json.load(sys.stdin).get('items',[])
 def cap(it):
     try: return int(it.get('status',{}).get('accelerator',{}).get('capacity',0) or 0)
     except Exception: return 0
-# 1) the exact pool for this node's accelerator group id, with an entrance queue and real capacity.
+# 1) the exact pool for this node — its identity tuple, not its rendered name (see the index's note on
+#    pool lookup) — with an entrance queue and real capacity.
 for it in items:
     s=it.get('spec',{}); st=it.get('status',{})
-    if s.get('acceleratable') and gid and gid in it['metadata']['name'] and st.get('entrance') and cap(it)>0:
+    if s.get('acceleratable') and in_group(s) and backs(it) and st.get('entrance') and cap(it)>0:
         print(it['metadata']['name'], st['entrance'], cap(it)); sys.exit(0)
 # 2) fall back to the highest-capacity acceleratable pool with an entrance queue.
 best=None

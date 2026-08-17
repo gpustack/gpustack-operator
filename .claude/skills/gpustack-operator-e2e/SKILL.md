@@ -90,6 +90,46 @@ Each case is self-contained; its header (see **Case header contract**) states go
 Each note below is something the **lead** must act on before or around a run. What a case *does* — its goal, environment, inputs, assertions and cleanup — lives in its own header, which the **Case header contract** below requires to be readable on its own; the index never restates it.
 
 - **Two disjoint accelerator families, two disjoint card populations.** *Logical slicing* (software; the vendor preload library) is `<base>.sliced` plus its sizing keys, served **only** by a card that is not in a hardware partitioning mode. *Physical partitioning* (hardware; NVIDIA MIG) is `<base>.partitioned` plus one `<base>.partitioned.<kind>-<profile>` key per profile, served **only** by a card that is. A card serves exactly one family — which is why `InstanceType` carries four views (`Accelerator(EX/SH/SL/PT)`), and why a case deploying a logical slice must select a pool with a non-zero *logical* slice count, never merely a "sliceable" one. Normative reference: [`docs/accelerator-requests.md`](../../../docs/accelerator-requests.md).
+- **Ask whether a pool BACKS the node; never match its rendered name.** The webhook stamps each
+  `InstanceType` with its own schedule labels — `nodefeature.PoolScheduleLabels`, via
+  `pkg/worker/webhooks/worker/instance_type.go` — expressly "so it is selectable by the same
+  discriminators its `Devices` and `ResourceFlavor`s carry". So the pool backing a node is the one whose
+  every label the node also carries, and the recipe is one predicate:
+
+  ```python
+  # every discriminator the pool carries is a label the node carries too
+  d = {k: v for k, v in pool_labels.items() if not k.startswith('schedule.gpustack.ai/')}
+  backs = bool(d) and all(node_labels.get(k) == v for k, v in d.items())
+  ```
+
+  That covers the whole identity at once — `kubernetes.io/os` / `arch`,
+  `feature.gpustack.ai/acceleratable`, `acceleratable.feature.gpustack.ai/<accelerator group>` and,
+  **only under `instance-type-aware-cpu-manufacturer`**, `general.feature.gpustack.ai/<general group>`.
+  Enumerating `spec` fields instead means getting that last one conditionally right: with CPU awareness
+  off every pool's `spec.generalGroup` is `generic`, and with it on the pools split by CPU key, so a
+  hand-written tuple is wrong in one mode or the other. `schedule.gpustack.ai/*` is the pool's own
+  bookkeeping and never a node label, so it is excluded.
+  Add the accelerator group the case targets — as an **anchored suffix**,
+  `acceleratorGroup.endswith('-' + groupID)` — only to choose among the pools of a node carrying more
+  than one accelerator group. The per-node group id from `Devices.spec.groups[].id` cannot carry the
+  match on its own: it has no manufacturer, no os/arch and no CPU group.
+
+  Three ways a looser match picks the wrong pool, all silent:
+  - **A substring of the InstanceType name.** Real product tokens nest — `a10` inside `a100`, `l40`
+    inside `l40s`, `h20` inside `h200` — so an A10 node's group id also matches the A100 pool's name.
+    Which one wins then depends on API list order, not on anything the case controls. The anchored
+    suffix above is what closes this.
+  - **Ignoring os/arch.** The name carries `-<os>-<arch>` and the group id does not, so on a mixed-arch
+    cluster with one accelerator model a node's group id matches **both** arch pools, and `linux-amd64`
+    sorts ahead of `linux-arm64`.
+  - **Ignoring the general group.** Under CPU awareness two nodes with the same accelerator and os/arch
+    but different CPUs are different pools, and a tuple that stops at the accelerator matches both.
+
+  The damage is not a clean error: the claim is submitted through the wrong pool's entrance LocalQueue,
+  whose ResourceFlavor selects other nodes, so a node-pinned Pod is simply never admitted and the case
+  fails on a timeout that reads like a placement defect. Worse where a ceiling comes from the pool —
+  CASE 11 reads its over-commit limit from `Status.Detail.Memory` — because a mismatched pool with larger
+  cards makes a real over-commit pass vacuously.
 - **`spec.os`/`spec.arch` has no case of its own** — CASE 1 (cpu pool) and CASE 6 (accelerated) assert it inline.
 - **CASE 4 is safe on a real-accelerator cluster**: its mock uses a fake product key (`nvidia-e2emock`) that never collides with a real GPU pool.
 - **CASES 23–32, 34 and 39 need a node address you must ask the user for.** 23–32 and 34 read `MIG_NODE_SSH=<user@host>`; CASE 39 reads `PPU_NODE_SSH=<user@host>`, and only when it is not already running on the node. Each **exits 2 (input required)**, going no further, when its address is unset — ask for it and pass it inline at run time, never hardcoded. All **auto-skip (exit 0)** when the hardware itself is missing.
