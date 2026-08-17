@@ -179,19 +179,29 @@ print(0)
 [ "${CARD_MEM_MIB:-0}" -gt 0 ] || { echo "the accelerator group reports no memory size, so no VRAM expectation can be computed"; exit 1; }
 echo "[case-39] one accelerator = ${CARD_MEM_MIB}MiB VRAM"
 
-# The T-Head pool's InstanceType and its entrance LocalQueue. Matched on the node's accelerator
-# group id, or the queue would route the claim to a different pool's nodes. The pool's own group name
-# CARRIES that id rather than equalling it — the InstanceType qualifies it with the manufacturer,
-# which the per-node group id does not — so the test is containment, not equality.
-read -r IT LQ <<<"$(kubectl get instancetypes.v1alpha1.worker.gpustack.ai -o json 2>/dev/null | GID="$GROUPID" python3 -c "
-import json,os,sys
-gid=os.environ.get('GID','')
+# The T-Head pool's InstanceType and its entrance LocalQueue. Matched on the pool's identity tuple, or
+# the queue would route the claim to a different pool's nodes. The InstanceType qualifies the group with
+# the manufacturer where the per-node group id does not, so the manufacturer is supplied here and the
+# test is equality — see the index's note on pool lookup for why containment is not enough.
+read -r IT LQ <<<"$(kubectl get instancetypes.v1alpha1.worker.gpustack.ai -o json 2>/dev/null | NODE_GID="$GROUPID" NODE_JSON="$(kubectl get node "$NODE" -o json 2>/dev/null)" python3 -c "
+import json,sys,os
+gid=os.environ.get('NODE_GID','')
+nl=(json.loads(os.environ.get('NODE_JSON') or '{}').get('metadata',{}) or {}).get('labels',{}) or {}
+# A pool BACKS this node when every discriminator it carries is a label the node carries too. Those are
+# the schedule labels the webhook stamps from PoolScheduleLabels, so this is the pool's whole identity —
+# os/arch, the acceleratable boolean, the accelerator group and, under CPU-aware grouping, the general
+# group. schedule.gpustack.ai/* is the pool's own bookkeeping and never a node label.
+def backs(it):
+    d={k:v for k,v in (it['metadata'].get('labels') or {}).items() if not k.startswith('schedule.gpustack.ai/')}
+    return bool(d) and all(nl.get(k)==v for k,v in d.items())
+def in_group(s):
+    return bool(gid) and (s.get('acceleratorGroup') or '').endswith('-'+gid)
 for it in json.load(sys.stdin).get('items',[]):
     s=it.get('spec',{}); st=it.get('status',{})
-    if s.get('acceleratable') and gid and gid in (s.get('acceleratorGroup') or '') and st.get('entrance'):
+    if s.get('acceleratable') and in_group(s) and backs(it) and st.get('entrance'):
         print(it['metadata']['name'], st['entrance']); break
 ")"
-[ -n "${IT:-}" ] && [ -n "${LQ:-}" ] || { echo "no T-Head InstanceType with an entrance LocalQueue found for group ${GROUPID}"; exit 1; }
+[ -n "${IT:-}" ] && [ -n "${LQ:-}" ] || { echo "no T-Head InstanceType with an entrance LocalQueue backs ${NODE} in group '${GROUPID}'"; exit 1; }
 echo "[case-39] pool ${IT} via LocalQueue ${LQ}; slice pods carry no runtimeClass (this vendor needs none)"
 
 # --- How the node's host context is reached: directly when this script is already running ON the
