@@ -169,10 +169,10 @@ runtime, and answer for different consumers:
 
 - `runtimeInjectsDriver` is why the NVIDIA and MThreads **device-managers** run under a RuntimeClass,
   while every other manufacturer's reads its management library from a hostPath mount.
-- `runtimeInjectsDevices` is the **workload's** need alone: AMD sets it because its allocator returns
-  no device spec and leaves injection to `amd-container-runtime`, driven by the `AMD_VISIBLE_DEVICES`
-  it writes — yet the AMD device-manager reads its library from `/opt/rocm` and does not run under
-  the class.
+- `runtimeInjectsDevices` is the **workload's** need alone, for a manufacturer whose allocator
+  contributes no device node of its own — Ascend and Iluvatar, which emit `ASCEND_VISIBLE_DEVICES`
+  and `IX_VISIBLE_DEVICES` and nothing else. AMD used to be a third and no longer is: its allocator
+  injects `/dev/kfd` and the accelerator's DRM nodes itself.
 
 **Either** — never `runtimeName` — decides which RuntimeClasses the chart creates
 (`deviceManager.createRuntimeClasses`, and only where the class is absent or already this release's),
@@ -263,14 +263,52 @@ the kubelet cannot hand a partition request an accelerator that cannot host it.
 ### Exclusive and shared
 
 For most manufacturers the injection is the device-visibility env (`NVIDIA_VISIBLE_DEVICES` /
-`ASCEND_VISIBLE_DEVICES` / …), which their container runtime turns into device nodes. Cambricon,
+`ASCEND_VISIBLE_DEVICES` / …), which their container runtime turns into device nodes. AMD, Cambricon,
 MetaX and Hygon inject the nodes themselves, so a node of theirs needs the vendor driver alone.
+
+AMD injects `/dev/kfd` plus each granted accelerator's `/dev/dri/card<N>` and `/dev/dri/renderD<N>`,
+every one of them required, and sets `AMD_VISIBLE_DEVICES=none`: the variable and the injected nodes
+union rather than reconcile, so leaving it live would be a second grant channel.
 
 Cambricon injects what its vendor plugin injects by default: the card's own node, the optional
 per-card nodes the host exposes, and the node-level control nodes once per response. Only the card's
 own node is required — a card the host exposes none for fails the allocation rather than starting a
 container with no accelerator. `CAMBRICON_VISIBLE_DEVICES` is still set, for a deployment that does
 run the vendor runtime.
+
+A manufacturer that publishes CDI specifications can carry the grant that way instead. The two
+channels put different things in the same allocate response, and differ in who performs the injection:
+
+| Channel | What the response carries | Who injects |
+|---|---|---|
+| `envvar` (default) | `NVIDIA_VISIBLE_DEVICES=GPU-…` | the vendor's container runtime, *if* it is in the Pod's path. Under a generic OCI handler the variable is inert: the container starts with no accelerator and no error |
+| `cdi-annotations` | the annotation `cdi.k8s.io/gpustack-<manufacturer>: <kind>=<id>` | the container engine itself, resolving that name against the specifications already on the node and injecting the device nodes *and* the driver libraries — no vendor runtime in the Pod's path |
+
+The channel is chosen per manufacturer through
+[`GPUSTACK_${MANUFACTURER}_DEVICE_INJECTION_STRATEGY`](../settings.md#per-manufacturer-overrides).
+Its third value, `auto`, answers per container and only ever moves off the default on a positive
+fact — it keeps `envvar` at the first of these that holds, and logs which one:
+
+1. the Pod names a `runtimeClassName`, whose handler owns injection and whose configuration this
+   cannot read;
+2. the container engine's configuration could not be read;
+3. the engine's default runtime handler is a vendor runtime — the variable already works there, and a
+   CDI request would be a second injection path for one container;
+4. the engine does not resolve CDI requests;
+5. the loaded specifications do not name every granted accelerator. A request naming one they do not
+   carry fails the whole container, so a partial match is no better than none.
+
+The division of labour is worth stating plainly, because the two halves are easy to conflate. The
+manufacturer's generator writes what a name **means** — device nodes, driver libraries, hooks — into
+`/etc/cdi` and `/var/run/cdi` on the node. This operator writes only the **name** of what one container
+was granted, onto that container.
+
+Those directories are read to check the name is there before requesting it, and written to never: two
+writers on a node's description of the same hardware is a race whose loser is whichever the engine
+loaded second.
+
+The `.partitioned` family never takes that channel: the instance below is materialized at allocation
+time, so no pre-generated specification names it.
 
 ### Partitioned
 
@@ -447,14 +485,22 @@ while initialising, before any preloaded code exists.
 So the operator *derives* the mask — closed-form over the accelerator's topology, branching on its
 GPU architecture family — and injects it; the library never sees it.
 
-A sliced AMD container carries one value under two names: `AMD_VISIBLE_DEVICES`, read by the
-container runtime to inject `/dev/kfd` and the render node, and `ROCR_VISIBLE_DEVICES`, read by the
-ROCm user-space runtime to filter and order its agents.
+A sliced AMD container gets its device nodes the same way the exclusive and shared paths do: the
+allocator injects `/dev/kfd` plus each granted accelerator's `/dev/dri/card<N>` and
+`/dev/dri/renderD<N>` itself. `AMD_VISIBLE_DEVICES` carries the literal string `none` — an explicit
+instruction to any `amd-container-runtime` on the node to add nothing.
 
-Both are the accelerator's `GPU-<hex>` UUID, and that order is the index space of the other two
-variables: `HSA_CU_MASK`'s `GPU_list` index and `VROCM_DEVICE_MEMORY_LIMIT_<i>`'s `<i>` are positions
-in the `ROCR_VISIBLE_DEVICES` list, never physical ordinals. The three are emitted together and must
-stay in step.
+The variable and the injected nodes union rather than reconcile: measured, a node with the runtime
+installed and the variable naming an accelerator the injected nodes do not gives the container both.
+
+`ROCR_VISIBLE_DEVICES`, read by the ROCm user-space runtime to filter and order its agents, keeps
+carrying the granted accelerators' `GPU-<hex>` UUIDs, and must name exactly the accelerators whose
+nodes were injected: an entry ROCr cannot resolve to a visible agent does not drop that entry, it
+yields **zero GPU agents**, measured and silent.
+
+That order is also the index space of the other two variables: `HSA_CU_MASK`'s `GPU_list` index and
+`VROCM_DEVICE_MEMORY_LIMIT_<i>`'s `<i>` are positions in the `ROCR_VISIBLE_DEVICES` list, never
+physical ordinals. The three are emitted together and must stay in step.
 
 > **Why this one needs a probe** — a CU mask fails **open**: one ROCr rejects yields no error, no log
 > line, no changed return code, and the container gets the whole accelerator, while `rocm-smi` and
@@ -541,9 +587,9 @@ namespaces — runs. `sshd` requests an internal-only
 
 The allocator serves it from the same `ResourceServer` under an internal `Visibility` mode:
 `Allocate` selects no fresh device, reuses the physical device(s) `main` holds, and returns the same
-plain response the non-sliced modes do — the manufacturer's visible-devices env, and for the three
-that inject their own nodes ([Exclusive and shared](#exclusive-and-shared)) those nodes as well — with
-no slicing artifacts and no ledger consumption. It correlates the two calls in two steps:
+plain response the non-sliced modes do — the manufacturer's visible-devices env, and for those that
+inject their own nodes ([Exclusive and shared](#exclusive-and-shared)) those nodes as well — with no
+slicing artifacts and no ledger consumption. It correlates the two calls in two steps:
 
 - the in-process, pod-keyed reservation recorded at `main`'s `Allocate` — the kubelet allocates
   `main` before `sshd`, sequentially, in Pod spec order;
@@ -552,9 +598,16 @@ no slicing artifacts and no ledger consumption. It correlates the two calls in t
 
 **What that env names follows the owner's family**: the accelerator(s) `main` holds for an
 exclusive/shared/sliced owner; for a **partition-backed** owner the partition itself, never the
-parent accelerator, which hosts other tenants' partitions too. The sidecar's allocation is a
-device-cgroup grant and nothing else — the SSH session `nsenter`s into `main` and inherits its
-environment, needing no injection.
+parent accelerator, which hosts other tenants' partitions too.
+
+The sidecar's allocation is a device-cgroup grant and nothing else wherever the owner's grant travels
+in its environment: the SSH session `nsenter`s into `main` and inherits that environment, needing no
+injection.
+
+Wherever the grant travels as device nodes it is carried here too, because the same non-sliced
+responder serves this mode — AMD, Cambricon, Hygon and MetaX inject their control and DRM nodes for
+the sidecar as they do for the owner. NVIDIA follows whichever channel its resolver settled on, so a
+CDI request appears here as well.
 
 The trigger is the owner container's own `.partitioned.<kind>-<profile>` request, in the Pod spec
 from the start.

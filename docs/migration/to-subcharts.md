@@ -170,11 +170,13 @@ parent values to a subchart. Unset needs nothing, the defaults moved with it; an
 row, and drop the old key, since nothing reads top-level `manufacturers` any more: one left behind
 is ignored, its device-managers falling back to the default vendor IDs.
 
-The chart now creates **`amd`, `mthreads` and `nvidia`** — `amd` new in this release, not a
-consequence of this migration — still only where the class is absent or already belongs to this
-release. `runtimeName`, which most rows state, names the class the operator will *use*; creating one
-is gated on the narrower `runtimeInjectsDriver` or `runtimeInjectsDevices`, where the runtime is
-certainly installed. `deviceManager.createRuntimeClasses=false` remains the opt-out.
+The chart now creates **`ascend`, `iluvatar`, `mthreads` and `nvidia`**, and no longer `amd`, whose
+allocator injects its own device nodes. Neither is a consequence of this migration.
+
+Creation still happens only where the class is absent or already belongs to this release.
+`runtimeName`, which most rows state, names the class the operator will *use*; creating one is gated
+on the narrower `runtimeInjectsDriver` or `runtimeInjectsDevices`, where the runtime is certainly
+installed. `deviceManager.createRuntimeClasses=false` remains the opt-out.
 
 ### `worker.certmanager` moved to `global.certmanager`, and now answers for Kueue too
 

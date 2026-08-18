@@ -85,7 +85,7 @@ variable alone leaves those stale; the next render overwrites it.
 
 - `GPUSTACK_${MANUFACTURER}_PCI_VENDOR_ID` — the PCI vendor ID used for NFD node selection and device scanning. Accepts `${vendor}` or `${class}_${vendor}`.
 - `GPUSTACK_${MANUFACTURER}_ACCELERATABLE_RESOURCE_NAME` — the extended resource name the scheduling chain allocates against.
-- `GPUSTACK_${MANUFACTURER}_ACCELERATABLE_RUNTIME_NAME` — the container runtime class name used for accelerated workloads. A RuntimeClass of that name is attached only when one exists in the cluster; the chart creates it for the six manufacturers whose container runtime registers such a handler (see `global.manufacturers`), never for `hygon` or `metax`, whose defaults below hold only if something else created the class.
+- `GPUSTACK_${MANUFACTURER}_ACCELERATABLE_RUNTIME_NAME` — the container runtime class name used for accelerated workloads. A RuntimeClass of that name is attached only when one exists in the cluster; the chart creates one only where the `global.manufacturers` row sets a `runtimeInjectsDriver` or `runtimeInjectsDevices` fact (see `global.manufacturers`) — never for a manufacturer setting neither, whose default below holds only if something else created the class.
 
 Defaults:
 
@@ -111,6 +111,70 @@ A fourth override applies only to a manufacturer that has hardware partitioning 
 Elsewhere the variable does nothing: without hardware partitioning there is no `.partitioned` family, so
 no key segment to rename.
 
+A fifth override is per manufacturer, and today only NVIDIA reads it:
+
+- `GPUSTACK_${MANUFACTURER}_DEVICE_INJECTION_STRATEGY` — which channel that manufacturer's allocator
+  uses to make a granted accelerator reach a container: `envvar` (**default**, today's
+  `*_VISIBLE_DEVICES` behavior, byte-identical), `cdi-annotations` (the granted accelerator is
+  requested as a `cdi.k8s.io/*` device-plugin annotation), or `auto` (opt-in detection, falling back to
+  `envvar` with the reason logged whenever it cannot confirm CDI is safe on that node).
+
+A manufacturer whose allocator injects `/dev` nodes itself, or that ships no CDI generator, has nothing
+for the CDI channel to resolve, so the variable does nothing there. The partitioned (MIG) family and
+partition-backed visibility always use `envvar`, whatever the strategy names, since a MIG instance is
+materialized at `Allocate` time and no pre-generated specification names it.
+
+**Prefer `auto` over naming the CDI channel yourself.** The CDI channel needs a container engine that
+resolves CDI requests — containerd 2.x does, containerd 1.7 only with `enable_cdi = true`. Ask for it on
+an engine that does not and the request is simply ignored: no variable is set either, and the container
+starts with no accelerator and no error, which is the failure this setting exists to remove. `auto` reads
+the engine first and keeps the variable when the answer is no.
+
+**Which value a runtime wants.** Two independent questions decide it: does the engine resolve CDI
+requests at all, and can `auto` tell that it does? `auto` reads both answers out of containerd's
+`config.toml`, so a runtime that keeps them anywhere else is invisible to it. That file is where the
+detection looks; it is not something the channel itself needs.
+
+| Container runtime | Resolves CDI | `auto` can tell | Set |
+|---|---|---|---|
+| containerd 2.x (configuration version 3) | Yes, always | Yes, from the version | `auto` |
+| containerd 1.7 with `enable_cdi = true` | Yes | Yes, from the key | `auto` |
+| containerd 1.7, `enable_cdi` unset | No | Yes | `auto`, which keeps the variable. Naming `cdi-annotations` here is the silent no-accelerator case above |
+| CRI-O | Yes, natively | **No** — it has no `config.toml` | `cdi-annotations` |
+
+`cdi-annotations` is the answer on exactly one row: a runtime that does resolve CDI requests but that
+`auto` has no way to see. Everywhere else `auto` reaches the same channel by itself, or correctly
+declines to — and naming the channel where the engine ignores it is how a container ends up running
+with nothing.
+
+**Where to set it.** The name embeds the manufacturer in upper case, so it is not a literal you will
+find spelled out anywhere — pass it through the chart's `deviceManager.env`, which lands on every
+device-manager DaemonSet:
+
+```bash
+helm upgrade ... --set deviceManager.env.GPUSTACK_NVIDIA_DEVICE_INJECTION_STRATEGY=auto
+```
+
+It is read once, when that manufacturer's allocator is constructed, so a change takes effect only when
+the DaemonSet restarts. A value that is not one of the three is reported and the node keeps `envvar`:
+refusing to start the allocator over it would take the node's accelerators with it.
+
+`auto` also keeps the variable wherever the engine's own default runtime is already the vendor runtime,
+which is the usual shape on a distribution that ships the GPU toolkit for you. There every Pod runs under
+that runtime whether it asks to or not, so the variable works and a CDI request would only add a second
+injection path. `auto` doing nothing on such a node is the correct answer, not a misconfiguration.
+
+Which channel a node settled on, and why, is logged once per answer — but at the allocator's own
+verbosity, above what the DaemonSet ships with. [Runtime log
+verbosity](development.md#runtime-log-verbosity) raises it on a running Pod.
+
+One node-level variable feeds the same decision:
+
+- `GPUSTACK_CONTAINERD_CONFIG_DIR` — the directory holding the container engine's `config.toml`, from
+  the chart's `deviceManager.containerdConfigDir` (default `/etc/containerd`). `auto` reads it to learn
+  whether the engine resolves CDI requests and which runtime handler a Pod naming no
+  `runtimeClassName` runs under; unreadable keeps the node on `envvar`.
+
 ### Manufacturer toolkit paths
 
 The DM device bindings locate manufacturer libraries through conventional toolkit-home variables, each
@@ -124,7 +188,7 @@ falling back to the listed default when unset.
 | `CANN_HOME` | `/usr/local/Ascend` | Ascend | Driver root, searched for `libdcmi.so`. |
 | `ASCEND_TOOLKIT_HOME` | `/usr/local/Ascend/cann`, falling back to `/usr/local/Ascend/ascend-toolkit/latest/runtime` | Ascend | CANN toolkit root used by the Ascend detector. |
 | `NEUWARE_HOME` | `/usr/local/neuware` | Cambricon | Neuware root, searched for `libcndev.so`. |
-| `PPU_HOME` | `/usr/local/PPU_SDK` | Hygon | PPU SDK root, searched for `libhgml.so`. |
+| `PPU_HOME` | `/usr/local/PPU_SDK` | T-Head | PPU SDK root, searched for `libhgml.so`. |
 | `COREX_HOME` | `/usr/local/corex` | Iluvatar | CoreX root, searched for `libixml.so`. |
 | `MACA_HOME` | `/opt/maca` | MetaX | MACA root, searched for `libmxsml.so`. |
 | `LD_LIBRARY_PATH` | — | all | Standard library search path, consulted as an additional source of candidate library directories. |

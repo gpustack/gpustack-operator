@@ -240,6 +240,46 @@ only when *that* instance has active processes; sibling workloads are unaffected
 5. Verify the `Devices` capability now reports those GPUs' MIG profiles and **zero logical slicing** — a
    hardware-partitioned GPU offers no software slicing.
 
+### Across a fleet, with the NVIDIA GPU Operator
+
+The steps above are per node and go through SSH. The NVIDIA GPU Operator ships a **MIG Manager** that does
+the same job declaratively: each node carries an `nvidia.com/mig.config` label naming a profile, and the
+manager makes that node's cards match it.
+
+[Vendor Prerequisites](../vendor-prerequisites.md#nvidia) has that component off, because every other
+profile hands it the instances as well and those are this operator's to create. Turning it back on with
+`--set migManager.enabled=true` is what this section asks for, and the profile below is what keeps the
+division of labour intact.
+
+Use the profile named **`all-enabled`**. It turns MIG mode on and creates *no* instances — exactly the
+division of labour this page describes, where the mode is yours and the instances are GPUStack's. Every
+other shipped profile (`all-balanced`, `all-1g.5gb`, …) pre-creates a fixed geometry instead, and takes
+that job away.
+
+```console
+$ kubectl label node <node> nvidia.com/mig.config=all-enabled --overwrite
+```
+
+The label is per node, so a fleet can mix freely: nodes labelled `all-enabled` serve partitions, nodes
+labelled `all-disabled` — or carrying no label at all — stay whole-card.
+
+**Restarting the Device Manager is still yours to do**, on every node whose label you changed, exactly as
+in step 4 above. The MIG Manager restarts the GPU clients it owns, and this operator's Device Manager is
+not one of them, so until it restarts the node keeps advertising the capability it detected before the
+switch.
+
+Three things to know before reaching for it:
+
+- **Its default is `all-disabled`**, and the operator writes that label itself when the manager first
+  runs. Arriving on a node whose cards you had already enabled by hand, it turns them back off.
+- **It is placed only on nodes labelled `nvidia.com/mig.capable=true`**, which GPU Feature Discovery
+  publishes. Without that component the DaemonSet exists but schedules nowhere; setting the label by hand
+  is enough to place it.
+- **It restarts the node's GPU clients, the kubelet included**, to apply a change, and marks
+  `nvidia.com/mig.config.state=failed` when a service it wants to restart is masked — which is the state
+  the readiness steps above deliberately leave DCGM in. Read the cards' own modes before believing that
+  label.
+
 ## Disabling MIG on a node
 
 Run the inverse: with no Pod using the GPU's instances, destroy them, then

@@ -38,6 +38,7 @@ one, not to widen the overview.
 | An upgrade path between versions | `docs/migration/*.md` |
 | A per-product preset value | `docs/reference/instance-type-unit-resources.md` |
 | A user-visible capability, a vendor's slicing support, the install flow | `README.md` |
+| Vendor prerequisites, vendor GPU Operator coexistence | `docs/vendor-prerequisites.md` |
 | A recorded run with real output | `docs/walkthrough.md`, or the walkthrough section of `docs/operation/nvidia-mig.md` |
 
 A decision *record* — why an approach was chosen over another — belongs in `specs/`, not in `docs/`.
