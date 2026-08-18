@@ -129,21 +129,22 @@ func (s *server) GetContainerAllocateResponse(
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
-	// The allocated accelerators, ordered the way the container numbers them, plus the driver
-	// indexes ASCEND_VISIBLE_DEVICES carries; the pairs also feed the sliced path's quota and
-	// library subdir.
+	// The allocated accelerators, ordered the way the container numbers them.
 	// TODO: mount HCCL topo file for 950.
 	accelerators := deviceplugin.AllocatedAccelerators(devs, allocated)
-	indexes := make([]string, 0, len(accelerators))
-	for i := range accelerators {
-		indexes = append(indexes, strconvx.FormatUint(accelerators[i].Accel.Index, 10))
-	}
 
 	// Sliced containers get real logical-slicing isolation (vcann-rt preload + quota); every
 	// other mode returns the plain device-visibility response below, with only the
 	// container-share preflight in between.
 	if s.AllocationMode == workercore.DeviceAllocationModeSliced {
-		return s.getSlicedContainerAllocateResponse(pod, ctr, indexes, accelerators)
+		return s.getSlicedContainerAllocateResponse(pod, ctr, accelerators)
+	}
+
+	// Rendered before the preflight below, so an accelerator carrying no dcmi addressing fails
+	// the allocation before anything reaches the host.
+	visible, err := visibleDevices(accelerators)
+	if err != nil {
+		return nil, err
 	}
 
 	// Shared and visibility put a second container on an accelerator, which the driver refuses
@@ -161,14 +162,48 @@ func (s *server) GetContainerAllocateResponse(
 	}
 
 	// Delegate to container runtime for device injection,
-	// use indexes as ASCEND_VISIBLE_DEVICES value,
+	// use the driver indexes as ASCEND_VISIBLE_DEVICES value,
 	// do not support Atlas200I for now.
 	ctrResp := &deviceplugin.ContainerAllocateResponse{
 		Envs: map[string]string{
-			"ASCEND_VISIBLE_DEVICES": strings.Join(indexes, ","),
+			"ASCEND_VISIBLE_DEVICES": visible,
 		},
 	}
 	return ctrResp, nil
+}
+
+// driverIndex returns the number the driver knows an accelerator by, which for Ascend is the dcmi
+// physical id the detector recorded in PhysicalIndexes.
+//
+// It is that number, not the operator's own logical index, that a vendor runtime resolves:
+// ascend-docker-runtime reads each visible device as a physical id and converts it to a logic id
+// itself before naming the /dev/davinci node the container gets, and vcann-rt keys its quota config
+// by the physical id too, as the vendored dsmi patch under pack/ records from hardware. The two
+// coincide only while every accelerator on the host was detected, the logical index counting the
+// ones that were, so an accelerator failing a probe leaves every later logical index below its
+// physical id.
+//
+// A record carrying no dcmi addressing is malformed rather than degraded, so it is rejected instead
+// of being allocated against a guessed number that would name another accelerator.
+func driverIndex(accel *workercore.Accelerator) (uint32, error) {
+	if len(accel.PhysicalIndexes) == 0 {
+		return 0, fmt.Errorf("accelerator %q carries no dcmi physical index", accel.ID)
+	}
+	return accel.PhysicalIndexes[0], nil
+}
+
+// visibleDevices renders the ASCEND_VISIBLE_DEVICES value: every allocated accelerator's driver
+// index, comma-joined in the order the container numbers them.
+func visibleDevices(accels []deviceplugin.AllocatedAccelerator) (string, error) {
+	indexes := make([]string, 0, len(accels))
+	for i := range accels {
+		index, err := driverIndex(accels[i].Accel)
+		if err != nil {
+			return "", err
+		}
+		indexes = append(indexes, strconvx.FormatUint(index, 10))
+	}
+	return strings.Join(indexes, ","), nil
 }
 
 // In-container paths the vcann-rt logical-slicing runtime expects.
@@ -190,12 +225,10 @@ const (
 // runtime; this only stages quota + library mounts.
 //
 // vcann-rt's npu_info.config models a single physical NPU, so a sliced Ascend
-// container maps to one accelerator; ASCEND_VISIBLE_DEVICES still lists every
-// allocated index for visibility.
+// container maps to one accelerator, and ASCEND_VISIBLE_DEVICES names that one.
 func (s *server) getSlicedContainerAllocateResponse(
 	pod *core.Pod,
 	ctr *core.Container,
-	indexes []string,
 	accels []deviceplugin.AllocatedAccelerator,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
 	if len(accels) == 0 {
@@ -210,6 +243,10 @@ func (s *server) getSlicedContainerAllocateResponse(
 
 	// vcann-rt is single-NPU; configure the first allocated accelerator.
 	group, accel := accels[0].Group, accels[0].Accel
+	npuID, err := driverIndex(accel)
+	if err != nil {
+		return nil, err
+	}
 
 	// SM (aicore) and VRAM are independent dimensions (no single ratio).
 	coresPct := deviceplugin.SlicedCoresPercent(ctr,
@@ -233,8 +270,8 @@ func (s *server) getSlicedContainerAllocateResponse(
 	}
 
 	configHostPath := filepath.Join(podWorkDir, "etc/enpu/vcann-rt/npu_info.config")
-	vnpuID := lowestFreeVNPUID(deviceplugin.OperatorPodsDir, accel.Index, configHostPath)
-	cfg := renderNPUInfoConfig(accel.Index, vnpuID, coresPct, memMib, accel.ID)
+	vnpuID := lowestFreeVNPUID(deviceplugin.OperatorPodsDir, npuID, configHostPath)
+	cfg := renderNPUInfoConfig(npuID, vnpuID, coresPct, memMib, accel.ID)
 	if err = osx.WriteFile(configHostPath, stringx.ToBytes(&cfg), 0o644); err != nil {
 		return nil, fmt.Errorf("write npu_info.config %q: %w", configHostPath, err)
 	}
@@ -249,8 +286,9 @@ func (s *server) getSlicedContainerAllocateResponse(
 		{ContainerPath: ctrDevShmPath, HostPath: ctrDevShmPath, ReadOnly: false},
 	}
 
+	// Single-NPU, so the visibility env names this one accelerator by its driver index.
 	envs := map[string]string{
-		"ASCEND_VISIBLE_DEVICES": strings.Join(indexes, ","),
+		"ASCEND_VISIBLE_DEVICES": strconvx.FormatUint(npuID, 10),
 	}
 
 	// Quiet vcann-rt's per-call interception logging by default: its ENPU_LOG_LEVEL
@@ -305,6 +343,9 @@ func lowestFreeVNPUID(podsDir string, npuId uint32, selfConfigPath string) int {
 
 // renderNPUInfoConfig builds the vcann-rt npu_info.config body:
 //
+//   - physical-npu-id is the accelerator's driver index, the number vcann-rt resolves; the
+//     operator's own logical index would name another accelerator on a host where any of them
+//     failed detection.
 //   - aicore-quota is the compute percent (.sliced.cores-percentage).
 //   - memory-quota is the per-accelerator VRAM MiB
 //     (.sliced.memory-percentage/.sliced.memory-mib).

@@ -220,7 +220,9 @@ func TestSharedAndVisibilityEnableShare(t *testing.T) {
 				})
 			require.NoError(t, err)
 
-			assert.Equal(t, "0,1", resp.Envs["ASCEND_VISIBLE_DEVICES"])
+			// The env names the accelerators by driver index, while the flag below is addressed by
+			// the card/device pair, so the two carry different numbers.
+			assert.Equal(t, "3,7", resp.Envs["ASCEND_VISIBLE_DEVICES"])
 			assert.Empty(t, resp.Mounts, "no vcann-rt artifacts outside the sliced path")
 			assert.ElementsMatch(t, [][2]int32{{0, 0}, {1, 0}}, share.getCalls,
 				"reads the flag of every granted card")
@@ -273,7 +275,7 @@ func TestExclusiveAllocationNeverTouchesShare(t *testing.T) {
 		map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1})
 	require.NoError(t, err)
 
-	assert.Equal(t, "0", resp.Envs["ASCEND_VISIBLE_DEVICES"])
+	assert.Equal(t, "3", resp.Envs["ASCEND_VISIBLE_DEVICES"])
 	assert.Empty(t, share.getCalls)
 	assert.Empty(t, share.setCalls)
 }
