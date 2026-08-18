@@ -262,8 +262,15 @@ the kubelet cannot hand a partition request an accelerator that cannot host it.
 
 ### Exclusive and shared
 
-The injection is just the device-visibility env (`NVIDIA_VISIBLE_DEVICES` / `ASCEND_VISIBLE_DEVICES` /
-…).
+For most manufacturers the injection is the device-visibility env (`NVIDIA_VISIBLE_DEVICES` /
+`ASCEND_VISIBLE_DEVICES` / …), which their container runtime turns into device nodes. Cambricon,
+MetaX and Hygon inject the nodes themselves, so a node of theirs needs the vendor driver alone.
+
+Cambricon injects what its vendor plugin injects by default: the card's own node, the optional
+per-card nodes the host exposes, and the node-level control nodes once per response. Only the card's
+own node is required — a card the host exposes none for fails the allocation rather than starting a
+container with no accelerator. `CAMBRICON_VISIBLE_DEVICES` is still set, for a deployment that does
+run the vendor runtime.
 
 ### Partitioned
 
@@ -331,7 +338,12 @@ numbering:
 | T-Head | the SDK renumbering the injected nodes by ascending card ordinal (measured) | **load-bearing** |
 | AMD | `ROCR_VISIBLE_DEVICES`, which the injection itself states | self-consistent under any one order |
 | Hygon | a `device_id` the operator itself writes into each `vdev<i>.conf` — meaning not yet established on hardware | positional, but **persisted**; see below |
-| Ascend, Cambricon, MetaX, MThreads | not by position at all — the driver index travels as a value, or the request is single-accelerator | immaterial |
+| Ascend, Cambricon, MetaX, MThreads | not by position at all — the number travels as a value, or the request is single-accelerator | immaterial |
+
+Where a number does travel as a value, it is the **driver's** index — dcmi's physical id, cnDev's
+enumeration position — not the operator's logical one. The two coincide only while every accelerator
+on the host was detected, so one failing a probe leaves every later accelerator carrying a logical
+index below its driver index.
 
 Hygon is the one whose position outlives the allocation: its figures go into `vdev<i>.conf` files on
 the host, and a slot is reused only when the file at that path already names the same accelerator. A
@@ -363,7 +375,7 @@ through `/etc/ld.so.preload`.
 | MThreads | the host sGPU kmod | `MTHREADS_QOS_*` env vars — the compute share is a scheduling weight, not a hard cap |
 | Hygon | the host DTK/hyhal runtime | a per-pod `vdev.conf` (a `cores%`-derived CU bitmask + VRAM cap) mounted read-only at `/etc/vdev/docker/` |
 | MetaX | a sysfs `sgpu` subdevice | the accelerator is put in `sgpu` mode, a `cores%`-derived compute quota + VRAM cap written under a `fixed-share` scheduling class to `/sys/bus/pci/devices/<BDF>/sgpu/create`, then `METAX_SGPUS` plus the accelerator device nodes injected for the host MetaX runtime |
-| Cambricon | a cnDev sMLU profile + instance | a profile with `mluQuota = cores%` and `memorySize` set to the VRAM budget is created or reused, a subdevice instantiated, its device nodes `/dev/cambricon_dev*` / `/dev/cambricon_ipcm*` / the instance node injected, with a `VIRTUAL_DEVICES` env fallback for `--use-runtime` deployments since sMLU does not support CDI |
+| Cambricon | a cnDev sMLU profile + instance | a profile with `mluQuota = cores%` and `memorySize` set to the VRAM budget is created or reused, a subdevice instantiated, its device nodes `/dev/cambricon_dev*` / `/dev/cambricon_ipcm*` / the instance node injected alongside the node-level control nodes, with a `VIRTUAL_DEVICES` env fallback for `--use-runtime` deployments since sMLU does not support CDI |
 
 **Iluvatar reuses HAMi-core**, corex being CUDA-compatible. It keeps the accelerator visible through
 `IX_VISIBLE_DEVICES` and needs `ix-container-runtime` to inject corex, so a sliced Iluvatar Pod must
@@ -528,9 +540,10 @@ namespaces — runs. `sshd` requests an internal-only
 `device.gpustack.ai/<manufacturer>.visibility` resource, quantity = `main`'s accelerator count.
 
 The allocator serves it from the same `ResourceServer` under an internal `Visibility` mode:
-`Allocate` selects no fresh device, reuses the physical device(s) `main` holds, and returns only the
-manufacturer's visible-devices env — no slicing artifacts, no ledger consumption. It correlates the
-two calls in two steps:
+`Allocate` selects no fresh device, reuses the physical device(s) `main` holds, and returns the same
+plain response the non-sliced modes do — the manufacturer's visible-devices env, and for the three
+that inject their own nodes ([Exclusive and shared](#exclusive-and-shared)) those nodes as well — with
+no slicing artifacts and no ledger consumption. It correlates the two calls in two steps:
 
 - the in-process, pod-keyed reservation recorded at `main`'s `Allocate` — the kubelet allocates
   `main` before `sshd`, sequentially, in Pod spec order;

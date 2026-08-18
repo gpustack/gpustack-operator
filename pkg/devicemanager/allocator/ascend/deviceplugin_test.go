@@ -46,12 +46,16 @@ func ascendDevicesFixture() *workercore.Devices {
 				Memory:         65536, // MiB
 				RuntimeVersion: "8.5",
 				Family:         "910B",
-				// PhysicalIndexes is the detector's {physical id, card id, device id in card},
-				// which is where the sliced path reads the dcmi pair it addresses the
-				// container-share flag by.
+				// PhysicalIndexes is the detector's {physical id, card id, device id in card}:
+				// the physical id names the accelerator a visibility env or a quota config
+				// carries, while the card/device pair addresses the container-share flag. Those
+				// three and the logical Index are given deliberately distinct values, because the
+				// detector derives them from different counters -- Index skips an accelerator
+				// that failed detection, PhysicalIndexes carries dcmi's own numbers -- so a
+				// fixture where they agreed would let the responder read the wrong one and pass.
 				Accelerators: []workercore.Accelerator{
-					{ID: testAccelID0, Index: 0, PhysicalIndexes: []uint32{0, 0, 0}},
-					{ID: testAccelID1, Index: 1, PhysicalIndexes: []uint32{1, 1, 0}},
+					{ID: testAccelID0, Index: 0, PhysicalIndexes: []uint32{3, 0, 0}},
+					{ID: testAccelID1, Index: 1, PhysicalIndexes: []uint32{7, 1, 0}},
 				},
 			}},
 		},
@@ -112,8 +116,8 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocated)
 	require.NoError(t, err)
 
-	// Env: the visible device index.
-	assert.Equal(t, "0", resp.Envs["ASCEND_VISIBLE_DEVICES"])
+	// Env: the accelerator's driver index, 3 in the fixture, not its logical Index of 0.
+	assert.Equal(t, "3", resp.Envs["ASCEND_VISIBLE_DEVICES"])
 	assert.Equal(t, "1", resp.Envs["ENPU_LOG_LEVEL"]) // quiet vcann-rt by default
 	assert.Equal(t, "1", resp.Envs["ENPU_DSMI_HOOK"]) // slice visible in npu-smi by default
 
@@ -122,7 +126,7 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 	configPath := filepath.Join(podWorkDir, "etc/enpu/vcann-rt/npu_info.config")
 	body, err := os.ReadFile(configPath)
 	require.NoError(t, err)
-	want := "physical-npu-id=0\n" +
+	want := "physical-npu-id=3\n" +
 		"virtual-npu-id=0\n" +
 		"aicore-quota=10\n" +
 		"memory-quota=16384\n" +
@@ -230,21 +234,21 @@ func TestSlicedVirtualNPUIDAssignment(t *testing.T) {
 		return vnpu
 	}
 
-	// First slice on physical NPU 0 -> vnpu 0.
+	// First slice on physical NPU 3 -> vnpu 0.
 	p1, c1 := slicedPod("uid-a", "train", 10, 25)
 	_, err := s.GetContainerAllocateResponse(context.Background(), p1, c1, devs,
 		map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1})
 	require.NoError(t, err)
 	assert.Equal(t, 0, readVNPU("uid-a", "train"))
 
-	// Second slice on the SAME physical NPU 0 -> vnpu 1 (lowest free).
+	// Second slice on the SAME physical NPU 3 -> vnpu 1 (lowest free).
 	p2, c2 := slicedPod("uid-b", "train", 10, 25)
 	_, err = s.GetContainerAllocateResponse(context.Background(), p2, c2, devs,
 		map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1})
 	require.NoError(t, err)
 	assert.Equal(t, 1, readVNPU("uid-b", "train"))
 
-	// Slice on a DIFFERENT physical NPU (index 1) -> vnpu 0 again.
+	// Slice on a DIFFERENT physical NPU (driver index 7) -> vnpu 0 again.
 	p3, c3 := slicedPod("uid-c", "train", 10, 25)
 	_, err = s.GetContainerAllocateResponse(context.Background(), p3, c3, devs,
 		map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID1}: 1})
@@ -313,9 +317,69 @@ func TestGetContainerAllocateResponse_Visibility(t *testing.T) {
 	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, nil, devs, allocated)
 	require.NoError(t, err)
 
-	assert.Equal(t, "0", resp.Envs["ASCEND_VISIBLE_DEVICES"], "exact allocated index, never `all`")
+	assert.Equal(t, "3", resp.Envs["ASCEND_VISIBLE_DEVICES"], "exact allocated accelerator, never `all`")
 	assert.Len(t, resp.Envs, 1, "visibility emits only ASCEND_VISIBLE_DEVICES")
 	assert.Empty(t, resp.Mounts, "no vcann-rt preload/lib mounts")
+}
+
+// The detector always records dcmi's addressing, so an accelerator without it is malformed. Every
+// mode rejects it before touching the host, rather than naming an accelerator by a guessed number.
+func TestGetContainerAllocateResponse_MissingDriverIndexRejected(t *testing.T) {
+	for _, mode := range []workercore.DeviceAllocationMode{
+		workercore.DeviceAllocationModeExclusive,
+		workercore.DeviceAllocationModeShared,
+		workercore.DeviceAllocationModeVisibility,
+		workercore.DeviceAllocationModeSliced,
+	} {
+		t.Run(mode.String(), func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			share := &fakeShareDriver{enabled: map[[2]int32]bool{{0, 0}: true}}
+			s := &server{
+				ResourceServer: deviceplugin.ResourceServer{
+					Logger:         logr.Discard(),
+					Manufacturer:   Manufacturer,
+					AllocationMode: mode,
+				},
+				share: share,
+			}
+			devs := ascendDevicesFixture()
+			devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = nil
+
+			uid := "uid-noindex-" + mode.String()
+			pod, ctr := slicedPod(uid, "train", 10, 25)
+			_, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs,
+				map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "carries no dcmi physical index")
+
+			assert.Empty(t, share.getCalls, "a malformed record is rejected before the flag is read")
+			assert.Empty(t, share.setCalls, "and before it is written")
+			// The work dir is created before the quota config is written into it, so asserting the
+			// dir away covers both: nothing at all reached the host.
+			_, statErr := os.Stat(deviceplugin.PodWorkDir(uid, "train"))
+			assert.True(t, os.IsNotExist(statErr), "and before any host state is written")
+		})
+	}
+}
+
+// A request that is malformed in both ways at once -- an accelerator with no driver index, and no
+// memory dimension -- reports the record, not the request. Both manufacturers order it that way, so
+// one defect always produces one message wherever it is hit.
+func TestGetSlicedContainerAllocateResponse_MissingDriverIndexOutranksMissingMemory(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	s := newSlicedServer()
+
+	devs := ascendDevicesFixture()
+	devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = nil
+
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{UID: types.UID("uid-both-bad")},
+		Spec:       core.PodSpec{Containers: []core.Container{{Name: "train"}}}, // no memory dimension
+	}
+	_, err := s.GetContainerAllocateResponse(context.Background(), pod, &pod.Spec.Containers[0], devs,
+		map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "carries no dcmi physical index")
 }
 
 func Test_ascendCANNDir(t *testing.T) {

@@ -135,22 +135,152 @@ func (s *server) GetContainerAllocateResponse(
 		return s.getSlicedContainerAllocateResponse(pod, ctr, devs, allocated)
 	}
 
-	// The allocated accelerators, ordered the way the container numbers them, as the driver
-	// indexes CAMBRICON_VISIBLE_DEVICES carries.
+	// The allocated accelerators, ordered the way the container numbers them.
 	accelerators := deviceplugin.AllocatedAccelerators(devs, allocated)
-	indexes := make([]string, 0, len(accelerators))
-	for i := range accelerators {
-		indexes = append(indexes, strconvx.FormatUint(accelerators[i].Accel.Index, 10))
+
+	// Rendered before any node is probed, so an accelerator carrying no cnDev index fails the
+	// allocation first. The env is what a deployment running cambricon-container-runtime keys on,
+	// and it carries the same index the injected nodes are named with, so a container cannot be
+	// handed one card's nodes and pointed at another card by its environment.
+	visible, err := visibleDevices(accelerators)
+	if err != nil {
+		return nil, err
 	}
 
-	// Delegate to container runtime for device injection,
-	// use indexes as CAMBRICON_VISIBLE_DEVICES value.
 	ctrResp := &deviceplugin.ContainerAllocateResponse{
 		Envs: map[string]string{
-			"CAMBRICON_VISIBLE_DEVICES": strings.Join(indexes, ","),
+			"CAMBRICON_VISIBLE_DEVICES": visible,
 		},
 	}
+	for i := range accelerators {
+		if err = appendCardDevices(ctrResp, accelerators[i].Accel); err != nil {
+			return nil, err
+		}
+	}
+	appendNodeDevices(ctrResp)
+
 	return ctrResp, nil
+}
+
+// Device-node paths read from the Cambricon device plugin v2.2.0, commit cc0f7735f208, function
+// PrepareResponse in device-plugin/pkg/mlu/server.go with the path constants in
+// device-plugin/pkg/mlu/const.go. An older or newer Neuware may name them differently.
+const (
+	cardDevicePathFormat     = "/dev/cambricon_dev%d"
+	cardIPCMDevicePathFormat = "/dev/cambricon_ipcm%d"
+)
+
+var (
+	// optionalCardDevicePathFormats are the per-card nodes only some driver builds expose. Each is
+	// a format taking the card's driver index, so every one of them carries a %d. The sliced path
+	// injects the IPC node too, from the same format, so a name cannot be corrected in one place
+	// and left wrong in the other.
+	optionalCardDevicePathFormats = []string{
+		"/dev/cambr-msgq:%d",
+		"/dev/cambr-rpc:%d",
+		"/dev/cmsg_ctrl%d",
+		"/dev/commu%d",
+		cardIPCMDevicePathFormat,
+	}
+	// nodeDevicePaths belong to the host rather than to any one card: cnDev enumerates through the
+	// control node, and GPUDirect RDMA needs the GDR node. No index names them, and a response
+	// carries them once however many cards it holds.
+	nodeDevicePaths = []string{
+		"/dev/cambricon_ctl",
+		"/dev/cambricon_gdr",
+	}
+)
+
+// cardDevicePath returns the node that is the accelerator itself, named by its driver index.
+func cardDevicePath(index uint32) string {
+	return fmt.Sprintf(cardDevicePathFormat, index)
+}
+
+// cardIPCMDevicePath returns one card's IPC node, named by its driver index. Both the whole-card
+// and the sliced response carry it, the whole-card one among the optional nodes.
+func cardIPCMDevicePath(index uint32) string {
+	return fmt.Sprintf(cardIPCMDevicePathFormat, index)
+}
+
+// optionalCardDevicePaths returns one card's optional nodes, named by its driver index.
+func optionalCardDevicePaths(index uint32) []string {
+	paths := make([]string, 0, len(optionalCardDevicePathFormats))
+	for _, format := range optionalCardDevicePathFormats {
+		paths = append(paths, fmt.Sprintf(format, index))
+	}
+	return paths
+}
+
+// driverIndex returns the number the driver knows an accelerator by, which for Cambricon is the
+// cnDev device index the detector recorded in PhysicalIndexes.
+//
+// It is that number, not the operator's own logical index, that names the accelerator's char
+// devices, that the vendor's own runtime path resolves, and that an operator repairing the sMLU mode
+// by hand has to address. The two coincide only while every card on the host was detected, the
+// logical index counting the ones that were, so a card failing a probe leaves every later logical
+// index below its cnDev index.
+//
+// A record without the cnDev index is malformed rather than degraded, so it is rejected -- as the
+// Ascend responder rejects one missing its dcmi addressing -- instead of guessing an index that
+// would name another card.
+func driverIndex(accel *workercore.Accelerator) (uint32, error) {
+	if len(accel.PhysicalIndexes) == 0 {
+		return 0, fmt.Errorf("accelerator %q carries no cnDev device index", accel.ID)
+	}
+	return accel.PhysicalIndexes[0], nil
+}
+
+// visibleDevices renders the CAMBRICON_VISIBLE_DEVICES value: every allocated accelerator's driver
+// index, comma-joined in the order the container numbers them.
+func visibleDevices(accels []deviceplugin.AllocatedAccelerator) (string, error) {
+	indexes := make([]string, 0, len(accels))
+	for i := range accels {
+		index, err := driverIndex(accels[i].Accel)
+		if err != nil {
+			return "", err
+		}
+		indexes = append(indexes, strconvx.FormatUint(index, 10))
+	}
+	return strings.Join(indexes, ","), nil
+}
+
+// appendCardDevices appends one allocated card's device nodes.
+//
+// The card's own node is required: a card the host exposes no node for cannot be handed to a
+// container at all, so the allocation fails naming it rather than starting a container that has no
+// accelerator and no way to say why. The optional nodes are injected where the host has them, which
+// is the existence check every device constructor here already makes.
+func appendCardDevices(resp *deviceplugin.ContainerAllocateResponse, accel *workercore.Accelerator) error {
+	index, err := driverIndex(accel)
+	if err != nil {
+		return err
+	}
+
+	ownPath := cardDevicePath(index)
+	pDev := deviceplugin.NewRWDevice(ownPath)
+	if pDev == nil {
+		return fmt.Errorf("accelerator %q of card %q has no device node %q",
+			accel.ID, accel.Topology.PciBusID, ownPath)
+	}
+	resp.Devices = append(resp.Devices, pDev)
+
+	for _, path := range optionalCardDevicePaths(index) {
+		if pDev = deviceplugin.NewRWDevice(path); pDev != nil {
+			resp.Devices = append(resp.Devices, pDev)
+		}
+	}
+
+	return nil
+}
+
+// appendNodeDevices appends the node-level control devices, which a response carries once however
+// many cards it was allocated.
+func appendNodeDevices(resp *deviceplugin.ContainerAllocateResponse) {
+	for _, path := range nodeDevicePaths {
+		if pDev := deviceplugin.NewRWDevice(path); pDev != nil {
+			resp.Devices = append(resp.Devices, pDev)
+		}
+	}
 }
 
 // getSlicedContainerAllocateResponse renders the sMLU logical-slicing injection for a sliced
@@ -192,6 +322,14 @@ func (s *server) getSlicedContainerAllocateResponse(
 		return nil, fmt.Errorf("sliced container %q allocated %d cards, but Cambricon sMLU slicing is single-card", ctr.Name, count)
 	}
 
+	// The card's identity before the request's contents, as the Ascend responder also does, so a
+	// malformed record and a malformed request always report the record first.
+	slot, err := driverIndex(accel)
+	if err != nil {
+		return nil, err
+	}
+	card := accel.Topology.PciBusID
+
 	// Compute and VRAM are independent dimensions; both come straight from the shared
 	// helpers (the percent is used directly as the sMLU mluQuota, no CU conversion).
 	coresPct := deviceplugin.SlicedCoresPercent(ctr,
@@ -204,26 +342,16 @@ func (s *server) getSlicedContainerAllocateResponse(
 		return nil, fmt.Errorf("derive sliced memory limit: %w", err)
 	}
 
-	// The Cambricon detector records the cnDev device index in PhysicalIndexes, and it names both
-	// the accelerator's char devices and the card an operator repairing the sMLU mode by hand has to
-	// address. A record without it is malformed rather than degraded, so it is rejected here — as
-	// the Ascend responder rejects one missing its dcmi addressing — instead of guessing an index
-	// that would send the operator to another card.
-	if len(accel.PhysicalIndexes) == 0 {
-		return nil, fmt.Errorf("accelerator %q carries no cnDev device index", accel.ID)
-	}
-	card, slot := accel.Topology.PciBusID, accel.PhysicalIndexes[0]
-
 	inst, err := reserveInstance(s.smlu, string(pod.UID), ctr.Name, card, int(slot), coresPct, memMib, s.Logger)
 	if err != nil {
 		return nil, fmt.Errorf("reserve cambricon smlu instance: %w", err)
 	}
 
 	ctrResp := &deviceplugin.ContainerAllocateResponse{}
-	if pDev := deviceplugin.NewRWDevicef("/dev/cambricon_dev%d", slot); pDev != nil {
+	if pDev := deviceplugin.NewRWDevice(cardDevicePath(slot)); pDev != nil {
 		ctrResp.Devices = append(ctrResp.Devices, pDev)
 	}
-	if pDev := deviceplugin.NewRWDevicef("/dev/cambricon_ipcm%d", slot); pDev != nil {
+	if pDev := deviceplugin.NewRWDevice(cardIPCMDevicePath(slot)); pDev != nil {
 		ctrResp.Devices = append(ctrResp.Devices, pDev)
 	}
 	if inst.devNode != "" {
@@ -231,6 +359,10 @@ func (s *server) getSlicedContainerAllocateResponse(
 			ctrResp.Devices = append(ctrResp.Devices, pDev)
 		}
 	}
+	// A slice needs the node-level control devices for the same reasons a whole card does, and the
+	// vendor's own sMLU branch grants them too. The same helper serves both paths, so the two cannot
+	// come to disagree about what is node-level.
+	appendNodeDevices(ctrResp)
 	// The VIRTUAL_DEVICES env is the --use-runtime fallback: it names the sMLU instance's
 	// device node for a runtime that maps devices by env rather than by injected node. Set
 	// it only when the readback populated a device node — an empty value would misconfigure
