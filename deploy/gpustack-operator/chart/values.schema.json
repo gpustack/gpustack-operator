@@ -509,6 +509,12 @@
     },
     "deviceManager": {
       "properties": {
+        "containerdConfigDir": {
+          "default": "/etc/containerd",
+          "description": "Directory holding the container engine's `config.toml`, mounted read-only into every\ndevice manager at that same path and named to them as `GPUSTACK_CONTAINERD_CONFIG_DIR`.\n\nA distribution that keeps it elsewhere is served by naming that directory here: k3s uses\n`/var/lib/rancher/k3s/agent/etc/containerd` and RKE2 `/var/lib/rancher/rke2/agent/etc/containerd`.\nSet it to the directory itself, never the tree above it — on those two distributions that tree\nalso holds the cluster's tokens and keys. An empty value mounts nothing and passes nothing.\n\nIt is read for one purpose: a device-injection strategy of `auto` needs to know whether the\ncontainer engine resolves CDI requests, and which runtime handler a Pod naming no\n`runtimeClassName` runs under. With the configuration unreadable, `auto` keeps the\nenvironment-variable channel. Nothing else depends on it.",
+          "title": "containerdConfigDir",
+          "type": "string"
+        },
         "createRuntimeClasses": {
           "default": true,
           "description": "Create a RuntimeClass for every manufacturer whose `global.manufacturers` row sets\n`runtimeInjectsDriver` or `runtimeInjectsDevices`, where the cluster does not already have\none. That is the set whose container runtime is certain to be installed, since without it\nthose accelerators cannot work at all — see the note on `global.manufacturers`.\nDisable when something else provides them (e.g. a vendor GPU operator).",
@@ -721,7 +727,7 @@
           "type": "string"
         },
         "manufacturers": {
-          "description": "Accelerator manufacturers to manage, one row per manufacturer holding everything the\nrelease needs to know about it. `pciVendorID` is what NFD labels its devices with,\n`resourceName` what its device-plugin advertises to the kubelet, `runtimeName` the\nRuntimeClass its workloads run under, and `partitionKind` its own name for hardware\npartitioning (\"mig\" is NVIDIA's name for the concept, not the concept's). Each of those\nfour is also a `pkg/nodefeature` default overridable by a `GPUSTACK_\u003cMANUFACTURER\u003e_*`\nvariable, and this chart fans every stated one out as that variable to the worker and to\nthe device-managers — so a row here decides them rather than restating them, and a field\nleft out keeps the operator's own default. The two `runtimeInjects*` fields are the\nexception, deployment facts no Go code holds, and they answer different questions:\n\n  `runtimeInjectsDriver` marks a manufacturer whose user-space driver reaches a container\n  only through its container runtime, so that manufacturer's device-manager runs under the\n  RuntimeClass too. Every other vendor's device-manager reads its management library from a\n  hostPath mount the DaemonSet already makes.\n\n  `runtimeInjectsDevices` marks a manufacturer whose allocator contributes no device node of\n  its own, so its container runtime is the only thing that turns an allocation into `/dev`\n  entries inside the container. This is the WORKLOAD's need, not the device-manager's: such a\n  device-manager still reads its library from a hostPath and does not run under the class.\n  AMD is the case in point — its allocator returns no device spec and hands injection\n  entirely to `amd-container-runtime`, driven by the `AMD_VISIBLE_DEVICES` it sets.\n\nEither of the two — never `runtimeName` — is what decides which RuntimeClasses this chart\ncreates (`deviceManager.createRuntimeClasses`), because either one means the runtime's\npresence can be inferred: a vendor missing what it names cannot work at all unless its\ncontainer toolkit registered the handler. `runtimeName` alone is only the class the operator\nwill USE for a vendor. A vendor with neither field injects its own device nodes and needs no\nRuntimeClass, so the handler may well be absent while its accelerators work — and creating\none there would break them: the operator attaches a RuntimeClass to a workload whenever one\nexists, so the kubelet would reject every Pod of that vendor for a runtime nothing\nconfigured. A class the vendor's own operator created is still used; this chart just never\nconjures one.\n\nThe keys are the manufacturer list: they become the worker's `--manufacturer` flag (which\nis where the `gpustack-cpu-info` NodeFeatureRule's vendor IDs come from, since the worker\nrenders that rule itself), one device-manager DaemonSet each, and Kueue's credits mapping.\nEach DaemonSet only schedules on nodes NFD labelled with the matching PCI vendor, so\nadding a row is all it takes for a new vendor's devices to be labelled, detected and given\na device-manager, and a row no node in the cluster carries simply runs nothing.\n\nIt lives under `global` because the vendored Kueue subchart reads it too, and `global` is\nthe only channel Helm gives a subchart to this chart's values. The defaults are every\nmanufacturer `pkg/nodefeature` knows, which a Go test asserts. Narrow the list by setting a\nrow to `null` — an unwanted row is otherwise harmless (its DaemonSet schedules on no node),\nso this is about how much a release renders, not about what works.",
+          "description": "Accelerator manufacturers to manage, one row per manufacturer holding everything the\nrelease needs to know about it. `pciVendorID` is what NFD labels its devices with,\n`resourceName` what its device-plugin advertises to the kubelet, `runtimeName` the\nRuntimeClass its workloads run under, and `partitionKind` its own name for hardware\npartitioning (\"mig\" is NVIDIA's name for the concept, not the concept's). Each of those\nfour is also a `pkg/nodefeature` default overridable by a `GPUSTACK_\u003cMANUFACTURER\u003e_*`\nvariable, and this chart fans every stated one out as that variable to the worker and to\nthe device-managers — so a row here decides them rather than restating them, and a field\nleft out keeps the operator's own default. The two `runtimeInjects*` fields are the\nexception, deployment facts no Go code holds, and they answer different questions:\n\n  `runtimeInjectsDriver` marks a manufacturer whose user-space driver reaches a container\n  only through its container runtime, so that manufacturer's device-manager runs under the\n  RuntimeClass too. Every other vendor's device-manager reads its management library from a\n  hostPath mount the DaemonSet already makes.\n\n  `runtimeInjectsDevices` marks a manufacturer whose allocator contributes no device node of\n  its own, so its container runtime is the only thing that turns an allocation into `/dev`\n  entries inside the container. This is the WORKLOAD's need, not the device-manager's: such a\n  device-manager still reads its library from a hostPath and does not run under the class.\n  Ascend and Iluvatar are the cases in point: their allocators emit `ASCEND_VISIBLE_DEVICES` and\n  `IX_VISIBLE_DEVICES` and no device node, so without their runtime the container starts with the\n  variable set and no accelerator behind it — and no error anywhere. AMD used to be a third and\n  is not any more: its allocator injects `/dev/kfd` and the accelerator's DRM nodes itself.\n\nEither of the two — never `runtimeName` — is what decides which RuntimeClasses this chart\ncreates (`deviceManager.createRuntimeClasses`), because either one means the runtime's\npresence can be inferred: a vendor missing what it names cannot work at all unless its\ncontainer toolkit registered the handler. `runtimeName` alone is only the class the operator\nwill USE for a vendor. A vendor with neither field injects its own device nodes and needs no\nRuntimeClass, so the handler may well be absent while its accelerators work — and creating\none there would break them: the operator attaches a RuntimeClass to a workload whenever one\nexists, so the kubelet would reject every Pod of that vendor for a runtime nothing\nconfigured. A class the vendor's own operator created is still used; this chart just never\nconjures one.\n\nThe keys are the manufacturer list: they become the worker's `--manufacturer` flag (which\nis where the `gpustack-cpu-info` NodeFeatureRule's vendor IDs come from, since the worker\nrenders that rule itself), one device-manager DaemonSet each, and Kueue's credits mapping.\nEach DaemonSet only schedules on nodes NFD labelled with the matching PCI vendor, so\nadding a row is all it takes for a new vendor's devices to be labelled, detected and given\na device-manager, and a row no node in the cluster carries simply runs nothing.\n\nIt lives under `global` because the vendored Kueue subchart reads it too, and `global` is\nthe only channel Helm gives a subchart to this chart's values. The defaults are every\nmanufacturer `pkg/nodefeature` knows, which a Go test asserts. Narrow the list by setting a\nrow to `null` — an unwanted row is otherwise harmless (its DaemonSet schedules on no node),\nso this is about how much a release renders, not about what works.",
           "properties": {
             "amd": {
               "properties": {
@@ -734,11 +740,6 @@
                   "default": "amd.com/gpu",
                   "title": "resourceName",
                   "type": "string"
-                },
-                "runtimeInjectsDevices": {
-                  "default": true,
-                  "title": "runtimeInjectsDevices",
-                  "type": "boolean"
                 },
                 "runtimeName": {
                   "default": "amd",
@@ -761,6 +762,11 @@
                   "default": "huawei.com/npu",
                   "title": "resourceName",
                   "type": "string"
+                },
+                "runtimeInjectsDevices": {
+                  "default": true,
+                  "title": "runtimeInjectsDevices",
+                  "type": "boolean"
                 },
                 "runtimeName": {
                   "default": "ascend",
@@ -822,6 +828,11 @@
                   "default": "iluvatar.com/gpu",
                   "title": "resourceName",
                   "type": "string"
+                },
+                "runtimeInjectsDevices": {
+                  "default": true,
+                  "title": "runtimeInjectsDevices",
+                  "type": "boolean"
                 },
                 "runtimeName": {
                   "default": "iluvatar",

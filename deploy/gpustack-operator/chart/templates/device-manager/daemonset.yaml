@@ -120,6 +120,10 @@ spec:
                   fieldPath: spec.nodeName
             - name: KUBERNETES_SERVICE_NAME
               value: {{ $name | quote }}
+            {{- with $root.Values.deviceManager.containerdConfigDir }}
+            - name: GPUSTACK_CONTAINERD_CONFIG_DIR
+              value: {{ . | quote }}
+            {{- end }}
             {{- include "gpustack-operator.manufacturer.env"
                   (dict "name" $manu "identity" $identity) | trim | nindent 12 }}
           ports:
@@ -161,8 +165,29 @@ spec:
               mountPath: /run/docker
             - name: gpustack-data-dir
               mountPath: /var/lib/gpustack
+            {{- /*
+              Both CDI specification directories, read-only: a container engine loads what an
+              administrator placed in the static one and what a vendor generator refreshes into the
+              dynamic one, so a device manager reading only one of them would miss what the engine
+              will resolve. Read to decide whether a granted accelerator can be requested as a CDI
+              device; never written.
+            */}}
+            - name: cdi-static-dir
+              mountPath: /etc/cdi
+              readOnly: true
             - name: cdi-dir
               mountPath: /var/run/cdi
+              readOnly: true
+            {{- with $root.Values.deviceManager.containerdConfigDir }}
+            {{- /*
+              The container engine's configuration, read-only and at the host's own path so a log line
+              naming it names the file an operator would open. It says whether the engine resolves CDI
+              requests and which runtime handler a Pod naming no runtimeClassName runs under.
+            */}}
+            - name: containerd-config-dir
+              mountPath: {{ . }}
+              readOnly: true
+            {{- end }}
             - name: kubelet-device-plugins-dir
               mountPath: /var/lib/kubelet/device-plugins
             {{- if eq $manu "amd" }}
@@ -233,6 +258,10 @@ spec:
           hostPath:
             path: /var/lib/gpustack
             type: DirectoryOrCreate
+        - name: cdi-static-dir
+          hostPath:
+            path: /etc/cdi
+            type: DirectoryOrCreate
         - name: cdi-dir
           hostPath:
             path: /var/run/cdi
@@ -241,6 +270,12 @@ spec:
           hostPath:
             path: /var/lib/kubelet/device-plugins
             type: DirectoryOrCreate
+        {{- with $root.Values.deviceManager.containerdConfigDir }}
+        - name: containerd-config-dir
+          hostPath:
+            path: {{ . }}
+            type: DirectoryOrCreate
+        {{- end }}
         {{- if eq $manu "amd" }}
         - name: gpustack-amd-driver
           hostPath:
