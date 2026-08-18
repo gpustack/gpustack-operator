@@ -83,6 +83,43 @@ func newSlicedServer() *server {
 	}
 }
 
+// redirectDevicePaths points the device-node paths at a temporary tree holding the nodes the fixture
+// accelerators name. The responder only stats these paths, so plain files stand in for character
+// devices.
+func redirectDevicePaths(t *testing.T) {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "dev")
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "dri"), 0o755))
+
+	origNode, origCard, origRender := nodeDevicePaths, cardDevicePathFormat, renderDevicePathFormat
+	nodeDevicePaths = []string{filepath.Join(root, "kfd"), filepath.Join(root, "mkfd")}
+	cardDevicePathFormat = filepath.Join(root, "dri", "card%d")
+	renderDevicePathFormat = filepath.Join(root, "dri", "renderD%d")
+	t.Cleanup(func() {
+		nodeDevicePaths, cardDevicePathFormat, renderDevicePathFormat = origNode, origCard, origRender
+	})
+
+	paths := append([]string{}, nodeDevicePaths...)
+	for _, minor := range []uint32{0, 1} {
+		paths = append(paths, cardDevicePath(minor))
+	}
+	for _, minor := range []uint32{128, 129} {
+		paths = append(paths, renderDevicePath(minor))
+	}
+	for _, path := range paths {
+		require.NoError(t, os.WriteFile(path, nil, 0o600))
+	}
+}
+
+// deviceHostPaths is what a response's device set names, in the order it carries them.
+func deviceHostPaths(resp *deviceplugin.ContainerAllocateResponse) []string {
+	paths := make([]string, 0, len(resp.Devices))
+	for _, d := range resp.Devices {
+		paths = append(paths, d.HostPath)
+	}
+	return paths
+}
+
 func mountByContainerPath(resp *deviceplugin.ContainerAllocateResponse, ctrPath string) (*deviceplugin.Mount, bool) {
 	for _, m := range resp.Mounts {
 		if m.ContainerPath == ctrPath {
@@ -235,4 +272,121 @@ func TestGetSlicedContainerAllocateResponse_NoMemory(t *testing.T) {
 
 	_, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocated)
 	require.Error(t, err)
+}
+
+// The device-node paths, asserted without the redirect the cases below install: those prove the
+// responder composes the set correctly, and only this one proves the set names the host's real nodes
+// rather than a temporary tree.
+func TestDevicePaths(t *testing.T) {
+	cases := []struct {
+		name string
+		got  []string
+		want []string
+	}{
+		{
+			name: "the accelerator's own drm nodes",
+			got:  []string{cardDevicePath(3), renderDevicePath(131)},
+			want: []string{"/dev/dri/card3", "/dev/dri/renderD131"},
+		},
+		{
+			name: "the node-level control nodes, which no drm minor names",
+			got:  nodeDevicePaths,
+			want: []string{"/dev/kfd", "/dev/mkfd"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, c.got)
+		})
+	}
+}
+
+// Neither the control devices nor the runtime mount is an accelerator, so a grant that resolved to
+// none of them is a success the container cannot use. The sliced path already refused this shape; the
+// whole-card path now does too.
+func TestGetContainerAllocateResponseRefusesAnEmptyGrant(t *testing.T) {
+	redirectDevicePaths(t)
+	s := &server{
+		ResourceServer: deviceplugin.ResourceServer{
+			Logger:         logr.Discard(),
+			Manufacturer:   Manufacturer,
+			AllocationMode: workercore.DeviceAllocationModeExclusive,
+		},
+	}
+	pod, ctr := slicedPod("pod-empty-grant", "ctr", 0, 0)
+
+	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr,
+		hygonDevicesFixture(), map[deviceplugin.Resource]int32{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no allocated accelerator found")
+	assert.Nil(t, resp)
+}
+
+// The device set a grant carries: the control nodes once however many accelerators were granted, then
+// each accelerator's own drm pair, in the order they were granted. The whole-card and the sliced path
+// render it from the same helpers, so both are asserted here.
+func TestDeviceSet(t *testing.T) {
+	cases := []struct {
+		name    string
+		mode    workercore.DeviceAllocationMode
+		granted []string
+		want    []string
+	}{
+		{
+			name:    "one accelerator, whole card",
+			mode:    workercore.DeviceAllocationModeExclusive,
+			granted: []string{"dcu-uuid-1"},
+			want:    []string{"kfd", "mkfd", "dri/card1", "dri/renderD129"},
+		},
+		{
+			name:    "two accelerators share one pair of control nodes",
+			mode:    workercore.DeviceAllocationModeShared,
+			granted: []string{"dcu-uuid-0", "dcu-uuid-1"},
+			want:    []string{"kfd", "mkfd", "dri/card0", "dri/renderD128", "dri/card1", "dri/renderD129"},
+		},
+		{
+			name:    "a slice reaches its accelerator through the same nodes",
+			mode:    workercore.DeviceAllocationModeSliced,
+			granted: []string{"dcu-uuid-0"},
+			want:    []string{"kfd", "mkfd", "dri/card0", "dri/renderD128"},
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			redirectDevicePaths(t)
+
+			s := &server{
+				ResourceServer: deviceplugin.ResourceServer{
+					Logger:         logr.Discard(),
+					Manufacturer:   Manufacturer,
+					AllocationMode: c.mode,
+				},
+			}
+			pod, ctr := slicedPod("pod-device-set", "ctr", 50, 50)
+			allocated := make(map[deviceplugin.Resource]int32, len(c.granted))
+			for _, id := range c.granted {
+				allocated[deviceplugin.Resource{Group: groupID, Device: id}] = 1
+			}
+
+			resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr,
+				hygonDevicesFixture(), allocated)
+			require.NoError(t, err)
+
+			want := make([]string, 0, len(c.want))
+			for _, rel := range c.want {
+				switch rel {
+				case "kfd":
+					want = append(want, nodeDevicePaths[0])
+				case "mkfd":
+					want = append(want, nodeDevicePaths[1])
+				default:
+					want = append(want, filepath.Join(filepath.Dir(nodeDevicePaths[0]), rel))
+				}
+			}
+			assert.Equal(t, want, deviceHostPaths(resp))
+		})
+	}
 }
