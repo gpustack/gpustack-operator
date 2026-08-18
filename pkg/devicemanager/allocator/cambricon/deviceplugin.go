@@ -359,6 +359,10 @@ func (s *server) getSlicedContainerAllocateResponse(
 			ctrResp.Devices = append(ctrResp.Devices, pDev)
 		}
 	}
+	// A slice needs the node-level control devices for the same reasons a whole card does, and the
+	// vendor's own sMLU branch grants them too. The same helper serves both paths, so the two cannot
+	// come to disagree about what is node-level.
+	appendNodeDevices(ctrResp)
 	// The VIRTUAL_DEVICES env is the --use-runtime fallback: it names the sMLU instance's
 	// device node for a runtime that maps devices by env rather than by injected node. Set
 	// it only when the readback populated a device node — an empty value would misconfigure
