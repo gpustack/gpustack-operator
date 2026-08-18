@@ -21,6 +21,20 @@ import (
 
 const Manufacturer = nodefeature.ManufacturerNVIDIA
 
+// injectionConfig is this manufacturer's vocabulary for the shared device-injection resolver: the
+// variable nvidia-container-runtime reads a device list from, and the kind nvidia-ctk publishes whole
+// accelerators under. A MIG partition carries a kind of its own, which is why the partitioned family
+// never takes the CDI channel.
+var injectionConfig = deviceplugin.InjectionConfig{
+	Manufacturer:      Manufacturer,
+	CDIKind:           "nvidia.com/gpu",
+	VisibleDevicesEnv: "NVIDIA_VISIBLE_DEVICES",
+}
+
+// defaultInjectionResolver is what a responder built without one uses. One instance rather than one
+// per call, so its "which channel was chosen" line is still logged once.
+var defaultInjectionResolver = deviceplugin.DefaultInjectionResolver(injectionConfig)
+
 func New(opts device.AllocatorOptions) device.Allocator {
 	logger := opts.Logger.WithName(Manufacturer)
 
@@ -38,22 +52,33 @@ func New(opts device.AllocatorOptions) device.Allocator {
 		mig = newMigDriver()
 	}
 
+	// One resolver for the node: it caches what it reads off the host, and logs the channel it settled
+	// on once rather than once per responder. A misconfigured strategy is reported and the node
+	// keeps the default, because refusing to start the allocator would take the accelerators with it.
+	injection, err := deviceplugin.NewInjectionResolver(injectionConfig)
+	if err != nil {
+		logger.Error(err, "keeping the default device-injection strategy")
+		injection = deviceplugin.DefaultInjectionResolver(injectionConfig)
+	}
+
 	servers := []deviceplugin.Server{
-		newServer(logger, workercore.DeviceAllocationModeExclusive, nil),
+		newServer(logger, workercore.DeviceAllocationModeExclusive, nil, injection),
 	}
 	if !opts.NoShared {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeShared, nil),
+			newServer(logger, workercore.DeviceAllocationModeShared, nil, injection),
 		)
 	}
 	if !opts.NoSliced {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeSliced, nil),
+			newServer(logger, workercore.DeviceAllocationModeSliced, nil, injection),
 		)
 	}
 	if partitioned {
+		// The partitioned responder never consults the resolver: a MIG instance is materialized at
+		// Allocate time and no pre-generated CDI specification can name it.
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModePartitioned, mig),
+			newServer(logger, workercore.DeviceAllocationModePartitioned, mig, nil),
 		)
 	}
 	// The visibility server co-allocates a container to the same physical GPU(s) its owner
@@ -61,8 +86,11 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	// NVIDIA_VISIBLE_DEVICES, which is exactly what a device-cgroup grant needs (no HAMi
 	// logical-slicing artifacts). On a partition-backed accelerator that env must name the owner's
 	// partition, not the parent accelerator, which is what the shared MIG driver is for.
+	// A partition-backed visibility response is rendered by the MIG path, which never consults the
+	// resolver; the resolver is here for the plain case, where the co-allocated container is made to
+	// see a whole accelerator exactly as its owner does.
 	servers = append(servers,
-		newServer(logger, workercore.DeviceAllocationModeVisibility, mig),
+		newServer(logger, workercore.DeviceAllocationModeVisibility, mig, injection),
 	)
 
 	return aggregated{
@@ -149,9 +177,31 @@ type server struct {
 	// a co-allocated partition is still live. It is nil for every other mode, and on a node that
 	// serves no partitioning at all.
 	mig migDriver
+
+	// injection decides which channel carries a granted accelerator to the container. One resolver
+	// serves every responder on the node. Nil means the default strategy, so a responder built
+	// without one behaves as this package did before the strategy existed. The partitioned and
+	// partition-backed visibility responders do not consult it at all — see mig.go for why a
+	// partition cannot travel over CDI.
+	injection *deviceplugin.InjectionResolver
 }
 
-func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode, mig migDriver) deviceplugin.Server {
+// resolver returns this responder's injection resolver, or a default one when it was built without
+// any.
+func (s *server) resolver() *deviceplugin.InjectionResolver {
+	if s.injection == nil {
+		return defaultInjectionResolver
+	}
+
+	return s.injection
+}
+
+func newServer(
+	logger klog.Logger,
+	mode workercore.DeviceAllocationMode,
+	mig migDriver,
+	injection *deviceplugin.InjectionResolver,
+) deviceplugin.Server {
 	logger = logger.WithName(strings.ToLower(mode.String()))
 
 	s := &server{
@@ -161,7 +211,8 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode, mig mig
 			AllocationMode: mode,
 			Reconciler:     controllers.Get[*deviceplugin.DevicesReconciler](),
 		},
-		mig: mig,
+		mig:       mig,
+		injection: injection,
 	}
 	s.Responder = s
 
@@ -189,12 +240,19 @@ func (s *server) GetContainerAllocateResponse(
 		return s.getSlicedContainerAllocateResponse(pod, ctr, ids, accelerators)
 	}
 
-	// Delegate to container runtime for device injection,
-	// use GPU UUID as NVIDIA_VISIBLE_DEVICES value.
-	ctrResp := &deviceplugin.ContainerAllocateResponse{
-		Envs: map[string]string{
-			"NVIDIA_VISIBLE_DEVICES": strings.Join(ids, ","),
-		},
+	// Refuse a grant that resolved to nothing, as the sliced path above does. Neither channel below
+	// reports it: the environment variable would carry an empty value and the annotation an empty
+	// device list, so the response would be a success the container cannot use.
+	if len(accelerators) == 0 {
+		return nil, fmt.Errorf("no allocated accelerator found for container %q", ctr.Name)
+	}
+
+	// Name the granted accelerators over whichever channel this node honors: the container runtime's
+	// environment variable, or a CDI request the container engine resolves itself. Exactly one of
+	// them, never both.
+	ctrResp := &deviceplugin.ContainerAllocateResponse{}
+	if err := s.resolver().Apply(s.Logger, ctrResp, pod, ids); err != nil {
+		return nil, err
 	}
 	return ctrResp, nil
 }
@@ -246,7 +304,6 @@ func (s *server) getSlicedContainerAllocateResponse(
 	memPctRes := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer)
 	memMibRes := nodefeature.GetAcceleratableSlicedMemoryMibResourceName(Manufacturer)
 	envs := map[string]string{
-		"NVIDIA_VISIBLE_DEVICES":          strings.Join(ids, ","),
 		"CUDA_DEVICE_SM_LIMIT":            strconv.Itoa(deviceplugin.SlicedCoresPercent(ctr, coresRes)),
 		"CUDA_DEVICE_MEMORY_SHARED_CACHE": ctrVgpuSharedCache,
 	}
@@ -306,10 +363,18 @@ func (s *server) getSlicedContainerAllocateResponse(
 		{ContainerPath: ctrDevShmPath, HostPath: ctrDevShmPath, ReadOnly: false},
 	}
 
-	return &deviceplugin.ContainerAllocateResponse{
+	ctrResp := &deviceplugin.ContainerAllocateResponse{
 		Envs:   envs,
 		Mounts: mounts,
-	}, nil
+	}
+	// The accelerator's visibility is independent of the slicing artifacts above: HAMi-core is
+	// preloaded and reads its quota from the environment either way, so a slice works over whichever
+	// channel this node honors.
+	if err := s.resolver().Apply(s.Logger, ctrResp, pod, ids); err != nil {
+		return nil, err
+	}
+
+	return ctrResp, nil
 }
 
 // nvidiaCUDADir returns the HAMi-core library subdirectory for an accelerator's CUDA runtime
