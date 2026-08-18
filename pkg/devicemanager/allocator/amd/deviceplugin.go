@@ -38,8 +38,8 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	}
 	// The visibility server co-allocates a container to the same physical device(s) its owner
 	// container was granted: its Allocate reuses the owner's reserved device and the responder
-	// returns the same plain device-visibility response as the non-sliced modes (device-cgroup
-	// access only, no slicing artifacts).
+	// returns the same plain response as the non-sliced modes — the owner's own device nodes, and
+	// none of the slicing artifacts.
 	servers = append(servers,
 		newServer(logger, workercore.DeviceAllocationModeVisibility),
 	)
@@ -123,9 +123,152 @@ const (
 // arithmetic that must stay testable with no accelerator and no ROCm.
 var readTopologyFn = readTopology
 
-// acceleratorIDPrefix is what the detector puts in front of an accelerator's ASIC serial to form its
-// ID. The ROCm runtime wants the whole thing; the container runtime wants the serial alone.
-const acceleratorIDPrefix = "GPU-"
+// Device-node paths read from the AMD device plugin, function Allocate in
+// internal/pkg/plugin/plugin.go of rocm/k8s-device-plugin.
+//
+// They are vars rather than consts so a test can point them at a temporary tree instead of the host's
+// own nodes — the seam the THead partitioning responder already uses for the same reason. It is what
+// lets this package assert the device set a grant CARRIES, not only the refusals: every path here is
+// required, so on a machine with no ROCm driver every successful response would otherwise be
+// unreachable, taking the sliced compute mask and memory-limit cases down with it.
+//
+// Every one of them is required, unlike the optional per-card nodes other vendors expose. The shared
+// device-spec constructor returns nil for a path that does not exist, and a responder appending only
+// what is non-nil would turn a missing node into a SUCCESSFUL allocation carrying a silently
+// incomplete set — a container that cannot reach the accelerator it was charged for, with nothing
+// anywhere reporting a problem.
+var (
+	// nodeDevicePaths belong to the host rather than to any one accelerator: /dev/kfd is the compute
+	// driver's single entry point, so a response carries it once however many accelerators it holds.
+	nodeDevicePaths = []string{"/dev/kfd"}
+	// cardDevicePathFormat and renderDevicePathFormat name an accelerator's own two drm nodes. Each is
+	// a format taking that node's drm minor, so both of them carry a %d.
+	cardDevicePathFormat   = "/dev/dri/card%d"
+	renderDevicePathFormat = "/dev/dri/renderD%d"
+)
+
+// cardDevicePath returns the drm card node of one accelerator, named by its drm minor.
+func cardDevicePath(minor uint32) string {
+	return fmt.Sprintf(cardDevicePathFormat, minor)
+}
+
+// renderDevicePath returns the drm render node of one accelerator, named by its drm minor.
+func renderDevicePath(minor uint32) string {
+	return fmt.Sprintf(renderDevicePathFormat, minor)
+}
+
+// driverMinors returns the two numbers the driver knows an accelerator by, which for AMD are the drm
+// card and render minors the detector recorded in PhysicalIndexes.
+//
+// Both numbers or neither. The detector reads them from the amdgpu driver's own sysfs tree, which
+// yields the pair, the card number alone, or nothing at all — so a pair is not something this can
+// assume, and indexing an absent one panics the single process that serves every allocation on the
+// node, for every manufacturer. A record short of the pair is malformed rather than degraded, so it
+// is rejected instead of named by a guessed minor that would address another accelerator.
+func driverMinors(accel *workercore.Accelerator) (card, render uint32, err error) {
+	if len(accel.PhysicalIndexes) < 2 {
+		return 0, 0, fmt.Errorf("card %s records no drm card and render node, so the device nodes it "+
+			"needs cannot be named", accel.ID)
+	}
+
+	return accel.PhysicalIndexes[0], accel.PhysicalIndexes[1], nil
+}
+
+// appendDeviceNodes appends the device set a grant of these accelerators needs: the node-level
+// compute node once, then each accelerator's own drm pair, in the order they were granted.
+//
+// This is the set the AMD device plugin injects, and it is what lets a ROCm container run with the
+// driver alone — no container runtime has to interpret an environment variable for the accelerator to
+// arrive.
+func appendDeviceNodes(
+	resp *deviceplugin.ContainerAllocateResponse,
+	accels []deviceplugin.AllocatedAccelerator,
+) error {
+	if err := appendNodeDevices(resp); err != nil {
+		return err
+	}
+
+	// Which accelerator claimed each drm node, so a collision can name both sides of the disagreement.
+	claimed := make(map[string]*workercore.Accelerator, 2*len(accels))
+	for i := range accels {
+		if err := appendCardDevices(resp, accels[i].Accel, claimed); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// appendNodeDevices appends the node-level device nodes, which a response carries once however many
+// accelerators it was granted.
+func appendNodeDevices(resp *deviceplugin.ContainerAllocateResponse) error {
+	for _, path := range nodeDevicePaths {
+		pDev := deviceplugin.NewRWDevice(path)
+		if pDev == nil {
+			return fmt.Errorf("the host has no device node %q, so no accelerator can be granted", path)
+		}
+		resp.Devices = append(resp.Devices, pDev)
+	}
+
+	return nil
+}
+
+// appendCardDevices appends one granted accelerator's own device nodes, and records them in claimed so
+// a later accelerator naming the same node is refused.
+//
+// Two accelerators naming one node means the recorded minors do not identify an accelerator, so
+// neither grant can be trusted to reach the hardware it was charged for. Measured hardware records one
+// card and one render node per bus address, and this has nothing to fire on; a part that enumerates
+// differently is refused rather than served a set that may belong to its neighbor.
+//
+// A refusal, not a silent de-duplication, because the two readings are not distinguishable from here:
+// a detector that mis-associated a bus address with the wrong accelerator looks exactly like a part
+// that genuinely shares one node between two logical accelerators, and only the first is safe to
+// serve. The message names both bus addresses and the sysfs directory to read, so whoever hits it can
+// tell which they have.
+func appendCardDevices(
+	resp *deviceplugin.ContainerAllocateResponse,
+	accel *workercore.Accelerator,
+	claimed map[string]*workercore.Accelerator,
+) error {
+	card, render, err := driverMinors(accel)
+	if err != nil {
+		return err
+	}
+
+	for _, path := range []string{cardDevicePath(card), renderDevicePath(render)} {
+		if owner, ok := claimed[path]; ok {
+			return fmt.Errorf("cards %s and %s both record drm node %q, so neither can be granted; "+
+				"compare their /sys/module/amdgpu/drivers/pci:amdgpu/%s/drm and "+
+				"/sys/module/amdgpu/drivers/pci:amdgpu/%s/drm listings",
+				owner.ID, accel.ID, path, owner.Topology.PciBusID, accel.Topology.PciBusID)
+		}
+		claimed[path] = accel
+
+		pDev := deviceplugin.NewRWDevice(path)
+		if pDev == nil {
+			return fmt.Errorf("card %s has no device node %q on the host", accel.ID, path)
+		}
+		resp.Devices = append(resp.Devices, pDev)
+	}
+
+	return nil
+}
+
+// runtimeVisibleDevicesNone is what AMD_VISIBLE_DEVICES carries now that the responder injects the
+// device nodes itself: an explicit instruction to amd-container-runtime to add nothing.
+//
+// The two channels do not reconcile, they union — measured. With the runtime installed and the
+// variable naming an accelerator the injected nodes do not, the container reaches BOTH: the one it
+// was granted and the one the variable named, with no error anywhere. Nothing in this package can
+// produce that disagreement today, since the serial and the drm indexes are two fields of one
+// detector record, but the variable buys nothing to offset the risk — whatever it names is already
+// injected above. Saying "none" removes the second grant channel instead of leaving it live and
+// hoping the two never drift.
+//
+// Stated rather than omitted: the runtime injects nothing when the variable is absent either, but
+// that is its default, and a default is not a contract. "none" is.
+const runtimeVisibleDevicesNone = "none"
 
 // rocrVisibleDevices is the value ROCR_VISIBLE_DEVICES carries: the accelerator IDs as the detector
 // recorded them, which is byte-for-byte the "GPU-<serial>" UUID ROCr matches an agent by.
@@ -144,53 +287,41 @@ func rocrVisibleDevices(accels []deviceplugin.AllocatedAccelerator) string {
 	return strings.Join(ids, ",")
 }
 
-// runtimeVisibleDevices is the value AMD_VISIBLE_DEVICES carries: the same accelerators, in the same
-// order, with the ID prefix stripped.
-//
-// The two variables cannot share one string, measured: amd-container-runtime accepts "all", "none",
-// an index range, or the bare serial, and rejects a "GPU-"prefixed one. It rejects it the worst way
-// available — it logs the value as an invalid range, adds no device to the OCI spec, and still
-// reports the container configured for accelerator access — so the container starts with no
-// /dev/kfd and no render node while every other layer believes it was served. Since this allocator
-// returns no DeviceSpec of its own and leaves device injection entirely to the runtime, this
-// spelling is the only thing standing between an admitted claim and an accelerator the container can
-// actually reach.
-//
-// The serial rather than the index, deliberately: an index is only meaningful in the enumeration the
-// runtime happens to use, and this host's DRM ordering already runs opposite to the vendor tool's.
-func runtimeVisibleDevices(accels []deviceplugin.AllocatedAccelerator) string {
-	serials := make([]string, 0, len(accels))
-	for i := range accels {
-		serials = append(serials, strings.TrimPrefix(accels[i].Accel.ID, acceleratorIDPrefix))
-	}
-	return strings.Join(serials, ",")
-}
-
 func (s *server) GetContainerAllocateResponse(
 	_ context.Context,
 	_ *core.Pod,
-	_ *core.Container,
+	ctr *core.Container,
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
 	accels := deviceplugin.AllocatedAccelerators(devs, allocated)
-	// Refuse an accelerator with no identity, for the same reason the sliced path does: this variable
-	// is the only filter the container is given, and an empty entry widens it to every accelerator on
-	// the node rather than narrowing it to the granted one. Failing the claim visibly is the safe
-	// direction — the alternative is a container quietly running against hardware nobody granted it.
+	// Refuse a grant that resolved to nothing, as the sliced path does. The device set below would
+	// still carry the node-level compute node, so without this the response is a success the
+	// container cannot use: no accelerator, and no error to say so.
+	if len(accels) == 0 {
+		return nil, fmt.Errorf("no allocated accelerator found for container %q", ctr.Name)
+	}
+	// Refuse an accelerator with no identity, for the same reason the sliced path does: the ID is
+	// what ROCr matches an agent by, and an empty entry does not narrow the container to the granted
+	// accelerator. Failing the claim visibly is the safe direction — the alternative is a container
+	// quietly running against hardware nobody granted it.
 	for i := range accels {
 		if accels[i].Accel.ID == "" {
 			return nil, fmt.Errorf("card at index %d reports no unique id, so it cannot be granted",
 				accels[i].Accel.Index)
 		}
 	}
-	// Delegate to container runtime for device injection, naming the accelerators the way that
-	// runtime accepts — see runtimeVisibleDevices for why the spelling is the whole contract here.
 	ctrResp := &deviceplugin.ContainerAllocateResponse{
 		Envs: map[string]string{
-			"AMD_VISIBLE_DEVICES": runtimeVisibleDevices(accels),
+			"AMD_VISIBLE_DEVICES": runtimeVisibleDevicesNone,
 		},
 	}
+	// Inject the accelerator's own device nodes, so the grant does not depend on a container runtime
+	// being installed to interpret anything.
+	if err := appendDeviceNodes(ctrResp, accels); err != nil {
+		return nil, err
+	}
+
 	return ctrResp, nil
 }
 
@@ -269,6 +400,15 @@ func (s *server) GetLogicalSlicedResponse(
 		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
 	}
 
+	// A slice reaches its accelerator through the same device nodes a whole one does; what makes it a
+	// slice is the quota and the compute mask below, not a narrower device set. The same helper serves
+	// both paths, so the two cannot come to disagree about what a grant carries. Resolved before the
+	// directory below, so a refusal leaves nothing behind on the host to clean up.
+	ctrResp := &deviceplugin.ContainerAllocateResponse{}
+	if err := appendDeviceNodes(ctrResp, accels); err != nil {
+		return nil, err
+	}
+
 	// The usage region is per container rather than per node: it is addressed by the accelerator's
 	// position in ROCR_VISIBLE_DEVICES, which is container-local, so a shared location would let
 	// two containers' index 0 — two different physical accelerators — charge one slot. Under the pod
@@ -284,11 +424,11 @@ func (s *server) GetLogicalSlicedResponse(
 	memMibRes := nodefeature.GetAcceleratableSlicedMemoryMibResourceName(Manufacturer)
 
 	envs := map[string]string{
-		// The container runtime reads the first to inject /dev/kfd and the accelerator's render node;
-		// the ROCm user-space runtime reads the second to filter and order its agents. Neither is read
-		// by the other, and they spell an accelerator differently — bare serial against
-		// "GPU-<serial>" — so each gets its own rendering of the same accelerators in the same order.
-		"AMD_VISIBLE_DEVICES":  runtimeVisibleDevices(accels),
+		// The ROCm user-space runtime reads ROCR_VISIBLE_DEVICES to filter and order its agents, and
+		// it must name exactly the accelerators whose nodes were injected above: an entry ROCr cannot
+		// resolve to a visible agent does not drop that entry, it yields ZERO GPU agents, measured and
+		// silent. Both are rendered from the one collected slice, which is what keeps them equal.
+		"AMD_VISIBLE_DEVICES":  runtimeVisibleDevicesNone,
 		"ROCR_VISIBLE_DEVICES": rocrVisibleDevices(accels),
 		"VROCM_LEDGER_PATH":    ctrLedgerPath,
 	}
@@ -327,14 +467,14 @@ func (s *server) GetLogicalSlicedResponse(
 	}
 
 	libDir := filepath.Join(deviceplugin.OperatorLibDir, "amd")
-	return &deviceplugin.ContainerAllocateResponse{
-		Envs: envs,
-		Mounts: []*deviceplugin.Mount{
-			{ContainerPath: ctrLdPreloadPath, HostPath: filepath.Join(libDir, "ld.so.preload"), ReadOnly: true},
-			{ContainerPath: ctrVrocmLibPath, HostPath: filepath.Join(libDir, "libvrocm.so"), ReadOnly: true},
-			{ContainerPath: ctrVrocmMonPath, HostPath: filepath.Join(libDir, "rocm-monitor"), ReadOnly: true},
-			{ContainerPath: ctrVrocmCheckPath, HostPath: filepath.Join(libDir, "rocm-cumask-check"), ReadOnly: true},
-			{ContainerPath: ctrLedgerDir, HostPath: ledgerDir, ReadOnly: false},
-		},
-	}, nil
+	ctrResp.Envs = envs
+	ctrResp.Mounts = []*deviceplugin.Mount{
+		{ContainerPath: ctrLdPreloadPath, HostPath: filepath.Join(libDir, "ld.so.preload"), ReadOnly: true},
+		{ContainerPath: ctrVrocmLibPath, HostPath: filepath.Join(libDir, "libvrocm.so"), ReadOnly: true},
+		{ContainerPath: ctrVrocmMonPath, HostPath: filepath.Join(libDir, "rocm-monitor"), ReadOnly: true},
+		{ContainerPath: ctrVrocmCheckPath, HostPath: filepath.Join(libDir, "rocm-cumask-check"), ReadOnly: true},
+		{ContainerPath: ctrLedgerDir, HostPath: ledgerDir, ReadOnly: false},
+	}
+
+	return ctrResp, nil
 }

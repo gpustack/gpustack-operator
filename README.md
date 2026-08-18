@@ -26,8 +26,11 @@ the operator brings up the rest.
 **Prerequisites.**
 
 - Kubernetes `>= 1.23` (required by the bundled Kueue), Helm `3.8+`, cluster-admin.
-- On accelerator nodes: the manufacturer driver and container runtime. The operator brings the device
-  plugin, not the driver.
+- On accelerator nodes: the manufacturer driver is always yours to install — the operator brings the
+  device plugin, not the driver. A container toolkit is required for a named subset of manufacturers.
+  A vendor GPU Operator usually stays alongside GPUStack with some of its components turned off —
+  where a vendor ships no switch for one of them, it has to go instead. See
+  [Vendor Prerequisites](./docs/vendor-prerequisites.md) for the per-manufacturer detail.
 - cert-manager is optional — the default `global.certmanager.enabled=auto` uses it when detected, and
   every component self-signs otherwise.
 

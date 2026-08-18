@@ -136,45 +136,120 @@ func (s *server) GetContainerAllocateResponse(
 
 	ctrResp := &deviceplugin.ContainerAllocateResponse{}
 
-	// Mount control devices.
-	for _, p := range []string{
-		"/dev/mxcd",
-		"/dev/mxnd",
-		"/dev/mxgd",
-	} {
-		if pDev := deviceplugin.NewRWDevice(p); pDev != nil {
-			ctrResp.Devices = append(ctrResp.Devices, pDev)
-		}
-	}
+	appendNodeDevices(ctrResp, s.Logger)
 
-	// Mount specified devices.
 	for _, allocatedAccel := range deviceplugin.AllocatedAccelerators(devs, allocated) {
-		devsAccelerator := allocatedAccel.Accel
-
-		// Each recorded index is guarded by its own length, as the sliced path below already
-		// does. The detector reads them from this manufacturer's sysfs drm directory, which
-		// yields both numbers, the drm card<N> number alone, or nothing at all — so a pair is
-		// not something this can assume. Indexing an absent one panics, and no interceptor
-		// recovers a panic in this handler: the process that serves every allocation on the node
-		// dies with it, for every manufacturer, over one accelerator whose drm directory could
-		// not be read.
-		if len(devsAccelerator.PhysicalIndexes) > 0 {
-			if pDev := deviceplugin.NewRWDevicef("/dev/dri/card%d", devsAccelerator.PhysicalIndexes[0]); pDev != nil {
-				ctrResp.Devices = append(ctrResp.Devices, pDev)
-			}
-		} else {
-			s.Logger.Info("no recorded drm index for an allocated card; its device nodes cannot be "+
-				"named and are not injected",
-				"card", devsAccelerator.ID)
-		}
-		if len(devsAccelerator.PhysicalIndexes) > 1 {
-			if pDev := deviceplugin.NewRWDevicef("/dev/dri/renderD%d", devsAccelerator.PhysicalIndexes[1]); pDev != nil {
-				ctrResp.Devices = append(ctrResp.Devices, pDev)
-			}
-		}
+		appendCardDevices(ctrResp, allocatedAccel.Accel, s.Logger)
 	}
 
 	return ctrResp, nil
+}
+
+// Device-node paths read from this manufacturer's own container documentation. They are vars rather
+// than consts so a test can point them at a temporary tree instead of the host's own nodes — the seam
+// the AMD, Hygon and THead responders use for the same reason.
+var (
+	// nodeDevicePaths belong to the host rather than to any one accelerator, so a response carries
+	// them once however many accelerators it holds. The sliced path takes only the first of them: an
+	// sgpu subdevice is reached through the control node and its own render node, and the vendor's own
+	// slicing branch grants no more than that.
+	nodeDevicePaths = []string{controlDevicePath, "/dev/mxnd", "/dev/mxgd"}
+	// controlDevicePath is the one node-level device the sliced path carries as well: an sgpu
+	// subdevice is reached through it and through the subdevice's own render node, and nothing else.
+	controlDevicePath = "/dev/mxcd"
+	// cardDevicePathFormat and renderDevicePathFormat name an accelerator's own two drm nodes. Each is
+	// a format taking that node's drm minor, so both of them carry a %d. The whole-card and the sliced
+	// path render from the same two formats, so a name cannot be corrected in one place and left wrong
+	// in the other.
+	cardDevicePathFormat   = "/dev/dri/card%d"
+	renderDevicePathFormat = "/dev/dri/renderD%d"
+)
+
+// cardDevicePath returns the drm card node of one accelerator, named by its drm minor.
+func cardDevicePath(minor uint32) string {
+	return fmt.Sprintf(cardDevicePathFormat, minor)
+}
+
+// renderDevicePath returns the drm render node of one accelerator, named by its drm minor.
+func renderDevicePath(minor uint32) string {
+	return fmt.Sprintf(renderDevicePathFormat, minor)
+}
+
+// appendNodeDevices appends the node-level control devices, which a response carries once however many
+// accelerators it was granted.
+func appendNodeDevices(resp *deviceplugin.ContainerAllocateResponse, logger klog.Logger) {
+	for _, path := range nodeDevicePaths {
+		appendNodeDevice(resp, logger, path)
+	}
+}
+
+// appendNodeDevice appends one node-level device, or says why the response will not carry it.
+func appendNodeDevice(resp *deviceplugin.ContainerAllocateResponse, logger klog.Logger, path string) {
+	pDev := deviceplugin.NewRWDevice(path)
+	if pDev == nil {
+		logger.Info("the host exposes no control device node, so the container will not receive it",
+			"path", path)
+
+		return
+	}
+	resp.Devices = append(resp.Devices, pDev)
+}
+
+// appendCardDevices appends one allocated accelerator's own drm nodes, where the host has them.
+//
+// Each recorded index is guarded by its own length. The detector reads them from this manufacturer's
+// sysfs drm directory, which yields both numbers, the drm card<N> number alone, or nothing at all — so
+// a pair is not something this can assume. Indexing an absent one panics, and no interceptor recovers
+// a panic in this handler: the process that serves every allocation on the node dies with it, for
+// every manufacturer, over one accelerator whose drm directory could not be read.
+//
+// The device set here is best-effort, where the AMD responder's is fail-closed: a node this cannot
+// name, or that the host does not have, is left out and the allocation still succeeds. This package
+// has always behaved that way and no hardware is available to confirm what a container is left able to
+// do without those nodes, so the shape is kept — and every omission is said out loud instead. A
+// container that reaches its accelerator with less than the full set is then something the log
+// explains, rather than something an operator has to infer from the symptom.
+func appendCardDevices(
+	resp *deviceplugin.ContainerAllocateResponse,
+	accel *workercore.Accelerator,
+	logger klog.Logger,
+) {
+	if len(accel.PhysicalIndexes) == 0 {
+		logger.Info("an allocated card records no drm index, so none of its device nodes can be named "+
+			"and the container will receive none of them",
+			"card", accel.ID)
+
+		return
+	}
+	appendCardDevice(resp, accel, logger, cardDevicePath(accel.PhysicalIndexes[0]))
+
+	if len(accel.PhysicalIndexes) < 2 {
+		logger.Info("an allocated card records no drm render index, so its render node cannot be named "+
+			"and the container will not receive it",
+			"card", accel.ID)
+
+		return
+	}
+	appendCardDevice(resp, accel, logger, renderDevicePath(accel.PhysicalIndexes[1]))
+}
+
+// appendCardDevice appends one node of an allocated accelerator, or says why the response will not
+// carry it.
+func appendCardDevice(
+	resp *deviceplugin.ContainerAllocateResponse,
+	accel *workercore.Accelerator,
+	logger klog.Logger,
+	path string,
+) {
+	pDev := deviceplugin.NewRWDevice(path)
+	if pDev == nil {
+		logger.Info("the host has no device node an allocated card names, so the container will not "+
+			"receive it",
+			"card", accel.ID, "path", path)
+
+		return
+	}
+	resp.Devices = append(resp.Devices, pDev)
 }
 
 // getSlicedContainerAllocateResponse renders the sgpu logical-slicing injection for a
@@ -221,13 +296,15 @@ func (s *server) getSlicedContainerAllocateResponse(
 	}
 
 	ctrResp := &deviceplugin.ContainerAllocateResponse{}
-	if pDev := deviceplugin.NewRWDevice("/dev/mxcd"); pDev != nil {
-		ctrResp.Devices = append(ctrResp.Devices, pDev)
-	}
-	if len(accel.PhysicalIndexes) >= 2 {
-		if pDev := deviceplugin.NewRWDevicef("/dev/dri/renderD%d", accel.PhysicalIndexes[1]); pDev != nil {
-			ctrResp.Devices = append(ctrResp.Devices, pDev)
-		}
+	// The control node and this subdevice's own render node, from the same helpers the whole-card path
+	// uses so the two cannot come to name a node differently. An sgpu slice takes no more than these.
+	appendNodeDevice(ctrResp, s.Logger, controlDevicePath)
+	if len(accel.PhysicalIndexes) < 2 {
+		s.Logger.Info("an allocated card records no drm render index, so its render node cannot be named "+
+			"and the sliced container will not receive it",
+			"card", accel.ID)
+	} else {
+		appendCardDevice(ctrResp, accel, s.Logger, renderDevicePath(accel.PhysicalIndexes[1]))
 	}
 	// A partial slice injects METAX_SGPUS; a whole accelerator takes the native path (no env).
 	if !res.wholeCard {

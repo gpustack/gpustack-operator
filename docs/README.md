@@ -18,9 +18,11 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 2. [Installation Modes](architecture/installation-modes.md) — what the chart owns, what the worker applies.
 3. [High Availability Operations](operation/high-availability.md) — the replica knob per component.
 4. [Settings & Environment Variables](settings.md) — online-adjustable settings and every `GPUSTACK_*`.
-5. [NVIDIA MIG Operations](operation/nvidia-mig.md) and [T-Head MIG Operations](operation/thead-mig.md) —
+5. [Vendor Prerequisites](vendor-prerequisites.md) — what to install per manufacturer, and which vendor
+   GPU Operator components to disable.
+6. [NVIDIA MIG Operations](operation/nvidia-mig.md) and [T-Head MIG Operations](operation/thead-mig.md) —
    the runbook for enabling and disabling partitioning on a node.
-6. Upgrading: [Migrating to Bundled Subcharts](migration/to-subcharts.md) · [Migrating from
+7. Upgrading: [Migrating to Bundled Subcharts](migration/to-subcharts.md) · [Migrating from
    v0.5.x](migration/from-v0.5.md).
 
 **I change the code** — read the overview first; it is the map for everything else.
@@ -51,6 +53,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [Accelerator Requests](accelerator-requests.md) | The resource keys per family and the seven rules admission enforces, with worked examples | users, contributors | ~11 min |
 | [Walkthrough](walkthrough.md) | A recorded end-to-end run: every object, before/after each operation | everyone | ~12 min |
 | [Settings & Environment Variables](settings.md) | Online-adjustable settings, every `GPUSTACK_*` env, per-manufacturer overrides, toolkit paths | operators | ~8 min |
+| [Vendor Prerequisites](vendor-prerequisites.md) | What to install per manufacturer before GPUStack, and which vendor GPU Operator components to keep or disable | operators | ~10 min |
 | [Development](development.md) | Build, lint, test, code generation, vendored subcharts and dependencies | contributors | ~5 min |
 | [High Availability Operations](operation/high-availability.md) | Which knob to raise per control-plane component, and the one topology that cannot be redundant | operators | ~4 min |
 | [NVIDIA MIG Operations](operation/nvidia-mig.md) | Enabling/disabling MIG, reboot recovery, and a recorded three-configuration walkthrough | operators | ~21 min |

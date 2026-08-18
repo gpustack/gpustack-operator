@@ -97,6 +97,21 @@ genericized. Never hand-write plausible output.
 **Owns** — the online-adjustable `Setting` catalog and every `GPUSTACK_*` variable, including the
 per-manufacturer overrides and vendor toolkit paths.
 
+## `docs/vendor-prerequisites.md`
+
+**Owns** — what to install on a node before GPUStack, per manufacturer; which of a vendor GPU
+Operator's components conflict with ours and the switch that turns each off; what to change when one
+is already installed.
+
+**Never** — how our own allocator picks or renders a channel (device discovery owns that), the
+`GPUSTACK_*` variable that names one (settings owns it), or a vendor's own install procedure beyond
+the values this operator needs changed. Link, do not restate a vendor's chart.
+
+**Pinned** — the injection table comes from each allocator's device set
+(`pkg/devicemanager/allocator/*/deviceplugin.go`); re-check it when an allocator changes what it
+injects. Every section names the vendor product version its statements were read against — move that
+version only together with a re-reading.
+
 ## `docs/development.md`
 
 **Owns** — make targets, the chart targets, vendored subcharts and how to patch one, commit-message

@@ -2,6 +2,8 @@ package metax
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -75,6 +77,91 @@ func allocateGPU0() map[deviceplugin.Resource]int32 {
 // nothing; this handler has no panic recovery, so indexing an absent one killed the process that
 // serves every allocation on the node — for every manufacturer — over one unreadable directory.
 // The nodes that cannot be named are left out instead.
+// redirectDevicePaths points the device-node paths at a temporary tree holding the nodes the fixture
+// accelerators name. The responder only stats these paths, so plain files stand in for character
+// devices.
+func redirectDevicePaths(t *testing.T) {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "dev")
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "dri"), 0o755))
+
+	origNode, origCard, origRender := nodeDevicePaths, cardDevicePathFormat, renderDevicePathFormat
+	origControl := controlDevicePath
+	// The control node is redirected on its own as well as through the slice below it: the sliced
+	// path reads the variable directly, so redirecting only the slice would leave that path stating
+	// the real /dev/mxcd, which does not exist under this tree and is silently left out.
+	controlDevicePath = filepath.Join(root, "mxcd")
+	nodeDevicePaths = []string{
+		controlDevicePath, filepath.Join(root, "mxnd"), filepath.Join(root, "mxgd"),
+	}
+	cardDevicePathFormat = filepath.Join(root, "dri", "card%d")
+	renderDevicePathFormat = filepath.Join(root, "dri", "renderD%d")
+	t.Cleanup(func() {
+		nodeDevicePaths, cardDevicePathFormat, renderDevicePathFormat = origNode, origCard, origRender
+		controlDevicePath = origControl
+	})
+
+	paths := append([]string{}, nodeDevicePaths...)
+	for _, minor := range []uint32{0, 1} {
+		paths = append(paths, cardDevicePath(minor))
+	}
+	for _, minor := range []uint32{128, 129} {
+		paths = append(paths, renderDevicePath(minor))
+	}
+	for _, path := range paths {
+		require.NoError(t, os.WriteFile(path, nil, 0o600))
+	}
+}
+
+// The device-node paths, asserted without the redirect the case below installs: only this one proves
+// the set names the host's real nodes rather than a temporary tree.
+func TestDevicePaths(t *testing.T) {
+	assert.Equal(t, []string{"/dev/dri/card3", "/dev/dri/renderD131"},
+		[]string{cardDevicePath(3), renderDevicePath(131)})
+	assert.Equal(t, []string{"/dev/mxcd", "/dev/mxnd", "/dev/mxgd"}, nodeDevicePaths)
+}
+
+// The device set a grant carries: the three control nodes once however many accelerators were granted,
+// then each accelerator's own drm pair. The sliced path takes the control node and the render node
+// only, which is what the vendor's own sgpu branch grants.
+func TestDeviceSet(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	redirectDevicePaths(t)
+
+	hostPaths := func(resp *deviceplugin.ContainerAllocateResponse) []string {
+		out := make([]string, 0, len(resp.Devices))
+		for _, d := range resp.Devices {
+			out = append(out, d.HostPath)
+		}
+		return out
+	}
+
+	allocateGPU1 := map[deviceplugin.Resource]int32{{Group: "c500", Device: "GPU-1"}: 1}
+
+	t.Run("a whole card takes the control nodes and its own drm pair", func(t *testing.T) {
+		s := &server{
+			ResourceServer: deviceplugin.ResourceServer{
+				Logger:         logr.Discard(),
+				Manufacturer:   Manufacturer,
+				AllocationMode: workercore.DeviceAllocationModeExclusive,
+			},
+		}
+		pod, ctr := slicedPod("pod-device-set", "ctr", 0, 0)
+		resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, metaxDevicesFixture(), allocateGPU1)
+		require.NoError(t, err)
+		assert.Equal(t, append(append([]string{}, nodeDevicePaths...),
+			cardDevicePath(1), renderDevicePath(129)), hostPaths(resp))
+	})
+
+	t.Run("a slice takes the control node and the render node only", func(t *testing.T) {
+		s := newSlicedServer(newFakeMgr())
+		pod, ctr := slicedPod("pod-device-set-sliced", "ctr", 60, 50)
+		resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, metaxDevicesFixture(), allocateGPU1)
+		require.NoError(t, err)
+		assert.Equal(t, []string{controlDevicePath, renderDevicePath(129)}, hostPaths(resp))
+	})
+}
+
 func TestGetContainerAllocateResponseWithoutDrmIndexes(t *testing.T) {
 	devs := metaxDevicesFixture()
 	// Neither number readable, and only the accelerator number readable: the two shapes sysfs yields

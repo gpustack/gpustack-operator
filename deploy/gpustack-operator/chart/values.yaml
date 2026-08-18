@@ -84,8 +84,10 @@ global:
   #   its own, so its container runtime is the only thing that turns an allocation into `/dev`
   #   entries inside the container. This is the WORKLOAD's need, not the device-manager's: such a
   #   device-manager still reads its library from a hostPath and does not run under the class.
-  #   AMD is the case in point — its allocator returns no device spec and hands injection
-  #   entirely to `amd-container-runtime`, driven by the `AMD_VISIBLE_DEVICES` it sets.
+  #   Ascend and Iluvatar are the cases in point: their allocators emit `ASCEND_VISIBLE_DEVICES` and
+  #   `IX_VISIBLE_DEVICES` and no device node, so without their runtime the container starts with the
+  #   variable set and no accelerator behind it — and no error anywhere. AMD used to be a third and
+  #   is not any more: its allocator injects `/dev/kfd` and the accelerator's DRM nodes itself.
   #
   # Either of the two — never `runtimeName` — is what decides which RuntimeClasses this chart
   # creates (`deviceManager.createRuntimeClasses`), because either one means the runtime's
@@ -115,11 +117,11 @@ global:
       pciVendorID: "1002"
       resourceName: amd.com/gpu
       runtimeName: amd
-      runtimeInjectsDevices: true
     ascend:
       pciVendorID: "19e5"
       resourceName: huawei.com/npu
       runtimeName: ascend
+      runtimeInjectsDevices: true
     cambricon:
       pciVendorID: "cabc"
       resourceName: cambricon.com/mlu
@@ -131,6 +133,7 @@ global:
       pciVendorID: "1e3e"
       resourceName: iluvatar.com/gpu
       runtimeName: iluvatar
+      runtimeInjectsDevices: true
     metax:
       pciVendorID: "9999"
       resourceName: metax-tech.com/gpu
@@ -277,6 +280,19 @@ deviceManager:
   enabled: true
   # -- Secure serving port of the device-manager container.
   securePort: 32443
+  # -- Directory holding the container engine's `config.toml`, mounted read-only into every
+  # device manager at that same path and named to them as `GPUSTACK_CONTAINERD_CONFIG_DIR`.
+  #
+  # A distribution that keeps it elsewhere is served by naming that directory here: k3s uses
+  # `/var/lib/rancher/k3s/agent/etc/containerd` and RKE2 `/var/lib/rancher/rke2/agent/etc/containerd`.
+  # Set it to the directory itself, never the tree above it — on those two distributions that tree
+  # also holds the cluster's tokens and keys. An empty value mounts nothing and passes nothing.
+  #
+  # It is read for one purpose: a device-injection strategy of `auto` needs to know whether the
+  # container engine resolves CDI requests, and which runtime handler a Pod naming no
+  # `runtimeClassName` runs under. With the configuration unreadable, `auto` keeps the
+  # environment-variable channel. Nothing else depends on it.
+  containerdConfigDir: /etc/containerd
   # -- Per-device-manager image overrides (`repository`/`tag`/`pullPolicy`); unset keys
   # fall back to the chart-level `image`.
   image: {}

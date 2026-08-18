@@ -11,6 +11,29 @@ Components:
 {{- if .Values.deviceManager.enabled }}
   - Device managers: one DaemonSet per manufacturer ({{ join ", " (keys .Values.global.manufacturers | sortAlpha) }})
     Each only schedules on nodes that NFD labels with the matching PCI vendor.
+
+  Before a manufacturer's Pods can use its accelerators, its driver must already be on the node —
+  and, where our allocator hands the container a *_VISIBLE_DEVICES variable instead of injecting
+  `/dev` nodes itself, so must its container toolkit. A vendor GPU Operator can run alongside once
+  the components that would compete with this chart's are turned off; which those are, and the
+  vendors where it has to go instead, are per manufacturer:
+  https://github.com/gpustack/gpustack-operator/blob/main/docs/vendor-prerequisites.md
+{{- /*
+  Which manufacturers need a container toolkit is derived from the same two facts that decide which
+  RuntimeClasses this chart creates, never from a list spelled out here: a manufacturer whose runtime
+  injects its driver or its device nodes is exactly one whose container cannot be served without that
+  runtime. A hand-kept list goes stale the moment an allocator starts injecting its own device nodes,
+  and then this text contradicts the page it links to.
+
+  The components to turn off are named on that page and nowhere else, for the same reason and one
+  more: which of them is a conflict is per vendor and per profile — NVIDIA's GPU Feature Discovery
+  stays, and its MIG Manager has one profile that does not conflict — so any summary here is either
+  wrong for someone or long enough to be a second copy of the page.
+*/}}
+{{- range $manu := (keys .Values.global.manufacturers | sortAlpha) }}
+{{- $identity := index $.Values.global.manufacturers $manu }}
+    - {{ $manu }}: requires the driver{{ if or $identity.runtimeInjectsDriver $identity.runtimeInjectsDevices }} and the container toolkit{{ end }}
+{{- end }}
 {{- end }}
 {{- if (index .Values "node-feature-discovery").enabled }}
   - Node Feature Discovery, including its CRDs
