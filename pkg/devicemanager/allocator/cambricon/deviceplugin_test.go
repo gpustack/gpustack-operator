@@ -80,6 +80,145 @@ func allocateMLU0() map[deviceplugin.Resource]int32 {
 	return map[deviceplugin.Resource]int32{{Group: testGroupID, Device: "MLU-0"}: 1}
 }
 
+// missingCardIndex is a driver index no host is expected to have a device node for. A case that
+// needs the required-node refusal addresses a card by it, so the case behaves the same wherever the
+// suite runs -- including on a machine that does have Cambricon cards.
+const missingCardIndex = 4095
+
+// requireNoCardNode states the assumption missingCardIndex rests on. No numeric device name is
+// intrinsically impossible, so a host that does carry that node would send the case down the success
+// path and fail it somewhere confusing; this fails it here instead, saying what to change.
+func requireNoCardNode(t *testing.T) {
+	t.Helper()
+	require.NoFileExists(t, cardDevicePath(missingCardIndex),
+		"this case needs a host without that node; pick another index for missingCardIndex")
+}
+
+// newWholeCardServer builds a responder for one of the modes that hand out whole cards.
+func newWholeCardServer(mode workercore.DeviceAllocationMode) *server {
+	return &server{
+		ResourceServer: deviceplugin.ResourceServer{
+			Logger:         logr.Discard(),
+			Manufacturer:   Manufacturer,
+			AllocationMode: mode,
+		},
+	}
+}
+
+// wholeCardPod builds a pending pod whose container requests no slicing dimension at all, the shape
+// the exclusive, shared and visibility responders are handed.
+func wholeCardPod(uid, ctrName string) (*core.Pod, *core.Container) {
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Name: ctrName + "-pod", UID: types.UID(uid)},
+		Spec: core.PodSpec{
+			Containers: []core.Container{{Name: ctrName}},
+		},
+	}
+	return pod, &pod.Spec.Containers[0]
+}
+
+// The device-node paths and the index that names them. Two of the optional ones carry a colon,
+// which no other vendor's paths in this repo do, so they are spelled out here.
+func TestDevicePaths(t *testing.T) {
+	cases := []struct {
+		name string
+		got  []string
+		want []string
+	}{
+		{
+			name: "the card's own node",
+			got:  []string{cardDevicePath(3)},
+			want: []string{"/dev/cambricon_dev3"},
+		},
+		{
+			name: "the card's IPC node, which the sliced path injects too",
+			got:  []string{cardIPCMDevicePath(3)},
+			want: []string{"/dev/cambricon_ipcm3"},
+		},
+		{
+			name: "the card's optional nodes",
+			got:  optionalCardDevicePaths(3),
+			want: []string{
+				"/dev/cambr-msgq:3",
+				"/dev/cambr-rpc:3",
+				"/dev/cmsg_ctrl3",
+				"/dev/commu3",
+				"/dev/cambricon_ipcm3",
+			},
+		},
+		{
+			name: "the node-level nodes, which no index names",
+			got:  nodeDevicePaths,
+			want: []string{"/dev/cambricon_ctl", "/dev/cambricon_gdr"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, c.got)
+		})
+	}
+}
+
+// The visibility env carries every allocated card's driver index, in the order the container
+// numbers them. The fixture's indexes are 3 and 7, so a responder reading the logical one would emit
+// "0" or "0,1" and fail here.
+func TestVisibleDevices(t *testing.T) {
+	cases := []struct {
+		name      string
+		allocated map[deviceplugin.Resource]int32
+		want      string
+	}{
+		{
+			name:      "one allocated card",
+			allocated: allocateMLU0(),
+			want:      "3",
+		},
+		{
+			name: "two allocated cards",
+			allocated: map[deviceplugin.Resource]int32{
+				{Group: testGroupID, Device: "MLU-0"}: 1,
+				{Group: testGroupID, Device: "MLU-1"}: 1,
+			},
+			want: "3,7",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			visible, err := visibleDevices(
+				deviceplugin.AllocatedAccelerators(cambriconDevicesFixture(), c.allocated))
+			require.NoError(t, err)
+			assert.Equal(t, c.want, visible)
+		})
+	}
+}
+
+// A record carrying no cnDev index is refused rather than named by a guessed number.
+func TestVisibleDevices_MissingDriverIndexRejected(t *testing.T) {
+	devs := cambriconDevicesFixture()
+	devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = nil
+
+	_, err := visibleDevices(deviceplugin.AllocatedAccelerators(devs, allocateMLU0()))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "carries no cnDev device index")
+}
+
+// A card the host exposes no device node for fails the allocation, rather than starting a container
+// with no accelerator; the error names the card and the path it looked for. The path is named by the
+// driver index, so a responder reading the logical index would look for the wrong one.
+func TestWholeCard_MissingOwnDeviceNodeRejected(t *testing.T) {
+	requireNoCardNode(t)
+	devs := cambriconDevicesFixture()
+	devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = []uint32{missingCardIndex}
+
+	pod, ctr := wholeCardPod("pod-no-devnode", "train")
+	_, err := newWholeCardServer(workercore.DeviceAllocationModeExclusive).GetContainerAllocateResponse(
+		context.Background(), pod, ctr, devs, allocateMLU0())
+	require.Error(t, err)
+	for _, want := range []string{testCard0, cardDevicePath(missingCardIndex)} {
+		assert.Containsf(t, err.Error(), want, "the message must name %q", want)
+	}
+}
+
 // A single-accelerator slice creates one sMLU instance, records the correlation + profile marker,
 // and injects VIRTUAL_DEVICES naming the instance's device node.
 func TestSliced_PartialSlice(t *testing.T) {
@@ -202,22 +341,36 @@ func TestSliced_MissingDeviceIndexRejected(t *testing.T) {
 	assert.False(t, markerExists("pod-noindex", "train"))
 }
 
+// A request that is malformed in both ways at once -- an accelerator with no driver index, and no
+// memory dimension -- reports the record, not the request. Both manufacturers order it that way, so
+// one defect always produces one message wherever it is hit.
+func TestSliced_MissingDeviceIndexOutranksMissingMemory(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	d := newFakeDriver()
+	s := newSlicedServer(d)
+
+	devs := cambriconDevicesFixture()
+	devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = nil
+
+	pod, ctr := slicedPod("pod-both-bad", "train", 25, 0) // no memory dimension either
+	_, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocateMLU0())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "carries no cnDev device index")
+}
+
 // A non-sliced (exclusive) responder never creates an instance or writes a marker: the
-// slicing artifacts are isolated to the sliced mode.
+// slicing artifacts are isolated to the sliced mode. Asserted on a card the host has no device node
+// for, so that the whole-card path is exercised the same way wherever this runs — it refuses that
+// card, and must leave no slicing state behind while doing so.
 func TestSliced_ExclusiveModeHasNoSlicingArtifacts(t *testing.T) {
 	redirectLogicalSliceDirs(t)
-	s := &server{
-		ResourceServer: deviceplugin.ResourceServer{
-			Manufacturer:   Manufacturer,
-			AllocationMode: workercore.DeviceAllocationModeExclusive,
-		},
-	}
+	requireNoCardNode(t)
+	s := newWholeCardServer(workercore.DeviceAllocationModeExclusive)
 	devs := cambriconDevicesFixture()
+	devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = []uint32{missingCardIndex}
 	pod, ctr := slicedPod("pod-excl", "train", 25, 50)
 
-	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocateMLU0())
-	require.NoError(t, err)
-	assert.Empty(t, resp.Envs["VIRTUAL_DEVICES"])
-	assert.NotEmpty(t, resp.Envs["CAMBRICON_VISIBLE_DEVICES"], "exclusive mode keeps the plain visibility env")
+	_, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocateMLU0())
+	require.Error(t, err)
 	assert.False(t, markerExists("pod-excl", "train"))
 }
