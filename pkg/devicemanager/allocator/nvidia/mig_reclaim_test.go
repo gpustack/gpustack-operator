@@ -2,6 +2,7 @@ package nvidia
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -76,7 +77,7 @@ func TestReclaim_InUseBoundedRetryAndCondition(t *testing.T) {
 
 	var conditions int
 	logger := funcr.New(func(_, args string) {
-		if strings.Contains(args, "still in use after bounded destroy retries") {
+		if strings.Contains(args, "not reclaimable after bounded retries") {
 			conditions++
 		}
 	}, funcr.Options{})
@@ -196,6 +197,215 @@ func seedInstances(drv *fakeMigDriver, seeds []migSeed) {
 		drv.seedLive(s.card, migInstance{
 			GiID: s.giID, CiID: s.giID, ComputeSlices: 1,
 			Placement: migPlacement{Start: int32(i) * 2, Length: 2}, UUID: "MIG-" + s.card,
+		})
+	}
+}
+
+// TestReclaim_PartitionRunningAProcessIsKept asserts the process check that precedes every destroy
+// this loop makes. A partition carrying a compute process is left alone in both directions — a dead
+// Pod's recorded one, and a marker-less orphan on an otherwise drained accelerator, which is the case
+// that would otherwise take a partition carved outside this operator out from under its user. It is
+// left alone in silence: nothing is wrong, so nothing is reported as an error.
+//
+// A failure to ask splits in two, and the two lead opposite ways. A partition NO MIG DEVICE
+// ADDRESSES has nothing there to ask — a GPU instance carrying no compute instance, or every
+// partition as a container the driver's MIG devices are hidden from sees them — and the destroy
+// proceeds. A partition the driver WOULD NOT ANSWER ABOUT is kept: beginning a teardown on a
+// partition whose state is unknown is what sweeps an idle compute instance out of a busy one.
+func TestReclaim_PartitionRunningAProcessIsKept(t *testing.T) {
+	cases := []struct {
+		name string
+		// marked owns the partition with a dead Pod's ownership marker; otherwise the sweep finds it
+		// as a marker-less orphan.
+		marked        bool
+		processes     int
+		processesErr  error
+		wantDestroyed bool
+	}{
+		{name: "a dead pod's partition running a process is kept", marked: true, processes: 1},
+		{name: "a dead pod's idle partition is reclaimed", marked: true, wantDestroyed: true},
+		{name: "an orphan running a process is kept on a drained card", processes: 2},
+		{name: "an idle orphan is reclaimed on a drained card", wantDestroyed: true},
+		{
+			name:   "a dead pod's partition no mig device addresses is left to the driver",
+			marked: true, processesErr: fmt.Errorf("probe: %w", errNoAddressableDevice), wantDestroyed: true,
+		},
+		{
+			name:         "an orphan no mig device addresses is left to the driver",
+			processesErr: fmt.Errorf("probe: %w", errNoAddressableDevice), wantDestroyed: true,
+		},
+		{
+			name:   "a dead pod's partition the driver would not answer about is kept",
+			marked: true, processesErr: assert.AnError,
+		},
+		{
+			name:         "an orphan the driver would not answer about is kept",
+			processesErr: assert.AnError,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			drv := newFakeMigDriver()
+			drv.processesByGiID = map[uint32]int{1: c.processes}
+			drv.processesErr = c.processesErr
+			if c.marked {
+				seedMarkedInstance(t, drv, "pod-dead", testGPUUUID0, 1)
+			} else {
+				seedInstances(drv, []migSeed{{card: testGPUUUID0, giID: 1}})
+			}
+
+			var errorRecords int
+			logger := funcr.New(func(_, args string) {
+				if strings.Contains(args, `"error"=`) {
+					errorRecords++
+				}
+			}, funcr.Options{})
+			r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logger, noClaims)
+
+			for i := 0; i < reclaimMaxMisses+3; i++ {
+				r.reconcile(nil)
+			}
+
+			if c.wantDestroyed {
+				require.Len(t, drv.destroyed, 1)
+				assert.Equal(t, uint32(1), drv.destroyed[0].GiID)
+			} else {
+				assert.Empty(t, drv.destroyed, "a partition in use is never destroyed")
+			}
+			if c.marked {
+				_, err := parseMarker(markerPath("pod-dead", "c", testGPUUUID0))
+				if c.wantDestroyed {
+					require.Error(t, err, "the marker goes with the partition")
+				} else {
+					require.NoError(t, err, "the marker is kept, so a later pass finds the partition again")
+				}
+			}
+			assert.Zero(t, errorRecords, "a partition in use is not a failure to report")
+		})
+	}
+}
+
+// TestReclaim_ProcessHeldPartitionReachesTheBound asserts the process pre-check does not cost the
+// operator the one surface this loop has. Skipping the destroy means the driver never refuses it, so
+// nothing would increment the in-use counter and the bounded log could never fire for the very
+// condition it was written for — a partition a leaked process holds forever, occupying its placement.
+// The skip therefore counts as in-use: the log fires once at the bound, and only once, exactly as a
+// refused destroy would have made it.
+func TestReclaim_ProcessHeldPartitionReachesTheBound(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	drv := newFakeMigDriver()
+	drv.processesByGiID = map[uint32]int{1: 1}
+	seedMarkedInstance(t, drv, "pod-dead", testGPUUUID0, 1)
+
+	var bounded int
+	logger := funcr.New(func(_, args string) {
+		if strings.Contains(args, "not reclaimable after bounded retries") {
+			bounded++
+		}
+	}, funcr.Options{})
+	r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logger, noClaims)
+
+	for i := 0; i < reclaimMaxMisses+reclaimMaxDestroyMisses+2; i++ {
+		r.reconcile(nil)
+	}
+	assert.Empty(t, drv.destroyed, "the destroy is never attempted while a process holds it")
+	_, err := parseMarker(markerPath("pod-dead", "c", testGPUUUID0))
+	require.NoError(t, err, "the marker is retained")
+	assert.Equal(t, 1, bounded, "the operator-visible log fires exactly once at the bound")
+
+	// Once the process exits the next pass reclaims it, which is what returns the placement.
+	drv.processesByGiID = nil
+	r.reconcile(nil)
+	require.Len(t, drv.destroyed, 1)
+	_, err = parseMarker(markerPath("pod-dead", "c", testGPUUUID0))
+	require.Error(t, err)
+}
+
+// TestReclaim_ProcessHeldOrphanReachesTheBound is the same assertion for the other destroy this loop
+// makes. The two routes count in-use passes on keys of their own — a dead Pod's UID, and the
+// accelerator whose orphans are being swept — and each raises its own log, so one route counting
+// while the other does not would leave a held partition off the only surface an operator has. This
+// is the route that carries a partition carved outside this operator: it never had a marker to be
+// found by, so it is only ever reached as an orphan.
+func TestReclaim_ProcessHeldOrphanReachesTheBound(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	drv := newFakeMigDriver()
+	seedInstances(drv, []migSeed{{card: testGPUUUID0, giID: 1}})
+	drv.processesByGiID = map[uint32]int{1: 1}
+
+	var bounded int
+	logger := funcr.New(func(_, args string) {
+		if strings.Contains(args, "marker-less mig instance on a drained card is still not reclaimable") {
+			bounded++
+		}
+	}, funcr.Options{})
+	r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logger, noClaims)
+
+	for i := 0; i < reclaimMaxMisses+reclaimMaxDestroyMisses+2; i++ {
+		r.reconcile(nil)
+	}
+	assert.Empty(t, drv.destroyed, "the destroy is never attempted while a process holds it")
+	assert.Equal(t, 1, bounded, "the operator-visible log fires exactly once at the bound")
+
+	// Once the process exits the next pass reclaims it, which is what returns the placement.
+	drv.processesByGiID = nil
+	r.reconcile(nil)
+	require.Len(t, drv.destroyed, 1)
+	assert.Equal(t, uint32(1), drv.destroyed[0].GiID)
+}
+
+// TestReclaim_BoundNamesWhatBlockedTheReclaim asserts the one log an operator actually sees names the
+// right fault. Both a process running on a partition and a partition that cannot be asked about its
+// processes block the destroy and count toward the same bound, but they call for opposite things —
+// find the process, or give the container access to the driver — and the per-pass lines that would
+// tell them apart are below the shipped verbosity. Reporting a query failure as errInstanceInUse
+// would send an operator hunting a process that does not exist.
+func TestReclaim_BoundNamesWhatBlockedTheReclaim(t *testing.T) {
+	cases := []struct {
+		name string
+		// processes is how many the partition answers with; processesErr makes the query itself fail.
+		processes    int
+		processesErr error
+		// wantNamed must appear in the bounded log, wantNotNamed must not.
+		wantNamed    string
+		wantNotNamed string
+	}{
+		{
+			name:      "a process holding it is reported as in use",
+			processes: 1, wantNamed: errInstanceInUse.Error(),
+		},
+		{
+			name:         "a query failure is reported as itself, not as a process",
+			processesErr: assert.AnError,
+			wantNamed:    assert.AnError.Error(), wantNotNamed: errInstanceInUse.Error(),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			drv := newFakeMigDriver()
+			drv.processesByGiID = map[uint32]int{1: c.processes}
+			drv.processesErr = c.processesErr
+			seedMarkedInstance(t, drv, "pod-dead", testGPUUUID0, 1)
+
+			var bounded []string
+			logger := funcr.New(func(_, args string) {
+				if strings.Contains(args, "not reclaimable after bounded retries") {
+					bounded = append(bounded, args)
+				}
+			}, funcr.Options{})
+			r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logger, noClaims)
+
+			for i := 0; i < reclaimMaxMisses+reclaimMaxDestroyMisses+2; i++ {
+				r.reconcile(nil)
+			}
+			require.Len(t, bounded, 1, "the operator-visible log fires exactly once at the bound")
+			assert.Contains(t, bounded[0], c.wantNamed, "the log names what actually blocked the reclaim")
+			if c.wantNotNamed != "" {
+				assert.NotContains(t, bounded[0], c.wantNotNamed, "and does not name a cause it cannot know")
+			}
+			assert.Empty(t, drv.destroyed, "the destroy is never attempted while the partition is blocked")
 		})
 	}
 }

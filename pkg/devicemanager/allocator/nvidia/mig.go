@@ -61,6 +61,14 @@ type migCardState struct {
 // _linux seam wraps it so the platform-independent reclaim core can test with errors.Is.
 var errInstanceInUse = errors.New("mig instance in use")
 
+// errNoAddressableDevice marks a partition no MIG device handle addresses: a GPU instance carrying
+// no compute instance, or a container the driver's MIG devices are hidden from, which reads every
+// partition of the accelerator that way. It is the one process-query failure the reclaim loop lets a
+// destroy proceed on — there is nothing there to ask, as opposed to a driver that was asked and did
+// not answer. The _linux seam wraps it so the platform-independent reclaim core can test with
+// errors.Is.
+var errNoAddressableDevice = errors.New("no mig device addresses the instance")
+
 // migLiveInstance is one live GPU instance enumerated globally for reclaim: its accelerator UUID
 // plus the instance. It lets the orphan GC find a marker-less GI on any accelerator (including
 // one carrying no marker at all) without a per-accelerator profile hint.
@@ -94,6 +102,12 @@ type migDriver interface {
 	// accelerator. A MIG GI carries no operator tag, so this is the only way to see an untracked
 	// one.
 	ListInstances() ([]migLiveInstance, error)
+	// InstanceProcesses counts the compute processes running on one partition, read off every MIG
+	// device handle addressing it — those handles carry a partition's own process list, while the
+	// accelerator's own query answers for the whole card. It errors rather than answering zero
+	// whenever the partition cannot be asked, which a caller must never read as "nobody is using
+	// it"; the error wraps errNoAddressableDevice when there was no device there to ask.
+	InstanceProcesses(cardUUID string, inst migInstance) (int, error)
 	// CardInstances enumerates one accelerator's live GPU instances, for the callers that already
 	// know which accelerator they are deciding about. It exists so the reclaim loop's verification
 	// re-read does not have to walk the node: that read happens with the accelerator's lock held,

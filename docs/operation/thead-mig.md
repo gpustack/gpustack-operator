@@ -203,7 +203,9 @@ Device-node injection is the one place T-Head's response differs in *shape* from
   NVIDIA makes too (see [Rule 3](../accelerator-requests.md#rule-3--basepartitioned-is-exactly-1)).
 - **Hand-carving a partition outside GPUStack is unsupported on a managed node** — every node-level number
   derives from the allocation annotations the device plugin writes, and a hand-carved instance produces
-  none; see [Accelerator Requests](../accelerator-requests.md#limitations).
+  none; see [Accelerator Requests](../accelerator-requests.md#limitations). It is deleted as an orphan once
+  its PPU is idle. An instance with something **running on it** is the exception: it is left alone and
+  re-checked each cycle, so one you carved by hand survives for as long as you are using it.
 - **A same-profile replacement submitted the instant its predecessor is deleted can fail to start**, the
   reclaim-debounce reason documented for [NVIDIA](nvidia-mig.md#limitations); T-Head runs the same reclaim
   loop and bounded busy-destroy retry.
@@ -307,7 +309,7 @@ reboot as if it did not:
 - Trigger on nodeconfig or labels, flip the mode automatically, or rewrite the geometry.
 - Deschedule or evict Pods when the mode changes.
 - Account for an instance you carved by hand. (It *does* delete it: an instance no allocation accounts for
-  is reclaimed as an orphan once its PPU is idle.)
+  is reclaimed as an orphan once its PPU is idle and nothing is running on it.)
 
 A capability change reaches the cluster **only** through Device Manager restart or re-detection.
 

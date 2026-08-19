@@ -192,8 +192,10 @@ only when *that* instance has active processes; sibling workloads are unaffected
   So while a GPUStack workload holds the GPU the node advertises room it does not have, and that **never
   converges** — placement reads live NVML and will not double-book it, but the accounting above stays
   wrong. Once the GPU is drained the reverse happens: after its debounce the reclaimer **destroys** an
-  instance no allocation accounts for as an orphan, including one it never created and one your own
-  process is using.
+  instance no allocation accounts for as an orphan, including one it never created.
+
+  An instance with something **running on it** is the exception: it is left alone and re-checked each
+  cycle, so one you carved by hand survives for as long as you are using it.
 
 - **A same-profile replacement submitted the instant its predecessor is deleted can fail to start.** Leave a
   gap between the delete and the replacement, or let the replacement's own restart handle it.
@@ -748,8 +750,8 @@ gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   
 - Enable, disable or reconfigure MIG *mode* — `nvidia-smi` operations you run.
 - Trigger on nodeconfig or labels, flip the mode automatically, rewrite its geometry, or deschedule and
   evict Pods on a *mode* change.
-- Account for an instance you carved by hand — though it *does* delete it as an orphan once its GPU is idle
-  ([Limitations](#limitations)).
+- Account for an instance you carved by hand — though it *does* delete it as an orphan once its GPU is
+  idle and nothing is running on it ([Limitations](#limitations)).
 
 It *does* create and destroy the *instances* backing scheduled workloads
 ([Requesting a MIG instance](#requesting-a-mig-instance)).
