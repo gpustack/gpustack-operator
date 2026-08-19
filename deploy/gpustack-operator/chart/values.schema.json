@@ -1524,6 +1524,9 @@
                           },
                           {
                             "type": "string"
+                          },
+                          {
+                            "type": "string"
                           }
                         ],
                         "required": []
@@ -1532,8 +1535,8 @@
                       "type": "array"
                     },
                     "labelWhiteList": {
-                      "default": "^(pci-|cpu-model\\.|acceleratable)",
-                      "description": "Only the labels this chart consumes are published, so NFD does not cover the nodes\nin features nothing reads.",
+                      "default": "^(pci-|cpu-model\\.|system-os_release\\.|acceleratable)",
+                      "description": "Only the labels this chart consumes are published, so NFD does not cover the nodes\nin features nothing reads — `system-os_release.` excepted, which a vendor GPU operator\nreads.",
                       "title": "labelWhiteList",
                       "type": "string"
                     }

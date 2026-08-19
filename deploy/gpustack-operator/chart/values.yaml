@@ -673,9 +673,11 @@ node-feature-discovery:
           - "cpu"
           - "pci"
           - "custom"
+          - "system"
         # -- Only the labels this chart consumes are published, so NFD does not cover the nodes
-        # in features nothing reads.
-        labelWhiteList: '^(pci-|cpu-model\.|acceleratable)'
+        # in features nothing reads — `system-os_release.` excepted, which a vendor GPU operator
+        # reads.
+        labelWhiteList: '^(pci-|cpu-model\.|system-os_release\.|acceleratable)'
       sources:
         pci:
           # -- PCI device classes to label, as class-code prefixes: display controllers,
