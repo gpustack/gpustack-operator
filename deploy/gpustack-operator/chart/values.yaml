@@ -564,6 +564,9 @@ node-feature-discovery:
   image:
     # -- NFD image repository; the master, the worker and the gc all run it.
     repository: docker.io/gpustack/mirrored-node-feature-discovery
+    # -- NFD image tag, stated rather than inherited so a subchart bump cannot move the image
+    # without the diff showing it.
+    tag: v0.19.0-gpustack1
   master:
     # -- Number of NFD master replicas. The master is what turns a device-manager's detections into
     # node labels, so while it is down no node is ever (re)classified and the scheduling chain
@@ -670,9 +673,11 @@ node-feature-discovery:
           - "cpu"
           - "pci"
           - "custom"
+          - "system"
         # -- Only the labels this chart consumes are published, so NFD does not cover the nodes
-        # in features nothing reads.
-        labelWhiteList: '^(pci-|cpu-model\.|acceleratable)'
+        # in features nothing reads — `system-os_release.` excepted, which a vendor GPU operator
+        # reads.
+        labelWhiteList: '^(pci-|cpu-model\.|system-os_release\.|acceleratable)'
       sources:
         pci:
           # -- PCI device classes to label, as class-code prefixes: display controllers,

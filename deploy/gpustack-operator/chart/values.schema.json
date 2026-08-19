@@ -1278,6 +1278,12 @@
               "description": "NFD image repository; the master, the worker and the gc all run it.",
               "title": "repository",
               "type": "string"
+            },
+            "tag": {
+              "default": "v0.19.0-gpustack1",
+              "description": "NFD image tag, stated rather than inherited so a subchart bump cannot move the image\nwithout the diff showing it.",
+              "title": "tag",
+              "type": "string"
             }
           },
           "required": [],
@@ -1518,6 +1524,9 @@
                           },
                           {
                             "type": "string"
+                          },
+                          {
+                            "type": "string"
                           }
                         ],
                         "required": []
@@ -1526,8 +1535,8 @@
                       "type": "array"
                     },
                     "labelWhiteList": {
-                      "default": "^(pci-|cpu-model\\.|acceleratable)",
-                      "description": "Only the labels this chart consumes are published, so NFD does not cover the nodes\nin features nothing reads.",
+                      "default": "^(pci-|cpu-model\\.|system-os_release\\.|acceleratable)",
+                      "description": "Only the labels this chart consumes are published, so NFD does not cover the nodes\nin features nothing reads — `system-os_release.` excepted, which a vendor GPU operator\nreads.",
                       "title": "labelWhiteList",
                       "type": "string"
                     }
