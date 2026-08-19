@@ -1278,6 +1278,12 @@
               "description": "NFD image repository; the master, the worker and the gc all run it.",
               "title": "repository",
               "type": "string"
+            },
+            "tag": {
+              "default": "v0.19.0-gpustack1",
+              "description": "NFD image tag, stated rather than inherited so a subchart bump cannot move the image\nwithout the diff showing it.",
+              "title": "tag",
+              "type": "string"
             }
           },
           "required": [],
