@@ -353,23 +353,13 @@ func (in *nvidia) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 				gpmMetrics, ret := gpmMetricsHandler.V1(100*time.Millisecond, nvml.GPM_METRIC_SM_UTIL)
 				if !ret.IsSuccess() {
 					logger.V(4).Error(ret, "failed to get device cores utilization with GPM, fallback")
-					utilInfo, ret := dev.GetUtilizationRates()
-					if !ret.IsSuccess() {
-						logger.V(3).Error(ret, "failed to get device cores utilization")
-					} else {
-						coresUtilization = utilInfo.Gpu
-					}
+					coresUtilization = coresUtilizationOf(logger, dev)
 				} else {
 					coresUtilization = uint32(gpmMetrics[0].Value)
 				}
 			} else {
 				logger.Info("cannot get device cores utilization with GPM, fallback")
-				utilInfo, ret := dev.GetUtilizationRates()
-				if !ret.IsSuccess() {
-					logger.V(3).Error(ret, "failed to get device cores utilization")
-				} else {
-					coresUtilization = utilInfo.Gpu
-				}
+				coresUtilization = coresUtilizationOf(logger, dev)
 			}
 
 			temperature, ret = dev.GetTemperature()
@@ -401,6 +391,30 @@ func (in *nvidia) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 	}
 
 	return grpList, nil
+}
+
+// coresUtilizationOf reads an accelerator's whole-device cores utilization.
+//
+// NOT_SUPPORTED is the driver's own answer about the device rather than a failure, and a
+// partitioning accelerator is the case in point: with MIG mode on, compute is accounted per
+// partition and no whole-device aggregate exists. That is a property of the device, so it holds for
+// every round the detector runs, and reporting it as an error would raise a failure, once a round
+// forever, over a device that is working as designed. It is reported at the detector's own verbosity
+// instead.
+//
+// Either way the reading is zero: this figure has no absent form, and a consumer after a
+// partitioning accelerator's real usage reads each partition's own entry rather than the card's.
+func coresUtilizationOf(logger klog.Logger, dev nvml.Device) uint32 {
+	utilInfo, ret := dev.GetUtilizationRates()
+	switch {
+	case ret.IsSuccess():
+		return utilInfo.Gpu
+	case ret == nvml.ERROR_NOT_SUPPORTED:
+		logger.Info("device-level cores utilization is unsupported")
+	default:
+		logger.Error(ret, "failed to get device cores utilization")
+	}
+	return 0
 }
 
 func (in *nvidia) init() {
