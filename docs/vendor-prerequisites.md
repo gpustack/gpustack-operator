@@ -76,35 +76,38 @@ the install mode gives you: `--set node-feature-discovery.enabled=false` in char
 Modes](architecture/installation-modes.md#chart-mode-and-image-mode) has the difference.
 
 Either way the worker still applies the `gpustack-cpu-info` NodeFeatureRule itself, so that one is never
-the replacement's to install — only to evaluate. Ours is configured for five things this chain needs of
-an NFD, and a replacement must be too:
+the replacement's to install — only to evaluate. Ours is configured for six things an NFD must do
+here, and a replacement must be too:
 
 1. A worker collecting `pci`, with `vendor` among its `deviceLabelFields` and device classes `02`, `03`,
    `0b` and `12` whitelisted. Those are what produce the `pci-<vendor>.present` labels, and the
    `gpustack-cpu-info` NodeFeatureRule matches the same classes.
-2. A master that evaluates `NodeFeature` objects from **every** namespace. The worker's and the
+2. A worker collecting `system`, which publishes `system-os_release.*`. This chain reads none of it;
+   the NVIDIA GPU Operator does, and ours publishes it so that operator can run with its own NFD off
+   — [NVIDIA](#nvidia).
+3. A master that evaluates `NodeFeature` objects from **every** namespace. The worker's and the
    device-managers' own `<node>-gpustack-*` objects are how their detections reach the Node.
-3. `restrictions.denyNodeFeatureLabels: false` and `disableExtendedResources: false`, since those
+4. `restrictions.denyNodeFeatureLabels: false` and `disableExtendedResources: false`, since those
    detections arrive as labels *and* as extended resources.
-4. A `denyLabelNs` that admits `acceleratable.feature.gpustack.ai` and `general.feature.gpustack.ai`.
-5. One owner for the NFD CRDs. Vendor charts bundle an NFD version of their own, so decide which
+5. A `denyLabelNs` that admits `acceleratable.feature.gpustack.ai` and `general.feature.gpustack.ai`.
+6. One owner for the NFD CRDs. Vendor charts bundle an NFD version of their own, so decide which
    release installs them before installing two that both want to.
 
-A vendor chart that bundles NFD as a subchart exposes all four, so its NFD can be the cluster's one.
+A vendor chart that bundles NFD as a subchart exposes all five, so its NFD can be the cluster's one.
 The NVIDIA GPU Operator's already publishes `vendor` as its only `deviceLabelFields`, which is what
-item 1 asks for; its device classes are the gap.
+item 1 asks for, and collects every source, which is item 2; its device classes are the gap.
 
 It whitelists `0300` and `0302` — the GPUs it was written for — and neither `0b` nor `12`, so an
 accelerator in either class never gets the label its device manager schedules on, and that DaemonSet
 stays unscheduled with nothing to say why. Both values live under that chart's
 `node-feature-discovery.worker.config.sources.pci`.
 
-Item 5 is not a version problem there: both charts vendor NFD 0.19.0, so the CRDs are the same objects
+Item 6 is not a version problem there: both charts vendor NFD 0.19.0, so the CRDs are the same objects
 and all that has to be settled is which release owns them. And the class gap only bites once a second
 manufacturer is present — the display-controller classes it does whitelist cover NVIDIA and AMD, so a
 cluster holding only those is already served by its list.
 
-Read the five items as a checklist rather than a recipe: every cluster this page was written against
+Read the six items as a checklist rather than a recipe: every cluster this page was written against
 ran the NFD this chart bundles, so a handover has not been observed end to end.
 
 ## A removed plugin's resource lingers
@@ -415,20 +418,7 @@ specifications. Both can come from the operator itself.
 | MIG Manager | Disable | `--set migManager.enabled=false` — it reconfigures MIG geometry from node labels and fights this operator's Allocate-time MIG actuation. One profile does not: [NVIDIA MIG](operation/nvidia-mig.md#across-a-fleet-with-the-nvidia-gpu-operator) |
 | CDI | Disable | `--set cdi.enabled=false` — default `true` from v25.10, see below |
 
-**Label the nodes first.** The operator reads a node's OS from
-`feature.node.kubernetes.io/system-os_release.ID` before it places any operand there, and its own NFD is
-what publishes that label — ours does not. So with `nfd.enabled=false` below, set it on every node the
-operator will manage, from that node's own `/etc/os-release`:
-
-```bash
-kubectl label node <node> \
-  feature.node.kubernetes.io/system-os_release.ID=ubuntu \
-  feature.node.kubernetes.io/system-os_release.VERSION_ID=24.04
-```
-
-A label set by hand stays: NFD's master reconciles only the labels it owns.
-
-**And check the node is not opted out.** Some GPU distributions ship their nodes already labelled
+**Check the node is not opted out.** Some GPU distributions ship their nodes already labelled
 `nvidia.com/gpu.deploy.operands=false`, which tells this operator to place nothing on them at all. Its
 `ClusterPolicy` still reports `ready`, so the only symptom is that no operand ever appears. Set it to
 `true` on the nodes you want managed.
@@ -459,10 +449,10 @@ operator removes those DaemonSets itself; deleting one by hand only makes it com
 1. **Device plugin** — `--set devicePlugin.enabled=false`. It advertises the resource name ours does.
 2. **MIG Manager** — `--set migManager.enabled=false`. A node whose geometry it had been maintaining
    keeps whatever it was left in, and our allocator reconfigures that at `Allocate` time from then on.
-3. **Bundled Node Feature Discovery** — `--set nfd.enabled=false`. If that release was running the
-   cluster's only NFD, set the `system-os_release.*` labels from **Label the nodes first** above
-   *before* turning it off: its NFD is what had been publishing them. Keeping this one and turning ours
-   off is the other way round — [One NFD per cluster](#one-node-feature-discovery-per-cluster).
+3. **Bundled Node Feature Discovery** — `--set nfd.enabled=false`. Ours publishes the
+   `system-os_release.*` labels that release had been publishing, so nothing has to be carried over by
+   hand. Keeping this one and turning ours off is the other way round — [One NFD per
+   cluster](#one-node-feature-discovery-per-cluster).
 4. **Driver, container toolkit, DCGM exporter, GPU Feature Discovery** — leave running. GPUStack needs
    the first two.
 5. **Verify** — wait for `nvidia.com/gpu` to leave the Node before installing GPUStack.
