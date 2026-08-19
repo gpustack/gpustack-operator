@@ -158,6 +158,14 @@ is gone or recreated fails the sidecar's allocation closed — no fallback to th
 
 ## Prerequisites
 
+The Device Manager Pod must be processed by the **NVIDIA container runtime**, which the chart's
+`runtimeClassName` plus its `NVIDIA_MIG_CONFIG_DEVICES` / `NVIDIA_MIG_MONITOR_DEVICES` declarations
+arrange. Without them that runtime hides the driver's MIG capabilities from the Pod: carving fails with
+`NO_PERMISSION`, and an instance carved outside the Pod is invisible to it.
+
+Overriding either variable through `deviceManager.env`, or pointing the `nvidia` RuntimeClass handler
+elsewhere, brings that back ([NVIDIA prerequisites](../vendor-prerequisites.md#nvidia)).
+
 Before switching a GPU's MIG mode (enable or disable):
 
 - The GPU's instances must be **idle**: stop the using Pod first and let no process hold the GPU. A family's

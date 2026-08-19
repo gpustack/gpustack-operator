@@ -405,6 +405,11 @@ devices](#who-injects-the-devices), our allocator emits `NVIDIA_VISIBLE_DEVICES`
 device node. The toolkit is what the other channel needs too — it is what writes the node's CDI
 specifications. Both can come from the operator itself.
 
+**The toolkit is also what MIG needs**, not only workloads: the Device Manager Pod reads the management
+library through it, and the chart declares `NVIDIA_MIG_CONFIG_DEVICES` / `NVIDIA_MIG_MONITOR_DEVICES` on
+that Pod so the runtime stops hiding the driver's MIG capabilities from it — see
+[MIG prerequisites](operation/nvidia-mig.md#prerequisites) for the two ways to break that.
+
 **Vendor GPU Operator** — the NVIDIA GPU Operator, a Helm chart with one switch per component.
 
 | Component | Keep / disable | Mechanism |
