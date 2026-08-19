@@ -132,6 +132,40 @@ func TestLookupFailed(t *testing.T) {
 	}
 }
 
+// An absent symbol is remembered exactly like a present one. The callers that matter probe for a
+// symbol their driver may be too old to export, and they do it on every call: without this, each of
+// those calls paid a dlsym and produced a fresh error. A library's exports cannot change while it is
+// open, so the remembered answer keeps holding.
+func TestLookupFailedCached(t *testing.T) {
+	t.Parallel()
+
+	const absent = "gpustackAbsentSymbol"
+
+	name, _ := systemLibrary()
+	dl := New(name, RTLD_LAZY|RTLD_GLOBAL)
+	if err := dl.Open(); err != nil {
+		t.Fatalf("Error opening %s: %v", name, err)
+	}
+	t.Cleanup(func() { _ = dl.Close() })
+
+	first := dl.Lookup(absent)
+	if first == nil {
+		t.Fatal("Should have errored looking up an absent symbol but did not")
+	}
+
+	dl.mu.RLock()
+	_, cached := dl.caches[absent]
+	dl.mu.RUnlock()
+	if !cached {
+		t.Fatal("An absent symbol must be remembered, so it is resolved only once")
+	}
+
+	second := dl.Lookup(absent)
+	if second == nil || second.Error() != first.Error() {
+		t.Errorf("A remembered absent symbol must answer as before, got '%v'", second)
+	}
+}
+
 // One library handle is looked up from several goroutines at once, because that is how it is used:
 // the wrapper one package up serializes loading and unloading but deliberately not looking up, and a
 // device manager hands a single handle to more than one server. Every goroutine walks every symbol,

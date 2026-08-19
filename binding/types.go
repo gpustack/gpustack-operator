@@ -197,7 +197,11 @@ func (l *library) Lookup(symbol string) error {
 	}
 
 	if err := l.dl.Lookup(symbol); err != nil {
-		l.lg.Error(err, "error looking up symbol", "symbol", symbol, "path", l.dlPath)
+		// A miss is how a caller asks whether the loaded library offers a symbol at all, and every
+		// one of them treats the answer as a fact about the driver rather than as a failure — a
+		// symbol a newer driver added is absent from an older one, and the caller falls back. The
+		// returned error carries the detail for whichever caller decides a miss is fatal.
+		l.lg.Info("symbol not found", "symbol", symbol, "path", l.dlPath)
 		return fmt.Errorf("error looking up symbol %s in %s: %w", symbol, l.dlPath, err)
 	}
 

@@ -40,7 +40,18 @@ type DynamicLibrary struct {
 	mu     sync.RWMutex
 	handle unsafe.Pointer
 	path   string
-	caches map[string]struct{}
+	// generation counts the opens this value has been through, so a lookup can tell whether the
+	// library it asked is still the library it is about to record an answer about. The handle
+	// address cannot answer that: dlopen after dlclose commonly hands back the same address, and
+	// the file behind that name may have been replaced in between — a driver upgrade is exactly
+	// that. Without it, a lookup whose dlsym raced a close would write its answer into the next
+	// open's cache under a passing address check.
+	generation uint64
+	// caches remembers what a lookup answered for each symbol, a nil error for one the library
+	// exports. An absent symbol is remembered too: a library's exports do not change while it is
+	// open, so the answer keeps holding, and the callers that probe for a symbol their driver may
+	// be too old for do it on every call.
+	caches map[string]error
 }
 
 func New(name string, flags int) *DynamicLibrary {
@@ -65,7 +76,8 @@ func (dl *DynamicLibrary) init() *DynamicLibrary {
 		}
 		return ""
 	}()
-	dl.caches = make(map[string]struct{})
+	dl.generation++
+	dl.caches = make(map[string]error)
 	return dl
 }
 
@@ -123,9 +135,9 @@ func (dl *DynamicLibrary) Close() error {
 	return nil
 }
 
-// Lookup reports whether the library exports the symbol, remembering the ones it has already
-// resolved so a repeated lookup costs no dlsym call. It is safe to call concurrently, which the
-// wrapper above relies on: it is the one entry point that is not serialized there, and several
+// Lookup reports whether the library exports the symbol, remembering what it answered — present or
+// absent — so a repeated lookup of either costs no dlsym call. It is safe to call concurrently, which
+// the wrapper above relies on: it is the one entry point that is not serialized there, and several
 // callers reach one library handle at once.
 //
 // The read of the handle and of the cache is taken in one critical section, so a caller cannot
@@ -134,9 +146,9 @@ func (dl *DynamicLibrary) Close() error {
 // repeating, and holding a lock across it would serialize every vendor call in the process.
 func (dl *DynamicLibrary) Lookup(symbol string) error {
 	dl.mu.RLock()
-	handle, cached := dl.handle, false
+	handle, generation, cachedErr, cached := dl.handle, dl.generation, error(nil), false
 	if handle != nil {
-		_, cached = dl.caches[symbol]
+		cachedErr, cached = dl.caches[symbol]
 	}
 	dl.mu.RUnlock()
 
@@ -144,14 +156,14 @@ func (dl *DynamicLibrary) Lookup(symbol string) error {
 		return fmt.Errorf("error looking up %q: %w", symbol, errors.New("library not loaded"))
 	}
 	if cached {
-		return nil
+		return cachedErr
 	}
 
 	sym := C.CString(symbol)
 	defer C.free(unsafe.Pointer(sym))
 
 	var pointer unsafe.Pointer
-	if err := withOSLock(func() error {
+	lookupErr := withOSLock(func() error {
 		// Call dlError() to clear out any previous errors.
 		_ = dlError()
 		pointer = C.dlsym(handle, sym)
@@ -159,19 +171,17 @@ func (dl *DynamicLibrary) Lookup(symbol string) error {
 			return fmt.Errorf("symbol %q not found: %w", symbol, dlError())
 		}
 		return nil
-	}); err != nil {
-		return err
-	}
+	})
 
-	// Record the symbol only against the handle it was actually resolved on. A close that landed
-	// while dlsym ran has already replaced the cache with an empty one, and remembering a symbol
-	// in it would tell the next lookup — on a handle from a later open — that a symbol is present
-	// without ever asking the library.
+	// Record the answer only against the open it was actually taken on. A close that landed while
+	// dlsym ran has already replaced the cache with an empty one and moved the generation on, so
+	// remembering a symbol here would tell the next lookup — on a library it never asked — what
+	// that library exports. The address alone cannot tell the two opens apart.
 	dl.mu.Lock()
-	if dl.handle == handle {
-		dl.caches[symbol] = struct{}{}
+	if dl.handle == handle && dl.generation == generation {
+		dl.caches[symbol] = lookupErr
 	}
 	dl.mu.Unlock()
 
-	return nil
+	return lookupErr
 }
