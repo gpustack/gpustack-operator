@@ -72,8 +72,8 @@ boundary.
 ## `docs/architecture/internals.md`
 
 **Owns** — the contributor invariants: worker startup order, the two ensurers, the applications lock,
-the gateway's hand-maintained mirror, the per-manufacturer package split, the CGO bindings, the
-63-character rule.
+the gateway's hand-maintained mirror, the device-plugin generation/re-registration loop, the
+per-manufacturer package split, the CGO bindings, the 63-character rule.
 
 **Rule of thumb** — if breaking it produces a *silent* failure, it belongs here.
 

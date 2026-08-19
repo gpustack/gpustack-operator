@@ -401,3 +401,29 @@ func TestDevicesReconciler_PhysicalLedgerFold(t *testing.T) {
 		assert.Equal(t, int32(2), missingFree, "unrecorded orphan overstates free to the empty ceiling")
 	})
 }
+
+// TestDevicesReconciler_ReconcileNotifier_Unsubscribes keeps the broadcast set from growing once per
+// stream. kubelet opens a fresh ListAndWatch on every registration, and re-registers on every one of
+// its own restarts, so a subscription that outlived its reader would be walked by every later
+// broadcast — some of them synchronously under the node allocate mutex.
+func TestDevicesReconciler_ReconcileNotifier_Unsubscribes(t *testing.T) {
+	r := &DevicesReconciler{}
+
+	_, releaseSliced := r.getReconcileNotifier(
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
+	_, releaseShared := r.getReconcileNotifier(
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeShared)
+	require.Len(t, r.notifiers, 2)
+
+	releaseSliced()
+	require.Len(t, r.notifiers, 1, "releasing one subscription must leave the other")
+	assert.Equal(t, workercore.DeviceAllocationModeShared, r.notifiers[0].AllocationMode)
+
+	// Releasing twice is what a retried teardown does; it must not take somebody else's
+	// subscription with it.
+	releaseSliced()
+	require.Len(t, r.notifiers, 1)
+
+	releaseShared()
+	assert.Empty(t, r.notifiers)
+}
