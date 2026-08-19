@@ -29,7 +29,8 @@ func RunReclaimLoop(
 	mode workercore.DeviceAllocationMode,
 	reconcile func(livePodUIDs []string),
 ) {
-	notifier := reconciler.getReconcileNotifier(manufacturer, mode)
+	notifier, release := reconciler.getReconcileNotifier(manufacturer, mode)
+	defer release()
 	ticker := time.NewTicker(reclaimResyncInterval)
 	defer ticker.Stop()
 	reclaimLoop(ctx, reconcile, notifier, ticker.C)

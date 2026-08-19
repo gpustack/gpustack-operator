@@ -386,7 +386,13 @@ func (r *DevicesReconciler) enqueueDevicesWhenPodChanged(
 	return reqs
 }
 
-func (r *DevicesReconciler) getReconcileNotifier(manufacturer string, allocationMode workercore.DeviceAllocationMode) <-chan []string {
+// getReconcileNotifier subscribes to the live-pod-UID broadcast and returns the channel to read
+// plus the function that unsubscribes it. Every subscriber must call the second return value when
+// it stops reading: a subscription outlives its reader otherwise, and a broadcast walks the whole
+// set under the notifiers mutex — some of it from inside the node allocate mutex.
+func (r *DevicesReconciler) getReconcileNotifier(
+	manufacturer string, allocationMode workercore.DeviceAllocationMode,
+) (<-chan []string, func()) {
 	r.notifiersMutex.Lock()
 	defer r.notifiersMutex.Unlock()
 
@@ -401,7 +407,20 @@ func (r *DevicesReconciler) getReconcileNotifier(manufacturer string, allocation
 	if r.lastLivePodUIDs != nil {
 		channel <- r.lastLivePodUIDs
 	}
-	return channel
+	return channel, func() {
+		r.dropReconcileNotifier(channel)
+	}
+}
+
+// dropReconcileNotifier removes a subscription, identified by the channel it was handed. It is safe
+// to call more than once: a channel already gone matches nothing.
+func (r *DevicesReconciler) dropReconcileNotifier(channel chan []string) {
+	r.notifiersMutex.Lock()
+	defer r.notifiersMutex.Unlock()
+
+	r.notifiers = slices.DeleteFunc(r.notifiers, func(n _DevicesNotifier) bool {
+		return n.Channel == channel
+	})
 }
 
 func (r *DevicesReconciler) getDevices(ctx context.Context) (*workercore.Devices, error) {

@@ -1,16 +1,17 @@
 # Internals
 
 > **Purpose** — the code map and the invariants a contributor has to keep: startup ordering, the
-> gateway's hand-maintained mirror, the per-manufacturer split, the CGO bindings, and the recurring
-> 63-character limit.
+> gateway's hand-maintained mirror, the device-plugin registration loop, the per-manufacturer split,
+> the CGO bindings, and the recurring 63-character limit.
 > **Audience** contributors · **Prerequisites** [Architecture](../architecture.md) ·
-> **Read time** ~4 min
+> **Read time** ~5 min
 
 ## Contents
 
 - [One binary, three subcommands](#one-binary-three-subcommands)
 - [Worker startup order matters](#worker-startup-order-matters)
 - [The worker gateway mirrors the cluster API, it does not embed it](#the-worker-gateway-mirrors-the-cluster-api-it-does-not-embed-it)
+- [Device plugins re-register on their own, once per kubelet restart](#device-plugins-re-register-on-their-own-once-per-kubelet-restart)
 - [Per-manufacturer device support](#per-manufacturer-device-support)
 - [CGO bindings (`binding/`)](#cgo-bindings-binding)
 - [The 63-character constraint, recurring](#the-63-character-constraint-recurring)
@@ -105,6 +106,43 @@ Adding one means touching `types.go` and every aggregation site in `helper.go` (
 `newAggregatedCandidate`, both `Recompute` methods, `overviewResourceIsZero`).
 `TestAggregatedInstanceTypeMirrorsEveryStatusView` fails while the field sets differ, but cannot see a
 missed aggregation site — walk them.
+
+## Device plugins re-register on their own, once per kubelet restart
+
+kubelet's device-plugin registration server unlinks **every socket** in
+`/var/lib/kubelet/device-plugins` each time it starts, and only then listens on a fresh
+`kubelet.sock`. That directory is a hostPath in the device-manager, so the unlink takes the plugin's
+own socket with it while the plugin's process carries on untouched.
+
+`ResourceServer.Start` (`pkg/deviceplugin/server.go`) therefore serves in **generations** — a socket,
+a gRPC server on it, and a registration naming the two to kubelet — and loops over them. The socket
+going missing is the level-based signal that kubelet restarted, so the next generation listens and
+registers again.
+
+A generation ending because its server stopped serving is a second, separate signal. Unlinking the
+socket belongs to the *start* of a generation, so that a retiring one cannot unlink whatever holds
+the path by then — which, once a replacement allocator has taken over, is the replacement's socket.
+The path therefore outlives its listener, and a listener that died under one is invisible to the
+socket check.
+
+A generation retries its registration for as long as it lives, because right after the wipe
+`kubelet.sock` is not back yet. Listening again is not optional either: kubelet dials the endpoint
+back, blocking, from inside `Register`, and refuses a registration whose socket it cannot reach.
+
+> **The invariant** — kubelet's checkpoint restores a forgotten resource with an *empty* healthy set,
+> so the Node reports it at **zero capacity**, not merely zero allocatable, and drops the key outright
+> once the stopped endpoint's grace period expires. A zero pool key fails `poolAdvertised`, so
+> `NodeCapacityReconciler` reverse-patches that family's whole `.sliced.*` / `.partitioned.*` counting
+> set off the Node too — the flavor and InstanceType views move, not just allocatability.
+
+Nothing about the *process* looks wrong while that lasts, and its Pod stays Ready, so the plugin-side
+signal is the allocator's `registering to kubelet, retrying` error — visible at the DaemonSet's
+shipped `-v=2` because `Error` is not gated by V level the way `Info` is. The cluster-side signal is
+louder and comes first: the family's keys leave the Node.
+
+`Stop` ends the serving loop rather than one generation of it, and reports nothing for having been
+asked to: the allocator stops a manufacturer's servers **without** canceling its own context when
+that manufacturer stops being detected, and treats an error from a server as fatal to the node.
 
 ## Per-manufacturer device support
 

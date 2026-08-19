@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"testing"
@@ -12,7 +16,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	grpccodes "google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	grpcmetadata "google.golang.org/grpc/metadata"
 	grpcstatus "google.golang.org/grpc/status"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -3572,5 +3579,500 @@ func TestResourceServer_PreferredAllocation_StalePreferredIDDoesNotPanic(t *test
 	offered := sets.New(availableDeviceIDs...)
 	for _, id := range resp.GetDeviceIDs() {
 		assert.True(t, offered.Has(id), "the hint must name a token kubelet offered: %q", id)
+	}
+}
+
+// --- lifecycle: registration across a kubelet restart ---
+
+// pluginDir returns a temporary plugin directory short enough to hold unix socket paths. A unix
+// socket address is capped at 104 bytes on darwin, and t.TempDir() spends most of that budget on
+// the test's own name.
+func pluginDir(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("", "dp")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+	})
+
+	return dir
+}
+
+// fakeKubelet is kubelet's half of the device-plugin handshake: it accepts Register on kubelet.sock
+// and records what it was told, so a test can assert who registered and how often.
+//
+// It holds kubelet's actual acceptance contract, not a permissive stand-in for it: kubelet dials the
+// endpoint back from inside Register, blocking, and refuses a registration whose socket it cannot
+// reach. A plugin that re-registers without listening again therefore gets refused here too.
+//
+// The dial-back completes a real RPC, and that is the whole point of it. A unix socket accepts
+// connections into its listen backlog with nobody serving, so a bare net.Dial succeeds against a
+// plugin that called net.Listen and never started its gRPC server — which is exactly the half of
+// re-serving these tests exist to guard. kubelet's own check is a blocking gRPC dial, so it needs
+// the server's handshake; asking for one RPC is the cheapest faithful equivalent.
+type fakeKubelet struct {
+	kubeletdeviceplugin.UnimplementedRegistrationServer
+
+	dir string
+
+	mu   sync.Mutex
+	reqs []*kubeletdeviceplugin.RegisterRequest
+}
+
+func (k *fakeKubelet) Register(
+	ctx context.Context, req *kubeletdeviceplugin.RegisterRequest,
+) (*kubeletdeviceplugin.Empty, error) {
+	conn, err := grpc.NewClient("unix://"+filepath.Join(k.dir, req.GetEndpoint()),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = conn.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_, err = kubeletdeviceplugin.NewDevicePluginClient(conn).
+		GetDevicePluginOptions(ctx, &kubeletdeviceplugin.Empty{})
+	if err != nil {
+		return nil, err
+	}
+
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	k.reqs = append(k.reqs, req)
+
+	return &kubeletdeviceplugin.Empty{}, nil
+}
+
+func (k *fakeKubelet) registrations() []*kubeletdeviceplugin.RegisterRequest {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	return slices.Clone(k.reqs)
+}
+
+// fakeListAndWatchStream is the least of grpc.ServerStreamingServer that ListAndWatch touches: the
+// context it hands back is what ends the stream, and Send is where its responses go.
+type fakeListAndWatchStream struct {
+	ctx  context.Context
+	sent chan *ListAndWatchResponse
+}
+
+func (f *fakeListAndWatchStream) Send(resp *ListAndWatchResponse) error {
+	select {
+	case f.sent <- resp:
+	default:
+	}
+
+	return nil
+}
+
+func (f *fakeListAndWatchStream) Context() context.Context       { return f.ctx }
+func (*fakeListAndWatchStream) SetHeader(grpcmetadata.MD) error  { return nil }
+func (*fakeListAndWatchStream) SendHeader(grpcmetadata.MD) error { return nil }
+func (*fakeListAndWatchStream) SetTrailer(grpcmetadata.MD)       {}
+func (*fakeListAndWatchStream) SendMsg(any) error                { return nil }
+func (*fakeListAndWatchStream) RecvMsg(any) error                { return nil }
+
+// TestResourceServer_ListAndWatch_UnsubscribesWhenTheStreamEnds is the wiring half of the unsubscribe
+// guard. TestDevicesReconciler_ReconcileNotifier_Unsubscribes proves the release closure removes a
+// subscription; this proves ListAndWatch actually reaches it, which is what kubelet's habit of opening
+// a fresh stream on every registration makes load-bearing — a stream that kept its subscription would
+// leak one per kubelet restart for the life of the process.
+func TestResourceServer_ListAndWatch_UnsubscribesWhenTheStreamEnds(t *testing.T) {
+	const nodeName = "node-law-unsub"
+	rec := &DevicesReconciler{
+		NodeName: nodeName,
+		Client:   nodeFixture(twoCardDevices(nodeName, workercore.DeviceAllocationModeNone)),
+	}
+	s := &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeSliced,
+		Reconciler:     rec,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	returned := make(chan error, 1)
+	go func() {
+		returned <- s.ListAndWatch(&Empty{}, &fakeListAndWatchStream{
+			ctx:  ctx,
+			sent: make(chan *ListAndWatchResponse, 1),
+		})
+	}()
+
+	notifierCount := func() int {
+		rec.notifiersMutex.RLock()
+		defer rec.notifiersMutex.RUnlock()
+
+		return len(rec.notifiers)
+	}
+	require.Eventually(t, func() bool {
+		return notifierCount() == 1
+	}, 15*time.Second, 20*time.Millisecond, "ListAndWatch never subscribed to the broadcast")
+
+	cancel()
+	select {
+	case <-returned:
+	case <-time.After(15 * time.Second):
+		t.Fatal("ListAndWatch did not return after its stream context was canceled")
+	}
+
+	assert.Zero(t, notifierCount(), "the stream kept its subscription after returning")
+}
+
+// startFakeKubelet brings kubelet's registration server up the way kubelet does: it first unlinks
+// every socket in the plugin directory — kubelet's CleanupPluginDirectory, which takes the plugin's
+// own socket with it — and only then listens on kubelet.sock. The returned func stops it again,
+// standing in for the next restart.
+func startFakeKubelet(t *testing.T, dir string) (*fakeKubelet, func()) {
+	t.Helper()
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for i := range entries {
+		// Tolerating an already-gone entry is kubelet's own behavior, and here it is required: a
+		// generation removes its socket as it starts serving — retiring one deliberately leaves the
+		// path alone — so this wipe and that removal can race for the same entry.
+		if err := os.Remove(filepath.Join(dir, entries[i].Name())); err != nil && !os.IsNotExist(err) {
+			require.NoError(t, err)
+		}
+	}
+
+	lis, err := net.Listen("unix", filepath.Join(dir, "kubelet.sock"))
+	require.NoError(t, err)
+
+	k := &fakeKubelet{dir: dir}
+	srv := grpc.NewServer()
+	kubeletdeviceplugin.RegisterRegistrationServer(srv, k)
+	go func() {
+		_ = srv.Serve(lis)
+	}()
+
+	return k, srv.Stop
+}
+
+// startResourceServer runs a sliced NVIDIA server against the given kubelet socket and returns it,
+// failing the test if it does not come back once its context is canceled, or if it came back for any
+// other reason — a server that gave up mid-test would leave the assertions passing on a dead one.
+func startResourceServer(t *testing.T, kubeSocket string) *ResourceServer {
+	t.Helper()
+
+	s := &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeSliced,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	returned := make(chan error, 1)
+	go func() {
+		returned <- s.Start(ctx, kubeSocket)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-returned:
+			assert.ErrorIs(t, err, context.Canceled, "Start reported a failure of its own")
+		case <-time.After(10 * time.Second):
+			t.Error("Start did not return after its context was canceled")
+		}
+	})
+
+	return s
+}
+
+// requireRegistered waits for this kubelet to have accepted exactly one registration from this
+// server, and asserts it names the server's resource.
+//
+// Both halves are waited on together, because on their own each lags the other: kubelet writes its
+// record inside its handler, one round trip before the server learns the outcome, while the server's
+// own flag still reports the previous generation until it notices the socket is gone. That kubelet
+// accepted at all is the proof the endpoint is live — fakeKubelet dials it back before recording
+// anything, exactly as kubelet does.
+func requireRegistered(t *testing.T, k *fakeKubelet, s *ResourceServer) {
+	t.Helper()
+
+	require.Eventually(t, func() bool {
+		return s.isRegistered() && len(k.registrations()) == 1
+	}, 15*time.Second, 50*time.Millisecond, "kubelet never accepted a registration from the server")
+
+	reqs := k.registrations()
+	assert.Equal(t, string(s.ResourceName()), reqs[0].GetResourceName())
+	// The endpoint has to name this server's own socket beside kubelet's, by basename: kubelet
+	// resolves it against its plugin directory, so anything else names another plugin's socket or
+	// nothing at all. Spelled out rather than rebuilt from the production formula, which would only
+	// compare that formula with itself.
+	assert.Equal(t, "nvidia.sliced.sock", reqs[0].GetEndpoint())
+}
+
+// TestResourceServer_Start_ReregistersAfterPluginDirectoryWiped is the regression guard for a
+// kubelet restart. kubelet unlinks every socket in the plugin directory before it listens again,
+// so the plugin has to serve on a new socket and register again — once per restart, and no more.
+func TestResourceServer_Start_ReregistersAfterPluginDirectoryWiped(t *testing.T) {
+	cases := []struct {
+		name string
+		// restarts is how many times kubelet restarts after the first registration. Each restart
+		// wipes the plugin directory and brings a fresh registration server up, so every kubelet
+		// must see exactly one registration of its own.
+		restarts int
+	}{
+		{
+			name:     "one kubelet restart registers again",
+			restarts: 1,
+		},
+		{
+			name:     "repeated kubelet restarts register again once each",
+			restarts: 3,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := pluginDir(t)
+			kubelet, stopKubelet := startFakeKubelet(t, dir)
+			defer func() {
+				stopKubelet()
+			}()
+
+			s := startResourceServer(t, filepath.Join(dir, "kubelet.sock"))
+			requireRegistered(t, kubelet, s)
+
+			for range tc.restarts {
+				stopKubelet()
+				kubelet, stopKubelet = startFakeKubelet(t, dir)
+				requireRegistered(t, kubelet, s)
+			}
+
+			// The generation that is up must settle, rather than keep re-registering.
+			assert.Never(t, func() bool {
+				return len(kubelet.registrations()) > 1
+			}, 3*pluginSocketPeriod, pluginSocketPeriod/2)
+		})
+	}
+}
+
+// TestResourceServer_Start_RetriesWhileKubeletIsAway covers the other side of the same window: a
+// plugin that comes up before kubelet's registration server, or outlives a kubelet that has not
+// come back yet, keeps serving and keeps trying instead of failing the whole allocator.
+func TestResourceServer_Start_RetriesWhileKubeletIsAway(t *testing.T) {
+	dir := pluginDir(t)
+
+	s := startResourceServer(t, filepath.Join(dir, "kubelet.sock"))
+
+	assert.Never(t, func() bool {
+		return s.isRegistered()
+	}, 3*pluginSocketPeriod, pluginSocketPeriod/2,
+		"nothing was listening on kubelet.sock, so no registration can have been accepted")
+
+	kubelet, stopKubelet := startFakeKubelet(t, dir)
+	defer stopKubelet()
+
+	requireRegistered(t, kubelet, s)
+}
+
+// TestResourceServer_Stop_LeavesTheAllocatorStanding covers the shutdown contract the allocator
+// relies on. It stops one server without canceling the context the allocator handed it — what
+// happens when a manufacturer stops being detected — and requires the serving loop to end reporting
+// nothing: a supervisor that read an error there would take the remaining manufacturers down with a
+// server it asked to retire.
+//
+// A later generation is covered as well as the first, because they are not the same state: the loop
+// swaps the published gRPC server between generations, and a Stop has to end the loop rather than
+// only the generation it happened to land in.
+func TestResourceServer_Stop_LeavesTheAllocatorStanding(t *testing.T) {
+	cases := []struct {
+		name string
+		// restarts is how many kubelet restarts precede the Stop, and so which generation it lands
+		// in.
+		restarts int
+	}{
+		{
+			name:     "stopped in its first generation",
+			restarts: 0,
+		},
+		{
+			name:     "stopped in a generation that followed a kubelet restart",
+			restarts: 2,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := pluginDir(t)
+			kubelet, stopKubelet := startFakeKubelet(t, dir)
+			defer func() {
+				stopKubelet()
+			}()
+
+			s := &ResourceServer{
+				Manufacturer:   nodefeature.ManufacturerNVIDIA,
+				AllocationMode: workercore.DeviceAllocationModeSliced,
+			}
+			returned := make(chan error, 1)
+			go func() {
+				// Deliberately not cancellable, so Stop is the only thing that can end the loop.
+				returned <- s.Start(context.Background(), filepath.Join(dir, "kubelet.sock"))
+			}()
+			requireRegistered(t, kubelet, s)
+
+			for range tc.restarts {
+				stopKubelet()
+				kubelet, stopKubelet = startFakeKubelet(t, dir)
+				requireRegistered(t, kubelet, s)
+			}
+
+			s.Stop()
+
+			select {
+			case err := <-returned:
+				require.NoError(t, err, "being stopped on request is not a failure to serve")
+			case <-time.After(10 * time.Second):
+				t.Fatal("Start did not return after Stop")
+			}
+			assert.False(t, s.isRegistered(), "a stopped server still reports itself registered")
+		})
+	}
+}
+
+// TestResourceServer_Start_ServesAgainWhenItsServerStopsServing covers the generation that dies with
+// its socket still on disk. A listener closed under a path that stays is invisible to the socket
+// check — and the plugin keeps the path deliberately, so that a retiring generation cannot unlink its
+// successor's — which leaves the resource registered against an endpoint nobody is accepting on.
+func TestResourceServer_Start_ServesAgainWhenItsServerStopsServing(t *testing.T) {
+	dir := pluginDir(t)
+	kubelet, stopKubelet := startFakeKubelet(t, dir)
+	defer stopKubelet()
+
+	s := startResourceServer(t, filepath.Join(dir, "kubelet.sock"))
+	requireRegistered(t, kubelet, s)
+
+	socket := filepath.Join(dir, "nvidia.sliced.sock")
+	require.FileExists(t, socket)
+
+	// Stopping the generation's own server behind the loop's back is what a fatal Accept error does
+	// to it, minus the means to provoke one.
+	s.mu.Lock()
+	srv := s.server
+	s.mu.Unlock()
+	require.NotNil(t, srv, "the generation published no server")
+	srv.Stop()
+
+	require.Eventually(t, func() bool {
+		return len(kubelet.registrations()) == 2
+	}, 15*time.Second, 50*time.Millisecond,
+		"a generation that stopped serving was never replaced, and kubelet kept a dead endpoint")
+
+	assert.FileExists(t, socket, "the replacement generation is not listening anywhere")
+}
+
+// TestResourceServer_Register_RecordsOnlyTheGenerationBeingServed keeps a registration accepted just
+// as its generation retires from being recorded against the server as a whole. kubelet writes its
+// record inside its own handler, a round trip before the plugin learns the outcome, so a retire landing
+// in that gap would otherwise put the cleared flag back — leaving a stopped server reporting itself
+// registered, and every shutdown assertion timing-dependent.
+func TestResourceServer_Register_RecordsOnlyTheGenerationBeingServed(t *testing.T) {
+	dir := pluginDir(t)
+	kubeSocket := filepath.Join(dir, "kubelet.sock")
+	_, stopKubelet := startFakeKubelet(t, dir)
+	defer stopKubelet()
+
+	// One generation, listening for real, because kubelet dials the endpoint back before accepting.
+	socket := filepath.Join(dir, "nvidia.sliced.sock")
+	lis, err := net.Listen("unix", socket)
+	require.NoError(t, err)
+	s := &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeSliced,
+	}
+	srv := grpc.NewServer(grpc.Creds(insecure.NewCredentials()))
+	kubeletdeviceplugin.RegisterDevicePluginServer(srv, s)
+	go func() {
+		_ = srv.Serve(lis)
+	}()
+	defer srv.Stop()
+	s.publish(srv)
+
+	// A generation that is no longer the one being served. Its registration is accepted by kubelet
+	// all the same — the endpoint it names is still listening — so only the identity check can tell.
+	stale := grpc.NewServer()
+	defer stale.Stop()
+	require.NoError(t, s.register(context.Background(), stale, kubeSocket, socket))
+	assert.False(t, s.isRegistered(),
+		"a registration was recorded against a generation that is not the one being served")
+
+	require.NoError(t, s.register(context.Background(), srv, kubeSocket, socket))
+	assert.True(t, s.isRegistered(), "the serving generation's own registration was not recorded")
+}
+
+// TestResourceServer_Retire_LeavesALaterGenerationAlone keeps a Stop that lost a race from taking
+// down a generation it was never asked about. Stop reads the generation to retire together with the
+// cancel function, but nothing stops it from resuming after the loop it canceled has returned and a
+// later Start has published a server of its own; retiring that one would leave the node advertising a
+// resource whose endpoint is dead, under a loop that reports it registered.
+func TestResourceServer_Retire_LeavesALaterGenerationAlone(t *testing.T) {
+	dir := pluginDir(t)
+	kubeSocket := filepath.Join(dir, "kubelet.sock")
+	kubelet, stopKubelet := startFakeKubelet(t, dir)
+	defer func() {
+		stopKubelet()
+	}()
+
+	s := &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeSliced,
+	}
+	firstReturned := make(chan error, 1)
+	go func() {
+		// Deliberately not cancellable, so Stop is the only thing that can end the loop.
+		firstReturned <- s.Start(context.Background(), kubeSocket)
+	}()
+	requireRegistered(t, kubelet, s)
+
+	s.mu.Lock()
+	stale := s.server
+	s.mu.Unlock()
+	require.NotNil(t, stale, "the first generation published no server")
+
+	s.Stop()
+	select {
+	case err := <-firstReturned:
+		require.NoError(t, err, "being stopped on request is not a failure to serve")
+	case <-time.After(10 * time.Second):
+		t.Fatal("Start did not return after Stop")
+	}
+
+	stopKubelet()
+	kubelet, stopKubelet = startFakeKubelet(t, dir)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	secondReturned := make(chan error, 1)
+	go func() {
+		secondReturned <- s.Start(ctx, kubeSocket)
+	}()
+	requireRegistered(t, kubelet, s)
+
+	s.mu.Lock()
+	current := s.server
+	s.mu.Unlock()
+	require.NotSame(t, stale, current, "the second Start reused the first generation's server")
+
+	// What the delayed Stop would reach for.
+	s.retire(stale)
+
+	s.mu.Lock()
+	after := s.server
+	s.mu.Unlock()
+	assert.Same(t, current, after, "a stale retire dropped the live generation's server")
+	assert.True(t, s.isRegistered(), "a stale retire dropped the live registration")
+
+	cancel()
+	select {
+	case err := <-secondReturned:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(10 * time.Second):
+		t.Error("Start did not return after its context was canceled")
 	}
 }
