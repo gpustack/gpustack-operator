@@ -668,6 +668,12 @@ containers of one group each holding a live claim are both recorded and both cha
 charges its accelerator until its **Pod** is gone — the reclaimer and the kubelet also scope a device
 to the Pod's life, not the container's.
 
+One thing takes an entry back earlier, and it is the only one: an allocation the manufacturer
+responder refuses **after** the record is written is given back on the spot — the entry and the
+reservation both — because the kubelet does not start that container. A claim the container already
+held is restored rather than dropped, and a give-back that cannot reach the API is retried until it
+lands or the Pod is gone.
+
 **(a) This enforces the per-accelerator exclusive/shared/sliced cross-mode invariant.** An
 accelerator kubelet assigned that another mode holds, per the ledger `Status` or the in-process
 reservation, is refused with `FailedPrecondition`: an exclusive tenant truly owns its accelerator on
