@@ -51,7 +51,7 @@ VM only accepts key-based auth via `ssh_public_key`.
 | `project_id` | Nebius project ID (required); its region fixes VM placement & platform availability | *(required)* |
 | `name_prefix` | Prefix for the VM and its network/subnet/security-group names (a random suffix is appended) | `gpustack-nebius` |
 | `ssh_public_key` | Path to the SSH public key injected into the VM via cloud-init | `~/.ssh/id_ed25519.pub` |
-| `instance_type` | The platform/preset/image_family combination (see the reference table below) | `{ platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb", image_family = "ubuntu24.04-cuda13.0" }` |
+| `instance_type` | `platform` and `preset` are required; `image_family` is optional and resolved from the live catalogue when omitted | `{ platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" }` |
 | `boot_disk_type` | Boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |
 | `boot_disk_size_gb` | Boot disk size, in GiB | `100` |
 
@@ -61,43 +61,74 @@ VM only accepts key-based auth via `ssh_public_key`.
 |---|---|
 | `vm_name` | Name of the VM instance |
 | `public_ip` | Public IPv4 address of the VM |
+| `image_family` | The family the VM was built from: pinned, or resolved from the platform |
+| `image_architecture` | The resolved image's CPU architecture (null when the family was pinned) |
 | `private_ip` | Private IPv4 address of the VM |
 | `ssh_command` | Ready-to-run SSH command to reach the VM |
 
-## Platform / preset / image_family / region reference
+## Platform, preset and image family
 
-Region is implied by `project_id`'s project — Nebius resources take no
-`region` field. Platform availability varies by region:
+Region is implied by `project_id`'s project -- Nebius resources take no `region`
+field, and which platforms exist varies by region.
 
-| Region | Available platforms |
-|---|---|
-| `eu-north1` | `cpu-d3`, `cpu-e2`, `gpu-h100-sxm`, `gpu-h200-sxm`, `gpu-l40s-a`, `gpu-l40s-d` |
-| `eu-west1` | `cpu-d3`, `gpu-h200-sxm` |
-| `me-west1` | `cpu-d3`, `gpu-b200-sxm-a` |
-| `uk-south1` | `cpu-d3`, `gpu-b300-sxm` |
-| `us-central1` | `cpu-d3`, `gpu-b200-sxm`, `gpu-h200-sxm`, `gpu-rtx6000` |
+**You give the platform and the preset; the image family is resolved for you.**
+Leave `instance_type.image_family` out and the module asks Nebius which family
+that platform recommends, takes the newest, and validates the platform and the
+preset in the same call. So a platform Nebius adds tomorrow works with no change
+here -- and an ARM64 platform gets its ARM64 family instead of the AMD64 one a
+hand-written table would have handed it.
 
-The default `instance_type` is `gpu-h100-sxm` / `1gpu-16vcpu-200gb` /
-`ubuntu24.04-cuda13.0` (available in `eu-north1`); for a CPU box in any
-region use `cpu-d3` (the sole CPU platform available in all regions, minimum
-`4vcpu-16gb`).
+```bash
+# the default: gpu-h100-sxm / 1gpu-16vcpu-200gb, family resolved (ubuntu24.04-cuda13.0)
+terraform apply -var='project_id=project-...'
 
-Example — `eu-north1` (richest availability), platform -> preset -> image_family:
+# a CPU box; the family resolves to ubuntu24.04-driverless
+terraform apply -var='project_id=project-...' \
+  -var='instance_type={platform="cpu-d3",preset="4vcpu-16gb"}'
+```
 
-| Platform | Presets | Image family |
-|---|---|---|
-| `cpu-e2` | `2vcpu-8gb`, `4vcpu-16gb`, ... `80vcpu-320gb` | `ubuntu24.04-driverless` |
-| `cpu-d3` | `4vcpu-16gb`, ... `128vcpu-512gb` | `ubuntu24.04-driverless` |
-| `gpu-h100-sxm` | `1gpu-16vcpu-200gb` (default), `8gpu-128vcpu-1600gb` | `ubuntu24.04-cuda13.0` (default) |
-| `gpu-h200-sxm` | `1gpu-16vcpu-200gb`, `8gpu-128vcpu-1600gb` | `ubuntu24.04-cuda13.0` |
-| `gpu-l40s-a` | `1gpu-8vcpu-32gb`, ... `1gpu-40vcpu-160gb` | `ubuntu24.04-cuda13.0` |
-| `gpu-l40s-d` | `1gpu-16vcpu-96gb`, ... `4gpu-192vcpu-1152gb` | `ubuntu24.04-cuda13.0` |
+The resolved family and its CPU architecture are module outputs (`image_family`,
+`image_architecture`).
 
-See `variables.tf` for the full platform / preset / image_family catalog
-(all CPU and GPU shapes across all regions) and the object syntax to
-override a combo, e.g.:
+To see what the API currently offers:
+
+```bash
+project=project-...
+region=$(nebius iam project get --id "$project" --format json | jq -r .spec.region)
+
+nebius compute platform list --parent-id "$project" --format json \
+  | jq -r '.items[] | "\(.metadata.name): \([.spec.presets[].name] | join(", "))"'
+
+nebius compute image list-public --region "$region" --format json \
+  | jq -r '.items[] | select((.spec.recommended_platforms // []) | length > 0)
+          | "\(.spec.image_family) <- \(.spec.recommended_platforms | join(", "))"'
+```
+
+### Pinning the family, and what it opts out of
 
 ```bash
 terraform apply -var='project_id=project-...' \
   -var='instance_type={platform="cpu-d3",preset="4vcpu-16gb",image_family="ubuntu24.04-driverless"}'
 ```
+
+Pinning skips the lookup **entirely** -- no `nebius` CLI and no `jq` are needed
+on plan, apply or destroy. It also skips the platform/preset check and the
+boot-disk minimum check, since both come from the same call.
+
+Two consequences worth knowing before you pin:
+
+- **Pass it on every operation, not just apply.** A `-var` given only on apply is
+  not remembered at destroy: `.last-apply.auto.tfvars.json` deliberately
+  snapshots only variables that have no default, and `instance_type` has one. A
+  destroy without the pin runs the lookup again, and so needs the CLI.
+- **An unpinned plan re-reads the live catalogue.** If Nebius publishes a newer
+  family for your platform, the next plan proposes **replacing** the VM. Pin the
+  family for anything you intend to keep.
+
+### Boot disk
+
+`boot_disk_size_gb` is checked twice at plan time: against the disk type's own
+granularity (`NETWORK_SSD_NON_REPLICATED` and `NETWORK_SSD_IO_M3` are allocated
+in whole 93 GiB units; `NETWORK_SSD` is 1-8192 GiB), and -- when the family is
+resolved rather than pinned -- against the minimum the image itself publishes
+(10 GiB driverless, 40 GiB CUDA), rounded up from the bytes the API reports.
