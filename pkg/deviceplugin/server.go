@@ -721,10 +721,12 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 	}
 
 	// Every other responder keeps its position after the patch — see renderPrePatchResponse for why
-	// moving it earlier would strand hardware some vendors create inside it.
+	// moving it earlier would strand hardware some vendors create inside it. Its refusal is therefore
+	// the one error that finds the allocation already durable, and is compensated instead of reordered.
 	if ctrResp == nil {
 		if ctrResp, err = s.Responder.GetContainerAllocateResponse(
 			ctx, decision.Pod, decision.Container, decision.Devices, decision.Allocation); err != nil {
+			s.releaseAllocation(ctx, &decision, physical)
 			s.Logger.Error(err, "get container allocate response")
 			return nil, err
 		}
@@ -755,6 +757,11 @@ type _AllocationDecision struct {
 	// LogicalPlacements is the geometry picked under the mutex. GetLogicalSlicedResponse consumes
 	// it rather than recomputing it: only one of the two can be authoritative.
 	LogicalPlacements Placements
+	// PriorClaim is what this container already held when the decision was taken, or nil when it
+	// held nothing. It is captured inside the serialized section, before the reservation overwrites
+	// it, because it is what a refusal after the durable patch has to put back — by then neither
+	// record carries it any more.
+	PriorClaim *ContainerAllocation
 }
 
 // decideAllocation runs the identify → cross-mode check → reserve section of a workload Allocate.
@@ -827,6 +834,11 @@ func (s *ResourceServer) decideAllocation(
 		// actuator runs. The post-actuation call below records what the hardware actually gave.
 		applyPhysicalPlacements(&d.Status, d.Profile, placements, nil)
 	}
+
+	// What this container already holds, captured before the reservation below overwrites it: a
+	// refusal after the durable patch has to put exactly this back, and by then neither record still
+	// carries it.
+	d.PriorClaim = s.priorClaimOf(d.Pod, d.Container.Name)
 
 	// Reserve the accelerators in-process before releasing the mutex: the accelerator is taken the
 	// instant the check passes, so the next serialized Allocate observes it (the cross-mode check
@@ -1183,6 +1195,33 @@ func (s *ResourceServer) priorAllocationOf(
 	return workercore.DevicesStatus{}, false
 }
 
+// priorClaimOf returns the whole record this container already holds — the allocation together with
+// the device IDs kubelet offered for it — or nil when it holds nothing. It reads the in-process
+// reservation first and the durable annotation second, the precedence priorAllocationOf uses: the
+// reservation is the synchronous, cache-lag-free marker, while the annotation on a pod the informer
+// handed over can be a round-trip behind.
+//
+// It exists beside priorAllocationOf because a compensation has to put a claim BACK, which needs the
+// device IDs too: a family whose Allocate picks the accelerator itself hands back devices the offered
+// IDs do not name, so they cannot be re-derived from the allocation.
+//
+// An unreadable annotation reads as "nothing to restore", the same conclusion a missing entry reaches.
+// It cannot mislead a compensation: patchAllocatingPod parses the same annotation, so the patch a
+// compensation would undo could never have landed.
+func (s *ResourceServer) priorClaimOf(pod *core.Pod, container string) *ContainerAllocation {
+	if held, ok := s.Reconciler.reservationsFor(pod.UID)[container]; ok && len(held.Allocated.Groups) > 0 {
+		return &ContainerAllocation{Devices: held.Allocated, DeviceIDs: held.DeviceIDs}
+	}
+	allocations, err := AllocatedAcceleratorsOf(pod)
+	if err != nil {
+		return nil
+	}
+	if held, ok := allocations[container]; ok && len(held.Devices.Groups) > 0 {
+		return &held
+	}
+	return nil
+}
+
 // priorPartitionTokens re-derives Allocate's two per-accelerator maps from an allocation this
 // container already holds, so a retry reuses the accelerator and interval it recorded.
 func priorPartitionTokens(
@@ -1495,6 +1534,70 @@ func (s *ResourceServer) persistAllocation(
 	s.Logger.Error(err, "patch allocating pod for allocation")
 
 	return grpcstatus.Errorf(grpccodes.Internal, "patch allocating pod for allocation: %v", err)
+}
+
+// releaseAllocationTimeout bounds the compensating patch. It runs on a context detached from the
+// kubelet's request, so it carries a deadline of its own rather than inheriting one.
+const releaseAllocationTimeout = 10 * time.Second
+
+// releaseAllocation gives back an allocation whose durable patch has already landed, which is the
+// state a refusal from the post-patch responder call leaves behind. Kubelet does not start the
+// container on that error, so the accelerator is free in fact and has to read as free in the ledger
+// too. Left alone it counted as handed out to a container that does not exist, and the opposite mode
+// kept being refused it.
+//
+// It gives back what THIS attempt wrote, which is not always the whole record. Kubelet re-runs
+// Allocate for a container whose checkpoint it lost, and such a replay's patch overwrote a claim the
+// container already held — one whose placement is part of the node's occupancy and whose vendor
+// artifact is still carved. So a prior claim is restored, in BOTH records: releasing the reservation
+// while restoring the annotation would leave the two disagreeing about a claim that is still live.
+// Only what this attempt created is removed.
+//
+// The reservation is settled BEFORE the annotation, not after. A sibling container's patch rebuilds
+// this pod's other entries from two sources, and the refused entry can travel by either: the
+// reservations that patch reads, and the sibling's own cached copy of the annotation. Settling the
+// reservation first closes the reservation route — a sibling reading them from then on sees this
+// container as it was before the attempt.
+//
+// It does nothing about the other route, and that one stays open: a sibling whose cached pod already
+// carries this patch writes the entry back after the unpatch removed it. Both routes exist because
+// annotation I/O is deliberately off the node allocate mutex, so closing them means serializing the
+// whole read-modify-write against every other writer of this annotation — a change to that contract
+// rather than to this path.
+//
+// The compensation runs on a context detached from the caller's, with its own deadline: the very
+// failure being compensated can be the request's own cancellation or expired deadline, and a patch
+// issued on that dead context would fail immediately — freeing the reservation while leaving the
+// annotation charged, which is the leak this exists to prevent.
+//
+// A vendor artifact the responder itself created before erroring is deliberately not undone here: the
+// framework does not know it exists. What makes that safe is a property of the responders, stated on
+// ContainerAllocateResponder — none returns an error after materializing one, so there is no artifact
+// to strand. It is NOT safe by Pod liveness: a Pod whose admission failed stays in the live set the
+// vendor reclaimers respect. A partition the server's own actuator materialized IS torn down, and that
+// rollback is a no-op for an instance the actuator only reused (see PhysicalSlicedAllocation.Rollback).
+//
+// Every step is best-effort and logged rather than returned: the caller is already failing the
+// allocation with the responder's own error, which is the one the kubelet has to see.
+func (s *ResourceServer) releaseAllocation(
+	ctx context.Context, d *_AllocationDecision, physical *PhysicalSlicedAllocation,
+) {
+	if physical != nil && physical.Rollback != nil {
+		physical.Rollback()
+	}
+	if d.PriorClaim != nil {
+		s.Reconciler.reserveDevices(d.Pod.UID, d.Container.Name, d.PriorClaim.Devices, d.PriorClaim.DeviceIDs)
+	} else {
+		s.Reconciler.releaseReservation(d.Pod.UID, d.Container.Name)
+	}
+
+	unpatchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseAllocationTimeout)
+	defer cancel()
+
+	if err := s.Reconciler.unpatchAllocatingPod(unpatchCtx, d.Pod, d.Container.Name, d.PriorClaim); err != nil {
+		s.Logger.Error(err, "unpatch allocating pod for refused allocation",
+			"pod", kubemeta.GetNamespacedNameKey(d.Pod), "container", d.Container.Name)
+	}
 }
 
 // --- Visibility ---
