@@ -115,7 +115,7 @@ func (d *hgmlMigDriver) cardInstances(dev hgml.Device, cardUUID string) ([]migIn
 // every entry point rather than half-working.
 func (d *hgmlMigDriver) ready() error {
 	if !d.initRet.IsSuccess() {
-		return fmt.Errorf("vendor management library init failed: %s", d.initRet.Error())
+		return fmt.Errorf("vendor management library init failed: %w", d.initRet)
 	}
 	return nil
 }
@@ -196,7 +196,7 @@ func (d *hgmlMigDriver) device(cardUUID string) (hgml.Device, error) {
 	}
 	dev, ret := d.lib.DeviceGetHandleByUUID(cardUUID)
 	if !ret.IsSuccess() {
-		return hgml.Device{}, fmt.Errorf("get device handle for card %s: %s", cardUUID, ret.Error())
+		return hgml.Device{}, fmt.Errorf("get device handle for card %s: %w", cardUUID, ret)
 	}
 	return dev, nil
 }
@@ -238,7 +238,7 @@ func migModeEnabled(dev hgml.Device, cardUUID string) (bool, error) {
 	if ret == hgml.ERROR_NOT_SUPPORTED {
 		return false, nil
 	}
-	return false, fmt.Errorf("card %s: read partitioning mode: %s", cardUUID, ret.Error())
+	return false, fmt.Errorf("card %s: read partitioning mode: %w", cardUUID, ret)
 }
 
 // cardProfiles probes the accelerator's whole GPU-instance profile space and returns every profile
@@ -260,7 +260,7 @@ func cardProfiles(dev hgml.Device, cardUUID string) ([]hgml.GpuInstanceProfileIn
 		if driverReportsAbsent(ret) {
 			continue
 		}
-		return nil, fmt.Errorf("card %s: probe gpu-instance profile %d: %s", cardUUID, id, ret.Error())
+		return nil, fmt.Errorf("card %s: probe gpu-instance profile %d: %w", cardUUID, id, ret)
 	}
 	return infos, nil
 }
@@ -374,7 +374,7 @@ type migIdentity struct {
 func migIdentities(dev hgml.Device, cardUUID string) (map[uint32]migIdentity, error) {
 	count, ret := dev.GetMaxMigDeviceCount()
 	if !ret.IsSuccess() {
-		return nil, fmt.Errorf("card %s: get max partition-device count: %s", cardUUID, ret.Error())
+		return nil, fmt.Errorf("card %s: get max partition-device count: %w", cardUUID, ret)
 	}
 
 	out := make(map[uint32]migIdentity, count)
@@ -384,7 +384,7 @@ func migIdentities(dev hgml.Device, cardUUID string) (map[uint32]migIdentity, er
 			if driverReportsAbsent(ret) {
 				continue
 			}
-			return nil, fmt.Errorf("card %s: get partition-device handle %d: %s", cardUUID, i, ret.Error())
+			return nil, fmt.Errorf("card %s: get partition-device handle %d: %w", cardUUID, i, ret)
 		}
 		if mig == nil {
 			return nil, fmt.Errorf(
@@ -395,16 +395,16 @@ func migIdentities(dev hgml.Device, cardUUID string) (map[uint32]migIdentity, er
 		giID, ret := mig.GetGpuInstanceId()
 		if !ret.IsSuccess() {
 			return nil, fmt.Errorf(
-				"card %s: get owning gpu-instance id of partition device %d: %s", cardUUID, i, ret.Error())
+				"card %s: get owning gpu-instance id of partition device %d: %w", cardUUID, i, ret)
 		}
 		ciID, ret := mig.GetComputeInstanceId()
 		if !ret.IsSuccess() {
 			return nil, fmt.Errorf(
-				"card %s: get compute-instance id of partition device %d: %s", cardUUID, i, ret.Error())
+				"card %s: get compute-instance id of partition device %d: %w", cardUUID, i, ret)
 		}
 		uuid, ret := mig.GetUUID()
 		if !ret.IsSuccess() {
-			return nil, fmt.Errorf("card %s: get identity of partition device %d: %s", cardUUID, i, ret.Error())
+			return nil, fmt.Errorf("card %s: get identity of partition device %d: %w", cardUUID, i, ret)
 		}
 		if prev, dup := out[giID]; dup {
 			return nil, fmt.Errorf(
@@ -444,7 +444,7 @@ func liveInstances(
 		gis, ret := dev.GetGpuInstances(info.Id)
 		if !ret.IsSuccess() {
 			return nil, fmt.Errorf(
-				"card %s: list live gpu instances of profile %d: %s", cardUUID, info.Id, ret.Error())
+				"card %s: list live gpu instances of profile %d: %w", cardUUID, info.Id, ret)
 		}
 		for j := range gis {
 			gi := gis[j].GetInfo()
@@ -497,8 +497,8 @@ func wholeGiComputeProfile(
 				continue
 			}
 			return hgml.ComputeInstanceProfileInfo{}, fmt.Errorf(
-				"card %s: probe compute-instance profile %d of gpu-instance profile %d: %s",
-				cardUUID, ciID, giProfile.Id, ret.Error())
+				"card %s: probe compute-instance profile %d of gpu-instance profile %d: %w",
+				cardUUID, ciID, giProfile.Id, ret)
 		}
 		if info.SliceCount != giProfile.SliceCount {
 			continue
@@ -554,7 +554,7 @@ func (d *hgmlMigDriver) CardState(cardUUID, profile string, _, _ int32) (migCard
 	slots, ret := dev.GetGpuInstancePossiblePlacements(matched.Id)
 	if !ret.IsSuccess() {
 		return migCardState{}, fmt.Errorf(
-			"card %s: get possible placements of profile %d: %s", cardUUID, matched.Id, ret.Error())
+			"card %s: get possible placements of profile %d: %w", cardUUID, matched.Id, ret)
 	}
 	possible := make([]migPlacement, 0, len(slots))
 	for i := range slots {
@@ -601,8 +601,8 @@ func (d *hgmlMigDriver) CreateInstance(
 	gi, ret := dev.CreateGpuInstanceWithPlacement(&hgml.GpuInstanceProfileInfo{Id: matched.Id}, placement)
 	if !ret.IsSuccess() {
 		return migInstance{}, fmt.Errorf(
-			"card %s: create gpu instance of profile %d at placement %d:%d: %s",
-			cardUUID, matched.Id, slot.Start, slot.Length, ret.Error())
+			"card %s: create gpu instance of profile %d at placement %d:%d: %w",
+			cardUUID, matched.Id, slot.Start, slot.Length, ret)
 	}
 	giInfo := gi.GetInfo()
 	if giInfo.ProfileId != matched.Id {
@@ -621,8 +621,8 @@ func (d *hgmlMigDriver) CreateInstance(
 	if !ret.IsSuccess() {
 		_ = gi.Destroy()
 		return migInstance{}, fmt.Errorf(
-			"card %s: create compute instance of profile %d on gpu instance %d: %s",
-			cardUUID, ciProfile.Id, giInfo.Id, ret.Error())
+			"card %s: create compute instance of profile %d on gpu instance %d: %w",
+			cardUUID, ciProfile.Id, giInfo.Id, ret)
 	}
 
 	identityByGI, err := migIdentities(dev, cardUUID)
@@ -667,18 +667,18 @@ func (d *hgmlMigDriver) ListInstances() ([]migLiveInstance, error) {
 	}
 	count, ret := d.lib.DeviceGetCount()
 	if !ret.IsSuccess() {
-		return nil, fmt.Errorf("get device count: %s", ret.Error())
+		return nil, fmt.Errorf("get device count: %w", ret)
 	}
 
 	var out []migLiveInstance
 	for i := 0; i < count; i++ {
 		dev, ret := d.lib.DeviceGetHandleByIndex(i)
 		if !ret.IsSuccess() {
-			return nil, fmt.Errorf("get device handle at index %d: %s", i, ret.Error())
+			return nil, fmt.Errorf("get device handle at index %d: %w", i, ret)
 		}
 		cardUUID, ret := dev.GetUUID()
 		if !ret.IsSuccess() {
-			return nil, fmt.Errorf("get card uuid at device index %d: %s", i, ret.Error())
+			return nil, fmt.Errorf("get card uuid at device index %d: %w", i, ret)
 		}
 
 		live, err := d.cardInstances(dev, cardUUID)
@@ -719,7 +719,7 @@ func (d *hgmlMigDriver) DestroyInstance(cardUUID string, inst migInstance) error
 		gis, ret := dev.GetGpuInstances(infos[i].Id)
 		if !ret.IsSuccess() {
 			return fmt.Errorf(
-				"card %s: list live gpu instances of profile %d: %s", cardUUID, infos[i].Id, ret.Error())
+				"card %s: list live gpu instances of profile %d: %w", cardUUID, infos[i].Id, ret)
 		}
 		for j := range gis {
 			giInfo := gis[j].GetInfo()
@@ -788,8 +788,8 @@ func destroyGpuInstance(cardUUID string, gi hgml.GpuInstance, giID uint32) error
 				continue
 			}
 			return fmt.Errorf(
-				"card %s: list compute instances of profile %d on gpu instance %d: %s",
-				cardUUID, ciID, giID, ret.Error())
+				"card %s: list compute instances of profile %d on gpu instance %d: %w",
+				cardUUID, ciID, giID, ret)
 		}
 		for k := range cis {
 			ciInfo := cis[k].GetInfo()
@@ -800,8 +800,8 @@ func destroyGpuInstance(cardUUID string, gi hgml.GpuInstance, giID uint32) error
 						cardUUID, ciInfo.Id, giID, errInstanceInUse)
 				}
 				return fmt.Errorf(
-					"card %s: destroy compute instance %d on gpu instance %d: %s",
-					cardUUID, ciInfo.Id, giID, r.Error())
+					"card %s: destroy compute instance %d on gpu instance %d: %w",
+					cardUUID, ciInfo.Id, giID, r)
 			}
 		}
 	}
@@ -810,7 +810,7 @@ func destroyGpuInstance(cardUUID string, gi hgml.GpuInstance, giID uint32) error
 		if driverReportsInUse(r) {
 			return fmt.Errorf("card %s: destroy gpu instance %d: %w", cardUUID, giID, errInstanceInUse)
 		}
-		return fmt.Errorf("card %s: destroy gpu instance %d: %s", cardUUID, giID, r.Error())
+		return fmt.Errorf("card %s: destroy gpu instance %d: %w", cardUUID, giID, r)
 	}
 	return nil
 }
