@@ -9,9 +9,14 @@ fail=0
 
 assert_output() {
   local name="$1" config_version="$2" input="$3" expected="$4"
-  local actual
-  actual="$(printf '%s' "$input" | bash "$render" "$config_version")"
-  if [ "$actual" != "$expected" ]; then
+  # The exit code is asserted alongside the output: the renderer's contract is to print the runtimes
+  # AND exit 0, and comparing only stdout leaves a case that cannot fail on a nonzero exit.
+  local actual rc=0
+  actual="$(printf '%s' "$input" | bash "$render" "$config_version")" || rc=$?
+  if [ "$rc" != 0 ]; then
+    echo "FAIL: $name (the renderer exited $rc)"
+    fail=1
+  elif [ "$actual" != "$expected" ]; then
     echo "FAIL: $name"
     echo "--- expected ---"
     printf '%s\n' "$expected"
