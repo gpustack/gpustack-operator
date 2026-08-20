@@ -987,6 +987,74 @@ func (r *DevicesReconciler) patchAllocatingPod(
 	return err
 }
 
+// unpatchAllocatingPod is the inverse of patchAllocatingPod: it takes one container's entry back out
+// of the pod's allocation annotation and keeps every sibling's, which is what makes the durable half
+// of an allocation compensatable once the patch has already landed.
+//
+// prior is what that container's entry held before the patch being undone, or nil when it held
+// nothing. It is restored rather than removed, because a patch can be a replay overwriting a claim the
+// container already had: removing that would drop a placement the node's occupancy still counts on.
+//
+// The entries that stay are rebuilt exactly the way the patch builds them — the pod as the informer
+// has it, overlaid with this process's reservations for the pod's other containers — because a
+// strategic merge patch replaces the annotation's whole value, so writing only what the cached copy
+// carried would erase a sibling's claim.
+func (r *DevicesReconciler) unpatchAllocatingPod(
+	ctx context.Context, pod *core.Pod, container string, prior *ContainerAllocation,
+) error {
+	allocations, err := AllocatedAcceleratorsOf(pod)
+	if err != nil {
+		return fmt.Errorf("read allocated accelerators: %w", err)
+	}
+	for name, reserved := range r.reservationsFor(pod.UID) {
+		if name == container {
+			continue
+		}
+		if allocations == nil {
+			allocations = make(PodAllocations, 1)
+		}
+		allocations[name] = ContainerAllocation{
+			Devices:   reserved.Allocated,
+			DeviceIDs: reserved.DeviceIDs,
+		}
+	}
+	if prior != nil {
+		if allocations == nil {
+			allocations = make(PodAllocations, 1)
+		}
+		allocations[container] = *prior
+	} else {
+		delete(allocations, container)
+	}
+
+	// With nothing left to record, the annotation goes rather than staying behind empty: the
+	// Pod-delete prune is gated on its presence, so an empty one would enqueue work for an
+	// allocation nobody holds. A nil value is how a strategic merge patch removes a key.
+	var value any
+	if len(allocations) > 0 {
+		allocationsBytes, marshalErr := json.Marshal(allocations)
+		if marshalErr != nil {
+			return fmt.Errorf("marshal allocated accelerators: %w", marshalErr)
+		}
+		value = string(allocationsBytes)
+	}
+
+	obj := map[string]any{
+		"metadata": map[string]any{
+			"annotations": map[string]any{
+				AllocatedAcceleratorAnnoKey: value,
+			},
+		},
+	}
+	objBytes, err := json.Marshal(obj)
+	if err != nil {
+		return fmt.Errorf("marshal object meta: %w", err)
+	}
+
+	_, err = kubeclientset.PatchWithCtrlClient(ctx, r.Client, pod, types.StrategicMergePatchType, objBytes)
+	return err
+}
+
 func allocatedStatusOf(pod *core.Pod) (allocatedStatus workercore.DevicesStatus, err error) {
 	allocations, err := AllocatedAcceleratorsOf(pod)
 	if err != nil {

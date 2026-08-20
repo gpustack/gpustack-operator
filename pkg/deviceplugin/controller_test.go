@@ -188,6 +188,130 @@ func TestDevicesReconciler_PatchAllocatingPod_PerContainer(t *testing.T) {
 		"a sibling container's claim survives a patch built from a stale pod copy")
 }
 
+// TestDevicesReconciler_UnpatchAllocatingPod verifies the inverse of patchAllocatingPod: it takes one
+// container's entry back out and keeps every sibling's, whichever source records them. A sibling can be
+// known only to the informer copy or only to this process's reservations, and the patch replaces the
+// annotation's whole value, so a rebuild that reads one source alone erases the other's claim.
+//
+// It also pins the two conclusions the entry itself decides: a claim the container already held is
+// restored rather than removed — the patch being undone overwrote it, so removing it would report an
+// accelerator free while its instance is still carved — and an annotation left with nothing to record
+// goes away entirely, because the Pod-delete prune is gated on the key's presence.
+func TestDevicesReconciler_UnpatchAllocatingPod(t *testing.T) {
+	const nodeName = "node-unpatch"
+
+	held := func(device string) ContainerAllocation {
+		return ContainerAllocation{
+			Devices:   physicalSliceAllocation("grp-0", device, "1g.10gb", pl(0, 2)),
+			DeviceIDs: []string{"grp-0:" + device + ":0000"},
+		}
+	}
+	prior := held("dev-prior")
+
+	cases := []struct {
+		name string
+		// recorded is the pod's annotation as the unpatch reads it.
+		recorded PodAllocations
+		// rawRecorded overrides recorded with a literal annotation value.
+		rawRecorded string
+		// reserved is this process's reservation table for the pod, by container.
+		reserved PodAllocations
+		// prior is what the container's entry held before the patch being undone, nil when nothing.
+		prior          *ContainerAllocation
+		wantErr        bool
+		wantAbsent     bool
+		wantContainers []string
+	}{
+		{
+			name:       "the last entry goes, and the annotation with it",
+			recorded:   PodAllocations{"main": held("dev-0")},
+			wantAbsent: true,
+		},
+		{
+			name:           "a sibling recorded in the annotation survives",
+			recorded:       PodAllocations{"main": held("dev-0"), "sidecar": held("dev-1")},
+			wantContainers: []string{"sidecar"},
+		},
+		{
+			name:           "a sibling known only to this process survives",
+			recorded:       PodAllocations{"main": held("dev-0")},
+			reserved:       PodAllocations{"sidecar": held("dev-1")},
+			wantContainers: []string{"sidecar"},
+		},
+		{
+			name:           "a replayed claim is restored, not removed",
+			recorded:       PodAllocations{"main": held("dev-0")},
+			prior:          &prior,
+			wantContainers: []string{"main"},
+		},
+		{
+			name:        "an unreadable record is refused, not written over",
+			rawRecorded: "{not json",
+			wantErr:     true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			annotations := allocationAnnotation(t, c.recorded)
+			if c.rawRecorded != "" {
+				annotations = map[string]string{AllocatedAcceleratorAnnoKey: c.rawRecorded}
+			}
+			pod := &core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name: "p", Namespace: "default", UID: "uid-p",
+					Annotations: annotations,
+				},
+				Spec: core.PodSpec{NodeName: nodeName},
+			}
+			cli := ctrlfake.NewClientBuilder().
+				WithScheme(scheme.Scheme).
+				WithObjects(pod).
+				Build()
+			rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+			for name, reserved := range c.reserved {
+				rec.reserveDevices(pod.UID, name, reserved.Devices, reserved.DeviceIDs)
+			}
+
+			err := rec.unpatchAllocatingPod(ctx, pod, "main", c.prior)
+			got := new(core.Pod)
+			require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKeyFromObject(pod), got))
+			if c.wantErr {
+				require.Error(t, err, "a record this process cannot read must be refused")
+				assert.Equal(t, c.rawRecorded, got.Annotations[AllocatedAcceleratorAnnoKey],
+					"and left exactly as it was, since rewriting it would drop claims nobody can enumerate")
+				return
+			}
+			require.NoError(t, err)
+			if c.wantAbsent {
+				assert.NotContains(t, got.Annotations, AllocatedAcceleratorAnnoKey,
+					"an annotation with nothing left to record must be removed, not left behind empty")
+				return
+			}
+
+			allocations, err := AllocatedAcceleratorsOf(got)
+			require.NoError(t, err)
+			names := make([]string, 0, len(allocations))
+			for name := range allocations {
+				names = append(names, name)
+			}
+			assert.ElementsMatch(t, c.wantContainers, names)
+			if c.prior != nil {
+				assert.Equal(t, *c.prior, allocations["main"],
+					"the claim the container already held must come back unchanged, device IDs included")
+			}
+			for _, name := range c.wantContainers {
+				if name == "main" {
+					continue
+				}
+				assert.NotEmpty(t, allocations[name].DeviceIDs,
+					"a sibling's device IDs travel with its allocation, whichever source it came from")
+			}
+		})
+	}
+}
+
 // TestDevicesReconciler_TerminatingPodStillCharges verifies a terminating Pod keeps charging its
 // accelerator. The reclaimer destroys an instance when the Pod object is gone, not when its
 // containers exit, so dropping it at the deletion timestamp would advertise a slot the hardware
