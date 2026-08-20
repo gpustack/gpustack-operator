@@ -339,12 +339,20 @@ Things the module does not do:
   RKE2 gives every node a password (`/etc/rancher/node/password`, hashed into a
   `<node>.node-password.rke2` Secret) and `rke2-uninstall.sh` deletes it, so a node replaced while the
   cluster survives would present a fresh one and be refused for good. The module saves the file before
-  each uninstall and restores it before the service starts. If it is already gone -- a host cleaned by
-  other means -- delete that node's Secret and let it re-register:
+  each uninstall, to `/etc/rancher/node-password.saved` outside the directory the uninstall removes,
+  and restores it before the service starts. If it is already gone -- a host cleaned by other means --
+  delete that node's Secret and let it re-register:
   ```bash
   kubectl -n kube-system delete secret <node name>.node-password.rke2
   ```
   The `k3s` module needs none of this: its uninstall leaves `/etc/rancher/node` alone.
+- **A `terraform destroy` leaves `/etc/rancher/node-password.saved` on each host, and it is inert
+  there.** The save is in the destroy-time provisioner as well, which cannot know whether a create
+  follows, and only a create restores the file and removes it. After a full destroy there is nothing
+  left to match it against: the datastore goes with the cluster, and with it every
+  `node-password.rke2` Secret, so the nodes of the next cluster register with whatever password they
+  present. It is load-bearing in the other case only -- a node replaced while the cluster survives.
+  Delete it whenever you are done with the host; a later apply neither needs it nor minds it.
 - **A first server reachable only through the jump host is not supported, and the failure comes last.**
   The final step rewrites the fetched kubeconfig to the first server's SSH host and then polls
   `/readyz` **from this workstation**, 60 times. With that host on an internal network the cluster
