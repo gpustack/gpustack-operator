@@ -1314,6 +1314,295 @@ func TestResourceServer_Allocate_RollsBackReservationOnPatchFailure(t *testing.T
 	assert.False(t, reserved, "a failed patch must roll back the reservation so the card is not stranded")
 }
 
+// refusingServer builds an exclusive-mode server over one node's Devices and Pod, with the given
+// responder, for the refusal guards below.
+func refusingServer(
+	nodeName string, cli ctrlcli.WithWatch, responder ContainerAllocateResponder,
+) (*ResourceServer, *DevicesReconciler) {
+	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+	return &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeExclusive,
+		Reconciler:     rec,
+		Responder:      responder,
+	}, rec
+}
+
+// allocateOneCard drives one whole-accelerator Allocate for the first token of dev-0.
+func allocateOneCard(ctx context.Context, s *ResourceServer) error {
+	_, err := s.Allocate(ctx, &AllocateRequest{
+		ContainerRequests: []*ContainerAllocateRequest{{DevicesIds: []string{"grp-0:dev-0:0000"}}},
+	})
+	return err
+}
+
+// TestResourceServer_Allocate_ReleasesLedgerOnResponderRefusal covers the one error path that runs
+// AFTER the durable annotation patch: the responder call, which keeps its position on purpose. A
+// refusal there fails the allocation, so kubelet never starts the container, and the accelerator has
+// to come back — both halves of the write, the annotation and the in-process reservation.
+//
+// It enters through Allocate rather than calling the responder directly, which is the whole point:
+// every responder-level test passes while the ledger stays charged for a container that does not exist.
+func TestResourceServer_Allocate_ReleasesLedgerOnResponderRefusal(t *testing.T) {
+	const nodeName = "node-rr"
+	podA := concurrentAllocatePod(nodeName, "a", "uid-a", workercore.DeviceAllocationModeExclusive, 1)
+	cli := nodeFixture(crossModeDevices(nodeName, workercore.DeviceAllocationModeNone), podA)
+	s, rec := refusingServer(nodeName, cli, failingResponder{})
+
+	ctx := context.Background()
+	require.Error(t, allocateOneCard(ctx, s), "Allocate must fail when the responder refuses")
+
+	_, reserved := reservedWorkload(rec, "uid-a")
+	assert.False(t, reserved, "a refused allocation must not leave the accelerator reserved")
+
+	got := new(core.Pod)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKeyFromObject(podA), got))
+	allocations, err := AllocatedAcceleratorsOf(got)
+	require.NoError(t, err)
+	assert.NotContains(t, allocations, workloadContainer,
+		"a refused allocation must not leave its allocation stamped on the pod")
+}
+
+// cancellingResponder refuses like failingResponder, and cancels the request context on its way out
+// — the shape of a kubelet that gives up, or a gRPC deadline that expires, while the responder is
+// working. The refusal and the dead context then arrive together.
+type cancellingResponder struct{ cancel context.CancelFunc }
+
+func (r cancellingResponder) GetContainerAllocateResponse(
+	context.Context, *core.Pod, *core.Container, *workercore.Devices, map[Resource]int32,
+) (*ContainerAllocateResponse, error) {
+	r.cancel()
+	return nil, errors.New("responder failed as the request was cancelled")
+}
+
+// cancelAwareClient is a fake client that refuses a patch on a dead context, the way a real one does.
+// The default fake ignores the context entirely, which would make a compensation issued on the
+// caller's canceled context look like a success.
+func cancelAwareClient(objs ...ctrlcli.Object) ctrlcli.WithWatch {
+	return ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(objs...).
+		WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+			return []string{obj.(*core.Pod).Spec.NodeName}
+		}).
+		WithInterceptorFuncs(ctrlintercept.Funcs{
+			Patch: func(
+				ctx context.Context, cli ctrlcli.WithWatch, obj ctrlcli.Object,
+				patch ctrlcli.Patch, opts ...ctrlcli.PatchOption,
+			) error {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return cli.Patch(ctx, obj, patch, opts...)
+			},
+		}).
+		Build()
+}
+
+// TestResourceServer_Allocate_ReleasesLedgerWhenTheRequestIsCancelled pins the context the
+// compensation runs on. The failure it compensates can BE the request's own cancellation, so a
+// compensating patch issued on the caller's context would fail on arrival — freeing the reservation
+// while leaving the annotation charged, which is the leak inverted rather than fixed.
+func TestResourceServer_Allocate_ReleasesLedgerWhenTheRequestIsCancelled(t *testing.T) {
+	const nodeName = "node-rr-cancel"
+	podA := concurrentAllocatePod(nodeName, "a", "uid-a", workercore.DeviceAllocationModeExclusive, 1)
+	cli := cancelAwareClient(crossModeDevices(nodeName, workercore.DeviceAllocationModeNone), podA)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s, rec := refusingServer(nodeName, cli, cancellingResponder{cancel: cancel})
+
+	require.Error(t, allocateOneCard(ctx, s), "Allocate must fail when the responder refuses")
+
+	_, reserved := reservedWorkload(rec, "uid-a")
+	assert.False(t, reserved, "the reservation must be freed whatever the request's context is doing")
+
+	got := new(core.Pod)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(podA), got))
+	allocations, err := AllocatedAcceleratorsOf(got)
+	require.NoError(t, err)
+	assert.NotContains(t, allocations, workloadContainer,
+		"the annotation must come off even though the caller's context is already cancelled")
+}
+
+// TestResourceServer_Allocate_RefusalFreesTheReservationBeforeTheAnnotation pins the order of the two
+// halves. A sibling container's patch rebuilds this pod's other entries from the reservations it
+// reads, so one reading them while the refused container's reservation still stood would write that
+// container back in after the compensation removed it. Freeing first closes that route; the sibling's
+// own cached copy of the annotation is a second route this ordering does not reach.
+func TestResourceServer_Allocate_RefusalFreesTheReservationBeforeTheAnnotation(t *testing.T) {
+	const nodeName = "node-rr-order"
+	podA := concurrentAllocatePod(nodeName, "a", "uid-a", workercore.DeviceAllocationModeExclusive, 1)
+
+	rec := &DevicesReconciler{NodeName: nodeName}
+	// heldAtPatch records, for each patch the server issues, whether the refused container's
+	// reservation was still standing when it ran: true for the durable patch, false for the
+	// compensating one.
+	var heldAtPatch []bool
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(crossModeDevices(nodeName, workercore.DeviceAllocationModeNone), podA).
+		WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+			return []string{obj.(*core.Pod).Spec.NodeName}
+		}).
+		WithInterceptorFuncs(ctrlintercept.Funcs{
+			Patch: func(
+				ctx context.Context, cli ctrlcli.WithWatch, obj ctrlcli.Object,
+				patch ctrlcli.Patch, opts ...ctrlcli.PatchOption,
+			) error {
+				_, held := reservedWorkload(rec, "uid-a")
+				heldAtPatch = append(heldAtPatch, held)
+				return cli.Patch(ctx, obj, patch, opts...)
+			},
+		}).
+		Build()
+	rec.Client = cli
+
+	s := &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeExclusive,
+		Reconciler:     rec,
+		Responder:      failingResponder{},
+	}
+
+	require.Error(t, allocateOneCard(context.Background(), s))
+	require.Equal(t, []bool{true, false}, heldAtPatch,
+		"the durable patch runs while the reservation stands, the compensating one after it is freed")
+}
+
+// TestResourceServer_Allocate_RefusalRestoresAReplayedClaim pins what a refusal must NOT do to a claim
+// the container already held. Kubelet re-runs Allocate for a container whose checkpoint it lost, and
+// priorAllocationOf resolves such a replay from the durable annotation — so by then that entry is the
+// only record of a placement the node's occupancy counts on, with the vendor's artifact still carved
+// against it. Deleting it would report the accelerator free while it is still held: the opposite
+// direction from the leak this compensation closes, and the dangerous one.
+//
+// Both halves come back, not just the annotation. Releasing the reservation unconditionally would
+// leave the two records disagreeing about a claim that is still live.
+func TestResourceServer_Allocate_RefusalRestoresAReplayedClaim(t *testing.T) {
+	const nodeName = "node-rr-replay"
+	podA := concurrentAllocatePod(nodeName, "a", "uid-a", workercore.DeviceAllocationModeExclusive, 1)
+
+	// The claim the container already holds, recorded the way a previous Allocate left it.
+	held := PodAllocations{workloadContainer: ContainerAllocation{
+		Devices: workercore.DevicesStatus{
+			Groups: []workercore.DevicesAllocationGroup{{
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Accelerators: []workercore.AcceleratorAllocation{{
+					ID:        "dev-0",
+					Mode:      workercore.DeviceAllocationModeExclusive,
+					Allocated: nodefeature.ResourceMaxUnits,
+				}},
+			}},
+		},
+		DeviceIDs: []string{"grp-0:dev-0:0000"},
+	}}
+	heldBytes, err := json.Marshal(held)
+	require.NoError(t, err)
+	podA.Annotations = map[string]string{AllocatedAcceleratorAnnoKey: string(heldBytes)}
+
+	cli := nodeFixture(crossModeDevices(nodeName, workercore.DeviceAllocationModeNone), podA)
+	s, rec := refusingServer(nodeName, cli, failingResponder{})
+
+	ctx := context.Background()
+	require.Error(t, allocateOneCard(ctx, s), "Allocate must fail when the responder refuses")
+
+	got := new(core.Pod)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKeyFromObject(podA), got))
+	allocations, err := AllocatedAcceleratorsOf(got)
+	require.NoError(t, err)
+	require.Contains(t, allocations, workloadContainer,
+		"a refusal must not delete a claim this Allocate only replayed")
+	assert.Equal(t, held[workloadContainer], allocations[workloadContainer],
+		"the entry must come back exactly as it was before the patch")
+
+	reserved, ok := reservedWorkload(rec, "uid-a")
+	require.True(t, ok, "the reservation must record the replayed claim, not be released with it")
+	assert.Equal(t, held[workloadContainer].Devices, reserved,
+		"and it must record what the container still holds, not what this attempt tried to take")
+}
+
+// TestResourceServer_PriorClaimOf pins which record answers "what does this container already hold" —
+// the question a refusal's compensation has to put back, and a replay has to reuse. The reservation
+// leads because it cannot lag; the durable annotation is the fallback that survives a restart; and an
+// entry whose give-back is still pending is void, however present it looks, because the write that
+// would have removed it did not land.
+func TestResourceServer_PriorClaimOf(t *testing.T) {
+	const container = workloadContainer
+
+	held := func(dev string) ContainerAllocation {
+		return ContainerAllocation{
+			Devices:   reservationStatusFor(dev),
+			DeviceIDs: []string{"grp-0:" + dev + ":0000"},
+		}
+	}
+	recorded := held("dev-anno")
+	reserved := held("dev-reserved")
+	restored := held("dev-restored")
+
+	cases := []struct {
+		name string
+		// annotated is what the pod's annotation carries.
+		annotated *ContainerAllocation
+		// reservation is what this process has reserved for the container.
+		reservation *ContainerAllocation
+		// pending, when set, is a give-back waiting for this container; its value is what that
+		// give-back would restore, and a nil pendingPrior means it would remove the entry outright.
+		pending      bool
+		pendingPrior *ContainerAllocation
+		want         *ContainerAllocation
+	}{
+		{
+			name:      "the annotation answers when nothing else does",
+			annotated: &recorded,
+			want:      &recorded,
+		},
+		{
+			name:        "a reservation leads the annotation",
+			annotated:   &recorded,
+			reservation: &reserved,
+			want:        &reserved,
+		},
+		{
+			name:      "an entry whose give-back is pending holds nothing",
+			annotated: &recorded,
+			pending:   true,
+		},
+		{
+			name:         "and a give-back that restores an earlier claim answers with it",
+			annotated:    &recorded,
+			pending:      true,
+			pendingPrior: &restored,
+			want:         &restored,
+		},
+		{
+			name: "nothing recorded anywhere",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			pod := &core.Pod{ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "default", UID: "uid-p"}}
+			if c.annotated != nil {
+				annoBytes, err := json.Marshal(PodAllocations{container: *c.annotated})
+				require.NoError(t, err)
+				pod.Annotations = map[string]string{AllocatedAcceleratorAnnoKey: string(annoBytes)}
+			}
+			rec := new(DevicesReconciler)
+			if c.reservation != nil {
+				rec.reserveDevices(pod.UID, container, c.reservation.Devices, c.reservation.DeviceIDs)
+			}
+			if c.pending {
+				rec.recordPendingRelease(pod.UID, container, c.pendingPrior)
+			}
+			s := &ResourceServer{Reconciler: rec}
+
+			assert.Equal(t, c.want, s.priorClaimOf(pod, container))
+		})
+	}
+}
+
 // reservationStatusFor builds a one-accelerator sliced allocation for a reservation fixture.
 func reservationStatusFor(dev string) workercore.DevicesStatus {
 	return workercore.DevicesStatus{
@@ -3516,29 +3805,53 @@ func (failingResponder) GetContainerAllocateResponse(
 	return nil, errors.New("vendor responder failed")
 }
 
-// TestResourceServer_Allocate_LegacyResponderFailureKeepsItsShape pins the BOUNDARY of the
-// reordering that TestResourceServer_Allocate_ResponderFailureLeavesNothing pins the inside of.
-// Only a logical-slice response is rendered before the durable patch. Every other responder keeps
-// its position after it — including its pre-existing failure shape, where the annotation is already
-// written — because two vendors materialize a subdevice and an ownership marker inside that call,
-// and rendering them before a patch that then failed would leave the hardware allocated while the
-// ledger read the accelerator as free. That strand is pre-existing; this branch must not widen it.
-func TestResourceServer_Allocate_LegacyResponderFailureKeepsItsShape(t *testing.T) {
+// postPatchWitnessResponder fails like failingResponder, and records whether the allocation
+// annotation had already landed on the API when it ran — which is what "the patch runs before me"
+// looks like from inside the responder. It reads the pod back rather than inspecting the one it was
+// handed: the patch does not write through to that in-memory copy.
+type postPatchWitnessResponder struct {
+	cli           ctrlcli.Client
+	sawPatchedPod bool
+}
+
+func (r *postPatchWitnessResponder) GetContainerAllocateResponse(
+	ctx context.Context, pod *core.Pod, _ *core.Container, _ *workercore.Devices, _ map[Resource]int32,
+) (*ContainerAllocateResponse, error) {
+	live := new(core.Pod)
+	if err := r.cli.Get(ctx, ctrlcli.ObjectKeyFromObject(pod), live); err == nil {
+		r.sawPatchedPod = live.Annotations[AllocatedAcceleratorAnnoKey] != ""
+	}
+	return nil, errors.New("vendor responder failed")
+}
+
+// TestResourceServer_Allocate_LegacyResponderKeepsItsPosition pins the BOUNDARY of the reordering
+// that TestResourceServer_Allocate_ResponderFailureLeavesNothing pins the inside of. Only a
+// logical-slice response is rendered before the durable patch; every other responder keeps its
+// position after it, because two vendors materialize a subdevice and an ownership marker inside that
+// call, and rendering them before a patch that then failed would leave the hardware allocated while
+// the ledger read the accelerator as free.
+//
+// The position is what this pins — not the aftermath. A refusal from that position is compensated
+// (TestResourceServer_Allocate_ReleasesLedgerOnResponderRefusal), so the ledger comes back; what the
+// responder itself created before failing is still its own reclaimer's business.
+func TestResourceServer_Allocate_LegacyResponderKeepsItsPosition(t *testing.T) {
 	const nodeName = "node-legacy-respfail"
 
 	pod := slicedPod(nodeName, "p", "pod-p")
 	cli := nodeFixture(slicedDevices(nodeName), pod)
 	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
-	s := slicedServer(rec, failingResponder{})
+	responder := &postPatchWitnessResponder{cli: cli}
+	s := slicedServer(rec, responder)
 
 	require.Error(t, allocateOneSlice(t, s))
+	assert.True(t, responder.sawPatchedPod,
+		"a non-logical responder still runs after the durable patch, exactly as before")
 
 	got := new(core.Pod)
 	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(pod), got))
 	allocations, err := AllocatedAcceleratorsOf(got)
 	require.NoError(t, err)
-	assert.NotEmpty(t, allocations,
-		"the annotation is written before a non-logical responder runs, exactly as before this branch")
+	assert.Empty(t, allocations, "and its refusal gives the allocation back")
 }
 
 // TestResourceServer_PreferredAllocation_StalePreferredIDDoesNotPanic pins the lower bound on the

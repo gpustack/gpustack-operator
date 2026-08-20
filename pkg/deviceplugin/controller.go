@@ -24,6 +24,7 @@ import (
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
+	ctrlsource "sigs.k8s.io/controller-runtime/pkg/source"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
@@ -100,6 +101,27 @@ type (
 		visibilityGrantsMutex sync.RWMutex
 		visibilityGrants      sets.Set[_ReservationKey]
 
+		// pendingReleases records the compensating annotation writes that have not landed yet, keyed
+		// by pod UID AND container name, carrying the claim to restore (nil to remove the entry).
+		// The reservation half of a compensation is memory and cannot fail; this half is I/O and
+		// can, and an entry left behind keeps charging its accelerator to a container the kubelet
+		// never started — the leak the compensation exists to close. Nothing else retries it: the
+		// Pod watch fires on changes to this very annotation, and the change that would fire it is
+		// the write that failed. So Reconcile retries these until they land or their pod is gone.
+		//
+		// It is deliberately NOT folded into reservations: an entry here is the absence of a claim,
+		// and every reader of that map would count it as one.
+		pendingReleasesMutex sync.RWMutex
+		pendingReleases      map[_ReservationKey]*ContainerAllocation
+
+		// pendingReleaseEvents wakes this reconciler when a compensating write is recorded. Nothing
+		// else would: the only Pod change that enqueues it is a change to the allocation annotation,
+		// and the change that would have fired is the write that just failed — while RequeueAfter can
+		// only re-arm from a pass that already saw the entry. Buffered by one and sent without
+		// blocking, since a wake-up already queued is the same wake-up; a nil channel (nothing wired
+		// this up) simply drops it, and the next reconcile finds the entry in the table anyway.
+		pendingReleaseEvents chan ctrlevent.GenericEvent
+
 		// allocateMutex serializes the whole workload Allocate identify→cross-mode-check→reserve
 		// section for the node, and the visibility Allocate's identify→grant section. All per-mode
 		// ResourceServers share this one reconciler, so a single node-wide mutex makes concurrent
@@ -156,11 +178,20 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Drop the in-process claims whose pod is gone (same live set the sliced working-dir GC uses).
 	r.pruneReservations(livePodUIDs)
 	r.pruneVisibilityGrants(livePodUIDs)
+	r.retryPendingReleases(ctx, logger, podList.Items, livePodUIDs)
 
 	r.notifiersMutex.Lock()
 	r.lastLivePodUIDs = livePodUIDs
 	r.notifiersMutex.Unlock()
 	r.notifyListeners()
+
+	// A compensating write that still has not landed keeps an accelerator reading as held, and no
+	// watch brings this reconciler back for it: the Pod watch fires on changes to the allocation
+	// annotation, and the change that would fire it is the write that failed. So ask for another
+	// pass while any remain.
+	if r.hasPendingReleases() {
+		return ctrl.Result{RequeueAfter: pendingReleaseRetryPeriod}, nil
+	}
 
 	return ctrl.Result{}, nil
 }
@@ -308,6 +339,10 @@ func (r *DevicesReconciler) SetupController(ctx context.Context, opts controller
 		return fmt.Errorf("index pod '%s': %w", IndexingPodsByNodeName, err)
 	}
 
+	// The wake-up channel for a recorded compensating write, in place before the controller watches it
+	// and before any Allocate can record one.
+	r.pendingReleaseEvents = make(chan ctrlevent.GenericEvent, 1)
+
 	r.NodeName = osx.Getenv("KUBERNETES_NODE_NAME")
 	r.Client = opts.Manager.GetClient()
 
@@ -358,7 +393,30 @@ func (r *DevicesReconciler) SetupController(ctx context.Context, opts controller
 				},
 			),
 		).
+		WatchesRawSource(
+			// A compensating write that could not land is retried from Reconcile, so recording one has
+			// to bring this reconciler back by itself — see pendingReleaseEvents for why no watch does.
+			ctrlsource.Channel(
+				r.pendingReleaseEvents,
+				ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueueDevicesForThisNode),
+			),
+		).
 		Complete(r)
+}
+
+// enqueueDevicesForThisNode enqueues this node's Devices whatever the event carried. It serves the
+// wake-up channel, whose events name no object of their own: what they say is "this node has work",
+// which is one request.
+func (r *DevicesReconciler) enqueueDevicesForThisNode(
+	context.Context, ctrlcli.Object,
+) []ctrlreconcile.Request {
+	return []ctrlreconcile.Request{
+		{
+			NamespacedName: ctrlcli.ObjectKey{
+				Name: r.NodeName,
+			},
+		},
+	}
 }
 
 func (r *DevicesReconciler) enqueueDevicesWhenPodChanged(
@@ -678,6 +736,142 @@ func livePodUIDSet(livePodUIDs []string) sets.Set[types.UID] {
 	return live
 }
 
+// pendingReleaseRetryPeriod is how long Reconcile waits before coming back for a compensating write
+// that has not landed. The accelerator reads as held until it does, so this is short; it is not urgent
+// enough to spin, since the write failed on I/O that needs time to recover.
+const pendingReleaseRetryPeriod = 5 * time.Second
+
+// recordPendingRelease remembers a compensating annotation write that did not land, so a later
+// Reconcile retries it. prior is the claim to restore, nil to remove the container's entry. A no-op
+// for an empty UID or an empty container name.
+func (r *DevicesReconciler) recordPendingRelease(
+	podUID types.UID, container string, prior *ContainerAllocation,
+) {
+	if podUID == "" || container == "" {
+		return
+	}
+	r.pendingReleasesMutex.Lock()
+	if r.pendingReleases == nil {
+		r.pendingReleases = make(map[_ReservationKey]*ContainerAllocation, 1)
+	}
+	wasEmpty := len(r.pendingReleases) == 0
+	r.pendingReleases[_ReservationKey{PodUID: podUID, Container: container}] = prior
+	r.pendingReleasesMutex.Unlock()
+
+	// Wake the reconciler on the FIRST entry only: the write that failed is the very change that would
+	// otherwise have enqueued it, so without this the retry waits for an unrelated event a quiet node
+	// never produces. Waking on every entry instead would spin — a retry that fails records again, and
+	// the wake-up it sent would bring the next attempt straight back with no delay. From here the
+	// requeue paces it.
+	if !wasEmpty {
+		return
+	}
+	select {
+	case r.pendingReleaseEvents <- ctrlevent.GenericEvent{}:
+	default:
+	}
+}
+
+// dropPendingRelease forgets a compensating write. It runs when the write lands, when the pod it
+// belongs to is gone, and — the case that matters for correctness — when a later Allocate publishes a
+// claim for the same container: that claim supersedes whatever the pending write would have restored,
+// so retrying it afterwards would take back an allocation the container legitimately holds.
+func (r *DevicesReconciler) dropPendingRelease(podUID types.UID, container string) {
+	r.pendingReleasesMutex.Lock()
+	delete(r.pendingReleases, _ReservationKey{PodUID: podUID, Container: container})
+	r.pendingReleasesMutex.Unlock()
+}
+
+// hasPendingReleases reports whether any compensating write is still waiting to be retried.
+func (r *DevicesReconciler) hasPendingReleases() bool {
+	r.pendingReleasesMutex.RLock()
+	defer r.pendingReleasesMutex.RUnlock()
+	return len(r.pendingReleases) > 0
+}
+
+// pendingReleaseKeySet lists the containers with a compensating write waiting, so a retry walk
+// performs its I/O without holding the lock. Only the keys: the write itself is taken again, right
+// before it is issued, so a claim published in between is not written over.
+func (r *DevicesReconciler) pendingReleaseKeySet() sets.Set[_ReservationKey] {
+	r.pendingReleasesMutex.RLock()
+	defer r.pendingReleasesMutex.RUnlock()
+	if len(r.pendingReleases) == 0 {
+		return nil
+	}
+	return sets.KeySet(r.pendingReleases)
+}
+
+// peekPendingRelease returns one container's compensating write, or reports that none is waiting. It
+// is read fresh at the moment of writing rather than out of a snapshot, which is what keeps a retry
+// from acting on a decision that has since been superseded: a claim published while the walk was
+// elsewhere drops the entry, and this then finds nothing to do. The entry stays until the write lands,
+// so a failed attempt needs no re-recording — and therefore sends no second wake-up.
+func (r *DevicesReconciler) peekPendingRelease(
+	podUID types.UID, container string,
+) (*ContainerAllocation, bool) {
+	r.pendingReleasesMutex.RLock()
+	defer r.pendingReleasesMutex.RUnlock()
+	prior, ok := r.pendingReleases[_ReservationKey{PodUID: podUID, Container: container}]
+	return prior, ok
+}
+
+// retryPendingReleases re-attempts the compensating writes that did not land, against the pod list
+// this reconcile already holds, and forgets the ones whose pod is gone.
+//
+// A pending write is matched to its pod by UID, never by name: a pod recreated under the same name is
+// a different pod, and its own allocation must not be taken back by an entry the previous one left
+// behind. Such an entry is dropped instead, its UID no longer being live.
+//
+// Each write is TAKEN from the table immediately before it is issued, not read from a snapshot of it.
+// A retry walk spans several round trips, and a claim published for one of its containers meanwhile
+// drops that entry — acting on the snapshot would take back the allocation just published, which is
+// the dangerous direction. What is left is the patch itself racing a concurrent one, which no ordering
+// here can settle: that is the read-modify-write this annotation does not serialize.
+func (r *DevicesReconciler) retryPendingReleases(
+	ctx context.Context, logger logr.Logger, pods []core.Pod, livePodUIDs []string,
+) {
+	pending := r.pendingReleaseKeySet()
+	if pending.Len() == 0 {
+		return
+	}
+
+	live := livePodUIDSet(livePodUIDs)
+	for key := range pending {
+		if !live.Has(key.PodUID) {
+			r.dropPendingRelease(key.PodUID, key.Container)
+			pending.Delete(key)
+		}
+	}
+
+	for i := range pods {
+		pod := &pods[i]
+		for key := range pending {
+			if key.PodUID != pod.UID {
+				continue
+			}
+			pending.Delete(key)
+			prior, ok := r.peekPendingRelease(key.PodUID, key.Container)
+			if !ok {
+				continue
+			}
+			if err := r.unpatchAllocatingPod(ctx, pod, key.Container, prior); err != nil {
+				logger.Error(err, "give back a refused allocation; its accelerator keeps reading as "+
+					"held until this lands or the pod is gone",
+					"pod", ctrlcli.ObjectKeyFromObject(pod), "container", key.Container)
+				break
+			}
+			r.dropPendingRelease(key.PodUID, key.Container)
+			// One write per pod per pass. The rebuild reads the pod as the informer has it and the
+			// patch does not write through to that copy, so a second write here would start from an
+			// annotation still carrying the entry the first one just removed — and put it back.
+			// Editing the cached copy instead is not an option: it is shared with every other reader.
+			// The requeue brings this pod's remaining entries back, by which time the informer has the
+			// write.
+			break
+		}
+	}
+}
+
 const (
 	// AllocatedAcceleratorAnnoKey names the annotation carrying a Pod's per-container accelerator
 	// allocation, as the JSON of PodAllocations. It is the only durable record of what a container
@@ -984,6 +1178,89 @@ func (r *DevicesReconciler) patchAllocatingPod(
 	}
 
 	_, err = kubeclientset.PatchWithCtrlClient(ctx, r.Client, pod, types.StrategicMergePatchType, objBytes)
+	if err == nil {
+		// A claim that is now durable is what supersedes a give-back still pending for the same
+		// container: retrying that give-back afterwards would take back the allocation just recorded.
+		// The reservation cannot say this — it is not a record anything outside this process reads, and
+		// had this patch failed the pending give-back would still be the only thing that ever frees the
+		// accelerator the refused attempt left charged.
+		r.dropPendingRelease(pod.UID, container)
+	}
+	return err
+}
+
+// unpatchAllocatingPod is the inverse of patchAllocatingPod: it takes one container's entry back out
+// of the pod's allocation annotation and keeps every sibling's, which is what makes the durable half
+// of an allocation compensatable once the patch has already landed.
+//
+// prior is what that container's entry held before the patch being undone, or nil when it held
+// nothing. It is restored rather than removed, because a patch can be a replay overwriting a claim the
+// container already had: removing that would drop a placement the node's occupancy still counts on.
+//
+// The entries that stay are rebuilt exactly the way the patch builds them — the pod as the informer
+// has it, overlaid with this process's reservations for the pod's other containers — because a
+// strategic merge patch replaces the annotation's whole value, so writing only what the cached copy
+// carried would erase a sibling's claim.
+func (r *DevicesReconciler) unpatchAllocatingPod(
+	ctx context.Context, pod *core.Pod, container string, prior *ContainerAllocation,
+) error {
+	allocations, err := AllocatedAcceleratorsOf(pod)
+	if err != nil {
+		return fmt.Errorf("read allocated accelerators: %w", err)
+	}
+	for name, reserved := range r.reservationsFor(pod.UID) {
+		if name == container {
+			continue
+		}
+		if allocations == nil {
+			allocations = make(PodAllocations, 1)
+		}
+		allocations[name] = ContainerAllocation{
+			Devices:   reserved.Allocated,
+			DeviceIDs: reserved.DeviceIDs,
+		}
+	}
+	if prior != nil {
+		if allocations == nil {
+			allocations = make(PodAllocations, 1)
+		}
+		allocations[container] = *prior
+	} else {
+		delete(allocations, container)
+	}
+
+	// With nothing left to record, the annotation goes rather than staying behind empty: the
+	// Pod-delete prune is gated on its presence, so an empty one would enqueue work for an
+	// allocation nobody holds. A nil value is how a strategic merge patch removes a key.
+	var value any
+	if len(allocations) > 0 {
+		allocationsBytes, marshalErr := json.Marshal(allocations)
+		if marshalErr != nil {
+			return fmt.Errorf("marshal allocated accelerators: %w", marshalErr)
+		}
+		value = string(allocationsBytes)
+	}
+
+	obj := map[string]any{
+		"metadata": map[string]any{
+			"annotations": map[string]any{
+				AllocatedAcceleratorAnnoKey: value,
+			},
+		},
+	}
+	objBytes, err := json.Marshal(obj)
+	if err != nil {
+		return fmt.Errorf("marshal object meta: %w", err)
+	}
+
+	_, err = kubeclientset.PatchWithCtrlClient(ctx, r.Client, pod, types.StrategicMergePatchType, objBytes)
+	if err != nil {
+		// Only a failed WRITE is worth retrying, and it has to be: the reservation is already given
+		// back, so an entry left here charges its accelerator to a container that does not exist. The
+		// read and marshal failures above would reach the same verdict on every attempt, and rewriting
+		// a record this process cannot parse would drop claims nobody can enumerate.
+		r.recordPendingRelease(pod.UID, container, prior)
+	}
 	return err
 }
 

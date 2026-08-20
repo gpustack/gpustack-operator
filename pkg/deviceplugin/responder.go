@@ -14,6 +14,21 @@ type (
 	// outright. The two optional interfaces below take over per family — PhysicalSlicedResponder
 	// for a hardware partition, LogicalSlicedResponder for a logical slice — so a responder
 	// implementing neither still serves those families from here, unchanged.
+	//
+	// On a workload allocation this is called AFTER the allocation is durably recorded, and a refusal
+	// from it is compensated by the server: the annotation entry and the reservation are given back.
+	// That compensation reaches only what the framework itself wrote, which makes one requirement on
+	// every implementation: once it has materialized anything outside the response — a subdevice, an
+	// on-disk ownership marker — it must not return an error. Cambricon and MetaX both do materialize,
+	// and both satisfy this today: every error return precedes the create, and nothing after it can
+	// fail. An implementation that broke this would leave the hardware alive while the server dropped
+	// its ledger claim, and the vendor reclaimers would keep it that way — they preserve an artifact
+	// whose Pod is still listed, and a Pod whose admission just failed still is. Such a responder needs
+	// a rollback the server can call, as PhysicalSlicedResponder carries, rather than a compensation
+	// that guesses.
+	//
+	// The guarantee is scoped to workload allocations. A visibility Allocate calls this same method but
+	// patches nothing and reserves nothing, so there is nothing to compensate there and none runs.
 	ContainerAllocateResponder interface {
 		// GetContainerAllocateResponse returns the ContainerAllocateResponse
 		// for the given pod, devices and allocated resources.
