@@ -4,7 +4,7 @@
 # testing/infra/clusters/<MODALITY>. MUTATING and irreversible — the skill
 # confirms before running this. Run from the repo root.
 #
-#   destroy.sh <eks|k3s|nebius> [extra terraform destroy args...]
+#   destroy.sh <eks|k3s|nebius|rke2> [extra terraform destroy args...]
 #
 # ONLY for a cluster provision.sh created in this run. A cluster the user
 # brought is NEVER destroyed — for that one, the in-cluster teardown.sh is the
@@ -25,7 +25,7 @@ set -uo pipefail
 E2E_SHIM_DIR="$(cd "$(dirname "$0")/kubectl-shim" 2>/dev/null && pwd)"
 [ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
 
-MOD="${1:?usage: destroy.sh <eks|k3s|nebius> [terraform args...]}"
+MOD="${1:?usage: destroy.sh <eks|k3s|nebius|rke2> [terraform args...]}"
 shift
 DIR="testing/infra/clusters/${MOD}"
 if [ ! -d "$DIR" ]; then

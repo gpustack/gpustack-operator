@@ -5,7 +5,7 @@
 # TWICE before running this: once that a cluster should be provisioned at all,
 # and once on the modality after being told its cost. Run from the repo root.
 #
-#   provision.sh <eks|k3s|nebius> [extra terraform -var/... args...]
+#   provision.sh <eks|k3s|nebius|rke2> [extra terraform -var/... args...]
 #
 # Prefer a cluster the user already has: this script is only for the opt-in
 # path. Whatever it creates, THIS RUN OWNS — destroy.sh <MODALITY> at teardown
@@ -14,6 +14,8 @@
 # The extra args are passed to BOTH plan and apply, e.g.:
 #   provision.sh nebius -var='project_id=<id>' -var='release=1.31'
 #   provision.sh k3s    -var='server=["<addr>"]' -var='ssh_user=<user>'
+#   provision.sh rke2   -var='server=["<addr>"]' -var='agent=["<addr>"]' \
+#                       -var='node_internal_ip={"<addr>"="<ip>"}' -var='ssh_jumper=<addr>'
 #   provision.sh eks    -var='region=<region>'
 # Pass secrets/ids/addresses inline at run time; never write them into a file.
 #
@@ -34,7 +36,7 @@ set -uo pipefail
 E2E_SHIM_DIR="$(cd "$(dirname "$0")/kubectl-shim" 2>/dev/null && pwd)"
 [ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
 
-MOD="${1:?usage: provision.sh <eks|k3s|nebius> [terraform args...]}"
+MOD="${1:?usage: provision.sh <eks|k3s|nebius|rke2> [terraform args...]}"
 shift
 DIR="testing/infra/clusters/${MOD}"
 if [ ! -d "$DIR" ]; then

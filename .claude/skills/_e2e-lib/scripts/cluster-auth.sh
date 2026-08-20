@@ -3,7 +3,7 @@
 # Verify the toolchain + cloud credential a cluster modality's Terraform module
 # needs. READ-ONLY — it never provisions, destroys, or mutates a cluster.
 #
-#   cluster-auth.sh <eks|k3s|nebius>
+#   cluster-auth.sh <eks|k3s|nebius|rke2>
 #
 # Run it TWICE in a run: once BEFORE provisioning, and again BEFORE the teardown
 # destroy. A module can resolve inputs from a LIVE cloud API call at plan, apply
@@ -20,7 +20,7 @@ set -uo pipefail
 E2E_SHIM_DIR="$(cd "$(dirname "$0")/kubectl-shim" 2>/dev/null && pwd)"
 [ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
 
-MOD="${1:?usage: cluster-auth.sh <eks|k3s|nebius>}"
+MOD="${1:?usage: cluster-auth.sh <eks|k3s|nebius|rke2>}"
 FAILS=0
 need() {
   if command -v "$1" >/dev/null 2>&1; then
@@ -67,14 +67,30 @@ nebius)
   ;;
 k3s)
   need ssh
+  # jq is a WORKSTATION prerequisite, not a node one: the module fetches each node's daemon.json
+  # here and renders the containerd runtimes locally. Without jq the renderer produces nothing,
+  # which the module reads as "this node has no custom runtimes".
+  need jq
   # No cloud credential: the module installs onto servers the user already owns.
   # Their reachability and passwordless sudo are preconditions this script
   # cannot check without the host addresses, which are never written to a file.
   echo "note    k3s installs onto servers you already own — verify passwordless SSH"
   echo "        and passwordless sudo yourself; addresses stay in the live command only"
   ;;
+rke2)
+  need ssh
+  # Same workstation-side jq requirement as k3s, for the same containerd rendering.
+  need jq
+  # No cloud credential, same as k3s: the module installs onto servers the user already owns. The
+  # extra preconditions are RKE2's own -- its installer refuses to run as anything but root, and the
+  # forced tar method needs SELinux not enforcing.
+  echo "note    rke2 installs onto servers you already own -- verify passwordless SSH and"
+  echo "        passwordless sudo yourself; addresses stay in the live command only"
+  echo "note    rke2 also needs SELinux not enforcing, and the FIRST server reachable from here"
+  echo "        on 6443 (the apiserver endpoint is not proxied through ssh_jumper)"
+  ;;
 *)
-  echo "unknown modality '${MOD}' (expected eks | k3s | nebius)"
+  echo "unknown modality '${MOD}' (expected eks | k3s | nebius | rke2)"
   exit 1
   ;;
 esac
