@@ -142,7 +142,7 @@ func migPlacementsByProfile(
 	for _, info := range infos {
 		slots, ret := query(info.Id)
 		if !ret.IsSuccess() {
-			errs = append(errs, fmt.Errorf("profile %d: %s", info.Id, ret.Error()))
+			errs = append(errs, fmt.Errorf("profile %d: %w", info.Id, ret))
 			continue
 		}
 		answered = append(answered, info)
@@ -197,7 +197,7 @@ func probeMigProfiles(
 		info, ret := probe(id)
 		if !ret.IsSuccess() {
 			if !driverReportsAbsent(ret) {
-				unreadable = append(unreadable, fmt.Errorf("profile %d: %s", id, ret.Error()))
+				unreadable = append(unreadable, fmt.Errorf("profile %d: %w", id, ret))
 			}
 			continue
 		}

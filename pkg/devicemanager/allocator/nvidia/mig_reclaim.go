@@ -18,10 +18,13 @@ import (
 // Allocate-retry window).
 const reclaimMaxMisses = 3
 
-// reclaimMaxDestroyMisses bounds how many consecutive reconciles a destroy may fail with
-// NVML_ERROR_IN_USE before the loop surfaces an operator-visible log — a residual process is
-// holding the instance. The debounce is never cleared meanwhile, so the destroy keeps retrying
-// every pass; sibling accelerators are never blocked (per-accelerator locks). Devices.Status is
+// reclaimMaxDestroyMisses bounds how many consecutive reconciles anything may keep a partition from
+// being reclaimed before the loop surfaces an operator-visible log. Three ways reach it: a destroy
+// refused with NVML_ERROR_IN_USE, a destroy never attempted because the pre-check saw the process
+// first, and one never attempted because the partition could not be asked at all (destroyBlockedBy,
+// whose answer the log names, since the three call for different things). The debounce is never
+// cleared meanwhile, so the decision is retaken every
+// pass; sibling accelerators are never blocked (per-accelerator locks). Devices.Status is
 // rebuilt wholesale each reconcile from Spec + Pod annotations, so a status condition would be
 // stomped; the log is the operator-visible surface.
 const reclaimMaxDestroyMisses = 8
@@ -82,7 +85,9 @@ type reclaimer struct {
 	// misses is keyed by pod UID, by cardMissPrefix + accelerator UUID, or by a corrupt-path
 	// prefix + path, and counts consecutive absent-or-idle reconciles.
 	misses map[string]int
-	// inUse counts, per pod UID, consecutive IN_USE-failed destroy reconciles.
+	// inUse counts, per pod UID, consecutive reconciles something kept a partition from being
+	// reclaimed — a refused destroy, one the pre-check skipped because a process was running, or one
+	// it skipped because the partition could not be asked.
 	inUse map[string]int
 }
 
@@ -100,12 +105,16 @@ func newReclaimer(driver migDriver, podsDir string, logger klog.Logger, liveClai
 // Allocate's create+marker window while sibling accelerators proceed in parallel. It reconciles in
 // two directions:
 //   - a marker whose pod is dead -> destroy its GPU instance (CI then GI), unless a running Pod
-//     still claims that placement (attribution self-check); NVML_ERROR_IN_USE is a bounded,
-//     retryable partial failure (the debounce is not cleared) surfacing a log at the bound;
+//     still claims that placement (attribution self-check); a partition a residual process holds is
+//     a bounded, retryable partial failure (the debounce is not cleared) surfacing a log at the bound;
 //   - a marker-less GPU instance (a crash between GI-create and marker-write, or an out-of-band
 //     one) is destroyed only once its accelerator is fully drained (no live Pod claims or marks
 //     it), as MetaX does for unidentifiable orphans — a MIG GI carries no operator tag, so per-pod
 //     attribution of a marker-less GI is impossible.
+//
+// Both directions ask one question before any destroy: whether a process is running on the partition
+// itself. One that carries a process is never destroyed, however dead its recorded owner looks — see
+// destroyBlockedBy.
 //
 // An unparseable marker is not merely logged: its GPU instance is absent from the parsed ownership
 // set, so it would look exactly like a collectable orphan while a running Pod still holds it. Its
@@ -226,9 +235,11 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 }
 
 // destroyPod tears down one dead pod's partitions: for each marker, destroy the GPU instance
-// (under that accelerator's lock) and remove only that marker file. Two guards precede the destroy:
+// (under that accelerator's lock) and remove only that marker file. Three guards precede the destroy:
 //   - attribution self-check — if a running Pod claims the placement, the marker is
 //     mis-attributed (a dead pod's marker over a live pod's instance), so it is never destroyed;
+//   - process check — a partition running a process is left alone, marker and all, so a later pass
+//     finds it again;
 //   - identity check — the GI id must still carry the instance the marker recorded, compared
 //     against a live set re-read INSIDE that accelerator's lock; an out-of-band destroy + NVML
 //     GI-id reuse can put a different, possibly live, instance at that id, so on a mismatch the
@@ -242,7 +253,7 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 // reclaimed.
 func (r *reclaimer) destroyPod(uid string, entries []markerEntry, claims map[string][]migPlacement) {
 	ok := true
-	inUseHit := false
+	var blocked error
 
 	// Group by accelerator first: the attribution self-check needs no NVML call and no lock, so it
 	// filters here, and what survives it is destroyed one accelerator at a time under that
@@ -260,20 +271,20 @@ func (r *reclaimer) destroyPod(uid string, entries []markerEntry, claims map[str
 	}
 
 	for card, cardEntries := range byCard {
-		done, busy := r.destroyMarkedInstancesOnCard(uid, card, cardEntries)
+		done, cardBlocked := r.destroyMarkedInstancesOnCard(uid, card, cardEntries)
 		if !done {
 			ok = false
 		}
-		if busy {
-			inUseHit = true
+		if cardBlocked != nil {
+			blocked = worseBlock(blocked, cardBlocked)
 		}
 	}
 
-	if inUseHit {
+	if blocked != nil {
 		r.inUse[uid]++
 		if r.inUse[uid] == reclaimMaxDestroyMisses {
-			r.logger.Error(errInstanceInUse,
-				"reclaim: a mig instance is still in use after bounded destroy retries; a residual process is holding it, reclamation is blocked until it exits",
+			r.logger.Error(blocked,
+				"reclaim: a mig instance is still not reclaimable after bounded retries; its placement stays occupied until this clears",
 				"podUID", uid, "attempts", r.inUse[uid])
 		}
 	} else {
@@ -306,7 +317,7 @@ func (r *reclaimer) destroyPod(uid string, entries []markerEntry, claims map[str
 // group, so nothing outside this loop can change the accelerator between the markers — only this
 // loop's own destroys do, and each marker is verified against the identity it recorded rather than
 // against the residue of a sibling's destroy.
-func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []markerEntry) (done, inUseHit bool) {
+func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []markerEntry) (done bool, blocked error) {
 	unlock := lockCard(card)
 	defer unlock()
 
@@ -314,7 +325,7 @@ func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []mar
 	if lerr != nil {
 		r.logger.Error(lerr, "reclaim: re-read this card's mig instances before destroy, skipping it",
 			"podUID", uid, "card", card, "partitions", len(entries))
-		return false, false
+		return false, nil
 	}
 
 	done = true
@@ -328,10 +339,19 @@ func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []mar
 				"markerUUID", m.MigUUID, "liveUUID", inst.UUID,
 				"markerPlacement", migPlacement{Start: m.Start, Length: m.Length}, "livePlacement", inst.Placement)
 		case present:
+			if berr := r.destroyBlockedBy(card, m.instance()); berr != nil {
+				// Keep the marker as well as the partition: it is the record that lets a later pass
+				// find this partition again once whatever blocks it clears. Counted as blocked, so a
+				// partition held forever crosses the same bounded operator-visible surface it would
+				// have crossed by being refused.
+				done = false
+				blocked = worseBlock(blocked, berr)
+				continue
+			}
 			if derr := r.driver.DestroyInstance(card, m.instance()); derr != nil {
 				done = false
 				if errors.Is(derr, errInstanceInUse) {
-					inUseHit = true
+					blocked = worseBlock(blocked, derr)
 					continue
 				}
 				r.logger.Error(derr, "reclaim: destroy gpu instance", "podUID", uid, "card", card, "giID", m.GiID)
@@ -343,7 +363,70 @@ func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []mar
 			done = false
 		}
 	}
-	return done, inUseHit
+	return done, blocked
+}
+
+// destroyBlockedBy reports why a partition must be left alone, or nil when the destroy may proceed.
+// It is asked before every destroy this loop makes, in both directions, and what it returns is what
+// the bounded log names: errInstanceInUse for a process running on the partition, the query's own
+// error for a partition that could not be asked. Those are different faults with different remedies —
+// find the process, or give the container access to the driver — and the caller has no other way to
+// tell them apart, since the per-pass lines below are not shown at the shipped verbosity.
+//
+// A partition carrying a live process is somebody's working accelerator whatever the records here
+// say, and the orphan sweep is where that matters most: an instance carved outside this operator has
+// no marker by definition, so a drained accelerator's sweep is exactly what would rip it out from
+// under a running process. Such a partition is left whole and re-examined next pass, so it is
+// reclaimed as soon as its last process exits.
+//
+// What asking FIRST buys, beyond the driver's own refusal, is that the teardown is never started:
+// DestroyInstance destroys a GPU instance's compute instances before the instance itself, so an
+// instance holding one idle and one busy compute instance would lose the idle one and only then be
+// refused. That is the failure this removes; the refusal alone never covered it.
+//
+// A skip counts as in use, so a partition held forever still crosses the bounded operator-visible
+// surface at reclaimMaxDestroyMisses. It has to: the skip itself is reported at this logger's
+// verbosity, which the shipped verbosity does not show, and a placement nothing will ever release
+// must not stay occupied silently.
+//
+// A failure to ask separates into two answers, and they lead opposite ways. NOTHING TO ASK — no MIG
+// device addresses the partition — is how a GPU instance carrying no compute instance reads, and how
+// every partition reads to a container the driver's MIG devices are hidden from; the destroy proceeds
+// there, because on the first the partition is a routine reclaim target and on the second the destroy
+// is partition-scoped too and fails on its own. ASKED AND NO ANSWER is treated as in use: starting a
+// teardown on a partition whose state is unknown is what sweeps an idle compute instance out of a
+// partition that turns out to be busy, and that is the one thing asking first exists to prevent.
+//
+// The driver's own refusal (errInstanceInUse) remains the backstop either way, for a process
+// attaching between this question and the destroy.
+func (r *reclaimer) destroyBlockedBy(card string, inst migInstance) error {
+	procs, err := r.driver.InstanceProcesses(card, inst)
+	switch {
+	case errors.Is(err, errNoAddressableDevice):
+		r.logger.Info("reclaim: no mig device addresses this partition, leaving the destroy to the driver",
+			"card", card, "giID", inst.GiID, "err", err.Error())
+		return nil
+	case err != nil:
+		r.logger.Info("reclaim: this partition could not be asked about its processes, skipping destroy",
+			"card", card, "giID", inst.GiID, "err", err.Error())
+		return err
+	case procs == 0:
+		return nil
+	default:
+		r.logger.Info("reclaim: a process is running on this partition, skipping destroy",
+			"card", card, "giID", inst.GiID, "processes", procs)
+		return errInstanceInUse
+	}
+}
+
+// worseBlock picks which blocked partition the bound reports when a pass blocked on several. A
+// partition that could not be asked outranks one a process is holding: the first is a fault to
+// investigate, the second is a workload doing its job, and naming the workload would bury the fault.
+func worseBlock(held, next error) error {
+	if held == nil || (errors.Is(held, errInstanceInUse) && !errors.Is(next, errInstanceInUse)) {
+		return next
+	}
+	return held
 }
 
 // findLiveGi returns the GPU instance with giID from one accelerator's enumeration, if it holds one.
@@ -498,9 +581,10 @@ func (r *reclaimer) holdUnattributablePath(path string, touched sets.Set[string]
 // accelerator). An UNPARSEABLE marker naming the accelerator bails the same way: it is an ownership
 // record, and the fact that its contents cannot be read is exactly why the accelerator is not
 // provably drained — honoring only the parseable ones here would destroy the partition that record
-// owns. A residual NVML_ERROR_IN_USE is a bounded retryable failure with the same
-// condition-at-the-bound surface as the per-pod path; the miss counter is cleared only when every
-// removal succeeds.
+// owns. An orphan running a process is skipped as well: carved outside this operator or not, it is
+// in use, and a drained accelerator says nothing about that. A residual NVML_ERROR_IN_USE is a
+// bounded retryable failure with the same condition-at-the-bound surface as the per-pod path; the
+// miss counter is cleared only when every removal succeeds.
 func (r *reclaimer) destroyOrphans(missKey, card string, orphans []migInstance) {
 	unlock := lockCard(card)
 	defer unlock()
@@ -511,13 +595,18 @@ func (r *reclaimer) destroyOrphans(missKey, card string, orphans []migInstance) 
 	}
 
 	ok := true
-	inUseHit := false
+	var blocked error
 	destroyed := 0
 	for _, inst := range orphans {
+		if berr := r.destroyBlockedBy(card, inst); berr != nil {
+			ok = false
+			blocked = worseBlock(blocked, berr)
+			continue
+		}
 		if derr := r.driver.DestroyInstance(card, inst); derr != nil {
 			ok = false
 			if errors.Is(derr, errInstanceInUse) {
-				inUseHit = true
+				blocked = worseBlock(blocked, derr)
 				continue
 			}
 			r.logger.Error(derr, "reclaim: destroy orphan gpu instance on drained card", "card", card, "giID", inst.GiID)
@@ -526,11 +615,12 @@ func (r *reclaimer) destroyOrphans(missKey, card string, orphans []migInstance) 
 		destroyed++
 	}
 
-	if inUseHit {
+	if blocked != nil {
 		r.inUse[missKey]++
 		if r.inUse[missKey] == reclaimMaxDestroyMisses {
-			r.logger.Error(errInstanceInUse,
-				"reclaim: a marker-less mig instance on a drained card is still in use after bounded destroy retries; a residual process is holding it",
+			r.logger.Error(blocked,
+				"reclaim: a marker-less mig instance on a drained card is still not reclaimable after bounded "+
+					"retries; its placement stays occupied until this clears",
 				"card", card, "attempts", r.inUse[missKey])
 		}
 	} else {

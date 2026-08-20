@@ -53,6 +53,11 @@ each row below pairs the two products' names for one shape.
 > segment is **excluded** from the inventory, so a key always maps back by a plain prefix strip. They reach
 > no `Devices` ledger, capacity key or `InstanceType` inventory, and cannot be requested.
 
+> **A partition is one whole GPU instance; subdividing it is not supported.** Every profile above is created
+> as a GPU instance plus a single compute instance covering all of it. GPUStack addresses a partition by one
+> device id, and a GPU instance you subdivide by hand (`nvidia-smi mig -cci`) has several — a share of the
+> compute each, all on the same memory — so it is refused rather than half-addressed.
+
 Instances occupy **hardcoded placement slots** — the *legal starts* above, in memory-slice units — and a
 combination is legal only when the occupied intervals do not overlap. A profile's **max instances/GPU is the
 length of its start list**.
@@ -158,6 +163,14 @@ is gone or recreated fails the sidecar's allocation closed — no fallback to th
 
 ## Prerequisites
 
+The Device Manager Pod must be processed by the **NVIDIA container runtime**, which the chart's
+`runtimeClassName` plus its `NVIDIA_MIG_CONFIG_DEVICES` / `NVIDIA_MIG_MONITOR_DEVICES` declarations
+arrange. Without them that runtime hides the driver's MIG capabilities from the Pod: carving fails with
+`NO_PERMISSION`, and an instance carved outside the Pod is invisible to it.
+
+Overriding either variable through `deviceManager.env`, or pointing the `nvidia` RuntimeClass handler
+elsewhere, brings that back ([NVIDIA prerequisites](../vendor-prerequisites.md#nvidia)).
+
 Before switching a GPU's MIG mode (enable or disable):
 
 - The GPU's instances must be **idle**: stop the using Pod first and let no process hold the GPU. A family's
@@ -184,8 +197,10 @@ only when *that* instance has active processes; sibling workloads are unaffected
   So while a GPUStack workload holds the GPU the node advertises room it does not have, and that **never
   converges** — placement reads live NVML and will not double-book it, but the accounting above stays
   wrong. Once the GPU is drained the reverse happens: after its debounce the reclaimer **destroys** an
-  instance no allocation accounts for as an orphan, including one it never created and one your own
-  process is using.
+  instance no allocation accounts for as an orphan, including one it never created.
+
+  An instance with something **running on it** is the exception: it is left alone and re-checked each
+  cycle, so one you carved by hand survives for as long as you are using it.
 
 - **A same-profile replacement submitted the instant its predecessor is deleted can fail to start.** Leave a
   gap between the delete and the replacement, or let the replacement's own restart handle it.
@@ -210,6 +225,10 @@ only when *that* instance has active processes; sibling workloads are unaffected
   its allocation closed and is retried.
 - The `+me` / `+me.all` / `+gfx` profile variants are excluded from the inventory (see
   [Supported profiles](#supported-profiles)).
+- **A hand-subdivided GPU instance stops the sweep for the whole node.** One carrying more than one compute
+  instance (`nvidia-smi mig -cci`) cannot be addressed by a single device id, so its GPU is refused — and the
+  reclaim pass, which lists every GPU before deciding anything, ends there. Nothing is reclaimed on any GPU
+  of that node, with an error each pass, until that instance is back to one compute instance.
 - **A profile the driver enumerates no legal placement for is excluded too**, as is one whose placement query
   failed; the GPU and profile ids are named in a warning. A profile's memory-slice span has no source but its
   placement records, and that span is what matches an instance's identity. Nothing is lost: such a profile
@@ -740,8 +759,11 @@ gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   
 - Enable, disable or reconfigure MIG *mode* — `nvidia-smi` operations you run.
 - Trigger on nodeconfig or labels, flip the mode automatically, rewrite its geometry, or deschedule and
   evict Pods on a *mode* change.
-- Account for an instance you carved by hand — though it *does* delete it as an orphan once its GPU is idle
-  ([Limitations](#limitations)).
+- Account for an instance you carved by hand — though it *does* delete it as an orphan once its GPU is
+  idle and nothing is running on it ([Limitations](#limitations)).
+- Hand out a *subdivided* instance, or subdivide one itself — it creates a GPU instance with a single
+  compute instance covering all of it, and refuses one somebody else subdivided
+  ([Supported profiles](#supported-profiles)).
 
 It *does* create and destroy the *instances* backing scheduled workloads
 ([Requesting a MIG instance](#requesting-a-mig-instance)).

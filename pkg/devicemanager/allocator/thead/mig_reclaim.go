@@ -17,10 +17,13 @@ import (
 // still owns.
 const reclaimMaxMisses = 3
 
-// reclaimMaxDestroyMisses bounds how many consecutive reconciles a destroy may fail as busy before
-// the loop surfaces an operator-visible log — a residual process is holding the instance. The
-// debounce is never cleared meanwhile, so the destroy keeps retrying every pass; sibling
-// accelerators are never blocked (per-accelerator locks). Devices.Status is rebuilt wholesale each
+// reclaimMaxDestroyMisses bounds how many consecutive reconciles anything may keep a partition from
+// being reclaimed before the loop surfaces an operator-visible log. Three ways reach it: a destroy
+// refused as busy, a destroy never attempted because the pre-check saw the process first, and one
+// never attempted because the partition could not be asked at all (destroyBlockedBy, whose answer the
+// log names, since the three call for different things).
+// The debounce is never cleared meanwhile, so the decision is retaken every pass;
+// sibling accelerators are never blocked (per-accelerator locks). Devices.Status is rebuilt wholesale each
 // reconcile from Spec + Pod annotations, so a status condition would be stomped; the log is the
 // operator-visible surface.
 const reclaimMaxDestroyMisses = 8
@@ -81,7 +84,7 @@ type reclaimer struct {
 	// Kubernetes client.
 	liveClaims func() (map[string][]migPlacement, error)
 	misses     map[string]int // pod UID / "card:<uuid>" / "corrupt:<path>" -> consecutive absent-or-idle reconciles
-	inUse      map[string]int // pod UID / "card:<uuid>" -> consecutive busy-failed destroy reconciles
+	inUse      map[string]int // pod UID / "card:<uuid>" -> consecutive reconciles something blocked its reclaim
 }
 
 // newReclaimer builds the reclaim loop over a driver seam, a pods root and a live-claims source. The
@@ -109,6 +112,10 @@ func newReclaimer(
 //     out-of-band one) is destroyed only once its accelerator is fully drained (no live Pod claims
 //     or marks it) — a GPU instance carries no operator tag, so per-pod attribution of a
 //     marker-less one is impossible.
+//
+// Both directions ask one question before any destroy: whether a process is running on the partition
+// itself. One that carries a process is never destroyed, however dead its recorded owner looks — see
+// destroyBlockedBy.
 //
 // An unparseable marker is not merely logged: its GPU instance is absent from the parsed ownership
 // set, so it would look exactly like a collectable orphan while a running Pod still holds it. Its
@@ -234,9 +241,11 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 // destroyPod tears down one dead pod's partitions: the markers are grouped by accelerator and each
 // accelerator is taken once — one lock hold and one driver re-read per accelerator, however many of
 // the pod's containers carved a partition on it — and only that pod's own marker files are removed.
-// Two guards precede the destroy:
+// Three guards precede the destroy:
 //   - attribution self-check — if a running Pod claims the placement, the marker is mis-attributed
 //     (a dead pod's marker over a live pod's instance), so it is never destroyed;
+//   - process check — a partition running a process is left alone, marker and all, so a later pass
+//     finds it again;
 //   - identity check — the GPU-instance id must still carry the instance the marker recorded, by
 //     BOTH the raw vendor profile id and the partition identity string. The check re-reads the
 //     driver's live set INSIDE the accelerator lock rather than trusting the pass's lock-free
@@ -251,7 +260,7 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 // miss/in-use counters are cleared only when every one of the pod's partitions is reclaimed.
 func (r *reclaimer) destroyPod(uid string, entries []markerEntry, claims map[string][]migPlacement) {
 	ok := true
-	inUseHit := false
+	var blocked error
 
 	// Group by accelerator first: the attribution self-check needs no driver call and no lock, so it
 	// filters here, and what survives it is destroyed one accelerator at a time under that
@@ -269,21 +278,21 @@ func (r *reclaimer) destroyPod(uid string, entries []markerEntry, claims map[str
 	}
 
 	for card, cardEntries := range byCard {
-		done, busy := r.destroyMarkedInstancesOnCard(uid, card, cardEntries)
+		done, cardBlocked := r.destroyMarkedInstancesOnCard(uid, card, cardEntries)
 		if !done {
 			ok = false
 		}
-		if busy {
-			inUseHit = true
+		if cardBlocked != nil {
+			blocked = worseBlock(blocked, cardBlocked)
 		}
 	}
 
-	if inUseHit {
+	if blocked != nil {
 		r.inUse[uid]++
 		if r.inUse[uid] == reclaimMaxDestroyMisses {
-			r.logger.Error(errInstanceInUse,
-				"reclaim: a partition is still in use after bounded destroy retries; a residual process is holding it, "+
-					"reclamation is blocked until it exits",
+			r.logger.Error(blocked,
+				"reclaim: a partition is still not reclaimable after bounded retries; its placement stays "+
+					"occupied until this clears",
 				"podUID", uid, "attempts", r.inUse[uid])
 		}
 	} else {
@@ -310,7 +319,7 @@ func (r *reclaimer) destroyPod(uid string, entries []markerEntry, claims map[str
 // the lock is held across the whole group, so nothing outside this loop can change the accelerator
 // between the markers — only this loop's own destroys do, and each marker is verified against the
 // identity it recorded, not against the residue of a sibling's destroy.
-func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []markerEntry) (done, inUseHit bool) {
+func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []markerEntry) (done bool, blocked error) {
 	unlock := lockCard(card)
 	defer unlock()
 
@@ -318,7 +327,7 @@ func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []mar
 	if lerr != nil {
 		r.logger.Error(lerr, "reclaim: re-read this card's partitions before destroy, skipping it",
 			"podUID", uid, "card", card, "partitions", len(entries))
-		return false, false
+		return false, nil
 	}
 
 	done = true
@@ -332,10 +341,19 @@ func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []mar
 				"markerUUID", m.MigUUID, "liveUUID", inst.UUID,
 				"markerProfileID", m.ProfileID, "liveProfileID", inst.ProfileID)
 		case present:
+			if berr := r.destroyBlockedBy(card, m.instance()); berr != nil {
+				// Keep the marker as well as the partition: it is the record that lets a later pass
+				// find this partition again once whatever blocks it clears. Counted as blocked, so a
+				// partition held forever crosses the same bounded operator-visible surface it would
+				// have crossed by being refused.
+				done = false
+				blocked = worseBlock(blocked, berr)
+				continue
+			}
 			if derr := r.driver.DestroyInstance(card, m.instance()); derr != nil {
 				done = false
 				if errors.Is(derr, errInstanceInUse) {
-					inUseHit = true
+					blocked = worseBlock(blocked, derr)
 					continue
 				}
 				r.logger.Error(derr, "reclaim: destroy partition", "podUID", uid, "card", card, "giID", m.GiID)
@@ -347,7 +365,71 @@ func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []mar
 			done = false
 		}
 	}
-	return done, inUseHit
+	return done, blocked
+}
+
+// destroyBlockedBy reports why a partition must be left alone, or nil when the destroy may proceed.
+// It is asked before every destroy this loop makes, in both directions, and what it returns is what
+// the bounded log names: errInstanceInUse for a process running on the partition, the query's own
+// error for a partition that could not be asked. Those are different faults with different remedies —
+// find the process, or give the container access to the driver — and the caller has no other way to
+// tell them apart, since the per-pass lines below are not shown at the shipped verbosity.
+//
+// A partition carrying a live process is somebody's working accelerator whatever the records here
+// say, and the orphan sweep is where that matters most: a partition carved outside this operator has
+// no marker by definition, so a drained accelerator's sweep is exactly what would rip it out from
+// under a running process. Such a partition is left whole and re-examined next pass, so it is
+// reclaimed as soon as its last process exits.
+//
+// What asking FIRST buys, beyond the driver's own refusal, is that the teardown is never started:
+// destroying a GPU instance sweeps its compute instances first, so an instance holding one idle and
+// one busy compute instance would lose the idle one and only then be refused. That is the failure
+// this removes; the refusal alone never covered it.
+//
+// A skip counts as in use, so a partition held forever still crosses the bounded operator-visible
+// surface at reclaimMaxDestroyMisses. It has to: the skip itself is reported at this logger's
+// verbosity, which the shipped verbosity does not show, and a placement nothing will ever release
+// must not stay occupied silently.
+//
+// A failure to ask separates into two answers, and they lead opposite ways. NOTHING TO ASK — no
+// partition device addresses the partition — is how a GPU instance carrying no compute instance
+// reads, and how every partition reads to a container the driver's partition devices are hidden from;
+// the destroy proceeds there, because on the first the partition is a routine reclaim target and on
+// the second the destroy is partition-scoped too and fails on its own. ASKED AND NO ANSWER is treated
+// as in use: starting a teardown on a partition whose state is unknown is what sweeps an idle compute
+// instance out of a partition that turns out to be busy, and that is the one thing asking first
+// exists to prevent.
+//
+// The driver's own refusal (errInstanceInUse) remains the backstop either way, for a process
+// attaching between this question and the destroy.
+func (r *reclaimer) destroyBlockedBy(card string, inst migInstance) error {
+	procs, err := r.driver.InstanceProcesses(card, inst)
+	switch {
+	case errors.Is(err, errNoAddressableDevice):
+		r.logger.Info("reclaim: no partition device addresses this partition, leaving the destroy to the driver",
+			"card", card, "giID", inst.GiID, "err", err.Error())
+		return nil
+	case err != nil:
+		r.logger.Info("reclaim: this partition could not be asked about its processes, skipping destroy",
+			"card", card, "giID", inst.GiID, "err", err.Error())
+		return err
+	case procs == 0:
+		return nil
+	default:
+		r.logger.Info("reclaim: a process is running on this partition, skipping destroy",
+			"card", card, "giID", inst.GiID, "processes", procs)
+		return errInstanceInUse
+	}
+}
+
+// worseBlock picks which blocked partition the bound reports when a pass blocked on several. A
+// partition that could not be asked outranks one a process is holding: the first is a fault to
+// investigate, the second is a workload doing its job, and naming the workload would bury the fault.
+func worseBlock(held, next error) error {
+	if held == nil || (errors.Is(held, errInstanceInUse) && !errors.Is(next, errInstanceInUse)) {
+		return next
+	}
+	return held
 }
 
 // findLiveGi returns the GPU instance with giID from one accelerator's enumeration, if it holds
@@ -492,9 +574,11 @@ func (r *reclaimer) holdUnattributablePath(path string, touched sets.Set[string]
 // its orphans wait for a later pass. An UNPARSEABLE marker leaving the accelerator's ownership
 // unknowable bails the same way, through the same shared predicate the pass itself consults: the
 // two checks are not redundant, because the pass's verdict rests on a snapshot the lock does not
-// cover, and this one is what actually spares the partition that record owns. A residual busy
-// rejection is a bounded retryable failure with the same log-at-the-bound surface as the per-pod
-// path; the miss counter is cleared only when every removal succeeds.
+// cover, and this one is what actually spares the partition that record owns. An orphan running a
+// process is skipped as well: carved outside this operator or not, it is in use, and a drained
+// accelerator says nothing about that. A residual busy rejection is a bounded retryable failure with
+// the same log-at-the-bound surface as the per-pod path; the miss counter is cleared only when every
+// removal succeeds.
 func (r *reclaimer) destroyOrphans(missKey, card string, orphans []migInstance) {
 	unlock := lockCard(card)
 	defer unlock()
@@ -505,13 +589,18 @@ func (r *reclaimer) destroyOrphans(missKey, card string, orphans []migInstance) 
 	}
 
 	ok := true
-	inUseHit := false
+	var blocked error
 	destroyed := 0
 	for _, inst := range orphans {
+		if berr := r.destroyBlockedBy(card, inst); berr != nil {
+			ok = false
+			blocked = worseBlock(blocked, berr)
+			continue
+		}
 		if derr := r.driver.DestroyInstance(card, inst); derr != nil {
 			ok = false
 			if errors.Is(derr, errInstanceInUse) {
-				inUseHit = true
+				blocked = worseBlock(blocked, derr)
 				continue
 			}
 			r.logger.Error(derr, "reclaim: destroy marker-less partition on drained card", "card", card, "giID", inst.GiID)
@@ -520,12 +609,12 @@ func (r *reclaimer) destroyOrphans(missKey, card string, orphans []migInstance) 
 		destroyed++
 	}
 
-	if inUseHit {
+	if blocked != nil {
 		r.inUse[missKey]++
 		if r.inUse[missKey] == reclaimMaxDestroyMisses {
-			r.logger.Error(errInstanceInUse,
-				"reclaim: a marker-less partition on a drained card is still in use after bounded destroy retries; "+
-					"a residual process is holding it",
+			r.logger.Error(blocked,
+				"reclaim: a marker-less partition on a drained card is still not reclaimable after bounded "+
+					"retries; its placement stays occupied until this clears",
 				"card", card, "attempts", r.inUse[missKey])
 		}
 	} else {

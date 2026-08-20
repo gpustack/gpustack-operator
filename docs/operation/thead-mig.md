@@ -98,8 +98,12 @@ GPU-instance profiles the driver reports for the PPU in front of it.
   per-PPU slice count; a profile with *no* legal placement is not offered, since the span could only be
   guessed — and the ledger being placement-derived, such a key could never allocate. The PPU names it in
   a warning.
+- **A partition is one whole GPU instance; subdividing it is not supported.** Every profile is created as a
+  GPU instance plus a single compute instance covering all of it. GPUStack addresses a partition by one
+  device id, and a GPU instance subdivided into several compute instances has several — a share of the
+  compute each, all on the same memory — so it is refused rather than half-addressed.
 
-Both rules are shared with NVIDIA.
+All three rules are shared with NVIDIA.
 
 What a PPU offers:
 
@@ -203,7 +207,13 @@ Device-node injection is the one place T-Head's response differs in *shape* from
   NVIDIA makes too (see [Rule 3](../accelerator-requests.md#rule-3--basepartitioned-is-exactly-1)).
 - **Hand-carving a partition outside GPUStack is unsupported on a managed node** — every node-level number
   derives from the allocation annotations the device plugin writes, and a hand-carved instance produces
-  none; see [Accelerator Requests](../accelerator-requests.md#limitations).
+  none; see [Accelerator Requests](../accelerator-requests.md#limitations). It is deleted as an orphan once
+  its PPU is idle. An instance with something **running on it** is the exception: it is left alone and
+  re-checked each cycle, so one you carved by hand survives for as long as you are using it.
+- **A hand-subdivided GPU instance stops the sweep for the whole node.** One carrying more than one compute
+  instance cannot be addressed by a single device id, so its PPU is refused — and the reclaim pass, which
+  lists every PPU before deciding anything, ends there. Nothing is reclaimed on any PPU of that node, with
+  an error each pass, until that instance is back to one compute instance.
 - **A same-profile replacement submitted the instant its predecessor is deleted can fail to start**, the
   reclaim-debounce reason documented for [NVIDIA](nvidia-mig.md#limitations); T-Head runs the same reclaim
   loop and bounded busy-destroy retry.
@@ -307,7 +317,10 @@ reboot as if it did not:
 - Trigger on nodeconfig or labels, flip the mode automatically, or rewrite the geometry.
 - Deschedule or evict Pods when the mode changes.
 - Account for an instance you carved by hand. (It *does* delete it: an instance no allocation accounts for
-  is reclaimed as an orphan once its PPU is idle.)
+  is reclaimed as an orphan once its PPU is idle and nothing is running on it.)
+- Hand out a *subdivided* instance, or subdivide one itself — it creates a GPU instance with a single
+  compute instance covering all of it, and refuses one somebody else subdivided ([How partition profiles
+  are discovered](#how-partition-profiles-are-discovered)).
 
 A capability change reaches the cluster **only** through Device Manager restart or re-detection.
 

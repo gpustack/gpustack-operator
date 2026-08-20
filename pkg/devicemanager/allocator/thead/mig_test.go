@@ -59,6 +59,10 @@ type fakeMigDriver struct {
 	// inUseGiIDs marks GPU-instance ids whose DestroyInstance fails with errInstanceInUse (a
 	// residual process holding the instance).
 	inUseGiIDs map[uint32]bool
+	// processesByGiID is how many compute processes each partition answers with, and
+	// processesErr makes the query itself fail — the partition that cannot be asked.
+	processesByGiID map[uint32]int
+	processesErr    error
 }
 
 func newFakeMigDriver() *fakeMigDriver {
@@ -131,6 +135,17 @@ func (f *fakeMigDriver) CardInstances(cardUUID string) ([]migInstance, error) {
 		return nil, f.listErr
 	}
 	return append([]migInstance(nil), f.live[cardUUID]...), nil
+}
+
+// InstanceProcesses answers how many compute processes hold one partition (the reclaim
+// process-check seam). An unseeded partition holds none, which is the ordinary case.
+func (f *fakeMigDriver) InstanceProcesses(_ string, inst migInstance) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.processesErr != nil {
+		return 0, f.processesErr
+	}
+	return f.processesByGiID[inst.GiID], nil
 }
 
 // ListInstances returns every seeded live instance across all accelerators (the orphan-collection seam).

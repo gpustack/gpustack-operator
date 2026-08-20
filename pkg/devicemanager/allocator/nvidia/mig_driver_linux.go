@@ -95,6 +95,74 @@ func (d *nvmlMigDriver) cardInstances(dev nvml.Device, cardUUID string) ([]migIn
 	return liveInstances(dev, cardUUID, infos, uuidByGI)
 }
 
+// InstanceProcesses counts the compute processes running on one partition. The count is read off the
+// MIG device handles addressing that partition, which are the only handles carrying a partition's own
+// process list — the accelerator's own query answers for every tenant of the card.
+//
+// A partition can be subdivided further, and each of those subdivisions is a handle of its own, so
+// every handle addressing the partition is asked and the first one answering with a process ends the
+// walk: a caller deciding whether to destroy the partition is asking whether anything at all runs on
+// it, and stopping at the first handle would let an idle subdivision speak for a busy one. An index
+// the driver disclaims is skipped as the answer it is; every other failure to read a handle is an
+// error, because a handle skipped in silence could be the one carrying the process.
+//
+// The handles are matched by GPU-instance id rather than by identity string, because an orphan
+// discovered by enumeration alone may carry no identity at all, while its id is what named it in the
+// first place.
+//
+// A partition no handle addresses is an error, never a zero count: a caller deciding whether to
+// destroy it must not read "cannot ask" as "nobody is using it". No handle appears at all unless the
+// container is allowed to see the driver's MIG capabilities.
+func (d *nvmlMigDriver) InstanceProcesses(cardUUID string, inst migInstance) (int, error) {
+	dev, err := d.device(cardUUID)
+	if err != nil {
+		return 0, err
+	}
+
+	count, ret := dev.GetMaxMigDeviceCount()
+	if !ret.IsSuccess() {
+		if driverReportsAbsent(ret) {
+			return 0, fmt.Errorf("card %s: accelerator addresses no mig device: %w", cardUUID, errNoAddressableDevice)
+		}
+		return 0, fmt.Errorf("card %s: get max mig device count: %w", cardUUID, ret)
+	}
+	addressed := false
+	for i := 0; i < count; i++ {
+		mig, ret := dev.GetMigDeviceHandleByIndex(i)
+		if !ret.IsSuccess() {
+			if driverReportsAbsent(ret) {
+				continue
+			}
+			return 0, fmt.Errorf("card %s: get mig device handle %d: %w", cardUUID, i, ret)
+		}
+		if mig == nil {
+			return 0, fmt.Errorf(
+				"card %s: mig device handle %d is absent though the driver reported success", cardUUID, i)
+		}
+		giID, ret := mig.GetGpuInstanceId()
+		if !ret.IsSuccess() {
+			return 0, fmt.Errorf("card %s: get owning gpu-instance id of mig device %d: %w", cardUUID, i, ret)
+		}
+		if giID != inst.GiID {
+			continue
+		}
+		addressed = true
+		procs, ret := mig.GetComputeRunningProcesses()
+		if !ret.IsSuccess() {
+			return 0, fmt.Errorf(
+				"card %s: list compute processes on gpu instance %d: %w", cardUUID, inst.GiID, ret)
+		}
+		if len(procs) > 0 {
+			return len(procs), nil
+		}
+	}
+	if !addressed {
+		return 0, fmt.Errorf(
+			"card %s: gpu instance %d: %w", cardUUID, inst.GiID, errNoAddressableDevice)
+	}
+	return 0, nil
+}
+
 func (d *nvmlMigDriver) device(cardUUID string) (nvml.Device, error) {
 	if !d.initRet.IsSuccess() {
 		return nvml.Device{}, fmt.Errorf("nvml init failed: %w", d.initRet)
@@ -151,6 +219,12 @@ func driverReportsAbsent(ret nvml.Return) bool {
 // other failure IS an error, because a handle in hand whose owner or identity cannot be read leaves
 // the map missing a live partition — and a missing identity is exactly what makes a live partition
 // look reclaimable, or makes a destroy verify against nothing.
+//
+// One GPU instance owning several MIG devices is refused rather than resolved to one of them, which
+// is where the contract that a partition is one whole GPU instance is enforced: this operator creates
+// each with a single compute instance covering all of it, so several means somebody subdivided it by
+// hand, and either identity would hand a container part of the compute while the whole instance is
+// accounted for. The refusal fails the accelerator's enumeration, and with it the node's.
 func (d *nvmlMigDriver) migUUIDs(dev nvml.Device, cardUUID string) (map[uint32]string, error) {
 	count, ret := dev.GetMaxMigDeviceCount()
 	if !ret.IsSuccess() {

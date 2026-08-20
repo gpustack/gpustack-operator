@@ -365,6 +365,10 @@ type MigDevice interface {
 	// within its owning GPU instance. Read together with GetGpuInstanceId and GetUUID off the
 	// same handle, it identifies which compute instance the identity string addresses.
 	GetComputeInstanceId() (uint32, Return)
+	// GetComputeRunningProcesses returns one row per compute process running on this MIG device,
+	// on the same terms as the whole-device query of that name. It is the only query that answers
+	// for one partition: the parent device's answers for the whole accelerator.
+	GetComputeRunningProcesses() ([]ProcessInfo, Return)
 	// GpmQueryDeviceSupportV retrieves the support information for GPU performance metrics (GPM) on the device,
 	// returning a handler that can be used to access different versions of the GPM support information.
 	GpmQueryDeviceSupportV() GpmSupportHandler

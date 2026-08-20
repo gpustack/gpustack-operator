@@ -96,8 +96,31 @@ spec:
             readOnlyRootFilesystem: false
             runAsNonRoot: false
           env:
-            # User-supplied env first, so a misconfiguration can never shadow the
-            # managed downward-API and PCI-vendor variables below (last value wins).
+            {{- /*
+              This manufacturer's container runtime hides the driver's MIG capability subtree from
+              any container which does not declare that it manages MIG, and the management library
+              authorizes every partition-scoped call by opening a file under that subtree — so
+              without this declaration carving a partition fails with NO_PERMISSION, and a
+              partition carved outside this pod is not visible to it at all. Both are declared
+              because this pod does both jobs: the allocator configures partitions and the
+              detector reads them.
+
+              Keyed by the manufacturer rather than by `runtimeInjectsDriver` + `partitionKind`,
+              which describe the same node today: these names, and the privileged container they
+              require, are that one runtime's contract rather than anything true of partitioning
+              hardware in general. The monitoring half also outlives the partitioning half — an
+              accelerator whose partitions this operator does not manage still has to be read.
+              https://github.com/NVIDIA/nvidia-container-toolkit/blob/main/cmd/nvidia-container-runtime/README.md#mig-devices
+            */}}
+            {{- if eq $manu "nvidia" }}
+            - name: NVIDIA_MIG_CONFIG_DEVICES
+              value: "all"
+            - name: NVIDIA_MIG_MONITOR_DEVICES
+              value: "all"
+            {{- end }}
+            # User-supplied env next, so a misconfiguration can never shadow the
+            # managed downward-API and PCI-vendor variables below (last value wins),
+            # while the vendor-runtime declarations above stay overridable.
             {{- range $key, $value := $root.Values.deviceManager.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}
