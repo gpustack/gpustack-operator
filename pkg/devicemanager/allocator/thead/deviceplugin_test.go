@@ -286,7 +286,7 @@ func devicePaths(resp *deviceplugin.ContainerAllocateResponse) []string {
 // partitioning surface.
 func TestNew_ServerSet(t *testing.T) {
 	serversOf := func(a device.Allocator) []*server {
-		agg, ok := a.(aggregated)
+		agg, ok := a.(*aggregated)
 		require.True(t, ok)
 		srvs := make([]*server, 0, len(agg.servers))
 		for i := range agg.servers {
@@ -394,11 +394,11 @@ func TestNew_ServerSet(t *testing.T) {
 // server that creates the instances it frees, so it never runs with nothing to reclaim and never stops
 // while partitions are still live.
 func TestNew_ReclaimLoopFollowsThePartitionServer(t *testing.T) {
-	withPartitions, ok := New(device.AllocatorOptions{NoShared: true}).(aggregated)
+	withPartitions, ok := New(device.AllocatorOptions{NoShared: true}).(*aggregated)
 	require.True(t, ok)
 	assert.True(t, withPartitions.partitioned, "the reclaim loop runs while the partition server does")
 
-	withoutPartitions, ok := New(device.AllocatorOptions{NoPartitioned: true}).(aggregated)
+	withoutPartitions, ok := New(device.AllocatorOptions{NoPartitioned: true}).(*aggregated)
 	require.True(t, ok)
 	assert.False(t, withoutPartitions.partitioned, "no partition server, nothing to reclaim")
 }

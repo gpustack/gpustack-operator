@@ -6,6 +6,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/utils/gox"
 )
 
 // reclaimLoop must (1) never reconcile on a resync before the first broadcast seeds
@@ -55,4 +60,46 @@ func Test_reclaimLoop(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("loop did not stop on ctx cancel")
 	}
+}
+
+// reclaimSubscriptionTimeout bounds the waits below, so a reclaim loop that cannot be ended fails
+// the test instead of stalling the suite.
+const reclaimSubscriptionTimeout = 10 * time.Second
+
+// TestRunReclaimLoop_StoppedLifecycleReleasesSubscription is the wiring this whole seam exists for: the reclaim
+// loop subscribes to the reconciler's broadcast and releases on its way out, so an allocator that
+// cannot end its reclaim loop grows the notifier set by one per detect/undetect cycle — a set walked
+// in full on every broadcast, some of them synchronously on the allocate path.
+func TestRunReclaimLoop_StoppedLifecycleReleasesSubscription(t *testing.T) {
+	reconciler := &DevicesReconciler{}
+	var l gox.Lifecycle
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- l.Start(context.Background(), func(ctx context.Context) error {
+			RunReclaimLoop(ctx, reconciler, nodefeature.ManufacturerNVIDIA,
+				workercore.DeviceAllocationModePartitioned, func([]string) {})
+			return nil
+		})
+	}()
+
+	notifiers := func() int {
+		reconciler.notifiersMutex.RLock()
+		defer reconciler.notifiersMutex.RUnlock()
+
+		return len(reconciler.notifiers)
+	}
+	require.Eventually(t, func() bool {
+		return notifiers() == 1
+	}, reclaimSubscriptionTimeout, 10*time.Millisecond, "reclaim loop did not subscribe")
+
+	l.Stop()
+
+	select {
+	case err := <-errCh:
+		require.NoError(t, err)
+	case <-time.After(reclaimSubscriptionTimeout):
+		t.Fatal("Start did not return")
+	}
+	assert.Zero(t, notifiers(), "a stopped allocator must leave no reclaim subscription behind")
 }

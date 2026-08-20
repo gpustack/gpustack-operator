@@ -41,7 +41,7 @@ func New(opts device.AllocatorOptions) device.Allocator {
 		newServer(logger, workercore.DeviceAllocationModeVisibility),
 	)
 
-	return aggregated{
+	return &aggregated{
 		logger:     logger,
 		servers:    servers,
 		kubeSocket: opts.KubeSocket,
@@ -56,26 +56,29 @@ type aggregated struct {
 	// sliced reports whether a Sliced server is registered, gating the per-manufacturer
 	// stateful sgpu reclaim loop.
 	sliced bool
+	// lifecycle owns the context the tasks below run under, so that stopping this allocator ends
+	// every one of them and not only the ones watching a server.
+	lifecycle gox.Lifecycle
 }
 
-func (aggregated) Name() string {
+func (*aggregated) Name() string {
 	return Manufacturer
 }
 
-func (in aggregated) Start(ctx context.Context) error {
+func (in *aggregated) Start(ctx context.Context) error {
 	in.logger.Info("starting")
 
-	gp := gox.GroupWithContextIn(ctx)
+	tasks := make([]func(context.Context) error, 0, len(in.servers)+1)
 	for i := range in.servers {
 		srv := in.servers[i]
-		gp.Go(func(ctx context.Context) error {
+		tasks = append(tasks, func(ctx context.Context) error {
 			return srv.Start(ctx, in.kubeSocket)
 		})
 	}
 	// A sliced pool has no Release callback, so sgpu subdevices are reclaimed by a
 	// level-based loop fed the reconciler's broadcast live-pod set plus a resync ticker.
 	if in.sliced {
-		gp.Go(func(ctx context.Context) error {
+		tasks = append(tasks, func(ctx context.Context) error {
 			reconciler := controllers.Get[*deviceplugin.DevicesReconciler]()
 			r := newReclaimer(newSysfsSGPUManager(), deviceplugin.OperatorPodsDir, in.logger.WithName("reclaim"))
 			deviceplugin.RunReclaimLoop(ctx, reconciler, Manufacturer,
@@ -83,16 +86,17 @@ func (in aggregated) Start(ctx context.Context) error {
 			return nil
 		})
 	}
-	return gp.Wait()
+
+	return in.lifecycle.Start(ctx, tasks...)
 }
 
-func (in aggregated) Stop() {
+// Stop ends every task Start launched and does not return until they have. The servers are not
+// walked here: canceling the context they serve under is what retires them, and walking them
+// afterwards would report a completed teardown as a server that was never started.
+func (in *aggregated) Stop() {
 	in.logger.Info("stopping")
 
-	for i := range in.servers {
-		srv := in.servers[i]
-		srv.Stop()
-	}
+	in.lifecycle.Stop()
 }
 
 type server struct {

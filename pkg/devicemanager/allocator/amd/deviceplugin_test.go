@@ -205,7 +205,7 @@ func TestNew_ServerSet(t *testing.T) {
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
-			agg, ok := New(c.opts).(aggregated)
+			agg, ok := New(c.opts).(*aggregated)
 			require.True(t, ok)
 			got := make([]workercore.DeviceAllocationMode, 0, len(agg.servers))
 			for _, srv := range agg.servers {

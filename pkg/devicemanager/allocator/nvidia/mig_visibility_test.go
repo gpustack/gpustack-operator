@@ -228,7 +228,7 @@ func TestNew_VisibilityHoldsTheMigDriver(t *testing.T) {
 // migDriverByMode reports, per registered server, whether it holds a MIG driver.
 func migDriverByMode(t *testing.T, opts device.AllocatorOptions) map[workercore.DeviceAllocationMode]bool {
 	t.Helper()
-	agg, ok := New(opts).(aggregated)
+	agg, ok := New(opts).(*aggregated)
 	require.True(t, ok)
 	held := make(map[workercore.DeviceAllocationMode]bool, len(agg.servers))
 	for i := range agg.servers {

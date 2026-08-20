@@ -141,8 +141,37 @@ shipped `-v=2` because `Error` is not gated by V level the way `Info` is. The cl
 louder and comes first: the family's keys leave the Node.
 
 `Stop` ends the serving loop rather than one generation of it, and reports nothing for having been
-asked to: the allocator stops a manufacturer's servers **without** canceling its own context when
-that manufacturer stops being detected, and treats an error from a server as fatal to the node.
+asked to.
+
+The layer above it draws the same distinction through the `gox.Lifecycle`
+(`pkg/utils/gox/lifecycle.go`) a vendor allocator runs its tasks under: its `Stop` cancels the context
+every task its `Start` launched runs under, and waits for them. The device manager's own `Start` needs
+none of that — nothing stops it but its caller — so its detector, allocator, exporter and controller
+manager run under a plain `gox.GroupWithContextIn` group.
+
+> **The invariant** — the tasks under one of these groups are not interchangeable. A per-vendor
+> reclaim loop watches nothing but its context, so a `Stop` that cancelled nothing would leave it, its
+> resync ticker and its broadcast subscription running for the life of the process — one more of each
+> per detect/undetect cycle, on a set the reconciler walks in full on every broadcast, some of them
+> synchronously on the allocate path. And because nothing can be reported until every task has
+> returned, such a task also swallows a *sibling's* failure: before this shape, a device plugin that
+> could not establish a generation of service left the node advertising nothing for that manufacturer,
+> and the only trace was that server's own log line. The failure never reached the allocator, so
+> nothing acted on it — the signal to look for is the missing process-level one, not a missing log.
+>
+> So a task that *fails* ends its siblings — the group cancels the context they share on any task's
+> error, which is also what lets that failure be reported at all — and at the manager's level that is
+> what ends the process, rather than leaving a Pod passing its liveness probe with a dead subsystem
+> inside it. A task that merely *finishes* is left to have finished: the metrics exporter serves no
+> Instance gauges on a node whose name it cannot read and says so by returning, and ending the run
+> there would take the node's device plugin down over one missing environment variable.
+>
+> Being stopped is not an outcome to report either. The device manager treats **any** error from an
+> allocator's `Start` as fatal to the node (`pkg/devicemanager/allocator/allocator.go`), so reporting
+> `context.Canceled` for an ordinary undetect would take the node down. A `Stop` that arrives before
+> its run does is kept, not lost: an allocator's `Start` is submitted to a pool, so it can reach the
+> `Lifecycle` after the undetect that retired it, and a run that began then is one nothing holds the
+> cancel of — the leak, reproduced by the teardown meant to end it.
 
 ## Per-manufacturer device support
 
