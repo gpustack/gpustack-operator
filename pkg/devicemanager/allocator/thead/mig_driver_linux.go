@@ -370,7 +370,8 @@ type migIdentity struct {
 // compute-instance id its marker never recorded and drop the marker without destroying, leaking the
 // partition, while a reserve for the same accelerator would fail closed on the mismatch and keep
 // failing for as long as the extra device exists. Refusing names the accelerator instead of silently
-// addressing the wrong half of it.
+// addressing the wrong half of it — and the refusal fails the accelerator's enumeration, and with it
+// the node's, so nothing is reclaimed anywhere on the node while such a device exists.
 func migIdentities(dev hgml.Device, cardUUID string) (map[uint32]migIdentity, error) {
 	count, ret := dev.GetMaxMigDeviceCount()
 	if !ret.IsSuccess() {

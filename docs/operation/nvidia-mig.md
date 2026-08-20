@@ -53,6 +53,11 @@ each row below pairs the two products' names for one shape.
 > segment is **excluded** from the inventory, so a key always maps back by a plain prefix strip. They reach
 > no `Devices` ledger, capacity key or `InstanceType` inventory, and cannot be requested.
 
+> **A partition is one whole GPU instance; subdividing it is not supported.** Every profile above is created
+> as a GPU instance plus a single compute instance covering all of it. GPUStack addresses a partition by one
+> device id, and a GPU instance you subdivide by hand (`nvidia-smi mig -cci`) has several — a share of the
+> compute each, all on the same memory — so it is refused rather than half-addressed.
+
 Instances occupy **hardcoded placement slots** — the *legal starts* above, in memory-slice units — and a
 combination is legal only when the occupied intervals do not overlap. A profile's **max instances/GPU is the
 length of its start list**.
@@ -220,6 +225,10 @@ only when *that* instance has active processes; sibling workloads are unaffected
   its allocation closed and is retried.
 - The `+me` / `+me.all` / `+gfx` profile variants are excluded from the inventory (see
   [Supported profiles](#supported-profiles)).
+- **A hand-subdivided GPU instance stops the sweep for the whole node.** One carrying more than one compute
+  instance (`nvidia-smi mig -cci`) cannot be addressed by a single device id, so its GPU is refused — and the
+  reclaim pass, which lists every GPU before deciding anything, ends there. Nothing is reclaimed on any GPU
+  of that node, with an error each pass, until that instance is back to one compute instance.
 - **A profile the driver enumerates no legal placement for is excluded too**, as is one whose placement query
   failed; the GPU and profile ids are named in a warning. A profile's memory-slice span has no source but its
   placement records, and that span is what matches an instance's identity. Nothing is lost: such a profile
@@ -752,6 +761,9 @@ gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   
   evict Pods on a *mode* change.
 - Account for an instance you carved by hand — though it *does* delete it as an orphan once its GPU is
   idle and nothing is running on it ([Limitations](#limitations)).
+- Hand out a *subdivided* instance, or subdivide one itself — it creates a GPU instance with a single
+  compute instance covering all of it, and refuses one somebody else subdivided
+  ([Supported profiles](#supported-profiles)).
 
 It *does* create and destroy the *instances* backing scheduled workloads
 ([Requesting a MIG instance](#requesting-a-mig-instance)).

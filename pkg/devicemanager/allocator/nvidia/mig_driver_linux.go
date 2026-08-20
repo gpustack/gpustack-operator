@@ -219,6 +219,12 @@ func driverReportsAbsent(ret nvml.Return) bool {
 // other failure IS an error, because a handle in hand whose owner or identity cannot be read leaves
 // the map missing a live partition — and a missing identity is exactly what makes a live partition
 // look reclaimable, or makes a destroy verify against nothing.
+//
+// One GPU instance owning several MIG devices is refused rather than resolved to one of them, which
+// is where the contract that a partition is one whole GPU instance is enforced: this operator creates
+// each with a single compute instance covering all of it, so several means somebody subdivided it by
+// hand, and either identity would hand a container part of the compute while the whole instance is
+// accounted for. The refusal fails the accelerator's enumeration, and with it the node's.
 func (d *nvmlMigDriver) migUUIDs(dev nvml.Device, cardUUID string) (map[uint32]string, error) {
 	count, ret := dev.GetMaxMigDeviceCount()
 	if !ret.IsSuccess() {
