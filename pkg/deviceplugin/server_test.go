@@ -1523,6 +1523,86 @@ func TestResourceServer_Allocate_RefusalRestoresAReplayedClaim(t *testing.T) {
 		"and it must record what the container still holds, not what this attempt tried to take")
 }
 
+// TestResourceServer_PriorClaimOf pins which record answers "what does this container already hold" —
+// the question a refusal's compensation has to put back, and a replay has to reuse. The reservation
+// leads because it cannot lag; the durable annotation is the fallback that survives a restart; and an
+// entry whose give-back is still pending is void, however present it looks, because the write that
+// would have removed it did not land.
+func TestResourceServer_PriorClaimOf(t *testing.T) {
+	const container = workloadContainer
+
+	held := func(dev string) ContainerAllocation {
+		return ContainerAllocation{
+			Devices:   reservationStatusFor(dev),
+			DeviceIDs: []string{"grp-0:" + dev + ":0000"},
+		}
+	}
+	recorded := held("dev-anno")
+	reserved := held("dev-reserved")
+	restored := held("dev-restored")
+
+	cases := []struct {
+		name string
+		// annotated is what the pod's annotation carries.
+		annotated *ContainerAllocation
+		// reservation is what this process has reserved for the container.
+		reservation *ContainerAllocation
+		// pending, when set, is a give-back waiting for this container; its value is what that
+		// give-back would restore, and a nil pendingPrior means it would remove the entry outright.
+		pending      bool
+		pendingPrior *ContainerAllocation
+		want         *ContainerAllocation
+	}{
+		{
+			name:      "the annotation answers when nothing else does",
+			annotated: &recorded,
+			want:      &recorded,
+		},
+		{
+			name:        "a reservation leads the annotation",
+			annotated:   &recorded,
+			reservation: &reserved,
+			want:        &reserved,
+		},
+		{
+			name:      "an entry whose give-back is pending holds nothing",
+			annotated: &recorded,
+			pending:   true,
+		},
+		{
+			name:         "and a give-back that restores an earlier claim answers with it",
+			annotated:    &recorded,
+			pending:      true,
+			pendingPrior: &restored,
+			want:         &restored,
+		},
+		{
+			name: "nothing recorded anywhere",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			pod := &core.Pod{ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "default", UID: "uid-p"}}
+			if c.annotated != nil {
+				annoBytes, err := json.Marshal(PodAllocations{container: *c.annotated})
+				require.NoError(t, err)
+				pod.Annotations = map[string]string{AllocatedAcceleratorAnnoKey: string(annoBytes)}
+			}
+			rec := new(DevicesReconciler)
+			if c.reservation != nil {
+				rec.reserveDevices(pod.UID, container, c.reservation.Devices, c.reservation.DeviceIDs)
+			}
+			if c.pending {
+				rec.recordPendingRelease(pod.UID, container, c.pendingPrior)
+			}
+			s := &ResourceServer{Reconciler: rec}
+
+			assert.Equal(t, c.want, s.priorClaimOf(pod, container))
+		})
+	}
+}
+
 // reservationStatusFor builds a one-accelerator sliced allocation for a reservation fixture.
 func reservationStatusFor(dev string) workercore.DevicesStatus {
 	return workercore.DevicesStatus{

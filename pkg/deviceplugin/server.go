@@ -1212,6 +1212,12 @@ func (s *ResourceServer) priorClaimOf(pod *core.Pod, container string) *Containe
 	if held, ok := s.Reconciler.reservationsFor(pod.UID)[container]; ok && len(held.Allocated.Groups) > 0 {
 		return &ContainerAllocation{Devices: held.Allocated, DeviceIDs: held.DeviceIDs}
 	}
+	// An entry with a give-back still pending is void whatever the annotation says: the write that
+	// would have taken it out did not land. What the container actually holds is what that write was
+	// going to put back — nothing, unless the refused attempt had overwritten an earlier claim.
+	if prior, pending := s.Reconciler.peekPendingRelease(pod.UID, container); pending {
+		return prior
+	}
 	allocations, err := AllocatedAcceleratorsOf(pod)
 	if err != nil {
 		return nil

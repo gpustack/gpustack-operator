@@ -3,6 +3,7 @@ package deviceplugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlintercept "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	ctrlevent "sigs.k8s.io/controller-runtime/pkg/event"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
@@ -310,6 +312,245 @@ func TestDevicesReconciler_UnpatchAllocatingPod(t *testing.T) {
 			}
 		})
 	}
+}
+
+// pendingReleaseKeys lists the compensating writes still waiting to be retried, as
+// "<pod uid>/<container>".
+func pendingReleaseKeys(r *DevicesReconciler) []string {
+	r.pendingReleasesMutex.RLock()
+	defer r.pendingReleasesMutex.RUnlock()
+	keys := make([]string, 0, len(r.pendingReleases))
+	for k := range r.pendingReleases {
+		keys = append(keys, string(k.PodUID)+"/"+k.Container)
+	}
+	return keys
+}
+
+// TestDevicesReconciler_PendingRelease verifies a compensating write that could not land is retried
+// until it does. The reservation half of a compensation is memory and cannot fail; this half is I/O
+// and can, and an entry left behind keeps charging its accelerator to a container kubelet never
+// started — the very leak the compensation exists to close, with nothing else retrying it.
+//
+// It also pins what the retry must NOT do: take back a claim the container legitimately acquired after
+// the failure, or apply a stale entry to a pod that merely reuses the name.
+func TestDevicesReconciler_PendingRelease(t *testing.T) {
+	const nodeName = "node-pending"
+	const container = "main"
+
+	claim := ContainerAllocation{
+		Devices:   physicalSliceAllocation("grp-0", "mig-0", "3g.20gb", pl(0, 4)),
+		DeviceIDs: []string{"grp-0:mig-0:0000"},
+	}
+	other := ContainerAllocation{
+		Devices:   physicalSliceAllocation("grp-0", "mig-0", "1g.10gb", pl(4, 2)),
+		DeviceIDs: []string{"grp-0:mig-0:0001"},
+	}
+
+	type fixture struct {
+		rec     *DevicesReconciler
+		cli     ctrlcli.WithWatch
+		pod     *core.Pod
+		failing bool
+		patches int
+	}
+	// newFixture builds a reconciler over one pod whose patches fail while failing is set, counting
+	// every patch it issues.
+	newFixture := func(t *testing.T, podUID types.UID, annotations map[string]string) *fixture {
+		t.Helper()
+		f := new(fixture)
+		f.pod = &core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Name: "p", Namespace: "default", UID: podUID, Annotations: annotations,
+			},
+			Spec: core.PodSpec{NodeName: nodeName},
+		}
+		f.cli = ctrlfake.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithObjects(physicalAndLogicalDevices(nodeName), f.pod).
+			WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+				return []string{obj.(*core.Pod).Spec.NodeName}
+			}).
+			WithInterceptorFuncs(ctrlintercept.Funcs{
+				SubResourceUpdate: func(
+					context.Context, ctrlcli.Client, string, ctrlcli.Object, ...ctrlcli.SubResourceUpdateOption,
+				) error {
+					return nil
+				},
+				Patch: func(
+					ctx context.Context, cli ctrlcli.WithWatch, obj ctrlcli.Object,
+					patch ctrlcli.Patch, opts ...ctrlcli.PatchOption,
+				) error {
+					f.patches++
+					if f.failing {
+						return errors.New("the api server is unreachable")
+					}
+					return cli.Patch(ctx, obj, patch, opts...)
+				},
+			}).
+			Build()
+		f.rec = &DevicesReconciler{NodeName: nodeName, Client: f.cli}
+		return f
+	}
+	reconcile := func(t *testing.T, f *fixture) ctrl.Result {
+		t.Helper()
+		res, err := f.rec.Reconcile(context.Background(),
+			ctrl.Request{NamespacedName: ctrlcli.ObjectKey{Name: nodeName}})
+		require.NoError(t, err)
+		return res
+	}
+	recordedFor := func(t *testing.T, f *fixture) PodAllocations {
+		t.Helper()
+		got := new(core.Pod)
+		require.NoError(t, f.cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(f.pod), got))
+		allocations, err := AllocatedAcceleratorsOf(got)
+		require.NoError(t, err)
+		return allocations
+	}
+
+	t.Run("a write that could not land is retried until it does", func(t *testing.T) {
+		f := newFixture(t, "uid-p", allocationAnnotation(t, PodAllocations{container: claim}))
+		f.failing = true
+		require.Error(t, f.rec.unpatchAllocatingPod(context.Background(), f.pod, container, nil))
+		require.Equal(t, []string{"uid-p/" + container}, pendingReleaseKeys(f.rec))
+
+		res := reconcile(t, f)
+		assert.Positive(t, res.RequeueAfter,
+			"nothing else brings this reconciler back, so a pending write must ask for another pass")
+		assert.NotEmpty(t, pendingReleaseKeys(f.rec), "and it stays pending while the write keeps failing")
+
+		f.failing = false
+		res = reconcile(t, f)
+		assert.Zero(t, res.RequeueAfter, "with nothing left pending there is nothing to come back for")
+		assert.Empty(t, pendingReleaseKeys(f.rec))
+		assert.NotContains(t, recordedFor(t, f), container,
+			"the entry the refused allocation left behind is finally off the pod")
+	})
+
+	t.Run("the retry restores what the entry held, not just removes it", func(t *testing.T) {
+		f := newFixture(t, "uid-p", allocationAnnotation(t, PodAllocations{container: other}))
+		f.failing = true
+		require.Error(t, f.rec.unpatchAllocatingPod(context.Background(), f.pod, container, &claim))
+
+		f.failing = false
+		reconcile(t, f)
+		assert.Equal(t, claim, recordedFor(t, f)[container],
+			"the claim the container already held travels with the pending write")
+	})
+
+	t.Run("a write whose pod is gone is dropped without another patch", func(t *testing.T) {
+		f := newFixture(t, "uid-p", nil)
+		f.rec.recordPendingRelease("uid-gone", container, nil)
+
+		before := f.patches
+		reconcile(t, f)
+		assert.Equal(t, before, f.patches, "a pod that is no longer on this node is not patched")
+		assert.Empty(t, pendingReleaseKeys(f.rec))
+	})
+
+	t.Run("only a claim that landed invalidates it, never a reservation", func(t *testing.T) {
+		f := newFixture(t, "uid-p", allocationAnnotation(t, PodAllocations{container: claim}))
+		f.rec.recordPendingRelease("uid-p", container, nil)
+
+		f.rec.reserveDevices("uid-p", container, claim.Devices, claim.DeviceIDs)
+		require.NotEmpty(t, pendingReleaseKeys(f.rec),
+			"a reservation is not a record anything outside this process reads; if the patch that "+
+				"follows it fails, this give-back is still the only thing that frees the accelerator")
+
+		require.NoError(t, f.rec.patchAllocatingPod(
+			context.Background(), f.pod, container, claim.Devices, claim.DeviceIDs))
+		assert.Empty(t, pendingReleaseKeys(f.rec),
+			"a claim that landed supersedes the give-back that would have taken it back")
+	})
+
+	t.Run("a replacement whose own write fails keeps the give-back", func(t *testing.T) {
+		f := newFixture(t, "uid-p", allocationAnnotation(t, PodAllocations{container: claim}))
+		f.rec.recordPendingRelease("uid-p", container, nil)
+
+		// The kubelet retries the same container: it reserves, then its durable patch fails too. The
+		// reservation is rolled back by the caller, and the annotation still carries the refused
+		// attempt's entry — so the give-back has to survive both failures.
+		f.rec.reserveDevices("uid-p", container, other.Devices, other.DeviceIDs)
+		f.failing = true
+		require.Error(t, f.rec.patchAllocatingPod(
+			context.Background(), f.pod, container, other.Devices, other.DeviceIDs))
+		f.rec.releaseReservation("uid-p", container)
+		require.NotEmpty(t, pendingReleaseKeys(f.rec), "nothing else is left to free that accelerator")
+
+		f.failing = false
+		reconcile(t, f)
+		assert.NotContains(t, recordedFor(t, f), container, "and the retry finally gives it back")
+	})
+
+	t.Run("a pod reusing the name under a new uid is left alone", func(t *testing.T) {
+		f := newFixture(t, "uid-new", allocationAnnotation(t, PodAllocations{container: claim}))
+		f.rec.recordPendingRelease("uid-old", container, nil)
+
+		reconcile(t, f)
+		assert.Contains(t, recordedFor(t, f), container,
+			"the new pod's own claim must survive an entry left over from the previous one")
+		assert.Empty(t, pendingReleaseKeys(f.rec), "and that entry goes with the pod it belonged to")
+	})
+
+	t.Run("recording a write wakes the reconciler", func(t *testing.T) {
+		f := newFixture(t, "uid-p", nil)
+		f.rec.pendingReleaseEvents = make(chan ctrlevent.GenericEvent, 1)
+
+		f.rec.recordPendingRelease("uid-p", container, nil)
+		select {
+		case <-f.rec.pendingReleaseEvents:
+		default:
+			t.Fatal("recording a compensating write must enqueue this node: the annotation change that " +
+				"would otherwise wake the reconciler is the write that just failed")
+		}
+
+		// A wake-up already queued is the same wake-up, so further records coalesce into it rather
+		// than blocking the Allocate that is recording them.
+		f.rec.recordPendingRelease("uid-p", "init", nil)
+		f.rec.recordPendingRelease("uid-p", "sidecar", nil)
+		assert.Len(t, pendingReleaseKeys(f.rec), 3)
+	})
+
+	t.Run("a failed retry does not wake the reconciler again", func(t *testing.T) {
+		f := newFixture(t, "uid-p", allocationAnnotation(t, PodAllocations{container: claim}))
+		f.rec.pendingReleaseEvents = make(chan ctrlevent.GenericEvent, 1)
+		f.failing = true
+
+		require.Error(t, f.rec.unpatchAllocatingPod(context.Background(), f.pod, container, nil))
+		<-f.rec.pendingReleaseEvents // the first record wakes the reconciler; consume it
+
+		res := reconcile(t, f)
+		require.NotEmpty(t, pendingReleaseKeys(f.rec), "the write still has not landed")
+		assert.Positive(t, res.RequeueAfter, "the requeue paces the next attempt")
+		select {
+		case <-f.rec.pendingReleaseEvents:
+			t.Fatal("a failed retry must not send another wake-up: it would bring the next attempt " +
+				"straight back with no delay, and the retry would spin")
+		default:
+		}
+	})
+
+	t.Run("two writes for one pod land one pass at a time", func(t *testing.T) {
+		f := newFixture(t, "uid-p", allocationAnnotation(t, PodAllocations{"init": claim, container: other}))
+		f.rec.recordPendingRelease("uid-p", "init", nil)
+		f.rec.recordPendingRelease("uid-p", container, nil)
+
+		reconcile(t, f)
+		assert.Len(t, recordedFor(t, f), 1,
+			"one write per pass: a second one in the same pass rebuilds from a pod copy the first did "+
+				"not change, and puts the entry it just removed back")
+		require.Len(t, pendingReleaseKeys(f.rec), 1, "the other one stays pending")
+
+		reconcile(t, f)
+		assert.Empty(t, recordedFor(t, f), "and the next pass takes it")
+		assert.Empty(t, pendingReleaseKeys(f.rec))
+	})
+
+	t.Run("an unreadable record enqueues nothing", func(t *testing.T) {
+		f := newFixture(t, "uid-p", map[string]string{AllocatedAcceleratorAnnoKey: "{not json"})
+		require.Error(t, f.rec.unpatchAllocatingPod(context.Background(), f.pod, container, nil))
+		assert.Empty(t, pendingReleaseKeys(f.rec),
+			"a record this process cannot parse will not parse on a retry either")
+	})
 }
 
 // TestDevicesReconciler_TerminatingPodStillCharges verifies a terminating Pod keeps charging its
