@@ -1,19 +1,23 @@
-# region -> available platforms (region is fixed by project_id's project, NOT a TF variable):
-#   eu-north1   : cpu-d3, cpu-e2, gpu-h100-sxm, gpu-h200-sxm, gpu-l40s-a, gpu-l40s-d
-#   eu-west1    : cpu-d3, gpu-h200-sxm
-#   me-west1    : cpu-d3, gpu-b200-sxm-a
-#   uk-south1   : cpu-d3, gpu-b300-sxm
-#   us-central1 : cpu-d3, gpu-b200-sxm, gpu-h200-sxm, gpu-rtx6000
+# The platform/preset/image_family truth is the API's, not this file's. These two commands print it:
 #
-# Example -- eu-north1 (default region, richest availability), platform -> presets:
-#   cpu-e2       : 2vcpu-8gb (default), 4vcpu-16gb, ... 80vcpu-320gb
-#   cpu-d3       : 4vcpu-16gb, ... 128vcpu-512gb
-#   gpu-h100-sxm : 1gpu-16vcpu-200gb, 8gpu-128vcpu-1600gb
-#   gpu-h200-sxm : 1gpu-16vcpu-200gb, 8gpu-128vcpu-1600gb
-#   gpu-l40s-a   : 1gpu-8vcpu-32gb, ... 1gpu-40vcpu-160gb
-#   gpu-l40s-d   : 1gpu-16vcpu-96gb, ... 4gpu-192vcpu-1152gb
+#   region=$(nebius iam project get --id <project_id> --format json | jq -r .spec.region)
+#   nebius compute platform list --parent-id <project_id> --format json \
+#     | jq -r '.items[] | "\(.metadata.name): \([.spec.presets[].name] | join(", "))"'
+#   nebius compute image list-public --region "$region" --format json \
+#     | jq -r '.items[] | select((.spec.recommended_platforms // []) | length > 0)
+#             | "\(.spec.image_family) <- \(.spec.recommended_platforms | join(", "))"'
+#
+# The module runs the same three calls itself when instance_type.image_family is null, so a platform
+# Nebius adds tomorrow works with no change here. A SNAPSHOT of eu-north1 as of 2026-08-19, for
+# orientation only -- do not treat it as current:
+#
+#   cpu-d3, cpu-e2                                  -> ubuntu24.04-driverless   (AMD64, min 10 GiB)
+#   gpu-h100-sxm, gpu-h200-sxm, gpu-l40s-a/-d,
+#   gpu-b200-sxm/-a, gpu-b300-sxm, gpu-rtx6000/-a   -> ubuntu24.04-cuda13.0     (AMD64, min 40 GiB)
+#   gpu-gb200, gpu-gb300                            -> ubuntu24.04-cuda13.0-arm64 (ARM64, min 40 GiB)
+#
 variable "project_id" {
-  description = "Nebius project ID; its region fixes VM placement and platform availability (see the region table above)."
+  description = "Nebius project ID; its region fixes VM placement and which platforms are available."
   type        = string
 
   validation {
@@ -40,30 +44,32 @@ variable "ssh_public_key" {
   }
 }
 
-# platform / preset / image_family combos (pick one matching triple; an invalid combo fails at apply).
-# project_id's region gates platform availability (see the region table above).
-# Default: gpu-h100-sxm / 1gpu-16vcpu-200gb / ubuntu24.04-cuda13.0.
-#
-# | Platform         | Notes                    | Presets                                                | Image family          |
-# |------------------|--------------------------|---------------------------------------------------------|-----------------------|
-# | cpu-d3           | AMD Epyc Genoa, all regions | 4vcpu-16gb, 8vcpu-32gb, 16vcpu-64gb, 32vcpu-128gb, 48vcpu-192gb, 64vcpu-256gb, 96vcpu-384gb, 128vcpu-512gb | ubuntu24.04-driverless |
-# | cpu-e2           | Intel Ice Lake, eu-north1 only | 2vcpu-8gb, 4vcpu-16gb, 8vcpu-32gb, 16vcpu-64gb, 32vcpu-128gb, 48vcpu-192gb, 64vcpu-256gb, 80vcpu-320gb | ubuntu24.04-driverless |
-# | gpu-h100-sxm     | H100 NVLink              | 1gpu-16vcpu-200gb (default), 8gpu-128vcpu-1600gb        | ubuntu24.04-cuda13.0 (default) |
-# | gpu-h200-sxm     | H200 NVLink              | 1gpu-16vcpu-200gb, 8gpu-128vcpu-1600gb                  | ubuntu24.04-cuda13.0  |
-# | gpu-l40s-a       | L40S / Ice Lake          | 1gpu-8vcpu-32gb, 1gpu-16vcpu-64gb, 1gpu-24vcpu-96gb, 1gpu-32vcpu-128gb, 1gpu-40vcpu-160gb | ubuntu24.04-cuda13.0  |
-# | gpu-l40s-d       | L40S / Genoa             | 1gpu-16vcpu-96gb, 1gpu-32vcpu-192gb, 1gpu-48vcpu-288gb, 2gpu-64vcpu-384gb, 2gpu-96vcpu-576gb, 4gpu-128vcpu-768gb, 4gpu-192vcpu-1152gb | ubuntu24.04-cuda13.0  |
-# | gpu-b200-sxm     | B200 NVLink              | 1gpu-20vcpu-224gb, 8gpu-160vcpu-1792gb                  | ubuntu24.04-cuda13.0  |
-# | gpu-b200-sxm-a   | B200 NVLink              | 1gpu-20vcpu-224gb, 8gpu-160vcpu-1792gb                  | ubuntu24.04-cuda13.0  |
-# | gpu-b300-sxm     | B300 NVLink              | 1gpu-24vcpu-346gb, 8gpu-192vcpu-2768gb                  | ubuntu24.04-cuda13.0 (cuda12 families unsupported here, need nvidia_gpu_drivers 580.x) |
-# | gpu-rtx6000      | RTX PRO 6000             | 1gpu-24vcpu-218gb, 8gpu-192vcpu-1744gb                  | ubuntu24.04-cuda13.0 (cuda12 families unsupported here, need nvidia_gpu_drivers 580.x) |
 variable "instance_type" {
-  # The Nebius platform/preset/image_family combination that defines the instance shape.
-  description = "Nebius instance type: the platform/preset/image_family combination (see the table above); pick a matching combo."
-  type        = object({ platform = string, preset = string, image_family = string })
+  # The platform/preset pair defines the instance shape. image_family is optional: left null, the
+  # module resolves it from the platform against Nebius' live public-image catalogue, which is the only
+  # place that mapping is actually true. Pinning it skips the lookup entirely -- see the README for
+  # what that opts out of.
+  description = "Nebius instance type. platform/preset are required; image_family is optional and resolved from the live image catalogue when null."
+  type = object({
+    platform     = string
+    preset       = string
+    image_family = optional(string)
+  })
   default = {
-    platform     = "gpu-h100-sxm"
-    preset       = "1gpu-16vcpu-200gb"
-    image_family = "ubuntu24.04-cuda13.0"
+    platform = "gpu-h100-sxm"
+    preset   = "1gpu-16vcpu-200gb"
+  }
+
+  validation {
+    # Null is "resolve it"; empty is neither a family nor a request to look one up, and it would skip
+    # the lookup and reach the provider as a blank image reference.
+    condition     = try(var.instance_type.image_family, null) != ""
+    error_message = "instance_type.image_family must be an image family name, or left out so the module resolves it from the platform. An empty string is neither."
+  }
+
+  validation {
+    condition     = var.instance_type.platform != "" && var.instance_type.preset != ""
+    error_message = "instance_type.platform and instance_type.preset must both be set; they are what the image family and the machine shape are resolved from."
   }
 }
 
@@ -86,5 +92,17 @@ variable "boot_disk_size_gb" {
   validation {
     condition     = var.boot_disk_size_gb > 0 && var.boot_disk_size_gb == floor(var.boot_disk_size_gb)
     error_message = "boot_disk_size_gb must be a positive whole number."
+  }
+
+  validation {
+    # Nebius' non-replicated and IO_M3 disks are allocated in 93 GiB units, and NETWORK_SSD tops out at
+    # 8192 GiB. Enforced here so a size the API will reject fails at plan; the image's own minimum is a
+    # separate check, on the instance, because it takes a live lookup.
+    condition = (
+      contains(["NETWORK_SSD_NON_REPLICATED", "NETWORK_SSD_IO_M3"], var.boot_disk_type)
+      ? var.boot_disk_size_gb >= 93 && var.boot_disk_size_gb % 93 == 0
+      : var.boot_disk_type != "NETWORK_SSD" || (var.boot_disk_size_gb >= 1 && var.boot_disk_size_gb <= 8192)
+    )
+    error_message = "NETWORK_SSD_NON_REPLICATED and NETWORK_SSD_IO_M3 are allocated in whole 93 GiB units (93, 186, 279, ...); NETWORK_SSD must be 1-8192 GiB."
   }
 }

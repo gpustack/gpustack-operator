@@ -17,3 +17,13 @@ output "ssh_command" {
   description = "Ready-to-run SSH command to reach the VM"
   value       = "ssh -i ${trimsuffix(var.ssh_public_key, ".pub")} ubuntu@${local.public_ip}"
 }
+
+output "image_family" {
+  description = "The image family the VM was built from: the pinned value, or the one resolved from the platform."
+  value       = local.image_family
+}
+
+output "image_architecture" {
+  description = "The CPU architecture of the resolved image, or null when image_family was pinned."
+  value       = local.resolved == null ? null : local.resolved.cpu_architecture
+}

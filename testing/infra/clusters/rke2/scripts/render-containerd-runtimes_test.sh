@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Unit test for render-containerd-runtimes.sh: run directly, e.g.
-#   bash testing/infra/clusters/k3s/scripts/render-containerd-runtimes_test.sh
+#   bash testing/infra/clusters/rke2/scripts/render-containerd-runtimes_test.sh
 set -uo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

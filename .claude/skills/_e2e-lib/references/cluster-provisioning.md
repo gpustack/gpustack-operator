@@ -32,6 +32,7 @@ normative and this table is only the triage summary.
 | Modality | What it provisions | Cost | Cloud CLI it needs (at plan, apply **and destroy**) |
 |---|---|---|---|
 | `k3s` | K3s over SSH onto servers **you already own** (embedded etcd, containerd runtime classes from each node's `daemon.json`) | **cheap** — no cloud bill; you are already paying for the servers | none; `ssh` + passwordless sudo on each node |
+| `rke2` | RKE2 over SSH onto servers **you already own** (embedded etcd, Calico, a per-release artifact cache, an optional SSH jump host, containerd runtime classes from each node's `daemon.json`) | **cheap** — no cloud bill; you are already paying for the servers | none; `ssh` + passwordless sudo on each node, SELinux not enforcing, first server reachable here on 6443 |
 | `eks` | A managed cluster + VPC + a CPU node group and per-key GPU node groups (GPU groups start scaled to zero), addons, kubeconfig merged after apply | **real money per hour**, and the VPC/NAT bills even while GPU groups are at zero | `aws` (`aws sts get-caller-identity` must pass) |
 | `nebius` | A managed cluster + network/subnet/security group + a CPU node group and per-key GPU node groups, kubeconfig merged after apply | **real money per hour**, GPU nodes are the expensive part | `nebius` + `jq` (a live compatibility-matrix call, see below) |
 
