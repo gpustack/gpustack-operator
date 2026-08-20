@@ -383,6 +383,21 @@ enumeration position — not the operator's logical one. The two coincide only w
 on the host was detected, so one failing a probe leaves every later accelerator carrying a logical
 index below its driver index.
 
+For Ascend the rule is **measured**, on a 910B2 against a simulated hole in the enumeration — the one
+condition that makes the difference observable. All three sites carry the driver index with the
+allocator driven directly on the host: `ASCEND_VISIBLE_DEVICES`, the `/dev/davinci<N>` the vendor
+runtime then mounts, and a slice's `npu_info.config` `physical-npu-id`.
+
+Through a device-manager DaemonSet under a real kubelet, the measurement covers the whole-accelerator
+path only — the env and the mounted device node, against the ledger's own record of the accelerator it
+allocated. The sliced site was not re-measured in-cluster; it rests on the host-side run, which drove
+the same responder.
+
+Two properties of the consuming side came out of the same runs: the container renumbers its
+accelerators by ascending physical id, not by the order they were named in, so the emission order
+stays immaterial even for a multi-accelerator claim; and an out-of-range value fails the container
+start outright, which is why naming the wrong accelerator is a silent misplacement.
+
 Hygon is the one whose position outlives the allocation: its figures go into `vdev<i>.conf` files on
 the host, and a slot is reused only when the file at that path already names the same accelerator. A
 sliced request is admitted for exactly one accelerator today, so the path is always `vdev0.conf` and
