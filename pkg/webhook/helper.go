@@ -6,7 +6,9 @@ import (
 	"net/http"
 
 	"github.com/davecgh/go-spew/spew"
+	"go.uber.org/multierr"
 	admreg "k8s.io/api/admissionregistration/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -202,6 +204,24 @@ func InstallConfigurations(
 	}
 
 	return nil
+}
+
+// DeleteConfigurations deletes the webhook configurations the prefix names,
+// "<prefix>-validation" and "<prefix>-mutation". An absent configuration is already deleted,
+// and both are attempted even after one fails.
+func DeleteConfigurations(ctx context.Context, prefix string, cli kubernetes.Interface) error {
+	var errs []error
+	if err := cli.AdmissionregistrationV1().ValidatingWebhookConfigurations().
+		Delete(ctx, prefix+"-validation", meta.DeleteOptions{}); err != nil && !kerrors.IsNotFound(err) {
+		errs = append(errs, fmt.Errorf("delete validating webhook configuration %q: %w",
+			prefix+"-validation", err))
+	}
+	if err := cli.AdmissionregistrationV1().MutatingWebhookConfigurations().
+		Delete(ctx, prefix+"-mutation", meta.DeleteOptions{}); err != nil && !kerrors.IsNotFound(err) {
+		errs = append(errs, fmt.Errorf("delete mutating webhook configuration %q: %w",
+			prefix+"-mutation", err))
+	}
+	return multierr.Combine(errs...)
 }
 
 // MergeConfigurations merges the webhook configurations from the getters and returns the validating and mutating webhook configurations.

@@ -60,6 +60,12 @@ for r in apiservice mutatingwebhookconfigurations validatingwebhookconfiguration
     | grep -Ei "${gpustack_pattern}" \
     | xargs -r -I{} kubectl delete {} --ignore-not-found 2>/dev/null || true
 done
+#    An APIService whose name carries none of the pattern still gives itself away by the
+#    namespace of the Service it proxies to — the operator's aggregated APIs included,
+#    whatever version registered them.
+kubectl get apiservices \
+  -o jsonpath='{.items[?(@.spec.service.namespace=="'"${NS}"'")].metadata.name}' 2>/dev/null \
+  | xargs -r -I{} kubectl delete apiservice {} --ignore-not-found 2>/dev/null || true
 
 # 3. Strip the finalizers that pin objects once their controllers are gone. Kueue pins
 #    workloads/flavors/queues/checks with kueue.x-k8s.io/resource-in-use and the operator pins

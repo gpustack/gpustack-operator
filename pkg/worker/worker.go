@@ -10,6 +10,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	admreg "k8s.io/api/admissionregistration/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	genericapiserver "k8s.io/apiserver/pkg/server"
 	"k8s.io/apiserver/pkg/server/healthz"
 	"k8s.io/apiserver/pkg/server/routes"
@@ -250,10 +252,48 @@ func (w *Worker) Start(ctx context.Context) error {
 		klog.Info("starting extension API services ensurer")
 		err := apis.EnsureServices(ctx, system.LoopbackKubeClient.Get(),
 			w.routingServiceReference(), w.RoutingCaBundle)
+		w.deregisterOnTeardown()
 		if err != nil && ctx.Err() == nil {
 			return fmt.Errorf("ensure extension API services: %w", err)
 		}
 		return nil
 	})
 	return gp.Wait()
+}
+
+// deregisterOnTeardown removes the cluster-scoped objects of this install — every API
+// service backed by the system namespace and the webhook configurations this worker
+// registered — when the shutdown comes from the system namespace going away. Both would
+// otherwise outlive their namespaced routing service: the stale API services wedge the
+// namespace's deletion on discovery it can no longer serve, and the stale webhook
+// configurations fail admissions against a service that is gone (gpustack-operator#123).
+// The API services are matched by backing namespace rather than by the worker's own list
+// because a chart-installed one — Kueue's visibility pair — wedges the deletion the same
+// way, and a direct namespace deletion runs no chart uninstall to take it down. An ordinary
+// restart or upgrade leaves the namespace standing, so nothing is removed then — a surviving
+// replica's ensurer or the next boot keeps them served. Best effort and bounded: this must
+// never hold a shutdown up.
+func (w *Worker) deregisterOnTeardown() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	lpCli := system.LoopbackKubeClient.Get()
+	ns, err := lpCli.CoreV1().Namespaces().Get(ctx, kuberess.SystemNamespaceName, meta.GetOptions{})
+	switch {
+	case err == nil && ns.DeletionTimestamp == nil:
+		// The namespace stands: a restart or an upgrade, not a teardown.
+		return
+	case err != nil && !kerrors.IsNotFound(err):
+		// A read failure cannot tell a teardown from a restart — leave the registrations
+		// rather than strip them off a living install.
+		klog.InfoS("leaving the extension API services and webhook configurations registered: cannot read the system namespace", "err", err)
+		return
+	}
+
+	if err = apis.DeleteServicesBackedBy(ctx, lpCli, kuberess.SystemNamespaceName); err != nil {
+		klog.InfoS("failed to delete the aggregated API services on teardown", "err", err)
+	}
+	if err = webhooks.Delete(ctx, lpCli); err != nil {
+		klog.InfoS("failed to delete webhook configurations on teardown", "err", err)
+	}
 }
