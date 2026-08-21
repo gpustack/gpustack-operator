@@ -5,6 +5,55 @@ entries:
       artifacthub.io/license: Apache-2.0
       artifacthub.io/operator: "true"
     apiVersion: v2
+    appVersion: 0.8.5
+    created: "2026-08-21T13:16:13.645266364Z"
+    dependencies:
+    - condition: kueue.enabled
+      name: kueue
+      repository: ""
+      version: 0.18.4
+    - condition: node-feature-discovery.enabled
+      name: node-feature-discovery
+      repository: ""
+      version: 0.19.0
+    - condition: csi-driver-nfs.enabled
+      name: csi-driver-nfs
+      repository: ""
+      version: 4.13.4
+    - condition: csi-driver-s3.enabled
+      name: csi-driver-s3
+      repository: ""
+      version: 0.43.7
+    description: A Kubernetes operator that turns raw node hardware into a Kueue-based
+      scheduling chain for accelerators (GPU/NPU/TPU), built on Node Feature Discovery
+      (NFD) and Kueue.
+    digest: b7d849b45e127fe1bdc1b8b3ce9a5ffbd1b748b83208d6d6ad1e863d54d30faa
+    home: https://github.com/gpustack/gpustack-operator
+    icon: https://raw.githubusercontent.com/gpustack/gpustack/main/docs/assets/logo.png
+    keywords:
+    - gpustack-operator
+    - operator
+    - kueue
+    - node-feature-discovery
+    - gpu
+    - npu
+    - accelerator
+    kubeVersion: '>=1.23.0-0'
+    maintainers:
+    - name: GPUStack Authors
+      url: https://github.com/gpustack
+    name: gpustack-operator
+    sources:
+    - https://github.com/gpustack/gpustack
+    - https://github.com/gpustack/gpustack-operator
+    type: application
+    urls:
+    - https://gpustack.github.io/gpustack-operator/charts/gpustack-operator-0.8.5.tgz
+    version: 0.8.5
+  - annotations:
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/operator: "true"
+    apiVersion: v2
     appVersion: 0.8.4
     created: "2026-08-20T16:39:50.690155721Z"
     dependencies:
@@ -774,4 +823,4 @@ entries:
     urls:
     - https://gpustack.github.io/gpustack-operator/charts/gpustack-operator-0.5.1.tgz
     version: 0.5.1
-generated: "2026-08-20T16:39:50.677982435Z"
+generated: "2026-08-21T13:16:13.62909354Z"
