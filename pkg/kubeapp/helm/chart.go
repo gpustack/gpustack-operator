@@ -55,6 +55,12 @@ type (
 		// CRDs get stuck Terminating and the reinstall can never recreate them. An upgrade
 		// keeps the controller alive to clear the finalizers and recreates any missing
 		// resources, so the release converges without stranding.
+		//
+		// The same destructiveness rules the rollback out of pending-record repair: a
+		// rollback re-applies the last deployed revision's manifest, deleting whatever the
+		// pending operation had already adopted (taken-over CRDs included), so an
+		// abandoned pending-upgrade or pending-rollback is repaired by discarding the
+		// record and upgrading from the revision beneath it.
 		RepairViaUpgradeOnly bool
 		// TakeOwnership adopts pre-existing live objects that this release does not own
 		// yet, instead of failing the action on them.

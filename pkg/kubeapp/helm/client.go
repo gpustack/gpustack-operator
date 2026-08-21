@@ -152,11 +152,14 @@ func (c *Client) nextStep(ctx context.Context, r *helmrelease.Release, chart *Ch
 			return _NextStepDiscard
 		}
 
-		// An abandoned upgrade/rollback still has its last deployed revision intact — roll
-		// back to it to clear the pending lock, then the loop upgrades. Others keep the
-		// reinstall behavior.
+		// An abandoned upgrade/rollback under upgrade-only repair: discard the pending
+		// record, which returns the release to its newest earlier revision, and the loop
+		// converges with an upgrade from there. Rolling back instead would re-apply that
+		// revision's manifest, deleting every object the pending operation had already
+		// adopted — the CRDs taken over from a legacy release included — which is the
+		// wedge RepairViaUpgradeOnly exists to avoid. Others keep the reinstall behavior.
 		if chart.RepairViaUpgradeOnly {
-			return NextStepRollback
+			return _NextStepDiscard
 		}
 
 		return _NextStepInstall
@@ -178,7 +181,6 @@ const (
 	NextStepDone NextStepType = iota
 	NextStepRequeue
 	NextStepUpgrade
-	NextStepRollback
 	NextStepReinstall
 	_NextStepInstall
 	_NextStepDiscard
@@ -231,8 +233,6 @@ func (c *Client) InstallWith(
 		return nil, fmt.Errorf("create helm config: %w", err)
 	}
 
-	logger := klog.Background().WithName(chart.Name).WithValues("release", chart.Release)
-
 	// Get release.
 	g := helmaction.NewGet(config)
 	r, err := g.Run(chart.Release)
@@ -240,11 +240,46 @@ func (c *Client) InstallWith(
 		return nil, fmt.Errorf("helm get: release %s: %w", chart.Release, err)
 	}
 
-	// Next.
+	return c.converge(ctx, config, chart, next, namespace, r)
+}
+
+// converge runs the next-step loop of InstallWith from an already-read release record — nil
+// when there is none: it decides, acts, and re-reads until the release reports done, and
+// returns the merged values then. It stands apart from InstallWith, which builds the
+// namespace and the action configuration from a live cluster, so the loop itself can run
+// against an in-memory Helm storage in tests.
+func (c *Client) converge(
+	ctx context.Context,
+	config *helmaction.Configuration,
+	chart *Chart,
+	next NextStepConditionFunc,
+	namespace string,
+	r *helmrelease.Release,
+) (helmchartutil.Values, error) {
+	logger := klog.Background().WithName(chart.Name).WithValues("release", chart.Release)
+	g := helmaction.NewGet(config)
+	var err error
+
+	// forceUpgrade turns a Done that follows a discarded pending upgrade/rollback into one
+	// upgrade: the revision beneath such a record can read as current (same chart version
+	// and values) while the killed operation only half-applied its manifest. It fires once —
+	// a Done after that upgrade means the release has truly converged.
+	forceUpgrade := false
 	for {
 		n := _NextStepInstall
 		if r != nil {
 			n = next(r)
+			if forceUpgrade {
+				// Fire once, and consume only when an upgrade actually fires: a Done
+				// that follows a discarded record becomes the upgrade, and an upgrade
+				// the release already needed (the usual version change) serves the same
+				// purpose, so the flag must not survive either. A requeue fires nothing,
+				// so it keeps the flag for the iteration that does.
+				if n == NextStepDone {
+					n = NextStepUpgrade
+				}
+				forceUpgrade = n != NextStepUpgrade
+			}
 		} else if isApiServiceReady(ctx, c, chart.SkippedInstallationIfApiServiceReady) {
 			return nil, nil
 		}
@@ -271,22 +306,9 @@ func (c *Client) InstallWith(
 			// dead process did manage to create. Only this revision goes, so a release that
 			// carries earlier ones converges on the newest of those instead of installing.
 			logger.Info("discarding the abandoned release revision")
+			forceUpgrade = r.Info.Status != helmrelease.StatusPendingInstall
 			if _, err := config.Releases.Delete(chart.Release, r.Version); err != nil {
 				return nil, fmt.Errorf("helm delete revision: release %s: %w", chart.Release, err)
-			}
-			r, err = g.Run(chart.Release)
-			if err != nil && !errors.Is(err, helmdriver.ErrReleaseNotFound) {
-				return nil, fmt.Errorf("helm get: release %s: %w", chart.Release, err)
-			}
-		case NextStepRollback:
-			// Clear a wedged pending release by rolling back to its last deployed revision,
-			// then re-evaluate (the loop then upgrades it). This only removes the pending
-			// lock; the upgrade that follows does the real reconciliation.
-			logger.Info("rolling back wedged release")
-			rb := helmaction.NewRollback(config)
-			rb.Timeout = c.timeout
-			if err := rb.Run(chart.Release); err != nil {
-				return nil, fmt.Errorf("helm rollback: release %s: %w", chart.Release, err)
 			}
 			r, err = g.Run(chart.Release)
 			if err != nil && !errors.Is(err, helmdriver.ErrReleaseNotFound) {
