@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -12,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	klog "k8s.io/klog/v2"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
@@ -99,7 +101,7 @@ func newSlicedServer() *server {
 // registering a server that advertises an empty name to kubelet is worse than registering none.
 func TestNew_ServerSet(t *testing.T) {
 	modesOf := func(a device.Allocator) []workercore.DeviceAllocationMode {
-		agg, ok := a.(aggregated)
+		agg, ok := a.(*aggregated)
 		require.True(t, ok)
 		modes := make([]workercore.DeviceAllocationMode, 0, len(agg.servers))
 		for i := range agg.servers {
@@ -166,13 +168,63 @@ func TestNew_ServerSet(t *testing.T) {
 // server that creates the instances it frees. Gating it on the logical slicing server would run
 // it with no partitions to reclaim, and stop it while partitions were still live.
 func TestNew_ReclaimLoopFollowsThePartitionServer(t *testing.T) {
-	withPartitions, ok := New(device.AllocatorOptions{NoSliced: true}).(aggregated)
+	withPartitions, ok := New(device.AllocatorOptions{NoSliced: true}).(*aggregated)
 	require.True(t, ok)
 	assert.True(t, withPartitions.partitioned, "the reclaim loop runs while the partition server does")
 
-	withoutPartitions, ok := New(device.AllocatorOptions{NoPartitioned: true}).(aggregated)
+	withoutPartitions, ok := New(device.AllocatorOptions{NoPartitioned: true}).(*aggregated)
 	require.True(t, ok)
 	assert.False(t, withoutPartitions.partitioned, "no partition server, nothing to reclaim")
+}
+
+// reclaimStopServer stands in for a resource server here: it serves nothing and returns once the
+// context it was started under ends, which is the whole of what the allocator's Start asks of it.
+// started is closed on its way in, so the test acts on a Start that has actually begun.
+type reclaimStopServer struct {
+	started chan struct{}
+}
+
+func (s reclaimStopServer) Start(ctx context.Context, _ string) error {
+	close(s.started)
+	<-ctx.Done()
+
+	return ctx.Err()
+}
+
+func (reclaimStopServer) Stop() {}
+
+// TestAggregated_StopEndsStartDespiteTheReclaimLoop is the wiring assertion for this vendor: the
+// reclaim loop watches nothing but its context, so an allocator whose Stop cancels nothing leaves it
+// — and the goroutine, ticker and broadcast subscription it holds — running for the life of the
+// process, and Start never returns. Returning is only half of it: the device manager treats any error
+// from an allocator's Start as fatal to the node, so a Stop that reported context.Canceled would take
+// the node down on an ordinary undetect.
+func TestAggregated_StopEndsStartDespiteTheReclaimLoop(t *testing.T) {
+	srv := reclaimStopServer{started: make(chan struct{})}
+	in := &aggregated{
+		logger:      klog.Background(),
+		servers:     []deviceplugin.Server{srv},
+		partitioned: true,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- in.Start(context.Background())
+	}()
+	select {
+	case <-srv.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Start did not run its servers")
+	}
+
+	in.Stop()
+
+	select {
+	case err := <-errCh:
+		assert.NoError(t, err, "being stopped is not an outcome to report to the device manager")
+	case <-time.After(10 * time.Second):
+		t.Fatal("Start did not return after Stop")
+	}
 }
 
 func TestGetSlicedContainerAllocateResponse(t *testing.T) {

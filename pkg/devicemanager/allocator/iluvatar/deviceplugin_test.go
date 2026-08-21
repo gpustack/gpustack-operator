@@ -98,7 +98,7 @@ func newSlicedServer() *server {
 // registers a partitioned server.
 func TestNew_ServerSet(t *testing.T) {
 	modesOf := func(a device.Allocator) []workercore.DeviceAllocationMode {
-		agg, ok := a.(aggregated)
+		agg, ok := a.(*aggregated)
 		require.True(t, ok)
 		modes := make([]workercore.DeviceAllocationMode, 0, len(agg.servers))
 		for i := range agg.servers {

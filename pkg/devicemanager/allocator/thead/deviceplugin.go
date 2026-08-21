@@ -68,7 +68,7 @@ func New(opts device.AllocatorOptions) device.Allocator {
 		newServer(logger, workercore.DeviceAllocationModeVisibility, mig),
 	)
 
-	return aggregated{
+	return &aggregated{
 		logger:      logger,
 		servers:     servers,
 		kubeSocket:  opts.KubeSocket,
@@ -83,19 +83,22 @@ type aggregated struct {
 	// partitioned reports whether a Partitioned server is registered, gating the per-vendor partition
 	// reclaim loop: the loop exists to free the instances that server creates.
 	partitioned bool
+	// lifecycle owns the context the tasks below run under, so that stopping this allocator ends
+	// every one of them and not only the ones watching a server.
+	lifecycle gox.Lifecycle
 }
 
-func (aggregated) Name() string {
+func (*aggregated) Name() string {
 	return Manufacturer
 }
 
-func (in aggregated) Start(ctx context.Context) error {
+func (in *aggregated) Start(ctx context.Context) error {
 	in.logger.Info("starting")
 
-	gp := gox.GroupWithContextIn(ctx)
+	tasks := make([]func(context.Context) error, 0, len(in.servers)+1)
 	for i := range in.servers {
 		srv := in.servers[i]
-		gp.Go(func(ctx context.Context) error {
+		tasks = append(tasks, func(ctx context.Context) error {
 			return srv.Start(ctx, in.kubeSocket)
 		})
 	}
@@ -104,7 +107,7 @@ func (in aggregated) Start(ctx context.Context) error {
 	// plus a resync ticker. The loop takes its own driver instance, mirroring the blueprint rather
 	// than sharing the servers' one.
 	if in.partitioned {
-		gp.Go(func(ctx context.Context) error {
+		tasks = append(tasks, func(ctx context.Context) error {
 			reconciler := controllers.Get[*deviceplugin.DevicesReconciler]()
 			r := newReclaimer(newMigDriver(), deviceplugin.OperatorPodsDir, in.logger.WithName("reclaim"),
 				liveClaimsFrom(ctx, reconciler))
@@ -113,7 +116,8 @@ func (in aggregated) Start(ctx context.Context) error {
 			return nil
 		})
 	}
-	return gp.Wait()
+
+	return in.lifecycle.Start(ctx, tasks...)
 }
 
 // liveClaimsFrom adapts the reconciler's annotation-derived live physical-slice occupancy into the
@@ -137,13 +141,13 @@ func liveClaimsFrom(ctx context.Context, reconciler *deviceplugin.DevicesReconci
 	}
 }
 
-func (in aggregated) Stop() {
+// Stop ends every task Start launched and does not return until they have. The servers are not
+// walked here: canceling the context they serve under is what retires them, and walking them
+// afterwards would report a completed teardown as a server that was never started.
+func (in *aggregated) Stop() {
 	in.logger.Info("stopping")
 
-	for i := range in.servers {
-		srv := in.servers[i]
-		srv.Stop()
-	}
+	in.lifecycle.Stop()
 }
 
 type server struct {
