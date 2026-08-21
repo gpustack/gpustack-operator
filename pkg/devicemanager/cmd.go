@@ -89,7 +89,10 @@ func newDetectCommand() *cobra.Command {
 
 			enc := yaml.NewEncoder(os.Stdout)
 			enc.SetIndent(4)
-			return enc.Encode(d.DetectAccelerator(ctx))
+			// The manufacturers this pass could not detect are logged by it, and a one-shot detect
+			// has no next pass to come back on.
+			grpList, _ := d.DetectAccelerator(ctx)
+			return enc.Encode(grpList)
 		},
 	}
 
@@ -121,7 +124,10 @@ func newMonitorCommand() *cobra.Command {
 
 			enc := yaml.NewEncoder(os.Stdout)
 			enc.SetIndent(4)
-			return enc.Encode(d.MonitorAccelerator(ctx))
+			// The manufacturers this pass could not measure are logged by it, and a one-shot
+			// monitor has no next pass to keep them out of.
+			grpList, _ := d.MonitorAccelerator(ctx)
+			return enc.Encode(grpList)
 		},
 	}
 

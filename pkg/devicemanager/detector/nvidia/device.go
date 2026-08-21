@@ -262,7 +262,7 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 
 func (in *nvidia) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, err error) {
 	defer loggerx.RecoverWithStackScanner(func(s loggerx.Scanner, e error) {
-		in.logger.Error(e, "failed to monitor mthreads devices")
+		in.logger.Error(e, "failed to monitor nvidia devices")
 		for s.Scan() {
 			in.logger.Error(nil, s.Text())
 		}

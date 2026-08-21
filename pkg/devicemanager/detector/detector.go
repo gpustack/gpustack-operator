@@ -47,6 +47,11 @@ type Detector struct {
 	monitorSnapshot         datax.Snapshot[MonitorSnapshot]
 	detectedManufacturersCh chan<- sets.Set[string]
 
+	// lastDetected is the newest groups each manufacturer's detect pass reported, kept so a pass that
+	// FAILS can report what was last detected instead of nothing. Only the detect loop reads or
+	// writes it, so it carries no lock of its own.
+	lastDetected map[string]device.DevicesGroupList
+
 	// podLister and procResolver are the two node-local reads the slice section needs: which Pods
 	// this node runs, and which of them a host process belongs to. They are fields rather than
 	// direct calls so the pass tests against a fake Pod list and a fake /proc tree.
@@ -107,35 +112,81 @@ func New(c *Config) (*Detector, error) {
 	return d, nil
 }
 
-// DetectAccelerator detects the accelerators on the node and returns a list of device groups once.
-func (d *Detector) DetectAccelerator(_ context.Context) (grpListMerged device.DevicesGroupList) {
+// DetectAccelerator detects the accelerators on the node and returns a list of device groups once,
+// naming the manufacturers whose pass could not measure them.
+//
+// A manufacturer whose pass FAILED is reported as it was last detected rather than left out. An error
+// from a detector says that pass could not measure and nothing about the hardware — a driver that will
+// not load or a bus holding no card is answered with an empty list and no error — so leaving the
+// manufacturer out would tell every consumer downstream that its accelerators are gone: the allocator
+// stops, its device-plugin sockets retire, and the node loses that family's capacity keys. There is
+// nothing to report on a first pass, so a manufacturer that has never answered is still absent.
+//
+// Reporting the last result is a substitution, which is why the manufacturers it was made for are
+// named: a caller that keeps detecting is meant to come back rather than settle on it. What it reports
+// is a copy, so the held result is never the one a consumer holds.
+//
+// This is the detect loop's own pass and holds the state that loop carries between rounds, so it is not
+// safe to call while Start is running.
+//
+// A pass that ran and found nothing is the opposite claim, and the only one that undetects a
+// manufacturer. Whatever was held for it is dropped there, so a later failure cannot resurrect a card
+// that was pulled.
+func (d *Detector) DetectAccelerator(
+	_ context.Context,
+) (grpListMerged device.DevicesGroupList, unmeasured sets.Set[string]) {
+	unmeasured = sets.New[string]()
+
 	for i := range d.detectors {
-		logger := logger.V(2).WithValues("manufacturer", d.detectors[i].Name())
+		manufacturer := d.detectors[i].Name()
+		logger := logger.V(2).WithValues("manufacturer", manufacturer)
 
 		grpList, err := d.detectors[i].DetectAccelerator(d.noPCICheck)
 		if err != nil {
 			logger.Error(err, "detect accelerators")
+			unmeasured.Insert(manufacturer)
+			if lastGrpList := d.lastDetected[manufacturer]; len(lastGrpList) != 0 {
+				logger.Info("reporting the accelerators last detected")
+				grpListMerged = append(grpListMerged, cloneDeviceGroups(lastGrpList)...)
+			}
 			continue
 		}
 		if len(grpList) == 0 {
+			delete(d.lastDetected, manufacturer)
 			continue
 		}
+
+		if d.lastDetected == nil {
+			d.lastDetected = make(map[string]device.DevicesGroupList, len(d.detectors))
+		}
+		d.lastDetected[manufacturer] = grpList
 
 		grpListMerged = append(grpListMerged, grpList...)
 		logger.Info("detected accelerators")
 	}
 
-	return grpListMerged
+	return grpListMerged, unmeasured
 }
 
-// MonitorAccelerator monitors the accelerators on the node and returns a list of metrics groups once.
-func (d *Detector) MonitorAccelerator(_ context.Context) (grpListMerged device.MetricsGroupList) {
+// MonitorAccelerator monitors the accelerators on the node and returns a list of metrics groups once,
+// naming the manufacturers whose pass could not measure them.
+//
+// Those are named rather than reported as they were last measured: a sample is only worth what its
+// timestamp claims, so a manufacturer that could not be measured is absent from the result. Naming it
+// is what keeps its absence from reading as a device set that shrank.
+func (d *Detector) MonitorAccelerator(
+	_ context.Context,
+) (grpListMerged device.MetricsGroupList, unmeasured sets.Set[string]) {
+	unmeasured = sets.New[string]()
+
 	for i := range d.detectors {
-		logger := logger.V(2).WithValues("manufacturer", d.detectors[i].Name())
+		manufacturer := d.detectors[i].Name()
+		logger := logger.V(2).WithValues("manufacturer", manufacturer)
 
 		grpList, err := d.detectors[i].MonitorAccelerator(d.noPCICheck)
 		if err != nil {
 			logger.Error(err, "monitor accelerators")
+			unmeasured.Insert(manufacturer)
 			continue
 		}
 		if len(grpList) == 0 {
@@ -146,7 +197,7 @@ func (d *Detector) MonitorAccelerator(_ context.Context) (grpListMerged device.M
 		logger.Info("monitored accelerators")
 	}
 
-	return grpListMerged
+	return grpListMerged, unmeasured
 }
 
 // MonitorSnapshot returns the latest accelerator metrics sample stored by the monitor loop,
@@ -167,12 +218,12 @@ type _DeviceKey struct {
 
 // Start starts the detector to detect and monitor the devices periodically until the context is canceled.
 func (d *Detector) Start(ctx context.Context) error {
-	failedOnFirstNotDetected := !d.noFastFailed && d.manufacturers.Len() == 1
+	holdUntilFirstDetected := !d.noFastFailed && d.manufacturers.Len() == 1
 
 	return waitx.UntilContextCancel(ctx, d.monitorPeriod, true, func(ctx context.Context) error {
 		logger.V(2).Info("detecting")
 
-		devicesGrpList := d.DetectAccelerator(ctx)
+		devicesGrpList, unmeasuredByDetect := d.DetectAccelerator(ctx)
 
 		// Get detected device keys and manufacturers from the detect result.
 		deviceKeys := sets.New[_DeviceKey]()
@@ -190,17 +241,23 @@ func (d *Detector) Start(ctx context.Context) error {
 			}
 		}
 
-		// If there is no device detected,
-		// but there is one manufacturer expected,
-		// return error directly without monitoring,
-		// which means the detector is failed.
-		if failedOnFirstNotDetected {
+		// A device manager asked for exactly one manufacturer runs on a node its DaemonSet was
+		// scheduled to by that manufacturer's PCI vendor label, so a first round that detected
+		// nothing is a node whose hardware is there and whose software has not answered yet. Hold
+		// the round back rather than publish and report a node with no accelerators, and say so
+		// again on every round for as long as it lasts: the driver appearing is what ends it.
+		//
+		// Returning an error ends this round and no more. The poll this runs under keeps polling on
+		// one, by contract and by the other three callers' design, and remembers it as the reason
+		// should the process go down still waiting. --no-fast-failed is what publishes and reports
+		// an empty first result instead of holding it.
+		if holdUntilFirstDetected {
 			if manufacturers.Len() == 0 {
 				err := fmt.Errorf("manufacturer %s is expected but not detected", d.manufacturers.UnsortedList()[0])
-				logger.Error(err, "failed to detect, quitting...")
+				logger.Error(err, "not reporting a node with no accelerators, detecting again")
 				return err
 			}
-			failedOnFirstNotDetected = false
+			holdUntilFirstDetected = false
 		}
 
 		// Publish detected devices groups.
@@ -223,7 +280,7 @@ func (d *Detector) Start(ctx context.Context) error {
 		_ = waitx.UntilContextCancel(ctx, d.monitorPeriod, true, func(ctx context.Context) error {
 			logger.V(3).Info("monitoring")
 
-			metricsGrpList := d.MonitorAccelerator(ctx)
+			metricsGrpList, unmeasuredByMonitor := d.MonitorAccelerator(ctx)
 			if len(metricsGrpList) != 0 {
 				// The per-process pass runs beside the card pass and is stamped with the same
 				// store time. It is a second enumeration of the same devices, so the card and
@@ -254,10 +311,25 @@ func (d *Detector) Start(ctx context.Context) error {
 				}
 			}
 
+			// What this round reported for a manufacturer whose detect pass failed — the accelerators
+			// it last detected, or nothing when it has never detected any — stands in for an answer
+			// rather than being one, so ask again instead of settling on it. Monitoring on it would
+			// log the failure once and then look healthy for as long as it lasts.
+			if unmeasuredByDetect.Len() != 0 {
+				logger.Info("a detect pass could not measure, going to detect again",
+					"manufacturers", unmeasuredByDetect.UnsortedList())
+				return waitx.ErrCanceled
+			}
+
 			// Compare the current devices with the previous devices,
 			// if they are the same, continue to monitor,
 			// otherwise, detect again.
-			if !deviceKeys.Equal(curDeviceKeys) {
+			//
+			// A manufacturer this pass could not measure is left out of the comparison entirely: it
+			// has no devices here, and reading that as devices that went away would take the loop
+			// round again on no evidence. A manufacturer that answered and reported nothing is a
+			// device set that DID shrink, and still takes it round.
+			if !measuredDeviceKeys(deviceKeys, unmeasuredByMonitor).Equal(curDeviceKeys) {
 				logger.Info("changed, going to detect again")
 				return waitx.ErrCanceled
 			}
@@ -266,6 +338,33 @@ func (d *Detector) Start(ctx context.Context) error {
 
 		return nil
 	})
+}
+
+// cloneDeviceGroups returns groups that share nothing with the ones given. The held result of a
+// manufacturer whose pass failed is reported again on every round that keeps failing, so handing it out
+// as it is would let a consumer that reaches into what it was given change what the next round reports.
+func cloneDeviceGroups(groups device.DevicesGroupList) device.DevicesGroupList {
+	out := make(device.DevicesGroupList, len(groups))
+	for i := range groups {
+		groups[i].DeepCopyInto(&out[i])
+	}
+	return out
+}
+
+// measuredDeviceKeys returns the detected device keys of every manufacturer but those a monitor pass
+// could not measure, which is what that pass's result can be compared against.
+func measuredDeviceKeys(keys sets.Set[_DeviceKey], unmeasured sets.Set[string]) sets.Set[_DeviceKey] {
+	if unmeasured.Len() == 0 {
+		return keys
+	}
+
+	measured := sets.New[_DeviceKey]()
+	for k := range keys {
+		if !unmeasured.Has(k.Manufacturer) {
+			measured.Insert(k)
+		}
+	}
+	return measured
 }
 
 type (
