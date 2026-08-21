@@ -278,6 +278,13 @@ type (
 	}
 
 	// Detector is an interface for detecting devices on the system.
+	//
+	// Both of its passes report an absent driver, a library that will not initialize and a bus
+	// holding no card as an EMPTY list and no error: that is a measurement, and it says this
+	// manufacturer has no accelerators here. An error says the opposite — the pass could not measure,
+	// so it carries no claim about the hardware at all, and a caller that reads it as an empty result
+	// declares accelerators gone on no evidence. Today the only thing that produces one is the panic
+	// guard each implementation defers.
 	Detector interface {
 		// Name returns the name of the device type that this interface detects.
 		Name() string

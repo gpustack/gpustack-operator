@@ -47,7 +47,7 @@ func (in *mthreads) Name() string {
 
 func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, err error) {
 	defer loggerx.RecoverWithStackScanner(func(s loggerx.Scanner, e error) {
-		in.logger.Error(e, "failed to detect metax devices")
+		in.logger.Error(e, "failed to detect mthreads devices")
 		for s.Scan() {
 			in.logger.Error(nil, s.Text())
 		}

@@ -210,3 +210,46 @@ func TestGroupWithContextIn_CallerCancellationReachesTasks(t *testing.T) {
 		t.Fatal("Wait did not return after the caller was canceled")
 	}
 }
+
+// TestGroup_PanickingTaskIsReported pins that a task that panicked is reported as the panic it was.
+// Each flavor of group carries its own guard, and until the recover helper behind them worked, a
+// panic went past both: the plain group's task was left to the pool, which recovers it and drops the
+// result nobody reads, so Wait returned nothing at all.
+func TestGroup_PanickingTaskIsReported(t *testing.T) {
+	testCases := []struct {
+		name string
+		// newGroup builds the flavor of group under test.
+		newGroup func() IWaitGroup
+	}{
+		{
+			name:     "a group of its own",
+			newGroup: Group,
+		},
+		{
+			name:     "a group sharing a context",
+			newGroup: func() IWaitGroup { return GroupWithContext(context.Background()) },
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gp := tc.newGroup()
+			gp.Go(func() error {
+				panic(errGroupTask)
+			})
+
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- gp.Wait()
+			}()
+			select {
+			case err := <-errCh:
+				if !errors.Is(err, errGroupTask) {
+					t.Fatalf("Wait must report the panic the task died of, got %v", err)
+				}
+			case <-time.After(groupTimeout):
+				t.Fatal("Wait did not return after a task panicked")
+			}
+		})
+	}
+}

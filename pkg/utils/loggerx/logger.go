@@ -20,29 +20,57 @@ type (
 
 // RecoverWithStackScanner recovers from a panic and provides a stack scanner
 // that contains the full stack trace of the panic.
+//
+// It has to be deferred directly — `defer loggerx.RecoverWithStackScanner(cb)` — because that is what
+// lets it recover at all: a recover only yields the panic value when the function calling it is the
+// one that was deferred. Wrapping this call in another function silently disarms it.
 func RecoverWithStackScanner(cb RecoverStackScannerFunc) {
-	recoverWithStackScanner(true, cb)
+	if r := recover(); r != nil {
+		reportRecovered(true, r, cb)
+	}
 }
 
 // RecoverWithGoroutineStackScanner recovers from a panic and provides a stack scanner
 // that contains the stack trace of the goroutine where the panic occurred.
+//
+// It has to be deferred directly, for the reason RecoverWithStackScanner gives.
 func RecoverWithGoroutineStackScanner(cb RecoverStackScannerFunc) {
-	recoverWithStackScanner(false, cb)
+	if r := recover(); r != nil {
+		reportRecovered(false, r, cb)
+	}
 }
 
-func recoverWithStackScanner(all bool, cb RecoverStackScannerFunc) {
-	if r := recover(); r != nil {
-		b := make([]byte, 64<<10)
-		n := runtime.Stack(b, all)
-		s := bufio.NewScanner(bytes.NewReader(b[:n]))
-		var e error
-		if err, ok := r.(error); ok {
-			e = err
-		} else {
-			e = fmt.Errorf("panic: %v", r)
+// maxStackBytes bounds the buffer the stack is read into. Growing until the trace fits is what makes
+// the trace whole, and a ceiling is what keeps a process that is already unwinding a panic from
+// asking for an unbounded allocation to describe it.
+const maxStackBytes = 8 << 20
+
+// reportRecovered hands a recovered panic value to cb as an error and a scanner over the stack the
+// panic is being unwound from — every goroutine's when all is true, the panicking one's otherwise.
+//
+// The buffer starts at the size one goroutine's trace needs and doubles until the trace fits: every
+// goroutine of a device manager passes that comfortably, and runtime.Stack fills the buffer it is
+// given and says nothing about what it left out, so a fixed buffer silently cuts the trace mid-frame.
+func reportRecovered(all bool, r any, cb RecoverStackScannerFunc) {
+	var (
+		b []byte
+		n int
+	)
+	for size := 64 << 10; ; size *= 2 {
+		b = make([]byte, size)
+		n = runtime.Stack(b, all)
+		if n < size || size >= maxStackBytes {
+			break
 		}
-		cb(_Scanner{s}, e)
 	}
+	s := bufio.NewScanner(bytes.NewReader(b[:n]))
+	var e error
+	if err, ok := r.(error); ok {
+		e = err
+	} else {
+		e = fmt.Errorf("panic: %v", r)
+	}
+	cb(_Scanner{s}, e)
 }
 
 type _Scanner struct {

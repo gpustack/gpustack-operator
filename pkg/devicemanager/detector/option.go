@@ -57,8 +57,9 @@ func (o *Options) AddFlags(fs *pflag.FlagSet, opts ...FlagOption) {
 	fs.StringSliceVar(&o.Manufacturers, "manufacturer", o.Manufacturers,
 		"comma separated list of manufacturers to detect.")
 	fs.BoolVar(&o.NoFastFailed, "no-fast-failed", o.NoFastFailed,
-		"disable fast failed, "+
-			"which means the detector will not fail immediately when --manufacturer configured one manufacturer.")
+		"publish and report a first detect pass that found nothing, "+
+			"instead of holding it back and detecting again; "+
+			"only applies when --manufacturer names exactly one manufacturer.")
 	if !o.noMonitorOptions {
 		fs.DurationVar(&o.MonitorPeriod, "monitor-period", o.MonitorPeriod,
 			"the period at which the monitor samples the devices, only the latest sample is kept.")

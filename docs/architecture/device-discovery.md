@@ -248,6 +248,27 @@ The DM re-detects whenever the device set or health changes. A separate `NodeDev
 the `gpustack.ai/managed` mark from the Node onto the same-named `Devices`, so the per-node DM never
 asserts a node-management decision it does not own.
 
+> **A pass that failed is not a manufacturer with no accelerators** — every detector answers an absent
+> driver, a library that will not initialise and a bus holding no card with an empty list and no error.
+> So an error means that pass could not measure, and carries no claim about the hardware. The loop
+> reports such a manufacturer as it was **last detected**: its allocator keeps serving, the `Devices`
+> keeps its group and the node keeps that family's capacity keys. A manufacturer that has never
+> answered is still absent, and a pass that ran and found nothing is what undetects one — which is
+> also what drops whatever was held for it, so a later failure cannot resurrect a card that was pulled.
+>
+> The monitor pass cannot be carried forward the same way, because a sample is worth what its
+> timestamp claims. A manufacturer it could not measure is simply absent from the sample, and is named
+> as unmeasured so that its absence is not read as accelerators that went away — which would take the
+> loop round again on no evidence.
+
+> **Before the first detection, a DM asked for one manufacturer reports nothing at all** — no
+> `Devices`, no NodeFeature, nothing published to the allocator. Its DaemonSet is scheduled by that
+> manufacturer's PCI vendor label, so a node that answers with no accelerators is one whose driver has
+> not answered yet, and the round is held back and repeated (loudly, every period) until it does. This
+> is what `--no-fast-failed` turns off: with it, the empty first result is published and reported like
+> any other. Neither setting ends the process — a node that never answers keeps detecting, it does not
+> restart.
+
 ## The device-plugin allocator
 
 Alongside detection the DM runs the **device-plugin allocator** (`pkg/devicemanager/allocator/<mfr>`,
