@@ -42,6 +42,13 @@ func EnsureServices(ctx context.Context, cli kubernetes.Interface, svc apireg.Se
 	return api.EnsureServices(ctx, cli, svc, ca, apiSvcGetters)
 }
 
+// DeleteServicesBackedBy deletes the api services backed by a service in the given namespace —
+// the ones this worker registered and the ones its sub-releases did (Kueue's visibility
+// pair), which outlive the namespace alike when the deletion skips the chart's uninstall.
+func DeleteServicesBackedBy(ctx context.Context, cli kubernetes.Interface, namespace string) error {
+	return api.DeleteServicesBackedBy(ctx, cli, namespace)
+}
+
 // IsServicesReady reports whether the api services are ready, checking each of them once.
 func IsServicesReady(ctx context.Context, cli kubernetes.Interface) error {
 	return api.IsServicesReady(ctx, cli, apiSvcGetters)

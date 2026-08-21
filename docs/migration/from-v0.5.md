@@ -171,6 +171,7 @@ kubectl get nodes -o json | grep -oE '"[^"]*(\.z-[a-z]+|generic-ln-x64)[^"]*"' |
 
 **See also** — [Migrating to Bundled Subcharts](to-subcharts.md) (the other one-time upgrade, from
 v0.7.x or earlier) · [Scheduling Chain](../architecture/scheduling-chain.md#naming-and-grouping) (the
-object names this upgrade moves to)
+object names this upgrade moves to) · [Migration Troubleshooting](troubleshooting.md) (recovering from
+a wedged upgrade or a stuck namespace)
 
 **Next** → [Architecture](../architecture.md) — what the new object set means.

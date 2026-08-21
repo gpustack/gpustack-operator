@@ -205,3 +205,42 @@ func Test_InstallConfigurations(t *testing.T) {
 		})
 	}
 }
+
+// Test_DeleteConfigurations pins the teardown contracts of the deleter: both configurations
+// go, an absent one is already deleted, and a failure deleting one does not stop the other
+// from being attempted.
+func Test_DeleteConfigurations(t *testing.T) {
+	t.Run("deletes both configurations", func(t *testing.T) {
+		cli := kubefake.NewSimpleClientset(seedConfigurations(testExpectedPath)...)
+		require.NoError(t, DeleteConfigurations(t.Context(), testPrefix, cli))
+
+		vwcs, err := cli.AdmissionregistrationV1().ValidatingWebhookConfigurations().
+			List(t.Context(), meta.ListOptions{})
+		require.NoError(t, err)
+		assert.Empty(t, vwcs.Items)
+		mwcs, err := cli.AdmissionregistrationV1().MutatingWebhookConfigurations().
+			List(t.Context(), meta.ListOptions{})
+		require.NoError(t, err)
+		assert.Empty(t, mwcs.Items)
+	})
+
+	t.Run("absent is already deleted", func(t *testing.T) {
+		cli := kubefake.NewSimpleClientset()
+		require.NoError(t, DeleteConfigurations(t.Context(), testPrefix, cli))
+	})
+
+	t.Run("a failure deleting one still attempts the other", func(t *testing.T) {
+		cli := kubefake.NewSimpleClientset(seedConfigurations(testExpectedPath)...)
+		cli.PrependReactor("delete", testVwcResource,
+			func(action k8stesting.Action) (bool, runtime.Object, error) {
+				return true, nil, errors.New("injected")
+			})
+
+		err := DeleteConfigurations(t.Context(), testPrefix, cli)
+		require.ErrorContains(t, err, "delete validating webhook configuration")
+
+		_, err = cli.AdmissionregistrationV1().MutatingWebhookConfigurations().
+			Get(t.Context(), testMwcName, meta.GetOptions{})
+		assert.True(t, kerrors.IsNotFound(err), "the mutating configuration was still attempted")
+	})
+}

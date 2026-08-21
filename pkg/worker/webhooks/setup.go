@@ -23,6 +23,16 @@ var cfgGetters = []webhook.ConfigurationsGetter{
 	worker.GetWebhookConfigurations,
 }
 
+// configurationPrefix becomes the webhook configuration object names,
+// "<prefix>-mutation" and "<prefix>-validation". The API server runs mutating
+// webhooks serially in lexicographic order of the configuration object name,
+// so this prefix must sort before "kueue-mutating-webhook-configuration": our
+// mutating webhook folds the sliced memory request into .sliced.units and
+// Kueue's Pod webhook then hashes the container resources into a role
+// annotation, so ours must run first. "gpustack-worker" sorts before "kueue-"
+// ('g' < 'k'); a prefix at or after "kueue-" would silently reverse the order.
+const configurationPrefix = "gpustack-worker"
+
 // Setup registers the webhook API to the given manager and HTTP mux.
 func Setup(ctx context.Context, mgr ctrl.Manager, mux webhook.HTTPServeMux) error {
 	return webhook.ExecuteSetup(ctx, mgr, mux, setups)
@@ -30,13 +40,10 @@ func Setup(ctx context.Context, mgr ctrl.Manager, mux webhook.HTTPServeMux) erro
 
 // Install installs the webhook configurations to the Kubernetes cluster.
 func Install(ctx context.Context, cli kubernetes.Interface, cc admreg.WebhookClientConfig) error {
-	// The prefix becomes the webhook configuration object names,
-	// "<prefix>-mutation" and "<prefix>-validation". The API server runs mutating
-	// webhooks serially in lexicographic order of the configuration object name,
-	// so this prefix must sort before "kueue-mutating-webhook-configuration": our
-	// mutating webhook folds the sliced memory request into .sliced.units and
-	// Kueue's Pod webhook then hashes the container resources into a role
-	// annotation, so ours must run first. "gpustack-worker" sorts before "kueue-"
-	// ('g' < 'k'); a prefix at or after "kueue-" would silently reverse the order.
-	return webhook.InstallConfigurations(ctx, "gpustack-worker", cli, cc, cfgGetters)
+	return webhook.InstallConfigurations(ctx, configurationPrefix, cli, cc, cfgGetters)
+}
+
+// Delete deletes the webhook configurations from the Kubernetes cluster.
+func Delete(ctx context.Context, cli kubernetes.Interface) error {
+	return webhook.DeleteConfigurations(ctx, configurationPrefix, cli)
 }

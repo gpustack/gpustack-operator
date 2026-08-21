@@ -369,3 +369,38 @@ func Test_InstallServices(t *testing.T) {
 		})
 	}
 }
+
+// Test_DeleteServicesBackedBy pins the namespace match of the teardown sweep: every api
+// service backed by a service in the given namespace goes, and anything else — another
+// namespace's, or a Local one with no service at all — stays.
+func Test_DeleteServicesBackedBy(t *testing.T) {
+	backed := func(name, namespace string) *apireg.APIService {
+		s := newTestAPIService(testServiceReference, nil)
+		s.Name = name
+		s.Spec.Service.Namespace = namespace
+		return s
+	}
+	local := newTestAPIService(testServiceReference, nil)
+	local.Name = "v1.local.example.io"
+	local.Spec.Service = nil
+
+	cli := kubefake.NewSimpleClientset(
+		backed("v1.worker.gpustack.ai", "gpustack-system"),
+		backed("v1beta1.visibility.kueue.x-k8s.io", "gpustack-system"),
+		backed("v1.other.io", "other-system"),
+		local,
+	)
+
+	require.NoError(t, DeleteServicesBackedBy(t.Context(), cli, "gpustack-system"))
+
+	remaining, err := cli.ApiregistrationV1().APIServices().List(t.Context(), meta.ListOptions{})
+	require.NoError(t, err)
+	names := make([]string, 0, len(remaining.Items))
+	for i := range remaining.Items {
+		names = append(names, remaining.Items[i].Name)
+	}
+	assert.ElementsMatch(t, []string{"v1.other.io", "v1.local.example.io"}, names)
+
+	// An absent service is already deleted: a second run is a no-op, not an error.
+	require.NoError(t, DeleteServicesBackedBy(t.Context(), cli, "gpustack-system"))
+}

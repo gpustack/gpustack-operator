@@ -1,19 +1,26 @@
 package helm
 
 import (
+	"io"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	helmaction "helm.sh/helm/v3/pkg/action"
 	helmchart "helm.sh/helm/v3/pkg/chart"
+	helmchartutil "helm.sh/helm/v3/pkg/chartutil"
+	kubefake "helm.sh/helm/v3/pkg/kube/fake"
 	helmrelease "helm.sh/helm/v3/pkg/release"
+	helmstorage "helm.sh/helm/v3/pkg/storage"
+	helmdriver "helm.sh/helm/v3/pkg/storage/driver"
 	helmtime "helm.sh/helm/v3/pkg/time"
 )
 
 // Test_Client_nextStep pins the release-state decision table, in particular the
 // RepairViaUpgradeOnly branch: a bad-status release is upgraded (not uninstalled)
-// when the flag is set, and the pre-existing behavior is preserved when it is not.
+// when the flag is set, an abandoned pending upgrade/rollback has its record
+// discarded (not rolled back — a rollback would delete adopted objects), and the
+// pre-existing behavior is preserved when the flag is not set.
 func Test_Client_nextStep(t *testing.T) {
 	release := func(status helmrelease.Status, chartVersion string, cfg map[string]any, lastDeployed time.Time) *helmrelease.Release {
 		return &helmrelease.Release{
@@ -88,25 +95,25 @@ func Test_Client_nextStep(t *testing.T) {
 			want:    NextStepRequeue,
 		},
 		{
-			name:    "an abandoned pending upgrade with RepairViaUpgradeOnly rolls back",
+			name:    "an abandoned pending upgrade with RepairViaUpgradeOnly discards the record",
 			chart:   &Chart{Version: "0.18.2", RepairViaUpgradeOnly: true, ExclusiveAccess: true},
 			release: release(helmrelease.StatusPendingUpgrade, "0.18.2", nil, time.Now()),
 			timeout: time.Hour,
-			want:    NextStepRollback,
+			want:    _NextStepDiscard,
 		},
 		{
-			name:    "a pending upgrade past the timeout rolls back without exclusive access",
+			name:    "a pending upgrade past the timeout discards the record without exclusive access",
 			chart:   &Chart{Version: "0.18.2", RepairViaUpgradeOnly: true},
 			release: release(helmrelease.StatusPendingUpgrade, "0.18.2", nil, time.Now().Add(-2*time.Hour)),
 			timeout: time.Hour,
-			want:    NextStepRollback,
+			want:    _NextStepDiscard,
 		},
 		{
-			name:    "an abandoned pending rollback with RepairViaUpgradeOnly rolls back",
+			name:    "an abandoned pending rollback with RepairViaUpgradeOnly discards the record",
 			chart:   &Chart{Version: "0.18.2", RepairViaUpgradeOnly: true, ExclusiveAccess: true},
 			release: release(helmrelease.StatusPendingRollback, "0.18.2", nil, time.Now()),
 			timeout: time.Hour,
-			want:    NextStepRollback,
+			want:    _NextStepDiscard,
 		},
 		{
 			name:    "a peer's pending install is left alone",
@@ -232,5 +239,125 @@ func Test_Client_InstallWith(t *testing.T) {
 			assert.EqualError(t, err, c.wantErr)
 			assert.Nil(t, got)
 		})
+	}
+}
+
+// newConvergeTestBed builds the convergence loop's test rig: a one-manifest chart packaged on
+// the fly, an in-memory Helm storage plus a printing kube client to act against, and a release
+// seeded with a deployed revision 1 beneath an abandoned pending revision 2 — both already at
+// the target chart version and values, so once the pending record is gone the release reads as
+// converged, which is exactly the Done the forced upgrade must turn into one upgrade.
+func newConvergeTestBed(t *testing.T) (*Client, *Chart, *helmaction.Configuration) {
+	t.Helper()
+
+	ch := &helmchart.Chart{
+		Metadata: &helmchart.Metadata{Name: "test", Version: "0.1.1", APIVersion: helmchart.APIVersionV2},
+		Templates: []*helmchart.File{
+			{
+				Name: "templates/configmap.yaml",
+				Data: []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\n  namespace: {{ .Release.Namespace }}\n"),
+			},
+		},
+	}
+	chartPath, err := helmchartutil.Save(ch, t.TempDir())
+	assert.NoError(t, err)
+
+	config := &helmaction.Configuration{
+		Releases:     helmstorage.Init(helmdriver.NewMemory()),
+		KubeClient:   &kubefake.FailingKubeClient{PrintingKubeClient: kubefake.PrintingKubeClient{Out: io.Discard}},
+		Capabilities: helmchartutil.DefaultCapabilities,
+		Log:          func(format string, v ...any) { t.Logf(format, v...) },
+	}
+
+	old := time.Now().Add(-2 * time.Hour)
+	seed := func(version int, status helmrelease.Status) *helmrelease.Release {
+		return &helmrelease.Release{
+			Name:      "test",
+			Namespace: "default",
+			Version:   version,
+			Info:      &helmrelease.Info{Status: status, LastDeployed: helmtime.Time{Time: old}},
+			Chart:     ch,
+			Config:    map[string]any{"a": "b"},
+		}
+	}
+	assert.NoError(t, config.Releases.Create(seed(1, helmrelease.StatusDeployed)))
+	assert.NoError(t, config.Releases.Create(seed(2, helmrelease.StatusPendingUpgrade)))
+
+	cli := &Client{timeout: time.Hour}
+	chart := &Chart{
+		Name:                 "test",
+		Release:              "test",
+		Version:              "0.1.1",
+		Path:                 chartPath,
+		Values:               StaticValues{"a": "b"},
+		RepairViaUpgradeOnly: true,
+	}
+	return cli, chart, config
+}
+
+// Test_Client_converge_discardThenUpgradeOnce runs the convergence loop end to end against an
+// in-memory Helm storage and a printing kube client, pinning the repair this file's decision
+// table only half-covers (gpustack-operator#122): a release with a deployed revision beneath
+// an abandoned pending upgrade must converge by discarding the pending record and firing
+// exactly one upgrade — never a rollback, which would re-apply the old manifest over whatever
+// the killed operation had already adopted.
+func Test_Client_converge_discardThenUpgradeOnce(t *testing.T) {
+	cli, chart, config := newConvergeTestBed(t)
+	next := func(r *helmrelease.Release) NextStepType { return cli.nextStep(t.Context(), r, chart) }
+
+	last, err := config.Releases.Last("test")
+	assert.NoError(t, err)
+	_, err = cli.converge(t.Context(), config, chart, next, "default", last)
+	assert.NoError(t, err)
+
+	// The pending record is gone and the forced upgrade fired: a new revision 2 stands
+	// deployed over the superseded revision 1.
+	history, err := config.Releases.History("test")
+	assert.NoError(t, err)
+	if assert.Len(t, history, 2) {
+		assert.Equal(t, helmrelease.StatusSuperseded, history[0].Info.Status)
+		assert.Equal(t, helmrelease.StatusDeployed, history[1].Info.Status)
+		assert.Equal(t, 2, history[1].Version)
+	}
+
+	// Fired once: a second pass reads converged and adds no revision.
+	last, err = config.Releases.Last("test")
+	assert.NoError(t, err)
+	_, err = cli.converge(t.Context(), config, chart, next, "default", last)
+	assert.NoError(t, err)
+	history, err = config.Releases.History("test")
+	assert.NoError(t, err)
+	assert.Len(t, history, 2)
+}
+
+// Test_Client_converge_requeueKeepsForcedUpgrade pins that a requeue between the discard and
+// the converged read does not spend the forced upgrade: the flag is consumed by the upgrade it
+// forces, not by an iteration that fired nothing.
+func Test_Client_converge_requeueKeepsForcedUpgrade(t *testing.T) {
+	if testing.Short() {
+		t.Skip("the requeue arm waits out a fixed 10s before re-reading the release")
+	}
+
+	cli, chart, config := newConvergeTestBed(t)
+	var requeued bool
+	next := func(r *helmrelease.Release) NextStepType {
+		if r.Info.Status == helmrelease.StatusDeployed && !requeued {
+			requeued = true
+			return NextStepRequeue
+		}
+		return cli.nextStep(t.Context(), r, chart)
+	}
+
+	last, err := config.Releases.Last("test")
+	assert.NoError(t, err)
+	_, err = cli.converge(t.Context(), config, chart, next, "default", last)
+	assert.NoError(t, err)
+
+	// The forced upgrade survived the requeue and fired: a new revision 2 stands deployed.
+	history, err := config.Releases.History("test")
+	assert.NoError(t, err)
+	if assert.Len(t, history, 2) {
+		assert.Equal(t, helmrelease.StatusDeployed, history[1].Info.Status)
+		assert.Equal(t, 2, history[1].Version)
 	}
 }

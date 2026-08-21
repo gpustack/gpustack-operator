@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/multierr"
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	klog "k8s.io/klog/v2"
@@ -292,6 +293,37 @@ func restoreServices(ctx context.Context, cli kubernetes.Interface, svcs []*apir
 		if err != nil {
 			errs = append(errs, fmt.Errorf("restore api service %q: %w",
 				svcs[i].GetName(), err))
+		}
+	}
+
+	return multierr.Combine(errs...)
+}
+
+// DeleteServicesBackedBy deletes the api services whose backing service lives in the given
+// namespace. This reaches the registrations the process never made: a chart-installed
+// aggregated api — Kueue's visibility pair is the one at hand — is cluster-scoped too, so a
+// namespace deletion that skips the chart's uninstall leaves it wedging the deletion on
+// discovery it can no longer serve, exactly as the process-registered ones do. An absent one
+// is already deleted, and every service is attempted even after one fails, for the reason
+// restoreCRDs carries.
+func DeleteServicesBackedBy(ctx context.Context, cli kubernetes.Interface, namespace string) error {
+	svcCli := cli.ApiregistrationV1().APIServices()
+
+	svcs, err := svcCli.List(ctx, meta.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("list api services: %w", err)
+	}
+
+	var errs []error
+	for i := range svcs.Items {
+		svc := svcs.Items[i].Spec.Service
+		if svc == nil || svc.Namespace != namespace {
+			continue
+		}
+		err = svcCli.Delete(ctx, svcs.Items[i].GetName(), meta.DeleteOptions{})
+		if err != nil && !kerrors.IsNotFound(err) {
+			errs = append(errs, fmt.Errorf("delete api service %q: %w",
+				svcs.Items[i].GetName(), err))
 		}
 	}
 

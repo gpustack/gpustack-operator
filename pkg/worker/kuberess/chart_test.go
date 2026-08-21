@@ -535,3 +535,40 @@ func sorted(s sets.Set[string]) []string {
 
 	return out
 }
+
+// TestChartWorkerStrategyType pins the Deployment strategy the worker rolls with
+// (gpustack-operator#122): the default must be Recreate — the worker fronts the aggregated
+// API and finishes its whole install before it serves, so two versions must never answer at
+// once — and the supported RollingUpdate override must render through.
+func TestChartWorkerStrategyType(t *testing.T) {
+	testCases := []struct {
+		name   string
+		values map[string]any
+		want   string
+	}{
+		{name: "default is Recreate", want: "Recreate"},
+		{
+			name:   "RollingUpdate override renders",
+			values: map[string]any{"worker": map[string]any{"strategyType": "RollingUpdate"}},
+			want:   "RollingUpdate",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			key := "Deployment/" + SystemNamespaceName + "/gpustack-operator-worker"
+			object, ok := renderChart(t, tc.values)[key]
+			require.True(t, ok, "the render carries the worker Deployment")
+
+			var manifest struct {
+				Spec struct {
+					Strategy struct {
+						Type string `yaml:"type"`
+					} `yaml:"strategy"`
+				} `yaml:"spec"`
+			}
+			require.NoError(t, yaml.Unmarshal([]byte(object.manifest), &manifest))
+			assert.Equal(t, tc.want, manifest.Spec.Strategy.Type)
+		})
+	}
+}

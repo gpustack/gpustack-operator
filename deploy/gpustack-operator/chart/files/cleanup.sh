@@ -12,6 +12,10 @@
 #     (Kueue's `kueue.x-k8s.io/resource-in-use`, the operator's
 #     `gpustack.ai/controlled` on Instances AND InstanceTypes);
 #   - the aggregated APIServices and admission webhooks the worker registers;
+#   - the orphaned cluster-scoped objects a release whose record died with the namespace
+#     leaves behind (ClusterRoles/Bindings, CSIDrivers, Kueue's kube-system RoleBinding) —
+#     their stale meta.helm.sh/release-name annotations make a later reinstall fail on
+#     "invalid ownership metadata";
 #   - the objects a failed migration hook leaves behind, including a cluster-admin
 #     ClusterRoleBinding.
 #
@@ -27,6 +31,17 @@ set -uo pipefail
 
 NS="${1:-${GPUSTACK_NAMESPACE:-gpustack-system}}"
 echo "[cleanup] namespace=${NS}"
+
+# 0. Preflight. Every sweep below swallows errors by design, so against a wrong or absent
+#    context the script would print "done" having deleted nothing — or worse, sweep a cluster
+#    the caller never meant to touch (the patterns are broad by assumption). Refuse to run
+#    blind, and name the context so a surprise is visible before anything is deleted.
+if ! kubectl get --raw=/healthz --request-timeout=10s >/dev/null 2>&1; then
+  echo "[cleanup] FATAL: cannot reach the API server of the current kubectl context" \
+    "($(kubectl config current-context 2>/dev/null || echo 'none set')) — fix KUBECONFIG/context and re-run" >&2
+  exit 1
+fi
+echo "[cleanup] context=$(kubectl config current-context 2>/dev/null || echo unknown)"
 
 # 1. Uninstall the releases the operator chart does not own. gpustack-operator-device-manager is
 #    the release the worker installs from the chart bundled into its own image (image mode, and the
@@ -50,16 +65,28 @@ fi
 #    worker.gpustack.ai/v1 proxy registered makes an unversioned `kubectl get instancetypes`
 #    resolve to it and fail, silently skipping the strip below.
 #
-#    Matched by name pattern rather than an explicit list, which is what reaches Kueue's
-#    *.visibility.kueue.x-k8s.io APIService and its kueue-* webhook configurations whatever
-#    version they carry. Kueue's and NFD's objects are in scope for the same reason their CRDs are
-#    below: this script assumes the release it follows exclusively owned them.
-gpustack_pattern='gpustack|kueue|nfd'
-for r in apiservice mutatingwebhookconfigurations validatingwebhookconfigurations; do
+#    Name patterns only NOMINATE: an external Kueue/NFD install is a supported configuration
+#    (docs/migration/to-subcharts.md) whose objects match the same names, so a candidate is
+#    deleted only once the namespace of the Service it points at confirms it belongs to THIS
+#    install. That confirmation is also version-blind — Helm's ownership annotations would do
+#    for the chart-installed objects, but the worker registers its own at runtime and those
+#    carry none.
+for r in mutatingwebhookconfigurations validatingwebhookconfigurations; do
   kubectl get "${r}" -o name 2>/dev/null \
-    | grep -Ei "${gpustack_pattern}" \
-    | xargs -r -I{} kubectl delete {} --ignore-not-found 2>/dev/null || true
+    | grep -Ei 'gpustack|kueue|nfd' \
+    | while read -r obj; do
+        kubectl get "${obj}" -o jsonpath='{.webhooks[*].clientConfig.service.namespace}' 2>/dev/null \
+          | grep -qw "${NS}" || continue
+        kubectl delete "${obj}" --ignore-not-found 2>/dev/null || true
+      done
 done
+#    An APIService gives itself away by the namespace of the Service it proxies to — the
+#    operator's aggregated APIs and Kueue's visibility pair included, whatever version
+#    registered them. Plain xargs, no -I{}: the jsonpath emits the names as ONE
+#    space-separated line, which -I{} would pass as a single, invalid name.
+kubectl get apiservices \
+  -o jsonpath='{.items[?(@.spec.service.namespace=="'"${NS}"'")].metadata.name}' 2>/dev/null \
+  | xargs -r kubectl delete apiservice --ignore-not-found 2>/dev/null || true
 
 # 3. Strip the finalizers that pin objects once their controllers are gone. Kueue pins
 #    workloads/flavors/queues/checks with kueue.x-k8s.io/resource-in-use and the operator pins
@@ -131,5 +158,42 @@ done
 kubectl get clusterrolebindings -l app.kubernetes.io/part-of=gpustack-operator -o name 2>/dev/null \
   | grep -E 'migrate' \
   | xargs -r -I{} kubectl delete {} --ignore-not-found 2>/dev/null || true
+
+# 8. Sweep orphaned cluster-scoped objects whose release record is already gone (it lives in the
+#    namespace, so a namespace deletion kills the record but not these): ClusterRoles and
+#    ClusterRoleBindings of the runtime releases and their subchart components, the CSI drivers'
+#    CSIDriver objects, and the one RoleBinding Kueue's visibility server plants in kube-system.
+#    Their stale meta.helm.sh/release-name annotations otherwise fail a later REINSTALL with
+#    "invalid ownership metadata", and no adoption re-fires for them (TakeOwnership gates on the
+#    legacy release records, which are exactly what is gone). The pattern is wider than step 2's:
+#    node-feature-discovery carries no "nfd" substring and the CSI RBAC is named after the driver.
+#    The "-cleanup" exclusion keeps the post-delete hook's own ClusterRoleBinding
+#    ("<release>-cleanup", cluster-admin) out of the sweep: deleting it mid-run would revoke the
+#    permissions every later delete in this script needs, and its lifecycle is the chart's, not
+#    this script's.
+#    The name pattern only nominates: a co-located standalone Kueue/NFD/CSI install in another
+#    namespace matches it too, so a candidate is deleted only when Helm's ownership annotation
+#    points its release at THIS namespace — everything the sweep targets is Helm-owned.
+orphan_sweep() {
+  local kind="$1"
+  kubectl get "${kind}" -o name 2>/dev/null \
+    | grep -Ei 'gpustack|kueue|nfd|node-feature|csi-nfs|csi-s3' \
+    | grep -vE -- '-cleanup$' \
+    | while read -r obj; do
+        owner_ns="$(kubectl get "${obj}" \
+          -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}' 2>/dev/null)"
+        [ "${owner_ns}" = "${NS}" ] || continue
+        echo "[cleanup] delete orphaned ${obj}"
+        kubectl delete "${obj}" --ignore-not-found 2>/dev/null || true
+      done
+}
+for r in clusterrole clusterrolebinding csidriver; do
+  orphan_sweep "${r}"
+done
+#    Kueue's visibility RoleBinding in kube-system gets the same ownership guard.
+if [ "$(kubectl -n kube-system get rolebinding kueue-visibility-server-auth-reader \
+      -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}' 2>/dev/null)" = "${NS}" ]; then
+  kubectl -n kube-system delete rolebinding kueue-visibility-server-auth-reader --ignore-not-found 2>/dev/null || true
+fi
 
 echo "[cleanup] done"
