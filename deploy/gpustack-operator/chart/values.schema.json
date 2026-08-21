@@ -1788,6 +1788,16 @@
           "title": "securePort",
           "type": "integer"
         },
+        "strategyType": {
+          "default": "Recreate",
+          "description": "Deployment strategy of the worker. The worker fronts the aggregated API and finishes its\nwhole install (`Prepare`) before it serves, so a `RollingUpdate` keeps the OLD replica\nanswering the old API until the new one turns Ready — which a failed install makes never.\nThe chart's `Recreate` takes the old replica down first: the API pauses during an upgrade\ninstead of serving a stale surface. `RollingUpdate` trades that pause for mixed-version\nserving — old and new replicas answer TOGETHER for the whole rollout, at any replica\ncount — so set it only where every upgrade pair you roll through is known to be\nAPI-compatible in both directions.",
+          "enum": [
+            "Recreate",
+            "RollingUpdate"
+          ],
+          "required": [],
+          "title": "strategyType"
+        },
         "tolerations": {
           "description": "Tolerations for the worker. Defaults let the control plane run on\ncontrol-plane/master nodes.",
           "items": {

@@ -196,6 +196,18 @@ worker:
   # -- Number of operator (control plane) replicas. Leader election is always on, so extra
   # replicas stand by; the reconcilers only ever run in one of them.
   replicas: 1
+  # @schema
+  # enum: [Recreate, RollingUpdate]
+  # @schema
+  # -- Deployment strategy of the worker. The worker fronts the aggregated API and finishes its
+  # whole install (`Prepare`) before it serves, so a `RollingUpdate` keeps the OLD replica
+  # answering the old API until the new one turns Ready — which a failed install makes never.
+  # The chart's `Recreate` takes the old replica down first: the API pauses during an upgrade
+  # instead of serving a stale surface. `RollingUpdate` trades that pause for mixed-version
+  # serving — old and new replicas answer TOGETHER for the whole rollout, at any replica
+  # count — so set it only where every upgrade pair you roll through is known to be
+  # API-compatible in both directions.
+  strategyType: Recreate
   # -- Applications the worker must not install at runtime, or `*` for all of them. This chart
   # deploys every one of them itself, so the default takes the worker out of that business
   # entirely. Keep the wildcard: whenever this chart deploys the worker, anything left off the

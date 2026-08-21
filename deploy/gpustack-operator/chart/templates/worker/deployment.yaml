@@ -13,6 +13,8 @@ metadata:
   {{- end }}
 spec:
   replicas: {{ .Values.worker.replicas }}
+  strategy:
+    type: {{ .Values.worker.strategyType }}
   selector:
     matchLabels:
       {{- include "gpustack-operator.worker.selectorLabels" . | nindent 6 }}
