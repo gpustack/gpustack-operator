@@ -96,6 +96,31 @@ kubectl get apiservices -o jsonpath='{.items[?(@.spec.service.namespace=="'"$NS"
 The namespace then finalizes within about a minute. If it still hangs, describe it again — the
 condition names the next discovery group that cannot be listed, and the same two steps clear it.
 
+Two more kinds of debris outlive the namespace and bite **after** it is gone. Neither blocks the
+finalizer, which is why they surface only on the next operation:
+
+- The `kueue-*` and `gpustack-worker-*` Mutating/ValidatingWebhookConfigurations keep
+  intercepting creates and updates **cluster-wide** (Deployments included) with
+  `failurePolicy: Fail`, calling Services that no longer exist — the next `kubectl apply` of any
+  Deployment fails with `service "kueue-webhook-service" not found`. Name patterns only nominate
+  the sweep — an external Kueue install matches them too — so confirm by the backing Service's
+  namespace before deleting:
+
+  ```bash
+  kubectl get mutatingwebhookconfigurations,validatingwebhookconfigurations -o name \
+    | grep -Ei 'gpustack|kueue|nfd' | while read -r wc; do
+        kubectl get "$wc" -o jsonpath='{.webhooks[*].clientConfig.service.namespace}' \
+          | grep -qw "$NS" && kubectl delete "$wc"
+      done
+  ```
+
+- Orphaned cluster-scoped RBAC and `CSIDriver` objects still carry
+  `meta.helm.sh/release-name` of a release whose record died with the namespace, so a reinstall
+  CrashLoops the worker on `invalid ownership metadata`, and no adoption re-fires (it gates on
+  the legacy release records — exactly what is gone). Current `cleanup.sh` sweeps them; on an
+  older copy the same pattern over `clusterrole,clusterrolebinding,csidriver` clears them, plus
+  `kubectl -n kube-system delete rolebinding kueue-visibility-server-auth-reader`.
+
 **Never** force-finalize a stuck namespace (`kubectl replace --raw .../finalize`, or patching
 `metadata.finalizers` away): the namespace object vanishes while whatever the deletion had not reached
 stays behind — CRs, Secrets, the very APIServices above — orphaned for good.
