@@ -324,6 +324,7 @@ kubectl get crd -o custom-columns=NAME:.metadata.name,DELETING:.metadata.deletio
 
 **See also** — [Installation Modes](../architecture/installation-modes.md) (what the two modes own after the
 transfer) · [High Availability Operations](../operation/high-availability.md) (the replica knobs now live in one
-`values.yaml`) · [Migrating from v0.5.x](from-v0.5.md)
+`values.yaml`) · [Migrating from v0.5.x](from-v0.5.md) · [Migration Troubleshooting](troubleshooting.md)
+(when the transfer wedges)
 
 **Next** → [Settings](../settings.md) — the configuration surface the transfer unifies.

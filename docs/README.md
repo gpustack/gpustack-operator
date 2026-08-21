@@ -23,7 +23,8 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 6. [NVIDIA MIG Operations](operation/nvidia-mig.md) and [T-Head MIG Operations](operation/thead-mig.md) —
    the runbook for enabling and disabling partitioning on a node.
 7. Upgrading: [Migrating to Bundled Subcharts](migration/to-subcharts.md) · [Migrating from
-   v0.5.x](migration/from-v0.5.md).
+   v0.5.x](migration/from-v0.5.md) · [Migration Troubleshooting](migration/troubleshooting.md) when it
+   goes wrong.
 
 **I change the code** — read the overview first; it is the map for everything else.
 
@@ -60,6 +61,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [T-Head MIG Operations](operation/thead-mig.md) | Enabling/disabling T-Head's own MIG-named partitioning, the busy-mode-change prerequisite, and reboot recovery | operators | ~10 min |
 | [Migrating to Bundled Subcharts](migration/to-subcharts.md) | The one-time ownership transfer from the runtime-installed releases | operators | ~9 min |
 | [Migrating from v0.5.x](migration/from-v0.5.md) | Upgrading across the scheduling-chain refactor | operators | ~5 min |
+| [Migration Troubleshooting](migration/troubleshooting.md) | Recovering from a wedged upgrade (worker CrashLoopBackOff) or a namespace stuck Terminating | operators | ~8 min |
 | [Instance Type Unit Resources Reference](reference/instance-type-unit-resources.md) | The per-product CPU/RAM tier a derived InstanceType is sized with, and where each tier came from | operators | reference |
 | [Instance Metrics Reference](reference/instance-metrics.md) | The `instances/<name>/metrics` subresource and the Device Manager's Prometheus exporter: the fields, the gauges, their sources and limits | users, operators, console developers | ~9 min |
 

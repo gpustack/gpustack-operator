@@ -66,7 +66,7 @@ shaped by the directory it lives in:
 |---|---|---|
 | root, `architecture/` | `<Subject>` | `Installation Modes` |
 | `operation/` | `<Subject> Operations` | `High Availability Operations` |
-| `migration/` | `Migrating <from\|to> <what>` | `Migrating from v0.5.x` |
+| `migration/` | `Migrating <from\|to> <what>`; a recovery page is `<Subject> Troubleshooting` | `Migrating from v0.5.x`, `Migration Troubleshooting` |
 | `reference/` | `<Subject> Reference` | `Instance Metrics Reference` |
 
 `##` and `###` headings are sentence case. GitHub lowercases anchors, so re-casing a heading keeps every

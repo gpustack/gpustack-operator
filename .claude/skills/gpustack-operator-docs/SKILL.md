@@ -36,6 +36,7 @@ one, not to widen the overview.
 | A make target, a subchart patch, code generation, a vendored dependency | `docs/development.md` |
 | An administrator procedure (MIG mode, replicas) | `docs/operation/*.md` |
 | An upgrade path between versions | `docs/migration/*.md` |
+| Recovery from a wedged upgrade or a stuck namespace deletion | `docs/migration/troubleshooting.md` |
 | A per-product preset value | `docs/reference/instance-type-unit-resources.md` |
 | A user-visible capability, a vendor's slicing support, the install flow | `README.md` |
 | Vendor prerequisites, vendor GPU Operator coexistence | `docs/vendor-prerequisites.md` |
