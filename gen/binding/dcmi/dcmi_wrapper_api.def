@@ -51,8 +51,45 @@
 // recognized, so a comment whose first line does not end in a backslash silently terminates the
 // definition and leaves the rest of the list as stray tokens at file scope.
 #define DCMI_V2_API_LIST(X) \
-    X(int, dcmiv2_get_device_type, (int dev_id, enum dcmi_unit_type *device_type), (dev_id, device_type)) \
     /* device_list FIRST, then device_num. See the note above. */ \
     X(int, dcmiv2_get_device_list, (int *device_list, int *device_num, int list_len), (device_list, device_num, list_len)) \
-    X(int, dcmiv2_get_device_board_info, (int dev_id, struct dcmi_board_info *board_info), (dev_id, board_info))
+    X(int, dcmiv2_get_all_device_count, (int *all_device_count), (all_device_count)) \
+    X(int, dcmiv2_get_device_type, (int dev_id, enum dcmi_unit_type *device_type), (dev_id, device_type)) \
+    X(int, dcmiv2_get_device_pcie_info, (int dev_id, struct dcmi_pcie_info_all *pcie_info), (dev_id, pcie_info)) \
+    X(int, dcmiv2_get_device_chip_info, (int dev_id, struct dcmi_chip_info_v2 *chip_info), (dev_id, chip_info)) \
+    X(int, dcmiv2_get_device_power_info, (int dev_id, int *power), (dev_id, power)) \
+    X(int, dcmiv2_get_device_health, (int dev_id, unsigned int *health), (dev_id, health)) \
+    X(int, dcmiv2_get_device_error_code_list, (int dev_id, int *error_count, unsigned int *error_code_list, unsigned int list_len), (dev_id, error_count, error_code_list, list_len)) \
+    X(int, dcmiv2_get_device_temperature, (int dev_id, int *temperature), (dev_id, temperature)) \
+    X(int, dcmiv2_get_device_voltage, (int dev_id, unsigned int *voltage), (dev_id, voltage)) \
+    X(int, dcmiv2_get_device_ecc_info, (int dev_id, enum dcmi_device_type input_type, struct dcmi_ecc_info *device_ecc_info), (dev_id, input_type, device_ecc_info)) \
+    X(int, dcmiv2_get_device_frequency, (int dev_id, enum dcmi_freq_type input_type, unsigned int *frequency), (dev_id, input_type, frequency)) \
+    X(int, dcmiv2_get_device_hbm_info, (int dev_id, struct dcmi_hbm_info *hbm_info), (dev_id, hbm_info)) \
+    X(int, dcmiv2_get_device_utilization_rate, (int dev_id, int input_type, unsigned int *utilization_rate), (dev_id, input_type, utilization_rate)) \
+    X(int, dcmiv2_get_device_multi_utilization_rate, (int dev_id, struct dcmi_multi_utilization_info *util_info), (dev_id, util_info)) \
+    X(int, dcmiv2_get_device_multi_utilization_rate_period, (int dev_id, struct dcmi_multi_utilization_info *util_info, int period), (dev_id, util_info, period)) \
+    X(int, dcmiv2_get_device_info, (int dev_id, enum dcmi_main_cmd main_cmd, unsigned int sub_cmd, void *buf, unsigned int *size), (dev_id, main_cmd, sub_cmd, buf, size)) \
+    X(int, dcmiv2_get_device_network_health, (int dev_id, enum dcmi_rdfx_detect_result *result), (dev_id, result)) \
+    X(int, dcmiv2_get_chip_phy_id_by_dev_id, (unsigned int dev_id, unsigned int *phyid), (dev_id, phyid)) \
+    X(int, dcmiv2_get_dev_id_by_chip_phy_id, (unsigned int phyid, unsigned int *dev_id), (phyid, dev_id)) \
+    X(int, dcmiv2_reset_device, (int dev_id, enum dcmi_reset_channel channel_type), (dev_id, channel_type)) \
+    X(int, dcmiv2_get_device_outband_channel_state, (int dev_id, int *channel_state), (dev_id, channel_state)) \
+    X(int, dcmiv2_pre_reset_device, (int dev_id), (dev_id)) \
+    X(int, dcmiv2_rescan_device, (int dev_id), (dev_id)) \
+    X(int, dcmiv2_get_device_boot_status, (int dev_id, enum dcmi_boot_status *boot_status), (dev_id, boot_status)) \
+    X(int, dcmiv2_get_device_die_id, (int dev_id, enum dcmi_die_type input_type, struct dcmi_die_id *die_id), (dev_id, input_type, die_id)) \
+    X(int, dcmiv2_get_device_proc_mem_info, (int dev_id, struct dcmi_proc_mem_info *proc_info, int *proc_num), (dev_id, proc_info, proc_num)) \
+    X(int, dcmiv2_get_device_board_info, (int dev_id, struct dcmi_board_info *board_info), (dev_id, board_info)) \
+    X(int, dcmiv2_get_pcie_link_bandwidth_info, (int dev_id, struct dcmi_pcie_link_bandwidth_info *pcie_link_bandwidth_info), (dev_id, pcie_link_bandwidth_info)) \
+    X(int, dcmiv2_get_dcmi_version, (char *dcmi_ver, int buf_size), (dcmi_ver, buf_size)) \
+    X(int, dcmiv2_get_mainboard_id, (int dev_id, unsigned int *mainboard_id), (dev_id, mainboard_id)) \
+    X(int, dcmiv2_get_affinity_cpu_info_by_dev_id, (int dev_id, char *affinity_cpu, int *len), (dev_id, affinity_cpu, len)) \
+    X(int, dcmiv2_start_ub_ping_mesh, (int dev_id, int count, struct dcmi_ub_ping_mesh_operate *ubping_mesh), (dev_id, count, ubping_mesh)) \
+    X(int, dcmiv2_stop_ub_ping_mesh, (int dev_id, int task_id), (dev_id, task_id)) \
+    X(int, dcmiv2_get_ub_ping_mesh_info, (int dev_id, int task_id, struct dcmi_ub_ping_mesh_info *ub_ping_mesh_reply, int mesh_reply_size, int *count), (dev_id, task_id, ub_ping_mesh_reply, mesh_reply_size, count)) \
+    X(int, dcmiv2_get_ub_ping_mesh_state, (int dev_id, int task_id, unsigned int *state), (dev_id, task_id, state)) \
+    X(int, dcmiv2_get_urma_device_cnt, (int dev_id, unsigned int *dev_cnt), (dev_id, dev_cnt)) \
+    X(int, dcmiv2_get_eid_list_by_urma_dev_index, (int dev_id, unsigned int dev_index, dcmi_urma_eid_info_t *eid_list, unsigned int *eid_cnt), (dev_id, dev_index, eid_list, eid_cnt)) \
+    X(int, dcmiv2_get_device_elabel_info, (int dev_id, struct dcmi_elabel_info *elabel_info), (dev_id, elabel_info)) \
+    X(int, dcmiv2_get_port_pkt_stats_info, (int dev_id, struct dcmi_ub_port_info *ub_port_info, struct dcmi_port_pkt_stats_info *port_pkt_stats_info), (dev_id, ub_port_info, port_pkt_stats_info))
 
