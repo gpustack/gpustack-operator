@@ -46,6 +46,7 @@ static void set_last_errorf(const char *prefix, const char *msg) {
     static ret (*name##_func) decl_args = NULL;
 
 DCMI_API_LIST(DECL_FUNC_PTR)
+DCMI_V2_API_LIST(DECL_FUNC_PTR)
 
 #undef DECL_FUNC_PTR
 
@@ -60,6 +61,7 @@ static int (*dcmi_init_func) (void) = NULL;
     }
 
 DCMI_API_LIST(IMPL_WRAPPER)
+DCMI_V2_API_LIST(IMPL_WRAPPER)
 
 #undef IMPL_WRAPPER
 
@@ -103,6 +105,7 @@ int w_dcmi_init(const char *path)
     #define RESET_API_PTR(ret, name, decl_args, call_args) \
         name##_func = NULL;
     DCMI_API_LIST(RESET_API_PTR)
+    DCMI_V2_API_LIST(RESET_API_PTR)
     #undef RESET_API_PTR
     dcmi_init_func = NULL;
 
@@ -141,10 +144,13 @@ int w_dcmi_init(const char *path)
         goto out;
     }
 
-    // Load all symbols
+    // Load all symbols. A generation the driver does not serve simply leaves its pointers NULL,
+    // which IMPL_WRAPPER reports as ERROR_FUNCTION_NOT_FOUND -- so both lists are loaded
+    // unconditionally and neither generation has to be known yet at this point.
     #define LOAD_API(ret, name, decl_args, call_args) \
         name##_func = dlsym(dcmiLib, #name);
     DCMI_API_LIST(LOAD_API)
+    DCMI_V2_API_LIST(LOAD_API)
     #undef LOAD_API
 
     rc = dcmi_init_func();
@@ -195,6 +201,7 @@ int w_dcmi_shutdown(void)
     #define RESET_API_PTR(ret, name, decl_args, call_args) \
         name##_func = NULL;
     DCMI_API_LIST(RESET_API_PTR)
+    DCMI_V2_API_LIST(RESET_API_PTR)
     #undef RESET_API_PTR
 
 out:

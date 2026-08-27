@@ -30,3 +30,29 @@
     X(int, dcmi_get_multi_die_policy, (enum dcmi_multi_die_policy *policy), (policy)) \
     X(int, dcmi_set_multi_die_policy, (enum dcmi_multi_die_policy policy), (policy))
 
+// The V2 entry points, transcribed from dcmi_interface_api_v2.h. Take every signature from that
+// header and never from a vendor Go-side prototype: ascend-common's own prototype for
+// dcmiv2_get_device_list names its two parameters the other way round while calling it positionally
+// correct, so its names are wrong and the header is right. That entry point is the sharp edge of
+// this whole list -- its (device_list, device_num) pair is the reverse of V1's dcmi_get_card_list
+// (card_num, card_list), and both parameters are int *, so no compiler on either side of cgo can
+// see a swap. wrapper_def_test.go is the only mechanical guard.
+//
+// dcmiv2_init is absent on purpose: like dcmi_init it is dlsym'd directly in dcmi_wrapper.c, which
+// owns the V1-then-V2 init sequence.
+//
+// dcmiv2_subscribe_fault_event is absent on purpose too, and that one is a decision rather than a
+// structural exception: the public header declares it with two parameters, while the vendor's own
+// function pointer takes three -- the third a fault-event callback. The two authoritative sources
+// disagree about its binary ABI, and calling a three-parameter symbol through a two-parameter
+// pointer is undefined behaviour, so it stays unbound until one of them settles it.
+//
+// A comment inside the macro body has to fit on one line. Line splicing runs before comments are
+// recognized, so a comment whose first line does not end in a backslash silently terminates the
+// definition and leaves the rest of the list as stray tokens at file scope.
+#define DCMI_V2_API_LIST(X) \
+    X(int, dcmiv2_get_device_type, (int dev_id, enum dcmi_unit_type *device_type), (dev_id, device_type)) \
+    /* device_list FIRST, then device_num. See the note above. */ \
+    X(int, dcmiv2_get_device_list, (int *device_list, int *device_num, int list_len), (device_list, device_num, list_len)) \
+    X(int, dcmiv2_get_device_board_info, (int dev_id, struct dcmi_board_info *board_info), (dev_id, board_info))
+

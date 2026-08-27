@@ -133,3 +133,8 @@ func (x *MultiUtilizationInfo) PassRef() (*C.struct_dcmi_multi_utilization_info,
 func (x *ProcMemInfo) PassRef() (*C.struct_dcmi_proc_mem_info, *cgoAllocMap) {
 	return (*C.struct_dcmi_proc_mem_info)(unsafe.Pointer(x)), cgoAllocsUnknown
 }
+
+// PassRef returns a reference to C object as it is or allocates a new C object of this type.
+func (x *BoardInfo) PassRef() (*C.struct_dcmi_board_info, *cgoAllocMap) {
+	return (*C.struct_dcmi_board_info)(unsafe.Pointer(x)), cgoAllocsUnknown
+}

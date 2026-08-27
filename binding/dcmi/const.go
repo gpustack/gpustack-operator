@@ -29,51 +29,51 @@ package dcmi
 import "C"
 
 const (
-	// SUCCESS as defined in dcmi/dcmi_wrapper.h:10
+	// SUCCESS as defined in dcmi/dcmi_wrapper.h:13
 	SUCCESS = 0
-	// ERROR_INVALID_PARAMETER as defined in dcmi/dcmi_wrapper.h:11
+	// ERROR_INVALID_PARAMETER as defined in dcmi/dcmi_wrapper.h:14
 	ERROR_INVALID_PARAMETER = -8001
-	// ERROR_MEM_OPERATE_FAIL as defined in dcmi/dcmi_wrapper.h:12
+	// ERROR_MEM_OPERATE_FAIL as defined in dcmi/dcmi_wrapper.h:15
 	ERROR_MEM_OPERATE_FAIL = -8003
-	// ERROR_INVALID_DEVICE_ID as defined in dcmi/dcmi_wrapper.h:13
+	// ERROR_INVALID_DEVICE_ID as defined in dcmi/dcmi_wrapper.h:16
 	ERROR_INVALID_DEVICE_ID = -8007
-	// ERROR_DEVICE_NOT_EXIST as defined in dcmi/dcmi_wrapper.h:14
+	// ERROR_DEVICE_NOT_EXIST as defined in dcmi/dcmi_wrapper.h:17
 	ERROR_DEVICE_NOT_EXIST = -8008
-	// ERROR_CONFIG_INFO_NOT_EXIST as defined in dcmi/dcmi_wrapper.h:15
+	// ERROR_CONFIG_INFO_NOT_EXIST as defined in dcmi/dcmi_wrapper.h:18
 	ERROR_CONFIG_INFO_NOT_EXIST = -8023
-	// ERROR_OPER_NOT_PERMITTED as defined in dcmi/dcmi_wrapper.h:16
+	// ERROR_OPER_NOT_PERMITTED as defined in dcmi/dcmi_wrapper.h:19
 	ERROR_OPER_NOT_PERMITTED = -8002
-	// ERROR_NOT_SUPPORT_IN_CONTAINER as defined in dcmi/dcmi_wrapper.h:17
+	// ERROR_NOT_SUPPORT_IN_CONTAINER as defined in dcmi/dcmi_wrapper.h:20
 	ERROR_NOT_SUPPORT_IN_CONTAINER = -8013
-	// ERROR_NOT_SUPPORT as defined in dcmi/dcmi_wrapper.h:18
+	// ERROR_NOT_SUPPORT as defined in dcmi/dcmi_wrapper.h:21
 	ERROR_NOT_SUPPORT = -8255
-	// ERROR_TIME_OUT as defined in dcmi/dcmi_wrapper.h:19
+	// ERROR_TIME_OUT as defined in dcmi/dcmi_wrapper.h:22
 	ERROR_TIME_OUT = -8006
-	// ERROR_NOT_REDAY as defined in dcmi/dcmi_wrapper.h:20
+	// ERROR_NOT_REDAY as defined in dcmi/dcmi_wrapper.h:23
 	ERROR_NOT_REDAY = -8012
-	// ERROR_IS_UPGRADING as defined in dcmi/dcmi_wrapper.h:21
+	// ERROR_IS_UPGRADING as defined in dcmi/dcmi_wrapper.h:24
 	ERROR_IS_UPGRADING = -8017
-	// ERROR_RESOURCE_OCCUPIED as defined in dcmi/dcmi_wrapper.h:22
+	// ERROR_RESOURCE_OCCUPIED as defined in dcmi/dcmi_wrapper.h:25
 	ERROR_RESOURCE_OCCUPIED = -8020
-	// ERROR_SECURE_FUN_FAIL as defined in dcmi/dcmi_wrapper.h:23
+	// ERROR_SECURE_FUN_FAIL as defined in dcmi/dcmi_wrapper.h:26
 	ERROR_SECURE_FUN_FAIL = -8004
-	// ERROR_INNER_ERR as defined in dcmi/dcmi_wrapper.h:24
+	// ERROR_INNER_ERR as defined in dcmi/dcmi_wrapper.h:27
 	ERROR_INNER_ERR = -8005
-	// ERROR_IOCTL_FAIL as defined in dcmi/dcmi_wrapper.h:25
+	// ERROR_IOCTL_FAIL as defined in dcmi/dcmi_wrapper.h:28
 	ERROR_IOCTL_FAIL = -8009
-	// ERROR_SEND_MSG_FAIL as defined in dcmi/dcmi_wrapper.h:26
+	// ERROR_SEND_MSG_FAIL as defined in dcmi/dcmi_wrapper.h:29
 	ERROR_SEND_MSG_FAIL = -8010
-	// ERROR_RECV_MSG_FAIL as defined in dcmi/dcmi_wrapper.h:27
+	// ERROR_RECV_MSG_FAIL as defined in dcmi/dcmi_wrapper.h:30
 	ERROR_RECV_MSG_FAIL = -8011
-	// ERROR_RESET_FAIL as defined in dcmi/dcmi_wrapper.h:28
+	// ERROR_RESET_FAIL as defined in dcmi/dcmi_wrapper.h:31
 	ERROR_RESET_FAIL = -8015
-	// ERROR_ABORT_OPERATE as defined in dcmi/dcmi_wrapper.h:29
+	// ERROR_ABORT_OPERATE as defined in dcmi/dcmi_wrapper.h:32
 	ERROR_ABORT_OPERATE = -8016
-	// ERROR_FUNCTION_NOT_FOUND as defined in dcmi/dcmi_wrapper.h:30
+	// ERROR_FUNCTION_NOT_FOUND as defined in dcmi/dcmi_wrapper.h:33
 	ERROR_FUNCTION_NOT_FOUND = -99997
-	// ERROR_LIBRARY_NOT_FOUND as defined in dcmi/dcmi_wrapper.h:31
+	// ERROR_LIBRARY_NOT_FOUND as defined in dcmi/dcmi_wrapper.h:34
 	ERROR_LIBRARY_NOT_FOUND = -99998
-	// ERROR_UNKNOWN as defined in dcmi/dcmi_wrapper.h:32
+	// ERROR_UNKNOWN as defined in dcmi/dcmi_wrapper.h:35
 	ERROR_UNKNOWN = -99999
 	// DCMIDLLEXPORT as defined in dcmi/dcmi_interface_api.h:24
 	DCMIDLLEXPORT = 0

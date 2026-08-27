@@ -2,6 +2,9 @@
 #define DCMI_WRAPPER_H
 
 #include "dcmi_interface_api.h"
+// After the V1 header, never before it: the V2 header declares no type of its own and its whole
+// body is guarded by DCMI_VERSION_2, which the V1 header defines.
+#include "dcmi_interface_api_v2.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,6 +43,7 @@ const char* w_dcmi_last_error(void);
 #include "dcmi_wrapper_api.def"
 
 DCMI_API_LIST(DECL_API)
+DCMI_V2_API_LIST(DECL_API)
 
 #undef DECL_API
 
