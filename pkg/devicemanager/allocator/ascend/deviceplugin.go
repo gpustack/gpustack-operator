@@ -151,11 +151,17 @@ func (s *server) GetContainerAllocateResponse(
 		return nil, err
 	}
 
-	// Shared and visibility put a second container on an accelerator, which the driver refuses
-	// unless container-share mode is on, so they need the same preflight a slice does. Unlike a
-	// slice they may hold several accelerators, hence the loop. Exclusive is named out on purpose:
-	// one container owns the whole accelerator, so there is nothing to permit and no reason to
-	// drop the driver's own single-container guard.
+	// Shared and visibility put a second container on an accelerator, so they need the same
+	// preflight a slice does. Unlike a slice they may hold several accelerators, hence the loop.
+	// Exclusive is named out on purpose: one container owns the whole accelerator, so there is
+	// nothing to permit and no reason to drop the driver's own single-container guard.
+	//
+	// That guard is what the preflight turns on, and it was measured on a 910B2 running the V1 DCMI
+	// API: with the mode off, a second container that opens the same device fails. It is not a
+	// universal rule. A driver serving the V2 API declares no such flag anywhere in its API, and the
+	// preflight lets those allocations through rather than refusing them over an entry point that
+	// generation does not have — see errShareNotDeclared. Whether that generation enforces the same
+	// single-container guard by some other means is unverified.
 	switch s.AllocationMode {
 	case workercore.DeviceAllocationModeShared, workercore.DeviceAllocationModeVisibility:
 		for i := range accelerators {

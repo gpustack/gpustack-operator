@@ -66,6 +66,37 @@ func (d *dcmiShareDriver) ready() error {
 	return nil
 }
 
+// shareFlagUndeclared reports whether this failure means the API generation has no container-share
+// flag at all. It takes the generation rather than reading it so that the whole verdict is a pure
+// function of its two inputs and can be table-tested; its caller is what knows where to get them.
+//
+// The verdict is deliberately **conjunctive**, and both halves are load-bearing:
+//
+//   - The generation must be V2, because that is the generation whose header declares no
+//     container-share entry point. No return code says this on its own: a V2 driver still exports the
+//     V1 entry points and answers NOT_SUPPORT, which is a code the V1 generation also uses to mean
+//     "this device does not do that", so a code alone cannot tell the two apart.
+//   - The code must also be one that means this call is not served — NOT_SUPPORT, which is what a V2
+//     driver answers for a V1 entry point, or FUNCTION_NOT_FOUND, which is an entry point that is not
+//     there at all. Without this half, every failure on a V2 host reads as "no such flag": a device
+//     the DM lacks the privilege to query (OPER_NOT_PERMITTED) or one that timed out would be waved
+//     through as though the API had been consulted, and the reason logged beside the verdict would
+//     contradict it. Those are ordinary failures, and the existing classification handles them —
+//     retry through the write, then refuse with a remedy if that fails too.
+//
+// LIBRARY_NOT_FOUND is excluded on purpose, even on V2: a library that never loaded has told us
+// nothing about any generation, and that path must refuse.
+//
+// Callers read the generation on each call rather than keeping it from construction, matching the
+// binding: this driver retries its init per call, so the generation can become known after an init
+// that failed.
+func shareFlagUndeclared(version dcmi.APIVersion, ret dcmi.Return) bool {
+	if version != dcmi.APIVersionV2 {
+		return false
+	}
+	return ret == dcmi.ERROR_NOT_SUPPORT || ret == dcmi.ERROR_FUNCTION_NOT_FOUND
+}
+
 func (d *dcmiShareDriver) GetShareEnabled(cardID, deviceID int32) (bool, error) {
 	dev, err := d.device(cardID, deviceID)
 	if err != nil {
@@ -73,6 +104,9 @@ func (d *dcmiShareDriver) GetShareEnabled(cardID, deviceID int32) (bool, error) 
 	}
 	enabled, ret := dev.GetShareEnabled()
 	if !ret.IsSuccess() {
+		if shareFlagUndeclared(d.lib.APIVersion(), ret) {
+			return false, shareNotDeclaredError("dcmi get device share enable", ret)
+		}
 		return false, shareModeError("dcmi get device share enable", ret, ret.IsAPIUnavailable())
 	}
 	return enabled, nil
@@ -84,6 +118,9 @@ func (d *dcmiShareDriver) SetShareEnabled(cardID, deviceID int32, enabled bool) 
 		return err
 	}
 	if ret := dev.SetShareEnabled(enabled); !ret.IsSuccess() {
+		if shareFlagUndeclared(d.lib.APIVersion(), ret) {
+			return shareNotDeclaredError("dcmi set device share enable", ret)
+		}
 		return shareModeError("dcmi set device share enable", ret, ret.IsAPIUnavailable())
 	}
 	return nil

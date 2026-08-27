@@ -18,6 +18,22 @@ import (
 // the error, and the core reads the mark.
 var errShareUnsupported = errors.New("this driver has no dcmi container-share API")
 
+// errShareNotDeclared marks a container-share call that failed because the API generation this
+// driver serves has no such flag in it — a different thing from a driver that has the flag and
+// cannot answer about it, and the opposite decision.
+//
+// The V2 generation of the DCMI API declares no container-share entry point at all. There is no flag
+// to read and none to write, so a preflight has nothing to establish and nothing to fix, and the
+// allocation proceeds. Refusing instead would refuse every co-tenant allocation on that generation
+// over a flag its API does not define.
+//
+// The distinction is invisible in the return code, which is why this cannot be classified from one.
+// A driver serving V2 still exports the V1 container-share entry points and answers NOT_SUPPORT —
+// the driver speaking about a device, so errShareUnsupported does not apply — and the preflight
+// would read that as a failure worth retrying, write, be refused again, and end by telling an
+// operator to run a command that cannot add a flag the generation does not have.
+var errShareNotDeclared = errors.New("this driver's dcmi API generation declares no container-share flag")
+
 // shareModeError renders a failed driver call on the container-share path, marking it with
 // errShareUnsupported when apiUnavailable says the call could not be made at all.
 //
@@ -30,6 +46,19 @@ func shareModeError(what string, cause error, apiUnavailable bool) error {
 		return fmt.Errorf("%s: %w: %w", what, cause, errShareUnsupported)
 	}
 	return fmt.Errorf("%s: %w", what, cause)
+}
+
+// shareNotDeclaredError renders a container-share call that failed on a driver whose API generation
+// has no such flag, marking it with errShareNotDeclared.
+//
+// The driver's own code is kept in the message alongside the mark. The generation is why the flag is
+// absent, but the code is what the driver actually said, and a log line that drops it leaves nothing
+// to check the classification against.
+//
+// It is a second constructor rather than a second bool on shareModeError so that the two verdicts
+// cannot be combined: a call is either about a flag that exists or about one the API never defined.
+func shareNotDeclaredError(what string, cause error) error {
+	return fmt.Errorf("%s: %w: %w", what, cause, errShareNotDeclared)
 }
 
 // shareDriver is the dcmi actuator seam behind a _linux.go/_other.go build tag: the real impl
@@ -55,12 +84,14 @@ type shareDriver interface {
 // diagnosis, which is why an accelerator whose flag cannot be turned on is refused rather than
 // admitted.
 //
-// The read is classified rather than treated as fatal on its own. A read that reports the dcmi
-// entry point missing refuses the allocation without touching the device — including one whose flag
-// is already on, since a driver this code cannot query is one it cannot manage. Any other read
-// failure says nothing about whether the API exists, so the write is still attempted: the write is
-// what makes the flag known, so a read this code could not trust is not a reason to refuse an
-// allocation the write would have completed — only a reason to say so if the write then fails too.
+// The read is classified rather than treated as fatal on its own, into three outcomes and not two.
+// A read that reports the dcmi entry point missing refuses the allocation without touching the
+// device — including one whose flag is already on, since a driver this code cannot query is one it
+// cannot manage. A read that reports the flag as absent from the driver's API generation altogether
+// allows the allocation, because there is no flag to set and no command that could set one. Any
+// other read failure says nothing about whether the API exists, so the write is still attempted: the
+// write is what makes the flag known, so a read this code could not trust is not a reason to refuse
+// an allocation the write would have completed — only a reason to say so if the write then fails too.
 func (s *server) ensureShareEnabled(accel *workercore.Accelerator) error {
 	if s.share == nil {
 		return fmt.Errorf("container-share actuator not configured")
@@ -74,6 +105,19 @@ func (s *server) ensureShareEnabled(accel *workercore.Accelerator) error {
 
 	enabled, readErr := s.share.GetShareEnabled(cardID, deviceID)
 	switch {
+	case errors.Is(readErr, errShareNotDeclared):
+		// Checked before the refusal below, and before any write: this generation has no flag, so
+		// there is nothing to read, nothing to set, and no `npu-smi` command to offer — that command
+		// cannot add an entry point the driver does not carry, and the numbers it would print are
+		// this binding's own V2 addressing rather than numbers an operator can type.
+		//
+		// This is logged per accelerator rather than passed over in silence, because it is the one
+		// place where a co-tenant allocation proceeds without the driver having confirmed it may.
+		// Whether that generation needs such confirmation at all is unverified on hardware, so the
+		// log line is the record of every allocation that relied on the assumption.
+		s.Logger.Info("allowing the allocation without a container-share flag",
+			"accelerator", accel.ID, "card", cardID, "device", deviceID, "reason", readErr.Error())
+		return nil
 	case errors.Is(readErr, errShareUnsupported):
 		return fmt.Errorf("card %d device %d cannot be shared: %w", cardID, deviceID, readErr)
 	case readErr == nil && enabled:
@@ -81,6 +125,13 @@ func (s *server) ensureShareEnabled(accel *workercore.Accelerator) error {
 	}
 
 	err := s.share.SetShareEnabled(cardID, deviceID, true)
+	if errors.Is(err, errShareNotDeclared) {
+		// Reachable when the read answered and the write did not: dcmi resolves each symbol
+		// independently, and the generation verdict is taken per call rather than cached.
+		s.Logger.Info("allowing the allocation without a container-share flag",
+			"accelerator", accel.ID, "card", cardID, "device", deviceID, "reason", err.Error())
+		return nil
+	}
 	if err == nil {
 		if readErr != nil {
 			// The flag is on now, so the allocation stands — but a read this code could not trust

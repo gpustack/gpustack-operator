@@ -109,6 +109,98 @@ func TestShareModeError(t *testing.T) {
 	assert.ErrorIs(t, plain, cause)
 }
 
+// The two markings are the whole contract between the build-tagged driver and the core, and they
+// must stay distinguishable: one refuses the allocation, the other allows it. Both keep the driver's
+// own reason, which is what a log line is checked against.
+func TestShareNotDeclaredError(t *testing.T) {
+	cause := errors.New("NOT_SUPPORT")
+
+	marked := shareNotDeclaredError("dcmi get device share enable", cause)
+	assert.ErrorIs(t, marked, errShareNotDeclared, "an undeclared flag must carry its own sentinel")
+	assert.ErrorIs(t, marked, cause, "and must keep the vendor's own reason")
+	assert.NotErrorIs(t, marked, errShareUnsupported,
+		"it must not be mistaken for a driver that has the flag and cannot answer -- that one refuses")
+
+	unsupported := shareModeError("dcmi get device share enable", cause, true)
+	assert.NotErrorIs(t, unsupported, errShareNotDeclared,
+		"and the refusing verdict must not be mistaken for the allowing one")
+}
+
+// An API generation with no container-share flag lets the allocation through, writing nothing and
+// offering no `npu-smi` command.
+//
+// This is the permissive half of the three-way classification, and it is deliberately not symmetric
+// with the refusal below: an absent entry point on a generation that HAS the flag means a driver
+// this code cannot manage, while a generation that never defined the flag has nothing to manage. The
+// command is suppressed for two reasons — it cannot add an entry point the driver does not carry,
+// and the numbers it would print are the binding's V2 addressing rather than numbers an operator
+// can type.
+func TestEnsureShareEnabled_FlagNotDeclared(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	share := &fakeShareDriver{
+		enabled: map[[2]int32]bool{},
+		getErr:  fmt.Errorf("dcmi get device share enable: NOT_SUPPORT: %w", errShareNotDeclared),
+	}
+	s := newSlicedServerWithShare(share)
+
+	require.NoError(t, allocateSlice(t, s, "uid-share-undeclared"),
+		"a generation with no such flag must not refuse the allocation")
+	assert.Equal(t, [][2]int32{{0, 0}}, share.getCalls, "the read still happens; it is what classifies")
+	assert.Empty(t, share.setCalls, "a flag the API never defined is never written")
+}
+
+// dcmi resolves each symbol independently, so the verdict can surface on the write after a read that
+// answered. The allocation is allowed there too, and still writes nothing further.
+func TestEnsureShareEnabled_FlagNotDeclaredOnTheWrite(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	share := &fakeShareDriver{
+		enabled: map[[2]int32]bool{{0, 0}: false},
+		setErr:  fmt.Errorf("dcmi set device share enable: NOT_SUPPORT: %w", errShareNotDeclared),
+	}
+	s := newSlicedServerWithShare(share)
+
+	require.NoError(t, allocateSlice(t, s, "uid-share-undeclared-setter"))
+	assert.Equal(t, [][2]int32{{0, 0}}, share.setCalls, "the write was attempted once and then accepted as moot")
+}
+
+// Shared and visibility are covered by the same permissive verdict as a slice, across every
+// accelerator they were granted. This is the part of the decision with the widest blast radius --
+// those two modes put a second container on a device for reasons other than slicing -- so it is
+// pinned rather than left to follow from the slice case.
+func TestSharedAndVisibilityAllowFlagNotDeclared(t *testing.T) {
+	for _, mode := range []workercore.DeviceAllocationMode{
+		workercore.DeviceAllocationModeShared,
+		workercore.DeviceAllocationModeVisibility,
+	} {
+		t.Run(mode.String(), func(t *testing.T) {
+			share := &fakeShareDriver{
+				enabled: map[[2]int32]bool{},
+				getErr:  fmt.Errorf("dcmi get device share enable: NOT_SUPPORT: %w", errShareNotDeclared),
+			}
+			s := &server{
+				ResourceServer: deviceplugin.ResourceServer{
+					Manufacturer:   Manufacturer,
+					AllocationMode: mode,
+				},
+				share: share,
+			}
+
+			pod, ctr := slicedPod("uid-undeclared-"+mode.String(), "train", 10, 25)
+			resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr,
+				ascendDevicesFixture(), map[deviceplugin.Resource]int32{
+					{Group: "910b2", Device: testAccelID0}: 1,
+					{Group: "910b2", Device: testAccelID1}: 1,
+				})
+			require.NoError(t, err)
+
+			assert.Equal(t, "3,7", resp.Envs["ASCEND_VISIBLE_DEVICES"])
+			assert.ElementsMatch(t, [][2]int32{{0, 0}, {1, 0}}, share.getCalls,
+				"every granted accelerator is classified, not just the first")
+			assert.Empty(t, share.setCalls, "and none is written")
+		})
+	}
+}
+
 // A driver whose libdcmi has no container-share entry point is refused without the device being
 // written to, and without an `npu-smi` command being offered: no command adds an API the driver does
 // not carry.
