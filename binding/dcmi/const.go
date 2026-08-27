@@ -75,6 +75,12 @@ const (
 	ERROR_LIBRARY_NOT_FOUND = -99998
 	// ERROR_UNKNOWN as defined in dcmi/dcmi_wrapper.h:35
 	ERROR_UNKNOWN = -99999
+	// API_VERSION_UNKNOWN as defined in dcmi/dcmi_wrapper.h:40
+	API_VERSION_UNKNOWN = 0
+	// API_VERSION_V1 as defined in dcmi/dcmi_wrapper.h:41
+	API_VERSION_V1 = 1
+	// API_VERSION_V2 as defined in dcmi/dcmi_wrapper.h:42
+	API_VERSION_V2 = 2
 	// DCMIDLLEXPORT as defined in dcmi/dcmi_interface_api.h:24
 	DCMIDLLEXPORT = 0
 	// MAX_VER_LEN as defined in dcmi/dcmi_interface_api.h:26
