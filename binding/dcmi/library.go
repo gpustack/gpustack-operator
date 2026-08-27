@@ -140,6 +140,16 @@ func (v APIVersion) String() string {
 // after the other holder succeeded through V2 — leaving every adapted call on the V1 path against a
 // V2 driver, and discovery permanently empty.
 func (l *DCMI) APIVersion() APIVersion {
+	return apiVersion()
+}
+
+// apiVersion is what the adapting methods dispatch on.
+//
+// It is a package function rather than a method because the library is process-global while Device
+// deliberately holds no reference to the DCMI that produced it. A generation reachable only through
+// a handle would be a generation recorded when that handle was made, which is exactly the cached
+// copy the accessor above exists to avoid.
+func apiVersion() APIVersion {
 	return APIVersion(dcmiApiVersion())
 }
 
@@ -153,6 +163,10 @@ func (l *DCMI) APIVersion() APIVersion {
 // return Return(dcmiShutdown()).
 
 // GetDriverVersion retrieves the version of the DCMI driver.
+//
+// V2 declares no driver-version query, so this passes through and a V2 driver refuses it. Its
+// dcmiv2_get_dcmi_version reports the version of the DCMI library, which is a different thing and
+// must not be substituted: an operator reading a driver version acts on it.
 func (l *DCMI) GetDriverVersion() (string, Return) {
 	version := make([]byte, MAX_VER_LEN)
 	ret := Return(dcmiGetDriverVersion(&version[0], uint32(len(version))))
@@ -163,6 +177,8 @@ func (l *DCMI) GetDriverVersion() (string, Return) {
 // are injected into a container together or one at a time. The policy belongs to the
 // driver as a whole rather than to any one card, which is why it hangs off the library.
 // A driver that does not implement the query returns ERROR_FUNCTION_NOT_FOUND.
+//
+// V2 declares no multi-die policy query, so this passes through and a V2 driver refuses it.
 func (l *DCMI) GetMultiDiePolicy() (MultiDiePolicy, Return) {
 	var policy MultiDiePolicy
 	ret := Return(dcmiGetMultiDiePolicy(&policy))
@@ -172,6 +188,8 @@ func (l *DCMI) GetMultiDiePolicy() (MultiDiePolicy, Return) {
 // SetMultiDiePolicy sets the multi-die container-injection policy. It applies to every
 // multi-die device the driver manages, so it is a node-wide change and not a per-workload
 // one.
+//
+// As with GetMultiDiePolicy above, V2 declares no counterpart and a V2 driver refuses this.
 func (l *DCMI) SetMultiDiePolicy(policy MultiDiePolicy) Return {
 	return Return(dcmiSetMultiDiePolicy(policy))
 }
