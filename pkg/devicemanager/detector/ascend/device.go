@@ -114,18 +114,10 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 				continue
 			}
 
-			var uuid string
-			{
-				dieHandler := dev.GetVDieV()
-				die, ret := dieHandler.V2()
-				if !ret.IsSuccess() {
-					die, ret = dieHandler.V1()
-					if !ret.IsSuccess() {
-						logger.Error(ret, "failed to get device vdie info")
-						continue
-					}
-				}
-				uuid = die.String()
+			uuid, ret := deviceUUID(dev)
+			if !ret.IsSuccess() {
+				logger.Error(ret, "failed to get device vdie info")
+				continue
 			}
 
 			var pciBusId string
@@ -311,18 +303,10 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 				continue
 			}
 
-			var uuid string
-			{
-				dieHandler := dev.GetVDieV()
-				die, ret := dieHandler.V2()
-				if !ret.IsSuccess() {
-					die, ret = dieHandler.V1()
-					if !ret.IsSuccess() {
-						logger.Error(ret, "failed to get device vdie info")
-						continue
-					}
-				}
-				uuid = die.String()
+			uuid, ret := deviceUUID(dev)
+			if !ret.IsSuccess() {
+				logger.Error(ret, "failed to get device vdie info")
+				continue
 			}
 
 			var (
@@ -459,6 +443,45 @@ var socNameVersionMap = map[string]int{
 	"Ascend910_9579":    260,
 	"Ascend910_95":      260,
 	"Ascend950":         260,
+}
+
+// deviceUUID reads the die id identifying a device, which is what the Devices API carries as the
+// accelerator's id.
+//
+// Both driver generations are covered without a branch here, because the binding orders the two
+// entry points: on a V2 driver the first is that generation's die query — which asks for the virtual
+// die and then the DDie, the type the vendor names as the A5 chip's uuid — and the second is a V1
+// entry point a V2 driver refuses. On a V1 driver the DDie is never asked for.
+//
+// A device whose die cannot be read is dropped by the caller rather than identified some other way.
+// Accelerator.ID is universally unique by contract, and the only other per-device number to hand is
+// the PCI address, which repeats on every node of a fleet — substituting it would make two nodes'
+// accelerators collide on identity, which is worse than a missing device.
+func deviceUUID(dev dcmi.Device) (string, dcmi.Return) {
+	dieHandler := dev.GetVDieV()
+
+	die, ret := dieHandler.V2()
+	if ret.IsSuccess() {
+		return die.String(), ret
+	}
+
+	die, v1Ret := dieHandler.V1()
+	if v1Ret.IsSuccess() {
+		return die.String(), v1Ret
+	}
+
+	// Which of the two failures is worth carrying out depends on whether the second call was
+	// served at all, which is a question its own return code answers -- so neither generation has
+	// to be named here. A V2 driver refuses the V1 entry point outright, and letting that refusal
+	// out would bury what the die queries above reported: a permission error or a timeout would
+	// reach the log as "this driver does not serve that call". A V1 driver does serve it, and
+	// there the second failure is the specific one, the first being an older driver turning down
+	// the newer die query.
+	if v1Ret == dcmi.ERROR_NOT_SUPPORT || v1Ret == dcmi.ERROR_FUNCTION_NOT_FOUND {
+		return "", ret
+	}
+
+	return "", v1Ret
 }
 
 var (

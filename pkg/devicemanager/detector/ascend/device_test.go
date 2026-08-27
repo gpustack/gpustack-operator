@@ -5,8 +5,30 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"gpustack.ai/gpustack/binding/dcmi"
 	"gpustack.ai/gpustack/pkg/device"
 )
+
+// A device whose die cannot be read yields no uuid and carries the failure out, which is what makes
+// all three call sites drop it.
+//
+// That is the observable form of "no PCI address as a substitute": Accelerator.ID is universally
+// unique by contract while a BDF repeats on every node of a fleet, so a device that cannot identify
+// itself has to be dropped rather than identified some other way. Returning an empty uuid with a
+// success code instead would have every unidentifiable device on a node collapse onto one id.
+//
+// On a host with no Ascend library to load, every die entry point is unresolved, which is exactly
+// this case. A host whose driver does answer for device 0 cannot observe it, hence the skip rather
+// than a failure — the same host-dependence the process tests in this package carry.
+func TestDeviceUUIDUnreadable(t *testing.T) {
+	uuid, ret := deviceUUID(dcmi.Device{})
+	if ret.IsSuccess() {
+		t.Skip("an Ascend driver answered for device 0 on this host, so an unreadable die cannot be observed")
+	}
+
+	assert.Empty(t, uuid, "the uuid of a device whose die cannot be read")
+	assert.False(t, ret.IsSuccess(), "the failure must be carried out, not swallowed")
+}
 
 func TestGetLogicalSliced(t *testing.T) {
 	sliced := device.AcceleratorLogicalSliced{
