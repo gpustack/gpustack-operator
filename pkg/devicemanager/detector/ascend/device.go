@@ -440,6 +440,7 @@ var socNameVersionMap = map[string]int{
 	"Ascend910_9382":    253,
 	"Ascend910_9372":    254,
 	"Ascend910_9362":    255,
+	"Ascend910_9363":    256,
 	"Ascend910_9579":    260,
 	"Ascend910_95":      260,
 	"Ascend950":         260,
@@ -495,6 +496,15 @@ func guessSocNameFromDeviceName(devName string) string {
 	socName := "Ascend" + strings.TrimSpace(devName)
 	if _, ok := socNameVersionMap[socName]; ok {
 		return socName
+	}
+	// The 950 generation is matched by prefix, not by name. Its suffixes are an open set -- 950PR
+	// and 950DT ship today -- and every vendor reader treats them as one soc: ascend-common's
+	// Is910A5Chip, ascend-docker-runtime's own type mapper and torch_npu's SetSocVersion all test
+	// HasPrefix("Ascend950") and collapse whatever follows onto the single Ascend950 soc version.
+	// Listing the suffixes instead would leave the next one resolving to no family at all, since
+	// none of the fallbacks below match a name starting with 950.
+	if strings.HasPrefix(devName, "950") {
+		return "Ascend950"
 	}
 	// https://gitcode.com/Ascend/mind-cluster/blob/master/component/ascend-common/devmanager/common/utils.go#L159-L176
 	if _310PRegex.MatchString(devName) {

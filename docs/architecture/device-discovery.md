@@ -305,6 +305,12 @@ it belongs to the allocator rather than the detector, and it gates admission ins
 field. That is the decision the generation accessor exists for, and it is described with the rest of
 the share preflight [below](#the-device-plugin-allocator).
 
+**The generation is also the one named by prefix.** A 950 reports a chip name carrying an open-ended
+suffix — `Ascend950PR` and `Ascend950DT` ship today — so the detector folds every `950*` name onto one
+soc name, and therefore one family, exactly as every vendor reader of that name does. Listing the
+suffixes instead would leave the next one with no family at all, since no other fallback matches a
+name starting with 950.
+
 > **Why** — the uuid comes from a die read, and A5 uses a die type the public V2 header does not
 > enumerate: `DDIE`, which the vendor names as that chip's uuid. The V2 die query asks for the virtual
 > die and then `DDIE`. A device whose die cannot be read is **dropped**, never identified by its PCI
