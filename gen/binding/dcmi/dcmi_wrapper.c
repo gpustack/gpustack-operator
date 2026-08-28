@@ -1,6 +1,7 @@
 #include "dcmi_wrapper.h"
 #include <dlfcn.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -20,6 +21,11 @@ static int dcmiReady = 0;
 // initializations cannot both dlopen, nor one read readiness while the other clears it. The
 // per-API call path stays lock-free.
 static pthread_mutex_t dcmiInitMutex = PTHREAD_MUTEX_INITIALIZER;
+
+// Which generation's init answered for the library currently held. Written only under the mutex
+// above, but declared _Atomic because it is read on every adapted query in the Go layer: taking the
+// init mutex there would serialize the whole per-API call path, which is otherwise lock-free.
+static _Atomic int dcmiApiVersion = API_VERSION_UNKNOWN;
 
 // Thread-local cached error string to avoid unrelated dlerror() noise.
 static __thread char dcmi_last_err[1024];
@@ -46,10 +52,56 @@ static void set_last_errorf(const char *prefix, const char *msg) {
     static ret (*name##_func) decl_args = NULL;
 
 DCMI_API_LIST(DECL_FUNC_PTR)
+DCMI_V2_API_LIST(DECL_FUNC_PTR)
 
 #undef DECL_FUNC_PTR
 
+// Neither generation's init goes through the macro lists: the sequence below is the one place that
+// has to know which generation answered, and the macro lists exist precisely so that no other
+// wrapper does.
 static int (*dcmi_init_func) (void) = NULL;
+static int (*dcmiv2_init_func) (void) = NULL;
+
+// vendor_init runs the V1 init and, only if its answer means this driver does not serve V1 at all,
+// the V2 one. It records which generation answered, and is the only writer of dcmiApiVersion.
+//
+// The fallback keys on the two refusal codes rather than on "anything other than SUCCESS". A driver
+// serving V2 exports dcmi_init and refuses it with ERROR_NOT_SUPPORT, so a refusal is the signal;
+// a transient V1 failure -- a device still resetting, a busy driver, a timeout -- is not, and must
+// not latch the process onto V2 for the rest of its life. ERROR_FUNCTION_NOT_FOUND is the second
+// code because a library need not export both inits, and an unresolved pointer is reported with
+// exactly the code IMPL_WRAPPER uses for one.
+//
+// Called with dcmiInitMutex held.
+static int vendor_init(void)
+{
+    int rc = dcmi_init_func ? dcmi_init_func() : ERROR_FUNCTION_NOT_FOUND;
+    int v2rc = SUCCESS;
+    char msg[128];
+
+    if (rc == SUCCESS) {
+        dcmiApiVersion = API_VERSION_V1;
+        return rc;
+    }
+    if (rc != ERROR_NOT_SUPPORT && rc != ERROR_FUNCTION_NOT_FOUND) {
+        return rc;
+    }
+
+    v2rc = dcmiv2_init_func ? dcmiv2_init_func() : ERROR_FUNCTION_NOT_FOUND;
+    if (v2rc == SUCCESS) {
+        dcmiApiVersion = API_VERSION_V2;
+        return v2rc;
+    }
+
+    // Neither generation serves this driver, so report the V1 code: that is the one an operator on
+    // a V1 fleet has to act on, while the V2 code says only that a generation they do not run also
+    // refused. The V2 code is not lost -- it goes out through the error string, which is what the
+    // Go binding logs beside the library path.
+    snprintf(msg, sizeof(msg), "dcmi_init: %d, dcmiv2_init: %d", rc, v2rc);
+    set_last_error(msg);
+
+    return rc;
+}
 
 #define IMPL_WRAPPER(ret, name, decl_args, call_args) \
     ret w_##name decl_args { \
@@ -60,6 +112,7 @@ static int (*dcmi_init_func) (void) = NULL;
     }
 
 DCMI_API_LIST(IMPL_WRAPPER)
+DCMI_V2_API_LIST(IMPL_WRAPPER)
 
 #undef IMPL_WRAPPER
 
@@ -83,7 +136,7 @@ int w_dcmi_init(const char *path)
     if (dcmiLib != NULL && strcmp(dcmiLibPath, path) == 0) {
         rc = SUCCESS;
         if (!dcmiReady) {
-            rc = dcmi_init_func();
+            rc = vendor_init();
             if (rc == SUCCESS) {
                 dcmiReady = 1;
             }
@@ -98,13 +151,16 @@ int w_dcmi_init(const char *path)
     }
     dcmiReady = 0;
     dcmiLibPath[0] = '\0';
+    dcmiApiVersion = API_VERSION_UNKNOWN;
 
     // Reset all cached function pointers before loading.
     #define RESET_API_PTR(ret, name, decl_args, call_args) \
         name##_func = NULL;
     DCMI_API_LIST(RESET_API_PTR)
+    DCMI_V2_API_LIST(RESET_API_PTR)
     #undef RESET_API_PTR
     dcmi_init_func = NULL;
+    dcmiv2_init_func = NULL;
 
     // Load the library
     dlerror();
@@ -116,14 +172,20 @@ int w_dcmi_init(const char *path)
         goto out;
     }
 
-    // Load dcmi_init
+    // Load both generations' init. Only one has to resolve: a library serving V2 need not export
+    // dcmi_init, and one serving V1 predates dcmiv2_init entirely. Refusing the load when either is
+    // missing would refuse a whole generation of driver, so the check is that neither resolved --
+    // that library offers no way in at all.
     dlerror();
     dcmi_init_func = dlsym(dcmiLib, "dcmi_init");
+    dcmiv2_init_func = dlsym(dcmiLib, "dcmiv2_init");
     err = dlerror();
-    if (!dcmi_init_func) {
-        set_last_errorf("dlsym(dcmi_init)", err);
+    if (!dcmi_init_func && !dcmiv2_init_func) {
+        set_last_errorf("dlsym(dcmi_init, dcmiv2_init)", err);
         dlclose(dcmiLib);
         dcmiLib = NULL;
+        dcmi_init_func = NULL;
+        dcmiv2_init_func = NULL;
         rc = ERROR_FUNCTION_NOT_FOUND;
         goto out;
     }
@@ -137,17 +199,21 @@ int w_dcmi_init(const char *path)
         dlclose(dcmiLib);
         dcmiLib = NULL;
         dcmi_init_func = NULL;
+        dcmiv2_init_func = NULL;
         rc = ERROR_LIBRARY_NOT_FOUND;
         goto out;
     }
 
-    // Load all symbols
+    // Load all symbols. A generation the driver does not serve simply leaves its pointers NULL,
+    // which IMPL_WRAPPER reports as ERROR_FUNCTION_NOT_FOUND -- so both lists are loaded
+    // unconditionally and neither generation has to be known yet at this point.
     #define LOAD_API(ret, name, decl_args, call_args) \
         name##_func = dlsym(dcmiLib, #name);
     DCMI_API_LIST(LOAD_API)
+    DCMI_V2_API_LIST(LOAD_API)
     #undef LOAD_API
 
-    rc = dcmi_init_func();
+    rc = vendor_init();
     if (rc == SUCCESS) {
         dcmiReady = 1;
     }
@@ -190,16 +256,27 @@ int w_dcmi_shutdown(void)
     dcmiLib = NULL;
     dcmiReady = 0;
     dcmiLibPath[0] = '\0';
+    dcmiApiVersion = API_VERSION_UNKNOWN;
     dcmi_init_func = NULL;
+    dcmiv2_init_func = NULL;
 
     #define RESET_API_PTR(ret, name, decl_args, call_args) \
         name##_func = NULL;
     DCMI_API_LIST(RESET_API_PTR)
+    DCMI_V2_API_LIST(RESET_API_PTR)
     #undef RESET_API_PTR
 
 out:
     pthread_mutex_unlock(&dcmiInitMutex);
     return rc;
+}
+
+int w_dcmi_api_version(void)
+{
+    // Read without the init mutex, which is what the _Atomic declaration is for: this is on the
+    // per-query path of every adapted call in the Go layer, and taking the init lock there would
+    // serialize a call path that is otherwise lock-free.
+    return dcmiApiVersion;
 }
 
 const char* w_dcmi_last_error(void) {

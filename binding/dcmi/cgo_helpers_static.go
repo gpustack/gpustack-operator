@@ -128,8 +128,54 @@ func (x *MultiUtilizationInfo) PassRef() (*C.struct_dcmi_multi_utilization_info,
 // PassRef returns a reference to C object as it is or allocates a new C object of this type.
 //
 // It hands over the Go object's own address rather than a copy, which is what lets a caller pass
-// the first element of a slice and have the library fill the elements after it. That matters here
-// because this is the only struct the library writes as an array.
+// the first element of a slice and have the library fill the elements after it. Every helper in
+// this file does that, and two entry points depend on it: the process-memory read below and the
+// UB ping mesh reply further down are both filled as arrays, sized by a separate count parameter.
 func (x *ProcMemInfo) PassRef() (*C.struct_dcmi_proc_mem_info, *cgoAllocMap) {
 	return (*C.struct_dcmi_proc_mem_info)(unsafe.Pointer(x)), cgoAllocsUnknown
+}
+
+// The helpers below exist for the V2 surface. A generated call site binds one for every struct a
+// bound wrapper takes by pointer, and `hack/generate.sh` deletes the generated cgo_helpers.go, so
+// this hand-written file is the only place they can come from -- a missing one is a compile error,
+// not a silent fallback. A parameter declared through a typedef rather than as `struct X *` needs
+// none: c-for-go casts it with unsafe.Pointer directly, which is why dcmi_urma_eid_info_t has no
+// entry here.
+
+// PassRef returns a reference to C object as it is or allocates a new C object of this type.
+func (x *BoardInfo) PassRef() (*C.struct_dcmi_board_info, *cgoAllocMap) {
+	return (*C.struct_dcmi_board_info)(unsafe.Pointer(x)), cgoAllocsUnknown
+}
+
+// PassRef returns a reference to C object as it is or allocates a new C object of this type.
+func (x *PcieLinkBandwidthInfo) PassRef() (*C.struct_dcmi_pcie_link_bandwidth_info, *cgoAllocMap) {
+	return (*C.struct_dcmi_pcie_link_bandwidth_info)(unsafe.Pointer(x)), cgoAllocsUnknown
+}
+
+// PassRef returns a reference to C object as it is or allocates a new C object of this type.
+func (x *ElabelInfo) PassRef() (*C.struct_dcmi_elabel_info, *cgoAllocMap) {
+	return (*C.struct_dcmi_elabel_info)(unsafe.Pointer(x)), cgoAllocsUnknown
+}
+
+// PassRef returns a reference to C object as it is or allocates a new C object of this type.
+func (x *UbPingMeshOperate) PassRef() (*C.struct_dcmi_ub_ping_mesh_operate, *cgoAllocMap) {
+	return (*C.struct_dcmi_ub_ping_mesh_operate)(unsafe.Pointer(x)), cgoAllocsUnknown
+}
+
+// PassRef returns a reference to C object as it is or allocates a new C object of this type.
+//
+// The ping mesh reply is filled as an array: the caller passes the first element of a slice and a
+// separate size, so handing over the Go object's own address rather than a copy is load-bearing.
+func (x *UbPingMeshInfo) PassRef() (*C.struct_dcmi_ub_ping_mesh_info, *cgoAllocMap) {
+	return (*C.struct_dcmi_ub_ping_mesh_info)(unsafe.Pointer(x)), cgoAllocsUnknown
+}
+
+// PassRef returns a reference to C object as it is or allocates a new C object of this type.
+func (x *UbPortInfo) PassRef() (*C.struct_dcmi_ub_port_info, *cgoAllocMap) {
+	return (*C.struct_dcmi_ub_port_info)(unsafe.Pointer(x)), cgoAllocsUnknown
+}
+
+// PassRef returns a reference to C object as it is or allocates a new C object of this type.
+func (x *PortPktStatsInfo) PassRef() (*C.struct_dcmi_port_pkt_stats_info, *cgoAllocMap) {
+	return (*C.struct_dcmi_port_pkt_stats_info)(unsafe.Pointer(x)), cgoAllocsUnknown
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	klog "k8s.io/klog/v2"
 
@@ -38,13 +39,118 @@ func New(opts ...binding.LibraryOption) *DCMI {
 }
 
 // Init initializes the DCMI library.
+//
+// The library serves one of two API generations. Init tries the V1 entry point first and falls back
+// to the V2 one only when V1's answer means this driver does not serve V1 at all; APIVersion then
+// reports which answered. When neither does, the V1 code is returned — an operator on a V1 fleet has
+// to act on that one — and the V2 code travels out in the logged error string.
+//
+// # Why the initialization is pinned to one OS thread
+//
+// The reason for a failed initialization lives in a thread-local buffer inside the C wrapper, and
+// getting it out takes a second cgo call. The runtime is free to resume a goroutine on a different
+// thread after a cgo call — and this one is the longest in the package, a dlopen plus a vendor init,
+// so it is exactly where a hand-off happens. The read would then find another thread's empty buffer.
+// initLocked below therefore holds both calls on one thread.
+//
+// This binding is the only one that has to arrange that for itself, which is why the pinning looks
+// out of place beside the other ten. Every other binding here opens its library through
+// binding.Library.Load, which goes to dl.DynamicLibrary.Open, which already pins dlopen and the
+// dlerror that reads its reason. DCMI does not: it uses binding.Library only to resolve a path
+// (l.so.Path), and hands that path to the C wrapper, which does its own dlopen, keeps its own
+// thread-local error buffer, and is reached through cgo rather than through dl. None of dl's
+// protection applies on this path, so the same hazard reappears here and is answered the same way.
+//
+// It also matters more here than the general case: when both API generations refuse, this returns the
+// V1 code, and the V2 code exists nowhere but that string. Losing it leaves an operator with a bare
+// library path and no reason at all.
 func (l *DCMI) Init(logger klog.Logger) Return {
-	ret := Return(dcmiInit(l.so.Path()))
+	ret, errStr := l.initLocked()
 	if !ret.IsSuccess() {
-		errStr := dcmiLastError()
 		logger.Errorf(nil, "dcmiInit(%s): %s", l.so.Path(), errStr)
+		return ret
 	}
+
+	// Only V2 is worth a line: V1 is what every existing node answers, and a log entry per
+	// initialization saying so would be noise. A V2 host is the new case, and knowing the binding
+	// took that path is the first thing to establish when its readings look wrong.
+	if version := l.APIVersion(); version == APIVersionV2 {
+		logger.Infof("dcmiInit(%s): the driver serves the %s API", l.so.Path(), version)
+	}
+
 	return ret
+}
+
+// initLocked runs the vendor initialization and reads its reason on one OS thread, returning both.
+// See Init for why that has to be one thread.
+//
+// The pinned region is those two calls and nothing else. Logging is deliberately left outside it: the
+// container-share driver retries this on every Allocate while the library is unready, and holding a
+// thread across a log write on that path takes an M out of the scheduler for no benefit.
+func (l *DCMI) initLocked() (Return, string) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	ret := Return(dcmiInit(l.so.Path()))
+	if ret.IsSuccess() {
+		return ret, ""
+	}
+
+	return ret, dcmiLastError()
+}
+
+// APIVersion identifies which generation of the DCMI API a library's initialization answered.
+type APIVersion int32
+
+const (
+	// APIVersionUnknown means no initialization has succeeded against the library currently held.
+	//
+	// It is the zero value deliberately: a DCMI whose Init never ran, or ran and failed, must not
+	// report V1. Reporting a generation that nothing established would send every adapted call down
+	// the V1 path on a host that may well be V2.
+	APIVersionUnknown APIVersion = API_VERSION_UNKNOWN
+	// APIVersionV1 is the generation every Ascend driver up to and including 910B/310P serves.
+	APIVersionV1 APIVersion = API_VERSION_V1
+	// APIVersionV2 is the generation the A5/950 driver serves. It enumerates devices flat, with no
+	// card level, and declares no counterpart for a number of V1 queries.
+	APIVersionV2 APIVersion = API_VERSION_V2
+)
+
+// String returns the string representation of an APIVersion.
+func (v APIVersion) String() string {
+	switch v {
+	case APIVersionV1:
+		return "V1"
+	case APIVersionV2:
+		return "V2"
+	case APIVersionUnknown:
+		return "unknown"
+	default:
+		return fmt.Sprintf("unknown API version: %d", int32(v))
+	}
+}
+
+// APIVersion reports which generation of the DCMI API answered this library's initialization.
+//
+// It reads the loaded library on every call and caches nothing, which is a correctness requirement
+// rather than a style choice. The library is process-global while its holders are not: in one
+// device-manager the accelerator detector initializes it once through sync.Once and never retries,
+// while the allocator's container-share driver retries on every call. A generation cached on either
+// holder could be recorded as Unknown or V1 from an initialization that failed, then never revised
+// after the other holder succeeded through V2 — leaving every adapted call on the V1 path against a
+// V2 driver, and discovery permanently empty.
+func (l *DCMI) APIVersion() APIVersion {
+	return apiVersion()
+}
+
+// apiVersion is what the adapting methods dispatch on.
+//
+// It is a package function rather than a method because the library is process-global while Device
+// deliberately holds no reference to the DCMI that produced it. A generation reachable only through
+// a handle would be a generation recorded when that handle was made, which is exactly the cached
+// copy the accessor above exists to avoid.
+func apiVersion() APIVersion {
+	return APIVersion(dcmiApiVersion())
 }
 
 // Unlike every other binding here, DCMI exposes no Shutdown. Unloading the library blanks the
@@ -57,6 +163,10 @@ func (l *DCMI) Init(logger klog.Logger) Return {
 // return Return(dcmiShutdown()).
 
 // GetDriverVersion retrieves the version of the DCMI driver.
+//
+// V2 declares no driver-version query, so this passes through and a V2 driver refuses it. Its
+// dcmiv2_get_dcmi_version reports the version of the DCMI library, which is a different thing and
+// must not be substituted: an operator reading a driver version acts on it.
 func (l *DCMI) GetDriverVersion() (string, Return) {
 	version := make([]byte, MAX_VER_LEN)
 	ret := Return(dcmiGetDriverVersion(&version[0], uint32(len(version))))
@@ -67,6 +177,8 @@ func (l *DCMI) GetDriverVersion() (string, Return) {
 // are injected into a container together or one at a time. The policy belongs to the
 // driver as a whole rather than to any one card, which is why it hangs off the library.
 // A driver that does not implement the query returns ERROR_FUNCTION_NOT_FOUND.
+//
+// V2 declares no multi-die policy query, so this passes through and a V2 driver refuses it.
 func (l *DCMI) GetMultiDiePolicy() (MultiDiePolicy, Return) {
 	var policy MultiDiePolicy
 	ret := Return(dcmiGetMultiDiePolicy(&policy))
@@ -76,6 +188,8 @@ func (l *DCMI) GetMultiDiePolicy() (MultiDiePolicy, Return) {
 // SetMultiDiePolicy sets the multi-die container-injection policy. It applies to every
 // multi-die device the driver manages, so it is a node-wide change and not a per-workload
 // one.
+//
+// As with GetMultiDiePolicy above, V2 declares no counterpart and a V2 driver refuses this.
 func (l *DCMI) SetMultiDiePolicy(policy MultiDiePolicy) Return {
 	return Return(dcmiSetMultiDiePolicy(policy))
 }

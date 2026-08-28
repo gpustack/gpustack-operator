@@ -68,6 +68,15 @@ var presetLookupCases = []struct {
 	// than on the tier of the family the detector would have guessed.
 	{"ascend 910b alias shape", "ascend", "A2G1", "4", "16Gi"},
 	{"ascend 310p alias shape", "ascend", "I21", "4", "16Gi"},
+	// The 950 generation is the one whose suffix rides in the same token as the number, so each
+	// suffix needs its own entry and the bare number cannot stand in for them. The detector folds
+	// every 950 name onto one family by prefix; this table does not, and the last case is what
+	// that costs — a suffix listed nowhere here takes the fallback rather than its siblings' tier.
+	{"ascend 950 bare", "ascend", "Ascend950", "12", "192Gi"},
+	{"ascend 950 prefill part", "ascend", "Ascend950PR", "12", "192Gi"},
+	{"ascend 950 decode part", "ascend", "Ascend950DT", "12", "192Gi"},
+	{"ascend 950 part reported without the vendor prefix", "ascend", "950PR", "12", "192Gi"},
+	{"an unlisted 950 suffix falls back", "ascend", "Ascend950XX", "4", "16Gi"},
 
 	// Vendor-specific product shapes.
 	{"underscore separates tokens", "hygon", "K100_AI", "12", "128Gi"},

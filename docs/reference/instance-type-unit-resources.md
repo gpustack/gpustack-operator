@@ -126,14 +126,23 @@ first thing to leave single-accelerator Pods `Pending`.
 | `ascend-910b3` | `medium` | `8` | `64Gi` | KunLun G5680 V2 24c/64g; Atlas 800T A2 24c/192g |
 | `ascend-910b4` | `medium` | `8` | `64Gi` | KunLun G5680 V2 24c/64g; Atlas 800T A2 24c/192g |
 | `ascend-910-9362` | `xlarge` | `12` | `192Gi` | Atlas 800T A3 32c/256g |
+| `ascend-910-9363` | `xlarge` | `12` | `192Gi` | Atlas 800T A3 32c/256g |
 | `ascend-910-9372` | `xlarge` | `12` | `192Gi` | Atlas 800T A3 32c/256g |
 | `ascend-910-9381` | `xlarge` | `12` | `192Gi` | Atlas 800T A3 32c/256g |
 | `ascend-910-9382` | `xlarge` | `12` | `192Gi` | Atlas 800T A3 32c/256g |
 | `ascend-910-9391` | `xlarge` | `12` | `192Gi` | Atlas 800T A3 32c/256g |
 | `ascend-910-9392` | `xlarge` | `12` | `192Gi` | Atlas 800T A3 32c/256g |
+| `ascend-950` | `xlarge` | `12` | `192Gi` | no published configuration; placed by its VRAM band |
+| `ascend-950pr` | `xlarge` | `12` | `192Gi` | inherited from `ascend-950` |
+| `ascend-950dt` | `xlarge` | `12` | `192Gi` | inherited from `ascend-950` |
 
 910B is held one tier below its VRAM band because the KunLun G5680 V2 gives 64GB per accelerator;
 `ascend-910b4` also covers `910B4-1`.
+
+The 950 rows sit at the top of the ladder on VRAM alone — 128GB on the PR part, 144GB on the DT
+part, both above every band below them — since no host configuration has been published to anchor
+them against. The detector resolves any `950*` chip name to one family, so a suffix this table has
+yet to list still schedules; it just takes the fallback unit resources until a row is added.
 
 ## AMD
 

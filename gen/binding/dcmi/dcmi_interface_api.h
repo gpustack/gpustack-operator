@@ -581,6 +581,66 @@ typedef struct dcmi_urma_eid_info {
 
 // urma device API for A5 -- end
 
+// port pkt stats API for A5 -- begin
+struct dcmi_ub_port_info {
+    int udie_id;
+    int port_id;
+};
+
+struct dcmi_port_pkt_stats_info {
+    int port_mode;
+    unsigned long long ub_glb_ipv4_pkt_cnt_rx;
+    unsigned long long ub_glb_ipv6_pkt_cnt_rx;
+    unsigned long long unic_ipv4_pkt_cnt_rx;
+    unsigned long long unic_ipv6_pkt_cnt_rx;
+    unsigned long long ub_clan_pkt_cnt_rx;
+    unsigned long long ub_umoc_ctph_cnt_rx;
+    unsigned long long ub_umoc_ntph_cnt_rx;
+    unsigned long long ub_mem_pkt_cnt_rx;
+    unsigned long long unknown_pkt_cnt_rx;
+    unsigned long long drop_ind_cnt_rx;
+    unsigned long long err_ind_cnt_rx;
+    unsigned long long to_host_pkt_cnt_rx;
+    unsigned long long to_imp_pkt_cnt_rx;
+    unsigned long long to_mar_pkt_cnt_rx;
+    unsigned long long to_link_pkt_cnt_rx;
+    unsigned long long to_noc_pkt_cnt_rx;
+    unsigned long long route_err_cnt_rx;
+    unsigned long long out_err_cnt_rx;
+    unsigned long long length_err_cnt_rx;
+    unsigned long long rx_busi_flit_num;
+    unsigned long long rx_send_ack_flit;
+    unsigned long long ub_glb_ipv4_pkt_cnt_tx;
+    unsigned long long ub_glb_ipv6_pkt_cnt_tx;
+    unsigned long long unic_ipv4_pkt_cnt_tx;
+    unsigned long long unic_ipv6_pkt_cnt_tx;
+    unsigned long long ub_clan_pkt_cnt_tx;
+    unsigned long long ub_umoc_ctph_cnt_tx;
+    unsigned long long ub_umoc_ntph_cnt_tx;
+    unsigned long long ub_mem_pkt_cnt_tx;
+    unsigned long long unknown_pkt_cnt_tx;
+    unsigned long long drop_ind_cnt_tx;
+    unsigned long long err_ind_cnt_tx;
+    unsigned long long lpbk_ind_cnt_tx;
+    unsigned long long out_err_cnt_tx;
+    unsigned long long length_err_cnt_tx;
+    unsigned long long tx_busi_flit_num;
+    unsigned long long tx_recv_ack_flit;
+    unsigned long long retry_req_sum;
+    unsigned long long retry_ack_sum;
+    unsigned long long crc_error_sum;
+    unsigned long long core_mib_rxpausepkts;
+    unsigned long long core_mib_txpausepkts;
+    unsigned long long core_mib_rxpfcpkts;
+    unsigned long long core_mib_txpfcpkts;
+    unsigned long long core_mib_rxbadpkts;
+    unsigned long long core_mib_txbadpkts;
+    unsigned long long core_mib_rxbadoctets;
+    unsigned long long core_mib_txbadoctets;
+    unsigned long long reserved[16];
+};
+// port pkt stats API for A5 -- end
+
 #define DCMI_VERSION_1
 #define DCMI_VERSION_2
 

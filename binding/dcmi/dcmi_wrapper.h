@@ -2,6 +2,9 @@
 #define DCMI_WRAPPER_H
 
 #include "dcmi_interface_api.h"
+// After the V1 header, never before it: the V2 header declares no type of its own and its whole
+// body is guarded by DCMI_VERSION_2, which the V1 header defines.
+#include "dcmi_interface_api_v2.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,15 +34,30 @@ extern "C" {
 #define	ERROR_LIBRARY_NOT_FOUND         -99998
 #define	ERROR_UNKNOWN                   -99999
 
+// The two API generations a driver can serve. They are not interoperable, and a driver serving V2
+// still exports the V1 entry points and refuses each of them, so the generation cannot be inferred
+// from any one call failing -- only from which init answered.
+#define API_VERSION_UNKNOWN             0
+#define API_VERSION_V1                  1
+#define API_VERSION_V2                  2
+
 int w_dcmi_init(const char *path);
 int w_dcmi_shutdown(void);
 const char* w_dcmi_last_error(void);
+
+// w_dcmi_api_version reports which generation's init answered, as one of the API_VERSION_* values.
+// API_VERSION_UNKNOWN means no init has succeeded against the library currently held.
+//
+// Call it rather than caching what it returned: the library is process-global while its callers are
+// not, so a copy kept anywhere else can outlive the answer it recorded.
+int w_dcmi_api_version(void);
 
 #define DECL_API(ret, name, decl_args, call_args) ret w_##name decl_args;
 
 #include "dcmi_wrapper_api.def"
 
 DCMI_API_LIST(DECL_API)
+DCMI_V2_API_LIST(DECL_API)
 
 #undef DECL_API
 

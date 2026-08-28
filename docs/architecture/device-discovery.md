@@ -45,8 +45,9 @@ them as Resources.*
 - **Resource** — the Kubernetes-side view of a Device, named by the device plugin and controllers.
   The hardware layer never speaks it.
 - **card** — a manufacturer-hardware term, used only where a manufacturer's SDK models a card as
-  something other than exactly one Accelerator: the Ascend DCMI card holding several devices, and the
-  T-Head device-node ordinal (see [T-Head MIG Operations](../operation/thead-mig.md)).
+  something other than exactly one Accelerator: the Ascend DCMI card holding several devices — a level
+  the [V2 DCMI API](#ascend-two-dcmi-api-generations) drops entirely — and the T-Head device-node
+  ordinal (see [T-Head MIG Operations](../operation/thead-mig.md)).
 - **manufacturer** — the company. Its native code is *the manufacturer's library, SDK or binding*.
 
 The `pkg/device` package doc carries the same diagram.
@@ -269,6 +270,53 @@ asserts a node-management decision it does not own.
 > any other. Neither setting ends the process — a node that never answers keeps detecting, it does not
 > restart.
 
+### Ascend: two DCMI API generations
+
+**Ascend drivers serve one of two mutually exclusive DCMI APIs, and `binding/dcmi` absorbs the
+difference so that no caller enumerates or addresses devices differently.** V1 is what every driver up
+to and including 910B/310P serves. V2 (`dcmiv2_*`) is what the A5/950 generation serves. `DCMI.Init`
+tries V1 and falls back to V2; `APIVersion()` reports which answered.
+
+One caller does read that accessor: the allocator, for the single decision below that turns on the
+generation itself rather than on a reading.
+
+The fallback keys on the driver *refusing* V1 rather than on `dlsym` finding no V1 symbol, because the
+absence is not what distinguishes the two: a V2 driver exports every V1 entry point and answers each
+with `NOT_SUPPORT`. An entry point that really is missing is treated as another refusal and falls back
+just the same. That refusal is also why the queries below need no code to fail — they pass through and
+the driver says no.
+
+**V2 has no card level.** It enumerates devices flat, indexed by the number V1 calls the logic id, so
+the binding presents each V2 device id as a card holding exactly one device: `cardId == devId ==
+logicId`, and `deviceId` is always 0. Any other second coordinate is refused with
+`INVALID_DEVICE_ID` rather than resolved to the card, so a stale index cannot be served a whole
+accelerator's readings under another device's name.
+
+`PhysicalIndexes` therefore reads `{physical id, device id, 0}` on a V2 host, in the same three-entry
+shape the allocator already expects.
+
+**Five detector readings have no V2 counterpart**, so on a V2 host the ledger simply lacks them:
+driver version, PCIe topology distance, RoCE IP and gateway, the `memory_info` v2/v3 structs (memory
+comes from the HBM query alone), and the multi-die injection policy. The detector already treats each
+as optional, so their absence drops nothing else.
+
+**The container-share flag is a sixth absent query, and the one absence that is not merely optional**:
+it belongs to the allocator rather than the detector, and it gates admission instead of filling in a
+field. That is the decision the generation accessor exists for, and it is described with the rest of
+the share preflight [below](#the-device-plugin-allocator).
+
+**The generation is also the one named by prefix.** A 950 reports a chip name carrying an open-ended
+suffix — `Ascend950PR` and `Ascend950DT` ship today — so the detector folds every `950*` name onto one
+soc name, and therefore one family, exactly as every vendor reader of that name does. Listing the
+suffixes instead would leave the next one with no family at all, since no other fallback matches a
+name starting with 950.
+
+> **Why** — the uuid comes from a die read, and A5 uses a die type the public V2 header does not
+> enumerate: `DDIE`, which the vendor names as that chip's uuid. The V2 die query asks for the virtual
+> die and then `DDIE`. A device whose die cannot be read is **dropped**, never identified by its PCI
+> address — `Accelerator.ID` is universally unique by contract while a BDF repeats on every node, so
+> substituting it would make two nodes' accelerators collide on identity.
+
 ## The device-plugin allocator
 
 Alongside detection the DM runs the **device-plugin allocator** (`pkg/devicemanager/allocator/<mfr>`,
@@ -414,6 +462,10 @@ path only — the env and the mounted device node, against the ledger's own reco
 allocated. The sliced site was not re-measured in-cluster; it rests on the host-side run, which drove
 the same responder.
 
+That measurement is a **V1** one, on a V1 driver. On a [V2 host](#ascend-two-dcmi-api-generations) the
+physical id comes from a different entry point (`dcmiv2_get_chip_phy_id_by_dev_id`) and the rule is
+**unmeasured**: nothing establishes that the driver numbers `/dev/davinci<N>` by that id there.
+
 Two properties of the consuming side came out of the same runs: the container renumbers its
 accelerators by ascending physical id, not by the order they were named in, so the emission order
 stays immaterial even for a multi-accelerator claim; and an out-of-range value fails the container
@@ -463,9 +515,21 @@ allocator reads the flag through `binding/dcmi`, writing only when off, so an ac
 carrying a tenant costs one query. One whose flag cannot be set fails `Allocate` naming both
 accelerator and flag, rather than admitting a pod that cannot use its device.
 
-The read is classified, not treated as fatal on its own. A read reporting the dcmi entry point missing
-— or a libdcmi that never loaded — refuses the allocation without writing, since no `npu-smi` command
-adds an API the driver lacks, and that holds even for a device whose flag is already on.
+The read is classified into three outcomes, not treated as fatal on its own. A read reporting the dcmi
+entry point missing — or a libdcmi that never loaded — refuses the allocation without writing, since
+no `npu-smi` command adds an API the driver lacks, and that holds even for a device whose flag is
+already on.
+
+**A driver whose DCMI generation declares no such flag is allowed through instead**, in all three
+tenanted modes. The [V2 API](#ascend-two-dcmi-api-generations) has no container-share entry point at
+all, so there is nothing to read, nothing to write and no command to offer — the numbers such a
+command would print are the binding's V2 addressing, not numbers an operator can type. Each allowed
+allocation is logged with its accelerator.
+
+> **Why** — the flag's refusal of a second container was measured on a 910B2 running V1, and it is not
+> a universal rule. Whether the V2 generation enforces the same guard by other means is **unmeasured**;
+> until it is, refusing would refuse every co-tenant allocation on that generation over an entry point
+> its API does not define. The log line is the record of every allocation that relied on this.
 
 Any other read failure still writes: the write is what makes the flag known, so a timeout cannot
 refuse an allocation the write completes — it is logged instead. dcmi resolves each symbol

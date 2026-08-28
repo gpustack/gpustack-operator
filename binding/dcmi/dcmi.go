@@ -32,7 +32,7 @@ import (
 	"unsafe"
 )
 
-// dcmiInit function as declared in dcmi/dcmi_wrapper.h:34
+// dcmiInit function as declared in dcmi/dcmi_wrapper.h:44
 func dcmiInit(Path string) int32 {
 	cPath, cPathAllocMap := unpackPCharString(Path)
 	__ret := C.w_dcmi_init(cPath)
@@ -41,21 +41,28 @@ func dcmiInit(Path string) int32 {
 	return __v
 }
 
-// dcmiShutdown function as declared in dcmi/dcmi_wrapper.h:35
+// dcmiShutdown function as declared in dcmi/dcmi_wrapper.h:45
 func dcmiShutdown() int32 {
 	__ret := C.w_dcmi_shutdown()
 	__v := (int32)(__ret)
 	return __v
 }
 
-// dcmiLastError function as declared in dcmi/dcmi_wrapper.h:36
+// dcmiLastError function as declared in dcmi/dcmi_wrapper.h:46
 func dcmiLastError() string {
 	__ret := C.w_dcmi_last_error()
 	__v := packPCharString(__ret)
 	return __v
 }
 
-// dcmiGetAffinityCpuInfoByDeviceId function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiApiVersion function as declared in dcmi/dcmi_wrapper.h:53
+func dcmiApiVersion() int32 {
+	__ret := C.w_dcmi_api_version()
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiGetAffinityCpuInfoByDeviceId function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetAffinityCpuInfoByDeviceId(CardId int32, DeviceId int32, AffinityCpu *byte, Length *int32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -70,7 +77,7 @@ func dcmiGetAffinityCpuInfoByDeviceId(CardId int32, DeviceId int32, AffinityCpu 
 	return __v
 }
 
-// dcmiGetCardList function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetCardList function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetCardList(CardNum *int32, CardList *int32, ListLen int32) int32 {
 	cCardNum, cCardNumAllocMap := (*C.int)(unsafe.Pointer(CardNum)), cgoAllocsUnknown
 	cCardList, cCardListAllocMap := (*C.int)(unsafe.Pointer(CardList)), cgoAllocsUnknown
@@ -83,7 +90,7 @@ func dcmiGetCardList(CardNum *int32, CardList *int32, ListLen int32) int32 {
 	return __v
 }
 
-// dcmiGetDeviceChipInfo function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceChipInfo function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceChipInfo(CardId int32, DeviceId int32, ChipInfo *ChipInfo) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -96,7 +103,7 @@ func dcmiGetDeviceChipInfo(CardId int32, DeviceId int32, ChipInfo *ChipInfo) int
 	return __v
 }
 
-// dcmiGetDeviceChipInfoV2 function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceChipInfoV2 function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceChipInfoV2(CardId int32, DeviceId int32, DeviceInfo *ChipInfoV2) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -109,7 +116,7 @@ func dcmiGetDeviceChipInfoV2(CardId int32, DeviceId int32, DeviceInfo *ChipInfoV
 	return __v
 }
 
-// dcmiGetDeviceDie function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceDie function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceDie(CardId int32, DeviceId int32, DeviceDie *SocDie) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -122,7 +129,7 @@ func dcmiGetDeviceDie(CardId int32, DeviceId int32, DeviceDie *SocDie) int32 {
 	return __v
 }
 
-// dcmiGetDeviceDieV2 function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceDieV2 function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceDieV2(CardId int32, DeviceId int32, InputType DieType, DieId *DieId) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -137,7 +144,7 @@ func dcmiGetDeviceDieV2(CardId int32, DeviceId int32, InputType DieType, DieId *
 	return __v
 }
 
-// dcmiGetDeviceEccInfo function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceEccInfo function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceEccInfo(CardId int32, DeviceId int32, InputType DeviceType, DeviceEccInfo *EccInfo) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -152,7 +159,7 @@ func dcmiGetDeviceEccInfo(CardId int32, DeviceId int32, InputType DeviceType, De
 	return __v
 }
 
-// dcmiGetDeviceGateway function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceGateway function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceGateway(CardId int32, DeviceId int32, InputType PortType, PortId int32, Gateway *IpAddr) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -169,7 +176,7 @@ func dcmiGetDeviceGateway(CardId int32, DeviceId int32, InputType PortType, Port
 	return __v
 }
 
-// dcmiGetDeviceHbmInfo function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceHbmInfo function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceHbmInfo(CardId int32, DeviceId int32, HbmInfo *HbmInfo) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -182,7 +189,7 @@ func dcmiGetDeviceHbmInfo(CardId int32, DeviceId int32, HbmInfo *HbmInfo) int32 
 	return __v
 }
 
-// dcmiGetDeviceInfo function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceInfo function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceInfo(CardId int32, DeviceId int32, MainCmd MainCmd, SubCmd uint32, Buf unsafe.Pointer, Size *uint32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -201,7 +208,7 @@ func dcmiGetDeviceInfo(CardId int32, DeviceId int32, MainCmd MainCmd, SubCmd uin
 	return __v
 }
 
-// dcmiGetDeviceIp function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceIp function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceIp(CardId int32, DeviceId int32, InputType PortType, PortId int32, Ip *IpAddr, Mask *IpAddr) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -220,7 +227,7 @@ func dcmiGetDeviceIp(CardId int32, DeviceId int32, InputType PortType, PortId in
 	return __v
 }
 
-// dcmiGetDeviceLogicId function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceLogicId function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceLogicId(DeviceLogicId *int32, CardId int32, DeviceId int32) int32 {
 	cDeviceLogicId, cDeviceLogicIdAllocMap := (*C.int)(unsafe.Pointer(DeviceLogicId)), cgoAllocsUnknown
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
@@ -233,7 +240,7 @@ func dcmiGetDeviceLogicId(DeviceLogicId *int32, CardId int32, DeviceId int32) in
 	return __v
 }
 
-// dcmiGetDeviceMemoryInfoV2 function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceMemoryInfoV2 function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceMemoryInfoV2(CardId int32, DeviceId int32, MemoryInfo *MemoryInfo) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -246,7 +253,7 @@ func dcmiGetDeviceMemoryInfoV2(CardId int32, DeviceId int32, MemoryInfo *MemoryI
 	return __v
 }
 
-// dcmiGetDeviceMemoryInfoV3 function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceMemoryInfoV3 function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceMemoryInfoV3(CardId int32, DeviceId int32, MemoryInfo *GetMemoryInfo) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -259,7 +266,7 @@ func dcmiGetDeviceMemoryInfoV3(CardId int32, DeviceId int32, MemoryInfo *GetMemo
 	return __v
 }
 
-// dcmiGetDeviceNumInCard function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceNumInCard function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceNumInCard(CardId int32, DeviceNum *int32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceNum, cDeviceNumAllocMap := (*C.int)(unsafe.Pointer(DeviceNum)), cgoAllocsUnknown
@@ -270,7 +277,7 @@ func dcmiGetDeviceNumInCard(CardId int32, DeviceNum *int32) int32 {
 	return __v
 }
 
-// dcmiGetDevicePcieInfo function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDevicePcieInfo function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDevicePcieInfo(CardId int32, DeviceId int32, PcieInfo *PcieInfo) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -283,7 +290,7 @@ func dcmiGetDevicePcieInfo(CardId int32, DeviceId int32, PcieInfo *PcieInfo) int
 	return __v
 }
 
-// dcmiGetDevicePcieInfoV2 function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDevicePcieInfoV2 function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDevicePcieInfoV2(CardId int32, DeviceId int32, PcieInfo *PcieInfoAll) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -296,7 +303,7 @@ func dcmiGetDevicePcieInfoV2(CardId int32, DeviceId int32, PcieInfo *PcieInfoAll
 	return __v
 }
 
-// dcmiGetDevicePhyidFromLogicid function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDevicePhyidFromLogicid function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDevicePhyidFromLogicid(Logicid uint32, Phyid *uint32) int32 {
 	cLogicid, cLogicidAllocMap := (C.uint)(Logicid), cgoAllocsUnknown
 	cPhyid, cPhyidAllocMap := (*C.uint)(unsafe.Pointer(Phyid)), cgoAllocsUnknown
@@ -307,7 +314,7 @@ func dcmiGetDevicePhyidFromLogicid(Logicid uint32, Phyid *uint32) int32 {
 	return __v
 }
 
-// dcmiGetDevicePowerInfo function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDevicePowerInfo function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDevicePowerInfo(CardId int32, DeviceId int32, Power *int32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -320,7 +327,7 @@ func dcmiGetDevicePowerInfo(CardId int32, DeviceId int32, Power *int32) int32 {
 	return __v
 }
 
-// dcmiGetDeviceResourceInfo function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceResourceInfo function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceResourceInfo(CardId int32, DeviceId int32, ProcInfo *ProcMemInfo, ProcNum *int32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -335,7 +342,7 @@ func dcmiGetDeviceResourceInfo(CardId int32, DeviceId int32, ProcInfo *ProcMemIn
 	return __v
 }
 
-// dcmiGetDeviceShareEnable function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceShareEnable function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceShareEnable(CardId int32, DeviceId int32, EnableFlag *int32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -348,7 +355,7 @@ func dcmiGetDeviceShareEnable(CardId int32, DeviceId int32, EnableFlag *int32) i
 	return __v
 }
 
-// dcmiGetDeviceTemperature function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceTemperature function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceTemperature(CardId int32, DeviceId int32, Temperature *int32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -361,7 +368,7 @@ func dcmiGetDeviceTemperature(CardId int32, DeviceId int32, Temperature *int32) 
 	return __v
 }
 
-// dcmiGetDeviceType function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceType function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceType(CardId int32, DeviceId int32, DeviceType *UnitType) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -374,7 +381,7 @@ func dcmiGetDeviceType(CardId int32, DeviceId int32, DeviceType *UnitType) int32
 	return __v
 }
 
-// dcmiGetDeviceUtilizationRate function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceUtilizationRate function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceUtilizationRate(CardId int32, DeviceId int32, InputType int32, UtilizationRate *uint32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -389,7 +396,7 @@ func dcmiGetDeviceUtilizationRate(CardId int32, DeviceId int32, InputType int32,
 	return __v
 }
 
-// dcmiGetDeviceUtilizationRateV2 function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDeviceUtilizationRateV2 function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDeviceUtilizationRateV2(CardId int32, DeviceId int32, UtilInfo *MultiUtilizationInfo) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -402,7 +409,7 @@ func dcmiGetDeviceUtilizationRateV2(CardId int32, DeviceId int32, UtilInfo *Mult
 	return __v
 }
 
-// dcmiGetDriverVersion function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetDriverVersion function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetDriverVersion(DriverVer *byte, Len uint32) int32 {
 	cDriverVer, cDriverVerAllocMap := (*C.char)(unsafe.Pointer(DriverVer)), cgoAllocsUnknown
 	cLen, cLenAllocMap := (C.uint)(Len), cgoAllocsUnknown
@@ -413,7 +420,7 @@ func dcmiGetDriverVersion(DriverVer *byte, Len uint32) int32 {
 	return __v
 }
 
-// dcmiGetMultiDiePolicy function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetMultiDiePolicy function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetMultiDiePolicy(Policy *MultiDiePolicy) int32 {
 	cPolicy, cPolicyAllocMap := (*C.enum_dcmi_multi_die_policy)(unsafe.Pointer(Policy)), cgoAllocsUnknown
 	__ret := C.w_dcmi_get_multi_die_policy(cPolicy)
@@ -422,7 +429,7 @@ func dcmiGetMultiDiePolicy(Policy *MultiDiePolicy) int32 {
 	return __v
 }
 
-// dcmiGetTopoInfoByDeviceId function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiGetTopoInfoByDeviceId function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiGetTopoInfoByDeviceId(CardId1 int32, DeviceId1 int32, CardId2 int32, DeviceId2 int32, TopoType *int32) int32 {
 	cCardId1, cCardId1AllocMap := (C.int)(CardId1), cgoAllocsUnknown
 	cDeviceId1, cDeviceId1AllocMap := (C.int)(DeviceId1), cgoAllocsUnknown
@@ -439,7 +446,7 @@ func dcmiGetTopoInfoByDeviceId(CardId1 int32, DeviceId1 int32, CardId2 int32, De
 	return __v
 }
 
-// dcmiSetDeviceShareEnable function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiSetDeviceShareEnable function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiSetDeviceShareEnable(CardId int32, DeviceId int32, EnableFlag int32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -452,11 +459,487 @@ func dcmiSetDeviceShareEnable(CardId int32, DeviceId int32, EnableFlag int32) in
 	return __v
 }
 
-// dcmiSetMultiDiePolicy function as declared in dcmi/dcmi_wrapper.h:42
+// dcmiSetMultiDiePolicy function as declared in dcmi/dcmi_wrapper.h:59
 func dcmiSetMultiDiePolicy(Policy MultiDiePolicy) int32 {
 	cPolicy, cPolicyAllocMap := (C.enum_dcmi_multi_die_policy)(Policy), cgoAllocsUnknown
 	__ret := C.w_dcmi_set_multi_die_policy(cPolicy)
 	runtime.KeepAlive(cPolicyAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetAffinityCpuInfoByDevId function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetAffinityCpuInfoByDevId(DevId int32, AffinityCpu *byte, Len *int32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cAffinityCpu, cAffinityCpuAllocMap := (*C.char)(unsafe.Pointer(AffinityCpu)), cgoAllocsUnknown
+	cLen, cLenAllocMap := (*C.int)(unsafe.Pointer(Len)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_affinity_cpu_info_by_dev_id(cDevId, cAffinityCpu, cLen)
+	runtime.KeepAlive(cLenAllocMap)
+	runtime.KeepAlive(cAffinityCpuAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetAllDeviceCount function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetAllDeviceCount(AllDeviceCount *int32) int32 {
+	cAllDeviceCount, cAllDeviceCountAllocMap := (*C.int)(unsafe.Pointer(AllDeviceCount)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_all_device_count(cAllDeviceCount)
+	runtime.KeepAlive(cAllDeviceCountAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetChipPhyIdByDevId function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetChipPhyIdByDevId(DevId uint32, Phyid *uint32) int32 {
+	cDevId, cDevIdAllocMap := (C.uint)(DevId), cgoAllocsUnknown
+	cPhyid, cPhyidAllocMap := (*C.uint)(unsafe.Pointer(Phyid)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_chip_phy_id_by_dev_id(cDevId, cPhyid)
+	runtime.KeepAlive(cPhyidAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDcmiVersion function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDcmiVersion(Ver *byte, BufSize int32) int32 {
+	cVer, cVerAllocMap := (*C.char)(unsafe.Pointer(Ver)), cgoAllocsUnknown
+	cBufSize, cBufSizeAllocMap := (C.int)(BufSize), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_dcmi_version(cVer, cBufSize)
+	runtime.KeepAlive(cBufSizeAllocMap)
+	runtime.KeepAlive(cVerAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDevIdByChipPhyId function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDevIdByChipPhyId(Phyid uint32, DevId *uint32) int32 {
+	cPhyid, cPhyidAllocMap := (C.uint)(Phyid), cgoAllocsUnknown
+	cDevId, cDevIdAllocMap := (*C.uint)(unsafe.Pointer(DevId)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_dev_id_by_chip_phy_id(cPhyid, cDevId)
+	runtime.KeepAlive(cDevIdAllocMap)
+	runtime.KeepAlive(cPhyidAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceBoardInfo function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceBoardInfo(DevId int32, BoardInfo *BoardInfo) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cBoardInfo, cBoardInfoAllocMap := BoardInfo.PassRef()
+	__ret := C.w_dcmiv2_get_device_board_info(cDevId, cBoardInfo)
+	runtime.KeepAlive(cBoardInfoAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceBootStatus function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceBootStatus(DevId int32, BootStatus *BootStatus) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cBootStatus, cBootStatusAllocMap := (*C.enum_dcmi_boot_status)(unsafe.Pointer(BootStatus)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_device_boot_status(cDevId, cBootStatus)
+	runtime.KeepAlive(cBootStatusAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceChipInfo function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceChipInfo(DevId int32, ChipInfo *ChipInfoV2) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cChipInfo, cChipInfoAllocMap := ChipInfo.PassRef()
+	__ret := C.w_dcmiv2_get_device_chip_info(cDevId, cChipInfo)
+	runtime.KeepAlive(cChipInfoAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceDieId function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceDieId(DevId int32, InputType DieType, DieId *DieId) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cInputType, cInputTypeAllocMap := (C.enum_dcmi_die_type)(InputType), cgoAllocsUnknown
+	cDieId, cDieIdAllocMap := DieId.PassRef()
+	__ret := C.w_dcmiv2_get_device_die_id(cDevId, cInputType, cDieId)
+	runtime.KeepAlive(cDieIdAllocMap)
+	runtime.KeepAlive(cInputTypeAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceEccInfo function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceEccInfo(DevId int32, InputType DeviceType, DeviceEccInfo *EccInfo) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cInputType, cInputTypeAllocMap := (C.enum_dcmi_device_type)(InputType), cgoAllocsUnknown
+	cDeviceEccInfo, cDeviceEccInfoAllocMap := DeviceEccInfo.PassRef()
+	__ret := C.w_dcmiv2_get_device_ecc_info(cDevId, cInputType, cDeviceEccInfo)
+	runtime.KeepAlive(cDeviceEccInfoAllocMap)
+	runtime.KeepAlive(cInputTypeAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceElabelInfo function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceElabelInfo(DevId int32, ElabelInfo *ElabelInfo) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cElabelInfo, cElabelInfoAllocMap := ElabelInfo.PassRef()
+	__ret := C.w_dcmiv2_get_device_elabel_info(cDevId, cElabelInfo)
+	runtime.KeepAlive(cElabelInfoAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceErrorCodeList function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceErrorCodeList(DevId int32, ErrorCount *int32, ErrorCodeList *uint32, ListLen uint32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cErrorCount, cErrorCountAllocMap := (*C.int)(unsafe.Pointer(ErrorCount)), cgoAllocsUnknown
+	cErrorCodeList, cErrorCodeListAllocMap := (*C.uint)(unsafe.Pointer(ErrorCodeList)), cgoAllocsUnknown
+	cListLen, cListLenAllocMap := (C.uint)(ListLen), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_device_error_code_list(cDevId, cErrorCount, cErrorCodeList, cListLen)
+	runtime.KeepAlive(cListLenAllocMap)
+	runtime.KeepAlive(cErrorCodeListAllocMap)
+	runtime.KeepAlive(cErrorCountAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceFrequency function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceFrequency(DevId int32, InputType FreqType, Frequency *uint32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cInputType, cInputTypeAllocMap := (C.enum_dcmi_freq_type)(InputType), cgoAllocsUnknown
+	cFrequency, cFrequencyAllocMap := (*C.uint)(unsafe.Pointer(Frequency)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_device_frequency(cDevId, cInputType, cFrequency)
+	runtime.KeepAlive(cFrequencyAllocMap)
+	runtime.KeepAlive(cInputTypeAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceHbmInfo function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceHbmInfo(DevId int32, HbmInfo *HbmInfo) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cHbmInfo, cHbmInfoAllocMap := HbmInfo.PassRef()
+	__ret := C.w_dcmiv2_get_device_hbm_info(cDevId, cHbmInfo)
+	runtime.KeepAlive(cHbmInfoAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceHealth function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceHealth(DevId int32, Health *uint32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cHealth, cHealthAllocMap := (*C.uint)(unsafe.Pointer(Health)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_device_health(cDevId, cHealth)
+	runtime.KeepAlive(cHealthAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceInfo function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceInfo(DevId int32, MainCmd MainCmd, SubCmd uint32, Buf unsafe.Pointer, Size *uint32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cMainCmd, cMainCmdAllocMap := (C.enum_dcmi_main_cmd)(MainCmd), cgoAllocsUnknown
+	cSubCmd, cSubCmdAllocMap := (C.uint)(SubCmd), cgoAllocsUnknown
+	cBuf, cBufAllocMap := Buf, cgoAllocsUnknown
+	cSize, cSizeAllocMap := (*C.uint)(unsafe.Pointer(Size)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_device_info(cDevId, cMainCmd, cSubCmd, cBuf, cSize)
+	runtime.KeepAlive(cSizeAllocMap)
+	runtime.KeepAlive(cBufAllocMap)
+	runtime.KeepAlive(cSubCmdAllocMap)
+	runtime.KeepAlive(cMainCmdAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceList function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceList(DeviceList *int32, DeviceNum *int32, ListLen int32) int32 {
+	cDeviceList, cDeviceListAllocMap := (*C.int)(unsafe.Pointer(DeviceList)), cgoAllocsUnknown
+	cDeviceNum, cDeviceNumAllocMap := (*C.int)(unsafe.Pointer(DeviceNum)), cgoAllocsUnknown
+	cListLen, cListLenAllocMap := (C.int)(ListLen), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_device_list(cDeviceList, cDeviceNum, cListLen)
+	runtime.KeepAlive(cListLenAllocMap)
+	runtime.KeepAlive(cDeviceNumAllocMap)
+	runtime.KeepAlive(cDeviceListAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceMultiUtilizationRate function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceMultiUtilizationRate(DevId int32, UtilInfo *MultiUtilizationInfo) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cUtilInfo, cUtilInfoAllocMap := UtilInfo.PassRef()
+	__ret := C.w_dcmiv2_get_device_multi_utilization_rate(cDevId, cUtilInfo)
+	runtime.KeepAlive(cUtilInfoAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceMultiUtilizationRatePeriod function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceMultiUtilizationRatePeriod(DevId int32, UtilInfo *MultiUtilizationInfo, Period int32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cUtilInfo, cUtilInfoAllocMap := UtilInfo.PassRef()
+	cPeriod, cPeriodAllocMap := (C.int)(Period), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_device_multi_utilization_rate_period(cDevId, cUtilInfo, cPeriod)
+	runtime.KeepAlive(cPeriodAllocMap)
+	runtime.KeepAlive(cUtilInfoAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceNetworkHealth function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceNetworkHealth(DevId int32, Result *RdfxDetectResult) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cResult, cResultAllocMap := (*C.enum_dcmi_rdfx_detect_result)(unsafe.Pointer(Result)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_device_network_health(cDevId, cResult)
+	runtime.KeepAlive(cResultAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceOutbandChannelState function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceOutbandChannelState(DevId int32, ChannelState *int32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cChannelState, cChannelStateAllocMap := (*C.int)(unsafe.Pointer(ChannelState)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_device_outband_channel_state(cDevId, cChannelState)
+	runtime.KeepAlive(cChannelStateAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDevicePcieInfo function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDevicePcieInfo(DevId int32, PcieInfo *PcieInfoAll) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cPcieInfo, cPcieInfoAllocMap := PcieInfo.PassRef()
+	__ret := C.w_dcmiv2_get_device_pcie_info(cDevId, cPcieInfo)
+	runtime.KeepAlive(cPcieInfoAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDevicePowerInfo function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDevicePowerInfo(DevId int32, Power *int32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cPower, cPowerAllocMap := (*C.int)(unsafe.Pointer(Power)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_device_power_info(cDevId, cPower)
+	runtime.KeepAlive(cPowerAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceProcMemInfo function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceProcMemInfo(DevId int32, ProcInfo *ProcMemInfo, ProcNum *int32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cProcInfo, cProcInfoAllocMap := ProcInfo.PassRef()
+	cProcNum, cProcNumAllocMap := (*C.int)(unsafe.Pointer(ProcNum)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_device_proc_mem_info(cDevId, cProcInfo, cProcNum)
+	runtime.KeepAlive(cProcNumAllocMap)
+	runtime.KeepAlive(cProcInfoAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceTemperature function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceTemperature(DevId int32, Temperature *int32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cTemperature, cTemperatureAllocMap := (*C.int)(unsafe.Pointer(Temperature)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_device_temperature(cDevId, cTemperature)
+	runtime.KeepAlive(cTemperatureAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceType function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceType(DevId int32, DeviceType *UnitType) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cDeviceType, cDeviceTypeAllocMap := (*C.enum_dcmi_unit_type)(unsafe.Pointer(DeviceType)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_device_type(cDevId, cDeviceType)
+	runtime.KeepAlive(cDeviceTypeAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceUtilizationRate function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceUtilizationRate(DevId int32, InputType int32, UtilizationRate *uint32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cInputType, cInputTypeAllocMap := (C.int)(InputType), cgoAllocsUnknown
+	cUtilizationRate, cUtilizationRateAllocMap := (*C.uint)(unsafe.Pointer(UtilizationRate)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_device_utilization_rate(cDevId, cInputType, cUtilizationRate)
+	runtime.KeepAlive(cUtilizationRateAllocMap)
+	runtime.KeepAlive(cInputTypeAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetDeviceVoltage function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetDeviceVoltage(DevId int32, Voltage *uint32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cVoltage, cVoltageAllocMap := (*C.uint)(unsafe.Pointer(Voltage)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_device_voltage(cDevId, cVoltage)
+	runtime.KeepAlive(cVoltageAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetEidListByUrmaDevIndex function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetEidListByUrmaDevIndex(DevId int32, DevIndex uint32, EidList *UrmaEidInfo, EidCnt *uint32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cDevIndex, cDevIndexAllocMap := (C.uint)(DevIndex), cgoAllocsUnknown
+	cEidList, cEidListAllocMap := (*C.dcmi_urma_eid_info_t)(unsafe.Pointer(EidList)), cgoAllocsUnknown
+	cEidCnt, cEidCntAllocMap := (*C.uint)(unsafe.Pointer(EidCnt)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_eid_list_by_urma_dev_index(cDevId, cDevIndex, cEidList, cEidCnt)
+	runtime.KeepAlive(cEidCntAllocMap)
+	runtime.KeepAlive(cEidListAllocMap)
+	runtime.KeepAlive(cDevIndexAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetMainboardId function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetMainboardId(DevId int32, MainboardId *uint32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cMainboardId, cMainboardIdAllocMap := (*C.uint)(unsafe.Pointer(MainboardId)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_mainboard_id(cDevId, cMainboardId)
+	runtime.KeepAlive(cMainboardIdAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetPcieLinkBandwidthInfo function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetPcieLinkBandwidthInfo(DevId int32, PcieLinkBandwidthInfo *PcieLinkBandwidthInfo) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cPcieLinkBandwidthInfo, cPcieLinkBandwidthInfoAllocMap := PcieLinkBandwidthInfo.PassRef()
+	__ret := C.w_dcmiv2_get_pcie_link_bandwidth_info(cDevId, cPcieLinkBandwidthInfo)
+	runtime.KeepAlive(cPcieLinkBandwidthInfoAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetPortPktStatsInfo function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetPortPktStatsInfo(DevId int32, UbPortInfo *UbPortInfo, PortPktStatsInfo *PortPktStatsInfo) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cUbPortInfo, cUbPortInfoAllocMap := UbPortInfo.PassRef()
+	cPortPktStatsInfo, cPortPktStatsInfoAllocMap := PortPktStatsInfo.PassRef()
+	__ret := C.w_dcmiv2_get_port_pkt_stats_info(cDevId, cUbPortInfo, cPortPktStatsInfo)
+	runtime.KeepAlive(cPortPktStatsInfoAllocMap)
+	runtime.KeepAlive(cUbPortInfoAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetUbPingMeshInfo function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetUbPingMeshInfo(DevId int32, TaskId int32, UbPingMeshReply *UbPingMeshInfo, MeshReplySize int32, Count *int32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cTaskId, cTaskIdAllocMap := (C.int)(TaskId), cgoAllocsUnknown
+	cUbPingMeshReply, cUbPingMeshReplyAllocMap := UbPingMeshReply.PassRef()
+	cMeshReplySize, cMeshReplySizeAllocMap := (C.int)(MeshReplySize), cgoAllocsUnknown
+	cCount, cCountAllocMap := (*C.int)(unsafe.Pointer(Count)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_ub_ping_mesh_info(cDevId, cTaskId, cUbPingMeshReply, cMeshReplySize, cCount)
+	runtime.KeepAlive(cCountAllocMap)
+	runtime.KeepAlive(cMeshReplySizeAllocMap)
+	runtime.KeepAlive(cUbPingMeshReplyAllocMap)
+	runtime.KeepAlive(cTaskIdAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetUbPingMeshState function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetUbPingMeshState(DevId int32, TaskId int32, State *uint32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cTaskId, cTaskIdAllocMap := (C.int)(TaskId), cgoAllocsUnknown
+	cState, cStateAllocMap := (*C.uint)(unsafe.Pointer(State)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_ub_ping_mesh_state(cDevId, cTaskId, cState)
+	runtime.KeepAlive(cStateAllocMap)
+	runtime.KeepAlive(cTaskIdAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2GetUrmaDeviceCnt function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2GetUrmaDeviceCnt(DevId int32, DevCnt *uint32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cDevCnt, cDevCntAllocMap := (*C.uint)(unsafe.Pointer(DevCnt)), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_get_urma_device_cnt(cDevId, cDevCnt)
+	runtime.KeepAlive(cDevCntAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2PreResetDevice function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2PreResetDevice(DevId int32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_pre_reset_device(cDevId)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2RescanDevice function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2RescanDevice(DevId int32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_rescan_device(cDevId)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2ResetDevice function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2ResetDevice(DevId int32, ChannelType ResetChannel) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cChannelType, cChannelTypeAllocMap := (C.enum_dcmi_reset_channel)(ChannelType), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_reset_device(cDevId, cChannelType)
+	runtime.KeepAlive(cChannelTypeAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2StartUbPingMesh function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2StartUbPingMesh(DevId int32, Count int32, UbpingMesh *UbPingMeshOperate) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cCount, cCountAllocMap := (C.int)(Count), cgoAllocsUnknown
+	cUbpingMesh, cUbpingMeshAllocMap := UbpingMesh.PassRef()
+	__ret := C.w_dcmiv2_start_ub_ping_mesh(cDevId, cCount, cUbpingMesh)
+	runtime.KeepAlive(cUbpingMeshAllocMap)
+	runtime.KeepAlive(cCountAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiv2StopUbPingMesh function as declared in dcmi/dcmi_wrapper.h:60
+func dcmiv2StopUbPingMesh(DevId int32, TaskId int32) int32 {
+	cDevId, cDevIdAllocMap := (C.int)(DevId), cgoAllocsUnknown
+	cTaskId, cTaskIdAllocMap := (C.int)(TaskId), cgoAllocsUnknown
+	__ret := C.w_dcmiv2_stop_ub_ping_mesh(cDevId, cTaskId)
+	runtime.KeepAlive(cTaskIdAllocMap)
+	runtime.KeepAlive(cDevIdAllocMap)
 	__v := (int32)(__ret)
 	return __v
 }

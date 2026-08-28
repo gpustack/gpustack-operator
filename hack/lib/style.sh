@@ -110,13 +110,13 @@ function gpustack::lint::run() {
     goimports_opts+=("-excludes=$(gpustack::util::join_array "," "${goimports_excludes[@]}")")
   fi
   if [[ "${goimport_target}" == "${ROOT_DIR}" ]]; then
-    gpustack::log::debug "go list -f \"{{.Dir}}\" ./... | xargs -I {} find {} -maxdepth 1 -type f -name '*.go' | grep -v _linux\.go | xargs -I {} goimports-reviser ${goimports_opts[*]} {}"
-    go list -f "{{.Dir}}" ./... | xargs -I {} find {} -maxdepth 1 -type f -name '*.go' | grep -v _linux\.go | xargs -I {} "$(gpustack::lint::goimports_reviser::bin)" "${goimports_opts[@]}" {}>/dev/null 2>&1
+    gpustack::log::debug "go list -f \"{{.Dir}}\" ./... | xargs -I {} find {} -maxdepth 1 -type f -name '*.go' | grep -vE '_linux(_test)?\.go$' | xargs -I {} goimports-reviser ${goimports_opts[*]} {}"
+    go list -f "{{.Dir}}" ./... | xargs -I {} find {} -maxdepth 1 -type f -name '*.go' | grep -vE '_linux(_test)?\.go$' | xargs -I {} "$(gpustack::lint::goimports_reviser::bin)" "${goimports_opts[@]}" {}>/dev/null 2>&1
   else
-    gpustack::log::debug "pushd \"${goimport_target}\" >/dev/null 2>&1; go list -f \"{{.Dir}}\" ./... | xargs -I {} find {} -maxdepth 1 -type f -name '*.go' | grep -v _linux\.go | xargs -I {} goimports-reviser ${goimports_opts[*]} {}; popd"
+    gpustack::log::debug "pushd \"${goimport_target}\" >/dev/null 2>&1; go list -f \"{{.Dir}}\" ./... | xargs -I {} find {} -maxdepth 1 -type f -name '*.go' | grep -vE '_linux(_test)?\.go$' | xargs -I {} goimports-reviser ${goimports_opts[*]} {}; popd"
     # shellcheck disable=SC2164
     pushd "${goimport_target}" >/dev/null 2>&1
-    go list -f "{{.Dir}}" ./... | xargs -I {} find {} -maxdepth 1 -type f -name '*.go' | grep -v _linux\.go | xargs -I {} "$(gpustack::lint::goimports_reviser::bin)" "${goimports_opts[@]}" {}>/dev/null 2>&1
+    go list -f "{{.Dir}}" ./... | xargs -I {} find {} -maxdepth 1 -type f -name '*.go' | grep -vE '_linux(_test)?\.go$' | xargs -I {} "$(gpustack::lint::goimports_reviser::bin)" "${goimports_opts[@]}" {}>/dev/null 2>&1
     # shellcheck disable=SC2164
     popd >/dev/null 2>&1
   fi

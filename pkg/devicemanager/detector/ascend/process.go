@@ -90,18 +90,10 @@ func (in *ascend) MonitorAcceleratorProcesses(
 
 			// The identity is resolved before the query, so a device carrying no carved allocation
 			// costs one cheap call and no process read at all.
-			var uuid string
-			{
-				dieHandler := dev.GetVDieV()
-				die, ret := dieHandler.V2()
-				if !ret.IsSuccess() {
-					die, ret = dieHandler.V1()
-					if !ret.IsSuccess() {
-						logger.V(3).Error(ret, "failed to get device vdie info")
-						continue
-					}
-				}
-				uuid = die.String()
+			uuid, ret := deviceUUID(dev)
+			if !ret.IsSuccess() {
+				logger.V(3).Error(ret, "failed to get device vdie info")
+				continue
 			}
 			if !deviceIDs.Has(uuid) {
 				continue

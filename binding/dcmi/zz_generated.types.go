@@ -359,6 +359,64 @@ type UrmaEidInfo struct {
 	Pad_cgo_0 [4]byte
 }
 
+type UbPortInfo struct {
+	Udie_id int32
+	Port_id int32
+}
+
+type PortPktStatsInfo struct {
+	Port_mode              int32
+	Ub_glb_ipv4_pkt_cnt_rx uint64
+	Ub_glb_ipv6_pkt_cnt_rx uint64
+	Unic_ipv4_pkt_cnt_rx   uint64
+	Unic_ipv6_pkt_cnt_rx   uint64
+	Ub_clan_pkt_cnt_rx     uint64
+	Ub_umoc_ctph_cnt_rx    uint64
+	Ub_umoc_ntph_cnt_rx    uint64
+	Ub_mem_pkt_cnt_rx      uint64
+	Unknown_pkt_cnt_rx     uint64
+	Drop_ind_cnt_rx        uint64
+	Err_ind_cnt_rx         uint64
+	To_host_pkt_cnt_rx     uint64
+	To_imp_pkt_cnt_rx      uint64
+	To_mar_pkt_cnt_rx      uint64
+	To_link_pkt_cnt_rx     uint64
+	To_noc_pkt_cnt_rx      uint64
+	Route_err_cnt_rx       uint64
+	Out_err_cnt_rx         uint64
+	Length_err_cnt_rx      uint64
+	Rx_busi_flit_num       uint64
+	Rx_send_ack_flit       uint64
+	Ub_glb_ipv4_pkt_cnt_tx uint64
+	Ub_glb_ipv6_pkt_cnt_tx uint64
+	Unic_ipv4_pkt_cnt_tx   uint64
+	Unic_ipv6_pkt_cnt_tx   uint64
+	Ub_clan_pkt_cnt_tx     uint64
+	Ub_umoc_ctph_cnt_tx    uint64
+	Ub_umoc_ntph_cnt_tx    uint64
+	Ub_mem_pkt_cnt_tx      uint64
+	Unknown_pkt_cnt_tx     uint64
+	Drop_ind_cnt_tx        uint64
+	Err_ind_cnt_tx         uint64
+	Lpbk_ind_cnt_tx        uint64
+	Out_err_cnt_tx         uint64
+	Length_err_cnt_tx      uint64
+	Tx_busi_flit_num       uint64
+	Tx_recv_ack_flit       uint64
+	Retry_req_sum          uint64
+	Retry_ack_sum          uint64
+	Crc_error_sum          uint64
+	Core_mib_rxpausepkts   uint64
+	Core_mib_txpausepkts   uint64
+	Core_mib_rxpfcpkts     uint64
+	Core_mib_txpfcpkts     uint64
+	Core_mib_rxbadpkts     uint64
+	Core_mib_txbadpkts     uint64
+	Core_mib_rxbadoctets   uint64
+	Core_mib_txbadoctets   uint64
+	Reserved               [16]uint64
+}
+
 type SocDie struct {
 	Die [5]uint32
 }
