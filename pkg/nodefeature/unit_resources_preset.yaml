@@ -98,8 +98,10 @@ families:
     - {prefix: rtx-5090, family: nvidia-rtx-5090, tier: medium}
 
   ascend:
-    # The detector reports the raw DCMI chip name, which is bare: "910B2", not "Ascend910B2".
-    # Each chip suffix is its own token, so each needs its own entry.
+    # The detector reports the raw DCMI chip name. Through 910C that name is bare -- "910B2", not
+    # "Ascend910B2" -- while the 950 generation reports it with the vendor prefix, which
+    # device.NormalizeName then trims back off. Either way each chip suffix is its own token, so
+    # each needs its own entry.
     - {prefix: "310p", family: ascend-310p, tier: medium}
     - {prefix: "310p1", family: ascend-310p1, tier: medium}
     - {prefix: "310p2", family: ascend-310p2, tier: medium}
@@ -118,11 +120,19 @@ families:
     - {prefix: "910b4", family: ascend-910b4, tier: medium}
     # 910C / Atlas A3. These names tokenize as [910, 93xx], not as one token.
     - {prefix: "910_9362", family: ascend-910-9362, tier: xlarge}
+    - {prefix: "910_9363", family: ascend-910-9363, tier: xlarge}
     - {prefix: "910_9372", family: ascend-910-9372, tier: xlarge}
     - {prefix: "910_9381", family: ascend-910-9381, tier: xlarge}
     - {prefix: "910_9382", family: ascend-910-9382, tier: xlarge}
     - {prefix: "910_9391", family: ascend-910-9391, tier: xlarge}
     - {prefix: "910_9392", family: ascend-910-9392, tier: xlarge}
+    # 950 / Atlas A5. The detector folds every "950*" chip name onto one family, but this table
+    # matches whole tokens, so a suffix it does not list resolves to the fallback rather than to
+    # its siblings' tier. Both shipping suffixes are listed, plus the bare name the vendor's own
+    # tests use.
+    - {prefix: "950", family: ascend-950, tier: xlarge}
+    - {prefix: "950pr", family: ascend-950pr, tier: xlarge}
+    - {prefix: "950dt", family: ascend-950dt, tier: xlarge}
 
   amd:
     - {prefix: mi300x, family: amd-mi300x, tier: xlarge}
