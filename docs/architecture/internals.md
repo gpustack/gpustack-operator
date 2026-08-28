@@ -191,6 +191,17 @@ rsmi/amdsmi/amdgpu, cndev, dcmi, hgml, ixml, mtml/mxsml, hsa, dl). The generator
 (c-for-go is vendored in `.sbin/`). The top-level `binding/helper*.go` files are hand-written CPU/NUMA
 topology helpers — *not* generated.
 
+**`dcmi` is the one binding that does not follow the shape above.** Its entry points are
+hand-transcribed into a `.def` macro list rather than read from a vendor header, and it opens its
+library from a hand-written C wrapper instead of through `binding/dl`. Adding an entry point there
+means editing C, not a config.
+
+> **Why** — `dl.DynamicLibrary` pins `dlopen` and the `dlerror` that reads its reason to one OS
+> thread, because that reason is thread-local. The dcmi wrapper needs the same pinning arranged by
+> hand (`binding/dcmi`'s `Init` documents it), and it is the kind of thing that has to be
+> rediscovered rather than inherited. Every other binding calls `binding.Library.Load`; dcmi calls
+> only `Path()`.
+
 ## The 63-character constraint, recurring
 
 Kubernetes label *values* cap at 63 chars. Long names (ClusterQueue names, queue references) live in
