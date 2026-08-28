@@ -29,6 +29,10 @@ const (
 )
 
 // Init initializes the MTML library.
+//
+// The library handle is kept only when the call succeeds. A failed Init leaves it unset, so every
+// later call answers ERROR_INVALID_ARGUMENT instead of working from a handle the library never
+// handed over, and Shutdown has nothing to release.
 func (l *MTML) Init() Return {
 	if err := l.so.Load(); err != nil {
 		return ERROR_LIBRARY_NOT_FOUND
@@ -36,7 +40,17 @@ func (l *MTML) Init() Return {
 	if l.so.Lookup("mtmlLibraryInit") != nil {
 		return ERROR_FUNCTION_NOT_FOUND
 	}
-	return mtmlLibraryInit(&l.lib)
+
+	// The handle comes back through a local. The address of the field would reach C inside an
+	// object that also holds the Library interface beside it, and the cgo pointer check scans every
+	// pointer slot of the object an argument points into: that interface's unpinned Go pointer
+	// panics the call before the library is entered.
+	var lib *mtmlLibrary
+	ret := mtmlLibraryInit(&lib)
+	if ret.IsSuccess() {
+		l.lib = lib
+	}
+	return ret
 }
 
 // Shutdown shuts down the MTML library and releases any resources it holds.
