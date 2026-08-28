@@ -267,16 +267,29 @@ func (l UtilizationRateHandler) V1() (MultiUtilizationInfo, Return) {
 		return Return(dcmiGetDeviceUtilizationRate(l.cardId, l.deviceId, inputType, out))
 	}
 
-	if ret = rate(UTILIZATION_RATE_AICPU, &info.Aic_util); !ret.IsSuccess() {
+	// Read into a local per component, for the same reason GetVDeviceInfo does: no address inside
+	// the returned struct reaches C, so the safety does not depend on what that struct happens to
+	// hold today. MultiUtilizationInfo is a pure C layout and carries no pointer slot to find, so
+	// this costs nothing now -- it keeps the file to one rule rather than two.
+	//
+	// Each local is assigned across as soon as its own read succeeds, not in one batch at the end.
+	// A caller that stops on the return code still receives the components read before the failure,
+	// which is what this returned before the locals were introduced.
+	var aic, aiv, aicore, npu uint32
+	if ret = rate(UTILIZATION_RATE_AICPU, &aic); !ret.IsSuccess() {
 		return info, ret
 	}
-	if ret = rate(UTILIZATION_RATE_VECTORCORE, &info.Aiv_util); !ret.IsSuccess() {
+	info.Aic_util = aic
+	if ret = rate(UTILIZATION_RATE_VECTORCORE, &aiv); !ret.IsSuccess() {
 		return info, ret
 	}
-	if ret = rate(UTILIZATION_RATE_AICORE, &info.Aicore_util); !ret.IsSuccess() {
+	info.Aiv_util = aiv
+	if ret = rate(UTILIZATION_RATE_AICORE, &aicore); !ret.IsSuccess() {
 		return info, ret
 	}
-	ret = rate(UTILIZATION_RATE_NPU, &info.Npu_util)
+	info.Aicore_util = aicore
+	ret = rate(UTILIZATION_RATE_NPU, &npu)
+	info.Npu_util = npu
 
 	return info, ret
 }
@@ -569,25 +582,36 @@ type VDeviceInfo struct {
 // Every read goes through deviceInfo, so the generation is handled once rather than at each of the
 // four queries below. The reported virtual-device count is checked against the array it indexes: a
 // driver reporting more than the array holds would otherwise read past its end.
+//
+// Each read lands in a local and is assigned afterwards, never straight into a field of the returned
+// struct. That struct holds Items, a Go slice, and the runtime's pointer check scans every pointer
+// slot of the object an argument points into -- so an address taken inside it hands C an object that
+// carries a Go pointer as soon as Items is non-nil, and the call is killed before the driver sees it.
+// Reading through locals is what makes that independent of statement order here: today the two reads
+// below happen while Items is still nil, and nothing about the function says they have to.
 func (l Device) GetVDeviceInfo() (VDeviceInfo, Return) {
 	var info VDeviceInfo
 
-	totalResourcePtr := unsafe.Pointer(&info.TotalResource)
-	totalResourceSize := uint32(unsafe.Sizeof(info.TotalResource))
+	var totalResource SocTotalResource
+	totalResourcePtr := unsafe.Pointer(&totalResource)
+	totalResourceSize := uint32(unsafe.Sizeof(totalResource))
 	ret := l.deviceInfo(MAIN_CMD_VDEV_MNG, VMNG_SUB_CMD_GET_TOTAL_RESOURCE, totalResourcePtr, &totalResourceSize)
 	if !ret.IsSuccess() {
 		return VDeviceInfo{}, ret
 	}
-	if info.TotalResource.Vdev_num > uint32(len(info.TotalResource.Vdev_id)) {
+	if totalResource.Vdev_num > uint32(len(totalResource.Vdev_id)) {
 		return VDeviceInfo{}, ERROR_LIST_TRUNCATED
 	}
+	info.TotalResource = totalResource
 
-	freeResourcePtr := unsafe.Pointer(&info.FreeResource)
-	freeResourceSize := uint32(unsafe.Sizeof(info.FreeResource))
+	var freeResource SocFreeResource
+	freeResourcePtr := unsafe.Pointer(&freeResource)
+	freeResourceSize := uint32(unsafe.Sizeof(freeResource))
 	ret = l.deviceInfo(MAIN_CMD_VDEV_MNG, VMNG_SUB_CMD_GET_FREE_RESOURCE, freeResourcePtr, &freeResourceSize)
 	if !ret.IsSuccess() {
 		return VDeviceInfo{}, ret
 	}
+	info.FreeResource = freeResource
 
 	for i := uint32(0); i < info.TotalResource.Vdev_num; i++ {
 		var vDevQuery VdevQuery
