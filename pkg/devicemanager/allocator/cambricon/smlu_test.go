@@ -76,6 +76,9 @@ type fakeSMLUDriver struct {
 	modeWrites    int
 	failModeRead  error
 	failModeWrite error
+	// failNthModeWrite makes failModeWrite apply to that write alone, counting from one, so a test
+	// can fail the restore without failing the ask that preceded it. Zero fails every write.
+	failNthModeWrite int
 }
 
 func newFakeDriver() *fakeSMLUDriver {
@@ -101,7 +104,7 @@ func (f *fakeSMLUDriver) SetSMLUMode(card string, enabled bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.modeWrites++
-	if f.failModeWrite != nil {
+	if f.failModeWrite != nil && (f.failNthModeWrite == 0 || f.failNthModeWrite == f.modeWrites) {
 		return f.failModeWrite
 	}
 	f.modes[card] = enabled
