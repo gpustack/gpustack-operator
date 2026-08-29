@@ -41,6 +41,21 @@ func New(opts ...binding.LibraryOption) *HSA {
 		"libhsa-runtime64.so",
 	}
 	{
+		// Hygon ships its HSA runtime under the hyhal tree rather than a ROCm one, so neither the
+		// dynamic linker's own search path nor home below reaches it. Naming it here is what makes
+		// the library loadable on that host without a caller exporting anything.
+		for _, soPathDir := range []string{
+			"/opt/hyhal/lib",
+			"/opt/dtk/hsa/lib",
+		} {
+			if s, err := os.Stat(soPathDir); err == nil && s.IsDir() {
+				soPaths = append(soPaths,
+					filepath.Join(soPathDir, "libhsa-runtime64.so.1"),
+					filepath.Join(soPathDir, "libhsa-runtime64.so"),
+				)
+			}
+		}
+
 		if s, err := os.Stat(home); err == nil && s.IsDir() {
 			soPaths = append(soPaths,
 				filepath.Join(home, "lib", "libhsa-runtime64.so.1"),
