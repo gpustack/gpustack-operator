@@ -130,6 +130,17 @@ Two consequences worth stating:
   > keys while instances are live.
   ```
 
+- **Delete some rationale rather than demoting it.** Before writing a `> **Why**` that names the error a
+  step avoids, ask **who takes that step** — not which page you are on. One the operator performs
+  unconditionally leaves the reader nothing to decide, so its error is noise: delete the block, then
+  re-read around it, since a removal orphans the pronouns and cross-references that pointed into it. One
+  the reader takes keeps its error, which is what tells them what they are choosing. Either way keep the
+  **boundary of a measurement** — which hardware, which driver generation, what is still unmeasured.
+- **A runtime claim holds itself to measured behavior, the vendored header, or the code** — not to
+  another project's account of it. Say what GPUStack observes from where it runs, as device discovery
+  does for the `cntoolkit` userspace version being unreadable from where the detector runs. Two things
+  are not that claim and stay: a link to an upstream table a reader wants, and `vendor-prerequisites.md`
+  quoting a **vendor's own** docs for an install prerequisite with the version it was read against.
 - **State a fact once.** The second place links to the first. If you are tempted to restate it "for
   convenience", the two copies will disagree within two releases.
 - **Break a wall of text into named subsections.** If a paragraph carries more than one rule, it is
