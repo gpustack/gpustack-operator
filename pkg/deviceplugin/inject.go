@@ -15,6 +15,17 @@ import (
 var (
 	OperatorLibDir  = "/var/lib/gpustack/operator/lib"
 	OperatorPodsDir = "/var/lib/gpustack/operator/pods"
+
+	// OperatorPreflightDir is where a preflight pass promotes what a responder rendered, so that a
+	// probe container has a host path to mount it from.
+	//
+	// Deliberately not under OperatorPodsDir. An allocator reads that tree as its record of what
+	// other Pods hold — Ascend derives the next free vNPU id from it, Hygon the free CU windows —
+	// so an entry there under a Pod UID no kubelet ever scheduled is counted as occupancy and
+	// shifts a real allocation off the placement it should have had. A preflight removes its own
+	// entries when it finishes, but that cleanup is a deferred call and no deferred call survives
+	// SIGKILL, so the tree it writes into has to be one whose leftovers cost an allocation nothing.
+	OperatorPreflightDir = "/var/lib/gpustack/operator/preflight"
 )
 
 // PodWorkDir returns the host working directory for a sliced container,
