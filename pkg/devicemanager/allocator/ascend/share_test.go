@@ -22,6 +22,9 @@ type fakeShareDriver struct {
 	setErr   error
 	getCalls [][2]int32
 	setCalls [][2]int32
+	// failNthSet makes setErr apply to that call alone, counting from one, so a test can fail the
+	// restore without failing the ask that preceded it. Zero fails every call, as before.
+	failNthSet int
 }
 
 func (d *fakeShareDriver) GetShareEnabled(cardID, deviceID int32) (bool, error) {
@@ -34,7 +37,7 @@ func (d *fakeShareDriver) GetShareEnabled(cardID, deviceID int32) (bool, error) 
 
 func (d *fakeShareDriver) SetShareEnabled(cardID, deviceID int32, enabled bool) error {
 	d.setCalls = append(d.setCalls, [2]int32{cardID, deviceID})
-	if d.setErr != nil {
+	if d.setErr != nil && (d.failNthSet == 0 || d.failNthSet == len(d.setCalls)) {
 		return d.setErr
 	}
 	d.enabled[[2]int32{cardID, deviceID}] = enabled
