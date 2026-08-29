@@ -20,9 +20,11 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 4. [Settings & Environment Variables](settings.md) — online-adjustable settings and every `GPUSTACK_*`.
 5. [Vendor Prerequisites](vendor-prerequisites.md) — what to install per manufacturer, and which vendor
    GPU Operator components to disable.
-6. [NVIDIA MIG Operations](operation/nvidia-mig.md) and [T-Head MIG Operations](operation/thead-mig.md) —
+6. [Preflight Operations](operation/preflight.md) — one container run that says what a node can
+   detect, slice and manage, before anything is installed on it.
+7. [NVIDIA MIG Operations](operation/nvidia-mig.md) and [T-Head MIG Operations](operation/thead-mig.md) —
    the runbook for enabling and disabling partitioning on a node.
-7. Upgrading: [Migrating to Bundled Subcharts](migration/to-subcharts.md) · [Migrating from
+8. Upgrading: [Migrating to Bundled Subcharts](migration/to-subcharts.md) · [Migrating from
    v0.5.x](migration/from-v0.5.md) · [Migration Troubleshooting](migration/troubleshooting.md) when it
    goes wrong.
 
@@ -59,11 +61,13 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [High Availability Operations](operation/high-availability.md) | Which knob to raise per control-plane component, and the one topology that cannot be redundant | operators | ~4 min |
 | [NVIDIA MIG Operations](operation/nvidia-mig.md) | Enabling/disabling MIG, reboot recovery, and a recorded three-configuration walkthrough | operators | ~21 min |
 | [T-Head MIG Operations](operation/thead-mig.md) | Enabling/disabling T-Head's own MIG-named partitioning, the busy-mode-change prerequisite, and reboot recovery | operators | ~10 min |
+| [Preflight Operations](operation/preflight.md) | Verifying on a bare host what a node can detect, slice and manage: the command line for both runtimes, every mount and flag, what it starts and removes | operators | ~9 min |
 | [Migrating to Bundled Subcharts](migration/to-subcharts.md) | The one-time ownership transfer from the runtime-installed releases | operators | ~9 min |
 | [Migrating from v0.5.x](migration/from-v0.5.md) | Upgrading across the scheduling-chain refactor | operators | ~5 min |
 | [Migration Troubleshooting](migration/troubleshooting.md) | Recovering from a wedged upgrade (worker CrashLoopBackOff) or a namespace stuck Terminating | operators | ~8 min |
 | [Instance Type Unit Resources Reference](reference/instance-type-unit-resources.md) | The per-product CPU/RAM tier a derived InstanceType is sized with, and where each tier came from | operators | reference |
 | [Instance Metrics Reference](reference/instance-metrics.md) | The `instances/<name>/metrics` subresource and the Device Manager's Prometheus exporter: the fields, the gauges, their sources and limits | users, operators, console developers | ~9 min |
+| [Command Reference](reference/commands.md) | Every command the binary offers: what each does, who runs it, its flags, and a runnable invocation | operators, developers | ~10 min |
 
 ## Conventions
 

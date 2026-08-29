@@ -38,6 +38,7 @@ one, not to widen the overview.
 | An upgrade path between versions | `docs/migration/*.md` |
 | Recovery from a wedged upgrade or a stuck namespace deletion | `docs/migration/troubleshooting.md` |
 | A per-product preset value | `docs/reference/instance-type-unit-resources.md` |
+| A subcommand, one of its flags, its exit codes, its invocation | `docs/reference/commands.md` |
 | A user-visible capability, a vendor's slicing support, the install flow | `README.md` |
 | Vendor prerequisites, vendor GPU Operator coexistence | `docs/vendor-prerequisites.md` |
 | A recorded run with real output | `docs/walkthrough.md`, or the walkthrough section of `docs/operation/nvidia-mig.md` |
