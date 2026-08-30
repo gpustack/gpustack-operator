@@ -15,9 +15,10 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
-// Slot-pool bounds of the DTK hy-virtual scheme: at most 200 vdev ids per node and 20
-// pipe ids per accelerator (the per-accelerator ≤ 4-slice bound is enforced upstream by the
-// sliced token pool). An accelerator's compute units are addressed as a 128-bit mask (two
+// Bounds of the DTK hy-virtual scheme: vdev ids run below 200 and at most 20 pipe ids are
+// allocatable per accelerator (the per-accelerator ≤ 4-slice bound is enforced upstream by the
+// sliced token pool). Only pipe ids are a pool -- a vdev id is the ordinal of the record's own
+// file, see allocateVdev. An accelerator's compute units are addressed as a 128-bit mask (two
 // cu_mask words).
 const (
 	maxVdevID  = 200
@@ -260,8 +261,10 @@ func allocateVdev(podsDir, selfPath, pciBusID string, cores uint32, coresPct int
 	allocMu.Lock()
 	defer allocMu.Unlock()
 
-	// Idempotent reuse of an existing self-config for the same accelerator.
-	if c, err := parseVdevConf(selfPath); err == nil && c.pciBusID == pciBusID {
+	// Idempotent reuse of an existing self-config for the same accelerator. The vdev id is checked
+	// too, so a record written before vdev ids were tied to the file name -- which the runtime
+	// rejects, see below -- is replaced rather than reused.
+	if c, err := parseVdevConf(selfPath); err == nil && c.pciBusID == pciBusID && c.vdevID == deviceID {
 		return c, nil
 	}
 
@@ -270,13 +273,11 @@ func allocateVdev(podsDir, selfPath, pciBusID string, cores uint32, coresPct int
 		return vdevConf{}, err
 	}
 
-	// Aggregate the used slots: CU bits and pipe ids are per-accelerator (same PCI bus id);
-	// vdev ids are node-wide.
+	// Aggregate the used slots: CU bits and pipe ids are per-accelerator, so only a record naming
+	// the same card contributes. Vdev ids are not pooled at all -- see below.
 	var usedCU cuMask
-	usedVdev := make(map[int]bool, len(confs))
 	usedPipe := make(map[int]bool)
 	for i := range confs {
-		usedVdev[confs[i].vdevID] = true
 		if confs[i].pciBusID == pciBusID {
 			usedCU = usedCU.or(confs[i].mask)
 			usedPipe[confs[i].pipeID] = true
@@ -291,9 +292,20 @@ func allocateVdev(podsDir, selfPath, pciBusID string, cores uint32, coresPct int
 	if err != nil {
 		return vdevConf{}, err
 	}
-	vdevID, err := lowestFreeSlot(usedVdev, maxVdevID)
-	if err != nil {
-		return vdevConf{}, fmt.Errorf("vdev_id pool exhausted: %w", err)
+	// The vdev id is the record's own ordinal, not a slot drawn from a pool. The DTK/hyhal runtime
+	// checks it against the ordinal in the file name it read the record from -- vdev<N>.conf must
+	// carry vdev_id N -- and a mismatch is not a degraded slice: the container is left with no
+	// accelerator at all ("No HIP GPUs are available"), measured on an 8-DCU host. A node-wide pool
+	// would hand the second pod on a node an id its own file name contradicts, because every pod
+	// numbers its own confs from zero.
+	//
+	// Node-wide uniqueness is not required to make up for that: two containers each holding vdev_id
+	// 0 on one card run side by side, the runtime telling them apart by container id and numbering
+	// its own instances (0x<gpu_id>@0 and @1 under the kfd vgpu sysfs). Pipe ids are the ones that
+	// must not collide on a card, and they are still drawn from the scan above.
+	vdevID := deviceID
+	if vdevID < 0 || vdevID >= maxVdevID {
+		return vdevConf{}, fmt.Errorf("card %s: device ordinal %d is not a usable vdev_id", pciBusID, vdevID)
 	}
 	pipeID, err := lowestFreeSlot(usedPipe, maxPipeID)
 	if err != nil {
