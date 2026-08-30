@@ -22,3 +22,7 @@ type InstanceNamespaceListerExpansion interface{}
 // InstanceTypeListerExpansion allows custom methods to be added to
 // InstanceTypeLister.
 type InstanceTypeListerExpansion interface{}
+
+// KVCacheBackendListerExpansion allows custom methods to be added to
+// KVCacheBackendLister.
+type KVCacheBackendListerExpansion interface{}

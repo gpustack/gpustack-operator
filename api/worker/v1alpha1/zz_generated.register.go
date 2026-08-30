@@ -72,6 +72,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&InstanceList{},
 		&InstanceType{},
 		&InstanceTypeList{},
+		&KVCacheBackend{},
+		&KVCacheBackendList{},
 	)
 	// AddToGroupVersion allows the serialization of client types like ListOptions.
 	v1.AddToGroupVersion(scheme, SchemeGroupVersion)

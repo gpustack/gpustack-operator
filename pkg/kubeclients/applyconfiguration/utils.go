@@ -812,6 +812,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationflowcontrolv1.UserSubjectApplyConfiguration{}
 
 		// Group=gpustack.ai, Version=v1
+	case apiv1.SchemeGroupVersion.WithKind("Condition"):
+		return &applyconfigurationapiv1.ConditionApplyConfiguration{}
 	case apiv1.SchemeGroupVersion.WithKind("Setting"):
 		return &applyconfigurationapiv1.SettingApplyConfiguration{}
 	case apiv1.SchemeGroupVersion.WithKind("SettingSpec"):
@@ -1362,6 +1364,30 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.InstanceTypeUnitResourcesApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceVolume"):
 		return &applyconfigurationworkerv1alpha1.InstanceVolumeApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackend"):
+		return &applyconfigurationworkerv1alpha1.KVCacheBackendApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendCapacity"):
+		return &applyconfigurationworkerv1alpha1.KVCacheBackendCapacityApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendConnection"):
+		return &applyconfigurationworkerv1alpha1.KVCacheBackendConnectionApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendEndpoint"):
+		return &applyconfigurationworkerv1alpha1.KVCacheBackendEndpointApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendExternal"):
+		return &applyconfigurationworkerv1alpha1.KVCacheBackendExternalApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendLeader"):
+		return &applyconfigurationworkerv1alpha1.KVCacheBackendLeaderApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendManaged"):
+		return &applyconfigurationworkerv1alpha1.KVCacheBackendManagedApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendMember"):
+		return &applyconfigurationworkerv1alpha1.KVCacheBackendMemberApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendMemberStatus"):
+		return &applyconfigurationworkerv1alpha1.KVCacheBackendMemberStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendSpec"):
+		return &applyconfigurationworkerv1alpha1.KVCacheBackendSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendStatus"):
+		return &applyconfigurationworkerv1alpha1.KVCacheBackendStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendTransport"):
+		return &applyconfigurationworkerv1alpha1.KVCacheBackendTransportApplyConfiguration{}
 
 	}
 	return nil

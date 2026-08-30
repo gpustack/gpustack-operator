@@ -294,6 +294,8 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1alpha1().Instances().Informer()}, nil
 	case workerv1alpha1.SchemeGroupVersion.WithResource("instancetypes"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1alpha1().InstanceTypes().Informer()}, nil
+	case workerv1alpha1.SchemeGroupVersion.WithResource("kvcachebackends"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1alpha1().KVCacheBackends().Informer()}, nil
 
 	}
 

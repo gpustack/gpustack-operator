@@ -12,3 +12,5 @@ type DevicesExpansion interface{}
 type InstanceExpansion interface{}
 
 type InstanceTypeExpansion interface{}
+
+type KVCacheBackendExpansion interface{}

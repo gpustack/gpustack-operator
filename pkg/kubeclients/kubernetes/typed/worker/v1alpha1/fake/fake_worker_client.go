@@ -29,6 +29,10 @@ func (c *FakeWorkerV1alpha1) InstanceTypes() v1alpha1.InstanceTypeInterface {
 	return newFakeInstanceTypes(c)
 }
 
+func (c *FakeWorkerV1alpha1) KVCacheBackends() v1alpha1.KVCacheBackendInterface {
+	return newFakeKVCacheBackends(c)
+}
+
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
 func (c *FakeWorkerV1alpha1) RESTClient() rest.Interface {

@@ -224,3 +224,68 @@ func (in InstanceTypeUnitResources) OpenAPIModelName() string {
 func (in InstanceVolume) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.InstanceVolume"
 }
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackend) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackend"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackendCapacity) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackendCapacity"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackendConnection) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackendConnection"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackendEndpoint) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackendEndpoint"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackendExternal) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackendExternal"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackendLeader) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackendLeader"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackendList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackendList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackendManaged) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackendManaged"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackendMember) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackendMember"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackendMemberStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackendMemberStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackendSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackendSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackendStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackendStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackendTransport) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackendTransport"
+}
