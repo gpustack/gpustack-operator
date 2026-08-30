@@ -3,9 +3,16 @@
 # copy of it, and stages any remaining image archives where RKE2 imports them. Runs ON the node,
 # as root -- it writes under /var/lib and never invokes sudo itself, so the caller decides.
 #
-#   image-archives.sh fetch     --release <tag> --cache-dir <dir> [--cni <name>]
-#   image-archives.sh artifacts --release <tag> --cache-dir <dir> --staging-dir <dir> [--cni <name>]
-#   image-archives.sh stage     --release <tag> --cache-dir <dir>
+#   image-archives.sh fetch     --release <tag> --cache-dir <dir> [--cni <name>] [--mirror cn]
+#   image-archives.sh artifacts --release <tag> --cache-dir <dir> --staging-dir <dir> [--cni <name>] [--mirror cn]
+#   image-archives.sh stage     --release <tag> --cache-dir <dir> [--mirror cn]
+#
+# With --mirror cn every download comes from rancher-mirror.rancher.cn instead: the release
+# assets from the mirror's copy of the release directory (same asset names, byte-identical
+# checksum files), and the installer from the mirror's own copy. This is for nodes that cannot
+# reach github.com or get.rke2.io. The installer's own INSTALL_RKE2_MIRROR parameter is
+# deliberately not used: the upstream and CN-hosted install.sh variants differ, and a node may
+# already hold a cached script of either variant, so mirror downloads are done here instead.
 #
 # The cache is <cache-dir>/<release>: one directory per release tag, which is what makes a
 # version-skewed install unreachable rather than merely detectable -- what the installer is given
@@ -53,6 +60,7 @@ release=""
 cache_root=""
 staging_dir=""
 cni=""
+mirror=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
   --release)
@@ -75,8 +83,13 @@ while [ "$#" -gt 0 ]; do
     [ -n "$cni" ] || die "--cni needs a value"
     shift 2
     ;;
+  --mirror)
+    mirror="${2:-}"
+    [ -n "$mirror" ] || die "--mirror needs a value"
+    shift 2
+    ;;
   *)
-    echo "usage: $PROG <fetch|artifacts|stage> --release <tag> --cache-dir <dir> [--cni <name>] [--staging-dir <dir>]" >&2
+    echo "usage: $PROG <fetch|artifacts|stage> --release <tag> --cache-dir <dir> [--cni <name>] [--staging-dir <dir>] [--mirror cn]" >&2
     exit 2
     ;;
   esac
@@ -86,7 +99,7 @@ done
 case "$command" in
 fetch | artifacts | stage) ;;
 *)
-  echo "usage: $PROG <fetch|artifacts|stage> --release <tag> --cache-dir <dir> [--cni <name>] [--staging-dir <dir>]" >&2
+  echo "usage: $PROG <fetch|artifacts|stage> --release <tag> --cache-dir <dir> [--cni <name>] [--staging-dir <dir>] [--mirror cn]" >&2
   exit 2
   ;;
 esac
@@ -95,6 +108,10 @@ esac
 case "$cache_root" in
 /*) ;;
 *) die "--cache-dir must be absolute, got '${cache_root}'" ;;
+esac
+case "$mirror" in
+"" | cn) ;;
+*) die "unsupported --mirror '${mirror}'; the only mirror this script knows is 'cn'" ;;
 esac
 
 readonly cache="${cache_root%/}/${release}"
@@ -147,8 +164,16 @@ readonly checksums="sha256sum-${arch}.txt"
 readonly binary_tarball="rke2.linux-${arch}.tar.gz"
 readonly installer="install.sh"
 # GitHub download paths take the tag percent-encoded; the '+' in every RKE2 tag is otherwise read
-# as a space and the asset is not found.
-readonly base_url="https://github.com/rancher/rke2/releases/download/${release//+/%2B}"
+# as a space and the asset is not found. The cn mirror serves the same assets -- same names,
+# byte-identical checksum files -- under the tag with '+' percent-encoded as %2D instead, and
+# hosts its own copy of the installer next to them.
+if [ "$mirror" = cn ]; then
+  readonly base_url="https://rancher-mirror.rancher.cn/rke2/releases/download/${release//+/%2D}"
+  readonly installer_url="https://rancher-mirror.rancher.cn/rke2/install.sh"
+else
+  readonly base_url="https://github.com/rancher/rke2/releases/download/${release//+/%2B}"
+  readonly installer_url="https://get.rke2.io"
+fi
 
 download() {
   curl -fL --retry 3 --retry-delay 2 -sS -o "$2" "$1" ||
@@ -282,10 +307,10 @@ ensure_installer() {
     return 0
   fi
   rm -f "$part"
-  log "downloading ${installer} from https://get.rke2.io"
-  download "https://get.rke2.io" "$part"
+  log "downloading ${installer} from ${installer_url}"
+  download "$installer_url" "$part"
   grep -q 'INSTALL_RKE2_ARTIFACT_PATH' "$part" ||
-    die "https://get.rke2.io did not return the RKE2 installer"
+    die "${installer_url} did not return the RKE2 installer"
   mv -f "$part" "${cache}/${installer}"
   log "downloaded ${installer} (covered by no published digest, so trusted only as far as TLS)"
 }
@@ -405,7 +430,7 @@ fetch) cmd_fetch ;;
 artifacts) cmd_artifacts ;;
 stage) cmd_stage ;;
 *)
-  echo "usage: $PROG <fetch|artifacts|stage> --release <tag> --cache-dir <dir> [--cni <name>] [--staging-dir <dir>]" >&2
+  echo "usage: $PROG <fetch|artifacts|stage> --release <tag> --cache-dir <dir> [--cni <name>] [--staging-dir <dir>] [--mirror cn]" >&2
   exit 2
   ;;
 esac

@@ -38,7 +38,9 @@ new_world() {
 
   cat >"$world/bin/curl" <<'STUB'
 #!/usr/bin/env bash
-# Serves $SERVE_DIR by URL basename and logs every request. Exits like curl -f on a miss.
+# Serves $SERVE_DIR by URL basename and logs every full URL it is asked for -- a mirror mode
+# serves the same basenames from a different host, so the basename alone cannot tell them apart.
+# Exits like curl -f on a miss.
 dest=""; url=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -47,7 +49,7 @@ while [ "$#" -gt 0 ]; do
     *) shift ;;
   esac
 done
-echo "$(basename "$url")" >> "$CURL_LOG"
+echo "$url" >> "$CURL_LOG"
 src="$SERVE_DIR/$(basename "$url")"
 [ -f "$src" ] || exit 22
 cp "$src" "$dest"
@@ -61,7 +63,10 @@ STUB
 
   chmod +x "$world/bin/curl" "$world/bin/uname"
   # https://get.rke2.io is not a release asset; the stub resolves it by basename like any other.
+  # The cn mirror's installer copy is https://rancher-mirror.rancher.cn/rke2/install.sh, served
+  # here by its own basename.
   printf '#!/bin/sh\n# INSTALL_RKE2_ARTIFACT_PATH is read here\n' >"$serve/get.rke2.io"
+  printf '#!/bin/sh\n# INSTALL_RKE2_ARTIFACT_PATH is read here\n' >"$serve/install.sh"
 }
 
 # Publishes the release assets for one arch and (re)writes the checksum file to match them. Every
@@ -116,6 +121,9 @@ assert_eq() {
 assert_contains() {
   if printf '%s' "$2" | grep -qF -- "$3"; then ok "$1"; else no "$1" "[$3] not found in: $2"; fi
 }
+assert_not_contains() {
+  if printf '%s' "$2" | grep -qF -- "$3"; then no "$1" "[$3] unexpectedly found in: $2"; else ok "$1"; fi
+}
 # Directory contents are asserted through the directory itself, not through `ls` output: a failing
 # `ls` yields an empty string, which would make "nothing was staged" pass for the wrong reason.
 dir_entries() { find "$1" -mindepth 1 -maxdepth 1 -exec basename {} \; | sort | tr '\n' ' '; }
@@ -134,7 +142,8 @@ assert_run_fails() {
   shift
   if run "$@"; then no "$name" "exited 0; stdout: $(cat "$world/out")"; else ok "$name"; fi
 }
-calls_for() { grep -cxF "$1" "$calls"; }
+# The call log holds full URLs; asset-level assertions still count by basename.
+calls_for() { awk -F/ '{print $NF}' "$calls" | grep -cxF "$1"; }
 
 # --- fetch ------------------------------------------------------------------
 
@@ -388,6 +397,76 @@ if out="$(bash "$script" frobnicate --release "$release" --cache-dir "$scratch" 
   no "unknown subcommand -> refused before any side effect" "exited 0"
 else
   assert_dir_holds "unknown subcommand -> creates nothing" "$scratch" ""
+fi
+rm -rf "$scratch"
+
+# 19. Default mode downloads from the places it always has: github.com for the release assets
+#     (tag percent-encoded) and get.rke2.io for the installer. Pinned explicitly because the cn
+#     mode below changes where both come from, and a regression here is silent.
+new_world
+publish amd64
+run fetch x86_64 --cni calico
+assert_eq "default urls -> exits 0" "$?" "0"
+assert_contains "default urls -> anchor from github, tag percent-encoded" "$(cat "$calls")" \
+  "https://github.com/rancher/rke2/releases/download/v1.34.9%2Brke2r1/sha256sum-amd64.txt"
+assert_contains "default urls -> core archive from github" "$(cat "$calls")" \
+  "https://github.com/rancher/rke2/releases/download/v1.34.9%2Brke2r1/rke2-images.linux-amd64.tar.zst"
+assert_contains "default urls -> installer from get.rke2.io" "$(cat "$calls")" "https://get.rke2.io"
+assert_not_contains "default urls -> nothing from the cn mirror" "$(cat "$calls")" "rancher-mirror.rancher.cn"
+drop_world
+
+# 20. --mirror cn: the same assets (same names, hence the same cache layout) come from
+#     rancher-mirror.rancher.cn instead -- under the tag with '+' percent-encoded as %2D -- the
+#     CNI extra included, and the installer from the mirror's own copy. Nothing at all may be
+#     fetched from github.com or get.rke2.io, which are exactly the hosts a CN node cannot reach.
+new_world
+publish amd64
+run fetch x86_64 --cni calico --mirror cn
+assert_eq "cn mirror -> exits 0" "$?" "0"
+assert_contains "cn mirror -> anchor from mirror, tag '+'->'%2D'" "$(cat "$calls")" \
+  "https://rancher-mirror.rancher.cn/rke2/releases/download/v1.34.9%2Drke2r1/sha256sum-amd64.txt"
+assert_contains "cn mirror -> core archive from mirror" "$(cat "$calls")" \
+  "https://rancher-mirror.rancher.cn/rke2/releases/download/v1.34.9%2Drke2r1/rke2-images.linux-amd64.tar.zst"
+assert_contains "cn mirror -> cni extra from mirror" "$(cat "$calls")" \
+  "https://rancher-mirror.rancher.cn/rke2/releases/download/v1.34.9%2Drke2r1/rke2-images-calico.linux-amd64.tar.zst"
+assert_contains "cn mirror -> binary tarball from mirror" "$(cat "$calls")" \
+  "https://rancher-mirror.rancher.cn/rke2/releases/download/v1.34.9%2Drke2r1/rke2.linux-amd64.tar.gz"
+assert_contains "cn mirror -> installer from mirror" "$(cat "$calls")" \
+  "https://rancher-mirror.rancher.cn/rke2/install.sh"
+assert_not_contains "cn mirror -> nothing from github" "$(cat "$calls")" "github.com"
+assert_not_contains "cn mirror -> nothing from get.rke2.io" "$(cat "$calls")" "get.rke2.io"
+assert_dir_holds "cn mirror -> cached under the same names" "$cache" \
+  "install.sh rke2-images-calico.linux-amd64.tar.zst rke2-images.linux-amd64.tar.zst rke2.linux-amd64.tar.gz sha256sum-amd64.txt"
+
+# 21. The artifacts and stage phases run off the mirror-filled cache unchanged, and a warm cache
+#     downloads nothing in cn mode either -- the mirror's checksums are the same bytes as
+#     github's, so a cache warmed in one mode verifies cleanly in the other.
+run artifacts x86_64 --cni calico --staging-dir "$staging" --mirror cn
+assert_eq "cn artifacts -> exits 0" "$?" "0"
+assert_dir_holds "cn artifacts -> the installer gets the same allowlist" "$staging" \
+  "rke2-images-calico.linux-amd64.tar.zst rke2-images.linux-amd64.tar.zst rke2.linux-amd64.tar.gz sha256sum-amd64.txt"
+run stage x86_64 --mirror cn
+assert_eq "cn stage -> exits 0" "$?" "0"
+assert_dir_holds "cn stage -> archives staged" "$images" \
+  "rke2-images-calico.linux-amd64.tar.zst rke2-images.linux-amd64.tar.zst"
+: >"$calls"
+run fetch x86_64 --cni calico --mirror cn
+assert_eq "cn warm cache -> exits 0" "$?" "0"
+assert_eq "cn warm cache -> zero downloads" "$(wc -l <"$calls" | tr -d ' ')" "0"
+drop_world
+
+# 22. An unknown mirror is refused up front, before anything is created or fetched.
+scratch="$(mktemp -d)"
+if out="$(bash "$script" fetch --release "$release" --cache-dir "$scratch" --mirror mars 2>&1)"; then
+  no "unknown --mirror -> refused" "exited 0"
+else
+  assert_contains "unknown --mirror -> refused, naming the value" "$out" "'mars'"
+fi
+assert_dir_holds "unknown --mirror -> creates nothing" "$scratch" ""
+if out="$(bash "$script" fetch --release "$release" --cache-dir "$scratch" --mirror 2>&1)"; then
+  no "--mirror with no value -> refused" "exited 0"
+else
+  assert_contains "--mirror with no value -> says which option" "$out" "--mirror needs a value"
 fi
 rm -rf "$scratch"
 
