@@ -169,7 +169,7 @@ vary by what the vendor exposes — and by whether we have been able to run it a
 | AMD | ✅ | ⚠️ driver-dependent | ✅ |
 | T-Head | ✅ | ✅ logical · — MIG partition | ✅ logical · — MIG partition |
 | Ascend | ✅ | — | ✅ |
-| Hygon | ✅ | ⚠️ driver-dependent | — |
+| Hygon | ✅ | ⚠️ driver-dependent | ✅ |
 | Cambricon | ✅ | ✅ | — |
 | Iluvatar | ✅ | — | — |
 | Metax | ✅ | — | — |
@@ -187,6 +187,20 @@ vary by what the vendor exposes — and by whether we have been able to run it a
 - **The last column is about evidence, not code.** Every backend is covered by unit tests over
   recorded vendor payloads; the ones marked `—` have never been run against a driver, because the
   project has no such card. Read their figures as untested rather than as wrong.
+- **On Hygon, memory was cross-checked against other tools and compute could not be.** On a BW
+  card (gfx936, DTK 25.04) holding a quarter-card slice, this page's `memoryUsedMiB` read 4236 —
+  the same figure the vendor's `hy-smi --showpids` and the kernel's `vram_<gpuid>` reported for
+  that same process. Three sources, one number.
+- **The vendor's own tool publishes no per-process compute figure**, so compute gets one comparison
+  where memory got two: `hy-smi --showpids` prints VRAM and SDMA only. The kernel's `cu_occupancy`
+  does publish one, and it read a steady 10 while the 44 reported here implies the library measured
+  11 — the cap-relative restatement above turns 11 into `ceil(11 × 100 / 25) = 44` for a 25 % slice,
+  where 10 would give 40. The one comparison available therefore disagrees by one, with no third
+  source to settle it.
+- **What the run does settle is that the figure follows the work.** It read 0 while the process
+  merely held its allocation, 44 once that same process ran a kernel, and board power moved from
+  93 W to 223 W with it. Read it as a measurement of the right quantity rather than as the
+  kernel's own number.
 - **A partition is addressed by the identifier its allocation recorded**, and by nothing else, on
   both partitioning manufacturers. The alternative is translating the recorded profile name back into
   a driver profile id, which walks the vendor's whole profile catalog — 17 ids on NVIDIA, 85 on
