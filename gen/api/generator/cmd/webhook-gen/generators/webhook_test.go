@@ -16,7 +16,7 @@ import (
 func Test_webhookGen(t *testing.T) {
 	var (
 		dir = filepath.Join("testdata", "webhook_gen")
-		pkg = "gpustack.ai/gpustack/gen/kube/generator/cmd/webhook-gen/generators/testdata/webhook_gen"
+		pkg = "gpustack.ai/gpustack/gen/api/generator/cmd/webhook-gen/generators/testdata/webhook_gen"
 	)
 
 	g := args.GeneratorArgs{

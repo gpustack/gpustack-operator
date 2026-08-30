@@ -16,7 +16,7 @@ import (
 func Test_apiregGen(t *testing.T) {
 	var (
 		dir = filepath.Join("testdata", "apireg_gen")
-		pkg = "gpustack.ai/gpustack/gen/kube/generator/cmd/apireg-gen/generators/testdata/apireg_gen"
+		pkg = "gpustack.ai/gpustack/gen/api/generator/cmd/apireg-gen/generators/testdata/apireg_gen"
 	)
 
 	g := args.GeneratorArgs{
