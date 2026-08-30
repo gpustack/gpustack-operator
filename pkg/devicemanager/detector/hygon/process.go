@@ -20,15 +20,21 @@ var _ device.AcceleratorProcessDetector = (*hygon)(nil)
 // compute-unit occupancy, so the device manager can attribute a share of a shared card to the
 // Instance holding it.
 //
-// THIS ADAPTER has been run against a driver; the observable path above it has not. On a BW card
+// THIS ADAPTER and the observable path above it have both been run against a driver. On a BW card
 // (gfx9, DTK 25.04) carrying a sliced container running a matmul, the library answered with the
 // holding process's host pid, its VRAM usage and a live cu_occupancy, all three matching the
-// kernel's own figures under /sys/class/kfd/kfd/proc/<pid>/ byte for byte. What that settles is the
-// question this adapter could not answer from recorded payloads: RSMI's compute figure on Hygon is a
-// real percentage and not the KFD_STATS_INVALID sentinel an AMD GFX revision returns — on this
-// revision. What it does not settle is what the subresource, the exporter, /monitor/snapshot and the
-// capability gauge publish from it, so `docs/reference/instance-metrics.md` still marks Hygon unrun
-// in its "On hardware" column, and correctly.
+// kernel's own figures under /sys/class/kfd/kfd/proc/<pid>/ at the time they were read. What that
+// settles is the question this adapter could not answer from recorded payloads: RSMI's compute
+// figure on Hygon is a real percentage and not the KFD_STATS_INVALID sentinel an AMD GFX revision
+// returns — on this revision.
+//
+// A later run carried it up through the subresource, the exporter, /monitor/snapshot and the
+// capability gauge on a held slice allocation, so `docs/reference/instance-metrics.md` now marks
+// Hygon run in its "On hardware" column. That run also showed the two figures are not corroborated
+// to the same depth, and the page says so: memory agreed exactly with both the vendor's hy-smi and
+// the kernel's vram_<gpuid>, while nothing BUT the kernel publishes a per-process compute figure to
+// compare against — and there it read a steady 10 where the library's figure implied 11. So read the
+// compute figure as measuring the right quantity rather than as agreeing with the kernel's number.
 //
 // What that run also established is that the THREE-STEP shape below is load-bearing rather than
 // defensive. The host-wide enumeration reports the pid and leaves both figures at zero — it is a

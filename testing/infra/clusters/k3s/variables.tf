@@ -300,27 +300,85 @@ variable "mirror" {
 }
 
 variable "system_default_registry" {
-  # Orthogonal to mirror: mirror decides where install-time artifacts come from, this decides
-  # where runtime system-image pulls (docker.io/rancher/mirrored-*) resolve. k3s defines
+  # A separate job from mirror, not a setting independent of it: mirror decides where
+  # install-time artifacts come from, this decides where runtime system-image pulls
+  # (docker.io/rancher/mirrored-*) resolve -- and mirror supplies this one's default,
+  # below. k3s defines
   # --system-default-registry as a SERVER flag only -- the agent CLI has none, and agents get
-  # their system images from the staged archives -- so it is passed to server installs only.
-  # Empty means the flag is not passed at all, exactly as before. A CN-reachable value is
-  # registry.rancher.cn; rancher-mirror.rancher.cn is NOT an OCI registry and does not work here.
-  description = "Registry the k3s servers resolve system-image pulls through, passed as --system-default-registry to server installs (agents have no such flag). Empty passes nothing."
+  # their system images from the staged archives -- so it is passed to server installs only. A
+  # CN-reachable value is registry.rancher.cn; rancher-mirror.rancher.cn is NOT an OCI registry
+  # and does not work here.
+  #
+  # Unset FOLLOWS THE MIRROR rather than passing nothing, so mirror = "cn" alone is a working
+  # configuration. A node is pointed at the CN mirror because it cannot reach github.com, and a
+  # node in that position cannot reach docker.io either. The staged archives carry the images the
+  # release ships with, so the install itself survives without a registry -- but every pull after
+  # them goes to docker.io and hangs, and what that looks like is a system Pod stuck in
+  # ContainerCreating with the reason buried in the kubelet's log. An explicit "" still passes
+  # nothing, which is how a node that CAN reach docker.io keeps the old behaviour under the mirror.
+  description = "Registry the k3s servers resolve system-image pulls through, passed as --system-default-registry to server installs (agents have no such flag). Unset follows the mirror ('cn' derives registry.rancher.cn); empty passes nothing."
   type        = string
-  default     = ""
+  default     = null
 
   validation {
     # Spliced single-quoted into the server install command that runs on the node, so the quote
     # character itself is excluded. k3s accepts only an RFC 3986 authority here: a hostname/IPv4
     # or a bracketed IPv6 literal, with an optional numeric port; no path. A bracketed value must
     # also parse as a real IPv6 address (checked via cidrhost), so [::::] or [deadbeef] fail.
-    condition = var.system_default_registry == "" || (
+    condition = var.system_default_registry == null || var.system_default_registry == "" || (
       can(regex("^[A-Za-z0-9._-]+(:[0-9]+)?$", var.system_default_registry)) ||
       (can(regex("^\\[[0-9A-Fa-f:]+\\](:[0-9]+)?$", var.system_default_registry)) &&
       can(cidrhost("${regex("\\[([0-9A-Fa-f:]+)\\]", var.system_default_registry)[0]}/128", 0)))
     )
     error_message = "system_default_registry must be a registry host[:port] -- a hostname/IPv4 or bracketed IPv6 literal, optional numeric port (it is spliced into the server install command), or empty."
+  }
+}
+
+variable "registry_mirrors" {
+  # The third leg of the CN story, and the one that governs WORKLOAD images.
+  # system_default_registry moves only the images k3s ships with; everything a chart pulls still
+  # resolves through docker.io, which is exactly the host a cn-mirrored node cannot reach. So this
+  # is written to the node's registries.yaml, which is where containerd takes per-registry mirror
+  # endpoints from.
+  #
+  # Unset FOLLOWS THE MIRROR, like system_default_registry: 'cn' derives a list of community
+  # docker.io proxies, anything else derives nothing. An explicit {} writes no file at all.
+  #
+  # Endpoints are tried IN ORDER and containerd falls through on failure, so a list costs a
+  # timeout where a single endpoint would cost the pull.
+  #
+  # The derived endpoints are UNAFFILIATED third-party proxies, and pointing docker.io at one
+  # is a trust decision rather than a transport detail: containerd checks a blob against the
+  # digest its manifest names, but the manifest itself comes from the mirror, so a proxy can
+  # serve a different image for a tag than Docker Hub would. This module provisions LAB
+  # clusters, which is the whole reason a default is defensible here -- point this at a
+  # registry you control when the images matter.
+  description = "Per-registry mirror endpoints written to the node's registries.yaml, e.g. {\"docker.io\" = [\"https://mirror.example.com\"]}. Unset follows the mirror ('cn' derives community docker.io proxies); {} writes no file."
+  type        = map(list(string))
+  default     = null
+
+  validation {
+    # Rendered into a YAML document that is spliced single-quoted into the command running on the
+    # node, so the quote character itself is excluded from both sides. A registry key is a
+    # host[:port] or the '*' catch-all containerd accepts; an endpoint is a scheme plus a REAL
+    # authority, with a path allowed because a proxy may serve under one. The host is spelled out
+    # rather than left to a character class: a class permits "https:///path" and "https://:", which
+    # pass validation and then write an endpoint containerd cannot dial, so the node is reprovisioned
+    # before anything says the value was unusable.
+    condition = var.registry_mirrors == null || alltrue(flatten([
+      for reg, eps in var.registry_mirrors : concat(
+        [can(regex("^([A-Za-z0-9._-]+(:[0-9]+)?|\\*)$", reg))],
+        [for e in eps : can(regex("^https?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]+)?(/[A-Za-z0-9._/-]*)?$", e))],
+      )
+    ]))
+    error_message = "registry_mirrors keys must be a registry host[:port] or '*', and every endpoint must be an http(s) URL naming a host -- a hostname or IPv4 literal, an optional numeric port, an optional path (both are spliced into the command that writes the node's registries.yaml)."
+  }
+
+  validation {
+    # An empty endpoint list writes a mirror entry containerd cannot use, and the failure surfaces
+    # as pulls that resolve nowhere rather than as a configuration error.
+    condition     = var.registry_mirrors == null || alltrue([for eps in values(var.registry_mirrors) : length(eps) > 0])
+    error_message = "every registry in registry_mirrors must name at least one endpoint; drop the key instead of giving it an empty list."
   }
 }
 

@@ -87,8 +87,9 @@ terraform apply \
 - `service_node_port_range`: NodePort Service port range (default `30000-32767`).
 - `image_archives_dir`: absolute path **on each node** for the artifact cache, on by default at
   `/var/lib/rke2-image-archives`; pass `''` to disable it. See below.
-- `mirror` / `system_default_registry`: for hosts that cannot reach github.com or get.rke2.io --
-  where the cache is filled from, and where runtime system-image pulls resolve. See
+- `mirror` / `system_default_registry` / `registry_mirrors`: for hosts that cannot reach github.com or
+  get.rke2.io -- where the cache is filled from, where RKE2's own system-image pulls resolve, and
+  where a workload's pulls resolve. `mirror=cn` alone is enough; it derives the other two. See
   [China networks](#china-networks-mirror-and-system-registry).
 - `calico_multi_nic_fix`: on whenever `cni` is `calico`, and an off switch only. See below.
 - `node_internal_ip` / `ssh_jumper` / `ssh_jumper_port`: for nodes whose cluster address is not the address
@@ -287,11 +288,14 @@ Worth knowing:
 
 ## China networks: mirror and system registry
 
-For hosts that cannot reach github.com or get.rke2.io, two orthogonal variables.
+For hosts that cannot reach github.com or get.rke2.io, three settings with separate jobs.
 `mirror` decides where **install-time artifacts** come from;
 `system_default_registry` decides where **runtime system-image pulls**
-(`docker.io/rancher/mirrored-*`) resolve. An airgap-staged node needs no registry;
-an online node may want the registry without the mirror.
+(`docker.io/rancher/mirrored-*`) resolve; `registry_mirrors` decides where a
+**workload's** pulls resolve. Each can be set on its own -- an online node may want a
+registry without the mirror -- but they are not independent: `mirror` supplies the
+default for the other two, because a node pointed away from github.com is a node that
+cannot reach docker.io either.
 
 `mirror=cn` points the module's own download script at rancher-mirror.rancher.cn:
 
@@ -304,14 +308,16 @@ an online node may want the registry without the mirror.
 
 The mirror carries **no `rke2-images-*` archives at all**, so cn mode downloads
 none: the system images are pulled at runtime from `system_default_registry`
-instead, and `mirror=cn` together with an empty registry is rejected by a
-precondition on every install resource.
+instead. That is why the registry is derived rather than merely suggested here --
+without it a cn-mirrored node has nowhere to get a single system image. An
+**explicitly** empty registry under `mirror=cn` is still rejected by a
+precondition on every install resource, so that combination stays something a
+caller has to mean.
 
 ```bash
 terraform apply \
   -var='server=["192.168.1.10"]' \
-  -var='mirror=cn' \
-  -var='system_default_registry=registry.rancher.cn'
+  -var='mirror=cn'
 ```
 
 A node whose cache already holds a full release's archives needs no mirror at
@@ -341,9 +347,58 @@ terraform apply \
   -var='system_default_registry=registry.rancher.cn'
 ```
 
-`registry.rancher.cn` is the CN-reachable example; it is never a default.
-`rancher-mirror.rancher.cn` is **not** an OCI registry and does not work as a
+Left unset it **follows the mirror**: `mirror=cn` derives `registry.rancher.cn`
+and no mirror derives nothing, so the `mirror=cn` command above already carries
+it. `rancher-mirror.rancher.cn` is **not** an OCI registry and does not work as a
 value here.
+
+### Workload images: `registry_mirrors`
+
+`system_default_registry` moves only the images **RKE2 itself** ships with. Every
+image a chart pulls still resolves through `docker.io`, which is the one host a
+cn-mirrored node was mirrored precisely because it cannot reach. So `mirror=cn`
+also derives `registry_mirrors`, written to each node's
+`/etc/rancher/rke2/registries.yaml` beside its `config.yaml` and before the
+service starts:
+
+```yaml
+mirrors:
+  docker.io:
+    endpoint:
+      - "https://docker.1panel.live"
+      - "https://image.jianmuhub.com"
+      - "https://dockerproxy.net"
+      - "https://proxy.vvvv.ee"
+```
+
+containerd tries the endpoints **in order and falls through on failure**, so a
+dead one costs a timeout rather than the pull.
+
+> **These are unaffiliated third-party proxies, and pointing `docker.io` at one is a
+> trust decision.** containerd checks a blob against the digest its manifest names, but
+> the manifest itself comes from the mirror — so a proxy can serve a different image for
+> a tag than Docker Hub would. This module provisions **lab clusters**, which is why a
+> default is defensible here; point `registry_mirrors` at a registry you control when
+> the images matter, and do not carry this default into a production path.
+
+**The derived list is a snapshot, not a guarantee.** These are community
+proxies. Sweeping the published list from a CN host found **47 of 76 dead**, and
+three more that answered a manifest request and then failed on the first blob —
+one of them redirecting to an ad page. What is listed above is only what a real
+`ctr pull` of a real image completed through, fastest first. Re-derive it when
+it rots, and override with your own:
+
+```bash
+terraform apply \
+  -var='server=["192.168.1.10"]' \
+  -var='mirror=cn' \
+  -var='registry_mirrors={"docker.io"=["https://mirror.example.com"],"gcr.io"=["https://gcr.example.com"]}'
+```
+
+Pass `-var='registry_mirrors={}'` to write no `registries.yaml` at all — the
+behaviour before this was derived. The file is **removed** rather than left
+alone when nothing is to be written, so a mirror dropped from the variable stops
+being used instead of lingering on the node.
 
 ## The Calico multi-NIC fix
 
@@ -490,8 +545,9 @@ Things the module does not do:
 | `service_cidr` | Service network (`service-cidr`, comma-separated for dual-stack) | `10.43.0.0/16` |
 | `service_node_port_range` | NodePort Service port range (`service-node-port-range`) | `30000-32767` |
 | `image_archives_dir` | Absolute path on each node for the per-release artifact cache; `""` disables it | `/var/lib/rke2-image-archives` |
-| `mirror` | Where the cache is filled from: `""` (github.com / get.rke2.io) or `cn` (rancher-mirror.rancher.cn); requires `image_archives_dir`, and `cn` also requires `system_default_registry` (the mirror carries no `rke2-images-*` archives) | `""` |
-| `system_default_registry` | `system-default-registry` in every node's `config.yaml`, e.g. `registry.rancher.cn`; a host[:port], no path | `""` |
+| `mirror` | Where the cache is filled from: `""` (github.com / get.rke2.io) or `cn` (rancher-mirror.rancher.cn); requires `image_archives_dir`, and `cn` derives `system_default_registry` (the mirror carries no `rke2-images-*` archives) | `""` |
+| `system_default_registry` | `system-default-registry` in every node's `config.yaml`, e.g. `registry.rancher.cn`; a host[:port], no path. Unset follows `mirror`; `""` writes nothing and is refused under `cn` | unset (`cn` derives `registry.rancher.cn`) |
+| `registry_mirrors` | Per-registry mirror endpoints written to the node's `registries.yaml`, tried in order. Unset follows `mirror`; `{}` writes no file | unset (`cn` derives community docker.io proxies) |
 | `switch_kube_context` | Let the merged context become the current one; `false` restores the previous one | `true` |
 
 ## Outputs

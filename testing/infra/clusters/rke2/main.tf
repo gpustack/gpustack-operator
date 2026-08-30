@@ -290,10 +290,51 @@ locals {
   # The fix is Calico-specific, so it follows var.cni unless the caller says otherwise.
   calico_fix_enabled = var.calico_multi_nic_fix == null ? var.cni == "calico" : var.calico_multi_nic_fix
 
+  # Unset follows the mirror -- see the variable for why a cn-mirrored node needs a registry it can
+  # actually reach. Derived once here so the config lines, the reinstall trigger and the
+  # precondition all read the same value: a precondition still reading the raw variable would
+  # refuse the very combination this derives a working answer for.
+  system_default_registry = var.system_default_registry != null ? var.system_default_registry : (
+    var.mirror == "cn" ? "registry.rancher.cn" : ""
+  )
+
+  # The docker.io proxies the cn mirror derives, tried in this order. Community endpoints, and they
+  # DO die: sweeping the published list from a CN host found 47 of 76 dead outright, and three more
+  # that served a manifest and then failed the blob -- one of them redirecting to an ad page. So
+  # what is listed here is only what a real containerd pull of a real image completed through,
+  # fastest first, and it is a snapshot rather than a guarantee. registry_mirrors replaces it.
+  cn_docker_io_mirrors = [
+    "https://docker.1panel.live",
+    "https://image.jianmuhub.com",
+    "https://dockerproxy.net",
+    "https://proxy.vvvv.ee",
+  ]
+
+  # Unset follows the mirror, exactly as system_default_registry does. The two are not
+  # interchangeable: that one moves the images RKE2 ships with, this one moves everything a
+  # workload pulls, and a cn-mirrored node needs both.
+  registry_mirrors = var.registry_mirrors != null ? var.registry_mirrors : (
+    var.mirror == "cn" ? { "docker.io" = local.cn_docker_io_mirrors } : {}
+  )
+
+  # RKE2 reads registries.yaml when it starts, so this is written beside config.yaml and before the
+  # service comes up. With nothing to write the file is REMOVED rather than left alone: the reclaim
+  # does not clear every path, and a stale file would go on routing every pull through a mirror the
+  # caller has since dropped.
+  #
+  # Carries no `|| exit 1`, unlike the k3s module's equivalent, and the difference is not an
+  # oversight: this string is spliced into a heredoc whose first line is `set -e`, so a failing tee
+  # already aborts the step, while k3s splices its own into an inline list that deliberately runs
+  # WITHOUT `set -e` (a `set -e` there would make its uninstall probes fatal on a clean host).
+  registries_yaml = yamlencode({
+    mirrors = { for reg, eps in local.registry_mirrors : reg => { endpoint = eps } }
+  })
+  write_registries_yaml = length(local.registry_mirrors) == 0 ? "sudo rm -f /etc/rancher/rke2/registries.yaml" : "printf '%s' '${local.registries_yaml}' | sudo tee /etc/rancher/rke2/registries.yaml > /dev/null"
+
   # An Agent/Runtime setting per the RKE2 reference, valid on servers and agents alike, so it
   # goes into every node's config.yaml. Empty means the key is not written, exactly as before.
   # The value is double-quoted: a bracketed IPv6 literal is otherwise a YAML flow sequence.
-  system_default_registry_lines = var.system_default_registry == "" ? [] : ["system-default-registry: \"${var.system_default_registry}\""]
+  system_default_registry_lines = local.system_default_registry == "" ? [] : ["system-default-registry: \"${local.system_default_registry}\""]
 
   server_common = concat([
     "cni: ${var.cni}",
@@ -419,7 +460,8 @@ resource "null_resource" "server_init" {
     # tracked empty: a key added to triggers replaces -- reinstalls -- every node already in state
     # from before the key existed.
     var.mirror == "" ? {} : { mirror = var.mirror },
-    var.system_default_registry == "" ? {} : { system_default_registry = var.system_default_registry },
+    local.system_default_registry == "" ? {} : { system_default_registry = local.system_default_registry },
+    length(local.registry_mirrors) == 0 ? {} : { registry_mirrors = jsonencode(local.registry_mirrors) },
   )
 
   lifecycle {
@@ -431,12 +473,13 @@ resource "null_resource" "server_init" {
       error_message = "mirror = \"cn\" requires image_archives_dir: without the artifact cache the install would still download from github.com and get.rke2.io."
     }
     # The cn mirror carries no rke2-images archives, so cn mode stages no system images at all --
-    # they are pulled at runtime, and without a CN-reachable system-default-registry (usually
-    # registry.rancher.cn) that pull would still go to docker.io, the exact host the node cannot
-    # reach. k3s needs no such pairing: its mirror serves the airgap archives itself.
+    # they are pulled at runtime, and without a CN-reachable system-default-registry that pull
+    # would still go to docker.io, the exact host the node cannot reach. k3s needs no such
+    # pairing: its mirror serves the airgap archives itself. Leaving the variable unset derives
+    # registry.rancher.cn, so only an EXPLICIT empty reaches this refusal.
     precondition {
-      condition     = var.mirror != "cn" || var.system_default_registry != ""
-      error_message = "mirror = \"cn\" requires system_default_registry (usually \"registry.rancher.cn\"): the cn mirror carries no rke2-images archives, so the system images must be pulled from a CN-reachable registry."
+      condition     = var.mirror != "cn" || local.system_default_registry != ""
+      error_message = "mirror = \"cn\" with an explicitly empty system_default_registry is refused: the cn mirror carries no rke2-images archives, so the system images must be pulled from a CN-reachable registry. Leave system_default_registry unset to derive \"registry.rancher.cn\"."
     }
   }
 
@@ -497,6 +540,8 @@ resource "null_resource" "server_init" {
         sudo touch /etc/rancher/rke2/config.yaml
         sudo chmod 600 /etc/rancher/rke2/config.yaml
         printf '%s\n' '${local.first_server_config}' | sudo tee /etc/rancher/rke2/config.yaml > /dev/null
+        # Beside it and before the start, which is when RKE2 reads the mirror endpoints.
+        ${local.write_registries_yaml}
         # Put the node's own password back before the service starts; see local.node_password_save.
         ${local.node_password_restore}
       EOT
@@ -572,7 +617,8 @@ resource "null_resource" "server_join" {
     # default-valued key is omitted entirely rather than tracked empty: a key added to triggers
     # replaces -- reinstalls -- every node already in state from before the key existed.
     var.mirror == "" ? {} : { mirror = var.mirror },
-    var.system_default_registry == "" ? {} : { system_default_registry = var.system_default_registry },
+    local.system_default_registry == "" ? {} : { system_default_registry = local.system_default_registry },
+    length(local.registry_mirrors) == 0 ? {} : { registry_mirrors = jsonencode(local.registry_mirrors) },
   )
 
   lifecycle {
@@ -582,12 +628,13 @@ resource "null_resource" "server_join" {
       error_message = "mirror = \"cn\" requires image_archives_dir: without the artifact cache the install would still download from github.com and get.rke2.io."
     }
     # The cn mirror carries no rke2-images archives, so cn mode stages no system images at all --
-    # they are pulled at runtime, and without a CN-reachable system-default-registry (usually
-    # registry.rancher.cn) that pull would still go to docker.io, the exact host the node cannot
-    # reach. k3s needs no such pairing: its mirror serves the airgap archives itself.
+    # they are pulled at runtime, and without a CN-reachable system-default-registry that pull
+    # would still go to docker.io, the exact host the node cannot reach. k3s needs no such
+    # pairing: its mirror serves the airgap archives itself. Leaving the variable unset derives
+    # registry.rancher.cn, so only an EXPLICIT empty reaches this refusal.
     precondition {
-      condition     = var.mirror != "cn" || var.system_default_registry != ""
-      error_message = "mirror = \"cn\" requires system_default_registry (usually \"registry.rancher.cn\"): the cn mirror carries no rke2-images archives, so the system images must be pulled from a CN-reachable registry."
+      condition     = var.mirror != "cn" || local.system_default_registry != ""
+      error_message = "mirror = \"cn\" with an explicitly empty system_default_registry is refused: the cn mirror carries no rke2-images archives, so the system images must be pulled from a CN-reachable registry. Leave system_default_registry unset to derive \"registry.rancher.cn\"."
     }
   }
 
@@ -635,6 +682,8 @@ resource "null_resource" "server_join" {
         sudo touch /etc/rancher/rke2/config.yaml
         sudo chmod 600 /etc/rancher/rke2/config.yaml
         printf '%s\n' '${local.server_join_config[each.value.host]}' | sudo tee /etc/rancher/rke2/config.yaml > /dev/null
+        # Beside it and before the start, which is when RKE2 reads the mirror endpoints.
+        ${local.write_registries_yaml}
         # Put the node's own password back before the service starts; see local.node_password_save.
         ${local.node_password_restore}
       EOT
@@ -696,7 +745,8 @@ resource "null_resource" "agent" {
     # entirely rather than tracked empty: a key added to triggers replaces -- reinstalls -- every
     # agent already in state from before the key existed.
     var.mirror == "" ? {} : { mirror = var.mirror },
-    var.system_default_registry == "" ? {} : { system_default_registry = var.system_default_registry },
+    local.system_default_registry == "" ? {} : { system_default_registry = local.system_default_registry },
+    length(local.registry_mirrors) == 0 ? {} : { registry_mirrors = jsonencode(local.registry_mirrors) },
   )
 
   lifecycle {
@@ -706,12 +756,13 @@ resource "null_resource" "agent" {
       error_message = "mirror = \"cn\" requires image_archives_dir: without the artifact cache the install would still download from github.com and get.rke2.io."
     }
     # The cn mirror carries no rke2-images archives, so cn mode stages no system images at all --
-    # they are pulled at runtime, and without a CN-reachable system-default-registry (usually
-    # registry.rancher.cn) that pull would still go to docker.io, the exact host the node cannot
-    # reach. k3s needs no such pairing: its mirror serves the airgap archives itself.
+    # they are pulled at runtime, and without a CN-reachable system-default-registry that pull
+    # would still go to docker.io, the exact host the node cannot reach. k3s needs no such
+    # pairing: its mirror serves the airgap archives itself. Leaving the variable unset derives
+    # registry.rancher.cn, so only an EXPLICIT empty reaches this refusal.
     precondition {
-      condition     = var.mirror != "cn" || var.system_default_registry != ""
-      error_message = "mirror = \"cn\" requires system_default_registry (usually \"registry.rancher.cn\"): the cn mirror carries no rke2-images archives, so the system images must be pulled from a CN-reachable registry."
+      condition     = var.mirror != "cn" || local.system_default_registry != ""
+      error_message = "mirror = \"cn\" with an explicitly empty system_default_registry is refused: the cn mirror carries no rke2-images archives, so the system images must be pulled from a CN-reachable registry. Leave system_default_registry unset to derive \"registry.rancher.cn\"."
     }
   }
 
@@ -758,6 +809,8 @@ resource "null_resource" "agent" {
         sudo touch /etc/rancher/rke2/config.yaml
         sudo chmod 600 /etc/rancher/rke2/config.yaml
         printf '%s\n' '${local.agent_config[each.value.host]}' | sudo tee /etc/rancher/rke2/config.yaml > /dev/null
+        # Beside it and before the start, which is when RKE2 reads the mirror endpoints.
+        ${local.write_registries_yaml}
         # Put the node's own password back before the service starts; see local.node_password_save.
         ${local.node_password_restore}
       EOT
