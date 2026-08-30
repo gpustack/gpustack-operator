@@ -190,10 +190,18 @@ func reflectType(p *types.Package, t *types.Type) *CRDTypeDefinition {
 				if err := json.Unmarshal([]byte(mv), &pcd.JSONPath); err != nil {
 					logger.Error(err, "unmarshal jsonPath", "value", mv)
 				}
+			case "description":
+				if err := json.Unmarshal([]byte(mv), &pcd.Description); err != nil {
+					logger.Error(err, "unmarshal description", "value", mv)
+				}
 			case "priority":
 				if err := json.Unmarshal([]byte(mv), &pcd.Priority); err != nil {
 					logger.Error(err, "unmarshal priority", "value", mv)
 				}
+			default:
+				// Without this an unrecognized key is dropped in silence, and a marker that looks
+				// like it configures something produces output where it configured nothing.
+				logger.Error(nil, "unknown print column key", "key", mk, "value", mv)
 			}
 		}
 

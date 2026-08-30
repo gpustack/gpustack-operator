@@ -195,7 +195,9 @@ func (g *crdGen) GenerateType(c *generator.Context, t *types.Type, w io.Writer) 
 			sw.Do("Type: \"$.COLUMN.Type$\",\n", colArgs)
 			sw.Do("Format: \"$.COLUMN.Format$\",\n", colArgs)
 			sw.Do("Description: $.$,\n", fmt.Sprintf("%#v", printerColumn.Description))
-			sw.Do("Priority: \"$.COLUMN.Priority$\",\n", colArgs)
+			// Priority is an int32, so it is emitted bare. Quoting it produced a string constant
+			// in an int32 field, which is why no CustomResourceColumnDefinition had ever compiled.
+			sw.Do("Priority: $.COLUMN.Priority$,\n", colArgs)
 			sw.Do("JSONPath: \"$.COLUMN.JSONPath$\",\n", colArgs)
 			sw.Do("},\n", nil)
 		}

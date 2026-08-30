@@ -14,9 +14,18 @@ import (
 )
 
 func Test_crdGen(t *testing.T) {
+	// The golden file is generated under the setting the suite runs with, and it is not cosmetic:
+	// with aliases materialized, a []byte alias resolves to a string of format byte, and without it
+	// to an opaque object preserving unknown fields. The generator cannot choose — the setting is
+	// read once at process start — so the expectation is pinned to one of the two and a run under
+	// the other is skipped rather than reported as drift.
+	if !strings.Contains(os.Getenv("GODEBUG"), "gotypesalias=0") {
+		t.Skip("run through `make test`, which sets GODEBUG=gotypesalias=0; the golden file is pinned to it")
+	}
+
 	var (
 		dir = filepath.Join("testdata", "crd_gen")
-		pkg = "gpustack.ai/gpustack/gen/kube/generator/cmd/crd-gen/generators/testdata/crd_gen"
+		pkg = "gpustack.ai/gpustack/gen/api/generator/cmd/crd-gen/generators/testdata/crd_gen"
 	)
 
 	g := args.GeneratorArgs{
