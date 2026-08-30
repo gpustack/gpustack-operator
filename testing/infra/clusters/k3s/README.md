@@ -320,7 +320,9 @@ an online node may want the registry without the mirror.
 - release assets come from `https://rancher-mirror.rancher.cn/k3s/<tag with '+' spelled '-'>/`
   (e.g. `.../k3s/v1.34.9-k3s1/sha256sum-amd64.txt`) -- the same asset names and
   byte-identical checksum files as GitHub, so a cache warmed in one mode verifies
-  cleanly in the other and the cache layout is unchanged;
+  cleanly in the other and the cache layout is unchanged. The mirror serves the
+  airgap images only as `.tar.gz`, even though the checksum anchor lists all three
+  compressions, so that is the one picked in cn mode;
 - the installer comes from `https://rancher-mirror.rancher.cn/k3s/k3s-install.sh`.
 
 ```bash
@@ -423,7 +425,7 @@ Things the module does not do:
 | `service_node_port_range` | NodePort Service port range (`--service-node-port-range`) | `30000-32767` |
 | `image_archives_dir` | Absolute path on each node for the per-release airgap image cache; `""` disables it | `/var/lib/k3s-image-archives` |
 | `mirror` | Where the cache is filled from: `""` (github.com / get.k3s.io) or `cn` (rancher-mirror.rancher.cn); requires `image_archives_dir` | `""` |
-| `system_default_registry` | `--system-default-registry` on the server installs, e.g. `registry.rancher.cn`; the k3s agent has no such flag | `""` |
+| `system_default_registry` | `--system-default-registry` on the server installs, e.g. `registry.rancher.cn`; a host[:port], no path; the k3s agent has no such flag | `""` |
 | `switch_kube_context` | Let the merged context become the current one; `false` restores the previous one | `true` |
 
 ## Outputs

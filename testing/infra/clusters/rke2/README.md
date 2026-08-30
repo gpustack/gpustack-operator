@@ -17,8 +17,10 @@ next door, so switching a verification run between the two distributions is a di
 - Asserts after the install that `rke2 --version` matches `release`, so Terraform state cannot
   claim a Kubernetes version the cluster does not run.
 - Keeps a per-release artifact cache on each node (`image_archives_dir`, on by default) holding the
-  binary, the image archives and the installer itself, so a warm node needs no network at all.
-  See [Artifact cache](#artifact-cache).
+  binary, the image archives and the installer itself, so a warm node needs no network at all
+  (with `mirror=cn` the cache deliberately holds no image archives, and the node pulls the system
+  images from `system_default_registry` at runtime -- see
+  [China networks](#china-networks-mirror-and-system-registry)). See [Artifact cache](#artifact-cache).
 - Advertises the node's own cluster address as `node-ip` and the address you SSH to as
   `node-external-ip` when the two differ, pinning `advertise-address` to the former so the apiserver
   keeps advertising an address its node actually holds.
@@ -241,7 +243,10 @@ On each node, between reclaiming the host and running the installer, the module:
    installer needs, hands that to the installer, and removes it afterwards,
 5. after the install, copies any remaining archives from the cache into RKE2's images directory.
 
-So the first apply fills the cache and every later one needs no network for RKE2 at all.
+So the first apply fills the cache and every later one needs no network for RKE2 at all -- with
+`mirror=cn` that covers the install only: the cache holds no image archives by design, and the
+system images are pulled from `system_default_registry` at runtime (see
+[China networks](#china-networks-mirror-and-system-registry)).
 
 Worth knowing:
 
@@ -290,20 +295,28 @@ an online node may want the registry without the mirror.
 
 `mirror=cn` points the module's own download script at rancher-mirror.rancher.cn:
 
-- release assets come from
+- the checksum anchor and the binary tarball come from
   `https://rancher-mirror.rancher.cn/rke2/releases/download/<tag with '+' percent-encoded as '%2D'>/`
   (e.g. `.../v1.34.9%2Drke2r1/sha256sum-amd64.txt`) -- the same asset names and
   byte-identical checksum files as GitHub, so a cache warmed in one mode verifies
-  cleanly in the other and the cache layout is unchanged. The CNI extra
-  (`rke2-images-<cni>.linux-<arch>` for `calico`/`cilium`/`flannel`) comes from the
-  mirror the same way;
+  cleanly in the other and the cache layout is unchanged;
 - the installer comes from `https://rancher-mirror.rancher.cn/rke2/install.sh`.
+
+The mirror carries **no `rke2-images-*` archives at all**, so cn mode downloads
+none: the system images are pulled at runtime from `system_default_registry`
+instead, and `mirror=cn` together with an empty registry is rejected by a
+precondition on every install resource.
 
 ```bash
 terraform apply \
   -var='server=["192.168.1.10"]' \
-  -var='mirror=cn'
+  -var='mirror=cn' \
+  -var='system_default_registry=registry.rancher.cn'
 ```
+
+A node whose cache already holds a full release's archives needs no mirror at
+all: leave `mirror` empty, and the find-or-fetch cache verifies the pre-placed
+files against the checksum anchor and downloads nothing.
 
 Worth knowing:
 
@@ -477,8 +490,8 @@ Things the module does not do:
 | `service_cidr` | Service network (`service-cidr`, comma-separated for dual-stack) | `10.43.0.0/16` |
 | `service_node_port_range` | NodePort Service port range (`service-node-port-range`) | `30000-32767` |
 | `image_archives_dir` | Absolute path on each node for the per-release artifact cache; `""` disables it | `/var/lib/rke2-image-archives` |
-| `mirror` | Where the cache is filled from: `""` (github.com / get.rke2.io) or `cn` (rancher-mirror.rancher.cn); requires `image_archives_dir` | `""` |
-| `system_default_registry` | `system-default-registry` in every node's `config.yaml`, e.g. `registry.rancher.cn` | `""` |
+| `mirror` | Where the cache is filled from: `""` (github.com / get.rke2.io) or `cn` (rancher-mirror.rancher.cn); requires `image_archives_dir`, and `cn` also requires `system_default_registry` (the mirror carries no `rke2-images-*` archives) | `""` |
+| `system_default_registry` | `system-default-registry` in every node's `config.yaml`, e.g. `registry.rancher.cn`; a host[:port], no path | `""` |
 | `switch_kube_context` | Let the merged context become the current one; `false` restores the previous one | `true` |
 
 ## Outputs
