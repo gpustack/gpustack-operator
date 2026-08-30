@@ -153,14 +153,22 @@ locals {
   # the last command's. The install commands carry the same guard: an installer that fails after
   # putting the binary in place is otherwise answered by the version assertion and reported as a
   # success.
-  stage_image_archives = var.image_archives_dir == "" ? "echo 'image_archives_dir is unset; k3s will download its binary and pull its images from a registry'" : join(" ", [
+  stage_image_archives = var.image_archives_dir == "" ? "echo 'image_archives_dir is unset; k3s will download its binary and pull its images from a registry'" : join(" ", compact([
     "sudo bash ${local.image_archives_script_path}",
     "--release '${var.release}'",
     "--cache-dir '${var.image_archives_dir}'",
+    # Where the cache is filled FROM; empty leaves the step byte-identical to before.
+    var.mirror == "" ? "" : "--mirror '${var.mirror}'",
     "|| exit 1",
-  ])
+  ]))
 
   cache_release_dir = "${var.image_archives_dir}/${var.release}"
+
+  # Server-only flag: the k3s agent CLI has no --system-default-registry, and an agent's system
+  # images come from the staged archives. Empty means the flag is not passed, exactly as before.
+  # The leading space is part of the value, so an empty one splices byte-identically. The value is
+  # single-quoted: a bracketed IPv6 literal is otherwise a glob pattern to the remote shell.
+  system_default_registry_flag = var.system_default_registry == "" ? "" : " --system-default-registry '${var.system_default_registry}'"
 
   # How the installer is obtained, and what it is told about downloading. With a cache the step
   # above has already put that release's own binary in place and pinned a copy of the installer, so
@@ -258,6 +266,20 @@ resource "null_resource" "server_init" {
     # Tracked so setting or changing the cache re-provisions this node now, rather than taking
     # effect at whatever later reinstall happens to come along.
     image_archives_dir = var.image_archives_dir
+    # Same reason: where the cache is filled from, and the registry the servers resolve
+    # system-image pulls through, both feed this node's install command.
+    mirror                  = var.mirror
+    system_default_registry = var.system_default_registry
+  }
+
+  lifecycle {
+    # Without the cache, the only CN-reachable install path would be the installer's own
+    # INSTALL_K3S_MIRROR parameter -- which this module deliberately never sets (see the mirror
+    # variable), so the combination is refused rather than silently reaching github.com.
+    precondition {
+      condition     = var.mirror != "cn" || var.image_archives_dir != ""
+      error_message = "mirror = \"cn\" requires image_archives_dir: without the artifact cache the install would still download from github.com and get.k3s.io."
+    }
   }
 
   connection {
@@ -308,7 +330,7 @@ resource "null_resource" "server_init" {
       # After the reclaim (which removed the images directory) and before the installer, which
       # is when k3s reads that directory. A warm cache makes this a local copy with no download.
       local.stage_image_archives,
-      "${local.install_prefix} ${local.install_sh} server --cluster-init --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} ${local.tls_san_flags[local.first_server.host]} --https-listen-port ${var.server_https_listen_port} --service-node-port-range ${var.service_node_port_range} ${local.node_internal_ip_flag[local.first_server.host]} ${local.node_external_ip_flag[local.first_server.host]} ${local.advertise_flag[local.first_server.host]} || exit 1",
+      "${local.install_prefix} ${local.install_sh} server --cluster-init --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} ${local.tls_san_flags[local.first_server.host]} --https-listen-port ${var.server_https_listen_port} --service-node-port-range ${var.service_node_port_range} ${local.node_internal_ip_flag[local.first_server.host]} ${local.node_external_ip_flag[local.first_server.host]} ${local.advertise_flag[local.first_server.host]}${local.system_default_registry_flag} || exit 1",
       local.version_assert,
     ]
   }
@@ -354,11 +376,22 @@ resource "null_resource" "server_join" {
     service_node_port_range  = var.service_node_port_range
     node_internal_ip         = lookup(var.node_internal_ip, each.value.host, "")
     image_archives_dir       = var.image_archives_dir
+    # See server_init: both feed this node's install command.
+    mirror                  = var.mirror
+    system_default_registry = var.system_default_registry
     # The first server owns the datastore and the cluster CA, so a member that outlives a
     # reinstall of it holds credentials for a cluster that no longer exists. Reinstalling it
     # therefore reinstalls every other member too -- including the case a taint causes, where
     # nothing else about this node changed.
     server_init = null_resource.server_init.id
+  }
+
+  lifecycle {
+    # See server_init.
+    precondition {
+      condition     = var.mirror != "cn" || var.image_archives_dir != ""
+      error_message = "mirror = \"cn\" requires image_archives_dir: without the artifact cache the install would still download from github.com and get.k3s.io."
+    }
   }
 
   connection {
@@ -400,7 +433,7 @@ resource "null_resource" "server_join" {
       "for c in $(echo '${var.cluster_cidr}' | tr ',' ' '); do sudo ip route flush root \"$c\" || true; done",
       local.join_wait,
       local.stage_image_archives,
-      "${local.install_prefix} ${local.install_sh} server --server ${local.server_url} --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} ${local.tls_san_flags[each.value.host]} --https-listen-port ${var.server_https_listen_port} --service-node-port-range ${var.service_node_port_range} ${local.node_internal_ip_flag[each.value.host]} ${local.node_external_ip_flag[each.value.host]} ${local.advertise_flag[each.value.host]} || exit 1",
+      "${local.install_prefix} ${local.install_sh} server --server ${local.server_url} --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} ${local.tls_san_flags[each.value.host]} --https-listen-port ${var.server_https_listen_port} --service-node-port-range ${var.service_node_port_range} ${local.node_internal_ip_flag[each.value.host]} ${local.node_external_ip_flag[each.value.host]} ${local.advertise_flag[each.value.host]}${local.system_default_registry_flag} || exit 1",
       local.version_assert,
     ]
   }
@@ -443,9 +476,20 @@ resource "null_resource" "agent" {
     # destroy-time route flush can read the CIDR off self.triggers.
     cluster_cidr       = var.cluster_cidr
     image_archives_dir = var.image_archives_dir
+    # Where this node's cache is filled from feeds its staging command; system_default_registry
+    # is server-only (the k3s agent CLI has no such flag), so it is not tracked here.
+    mirror = var.mirror
     # See server_join: an agent that outlives a reinstall of the first server holds credentials
     # for a cluster that no longer exists.
     server_init = null_resource.server_init.id
+  }
+
+  lifecycle {
+    # See server_init.
+    precondition {
+      condition     = var.mirror != "cn" || var.image_archives_dir != ""
+      error_message = "mirror = \"cn\" requires image_archives_dir: without the artifact cache the install would still download from github.com and get.k3s.io."
+    }
   }
 
   connection {

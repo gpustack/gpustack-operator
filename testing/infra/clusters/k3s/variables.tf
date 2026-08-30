@@ -281,6 +281,43 @@ variable "image_archives_dir" {
   }
 }
 
+variable "mirror" {
+  # Where the node's cache is filled FROM. 'cn' points the module's own download script at
+  # rancher-mirror.rancher.cn -- the same asset names and byte-identical checksum files as
+  # github.com, reachable from hosts that cannot reach github.com or get.k3s.io. The installer's
+  # own INSTALL_K3S_MIRROR parameter is deliberately never set: the upstream and CN-hosted
+  # install.sh variants differ, and a node may already hold a cached script of either variant, so
+  # mirror downloads are done by the module's script instead. Requires image_archives_dir --
+  # without the cache, avoiding github.com would need exactly that installer parameter.
+  description = "Release-asset mirror the node's image cache is filled from: '' (github.com and get.k3s.io) or 'cn' (rancher-mirror.rancher.cn). Requires image_archives_dir."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = contains(["", "cn"], var.mirror)
+    error_message = "mirror must be '' or 'cn' (rancher-mirror.rancher.cn)."
+  }
+}
+
+variable "system_default_registry" {
+  # Orthogonal to mirror: mirror decides where install-time artifacts come from, this decides
+  # where runtime system-image pulls (docker.io/rancher/mirrored-*) resolve. k3s defines
+  # --system-default-registry as a SERVER flag only -- the agent CLI has none, and agents get
+  # their system images from the staged archives -- so it is passed to server installs only.
+  # Empty means the flag is not passed at all, exactly as before. A CN-reachable value is
+  # registry.rancher.cn; rancher-mirror.rancher.cn is NOT an OCI registry and does not work here.
+  description = "Registry the k3s servers resolve system-image pulls through, passed as --system-default-registry to server installs (agents have no such flag). Empty passes nothing."
+  type        = string
+  default     = ""
+
+  validation {
+    # Spliced into the server install command that runs on the node, so the character set is the
+    # boundary; the colon is allowed for a port and the slash for a repository prefix.
+    condition     = var.system_default_registry == "" || can(regex("^[A-Za-z0-9._:/-]+$", var.system_default_registry))
+    error_message = "system_default_registry must be a registry host[:port][/prefix] made of [A-Za-z0-9._:/-] (it is spliced into the server install command), or empty."
+  }
+}
+
 variable "switch_kube_context" {
   # The cluster is merged into ~/.kube/config either way; this only decides whether a
   # bare kubectl points at it afterwards. Set it to false while another cluster is
