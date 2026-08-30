@@ -238,6 +238,9 @@ spec:
             - name: gpustack-hygon-toolkit
               mountPath: /opt/dtk
               readOnly: true
+            - name: gpustack-hygon-mig-config
+              mountPath: /etc/dmi_mig_config
+              readOnly: true
             {{- end }}
             {{- if eq $manu "iluvatar" }}
             - name: gpustack-iluvatar-toolkit
@@ -329,6 +332,14 @@ spec:
         - name: gpustack-hygon-toolkit
           hostPath:
             path: /opt/dtk
+            type: DirectoryOrCreate
+        # The vendor's registry of live compute instances, which is what maps a partition's UUID back
+        # to the instance the driver enumerates. The directory only exists while the node is in
+        # Multi-Instance mode, so it is created rather than required: a node that is not partitioned
+        # simply mounts an empty one.
+        - name: gpustack-hygon-mig-config
+          hostPath:
+            path: /etc/dmi_mig_config
             type: DirectoryOrCreate
         {{- end }}
         {{- if eq $manu "iluvatar" }}

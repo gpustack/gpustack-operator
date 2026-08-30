@@ -691,7 +691,8 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 		// Measured and idle, which is the figure a process-first lookup could not have taken.
 		assert.Equal(t, ptr.To[uint64](0), got.MemoryUsedMiB)
 		assert.Equal(t, ptr.To[uint32](0), got.MemoryUtilizationPercent)
-		assert.Nil(t, got.CoresUtilizationPercent, "no manufacturer serves one per partition")
+		assert.Nil(t, got.CoresUtilizationPercent,
+			"this partition's handle answered no compute, and the parent card's is not substituted")
 	})
 
 	// The degraded source's own branches are pinned in pkg/kubemetrics; what the two cases

@@ -1227,7 +1227,22 @@ func TestFiguresPartition(t *testing.T) {
 		assert.Equal(t, ptr.To[uint64](10<<10), figures.MemoryTotalMiB)
 		assert.Equal(t, ptr.To[uint64](2<<10), figures.MemoryUsedMiB)
 		assert.Nil(t, figures.CoresUtilizationPercent,
-			"no manufacturer serves a per-partition utilization, and none is invented")
+			"this record measured none, and none is invented from the parent card")
+	})
+
+	t.Run("a partition that measured its own compute publishes it", func(t *testing.T) {
+		measured := partition
+		measured.CoresPercent = ptr.To[uint32](85)
+		measured.CoresReason = device.AcceleratorProcessReasonNone
+		section := &MonitorSliceSection{
+			SchemaVersion: MonitorSliceSchemaVersion,
+			Partitions:    []SlicePartition{measured},
+		}
+
+		figures, ok := section.Figures(testManufacturer, testPodAUID, testCtrName, testDeviceID)
+		require.True(t, ok)
+		assert.Equal(t, ptr.To[uint32](85), figures.CoresUtilizationPercent,
+			"the partition's own handle answered, so the figure reaches the consumer")
 	})
 
 	t.Run("a partition supersedes a per-process record for the same key", func(t *testing.T) {
