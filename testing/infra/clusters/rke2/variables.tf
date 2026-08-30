@@ -286,22 +286,30 @@ variable "mirror" {
 }
 
 variable "system_default_registry" {
-  # Orthogonal to mirror: mirror decides where install-time artifacts come from, this decides
-  # where runtime system-image pulls (docker.io/rancher/mirrored-*) resolve. RKE2 defines
+  # A separate job from mirror, not a setting independent of it: mirror decides where
+  # install-time artifacts come from, this decides where runtime system-image pulls
+  # (docker.io/rancher/mirrored-*) resolve -- and mirror supplies this one's default,
+  # below. RKE2 defines
   # system-default-registry as an Agent/Runtime setting, valid on servers and agents alike, so it
-  # is written into EVERY node's config.yaml. Empty writes nothing, exactly as before. A
-  # CN-reachable value is registry.rancher.cn; rancher-mirror.rancher.cn is NOT an OCI registry
-  # and does not work here.
-  description = "Registry every RKE2 node resolves system-image pulls through, written as system-default-registry into each node's config.yaml. Empty writes nothing."
+  # is written into EVERY node's config.yaml. A CN-reachable value is registry.rancher.cn;
+  # rancher-mirror.rancher.cn is NOT an OCI registry and does not work here.
+  #
+  # Unset FOLLOWS THE MIRROR rather than writing nothing, so mirror = "cn" alone is a working
+  # configuration. RKE2 needs the pairing harder than k3s does: the cn mirror carries no
+  # rke2-images archives at all, so cn mode stages no system images and every one of them is
+  # pulled at runtime from a host the node was mirrored precisely because it cannot reach. An
+  # explicit "" still writes nothing and is still refused under the cn mirror, which is how that
+  # combination stays an error the caller has to mean rather than one they fell into.
+  description = "Registry every RKE2 node resolves system-image pulls through, written as system-default-registry into each node's config.yaml. Unset follows the mirror ('cn' derives registry.rancher.cn); empty writes nothing."
   type        = string
-  default     = ""
+  default     = null
 
   validation {
     # Written double-quoted into the config.yaml each node gets through a single-quoted printf,
     # so both quote characters are excluded. RKE2 accepts only an RFC 3986 authority here: a
     # hostname/IPv4 or a bracketed IPv6 literal, with an optional numeric port; no path. A bracketed
     # value must also parse as a real IPv6 address (checked via cidrhost), so [::::] fails.
-    condition = var.system_default_registry == "" || (
+    condition = var.system_default_registry == null || var.system_default_registry == "" || (
       can(regex("^[A-Za-z0-9._-]+(:[0-9]+)?$", var.system_default_registry)) ||
       (can(regex("^\\[[0-9A-Fa-f:]+\\](:[0-9]+)?$", var.system_default_registry)) &&
       can(cidrhost("${regex("\\[([0-9A-Fa-f:]+)\\]", var.system_default_registry)[0]}/128", 0)))

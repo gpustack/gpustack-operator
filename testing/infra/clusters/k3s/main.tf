@@ -164,11 +164,19 @@ locals {
 
   cache_release_dir = "${var.image_archives_dir}/${var.release}"
 
+  # Unset follows the mirror -- see the variable for why a cn-mirrored node needs a registry it can
+  # actually reach. Derived once here so the install flag, the reinstall trigger and the
+  # precondition all read the same value: a trigger still reading the raw variable would leave the
+  # derived registry out of what re-provisions a node.
+  system_default_registry = var.system_default_registry != null ? var.system_default_registry : (
+    var.mirror == "cn" ? "registry.rancher.cn" : ""
+  )
+
   # Server-only flag: the k3s agent CLI has no --system-default-registry, and an agent's system
   # images come from the staged archives. Empty means the flag is not passed, exactly as before.
   # The leading space is part of the value, so an empty one splices byte-identically. The value is
   # single-quoted: a bracketed IPv6 literal is otherwise a glob pattern to the remote shell.
-  system_default_registry_flag = var.system_default_registry == "" ? "" : " --system-default-registry '${var.system_default_registry}'"
+  system_default_registry_flag = local.system_default_registry == "" ? "" : " --system-default-registry '${local.system_default_registry}'"
 
   # How the installer is obtained, and what it is told about downloading. With a cache the step
   # above has already put that release's own binary in place and pinned a copy of the installer, so
@@ -272,7 +280,7 @@ resource "null_resource" "server_init" {
     # omitted entirely rather than tracked empty: a key added to triggers replaces -- reinstalls --
     # every node already in state from before the key existed.
     var.mirror == "" ? {} : { mirror = var.mirror },
-    var.system_default_registry == "" ? {} : { system_default_registry = var.system_default_registry },
+    local.system_default_registry == "" ? {} : { system_default_registry = local.system_default_registry },
   )
 
   lifecycle {
@@ -389,7 +397,7 @@ resource "null_resource" "server_join" {
     # entirely rather than tracked empty: a key added to triggers replaces -- reinstalls -- every
     # node already in state from before the key existed.
     var.mirror == "" ? {} : { mirror = var.mirror },
-    var.system_default_registry == "" ? {} : { system_default_registry = var.system_default_registry },
+    local.system_default_registry == "" ? {} : { system_default_registry = local.system_default_registry },
   )
 
   lifecycle {

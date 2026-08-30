@@ -300,22 +300,32 @@ variable "mirror" {
 }
 
 variable "system_default_registry" {
-  # Orthogonal to mirror: mirror decides where install-time artifacts come from, this decides
-  # where runtime system-image pulls (docker.io/rancher/mirrored-*) resolve. k3s defines
+  # A separate job from mirror, not a setting independent of it: mirror decides where
+  # install-time artifacts come from, this decides where runtime system-image pulls
+  # (docker.io/rancher/mirrored-*) resolve -- and mirror supplies this one's default,
+  # below. k3s defines
   # --system-default-registry as a SERVER flag only -- the agent CLI has none, and agents get
-  # their system images from the staged archives -- so it is passed to server installs only.
-  # Empty means the flag is not passed at all, exactly as before. A CN-reachable value is
-  # registry.rancher.cn; rancher-mirror.rancher.cn is NOT an OCI registry and does not work here.
-  description = "Registry the k3s servers resolve system-image pulls through, passed as --system-default-registry to server installs (agents have no such flag). Empty passes nothing."
+  # their system images from the staged archives -- so it is passed to server installs only. A
+  # CN-reachable value is registry.rancher.cn; rancher-mirror.rancher.cn is NOT an OCI registry
+  # and does not work here.
+  #
+  # Unset FOLLOWS THE MIRROR rather than passing nothing, so mirror = "cn" alone is a working
+  # configuration. A node is pointed at the CN mirror because it cannot reach github.com, and a
+  # node in that position cannot reach docker.io either. The staged archives carry the images the
+  # release ships with, so the install itself survives without a registry -- but every pull after
+  # them goes to docker.io and hangs, and what that looks like is a system Pod stuck in
+  # ContainerCreating with the reason buried in the kubelet's log. An explicit "" still passes
+  # nothing, which is how a node that CAN reach docker.io keeps the old behaviour under the mirror.
+  description = "Registry the k3s servers resolve system-image pulls through, passed as --system-default-registry to server installs (agents have no such flag). Unset follows the mirror ('cn' derives registry.rancher.cn); empty passes nothing."
   type        = string
-  default     = ""
+  default     = null
 
   validation {
     # Spliced single-quoted into the server install command that runs on the node, so the quote
     # character itself is excluded. k3s accepts only an RFC 3986 authority here: a hostname/IPv4
     # or a bracketed IPv6 literal, with an optional numeric port; no path. A bracketed value must
     # also parse as a real IPv6 address (checked via cidrhost), so [::::] or [deadbeef] fail.
-    condition = var.system_default_registry == "" || (
+    condition = var.system_default_registry == null || var.system_default_registry == "" || (
       can(regex("^[A-Za-z0-9._-]+(:[0-9]+)?$", var.system_default_registry)) ||
       (can(regex("^\\[[0-9A-Fa-f:]+\\](:[0-9]+)?$", var.system_default_registry)) &&
       can(cidrhost("${regex("\\[([0-9A-Fa-f:]+)\\]", var.system_default_registry)[0]}/128", 0)))

@@ -88,7 +88,8 @@ terraform apply \
 - `image_archives_dir`: absolute path **on each node** for the artifact cache, on by default at
   `/var/lib/rke2-image-archives`; pass `''` to disable it. See below.
 - `mirror` / `system_default_registry`: for hosts that cannot reach github.com or get.rke2.io --
-  where the cache is filled from, and where runtime system-image pulls resolve. See
+  where the cache is filled from, and where runtime system-image pulls resolve. `mirror=cn` alone
+  is enough; it derives the registry. See
   [China networks](#china-networks-mirror-and-system-registry).
 - `calico_multi_nic_fix`: on whenever `cni` is `calico`, and an off switch only. See below.
 - `node_internal_ip` / `ssh_jumper` / `ssh_jumper_port`: for nodes whose cluster address is not the address
@@ -290,8 +291,10 @@ Worth knowing:
 For hosts that cannot reach github.com or get.rke2.io, two orthogonal variables.
 `mirror` decides where **install-time artifacts** come from;
 `system_default_registry` decides where **runtime system-image pulls**
-(`docker.io/rancher/mirrored-*`) resolve. An airgap-staged node needs no registry;
-an online node may want the registry without the mirror.
+(`docker.io/rancher/mirrored-*`) resolve. They are separable -- an online node may
+want the registry without the mirror -- but not independent: `mirror=cn` on its own
+derives `system_default_registry=registry.rancher.cn`, because a node pointed away
+from github.com is a node that cannot reach docker.io either.
 
 `mirror=cn` points the module's own download script at rancher-mirror.rancher.cn:
 
@@ -304,14 +307,16 @@ an online node may want the registry without the mirror.
 
 The mirror carries **no `rke2-images-*` archives at all**, so cn mode downloads
 none: the system images are pulled at runtime from `system_default_registry`
-instead, and `mirror=cn` together with an empty registry is rejected by a
-precondition on every install resource.
+instead. That is why the registry is derived rather than merely suggested here --
+without it a cn-mirrored node has nowhere to get a single system image. An
+**explicitly** empty registry under `mirror=cn` is still rejected by a
+precondition on every install resource, so that combination stays something a
+caller has to mean.
 
 ```bash
 terraform apply \
   -var='server=["192.168.1.10"]' \
-  -var='mirror=cn' \
-  -var='system_default_registry=registry.rancher.cn'
+  -var='mirror=cn'
 ```
 
 A node whose cache already holds a full release's archives needs no mirror at
@@ -341,8 +346,9 @@ terraform apply \
   -var='system_default_registry=registry.rancher.cn'
 ```
 
-`registry.rancher.cn` is the CN-reachable example; it is never a default.
-`rancher-mirror.rancher.cn` is **not** an OCI registry and does not work as a
+Left unset it **follows the mirror**: `mirror=cn` derives `registry.rancher.cn`
+and no mirror derives nothing, so the `mirror=cn` command above already carries
+it. `rancher-mirror.rancher.cn` is **not** an OCI registry and does not work as a
 value here.
 
 ## The Calico multi-NIC fix
@@ -490,8 +496,8 @@ Things the module does not do:
 | `service_cidr` | Service network (`service-cidr`, comma-separated for dual-stack) | `10.43.0.0/16` |
 | `service_node_port_range` | NodePort Service port range (`service-node-port-range`) | `30000-32767` |
 | `image_archives_dir` | Absolute path on each node for the per-release artifact cache; `""` disables it | `/var/lib/rke2-image-archives` |
-| `mirror` | Where the cache is filled from: `""` (github.com / get.rke2.io) or `cn` (rancher-mirror.rancher.cn); requires `image_archives_dir`, and `cn` also requires `system_default_registry` (the mirror carries no `rke2-images-*` archives) | `""` |
-| `system_default_registry` | `system-default-registry` in every node's `config.yaml`, e.g. `registry.rancher.cn`; a host[:port], no path | `""` |
+| `mirror` | Where the cache is filled from: `""` (github.com / get.rke2.io) or `cn` (rancher-mirror.rancher.cn); requires `image_archives_dir`, and `cn` derives `system_default_registry` (the mirror carries no `rke2-images-*` archives) | `""` |
+| `system_default_registry` | `system-default-registry` in every node's `config.yaml`, e.g. `registry.rancher.cn`; a host[:port], no path. Unset follows `mirror`; `""` writes nothing and is refused under `cn` | unset (`cn` derives `registry.rancher.cn`) |
 | `switch_kube_context` | Let the merged context become the current one; `false` restores the previous one | `true` |
 
 ## Outputs
