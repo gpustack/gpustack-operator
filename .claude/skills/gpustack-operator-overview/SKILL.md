@@ -38,6 +38,7 @@ pkg/
   devicemanager/                  device-manager subcommand (per-node DaemonSet)
     detector/<mfr>/               per-manufacturer accelerator detection
     allocator/<mfr>/              per-manufacturer device-plugin allocation
+    preflight/                    can this node actually slice? (host chroot, probe containers)
     exporter/                     this node's Instances as Prometheus gauges on /metrics
   kubemetrics/                    Instance utilization from the kubelet, behind both surfaces
                                   (the metrics subresource and the exporter above)
@@ -82,5 +83,7 @@ controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.
 - Startup ordering, the gateway mirror, CGO bindings, the 63-char rule → [architecture/internals.md](../../../docs/architecture/internals.md)
 - The two accelerator families, their resource keys and request rules → [accelerator-requests.md](../../../docs/accelerator-requests.md)
 - Settings & `GPUSTACK_*` configuration knobs → [settings.md](../../../docs/settings.md)
+- Every command the binary offers, its flags and a runnable invocation → [reference/commands.md](../../../docs/reference/commands.md)
+- Checking a node can slice before it has to: the procedure → [operation/preflight.md](../../../docs/operation/preflight.md)
 - Build / lint / test / codegen / vendored deps → [development.md](../../../docs/development.md)
 - Writing or updating any of the above → the `gpustack-operator-docs` skill

@@ -486,6 +486,70 @@ The reconcile still stores them canonically (accelerators by index, groups by ma
 first accelerator), which keeps the stored list a function of the hardware rather than of which
 detection pass first saw each group. The allocators order what they read regardless.
 
+### Preflight: the preconditions read before a workload does
+
+`device-manager preflight` reads, on a bare host, the allocation-time preconditions the allocator
+reads when a workload lands. It drives each manufacturer's **own** responder with a synthetic
+allocation request rather than a copy of it, so a preflight answer and the allocation it predicts
+cannot disagree. The runbook is [Preflight Operations](../operation/preflight.md).
+
+It asks three questions per manufacturer, in order, and each is answerable on its own:
+
+1. **are the devices detected** — the detect pass, cross-checked against the host's own vendor CLI
+   where one is established (NVIDIA, Ascend and AMD); for the other six the detect pass answers alone,
+   and a count of zero is the container's own view rather than the host's;
+2. **can they be sliced** — the driver read, then a container that is granted a slice and reports
+   back the quota rather than the whole accelerator;
+3. **can they be managed while sliced** — two named cases: *sidecar visibility*, where the owner's
+   and the `sshd` sidecar's allocations are driven in the order the kubelet makes them and the second
+   must name nothing the first was not granted (see [SSH-enabled Instances and the visibility
+   resource](#ssh-enabled-instances-and-the-visibility-resource)); and *co-tenancy*, two independent
+   slices on one accelerator each seeing its own quota.
+
+**Every answer is one of three states**, exhaustive and mutually exclusive, each with a different
+consequence for the allocation it guards:
+
+| State | Meaning | What an allocation does |
+|---|---|---|
+| `ok` | the capability was read and the accelerator can serve the mode | proceeds |
+| `unavailable` | the driver could not be asked — entry point missing, library not loaded, no privilege | is refused |
+| `not-declared` | there is no such capability here to read or to set | proceeds without it |
+
+**And carries the depth it was reached at**, so an assumption is never read as evidence:
+
+| Depth | What was done | What it establishes |
+|---|---|---|
+| `declared` | the driver was asked and answered | what the host claims |
+| `simulated` | the allocator's own code produced the artifact and it was asserted on, while nothing on the hardware changed | what the allocation would emit |
+| `measured` | something ran and was observed | the behavior itself |
+
+Nothing carries a deeper label than it earned. A case that could not be taken to the measured depth
+is reported at the depth it reached, with the reason it went no deeper — never as a failure and never
+as a pass.
+
+Two of Q3's answers stop short by construction rather than by environment. Sidecar visibility is
+answered at `simulated`: a measured one needs the owner's container still running, and every
+container this starts is one-shot. A partition-backed accelerator is answered at `declared`:
+reaching its visibility response means driving the capability that also creates a partition.
+
+> **Why `simulated` is truthful** — several allocators write host state while serving an allocation,
+> so the pass substitutes the manufacturer's own driver seam and redirects the paths that
+> manufacturer alone knows it renders under. A manufacturer that serves an allocation out of paths
+> and a resource request writes none of it to begin with, so it reaches this depth with nothing to
+> substitute — all nine produce an injection, and the seam is only needed where producing one would
+> otherwise touch the node.
+
+It reaches the host by entering a bind-mounted host root with `chroot`, which gives it the host's own
+container CLI — sibling probe containers with no runtime socket mounted — and the host's own vendor
+CLI, which answers with no `/dev` mount in the container at all. That is what separates *this machine
+has no accelerators* from *this machine has eight and your container cannot see them*. Preflight's
+own code never runs in host context.
+
+> **Why it is not part of `detect`** — `detect` is a pure read no flag can turn into anything else,
+> while preflight starts containers that hold an accelerator and asks a driver to toggle a mode and
+> put it back. On a node carrying live workloads that difference is worth a command of its own. The
+> two cannot drift, because preflight reuses the detect pass rather than reimplementing it.
+
 ## Logical slicing per manufacturer
 
 Every sliceable manufacturer has real per-slice runtime isolation, but only four — NVIDIA, Iluvatar,

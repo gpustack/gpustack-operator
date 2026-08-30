@@ -2,6 +2,7 @@ package device
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -352,3 +353,217 @@ type (
 		Stop()
 	}
 )
+
+// Structures for the allocation-time preconditions an allocator reads before it hands a device out.
+type (
+	// PreflightState is what one answer concluded about one subject — an accelerator's
+	// precondition, or a manufacturer's detect pass. The three values are exhaustive and mutually
+	// exclusive, and each carries a different consequence for the allocation the answer guards.
+	PreflightState string
+
+	// PreflightDepth is how far an answer was actually taken, and is what keeps an assumption from
+	// being read as evidence. The three values are ordered: nothing may carry a deeper one than it
+	// earned.
+	PreflightDepth string
+
+	// PreflightDetection is what a manufacturer's detect pass concluded, reported as an answer in
+	// its own right rather than only as the input to the reads that follow.
+	//
+	// Detecting nothing and failing to look are different facts with different remedies, and
+	// collapsing them sends an operator to debug hardware that is present or absent for reasons the
+	// pass never established.
+	PreflightDetection struct {
+		// State is what the detect pass concluded: ok when accelerators were detected,
+		// not-declared when none of this manufacturer's are on the host, and unavailable when the
+		// pass itself could not measure — which says nothing about the hardware either way.
+		State PreflightState `json:"state" yaml:"state"`
+		// Depth is how far this answer was taken.
+		Depth PreflightDepth `json:"depth" yaml:"depth"`
+		// Accelerators is how many the detect pass found, across every group of this manufacturer.
+		Accelerators int `json:"accelerators" yaml:"accelerators"`
+		// Detail is what was detected, in the detector's own words.
+		Detail string `json:"detail,omitempty" yaml:"detail,omitempty"`
+		// Reason is why nothing was detected, or why the pass could not measure. It is empty
+		// exactly when State is PreflightStateOK.
+		Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
+		// Host is what the host's own vendor CLI saw, set only where one could be asked. It is
+		// what separates a machine with no accelerators from a machine with eight that this
+		// container cannot see, which is the single most common bring-up mistake and the one the
+		// detect pass cannot diagnose from inside.
+		Host *PreflightHostView `json:"host,omitempty" yaml:"host,omitempty"`
+	}
+
+	// PreflightHostView is what the host's own vendor CLI reported, read by entering the mounted
+	// host root — so it answers even when this container has no device mounts at all.
+	PreflightHostView struct {
+		// Command is what was run as the host, so a reader can run it themselves.
+		Command string `json:"command" yaml:"command"`
+		// Accelerators is how many the host's own CLI reported.
+		Accelerators int `json:"accelerators" yaml:"accelerators"`
+		// Detail is what that CLI answered, in its own words.
+		Detail string `json:"detail,omitempty" yaml:"detail,omitempty"`
+		// Reason is why the host could not be asked — no host root, no such CLI on the host, or a
+		// CLI that failed. It is empty exactly when the host answered.
+		Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
+		// MissingMounts names what this container would need in order to see what the host sees,
+		// and is set only when the host reported accelerators and the detect pass did not. That is
+		// the whole point of asking: the remedy, not just the discrepancy.
+		MissingMounts []string `json:"missingMounts,omitempty" yaml:"missingMounts,omitempty"`
+	}
+
+	// PreflightCheck is one allocation-time precondition, read on one accelerator.
+	//
+	// The failure is carried as a reason rather than flattened into the state, because the three
+	// states say what kind of answer this was and only the reason says what the driver actually
+	// replied — and an operator acting on the result needs both.
+	PreflightCheck struct {
+		// Accelerator is the ID of the accelerator the precondition was read on.
+		Accelerator string `json:"accelerator" yaml:"accelerator"`
+		// Capability names the precondition, in the manufacturer's own vocabulary.
+		//
+		// It is deliberately the vendor's word rather than a normalized one: an operator debugging
+		// an Ascend node searches for "container-share", not for a name this package invented. What
+		// makes two manufacturers' rows comparable is Mode, not this.
+		Capability string `json:"capability" yaml:"capability"`
+		// Mode is the allocation mode this precondition is a precondition *for*.
+		//
+		// It is what makes a report readable across manufacturers. Capability alone cannot be
+		// compared — "cu-mask-topology" and "container-share" are different words for the same
+		// question, "can this accelerator be logically sliced?" — and without Mode a reader cannot
+		// tell which of them answer the same thing, nor which mode went unanswered on a node.
+		//
+		// A string rather than workercore.DeviceAllocationMode, which is a uint32 with no marshaller
+		// of its own: putting the enum here would print "mode: 3" in a report meant to be read.
+		// Setting it through PreflightModeOf is what keeps the two from drifting.
+		Mode string `json:"mode" yaml:"mode"`
+		// State is what the read concluded.
+		State PreflightState `json:"state" yaml:"state"`
+		// Depth is how far this answer was taken. A preflighter that leaves it unset means the
+		// shallowest, which is the only depth a driver read on its own can reach.
+		Depth PreflightDepth `json:"depth" yaml:"depth"`
+		// Detail is what the driver answered, present when it answered at all. It is what
+		// distinguishes a capability that is on from one that is merely readable.
+		Detail string `json:"detail,omitempty" yaml:"detail,omitempty"`
+		// Reason is why the capability could not be read, or why there is none to read. It is
+		// empty exactly when State is PreflightStateOK.
+		Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
+		// Command is the container step this answer was reached by, printed exactly as it was run
+		// or exactly as it would have been. It is set on an answer a container was involved in,
+		// and is what lets a reader take the step themselves — which is the whole of the answer
+		// when the step was emitted rather than run.
+		Command string `json:"command,omitempty" yaml:"command,omitempty"`
+		// Evidence is what the container printed, carried verbatim. A measured answer is only
+		// worth what was observed, so the observation travels with the verdict rather than being
+		// summarized into it.
+		Evidence string `json:"evidence,omitempty" yaml:"evidence,omitempty"`
+	}
+
+	// PreflightGroup is one manufacturer's answers for every accelerator it was asked about in one
+	// pass.
+	PreflightGroup struct {
+		// Manufacturer is the name of the device manufacturer.
+		Manufacturer string `json:"manufacturer" yaml:"manufacturer"`
+		// Timestamp is the time when the preconditions were read. A preflight reports mutable host
+		// state as it stands, so the reading is only worth what its time claims.
+		Timestamp time.Time `json:"timestamp" yaml:"timestamp"`
+		// Detection is what this manufacturer's detect pass concluded. It is the floor: every
+		// answer below it is meaningless without it, so it is reported even for a manufacturer
+		// nothing else is read for.
+		Detection PreflightDetection `json:"detection" yaml:"detection"`
+		// Checks holds one row per accelerator per precondition, in any order.
+		Checks []PreflightCheck `json:"checks,omitempty" yaml:"checks,omitempty"`
+		// Note says what the checks below cannot: why no driver precondition was read for this
+		// manufacturer, or why the group carries no check at all. A manufacturer with nothing to
+		// check must say so in words, because an empty list alone reads as a pass -- and one that
+		// reads no driver but still produces simulated rows must say so too, because rows alone
+		// read as a driver that answered.
+		Note string `json:"note,omitempty" yaml:"note,omitempty"`
+	}
+
+	// PreflightGroupList represents a list of preflight groups.
+	PreflightGroupList = []PreflightGroup
+
+	// PreflighterOptions represents the options for configuring a preflighter.
+	PreflighterOptions struct {
+		Logger klog.Logger
+		// DryRun withholds every action a preflighter would otherwise take, leaving it a pure read.
+		//
+		// It reaches the manufacturer rather than being handled by the caller because the caller
+		// cannot know which reads are also actions: a capability that is off is asked on, to tell
+		// "off" from "cannot be turned on", and only the manufacturer knows it does that. A
+		// preflighter that skips the ask says so in the row's detail, so a dry run does not read as
+		// a capability that was checked and found working.
+		DryRun bool
+	}
+
+	// AcceleratorPreflighter is an optional companion to Allocator, implemented by every
+	// manufacturer that can answer either half of a preflight: a precondition read through a driver
+	// seam, an injection produced without one being served, or both.
+	//
+	// A manufacturer with no driver seam still implements it, because the injection half needs no
+	// seam -- its PreflightAccelerator returns no checks and a note saying why, and the runner adds
+	// the simulated rows from its responder. What the interface being optional buys is the case
+	// where neither half exists: that manufacturer does not implement it at all, which keeps
+	// "nothing is checked here" a compile-time fact the caller reports in words, rather than a
+	// method that has to answer a hopeful ok at runtime.
+	AcceleratorPreflighter interface {
+		// PreflightAccelerator reads each precondition its manufacturer's allocator would read at
+		// allocation time, over the groups given — which are this manufacturer's and no others.
+		//
+		// It returns no error: every failure belongs to the accelerator it happened on and is
+		// carried as that accelerator's state and reason, so one unreadable device never hides the
+		// rest of the node.
+		PreflightAccelerator(groups DevicesGroupList) PreflightGroup
+	}
+)
+
+const (
+	// PreflightStateOK means the capability was read and the accelerator can serve the mode it
+	// guards. What the capability currently says is in the check's detail: a flag the allocator
+	// turns on itself at allocation time is ok while it is still off.
+	PreflightStateOK PreflightState = "ok"
+	// PreflightStateUnavailable means the driver could not be asked -- an entry point that is
+	// missing, a library that never loaded, a privilege the process does not hold. This is the
+	// state an allocation is refused on, so the reason is the operator's whole lead.
+	PreflightStateUnavailable PreflightState = "unavailable"
+	// PreflightStateNotDeclared means there is no such capability here to read or to set: an API
+	// generation that declares none, or an accelerator whose driver disclaims it. Nothing can fix
+	// it and nothing needs to -- the allocator proceeds without it.
+	PreflightStateNotDeclared PreflightState = "not-declared"
+)
+
+const (
+	// PreflightDepthDeclared means the driver was asked and answered. It is the shallowest depth
+	// and the only one a read on its own can reach: it says what the host claims, not what
+	// happened when something relied on the claim.
+	PreflightDepthDeclared PreflightDepth = "declared"
+	// PreflightDepthSimulated means the allocator's own code produced the artifact and the
+	// artifact was asserted on, while nothing on the hardware changed. What it requires is that
+	// second clause and nothing more: a manufacturer whose allocator reaches a driver to produce an
+	// injection reaches it here too, so that seam is substituted for the pass, while one that
+	// serves an allocation out of paths and a request touches nothing to begin with and reaches
+	// this depth with no seam to substitute.
+	PreflightDepthSimulated PreflightDepth = "simulated"
+	// PreflightDepthMeasured means something ran and was observed. It is the only depth that
+	// establishes a behavior rather than predicting it.
+	PreflightDepthMeasured PreflightDepth = "measured"
+)
+
+// PreflightModeUnnamed is what a check that named no allocation mode carries. It is a value rather
+// than an empty string so a reader sees the gap instead of a blank column, and so it can never be
+// mistaken for a mode a manufacturer actually established.
+const PreflightModeUnnamed = "unnamed"
+
+// PreflightModeOf renders an allocation mode the way a preflight report names it: lower case, in the
+// same register as the states and depths beside it.
+//
+// It exists so the report and the allocator cannot drift. workercore.DeviceAllocationMode is a
+// uint32 whose String() is the single source of these names, and going through it means a mode
+// renamed there is renamed here — where writing the strings by hand would leave a report naming a
+// mode the allocator no longer has.
+func PreflightModeOf(mode workercore.DeviceAllocationMode) string {
+	if mode == workercore.DeviceAllocationModeNone {
+		return PreflightModeUnnamed
+	}
+	return strings.ToLower(mode.String())
+}

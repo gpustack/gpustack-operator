@@ -121,7 +121,8 @@ dependencies.
 ## `docs/operation/*.md`
 
 **Owns** — administrator procedures: what to run, in what order, and how to verify. Today: high
-availability, the NVIDIA MIG runbook, and `thead-mig.md` — MIG is T-Head's own word for its
+availability, `preflight.md` — the one-container run that says what a bare node can detect, slice and
+manage — the NVIDIA MIG runbook, and `thead-mig.md` — MIG is T-Head's own word for its
 partitioning, as `hgml.GetMigMode()` and the `alibabacloud.com/ppu.partitioned.mig-<profile>` key both
 show, so the page is named for it too.
 
@@ -138,10 +139,18 @@ transition, so do not "modernize" its version numbers.
 
 ## `docs/reference/*.md`
 
-**Owns** — lookup tables with provenance. Today: the per-product unit-resources presets.
+**Owns** — lookup tables with provenance. Today: the per-product unit-resources presets
+(`instance-type-unit-resources.md`), and every command the binary offers with its flags and exit
+codes (`commands.md`).
+
+**Not** — `commands.md` states what a flag does, not when to reach for the command. The procedure a
+one-shot belongs to lives on its operator page (`docs/operation/preflight.md` for `device-manager
+preflight`), and the reference row links to it rather than restating it.
 
 **Pinned** — `instance-type-unit-resources.md` is matched row-by-row by `TestUnitResourcesPresetDocs`,
-by path. Do not rename it or reshape its tables.
+by path. Do not rename it or reshape its tables. `commands.md` has no test behind it: its flag tables
+are only as true as the last person who ran `--help`, so change a flag and change the row in the same
+commit.
 
 **Rule** — these pages are exempt from the ten-`##` cap: a lookup page is meant to be flat.
 
