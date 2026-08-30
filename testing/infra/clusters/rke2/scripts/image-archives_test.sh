@@ -87,6 +87,16 @@ publish() {
   done) >"$serve/sha256sum-${arch}.txt" 2>/dev/null
 }
 
+# Publishes what the cn mirror's copy of a release directory actually holds: everything the
+# release has EXCEPT the rke2-images archives. The anchor is built while they are still there --
+# the mirror's checksum file is byte-identical to GitHub's, so it still LISTS the archives it
+# does not serve, which is what lets cn mode verify a pre-placed official archive against it.
+publish_cn() {
+  local arch="$1"
+  publish "$arch"
+  rm -f "$serve"/rke2-images*.tar.zst "$serve"/rke2-images*.tar.gz
+}
+
 # run <subcommand> [machine] [extra args...]
 run() {
   local sub="$1" machine="${2:-x86_64}"
@@ -415,44 +425,64 @@ assert_contains "default urls -> installer from get.rke2.io" "$(cat "$calls")" "
 assert_not_contains "default urls -> nothing from the cn mirror" "$(cat "$calls")" "rancher-mirror.rancher.cn"
 drop_world
 
-# 20. --mirror cn: the same assets (same names, hence the same cache layout) come from
-#     rancher-mirror.rancher.cn instead -- under the tag with '+' percent-encoded as %2D -- the
-#     CNI extra included, and the installer from the mirror's own copy. Nothing at all may be
-#     fetched from github.com or get.rke2.io, which are exactly the hosts a CN node cannot reach.
+# 20. --mirror cn: the mirror carries no rke2-images archives, so fetch brings in only the
+#     checksum anchor, the binary tarball and the installer -- under the tag with '+'
+#     percent-encoded as %2D. Nothing at all may be fetched from github.com or get.rke2.io,
+#     which are exactly the hosts a CN node cannot reach, and no rke2-images name may be
+#     requested: the mirror answers 404 for all of them. The system images come from the
+#     configured system-default-registry instead, which the module requires alongside cn.
 new_world
-publish amd64
+publish_cn amd64
 run fetch x86_64 --cni calico --mirror cn
 assert_eq "cn mirror -> exits 0" "$?" "0"
 assert_contains "cn mirror -> anchor from mirror, tag '+'->'%2D'" "$(cat "$calls")" \
   "https://rancher-mirror.rancher.cn/rke2/releases/download/v1.34.9%2Drke2r1/sha256sum-amd64.txt"
-assert_contains "cn mirror -> core archive from mirror" "$(cat "$calls")" \
-  "https://rancher-mirror.rancher.cn/rke2/releases/download/v1.34.9%2Drke2r1/rke2-images.linux-amd64.tar.zst"
-assert_contains "cn mirror -> cni extra from mirror" "$(cat "$calls")" \
-  "https://rancher-mirror.rancher.cn/rke2/releases/download/v1.34.9%2Drke2r1/rke2-images-calico.linux-amd64.tar.zst"
 assert_contains "cn mirror -> binary tarball from mirror" "$(cat "$calls")" \
   "https://rancher-mirror.rancher.cn/rke2/releases/download/v1.34.9%2Drke2r1/rke2.linux-amd64.tar.gz"
 assert_contains "cn mirror -> installer from mirror" "$(cat "$calls")" \
   "https://rancher-mirror.rancher.cn/rke2/install.sh"
+assert_not_contains "cn mirror -> no image archive requested (the mirror has none)" "$(cat "$calls")" \
+  "rke2-images"
 assert_not_contains "cn mirror -> nothing from github" "$(cat "$calls")" "github.com"
 assert_not_contains "cn mirror -> nothing from get.rke2.io" "$(cat "$calls")" "get.rke2.io"
-assert_dir_holds "cn mirror -> cached under the same names" "$cache" \
-  "install.sh rke2-images-calico.linux-amd64.tar.zst rke2-images.linux-amd64.tar.zst rke2.linux-amd64.tar.gz sha256sum-amd64.txt"
+assert_dir_holds "cn mirror -> cache holds anchor, binary tarball, installer" "$cache" \
+  "install.sh rke2.linux-amd64.tar.gz sha256sum-amd64.txt"
 
-# 21. The artifacts and stage phases run off the mirror-filled cache unchanged, and a warm cache
-#     downloads nothing in cn mode either -- the mirror's checksums are the same bytes as
-#     github's, so a cache warmed in one mode verifies cleanly in the other.
+# 21. artifacts hands the installer exactly the anchor and the binary tarball, and stage
+#     tolerates an images directory left empty -- in cn mode the system images are pulled from
+#     the system-default-registry by design, so an empty staging is success, not the silent
+#     regression it is in default mode. Pre-placed archives are still staged, and a warm cache
+#     downloads nothing.
 run artifacts x86_64 --cni calico --staging-dir "$staging" --mirror cn
 assert_eq "cn artifacts -> exits 0" "$?" "0"
-assert_dir_holds "cn artifacts -> the installer gets the same allowlist" "$staging" \
-  "rke2-images-calico.linux-amd64.tar.zst rke2-images.linux-amd64.tar.zst rke2.linux-amd64.tar.gz sha256sum-amd64.txt"
+assert_dir_holds "cn artifacts -> the installer gets anchor + binary only" "$staging" \
+  "rke2.linux-amd64.tar.gz sha256sum-amd64.txt"
 run stage x86_64 --mirror cn
-assert_eq "cn stage -> exits 0" "$?" "0"
-assert_dir_holds "cn stage -> archives staged" "$images" \
-  "rke2-images-calico.linux-amd64.tar.zst rke2-images.linux-amd64.tar.zst"
+assert_eq "cn stage -> exits 0 with an empty images dir" "$?" "0"
+assert_dir_holds "cn stage -> nothing staged" "$images" ""
+printf 'our-own-images' >"$cache/gpustack-images.tar.zst"
+run stage x86_64 --mirror cn
+assert_eq "cn stage with a pre-placed archive -> exits 0" "$?" "0"
+assert_file "cn stage -> pre-placed archive still staged" "$images/gpustack-images.tar.zst"
 : >"$calls"
 run fetch x86_64 --cni calico --mirror cn
 assert_eq "cn warm cache -> exits 0" "$?" "0"
 assert_eq "cn warm cache -> zero downloads" "$(wc -l <"$calls" | tr -d ' ')" "0"
+
+# The cn anchor still LISTS the rke2-images archives it does not serve (it is byte-identical to
+# GitHub's), so a pre-placed OFFICIAL archive is verified against it before staging: intact bytes
+# are staged as verified, corrupt ones are refused by digest -- a name match alone must never be
+# enough, or a tampered archive would be imported at every RKE2 start.
+printf 'core-images-amd64' >"$cache/rke2-images.linux-amd64.tar.zst"
+run stage x86_64 --mirror cn
+assert_eq "cn stage -> intact pre-placed official archive exits 0" "$?" "0"
+assert_contains "cn stage -> intact pre-placed official archive staged verified" "$(cat "$world/out")" \
+  "rke2-images.linux-amd64.tar.zst -- verified"
+printf 'tampered' >"$cache/rke2-images.linux-amd64.tar.zst"
+rm -f "$images/rke2-images.linux-amd64.tar.zst"
+assert_run_fails "cn stage -> corrupt pre-placed official archive refused" stage x86_64 --mirror cn
+assert_contains "cn stage -> names the failed digest" "$(cat "$world/err")" "does not match its published sha256"
+assert_no_file "cn stage -> corrupt archive never staged" "$images/rke2-images.linux-amd64.tar.zst"
 drop_world
 
 # 22. An unknown mirror is refused up front, before anything is created or fetched.

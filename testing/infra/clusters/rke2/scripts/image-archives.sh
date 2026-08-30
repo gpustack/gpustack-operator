@@ -7,19 +7,23 @@
 #   image-archives.sh artifacts --release <tag> --cache-dir <dir> --staging-dir <dir> [--cni <name>] [--mirror cn]
 #   image-archives.sh stage     --release <tag> --cache-dir <dir> [--mirror cn]
 #
-# With --mirror cn every download comes from rancher-mirror.rancher.cn instead: the release
-# assets from the mirror's copy of the release directory (same asset names, byte-identical
-# checksum files), and the installer from the mirror's own copy. This is for nodes that cannot
-# reach github.com or get.rke2.io. The installer's own INSTALL_RKE2_MIRROR parameter is
-# deliberately not used: the upstream and CN-hosted install.sh variants differ, and a node may
-# already hold a cached script of either variant, so mirror downloads are done here instead.
+# With --mirror cn every download comes from rancher-mirror.rancher.cn instead: the checksum
+# anchor and the binary tarball from the mirror's copy of the release directory, and the
+# installer from the mirror's own copy. The mirror carries no rke2-images archives at all, so cn
+# mode fetches none -- the system images are pulled from the system-default-registry instead,
+# which the module requires alongside --mirror cn. This is for nodes that cannot reach
+# github.com or get.rke2.io. The installer's own INSTALL_RKE2_MIRROR parameter is deliberately
+# not used: the upstream and CN-hosted install.sh variants differ, and a node may already hold a
+# cached script of either variant, so mirror downloads are done here instead.
 #
 # The cache is <cache-dir>/<release>: one directory per release tag, which is what makes a
 # version-skewed install unreachable rather than merely detectable -- what the installer is given
 # for a release can only come from that release's own directory, and what gets downloaded comes
 # from that release's own published assets. It is find-or-fetch, so a warm cache downloads nothing
-# and a node with the files pre-placed (the checksum file included) needs no network at all. It is
-# never pruned and never rewritten -- only added to.
+# and a node with the files pre-placed (the checksum file included) needs no network at all -- in
+# cn mode that guarantee covers THIS SCRIPT's downloads only: the cache holds no image archives by
+# design, and the install still pulls the system images from the configured system-default-registry
+# at runtime. It is never pruned and never rewritten -- only added to.
 #
 # Three phases rather than one, because the installer sits between them:
 #
@@ -237,10 +241,16 @@ pick_archive() {
 # canal needs, while calico/cilium/flannel each need a whole stack of their own images that live
 # only in their own archive. Caching the default set alone with cni=calico means the apply
 # succeeds and the entire Calico stack is pulled from a registry.
+#
+# In cn mode both stay empty: the mirror publishes no rke2-images archives, and the system images
+# are pulled from the configured system-default-registry instead. A pre-placed archive still
+# reaches the node through the stage phase's glob, untouched by this.
 resolve_names() {
   [ -s "${cache}/${checksums}" ] || fetch_checksums
-  core_archive="$(pick_archive "rke2-images.linux-${arch}")"
+  core_archive=""
   cni_archive=""
+  [ "$mirror" = cn ] && return 0
+  core_archive="$(pick_archive "rke2-images.linux-${arch}")"
   case "$cni" in
   calico | cilium | flannel) cni_archive="$(pick_archive "rke2-images-${cni}.linux-${arch}")" ;;
   esac
@@ -380,7 +390,7 @@ cmd_stage() {
   [ -d "$cache" ] || die "no cache at ${cache}"
   mkdir -p "$IMAGES_DIR"
 
-  local path name dest verified staged=0 present=0
+  local path name dest expected verified staged=0 present=0
   # *.txt is deliberately absent from these globs. In the cache a .txt is metadata (checksums,
   # image lists); in the images directory it means "pull every image named in me through the CRI
   # API" -- the exact opposite of importing locally.
@@ -404,7 +414,14 @@ cmd_stage() {
       present=$((present + 1))
       continue
     fi
-    if [ -n "$(checksum_lookup "$name")" ]; then
+    expected="$(checksum_lookup "$name")"
+    if [ -n "$expected" ]; then
+      # A published name is not proof of the bytes: in cn mode a pre-placed official archive
+      # reaches here without fetch ever having hashed it, and staging a corrupt one breaks image
+      # import at every RKE2 start. The anchor is fresh by now -- fetch refreshes it whenever an
+      # artifact disagrees with it -- so a mismatch is the file's fault, not the list's.
+      [ "$(sha256_of "$path")" = "$expected" ] ||
+        die "${name} does not match its published sha256 in ${checksums}: refusing to stage a corrupt archive"
       verified=verified
     else
       # An operator's own bundle has no published digest. Demanding one would break the
@@ -418,9 +435,17 @@ cmd_stage() {
 
   # An images directory left empty is the one state in which this feature reports success while
   # every image is still pulled from a registry -- and the installer's own airgap step returns
-  # silently in exactly that case, so it cannot be relied on to have said anything.
-  [ "$((staged + present))" -gt 0 ] ||
-    die "no image archive landed in ${IMAGES_DIR}: neither the installer nor ${cache} put one there, so every image would be pulled from a registry"
+  # silently in exactly that case, so it cannot be relied on to have said anything. In cn mode an
+  # empty staging is the design rather than the failure: the mirror carries no image archives,
+  # and the system images are pulled from the system-default-registry the module requires
+  # alongside it.
+  if [ "$((staged + present))" -eq 0 ]; then
+    if [ "$mirror" = cn ]; then
+      log "no image archive staged; in cn mode the system images come from the configured system-default-registry by design"
+    else
+      die "no image archive landed in ${IMAGES_DIR}: neither the installer nor ${cache} put one there, so every image would be pulled from a registry"
+    fi
+  fi
 
   log "${cache} staged into ${IMAGES_DIR}: ${staged} archive(s) copied, ${present} already present"
 }
