@@ -213,6 +213,9 @@ func init() {
 		// T-Head PPU carves an accelerator into GPU instances under the same feature name its
 		// own management library and CLI use, so it shares the word rather than coining one.
 		ManufacturerTHead: "mig",
+		// Hygon DCU does the same, and goes further: its management library exports the feature
+		// under NVML's own symbol names, and its profiles are reported as "MIG 2g.15gb".
+		ManufacturerHygon: "mig",
 	}
 	for _, manufacturer := range maps.Keys(_ManufacturerPartitionKindMap) {
 		// Extract the hardware partitioning name from environment variable if exists,

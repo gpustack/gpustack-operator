@@ -122,6 +122,22 @@ func (l *DMI) GetDeviceHandleByIndex(index uint32) (Device, Return) {
 	return Device{handle: handle, lib: l}, ret
 }
 
+// GetDeviceHandleByPciBusId returns a handle for the physical DCU at a PCI address.
+//
+// This is how a caller holding an identity from another library -- RSMI's, which is what the rest of
+// the Hygon detector enumerates by -- reaches the same card here. It is the only such bridge that
+// works: this library's own PCI query returns success and writes an empty string, its UUID lookup
+// answers NOT_SUPPORTED, and it has no GetUUID at all.
+//
+// The address must be domain-qualified, "0000:09:00.0" rather than "09:00.0"; the short form is
+// refused with INVALID_ARGUMENT. RSMI's GetPciId already renders the long form. An address no card
+// answers for is NOT_FOUND, which is a clean absence rather than a fault.
+func (l *DMI) GetDeviceHandleByPciBusId(pciBusID string) (Device, Return) {
+	var handle dmiDevice
+	ret := nvmlDeviceGetHandleByPciBusId(pciBusID, &handle)
+	return Device{handle: handle, lib: l}, ret
+}
+
 // IsSuccess reports whether the call succeeded.
 func (r Return) IsSuccess() bool {
 	return r == SUCCESS
