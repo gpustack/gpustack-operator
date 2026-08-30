@@ -363,6 +363,20 @@ func (p *Preflighter) measureAccelerator(
 
 	probe, known := sliceProbes[manufacturer]
 	if !known {
+		// The one place an empty injection has to be caught, because it is the only place nothing
+		// else would. A manufacturer with a container probe is covered downstream -- an injection
+		// mounting no shared object fails the load clause, and one carrying no cap fails the quota
+		// clause -- but this branch reports what the responder produced without ever looking at it,
+		// so a responder regression returning an empty response comes back as `ok` under a detail
+		// saying the allocator produced the slice injection. It produced nothing, and a container
+		// granted this slice would hold the accelerator with none of the slicing applied.
+		if injectsNothing(injection) {
+			return unreachablePair(accel.ID, device.PreflightStateUnavailable,
+				device.PreflightDepthSimulated, "",
+				"the allocator produced an injection for this slice that carries no environment "+
+					"variable, mount, device or annotation, so a container granted it would receive "+
+					"nothing that bounds it")
+		}
 		return unreachablePair(accel.ID, device.PreflightStateOK, device.PreflightDepthSimulated,
 			"the allocator produced the slice injection; no container probe has been established for "+
 				manufacturer+", so what the slice looks like from inside it was not observed", "")
@@ -948,6 +962,21 @@ func judgeProbeOutput(
 	}
 
 	return []device.PreflightCheck{loaded, quota}
+}
+
+// injectsNothing reports whether an injection carries nothing at all, on any of the four channels a
+// device plugin has to reach a container with.
+//
+// All four rather than the one a given manufacturer happens to use: which channel carries a slice
+// differs per vendor -- environment variables for three of them, a rendered file's mount for two,
+// device nodes for every one -- and this is asked exactly where the vendor is one this package has
+// no probe for, so it cannot know which to expect. What it can say is that a response reaching a
+// container with none of them applies nothing.
+func injectsNothing(injection *deviceplugin.ContainerAllocateResponse) bool {
+	return len(injection.GetEnvs()) == 0 &&
+		len(injection.GetMounts()) == 0 &&
+		len(injection.GetDevices()) == 0 &&
+		len(injection.GetAnnotations()) == 0
 }
 
 // injectedObjects counts the shared objects an injection mounts into the container.

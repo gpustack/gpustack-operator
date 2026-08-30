@@ -953,6 +953,35 @@ func TestMeasureSliced_Fallbacks(t *testing.T) {
 		}
 	})
 
+	// The same path, with a responder that produced a response carrying nothing. It is the one place
+	// an empty injection is not caught downstream: a manufacturer with a probe fails the load or the
+	// quota clause on it, while this branch reports what the responder produced without looking at
+	// it. Reported ok, a responder regression leaves the node passing under a detail saying the
+	// allocator produced the slice injection, and a container granted that slice holds the whole
+	// accelerator.
+	t.Run("an injection carrying nothing is a failure, not a simulation", func(t *testing.T) {
+		root := fakeHostRoot(t)
+		host, asked := answeringHost(root, "", nil)
+		p := &Preflighter{host: host, runtime: &hostRuntime{Name: "docker"}}
+
+		metax := ascendGroups()
+		metax[0].Manufacturer = nodefeature.ManufacturerMetaX
+
+		checks := p.measureSliced(context.Background(), nodefeature.ManufacturerMetaX,
+			&fakeInjector{build: func(_, _, _ string) *deviceplugin.ContainerAllocateResponse {
+				return &deviceplugin.ContainerAllocateResponse{}
+			}}, p.stageLibFor(nodefeature.ManufacturerMetaX), metax)
+
+		require.Len(t, checks, 2)
+		assert.Empty(t, *asked, "nothing is started for a manufacturer with no probe")
+		for _, c := range checks {
+			assert.Equal(t, device.PreflightStateUnavailable, c.State)
+			assert.Equal(t, device.PreflightDepthSimulated, c.Depth)
+			assert.Contains(t, c.Reason, "carries no environment variable, mount, device or annotation")
+			assert.Empty(t, c.Detail)
+		}
+	})
+
 	t.Run("libraries that could not be staged stop at simulated", func(t *testing.T) {
 		stagedImageLib(t, "some-other-manufacturer")
 		host, asked := answeringHost(fakeHostRoot(t), "", nil)
