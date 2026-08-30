@@ -127,10 +127,26 @@ func newPreflightCommand() *cobra.Command {
 				return fmt.Errorf("apply config: %w", err)
 			}
 
+			groups := p.PreflightAccelerator(ctx)
+
+			// An interrupted pass is not a verdict about the hardware. This context is the process
+			// signal handler's, so Ctrl-C or a SIGTERM cancels it, and every command the measuring
+			// path runs is an exec.CommandContext -- its children are killed, their failures read as
+			// containers that could not answer, and the accelerators they were asking about come out
+			// `unavailable`. Reported, that is a document saying this node cannot slice, and a
+			// non-zero exit for a script to act on, produced by the operator pressing Ctrl-C.
+			//
+			// So the cancellation is answered instead of the rows. It is checked after the pass
+			// rather than before, because a pass that finished before the signal arrived has a real
+			// answer and should still print it.
+			if err = ctx.Err(); err != nil {
+				return fmt.Errorf("preflight was interrupted before it could report: %w", err)
+			}
+
 			// Every manufacturer is reported, including the ones nothing was read for, so the
 			// result never has to be read as a pass by omission. Reporting also decides the exit
 			// code, which is what a script reads instead of the document.
-			return preflight.Report(os.Stdout, p.PreflightAccelerator(ctx))
+			return preflight.Report(os.Stdout, groups)
 		},
 	}
 
