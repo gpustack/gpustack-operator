@@ -297,11 +297,16 @@ variable "system_default_registry" {
   default     = ""
 
   validation {
-    # Written into the config.yaml each node gets through a single-quoted printf, so the character
-    # set is the boundary. RKE2 accepts only an RFC 3986 authority here -- host[:port], no path --
-    # so the colon is allowed for a port and the slash is not.
-    condition     = var.system_default_registry == "" || can(regex("^[A-Za-z0-9._:-]+$", var.system_default_registry))
-    error_message = "system_default_registry must be a registry host[:port] made of [A-Za-z0-9._:-] (it is written into the node's config.yaml), or empty."
+    # Written double-quoted into the config.yaml each node gets through a single-quoted printf,
+    # so both quote characters are excluded. RKE2 accepts only an RFC 3986 authority here: a
+    # hostname/IPv4 or a bracketed IPv6 literal, with an optional numeric port; no path. A bracketed
+    # value must also parse as a real IPv6 address (checked via cidrhost), so [::::] fails.
+    condition = var.system_default_registry == "" || (
+      can(regex("^[A-Za-z0-9._-]+(:[0-9]+)?$", var.system_default_registry)) ||
+      (can(regex("^\\[[0-9A-Fa-f:]+\\](:[0-9]+)?$", var.system_default_registry)) &&
+      can(cidrhost("${regex("\\[([0-9A-Fa-f:]+)\\]", var.system_default_registry)[0]}/128", 0)))
+    )
+    error_message = "system_default_registry must be a registry host[:port] -- a hostname/IPv4 or bracketed IPv6 literal, optional numeric port (it is written into the node's config.yaml), or empty."
   }
 }
 
