@@ -50,11 +50,11 @@ func GetMutatingWebhookConfiguration(n string, c v1.WebhookClientConfig) *v1.Mut
 }
 
 func (*DummyReconciler) ValidatePath() string {
-	return "/validate-samplecontroller-seal-io-v1-dummy"
+	return "/validate-test-samplecontroller-seal-io-v1-dummy"
 }
 
 func vwh_webhook_gen_generators_testdata_webhook_gen_DummyReconciler(c v1.WebhookClientConfig) v1.ValidatingWebhook {
-	path := "/validate-samplecontroller-seal-io-v1-dummy"
+	path := "/validate-test-samplecontroller-seal-io-v1-dummy"
 
 	cc := c.DeepCopy()
 	if cc.Service != nil {
@@ -64,7 +64,7 @@ func vwh_webhook_gen_generators_testdata_webhook_gen_DummyReconciler(c v1.Webhoo
 	}
 
 	return v1.ValidatingWebhook{
-		Name:         "validate.samplecontroller.seal.io.v1.dummy",
+		Name:         "validate.test.samplecontroller.seal.io.v1.dummy",
 		ClientConfig: *cc,
 		Rules: []v1.RuleWithOperations{
 			{
@@ -120,11 +120,11 @@ func vwh_webhook_gen_generators_testdata_webhook_gen_DummyReconciler(c v1.Webhoo
 }
 
 func (*DummyReconciler) DefaultPath() string {
-	return "/mutate-samplecontroller-seal-io-v1-dummy"
+	return "/mutate-test-samplecontroller-seal-io-v1-dummy"
 }
 
 func mwh_webhook_gen_generators_testdata_webhook_gen_DummyReconciler(c v1.WebhookClientConfig) v1.MutatingWebhook {
-	path := "/mutate-samplecontroller-seal-io-v1-dummy"
+	path := "/mutate-test-samplecontroller-seal-io-v1-dummy"
 
 	cc := c.DeepCopy()
 	if cc.Service != nil {
@@ -134,7 +134,7 @@ func mwh_webhook_gen_generators_testdata_webhook_gen_DummyReconciler(c v1.Webhoo
 	}
 
 	return v1.MutatingWebhook{
-		Name:         "mutate.samplecontroller.seal.io.v1.dummy",
+		Name:         "mutate.test.samplecontroller.seal.io.v1.dummy",
 		ClientConfig: *cc,
 		Rules: []v1.RuleWithOperations{
 			{
