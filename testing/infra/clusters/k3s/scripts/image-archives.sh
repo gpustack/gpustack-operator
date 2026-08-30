@@ -275,19 +275,37 @@ mkdir -p "$cache"
 
 # k3s publishes .tar, .tar.gz and .tar.zst of the same images. The checksum file decides which
 # one to take, rather than a hardcoded suffix that would reject a release publishing only
-# another; zst first because it is the smallest.
+# another; zst first because it is the smallest. The cn mirror serves only the .tar.gz -- its
+# copy of the checksum anchor still lists all three -- so in cn mode the gz is preferred, and
+# the rest stay as fallbacks for a mirror that one day carries them.
+archive_suffixes=".tar.zst .tar.gz .tar"
+[ "$mirror" = cn ] && archive_suffixes=".tar.gz .tar.zst .tar"
+# A cached archive whose digest already matches the anchor wins over the mode's download
+# preference: the mirror's checksums are the same bytes as github's, so a cache warmed in one
+# mode serves the other without re-downloading the same images in the other compression.
 archive=""
 for suffix in .tar.zst .tar.gz .tar; do
-  if [ -n "$(checksum_lookup "k3s-airgap-images-${arch}${suffix}")" ]; then
-    archive="k3s-airgap-images-${arch}${suffix}"
+  name="k3s-airgap-images-${arch}${suffix}"
+  [ -f "${cache}/${name}" ] || continue
+  expected="$(checksum_lookup "$name")"
+  if [ -n "$expected" ] && [ "$(sha256_of "${cache}/${name}")" = "$expected" ]; then
+    archive="$name"
     break
   fi
 done
 if [ -z "$archive" ]; then
+  for suffix in $archive_suffixes; do
+    if [ -n "$(checksum_lookup "k3s-airgap-images-${arch}${suffix}")" ]; then
+      archive="k3s-airgap-images-${arch}${suffix}"
+      break
+    fi
+  done
+fi
+if [ -z "$archive" ]; then
   # Neither listed: the anchor itself may be truncated, or from another release. Refresh it
   # once before concluding the release has no such asset.
   refresh_checksums
-  for suffix in .tar.zst .tar.gz .tar; do
+  for suffix in $archive_suffixes; do
     if [ -n "$(checksum_lookup "k3s-airgap-images-${arch}${suffix}")" ]; then
       archive="k3s-airgap-images-${arch}${suffix}"
       break
@@ -328,7 +346,14 @@ for path in "$cache"/*.tar "$cache"/*.tar.gz "$cache"/*.tar.zst; do
     present=$((present + 1))
     continue
   fi
-  if [ -n "$(checksum_lookup "$name")" ]; then
+  expected="$(checksum_lookup "$name")"
+  if [ -n "$expected" ]; then
+    # A published name is not proof of the bytes: the selection above hashes only the archive it
+    # picks, so a cached official compression whose digest failed is still sitting here -- and
+    # staging a corrupt archive breaks the import at every k3s start. The anchor is fresh by now
+    # (it is refreshed whenever an artifact disagrees with it), so a mismatch is the file's fault.
+    [ "$(sha256_of "$path")" = "$expected" ] ||
+      die "${name} does not match its published sha256 in ${checksums}: refusing to stage a corrupt archive"
     verified=verified
   else
     # An operator's own bundle has no published digest. Demanding one would break the

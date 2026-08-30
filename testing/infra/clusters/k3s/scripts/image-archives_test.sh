@@ -276,6 +276,21 @@ assert_contains "operator extra -> logged unverified" "$(cat "$world/out")" "gpu
 assert_contains "operator extra -> published archive still logged verified" "$(cat "$world/out")" "k3s-airgap-images-amd64.tar.zst -- verified"
 drop_world
 
+# 6a. A mixed cache -- one official compression corrupt, another intact -- must not stage the
+#     corrupt one on its name alone: the selection hashes only the archive it picks, so the
+#     failing compression is still sitting in the cache, and staging it would break the import
+#     at every k3s start.
+new_world
+publish amd64 "k3s-airgap-images-amd64.tar.zst:zst-images" "k3s-airgap-images-amd64.tar.gz:gz-images"
+mkdir -p "$cache"
+cp "$serve/sha256sum-amd64.txt" "$serve/k3s-airgap-images-amd64.tar.gz" "$cache/"
+printf 'tampered' >"$cache/k3s-airgap-images-amd64.tar.zst"
+assert_run_fails "mixed cache -> corrupt official compression refused" x86_64
+assert_contains "mixed cache -> names the failed digest" "$(cat "$world/err")" "does not match its published sha256"
+assert_no_file "mixed cache -> corrupt archive never staged" "$images/k3s-airgap-images-amd64.tar.zst"
+assert_file "mixed cache -> intact compression still staged" "$images/k3s-airgap-images-amd64.tar.gz"
+drop_world
+
 # 7. A leftover partial from an interrupted run is neither staged nor mistaken for an
 #    artifact. This is why downloads are named partial.<name> and not <name>.partial: the
 #    latter would be swept up by any *.tar* glob.
@@ -458,29 +473,40 @@ drop_world
 # 20. --mirror cn: the same assets (same names, hence the same cache layout) come from
 #     rancher-mirror.rancher.cn instead -- under the tag with '+' spelled '-', and the installer
 #     from the mirror's own copy. Nothing at all may be fetched from github.com or get.k3s.io,
-#     which are exactly the hosts a CN node cannot reach.
+#     which are exactly the hosts a CN node cannot reach. The mirror serves only the .tar.gz of
+#     the airgap images, even though the checksum anchor lists all three compressions, so the gz
+#     must be the one picked even when the anchor also lists the zst.
 new_world
-publish amd64 "k3s-airgap-images-amd64.tar.zst:images"
+publish amd64 "k3s-airgap-images-amd64.tar.zst:zst-images" "k3s-airgap-images-amd64.tar.gz:gz-images"
 run x86_64 --mirror cn
 assert_eq "cn mirror -> exits 0" "$?" "0"
 assert_contains "cn mirror -> anchor from mirror, tag '+'->'-'" "$(cat "$calls")" \
   "https://rancher-mirror.rancher.cn/k3s/v1.34.9-k3s1/sha256sum-amd64.txt"
 assert_contains "cn mirror -> archive from mirror" "$(cat "$calls")" \
-  "https://rancher-mirror.rancher.cn/k3s/v1.34.9-k3s1/k3s-airgap-images-amd64.tar.zst"
+  "https://rancher-mirror.rancher.cn/k3s/v1.34.9-k3s1/k3s-airgap-images-amd64.tar.gz"
+assert_not_contains "cn mirror -> zst skipped (the mirror has none)" "$(cat "$calls")" \
+  "k3s-airgap-images-amd64.tar.zst"
 assert_contains "cn mirror -> binary from mirror" "$(cat "$calls")" \
   "https://rancher-mirror.rancher.cn/k3s/v1.34.9-k3s1/k3s"
 assert_contains "cn mirror -> installer from mirror" "$(cat "$calls")" \
   "https://rancher-mirror.rancher.cn/k3s/k3s-install.sh"
 assert_not_contains "cn mirror -> nothing from github" "$(cat "$calls")" "github.com"
 assert_not_contains "cn mirror -> nothing from get.k3s.io" "$(cat "$calls")" "get.k3s.io"
-assert_file "cn mirror -> archive cached under the same name" "$cache/k3s-airgap-images-amd64.tar.zst"
+assert_file "cn mirror -> archive cached under the same name" "$cache/k3s-airgap-images-amd64.tar.gz"
+assert_file "cn mirror -> gz staged" "$images/k3s-airgap-images-amd64.tar.gz"
 
-# 21. A warm cache downloads nothing in cn mode either -- the mirror's checksums are the same
-#     bytes as github's, so a cache warmed in one mode verifies cleanly in the other.
+# 21. A warm cache downloads nothing in cn mode, and a cn-warmed cache serves a default-mode run
+#     too: the mirror's checksums are the same bytes as github's, so the cached gz verifies
+#     against the default anchor and is reused instead of the zst default mode would otherwise
+#     download.
 : >"$calls"
 run x86_64 --mirror cn
 assert_eq "cn warm cache -> exits 0" "$?" "0"
 assert_eq "cn warm cache -> zero downloads" "$(wc -l <"$calls" | tr -d ' ')" "0"
+run x86_64
+assert_eq "cross-mode warm cache -> exits 0" "$?" "0"
+assert_eq "cross-mode warm cache -> zero downloads (cached gz reused, no zst fetched)" \
+  "$(wc -l <"$calls" | tr -d ' ')" "0"
 drop_world
 
 # 22. An unknown mirror is refused up front, before anything is created or fetched.
