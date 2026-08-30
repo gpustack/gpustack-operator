@@ -13,17 +13,20 @@ type KVCacheBackendMemberStatusApplyConfiguration struct {
 	NodeName *string `json:"nodeName,omitempty"`
 	// Medium is what this member contributes, echoed from the group that selected its node.
 	Medium *string `json:"medium,omitempty"`
-	// Protocol is the transport this member RESOLVED to, which is the requested value only when
-	// that value was not Auto.
+	// Protocol is the transport the LEADER reports this member came up on.
 	//
-	// It is what the LEADER reports for the segment, not what the renderer asked for. The two can
-	// disagree — a member handed an RDMA request on a node whose device is missing comes up on TCP —
-	// and the report is the one that says what the data plane is actually doing.
+	// It is an OBSERVATION throughout, never an echo of spec.transport.protocol, and the two can
+	// disagree: a member handed an RDMA request on a node whose device is missing comes up on TCP.
+	// Read it as what the data plane is doing, and the spec field as what was asked for.
 	Protocol *string `json:"protocol,omitempty"`
 	// State is the member's state AS THE LEADER REPORTS IT, read from the leader's own segment
 	// listing rather than inferred from the member Pod. The states the store defines, in this API's
-	// casing: OK, Draining, Drained, GracefullyUnmounting, Unmounting, Undefined. An empty value
-	// means the leader was not reached — never the same as a state it reported.
+	// casing: OK, Draining, Drained, GracefullyUnmounting, Unmounting, Undefined.
+	//
+	// It carries no "unreached" sentinel, because there is no pass that would write one: a listing
+	// that cannot be read leaves the PREVIOUS entries in place and says so through MembersMounted,
+	// rather than rewriting them as blank. Whether what is here was just refreshed is the
+	// condition's question, and this field never answers it.
 	//
 	// Draining and the two unmounting states are what a shrink passes through, so the field can
 	// distinguish a member on its way out from one that is simply gone. That is the whole reason it

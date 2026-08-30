@@ -1,0 +1,2 @@
+# TYPE master_total_capacity_bytes gauge
+master_total_capacity_bytes not-a-number

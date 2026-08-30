@@ -1,0 +1,22 @@
+# HELP master_total_capacity_bytes Total memory capacity in bytes
+# TYPE master_total_capacity_bytes gauge
+master_total_capacity_bytes 1082331758592
+# HELP master_allocated_bytes Allocated memory in bytes
+# TYPE master_allocated_bytes gauge
+master_allocated_bytes 5476083302
+# HELP master_total_file_capacity_bytes Total file capacity in bytes
+# TYPE master_total_file_capacity_bytes gauge
+master_total_file_capacity_bytes 0
+# HELP master_allocated_file_size_bytes Allocated file size in bytes
+# TYPE master_allocated_file_size_bytes gauge
+master_allocated_file_size_bytes 0
+# HELP master_key_count Number of keys
+# TYPE master_key_count gauge
+master_key_count 1284
+# HELP master_active_clients Number of active clients
+# TYPE master_active_clients gauge
+master_active_clients 2
+# HELP segment_total_capacity_bytes Per-segment capacity
+# TYPE segment_total_capacity_bytes gauge
+segment_total_capacity_bytes{segment="n7-dram"} 541165879296
+segment_total_capacity_bytes{segment="n8-dram"} 541165879296

@@ -9,6 +9,10 @@ package v1alpha1
 // branch's input and the status's output, so a reader learns one shape.
 type KVCacheBackendEndpointApplyConfiguration struct {
 	// Address is host:port.
+	//
+	// 259 and not 253: the bound is on host:port, and the host alone may be a DNS subdomain of the
+	// full 253 characters, which leaves room for a colon and a five-digit port. At 253 the schema
+	// refused an address the webhook's own host:port rule accepts.
 	Address *string `json:"address,omitempty"`
 	// Name says who the address is for, and the two readers want different things. Client is
 	// what an inference engine connects to. Admin is the port serving the Prometheus exposition

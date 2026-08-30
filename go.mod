@@ -24,6 +24,7 @@ require (
 	github.com/akerl/go-indefinite-article v0.0.1
 	github.com/alitto/pond/v2 v2.7.1
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
+	github.com/distribution/reference v0.6.0
 	github.com/evanphx/json-patch v5.9.11+incompatible
 	github.com/go-logr/logr v1.4.3
 	github.com/go-openapi/inflect v0.21.5

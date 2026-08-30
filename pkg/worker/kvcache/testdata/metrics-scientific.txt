@@ -1,0 +1,4 @@
+# TYPE master_total_capacity_bytes gauge
+master_total_capacity_bytes 1.082331758592e+12
+# TYPE master_allocated_bytes gauge
+master_allocated_bytes 5.476083302e+09

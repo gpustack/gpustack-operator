@@ -1,0 +1,6 @@
+# HELP master_total_capacity_bytes Total memory capacity in bytes
+# TYPE master_total_capacity_bytes gauge
+master_total_capacity_bytes 0
+# HELP master_allocated_bytes Allocated memory in bytes
+# TYPE master_allocated_bytes gauge
+master_allocated_bytes 0

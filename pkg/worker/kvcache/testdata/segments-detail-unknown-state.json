@@ -1,0 +1,1 @@
+{"total_segments":1,"segments":[{"segment_name":"n9-dram","segment_id":"9f0b...","client_id":"c5d6...","base_address":"0x7f4e00000000","size_bytes":541165879296,"size_human":"504 GiB","te_endpoint":"10.42.0.13:15002","protocol":"tcp","status":"QUIESCING","allocator_used_bytes":0,"allocator_capacity_bytes":541165879296,"allocator_usage_percent":0.0}]}
