@@ -390,7 +390,7 @@ resource "null_resource" "server_init" {
   # Terraform destroys dependents first -- removed only after every node is gone.
   depends_on = [null_resource.vars_snapshot]
 
-  triggers = {
+  triggers = merge({
     host                    = local.first_server.host
     user                    = local.first_server.user
     port                    = var.server_ssh_port
@@ -413,11 +413,14 @@ resource "null_resource" "server_init" {
     # Tracked so setting or changing the cache re-provisions this node now, rather than taking
     # effect at whatever later reinstall happens to come along.
     image_archives_dir = var.image_archives_dir
+    },
     # Same reason: where the cache is filled from feeds the cache steps, and the registry is
-    # written into this node's config.yaml.
-    mirror                  = var.mirror
-    system_default_registry = var.system_default_registry
-  }
+    # written into this node's config.yaml. A default-valued key is omitted entirely rather than
+    # tracked empty: a key added to triggers replaces -- reinstalls -- every node already in state
+    # from before the key existed.
+    var.mirror == "" ? {} : { mirror = var.mirror },
+    var.system_default_registry == "" ? {} : { system_default_registry = var.system_default_registry },
+  )
 
   lifecycle {
     # Without the cache, the only CN-reachable install path would be the installer's own
@@ -539,7 +542,7 @@ resource "null_resource" "server_join" {
   for_each   = local.join_servers
   depends_on = [null_resource.server_init, null_resource.vars_snapshot]
 
-  triggers = {
+  triggers = merge({
     host         = each.value.host
     user         = each.value.user
     port         = var.server_ssh_port
@@ -559,15 +562,18 @@ resource "null_resource" "server_join" {
     # See server_init: the pre-start Calico manifest makes this a reinstall, not a re-reconcile.
     calico_multi_nic_fix = local.calico_fix_enabled
     image_archives_dir   = var.image_archives_dir
-    # See server_init: mirror feeds the cache steps, and the registry lands in config.yaml.
-    mirror                  = var.mirror
-    system_default_registry = var.system_default_registry
     # The first server owns the datastore and the cluster CA, so a member that outlives a reinstall
     # of it holds credentials for a cluster that no longer exists. Reinstalling it therefore
     # reinstalls every other member too -- including the case a taint causes, where nothing else
     # about this node changed.
     server_init = null_resource.server_init.id
-  }
+    },
+    # See server_init: mirror feeds the cache steps, and the registry lands in config.yaml. A
+    # default-valued key is omitted entirely rather than tracked empty: a key added to triggers
+    # replaces -- reinstalls -- every node already in state from before the key existed.
+    var.mirror == "" ? {} : { mirror = var.mirror },
+    var.system_default_registry == "" ? {} : { system_default_registry = var.system_default_registry },
+  )
 
   lifecycle {
     # See server_init.
@@ -661,7 +667,7 @@ resource "null_resource" "agent" {
   for_each   = local.agent_hosts
   depends_on = [null_resource.server_init, null_resource.vars_snapshot]
 
-  triggers = {
+  triggers = merge({
     host         = each.value.host
     user         = each.value.user
     port         = var.agent_ssh_port
@@ -681,14 +687,17 @@ resource "null_resource" "agent" {
     # route flush can read the CIDR off self.triggers.
     cluster_cidr       = var.cluster_cidr
     image_archives_dir = var.image_archives_dir
-    # See server_init: mirror feeds the cache steps, and the registry lands in this node's
-    # config.yaml (an Agent/Runtime setting, valid on agents too).
-    mirror                  = var.mirror
-    system_default_registry = var.system_default_registry
     # See server_join: an agent that outlives a reinstall of the first server holds credentials for
     # a cluster that no longer exists.
     server_init = null_resource.server_init.id
-  }
+    },
+    # See server_init: mirror feeds the cache steps, and the registry lands in this node's
+    # config.yaml (an Agent/Runtime setting, valid on agents too). A default-valued key is omitted
+    # entirely rather than tracked empty: a key added to triggers replaces -- reinstalls -- every
+    # agent already in state from before the key existed.
+    var.mirror == "" ? {} : { mirror = var.mirror },
+    var.system_default_registry == "" ? {} : { system_default_registry = var.system_default_registry },
+  )
 
   lifecycle {
     # See server_init.
