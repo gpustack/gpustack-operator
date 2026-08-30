@@ -312,9 +312,10 @@ variable "system_default_registry" {
 
   validation {
     # Spliced into the server install command that runs on the node, so the character set is the
-    # boundary; the colon is allowed for a port and the slash for a repository prefix.
-    condition     = var.system_default_registry == "" || can(regex("^[A-Za-z0-9._:/-]+$", var.system_default_registry))
-    error_message = "system_default_registry must be a registry host[:port][/prefix] made of [A-Za-z0-9._:/-] (it is spliced into the server install command), or empty."
+    # boundary. k3s accepts only an RFC 3986 authority here -- host[:port], no path -- so the
+    # colon is allowed for a port and the slash is not.
+    condition     = var.system_default_registry == "" || can(regex("^[A-Za-z0-9._:-]+$", var.system_default_registry))
+    error_message = "system_default_registry must be a registry host[:port] made of [A-Za-z0-9._:-] (it is spliced into the server install command), or empty."
   }
 }
 

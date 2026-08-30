@@ -427,6 +427,14 @@ resource "null_resource" "server_init" {
       condition     = var.mirror != "cn" || var.image_archives_dir != ""
       error_message = "mirror = \"cn\" requires image_archives_dir: without the artifact cache the install would still download from github.com and get.rke2.io."
     }
+    # The cn mirror carries no rke2-images archives, so cn mode stages no system images at all --
+    # they are pulled at runtime, and without a CN-reachable system-default-registry (usually
+    # registry.rancher.cn) that pull would still go to docker.io, the exact host the node cannot
+    # reach. k3s needs no such pairing: its mirror serves the airgap archives itself.
+    precondition {
+      condition     = var.mirror != "cn" || var.system_default_registry != ""
+      error_message = "mirror = \"cn\" requires system_default_registry (usually \"registry.rancher.cn\"): the cn mirror carries no rke2-images archives, so the system images must be pulled from a CN-reachable registry."
+    }
   }
 
   connection {
@@ -567,6 +575,14 @@ resource "null_resource" "server_join" {
       condition     = var.mirror != "cn" || var.image_archives_dir != ""
       error_message = "mirror = \"cn\" requires image_archives_dir: without the artifact cache the install would still download from github.com and get.rke2.io."
     }
+    # The cn mirror carries no rke2-images archives, so cn mode stages no system images at all --
+    # they are pulled at runtime, and without a CN-reachable system-default-registry (usually
+    # registry.rancher.cn) that pull would still go to docker.io, the exact host the node cannot
+    # reach. k3s needs no such pairing: its mirror serves the airgap archives itself.
+    precondition {
+      condition     = var.mirror != "cn" || var.system_default_registry != ""
+      error_message = "mirror = \"cn\" requires system_default_registry (usually \"registry.rancher.cn\"): the cn mirror carries no rke2-images archives, so the system images must be pulled from a CN-reachable registry."
+    }
   }
 
   connection {
@@ -679,6 +695,14 @@ resource "null_resource" "agent" {
     precondition {
       condition     = var.mirror != "cn" || var.image_archives_dir != ""
       error_message = "mirror = \"cn\" requires image_archives_dir: without the artifact cache the install would still download from github.com and get.rke2.io."
+    }
+    # The cn mirror carries no rke2-images archives, so cn mode stages no system images at all --
+    # they are pulled at runtime, and without a CN-reachable system-default-registry (usually
+    # registry.rancher.cn) that pull would still go to docker.io, the exact host the node cannot
+    # reach. k3s needs no such pairing: its mirror serves the airgap archives itself.
+    precondition {
+      condition     = var.mirror != "cn" || var.system_default_registry != ""
+      error_message = "mirror = \"cn\" requires system_default_registry (usually \"registry.rancher.cn\"): the cn mirror carries no rke2-images archives, so the system images must be pulled from a CN-reachable registry."
     }
   }
 

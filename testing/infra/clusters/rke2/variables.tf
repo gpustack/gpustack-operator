@@ -298,9 +298,10 @@ variable "system_default_registry" {
 
   validation {
     # Written into the config.yaml each node gets through a single-quoted printf, so the character
-    # set is the boundary; the colon is allowed for a port and the slash for a repository prefix.
-    condition     = var.system_default_registry == "" || can(regex("^[A-Za-z0-9._:/-]+$", var.system_default_registry))
-    error_message = "system_default_registry must be a registry host[:port][/prefix] made of [A-Za-z0-9._:/-] (it is written into the node's config.yaml), or empty."
+    # set is the boundary. RKE2 accepts only an RFC 3986 authority here -- host[:port], no path --
+    # so the colon is allowed for a port and the slash is not.
+    condition     = var.system_default_registry == "" || can(regex("^[A-Za-z0-9._:-]+$", var.system_default_registry))
+    error_message = "system_default_registry must be a registry host[:port] made of [A-Za-z0-9._:-] (it is written into the node's config.yaml), or empty."
   }
 }
 
