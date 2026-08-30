@@ -560,6 +560,15 @@ func TestActuatePhysicalSliced_RefusesACardWithNoPciAddress(t *testing.T) {
 	assert.Empty(t, drv.created)
 }
 
+// agedReclaimer is a reclaimer whose clock has moved past the grace window, which is how a test
+// asserts what the pass does about records that are no longer new. The window itself has its own
+// test.
+func agedReclaimer(drv migDriver, podsDir string) *migReclaimer {
+	r := newMigReclaimer(drv, podsDir, klog.Background())
+	r.now = func() time.Time { return time.Now().Add(2 * migReclaimGrace) }
+	return r
+}
+
 // Nothing else on the node can free a partition: the device-plugin protocol has no release callback,
 // and this vendor refuses to leave Multi-Instance mode while any instance survives. So what this
 // pass decides is the difference between a node that can be returned to whole-card service and one
@@ -592,7 +601,7 @@ func TestMigReclaimerReconcile(t *testing.T) {
 		record(t, podsDir, "alive", 3)
 		drv := &fakeMigDriver{listed: []migLiveInstance{instance(3)}}
 
-		newMigReclaimer(drv, podsDir, klog.Background()).reconcile([]string{"alive"})
+		agedReclaimer(drv, podsDir).reconcile([]string{"alive"})
 
 		assert.Empty(t, drv.destroyedGiIDs())
 		assert.FileExists(t, migMarkerPath(podsDir, "alive", "ctr", card))
@@ -604,7 +613,7 @@ func TestMigReclaimerReconcile(t *testing.T) {
 		record(t, podsDir, "gone", 4)
 		drv := &fakeMigDriver{listed: []migLiveInstance{instance(3), instance(4)}}
 
-		newMigReclaimer(drv, podsDir, klog.Background()).reconcile([]string{"alive"})
+		agedReclaimer(drv, podsDir).reconcile([]string{"alive"})
 
 		assert.Equal(t, []uint32{4}, drv.destroyedGiIDs())
 		assert.FileExists(t, migMarkerPath(podsDir, "alive", "ctr", card))
@@ -619,7 +628,7 @@ func TestMigReclaimerReconcile(t *testing.T) {
 			inUseGiIDs: map[uint32]bool{4: true},
 		}
 
-		newMigReclaimer(drv, podsDir, klog.Background()).reconcile(nil)
+		agedReclaimer(drv, podsDir).reconcile(nil)
 
 		assert.Empty(t, drv.destroyedGiIDs())
 		assert.FileExists(t, migMarkerPath(podsDir, "gone", "ctr", card),
@@ -635,7 +644,7 @@ func TestMigReclaimerReconcile(t *testing.T) {
 		record(t, podsDir, "gone", 4)
 		drv := &fakeMigDriver{listed: []migLiveInstance{instance(4)}}
 
-		newMigReclaimer(drv, podsDir, klog.Background()).reconcile(nil)
+		agedReclaimer(drv, podsDir).reconcile(nil)
 
 		assert.Equal(t, []uint32{4}, drv.destroyedGiIDs())
 	})
@@ -645,7 +654,7 @@ func TestMigReclaimerReconcile(t *testing.T) {
 		record(t, podsDir, "alive", 3)
 		drv := &fakeMigDriver{listed: []migLiveInstance{instance(3), instance(7)}}
 
-		newMigReclaimer(drv, podsDir, klog.Background()).reconcile([]string{"alive"})
+		agedReclaimer(drv, podsDir).reconcile([]string{"alive"})
 
 		assert.Equal(t, []uint32{7}, drv.destroyedGiIDs())
 	})
@@ -657,7 +666,7 @@ func TestMigReclaimerReconcile(t *testing.T) {
 		require.NoError(t, os.WriteFile(corrupt, []byte("{"), 0o600))
 		drv := &fakeMigDriver{listed: []migLiveInstance{instance(7)}}
 
-		newMigReclaimer(drv, podsDir, klog.Background()).reconcile(nil)
+		agedReclaimer(drv, podsDir).reconcile(nil)
 
 		assert.Empty(t, drv.destroyedGiIDs(),
 			"ownership that cannot be read must not let an instance be taken for an orphan")
@@ -668,7 +677,7 @@ func TestMigReclaimerReconcile(t *testing.T) {
 		record(t, podsDir, "gone", 4)
 		drv := &fakeMigDriver{destroyErr: errors.New("driver is unhappy")}
 
-		newMigReclaimer(drv, podsDir, klog.Background()).reconcile(nil)
+		agedReclaimer(drv, podsDir).reconcile(nil)
 
 		assert.FileExists(t, migMarkerPath(podsDir, "gone", "ctr", card))
 	})
@@ -677,7 +686,7 @@ func TestMigReclaimerReconcile(t *testing.T) {
 		podsDir := t.TempDir()
 		drv := &fakeMigDriver{listErr: errors.New("driver is unhappy")}
 
-		newMigReclaimer(drv, podsDir, klog.Background()).reconcile(nil)
+		agedReclaimer(drv, podsDir).reconcile(nil)
 
 		assert.Empty(t, drv.destroyedGiIDs())
 	})
@@ -711,7 +720,7 @@ func TestMigReclaimerDoesNotCollectAPartitionClaimedMidSweep(t *testing.T) {
 			}))
 	}
 
-	newMigReclaimer(drv, podsDir, klog.Background()).reconcile([]string{"just-admitted"})
+	agedReclaimer(drv, podsDir).reconcile([]string{"just-admitted"})
 
 	assert.Empty(t, drv.destroyedGiIDs(),
 		"a partition claimed while the sweep was deciding must survive it")
@@ -742,4 +751,66 @@ func TestLockMigCardIsKeyedByPciAddress(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("the lock was never released to the waiting holder")
 	}
+}
+
+// A container runtime asked to bind a source path that does not exist CREATES it -- as a directory.
+// So an instance destroyed between its allocation and its container starting leaves a directory
+// sitting on its name in the vendor's registry, and the driver can then never write that name again:
+// creating a compute instance whose id maps to it fails with INSUFFICIENT_RESOURCES. Because ids are
+// handed back out after a destroy, that failure outlives everything that caused it -- observed on a
+// node where two instance ids became permanently uncreatable.
+func TestMigReclaimerSweepsRuntimeDirectories(t *testing.T) {
+	root := t.TempDir()
+	ciDir := filepath.Join(root, "ci")
+	require.NoError(t, os.MkdirAll(ciDir, 0o755))
+
+	// What the runtime leaves, and what the driver leaves, side by side.
+	require.NoError(t, os.MkdirAll(filepath.Join(ciDir, "dev0gi3ci0.conf"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(ciDir, "dev1gi1ci2.conf"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(ciDir, "dev2gi0ci6.conf"),
+		[]byte("mig_uuid: real\n"), 0o600))
+
+	restore := migConfigDir
+	migConfigDir = root
+	t.Cleanup(func() { migConfigDir = restore })
+
+	newMigReclaimer(&fakeMigDriver{}, t.TempDir(), klog.Background()).reconcile(nil)
+
+	left, err := os.ReadDir(ciDir)
+	require.NoError(t, err)
+	names := make([]string, 0, len(left))
+	for _, e := range left {
+		names = append(names, e.Name())
+	}
+	assert.Equal(t, []string{"dev2gi0ci6.conf"}, names,
+		"every runtime-made directory must go and the driver's own record must stay")
+}
+
+// The live Pod set a pass is handed is a SNAPSHOT, and a record written after it was taken cannot be
+// judged by it: the Pod is live, it is simply not in the set yet. Measured with three Pods admitted
+// together, all three had their instance destroyed and their record removed while they were
+// starting, and all three then resolved to the same stale partition. A record is written before the
+// allocation annotation the snapshot is built from, so its own age is the only signal available.
+func TestMigReclaimerLeavesAFreshRecordAlone(t *testing.T) {
+	const card = "GPU-abc"
+	bdf := testCard().PciBusID
+	podsDir := t.TempDir()
+
+	require.NoError(t, writeMigMarker(
+		migMarkerPath(podsDir, "just-admitted", "main", card),
+		migMarker{
+			PodUID: "just-admitted", Container: "main", Card: card, PciBusID: bdf,
+			Profile: "2g.15gb", ProfileID: 3, GiID: 4, MigUUID: "u4",
+			ConfPath: "/etc/dmi_mig_config/ci/dev0gi4ci0.conf", Start: 1, Length: 1,
+		}))
+	drv := &fakeMigDriver{listed: []migLiveInstance{{PciBusID: bdf, Instance: migInstance{
+		GiID: 4, ProfileID: 3, Placement: migPlacement{1, 1}, UUID: "u4",
+	}}}}
+
+	// The Pod is absent from the set, which is exactly the state a just-admitted Pod is in.
+	newMigReclaimer(drv, podsDir, klog.Background()).reconcile(nil)
+
+	assert.Empty(t, drv.destroyedGiIDs(),
+		"a record younger than the grace window must survive a snapshot that predates it")
+	assert.FileExists(t, migMarkerPath(podsDir, "just-admitted", "main", card))
 }

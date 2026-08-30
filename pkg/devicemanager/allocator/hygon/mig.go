@@ -27,6 +27,15 @@ const migMarkerName = "hygon-mig.json"
 // this vendor, the value the container's own environment must carry to select the instance at all.
 const _MigInstanceIDPrefix = "MIG-"
 
+// migConfigDir is the vendor's own registry of live instances. The driver writes one file per
+// compute instance here the moment it is created, and that file is what a container binds to use the
+// instance -- so it is both the driver's source for a partition's identity and the artifact handed
+// out to a workload. It is a variable so a test can point at a fixture.
+//
+// It lives here rather than beside the driver because the reclaim sweep reads it on every platform,
+// while the driver itself is linux-only.
+var migConfigDir = "/etc/dmi_mig_config"
+
 // errInstanceInUse reports that the driver refused to destroy a partition because something still
 // holds it. It is the driver's own answer rather than a count this side took: the vendor refuses the
 // teardown with "the device is exist and may be in use" while a workload has the instance open,

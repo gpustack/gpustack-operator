@@ -15,12 +15,6 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
-// migConfigDir is the vendor's own registry of live instances. The driver writes one file per
-// compute instance here the moment it is created, and that file is what a container binds to use the
-// instance -- so it is both this driver's source for a partition's identity and the artifact it
-// hands out. It is a variable so a test can point at a fixture.
-var migConfigDir = "/etc/dmi_mig_config"
-
 // migSliceWidths is the instance-width space a profile lookup sweeps. The library's profile query
 // takes a width rather than a profile id, and a card offering no profile of some width answers with
 // an absent code -- every measured card has such a hole, at three slices.

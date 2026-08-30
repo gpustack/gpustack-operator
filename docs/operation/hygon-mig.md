@@ -138,6 +138,16 @@ never as mixed.
 library's query. There is no such thing as one card of a host being partitioned while another is
 not — the mixed-population layout NVIDIA supports has no analogue here.
 
+**A directory in the registry poisons an instance id.** The driver writes plain files under
+`/etc/dmi_mig_config/ci`, and a container is given one of them as a bind mount. A container runtime
+asked to bind a source that does not exist creates it — as a *directory* — so an instance destroyed
+between its allocation and its container starting leaves a directory sitting on its name.
+
+The driver can then never write that name again: creating a compute instance whose id maps to it
+fails with `INSUFFICIENT_RESOURCES`, and because ids are handed back out after a destroy, the failure
+outlives everything that caused it. The device manager sweeps such directories away on every reclaim
+pass; if you meet one on a node running an older build, remove it with `rmdir` — `rm` refuses it.
+
 **A recreated partition is a new grant.** Unlike NVIDIA's placement-derived MIG UUIDs, this vendor
 issues a fresh identity every time an instance is created, even for the same profile at the same
 placement on the same card. An identity recorded against a destroyed partition never matches its

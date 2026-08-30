@@ -3,6 +3,9 @@ package hygon
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"time"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	klog "k8s.io/klog/v2"
@@ -24,10 +27,25 @@ type migReclaimer struct {
 	drv     migDriver
 	podsDir string
 	logger  klog.Logger
+	// now is the clock the grace window below is measured against, injectable for tests.
+	now func() time.Time
 }
 
+// migReclaimGrace is how long a freshly written ownership record is left alone.
+//
+// The live Pod set this pass is handed is a SNAPSHOT, and a record written after that snapshot was
+// taken cannot be judged by it -- the Pod is live, it is simply not in the set yet. Without this,
+// a burst of admissions loses its partitions: measured with three Pods admitted together, all three
+// had their instance destroyed and their record removed while they were starting, and all three then
+// resolved to the same stale partition. There is no cheaper signal to key on, because a record is
+// written before the allocation annotation the snapshot is built from.
+//
+// The cost of the window is only latency on a genuinely abandoned partition, which the next pass
+// takes.
+const migReclaimGrace = 2 * time.Minute
+
 func newMigReclaimer(drv migDriver, podsDir string, logger klog.Logger) *migReclaimer {
-	return &migReclaimer{drv: drv, podsDir: podsDir, logger: logger}
+	return &migReclaimer{drv: drv, podsDir: podsDir, logger: logger, now: time.Now}
 }
 
 // reconcile destroys every partition whose Pod is gone, then collects the ones no record claims.
@@ -51,8 +69,14 @@ func (r *migReclaimer) reconcile(livePodUIDs []string) {
 		if live.Has(m.PodUID) {
 			continue
 		}
+		if r.withinGrace(entries[i].path) {
+			// Written after the snapshot this pass was handed, so the snapshot says nothing about it.
+			continue
+		}
 		r.release(entries[i])
 	}
+
+	r.sweepRuntimeDirs()
 
 	if len(corrupt) != 0 {
 		// A record that cannot be read might claim any instance, so nothing can be shown to be
@@ -63,6 +87,16 @@ func (r *migReclaimer) reconcile(livePodUIDs []string) {
 		return
 	}
 	r.collectOrphans(seen)
+}
+
+// withinGrace reports whether a record is too young to be judged by this pass's live set. A record
+// whose age cannot be read is treated as young: refusing to destroy is the safe direction.
+func (r *migReclaimer) withinGrace(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return true
+	}
+	return r.now().Sub(info.ModTime()) < migReclaimGrace
 }
 
 // note records that some ownership record named this partition during this pass.
@@ -149,6 +183,46 @@ func (r *migReclaimer) collectOrphans(seen map[string]sets.Set[uint32]) {
 	}
 }
 
+// sweepRuntimeDirs removes the DIRECTORIES a container runtime can leave in the vendor's instance
+// registry, which permanently poison the instance ids they are named after.
+//
+// The driver writes plain files here, one per compute instance, and a container is given one of them
+// as a bind mount. A runtime asked to bind a source path that does not exist creates it -- as a
+// DIRECTORY -- so an instance destroyed between the allocation and the container starting leaves a
+// directory sitting on its name. The driver can then never write that name again: creating a compute
+// instance whose id maps to it fails with INSUFFICIENT_RESOURCES, and since ids are handed back out
+// after a destroy, that failure outlives everything that caused it. Observed on a node where two ids
+// became permanently uncreatable.
+//
+// Only directories are removed, and only empty ones. A file here is the driver's own record and is
+// never this function's business; a non-empty directory is something else again and is reported
+// rather than removed.
+func (r *migReclaimer) sweepRuntimeDirs() {
+	ciDir := filepath.Join(migConfigDir, "ci")
+	entries, err := os.ReadDir(ciDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			r.logger.V(3).Error(err, "could not read the instance registry to sweep it", "dir", ciDir)
+		}
+		return
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(ciDir, entry.Name())
+		if err := os.Remove(path); err != nil {
+			r.logger.Error(err,
+				"a directory occupies an instance registry name, so the driver can never create that "+
+					"instance again, and it could not be removed", "path", path)
+			continue
+		}
+		r.logger.Info("removed a directory a container runtime left on an instance registry name",
+			"path", path)
+	}
+}
+
 // errMigInstanceClaimed reports that an ownership record for a candidate appeared between the
 // caller's scan and this lock being taken, so the candidate is not an orphan after all.
 var errMigInstanceClaimed = errors.New("partition is claimed")
@@ -161,6 +235,8 @@ var errMigInstanceClaimed = errors.New("partition is claimed")
 // not be taken for an orphan.
 func (r *migReclaimer) destroyIfStillUnclaimed(pciBusID string, inst migInstance) error {
 	entries, corrupt := scanMigMarkers(r.podsDir)
+	r.sweepRuntimeDirs()
+
 	if len(corrupt) != 0 {
 		return fmt.Errorf("%w: some ownership records are unreadable", errMigInstanceClaimed)
 	}
