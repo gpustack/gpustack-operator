@@ -191,7 +191,7 @@ there first, and the `ctr` row names a CLI this host does not have. Five cases r
 ## What you get, by manufacturer
 
 **Find your manufacturer first.** How much this command can tell you depends entirely on how much
-your allocator reads before it hands a device out, and that differs by vendor. There are three tiers,
+your allocator reads before it hands a device out, and that differs by vendor. There are four tiers,
 and knowing which one you are in is the difference between reading the result and being puzzled by it.
 
 **Every manufacturer is asked for the capability rows.** All nine allocators can be asked to produce an
@@ -209,8 +209,13 @@ serves no other mode. One declaring neither family reports none of the four.
 | Tier | Manufacturers | A driver-read row | The four capability rows reach | Deepest answer |
 |---|---|---|---|---|
 | **Full** | NVIDIA, Ascend, AMD, T-Head | yes | a real container, except `sidecar-visibility` | `measured` |
+| **Container probe, no driver read** | Hygon | no — a `note` says why instead | a real container, except `sidecar-visibility` | `measured` |
 | **Driver read + injection** | Cambricon, MetaX | yes | the injection only; no container is started | `simulated` |
-| **Injection only** | Hygon, Iluvatar, MThreads | no — a `note` says why instead | the injection only; no container is started | `simulated` |
+| **Injection only** | Iluvatar, MThreads | no — a `note` says why instead | the injection only; no container is started | `simulated` |
+
+The two middle tiers are the reminder that the two questions are independent. Cambricon and MetaX
+read a driver and start no container; Hygon starts a container and reads no driver. Neither is
+"further along" than the other — they answer different halves.
 
 `sidecar-visibility` is `simulated` on **every** tier, including the full one: measuring it would need
 the owner container still running when the sidecar starts, and the probe containers are one-shots that
@@ -230,7 +235,7 @@ What you do get:
   the row names what it grants: the device nodes, the mounts, the environment. What is *not*
   established is what that injection looks like from inside a container, because no container was
   started. See [#138](https://github.com/gpustack/gpustack-operator/issues/138) for the work that
-  would close that.
+  would close that; Hygon left this tier that way, and the two sections below are what changed.
 - **The host cross-check** on your detection — the one thing `detect` cannot do. From inside a
   container with no device mounts, "this machine has no accelerators" and "this machine has eight you
   cannot reach" are the same sentence. This enters the host and asks its own vendor CLI, so a
@@ -243,19 +248,46 @@ What you do get:
 If a slice does not work on your node, the place to look is the vendor container runtime and the
 resource request, not a driver flag.
 
+### If you are in the "container probe, no driver read" tier
+
+**Hygon is here, and it is the tier where the two sliced rows mean the most.** Its allocator reads no
+driver — the paragraph above applies to the `note` on your group unchanged — but a container *is*
+started, so `sliced-runtime-loaded` and `sliced-quota-in-force` come back at `measured`.
+
+Three things are worth knowing before you read those rows:
+
+- **`--probe-image` is required.** No default is claimed for a Hygon family. The image does not have
+  to be a DTK one — the probe runs the vendor's own `BandwidthTest` out of `/opt/dtk`, which your
+  allocator already mounts — but it is not "any image" either. It needs `sh`, `cat`, `grep`, `awk`,
+  `mkdir`, `sleep` and `kill`, plus a C library that can load a dynamically linked glibc binary.
+  `mkdir` is load-bearing: the reader claims the driver record it is about to read, and an image
+  without it reports a healthy accelerator as unavailable. Measured on a glibc image without DTK.
+- **The evidence is the driver's record, not a log line.** The other measured manufacturers preload a
+  library GPUStack builds and raise its log level to make it state the cap. Hygon's slicing runtime is
+  the vendor's own DTK/hyhal user space, whose vgpu diagnostics have an API to set the level and no
+  environment variable — so there is nothing to turn on from outside. What answers instead is the
+  per-slice record the driver publishes under the kfd vgpu sysfs, which exists only for a process
+  that entered vgpu mode.
+- **`hy-smi` will not confirm a slice for you.** It answers from the DMI layer and reports the
+  physical card: under a container capped at 1024 MiB it still prints the card's full VRAM. That is
+  not a broken slice — the cap binds the HSA/HIP runtime a workload uses. To see a slice by hand, ask
+  a HIP client.
+
 ### The full table
 
 | Manufacturer | Detection reads | Host cross-check | Driver-read row | For which mode | Container probe |
 |---|---|---|---|---|---|
-| NVIDIA | NVML | `nvidia-smi -L` | `mig-partitioning` | `partitioned` | yes |
-| Ascend | DCMI | `npu-smi info -l` | `container-share` | `sliced` | yes |
-| AMD | RSMI, AMDSMI, HSA | `rocm-smi --showuniqueid` | `cu-mask-topology` | `sliced` | yes |
-| T-Head | HGML | — | `mig-partitioning` | `partitioned` | yes |
-| Cambricon | CNDev | — | `smlu-mode` | `sliced` | — |
-| MetaX | MXSML, sGPU sysfs registry | — | `sgpu-mode` | `sliced` | — |
-| Hygon | RSMI, AMDGPU, HSA | — | — | — | — |
-| Iluvatar | IXML | — | — | — | — |
-| MThreads | MTML | — | — | — | — |
+| NVIDIA | NVML | `nvidia-smi -L` | `mig-partitioning` | `partitioned` | ✅ |
+| Ascend | DCMI | `npu-smi info -l` | `container-share` | `sliced` | ✅ |
+| AMD | RSMI, AMDSMI, HSA | `rocm-smi --showuniqueid` | `cu-mask-topology` | `sliced` | ✅ |
+| T-Head | HGML | | `mig-partitioning` | `partitioned` | ✅ |
+| Cambricon | CNDev | | `smlu-mode` | `sliced` | |
+| MetaX | MXSML, sGPU sysfs registry | | `sgpu-mode` | `sliced` | |
+| Hygon | RSMI, AMDGPU, HSA | | | | ✅ |
+| Iluvatar | IXML | | | | |
+| MThreads | MTML | | | | |
+
+**An empty cell is "this manufacturer has none"**, not a value left out.
 
 > **Read the `mode` column, not the capability name.** Every row in a report carries a `mode`, and it
 > is what makes two manufacturers comparable: `container-share` and `cu-mask-topology` are different
@@ -263,10 +295,10 @@ resource request, not a driver flag.
 > name stays the vendor's own so that searching for it finds their documentation; `mode` is what tells
 > you two rows answer the same thing, and which mode nothing answered for on your node.
 
-**A dash is an answer, not a gap.** A manufacturer with no host cross-check has no vendor CLI whose
-output shape this command has established, and says so rather than guessing: a wrong match counts
-zero, and a zero reads as "the host sees nothing either" — the one answer that sends an operator to
-debug the wrong layer.
+**An empty host cross-check is an answer, not a gap.** A manufacturer with none has no vendor CLI
+whose output shape this command has established, and the column says so rather than guessing: a wrong
+match counts zero, and a zero reads as "the host sees nothing either" — the one answer that sends an
+operator to debug the wrong layer.
 
 ### What the driver-read row means, per manufacturer
 
@@ -288,7 +320,7 @@ from a capability that was checked and found working.
 
 ### The slice rows, and what the probe needs
 
-Four manufacturers have a container probe. Each starts one container per sliceable accelerator, and
+Five manufacturers have a container probe. Each starts one container per sliceable accelerator, and
 the four rows below are what they add.
 
 | Manufacturer | Probe image | Vendor runtime | Reader inside | Where the cap is |
@@ -297,15 +329,20 @@ the four rows below are what they add.
 | Ascend | `quay.io/ascend/cann:<CANN major>-<family>` | `--runtime ascend` (docker only) | `enpu-monitor` | `npu_info.config`, key `memory-quota` |
 | AMD | `ubuntu:24.04` | none | `rocm-monitor` | `VROCM_DEVICE_MEMORY_LIMIT_<i>` |
 | T-Head | none — pass `--probe-image` | none | `ppu-monitor` | `HGGC_DEVICE_MEMORY_LIMIT_<i>` |
+| Hygon | none — pass `--probe-image` | none | `BandwidthTest`, then the kfd vgpu record it causes | `vdev0.conf`, key `mem` |
 
 The rows themselves are the same four everywhere:
 
 | Row | What it establishes |
 |---|---|
-| `sliced-runtime-loaded` | every shared object the injection mounts is in the container's own address space. `unavailable` here means the container got the whole accelerator and no cap at all |
+| `sliced-runtime-loaded` | every shared object the injection mounts is in the container's own address space — or, where the injection mounts none, that the driver recorded a slicing instance for the container. `unavailable` means the slice was **not** established: usually a container that got the whole accelerator and no cap at all, and for a driver-record manufacturer also a probe whose client could not run. The row's `reason` and `evidence` say which |
 | `sliced-quota-in-force` | the container reported back the cap the injection set, rather than the accelerator's own figure |
 | `sidecar-visibility` | the `sshd` sidecar's allocation names what the owner was granted, and nothing the owner was not |
 | `co-tenancy` | two independent slices were placed on one accelerator, each with its own geometry |
+
+Hygon is the row that mounts no shared object of ours, so its `sliced-runtime-loaded` is answered by
+the driver's own per-slice record rather than by the container's address space — the tier above
+describes what that costs and what the probe image has to carry.
 
 A slice asks for **half the accelerator**, so the figure to expect inside is half what the host
 reports: a 24564 MiB card caps at 12282, a 65536 MiB one at 32768. Half rather than a sliver because

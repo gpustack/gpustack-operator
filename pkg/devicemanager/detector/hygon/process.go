@@ -20,8 +20,21 @@ var _ device.AcceleratorProcessDetector = (*hygon)(nil)
 // compute-unit occupancy, so the device manager can attribute a share of a shared card to the
 // Instance holding it.
 //
-// UNVERIFIED ON HARDWARE: no Hygon DCU was available while writing this adapter; the conversion
-// below is exercised only against recorded RSMI payloads in process_test.go.
+// THIS ADAPTER has been run against a driver; the observable path above it has not. On a BW card
+// (gfx9, DTK 25.04) carrying a sliced container running a matmul, the library answered with the
+// holding process's host pid, its VRAM usage and a live cu_occupancy, all three matching the
+// kernel's own figures under /sys/class/kfd/kfd/proc/<pid>/ byte for byte. What that settles is the
+// question this adapter could not answer from recorded payloads: RSMI's compute figure on Hygon is a
+// real percentage and not the KFD_STATS_INVALID sentinel an AMD GFX revision returns — on this
+// revision. What it does not settle is what the subresource, the exporter, /monitor/snapshot and the
+// capability gauge publish from it, so `docs/reference/instance-metrics.md` still marks Hygon unrun
+// in its "On hardware" column, and correctly.
+//
+// What that run also established is that the THREE-STEP shape below is load-bearing rather than
+// defensive. The host-wide enumeration reports the pid and leaves both figures at zero — it is a
+// list of processes, not a measurement — so an adapter that trusted its rows would report every
+// holder of every card as using nothing. Only the per-device query answers, and only it: the
+// per-pid variant beside it returned the VRAM figure with cu_occupancy still zero.
 func (in *hygon) MonitorAcceleratorProcesses(
 	noPciCheck bool, deviceIDs sets.Set[string],
 ) (_ device.AcceleratorProcessesGroup, err error) {

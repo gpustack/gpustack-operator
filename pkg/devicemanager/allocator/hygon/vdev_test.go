@@ -116,8 +116,9 @@ func TestVdevConfRenderRoundTrip(t *testing.T) {
 	assert.Equal(t, c, got)
 }
 
-// A first slice, a second slice on the same accelerator, and a third on a different accelerator exercise
-// the three pools together: node-wide vdev_id, per-accelerator pipe_id, and per-accelerator CU bits.
+// A first slice, a second slice on the same accelerator, and a third on a different accelerator
+// exercise the two pools together -- per-accelerator pipe_id and per-accelerator CU bits -- while
+// the vdev id stays each record's own ordinal rather than climbing with the node.
 func TestAllocateVdev_PoolsAcrossCards(t *testing.T) {
 	root := t.TempDir()
 
@@ -128,18 +129,18 @@ func TestAllocateVdev_PoolsAcrossCards(t *testing.T) {
 	assert.Equal(t, 0, c0.pipeID)
 	assert.Equal(t, 16, c0.cuCount)
 
-	// Same accelerator, different pod: next 16 CU bits, next node vdev id, next per-accelerator pipe id.
+	// Same accelerator, different pod: next 16 CU bits and the next per-accelerator pipe id.
 	c1, err := allocateVdev(root, selfPathFor(root, "pod-1", "train", 0), bdfA, 64, 25, 24576, 0)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(0x00000000ffff0000), c1.mask.lo)
-	assert.Equal(t, 1, c1.vdevID)
+	assert.Equal(t, 0, c1.vdevID, "vdev id is the file ordinal, not a node slot")
 	assert.Equal(t, 1, c1.pipeID)
 
-	// Different accelerator: CU bits and pipe id reset, but the node-wide vdev id keeps climbing.
+	// Different accelerator: CU bits and pipe id reset.
 	c2, err := allocateVdev(root, selfPathFor(root, "pod-2", "train", 0), bdfB, 64, 25, 24576, 0)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(0x000000000000ffff), c2.mask.lo)
-	assert.Equal(t, 2, c2.vdevID, "vdev id is node-wide")
+	assert.Equal(t, 0, c2.vdevID)
 	assert.Equal(t, 0, c2.pipeID, "pipe id is per-card")
 }
 
@@ -176,20 +177,21 @@ func TestAllocateVdev_Idempotent(t *testing.T) {
 }
 
 // The used sets are reconstructed from pre-existing on-disk confs (restart-surviving), and
-// deleting a conf frees its slot for the lowest-hole reuse on the next allocate.
+// deleting a conf frees its slot for the lowest-hole reuse on the next allocate. Only pipe ids and
+// CU bits are pooled that way; the vdev id follows the record's own ordinal throughout.
 func TestAllocateVdev_RestartAndHoleReuse(t *testing.T) {
 	root := t.TempDir()
 	seedConf(t, root, "old-0", "train", 0, vdevConf{pciBusID: bdfA, mask: cuMask{lo: 0x000000000000ffff}, cuCount: 16, memMib: 24576, vdevID: 0, pipeID: 0})
-	seedConf(t, root, "old-1", "train", 0, vdevConf{pciBusID: bdfA, mask: cuMask{lo: 0x00000000ffff0000}, cuCount: 16, memMib: 24576, vdevID: 1, pipeID: 1})
+	seedConf(t, root, "old-1", "train", 0, vdevConf{pciBusID: bdfA, mask: cuMask{lo: 0x00000000ffff0000}, cuCount: 16, memMib: 24576, vdevID: 0, pipeID: 1})
 
 	// A fresh allocate reconstructs used bits/ids from disk and avoids them.
 	c, err := allocateVdev(root, selfPathFor(root, "new-0", "train", 0), bdfA, 64, 25, 24576, 0)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(0x0000ffff00000000), c.mask.lo)
-	assert.Equal(t, 2, c.vdevID)
+	assert.Equal(t, 0, c.vdevID)
 	assert.Equal(t, 2, c.pipeID)
 
-	// Free the lowest slot; the next allocate reuses vdev_id 0 / pipe_id 0 / CU bits 0-15.
+	// Free the lowest slot; the next allocate reuses pipe_id 0 / CU bits 0-15.
 	require.NoError(t, os.RemoveAll(filepath.Join(root, "old-0")))
 	c2, err := allocateVdev(root, selfPathFor(root, "new-1", "train", 0), bdfA, 64, 25, 24576, 0)
 	require.NoError(t, err)
@@ -198,8 +200,50 @@ func TestAllocateVdev_RestartAndHoleReuse(t *testing.T) {
 	assert.Equal(t, uint64(0x000000000000ffff), c2.mask.lo)
 }
 
-// Concurrent allocates on one accelerator must serialize on allocMu: distinct vdev/pipe ids and
-// pairwise-disjoint CU masks that tile the accelerator. Run under -race.
+// The vdev id a record carries is the ordinal of the file it is published as, whatever else the
+// node already holds. The DTK/hyhal runtime checks the two against each other and leaves a
+// container that fails the check with no accelerator at all, so a node-wide pool -- which hands the
+// second pod on a node an id its own vdev0.conf contradicts -- is the shape this guards against.
+func TestAllocateVdev_VdevIDIsTheFileOrdinal(t *testing.T) {
+	root := t.TempDir()
+	// A node already carrying slices, on this card and on another.
+	seedConf(t, root, "other-0", "train", 0, vdevConf{pciBusID: bdfA, mask: cuMask{lo: 0x00000000000000ff}, cuCount: 8, memMib: 1024, vdevID: 0, pipeID: 0})
+	seedConf(t, root, "other-1", "train", 0, vdevConf{pciBusID: bdfB, mask: cuMask{lo: 0x00000000000000ff}, cuCount: 8, memMib: 1024, vdevID: 0, pipeID: 0})
+
+	// This pod's own first accelerator is still vdev0.conf carrying vdev_id 0.
+	first, err := allocateVdev(root, selfPathFor(root, "mine", "train", 0), bdfA, 64, 12, 1024, 0)
+	require.NoError(t, err)
+	assert.Equal(t, 0, first.vdevID)
+	assert.Equal(t, 1, first.pipeID, "pipe ids stay pooled per card")
+
+	// Its second accelerator is vdev1.conf carrying vdev_id 1.
+	second, err := allocateVdev(root, selfPathFor(root, "mine", "train", 1), bdfB, 64, 12, 1024, 1)
+	require.NoError(t, err)
+	assert.Equal(t, 1, second.vdevID)
+}
+
+// A record left by an earlier build, whose vdev id does not match its file name, is replaced rather
+// than reused: reusing it would republish the very mismatch the runtime refuses.
+func TestAllocateVdev_ReplacesMismatchedVdevID(t *testing.T) {
+	root := t.TempDir()
+	self := selfPathFor(root, "pod-0", "train", 0)
+	require.NoError(t, writeVdevConf(self, vdevConf{
+		pciBusID: bdfA, mask: cuMask{lo: 0x00000000000000ff}, cuCount: 8, memMib: 1024, vdevID: 7, pipeID: 0,
+	}))
+
+	c, err := allocateVdev(root, self, bdfA, 64, 12, 1024, 0)
+	require.NoError(t, err)
+	assert.Equal(t, 0, c.vdevID)
+
+	onDisk, err := parseVdevConf(self)
+	require.NoError(t, err)
+	assert.Equal(t, 0, onDisk.vdevID)
+}
+
+// Concurrent allocates on one accelerator must serialize on allocMu: distinct pipe ids and
+// pairwise-disjoint CU masks that tile the accelerator. Every one of these is its pod's own first
+// slice, so all four share vdev_id 0 -- which the runtime allows, telling the containers apart by
+// container id, and which the file names require. Run under -race.
 func TestAllocateVdev_ConcurrentDisjoint(t *testing.T) {
 	root := t.TempDir()
 	const n = 4 // four 16-CU slices exactly tile a 64-CU card
@@ -217,13 +261,12 @@ func TestAllocateVdev_ConcurrentDisjoint(t *testing.T) {
 	wg.Wait()
 
 	var union cuMask
-	vdevIDs, pipeIDs := map[int]bool{}, map[int]bool{}
+	pipeIDs := map[int]bool{}
 	total := 0
 	for i := 0; i < n; i++ {
 		require.NoError(t, errs[i])
-		assert.Falsef(t, vdevIDs[confs[i].vdevID], "duplicate vdev_id %d", confs[i].vdevID)
+		assert.Equalf(t, 0, confs[i].vdevID, "slice %d is its pod's vdev0.conf", i)
 		assert.Falsef(t, pipeIDs[confs[i].pipeID], "duplicate pipe_id %d", confs[i].pipeID)
-		vdevIDs[confs[i].vdevID] = true
 		pipeIDs[confs[i].pipeID] = true
 		assert.Zerof(t, union.lo&confs[i].mask.lo, "overlapping CU mask for slice %d", i)
 		union = union.or(confs[i].mask)
@@ -324,15 +367,10 @@ func TestAllocateVdev_Exhaustion(t *testing.T) {
 		assert.Contains(t, err.Error(), "compute units")
 	})
 
-	t.Run("vdev id at 200", func(t *testing.T) {
+	t.Run("device ordinal beyond the vdev id range", func(t *testing.T) {
 		root := t.TempDir()
-		// 200 single-CU slices spread across many accelerators fill the node vdev pool.
-		for i := 0; i < maxVdevID; i++ {
-			bdf := fmt.Sprintf("0000:%02x:00.0", i)
-			seedConf(t, root, fmt.Sprintf("pod-%d", i), "train", 0,
-				vdevConf{pciBusID: bdf, mask: cuMask{lo: 0x1}, cuCount: 1, memMib: 1024, vdevID: i, pipeID: 0})
-		}
-		_, err := allocateVdev(root, selfPathFor(root, "over", "train", 0), "0000:ff:00.0", 64, 1, 1024, 0)
+		// Nothing on disk: the ordinal itself is what the scheme cannot express.
+		_, err := allocateVdev(root, selfPathFor(root, "over", "train", maxVdevID), bdfA, 64, 1, 1024, maxVdevID)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "vdev_id")
 	})

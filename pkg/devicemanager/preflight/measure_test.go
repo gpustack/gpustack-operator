@@ -3,6 +3,9 @@ package preflight
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -283,6 +286,21 @@ func TestStageLibFor_RefusesAPathThatIsNotAHostRoot(t *testing.T) {
 	assert.Contains(t, staged.Reason, "host root")
 }
 
+// A manufacturer whose slicing runtime is the vendor's own has no tree in this image to stage, and
+// attempting one fails -- which forces both of its container questions to be emitted rather than
+// run, so every accelerator it has stops at the simulated depth over a library that was never part
+// of its injection. Measured on an 8-DCU host, where that is exactly what happened.
+func TestStageLibFor_SkipsAManufacturerWithNoTreeOfOurs(t *testing.T) {
+	p := &Preflighter{host: newHostExec(fakeHostRoot(t))}
+
+	staged := p.stageLibFor(nodefeature.ManufacturerHygon)
+
+	assert.False(t, staged.Failed,
+		"staging was attempted for a manufacturer this image ships no library for")
+	assert.Empty(t, forceEmitReason(false, staged),
+		"a tree that is not this manufacturer's to stage must not force its step to be emitted")
+}
+
 // What a responder rendered has to reach the host for the container to mount it, and is cleared
 // again when the pass finishes.
 //
@@ -339,15 +357,34 @@ func TestJudgeProbeOutput(t *testing.T) {
 		}
 	}
 
+	// A cap carrier on disk, for the cases whose quota clause has to read a figure out of a
+	// load-evidence injection: that manufacturer carries its cap in a file rather than in the
+	// environment, so those rows cannot be reached with an env-prefix probe.
+	vdevRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(vdevRoot, "etc/vdev"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(vdevRoot, "etc/vdev/vdev0.conf"),
+		[]byte("PciBusId: 0000:09:00.0\nmem: 1024 MiB\n"), 0o600))
+	vdevInjection := &deviceplugin.ContainerAllocateResponse{
+		Mounts: []*deviceplugin.Mount{{ContainerPath: "/etc/vdev/docker", HostPath: "/etc/vdev"}},
+	}
+	vdevProbe := sliceProbe{
+		LoadEvidence:           "Vgpu device:",
+		MemoryQuotaConfigMount: "/etc/vdev/docker",
+		MemoryQuotaConfigFile:  "vdev0.conf",
+		MemoryQuotaConfigKey:   "mem",
+	}
+
 	testCases := []struct {
-		name        string
-		injection   *deviceplugin.ContainerAllocateResponse
-		probe       sliceProbe
-		output      string
-		exitError   string
-		wantLoaded  device.PreflightState
-		wantQuota   device.PreflightDepth
-		wantQuotaIn string
+		name         string
+		injection    *deviceplugin.ContainerAllocateResponse
+		probe        sliceProbe
+		hostRoot     string
+		output       string
+		exitError    string
+		wantLoaded   device.PreflightState
+		wantLoadedIn string
+		wantQuota    device.PreflightDepth
+		wantQuotaIn  string
 		// Defaults to ok, which every case but the two exit-status ones expects.
 		wantQuotaState device.PreflightState
 	}{
@@ -409,6 +446,109 @@ func TestJudgeProbeOutput(t *testing.T) {
 			},
 			probe:          sliceProbe{},
 			output:         mapsBegin + "\n7f00-7f01 r-xp 00000000 00:2f 12  /lib/x86_64-linux-gnu/libc.so.6\n" + mapsEnd + "\n",
+			wantLoaded:     device.PreflightStateUnavailable,
+			wantQuota:      device.PreflightDepthMeasured,
+			wantQuotaState: device.PreflightStateUnavailable,
+		},
+		{
+			// A load-evidence probe: no shared object of ours is injected, so the mapping section
+			// answers nothing and the driver's own record in the reader's section decides. Judged
+			// by the mapped-object clause instead, this injection mounts zero shared objects and
+			// every healthy Hygon accelerator would be reported as having no slicing runtime.
+			name: "load evidence in the reader's section stands in for a mapped object",
+			injection: &deviceplugin.ContainerAllocateResponse{
+				Mounts: []*deviceplugin.Mount{
+					{ContainerPath: "/etc/vdev/docker", HostPath: "/does/not/matter/here"},
+				},
+			},
+			probe: sliceProbe{LoadEvidence: "Vgpu device:"},
+			output: mapsBegin + "\n7f00-7f01 r-xp 00000000 00:2f 12  /lib/x86_64-linux-gnu/libc.so.6\n" +
+				mapsEnd + "\nVgpu device:0\nVram limit:1073741824\nVram limit MiB: 1024\n",
+			wantLoaded: device.PreflightStateOK,
+			// The cap carrier is a mount whose host copy is not there, so the quota row reports the
+			// carrier rather than the runtime -- the two rows are independent, which is the point
+			// of them being two rows.
+			wantQuota:      device.PreflightDepthMeasured,
+			wantQuotaState: device.PreflightStateUnavailable,
+		},
+		{
+			// The same probe with a driver that recorded nothing: the vendor runtime did not take
+			// the slice up, and that is this accelerator failing rather than an environment limit.
+			name: "load evidence the driver never printed is a failure of this accelerator",
+			injection: &deviceplugin.ContainerAllocateResponse{
+				Mounts: []*deviceplugin.Mount{{ContainerPath: "/etc/vdev/docker"}},
+			},
+			probe: sliceProbe{LoadEvidence: "Vgpu device:"},
+			output: mapsBegin + "\n7f00-7f01 r-xp 00000000 00:2f 12  /lib/x86_64-linux-gnu/libc.so.6\n" +
+				mapsEnd + "\nawk: cannot open /sys/devices/virtual/kfd/kfd/vgpu/*/entry\n",
+			wantLoaded:     device.PreflightStateUnavailable,
+			wantQuota:      device.PreflightDepthMeasured,
+			wantQuotaState: device.PreflightStateUnavailable,
+		},
+		{
+			// The exit status explains the absent record rather than being hidden behind it. This
+			// reader has to START the client that makes the driver publish, so a client that could
+			// not run produces exactly the absence the missing-evidence clause reports -- and an
+			// operator told only "the vendor runtime did not take the slice up" goes looking at the
+			// slice instead of at the loader error that is right there.
+			name: "an exit error is not swallowed by the missing load evidence",
+			injection: &deviceplugin.ContainerAllocateResponse{
+				Mounts: []*deviceplugin.Mount{{ContainerPath: "/etc/vdev/docker"}},
+			},
+			probe: sliceProbe{LoadEvidence: "Vgpu device:"},
+			output: mapsBegin + "\n7f00-7f01 r-xp 00000000 00:2f 12  /lib/x86_64-linux-gnu/libc.so.6\n" +
+				mapsEnd + "\nBandwidthTest: error while loading shared libraries: libgalaxyhip.so.5\n",
+			exitError:      "exit status 127",
+			wantLoaded:     device.PreflightStateUnavailable,
+			wantLoadedIn:   "exit status 127",
+			wantQuota:      device.PreflightDepthMeasured,
+			wantQuotaState: device.PreflightStateUnavailable,
+		},
+		{
+			// The container's own exit status cannot report the client the reader started: the
+			// reader tidies up and exits zero whatever became of it, so a client that could not
+			// resolve a library reaches the judge as an absent record and nothing else. Told only
+			// that the runtime did not take the slice up, an operator goes after the slice instead
+			// of the loader error the container printed.
+			name:      "a client that died is named rather than read as a refused slice",
+			injection: vdevInjection,
+			probe:     vdevProbe,
+			hostRoot:  vdevRoot,
+			output: mapsBegin + "\n7f00-7f01 r-xp 00000000 00:2f 12  /lib/x86_64-linux-gnu/libc.so.6\n" +
+				mapsEnd + "\n" + clientExitMarker + "127\n" +
+				"BandwidthTest: error while loading shared libraries: libgalaxyhip.so.5\n",
+			wantLoaded:   device.PreflightStateUnavailable,
+			wantLoadedIn: "status 127",
+			// And the cap is not measured out of that container either: see the case below.
+			wantQuota: device.PreflightDepthSimulated,
+		},
+		{
+			// A container the driver never admitted into the slice printed the cap's own figure --
+			// here in the dying client's last words, which name the very library whose soname
+			// carries it. Matched, the quota row would report a cap in force inside a slice the row
+			// above has just reported does not exist.
+			name:      "a figure printed outside the slice does not measure the cap",
+			injection: vdevInjection,
+			probe:     vdevProbe,
+			hostRoot:  vdevRoot,
+			output: mapsBegin + "\n7f00-7f01 r-xp 00000000 00:2f 12  /lib/x86_64-linux-gnu/libc.so.6\n" +
+				mapsEnd + "\n" + clientExitMarker + "127\n" +
+				"BandwidthTest: error while loading shared libraries: libhsa-runtime64.so.1024\n",
+			wantLoaded:  device.PreflightStateUnavailable,
+			wantQuota:   device.PreflightDepthSimulated,
+			wantQuotaIn: "1024",
+		},
+		{
+			// Load evidence is looked for in the reader's section only, for the same reason the
+			// mapped-object clause reads only the mapping section: a marker echoed before the
+			// probe's own output began was not printed by the driver for this container.
+			name: "load evidence outside the reader's section does not count",
+			injection: &deviceplugin.ContainerAllocateResponse{
+				Mounts: []*deviceplugin.Mount{{ContainerPath: "/etc/vdev/docker"}},
+			},
+			probe: sliceProbe{LoadEvidence: "Vgpu device:"},
+			output: "Vgpu device:0\n" + mapsBegin +
+				"\n7f00-7f01 r-xp 00000000 00:2f 12  /lib/x86_64-linux-gnu/libc.so.6\n" + mapsEnd + "\n",
 			wantLoaded:     device.PreflightStateUnavailable,
 			wantQuota:      device.PreflightDepthMeasured,
 			wantQuotaState: device.PreflightStateUnavailable,
@@ -497,7 +637,7 @@ func TestJudgeProbeOutput(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			run := emitResult{Command: "docker run ...", Output: []byte(tc.output), ExitError: tc.exitError}
 
-			got := judgeProbeOutput("npu-0", "", tc.injection, tc.probe, run)
+			got := judgeProbeOutput("npu-0", tc.hostRoot, tc.injection, tc.probe, run)
 
 			require.Len(t, got, 2)
 			loaded, quota := got[0], got[1]
@@ -506,6 +646,13 @@ func TestJudgeProbeOutput(t *testing.T) {
 			assert.Equal(t, tc.wantLoaded, loaded.State)
 			assert.Equal(t, device.PreflightDepthMeasured, loaded.Depth,
 				"the container ran, so the load clause is always measured")
+			if tc.wantLoadedIn != "" {
+				said := loaded.Detail
+				if loaded.State != device.PreflightStateOK {
+					said = loaded.Reason
+				}
+				assert.Contains(t, said, tc.wantLoadedIn)
+			}
 
 			assert.Equal(t, capSlicedQuotaInForce, quota.Capability)
 			assert.Equal(t, tc.wantQuota, quota.Depth)
@@ -550,6 +697,27 @@ func TestMemoryQuota(t *testing.T) {
 		Mounts: []*deviceplugin.Mount{
 			{ContainerPath: "/etc/enpu/vcann-rt/npu_info.config", HostPath: configHost},
 		},
+	}
+
+	// The other config carrier: a mounted DIRECTORY holding the record, whose fields are separated
+	// by a colon and whose figure carries a unit. PciBusId is kept in the fixture because it is the
+	// line that contains the separator inside its own value, which is what would split in the wrong
+	// place if the key were cut at the last colon rather than the first.
+	vdevHost := "/var/lib/gpustack/operator/pods/p/c/etc/vdev/docker"
+	require.NoError(t, os.MkdirAll(filepath.Join(hostRoot, vdevHost), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(hostRoot, vdevHost, "vdev0.conf"),
+		[]byte("PciBusId: 0000:09:00.0\ncu_mask: 0x00000000000000ff\ncu_mask: 0x0000000000000000\n"+
+			"cu_count: 8\nmem: 32760 MiB\ndevice_id: 0\nvdev_id: 0\npipe_id: 0\nenable: 1\n"), 0o644))
+
+	withVdevDir := &deviceplugin.ContainerAllocateResponse{
+		Mounts: []*deviceplugin.Mount{
+			{ContainerPath: "/etc/vdev/docker", HostPath: vdevHost},
+		},
+	}
+	hygonProbe := sliceProbe{
+		MemoryQuotaConfigMount: "/etc/vdev/docker",
+		MemoryQuotaConfigFile:  "vdev0.conf",
+		MemoryQuotaConfigKey:   "mem",
 	}
 
 	testCases := []struct {
@@ -604,6 +772,34 @@ func TestMemoryQuota(t *testing.T) {
 			injection:  &deviceplugin.ContainerAllocateResponse{},
 			probe:      sliceProbe{MemoryQuotaConfigMount: "/etc/enpu/vcann-rt/npu_info.config"},
 			wantAbsent: "mounts no /etc/enpu/vcann-rt/npu_info.config",
+		},
+		{
+			name:      "a directory carrier reads the named file, splits on the colon and drops the unit",
+			injection: withVdevDir,
+			probe:     hygonProbe,
+			want:      "32760",
+		},
+		{
+			name:      "a directory carrier whose key is absent answers nothing rather than a wrong figure",
+			injection: withVdevDir,
+			probe: sliceProbe{
+				MemoryQuotaConfigMount: "/etc/vdev/docker",
+				MemoryQuotaConfigFile:  "vdev0.conf",
+				MemoryQuotaConfigKey:   "vram",
+			},
+			wantAbsent: "names no vram",
+		},
+		{
+			// The reason has to name the FILE and not just the directory, or an operator is sent
+			// looking at a mount that is present for a record that is not.
+			name:      "a directory carrier missing its record says which file could not be read",
+			injection: withVdevDir,
+			probe: sliceProbe{
+				MemoryQuotaConfigMount: "/etc/vdev/docker",
+				MemoryQuotaConfigFile:  "vdev7.conf",
+				MemoryQuotaConfigKey:   "mem",
+			},
+			wantAbsent: "/etc/vdev/docker/vdev7.conf, and the host copy it mounts from could not be read",
 		},
 	}
 	for _, tc := range testCases {
@@ -717,11 +913,16 @@ func TestProbeShellCommand(t *testing.T) {
 // was. The pair is always two rows so that a run reports one shape whatever depth it reached.
 func TestMeasureSliced_Fallbacks(t *testing.T) {
 	groups := ascendGroups()
-	injection := func(_, libDir, _ string) *deviceplugin.ContainerAllocateResponse {
+	// Both mount sources a real Ascend injection carries: the preload library this repository
+	// stages, and the config its own responder renders under the pods directory.
+	injection := func(_, libDir, podsDir string) *deviceplugin.ContainerAllocateResponse {
 		return &deviceplugin.ContainerAllocateResponse{
 			Mounts: []*deviceplugin.Mount{{
 				ContainerPath: "/opt/enpu/vcann-rt/lib/libvruntime.so",
 				HostPath:      filepath.Join(libDir, "ascend/lib/libvruntime.so"),
+			}, {
+				ContainerPath: "/etc/enpu/vcann-rt/npu_info.config",
+				HostPath:      filepath.Join(podsDir, "preflight/c-preflight/npu_info.config"),
 			}},
 		}
 	}
@@ -749,6 +950,35 @@ func TestMeasureSliced_Fallbacks(t *testing.T) {
 			assert.Equal(t, device.PreflightDepthSimulated, c.Depth)
 			assert.Contains(t, c.Detail, "no container probe has been established")
 			assert.Empty(t, c.Reason)
+		}
+	})
+
+	// The same path, with a responder that produced a response carrying nothing. It is the one place
+	// an empty injection is not caught downstream: a manufacturer with a probe fails the load or the
+	// quota clause on it, while this branch reports what the responder produced without looking at
+	// it. Reported ok, a responder regression leaves the node passing under a detail saying the
+	// allocator produced the slice injection, and a container granted that slice holds the whole
+	// accelerator.
+	t.Run("an injection carrying nothing is a failure, not a simulation", func(t *testing.T) {
+		root := fakeHostRoot(t)
+		host, asked := answeringHost(root, "", nil)
+		p := &Preflighter{host: host, runtime: &hostRuntime{Name: "docker"}}
+
+		metax := ascendGroups()
+		metax[0].Manufacturer = nodefeature.ManufacturerMetaX
+
+		checks := p.measureSliced(context.Background(), nodefeature.ManufacturerMetaX,
+			&fakeInjector{build: func(_, _, _ string) *deviceplugin.ContainerAllocateResponse {
+				return &deviceplugin.ContainerAllocateResponse{}
+			}}, p.stageLibFor(nodefeature.ManufacturerMetaX), metax)
+
+		require.Len(t, checks, 2)
+		assert.Empty(t, *asked, "nothing is started for a manufacturer with no probe")
+		for _, c := range checks {
+			assert.Equal(t, device.PreflightStateUnavailable, c.State)
+			assert.Equal(t, device.PreflightDepthSimulated, c.Depth)
+			assert.Contains(t, c.Reason, "carries no environment variable, mount, device or annotation")
+			assert.Empty(t, c.Detail)
 		}
 	})
 
@@ -806,14 +1036,49 @@ func TestMeasureSliced_Fallbacks(t *testing.T) {
 			assert.Contains(t, c.Command, "quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11")
 			assert.Contains(t, c.Command, "--runtime ascend")
 			assert.Contains(t, c.Command, "--label "+preflightLabel)
-			assert.Contains(t, c.Detail, "a dry run deliberately writes neither")
-			// Both mount sources a dry run withholds are named, not only the library tree: the
+			assert.Contains(t, c.Detail, "a dry run deliberately does not write")
+			// Both mount sources a dry run withholds are named, not only the library tree: this
 			// command also mounts whatever the responder renders, from the host path it would have
 			// been promoted to.
 			assert.Contains(t, c.Detail, deviceplugin.OperatorLibDir,
 				"the library tree the command mounts")
 			assert.Contains(t, c.Detail, string(deviceplugin.PreflightPodUID),
 				"and the rendered artifact under the pods directory")
+		}
+	})
+
+	// The sentence describes THIS command. A manufacturer whose slicing runtime is the vendor's own
+	// is handed no library tree -- its injection mounts none and its probe stages none -- so naming
+	// one sends its operator after a directory that plays no part in the step they just read.
+	t.Run("an emitted step names only the mount sources its own command has", func(t *testing.T) {
+		host, _ := answeringHost(fakeHostRoot(t), "", nil)
+		p := &Preflighter{
+			host:       host,
+			dryRun:     true,
+			runtime:    &hostRuntime{Name: "docker"},
+			probeImage: "example.com/probe:test",
+		}
+
+		hygon := ascendGroups()
+		hygon[0].Manufacturer = nodefeature.ManufacturerHygon
+
+		checks := p.measureSliced(context.Background(), nodefeature.ManufacturerHygon,
+			&fakeInjector{build: func(_, _, podsDir string) *deviceplugin.ContainerAllocateResponse {
+				return &deviceplugin.ContainerAllocateResponse{
+					Mounts: []*deviceplugin.Mount{{
+						ContainerPath: "/etc/vdev/docker",
+						HostPath:      filepath.Join(podsDir, "preflight/c-preflight/etc/vdev/docker"),
+					}},
+				}
+			}}, p.stageLibFor(nodefeature.ManufacturerHygon), hygon)
+
+		require.Len(t, checks, 2)
+		for _, c := range checks {
+			assert.Equal(t, device.PreflightDepthSimulated, c.Depth)
+			assert.Contains(t, c.Detail, string(deviceplugin.PreflightPodUID),
+				"the rendered artifact this command does mount")
+			assert.NotContains(t, c.Detail, deviceplugin.OperatorLibDir,
+				"a library tree neither the injection nor the probe has")
 		}
 	})
 
@@ -1102,11 +1367,33 @@ func TestSliceProbeLogLevelsMatchTheVerificationCases(t *testing.T) {
 	require.Contains(t, cases, "docker run", "the cases changed shape; this test now checks nothing")
 
 	for manufacturer, probe := range sliceProbes {
-		assert.NotEmpty(t, probe.LogEnv, "%s names no log level, so its cap can never be observed",
+		// Every probe needs one of the two ways a slice makes itself observable, and the value it
+		// uses has to be the one its case reproduces by hand.
+		//
+		// Four raise the log level of a slicing runtime this repository builds. Hygon has no such
+		// switch to raise -- its vendor runtime logs through an API-only facility -- so what it
+		// carries instead is a marker the driver prints for a slice that took effect. A probe with
+		// neither would run a container and be unable to conclude anything from it.
+		assert.Truef(t, len(probe.LogEnv) > 0 || probe.LoadEvidence != "",
+			"%s names neither a log level nor load evidence, so its slice can never be observed",
 			manufacturer)
 		for name, value := range probe.LogEnv {
 			assert.Contains(t, cases, name+"="+value,
 				"%s's log level is not the one its verification case runs with", manufacturer)
+		}
+		// A reader that reports what became of the client it started has a branch no synthetic
+		// judge test can reach: only a container whose client really cannot run prints the marker.
+		// The case that reproduces the reader by hand is where that branch is exercised, so it has
+		// to carry the marker too -- otherwise the reader is free to stop reporting a dead client
+		// and every row of that case still passes.
+		if strings.Contains(probe.Reader, clientExitMarker) {
+			assert.Containsf(t, cases, clientExitMarker,
+				"%s's reader reports a client that could not start and no case exercises it",
+				manufacturer)
+		}
+		if probe.LoadEvidence != "" {
+			assert.Containsf(t, cases, probe.LoadEvidence,
+				"%s's load evidence is not a string any verification case asserts", manufacturer)
 		}
 	}
 }
@@ -1121,18 +1408,72 @@ func TestSliceProbeLogLevelsMatchTheVerificationCases(t *testing.T) {
 // registry those packages are reached through is empty.
 func TestSliceProbeReadersAreMountedByTheAllocator(t *testing.T) {
 	for manufacturer, probe := range sliceProbes {
-		reader := strings.Fields(probe.Reader)[0]
-		if !strings.HasPrefix(reader, "/") {
+		// The first absolute path in the fragment that somebody has to mount, rather than its first
+		// word: one reader is run under an environment assignment, so the tool is not the leading
+		// token there, and one reads a kernel interface before it runs anything. /sys, /proc, /dev
+		// and /tmp are in every container without an allocator putting them there, so requiring one
+		// to name them would fail a reader for using the kernel or for needing scratch space.
+		var reader string
+		for _, f := range strings.Fields(probe.Reader) {
+			if !strings.HasPrefix(f, "/") ||
+				strings.HasPrefix(f, "/sys/") || strings.HasPrefix(f, "/proc/") ||
+				strings.HasPrefix(f, "/dev/") || strings.HasPrefix(f, "/tmp") {
+				continue
+			}
+			reader = f
+			break
+		}
+		if reader == "" {
 			// Not something this repository mounts: nvidia-smi comes with the vendor runtime the
 			// probe container is handed to, which is what sliceProbe.Runtime is for.
 			continue
 		}
 
-		source, err := os.ReadFile(
-			filepath.Join("../allocator", manufacturer, "deviceplugin.go"))
+		// The string literals the allocator's code carries, taken from its syntax rather than from
+		// its source text: these paths appear in that file's prose as well, and a substring search
+		// cannot tell a mount from a sentence about one. What this still cannot tell is a literal
+		// that is declared and never used, so it is a guard against a path being CHANGED rather than
+		// proof that the mount is emitted -- the allocator's own suite is where that is asserted.
+		parsed, err := parser.ParseFile(token.NewFileSet(),
+			filepath.Join("../allocator", manufacturer, "deviceplugin.go"), nil, 0)
 		require.NoError(t, err)
-		assert.Contains(t, string(source), `"`+reader+`"`,
-			"%s's allocator mounts no reader at %s", manufacturer, reader)
+		literals := map[string]bool{}
+		ast.Inspect(parsed, func(n ast.Node) bool {
+			lit, ok := n.(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				return true
+			}
+			if v, err := strconv.Unquote(lit.Value); err == nil {
+				literals[v] = true
+			}
+			return true
+		})
+
+		// Walking up from the reader, because the allocators do not agree on what they mount: most
+		// mount the file itself, and Hygon mounts the directory tree its vendor tool lives in. Both
+		// put the reader inside the container, which is the property being checked; requiring the
+		// exact path would have forced a constant into an allocator that has no use for one.
+		named := func(path string) bool {
+			for ; path != "/" && path != "."; path = filepath.Dir(path) {
+				if literals[path] {
+					return true
+				}
+			}
+			return false
+		}
+		assert.True(t, named(reader),
+			"%s's allocator names nothing that puts %s in the container", manufacturer, reader)
+
+		// The cap carrier is walked the same way, because a reader can depend on it as much as on
+		// its own tool: Hygon's addresses its driver record by what this file says about the card it
+		// was given. An allocator that moved it would leave that reader correlating nothing and
+		// falling back to every record on the node rather than failing, which is the silent kind.
+		if probe.MemoryQuotaConfigMount == "" {
+			continue
+		}
+		assert.True(t, named(probe.MemoryQuotaConfigMount),
+			"%s's allocator names nothing that puts %s in the container",
+			manufacturer, probe.MemoryQuotaConfigMount)
 	}
 }
 

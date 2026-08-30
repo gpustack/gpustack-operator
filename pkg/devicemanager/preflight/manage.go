@@ -284,9 +284,7 @@ func (p *Preflighter) coTenancy(
 			runs[0].Reason
 		if p.dryRun {
 			// Only on a dry run, which is the one path that reaches here without having staged.
-			row.Detail += ". The command mounts " +
-				filepath.Join(deviceplugin.OperatorLibDir, manufacturer) +
-				", which a dry run deliberately does not write: stage it, or re-run without --dry-run"
+			row.Detail += dryRunRemediation(first, second)
 		}
 		return row
 	}
@@ -302,6 +300,7 @@ func (p *Preflighter) coTenancy(
 
 	firstQuota, firstAbsent := memoryQuota(first, probe, p.host.root)
 	secondQuota, secondAbsent := memoryQuota(second, probe, p.host.root)
+	firstOut, secondOut := readerSection(runs[0].Output), readerSection(runs[1].Output)
 	switch {
 	case runs[0].ExitError != "" || runs[1].ExitError != "":
 		// A co-tenant that printed the barrier marker and its cap and then died still printed both,
@@ -317,6 +316,31 @@ func (p *Preflighter) coTenancy(
 		row.Detail = "both slices were started and each ran, but neither waited out the other at " +
 			"the barrier, so they were not observed holding this accelerator at the same time; " +
 			"the containers' own output is carried as evidence"
+	case probe.LoadEvidence != "" &&
+		strings.Contains(firstOut, probe.LoadEvidence) && firstOut == secondOut:
+		// A manufacturer whose evidence is the driver's per-process record, whose two tenants
+		// printed the identical record: that is one record read twice, not two slices. The reader
+		// claims a record before reading it so this cannot happen (see sliceProbes[hygon].Reader),
+		// and this clause is what keeps a claim that stopped working from reading as co-tenancy --
+		// the two are asked for equal caps by construction, so every clause below would find its
+		// figure in a record neither tenant may own.
+		//
+		// Both tenants must have reported a RECORD, not merely the same bytes. Two tenants that
+		// failed the same way print the same output too -- measured, a probe image whose loader
+		// could not start the client had all eight accelerators reporting one diagnostic twice --
+		// and calling that one slice seen twice names the wrong thing entirely.
+		row.Detail = produced + "; both tenants reported the same driver record, so one slice was " +
+			"observed twice rather than two at once; the containers' own output is carried as evidence"
+	case probe.LoadEvidence != "" &&
+		(!strings.Contains(firstOut, probe.LoadEvidence) || !strings.Contains(secondOut, probe.LoadEvidence)):
+		// A tenant that produced no driver record was not in a slice, and the clauses below cannot
+		// tell that from its output: this reader reports what became of the client it started, and a
+		// diagnostic naming a library soname carries digits -- "libhsa-runtime64.so.1024" is enough
+		// for reportsFigure to find a 1024 MiB cap in a container the driver never admitted. The
+		// single-container judge makes the same call for the same reason.
+		row.Detail = produced + "; at least one of the two containers produced no driver record, so " +
+			"whatever it printed was printed outside a slice and the two were not observed holding " +
+			"this accelerator together; the containers' own output is carried as evidence"
 	case firstQuota == "" || secondQuota == "":
 		// The same call judgeProbeOutput makes for a single container: this manufacturer's probe
 		// names a carrier for the cap and the allocator was asked for one, so a slice with no
@@ -326,8 +350,7 @@ func (p *Preflighter) coTenancy(
 		row.Depth = device.PreflightDepthMeasured
 		row.Reason = "two slices ran together on this accelerator and at least one of them bounds " +
 			"nothing this run could read -- " + cmp.Or(firstAbsent, secondAbsent)
-	case !reportsFigure(readerSection(runs[0].Output), firstQuota) ||
-		!reportsFigure(readerSection(runs[1].Output), secondQuota):
+	case !reportsFigure(firstOut, firstQuota) || !reportsFigure(secondOut, secondQuota):
 		row.Detail = "two slices ran together on this accelerator, capped at " + firstQuota +
 			" and " + secondQuota + ", and at least one of them did not report its cap back, so the " +
 			"two coexist and each holding its own quota was not observed; the containers' own " +

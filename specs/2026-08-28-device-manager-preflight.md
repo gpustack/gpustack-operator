@@ -249,13 +249,25 @@ A sibling of `detect` and `monitor` under `device-manager`, never a flag on eith
 
   | state | meaning | what an allocation does |
   |---|---|---|
-  | `ok` | the capability was read and the accelerator can serve the mode | proceeds |
-  | `unavailable` | the driver could not be asked — entry point missing, library not loaded, no privilege | is refused |
-  | `not-declared` | there is no such capability here to read or to set | proceeds without it |
+  | `ok` | the capability works, at the depth the row states | proceeds |
+  | `unavailable` | it is offered and this pass did not establish it | is refused |
+  | `not-declared` | the accelerator does not offer it, so there is nothing to check | proceeds without it |
 
+- **The state is independent of the depth, and says nothing about a driver.** A row is `ok` when the
+  capability worked as far as the answer was taken, which for a container probe is no driver read at
+  all; and `unavailable` when it is offered and this pass did not establish it, which includes a probe
+  that ran against a perfectly healthy driver and observed no quota. A driver that refuses to answer
+  produces an `unavailable` row, but that is one case of the state rather than its definition.
+- **`unavailable` is not a claim that the capability is broken.** A container that could not be got
+  far enough to show anything lands there beside one that showed the capability failing — a probe
+  image whose client cannot start reads as `unavailable` — because a pass that waived what it could
+  not observe would let a node through on an assumption. Splitting the two into separate states was
+  considered and deferred: it is a fourth value on a published enum, and the `reason` already carries
+  the distinction the operator acts on.
 - The classification mirrors the allocator's own, so a preflight row and the allocation it predicts
   cannot disagree.
-- The reason is the driver's own message. A row that is not `ok` never carries an empty reason.
+- The reason is whatever answered: the driver's own message where one was asked, and what the
+  container did where one ran. A row that is not `ok` never carries an empty reason.
 - **`not-declared` is a verdict about the hardware, so it is never reached from the node's own record
   alone.** For the partitioned capability that record is `AcceleratorPhysicalSliced.Profiles`, and the
   detect pass publishes it empty for an accelerator that offers no profile *and* for one whose
