@@ -36,14 +36,18 @@ new_world() {
   mkdir -p "$serve" "$cache_root" "$images" "$bindir" "$world/bin"
   : >"$calls"
 
-  # The installer is fetched from https://get.k3s.io, whose basename is what the stub serves by.
-  # It carries the marker the script shape-checks for, since a 200 with the wrong body is the
-  # failure that matters here.
+  # The installer is fetched from https://get.k3s.io -- or, in cn mirror mode, from
+  # https://rancher-mirror.rancher.cn/k3s/k3s-install.sh -- whose basename is what the stub
+  # serves by. It carries the marker the script shape-checks for, since a 200 with the wrong
+  # body is the failure that matters here.
   printf '#!/bin/sh\n# INSTALL_K3S_SKIP_DOWNLOAD\n' >"$serve/get.k3s.io"
+  printf '#!/bin/sh\n# INSTALL_K3S_SKIP_DOWNLOAD\n' >"$serve/k3s-install.sh"
 
   cat >"$world/bin/curl" <<'STUB'
 #!/usr/bin/env bash
-# Serves $SERVE_DIR by URL basename and logs every request. Exits like curl -f on a miss.
+# Serves $SERVE_DIR by URL basename and logs every full URL it is asked for -- a mirror mode
+# serves the same basenames from a different host, so the basename alone cannot tell them apart.
+# Exits like curl -f on a miss.
 dest=""; url=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -52,7 +56,7 @@ while [ "$#" -gt 0 ]; do
     *) shift ;;
   esac
 done
-echo "$(basename "$url")" >> "$CURL_LOG"
+echo "$url" >> "$CURL_LOG"
 src="$SERVE_DIR/$(basename "$url")"
 [ -f "$src" ] || exit 22
 cp "$src" "$dest"
@@ -99,10 +103,11 @@ bin_asset_for() {
 
 run() {
   local machine="${1:-x86_64}"
+  shift 2>/dev/null || true
   env PATH="$world/bin:$PATH" \
     CURL_LOG="$calls" SERVE_DIR="$serve" FAKE_MACHINE="$machine" \
     K3S_AGENT_IMAGES_DIR="$images" GPUSTACK_K3S_BIN_DIR="$bindir" \
-    bash "$script" --release "$release" --cache-dir "$cache_root" >"$world/out" 2>"$world/err"
+    bash "$script" --release "$release" --cache-dir "$cache_root" "$@" >"$world/out" 2>"$world/err"
 }
 
 drop_world() { rm -rf "$world"; }
@@ -142,13 +147,17 @@ assert_dir_holds() {
 assert_contains() {
   if printf '%s' "$2" | grep -qF -- "$3"; then ok "$1"; else no "$1" "[$3] not found in: $2"; fi
 }
+assert_not_contains() {
+  if printf '%s' "$2" | grep -qF -- "$3"; then no "$1" "[$3] unexpectedly found in: $2"; else ok "$1"; fi
+}
 # Takes the machine type, runs, and expects a non-zero exit -- a refusal is as much of a
 # contract here as a success, since the alternative is a cluster that silently pulls everything.
 assert_run_fails() {
   local name="$1" machine="$2"
   if run "$machine"; then no "$name" "exited 0; stdout: $(cat "$world/out")"; else ok "$name"; fi
 }
-calls_for() { grep -cxF "$1" "$calls"; }
+# The call log holds full URLs; asset-level assertions still count by basename.
+calls_for() { awk -F/ '{print $NF}' "$calls" | grep -cxF "$1"; }
 # BSD and GNU stat disagree on the flag for a file's mode, and this suite runs on both.
 mode_of() {
   if stat -f '%Lp' "$1" 2>/dev/null; then return 0; fi
@@ -430,6 +439,63 @@ assert_run_fails "binary absent from release -> fails" x86_64
 assert_contains "binary absent from release -> names the asset" "$(cat "$world/err")" "lists no k3s in"
 assert_no_file "binary absent from release -> nothing installed" "$bindir/k3s"
 drop_world
+
+# 19. Default mode downloads from the places it always has: github.com for the release assets
+#     (tag percent-encoded) and get.k3s.io for the installer. Pinned explicitly because the cn
+#     mode below changes where both come from, and a regression here is silent.
+new_world
+publish amd64 "k3s-airgap-images-amd64.tar.zst:images"
+run x86_64
+assert_eq "default urls -> exits 0" "$?" "0"
+assert_contains "default urls -> anchor from github, tag percent-encoded" "$(cat "$calls")" \
+  "https://github.com/k3s-io/k3s/releases/download/v1.34.9%2Bk3s1/sha256sum-amd64.txt"
+assert_contains "default urls -> archive from github" "$(cat "$calls")" \
+  "https://github.com/k3s-io/k3s/releases/download/v1.34.9%2Bk3s1/k3s-airgap-images-amd64.tar.zst"
+assert_contains "default urls -> installer from get.k3s.io" "$(cat "$calls")" "https://get.k3s.io"
+assert_not_contains "default urls -> nothing from the cn mirror" "$(cat "$calls")" "rancher-mirror.rancher.cn"
+drop_world
+
+# 20. --mirror cn: the same assets (same names, hence the same cache layout) come from
+#     rancher-mirror.rancher.cn instead -- under the tag with '+' spelled '-', and the installer
+#     from the mirror's own copy. Nothing at all may be fetched from github.com or get.k3s.io,
+#     which are exactly the hosts a CN node cannot reach.
+new_world
+publish amd64 "k3s-airgap-images-amd64.tar.zst:images"
+run x86_64 --mirror cn
+assert_eq "cn mirror -> exits 0" "$?" "0"
+assert_contains "cn mirror -> anchor from mirror, tag '+'->'-'" "$(cat "$calls")" \
+  "https://rancher-mirror.rancher.cn/k3s/v1.34.9-k3s1/sha256sum-amd64.txt"
+assert_contains "cn mirror -> archive from mirror" "$(cat "$calls")" \
+  "https://rancher-mirror.rancher.cn/k3s/v1.34.9-k3s1/k3s-airgap-images-amd64.tar.zst"
+assert_contains "cn mirror -> binary from mirror" "$(cat "$calls")" \
+  "https://rancher-mirror.rancher.cn/k3s/v1.34.9-k3s1/k3s"
+assert_contains "cn mirror -> installer from mirror" "$(cat "$calls")" \
+  "https://rancher-mirror.rancher.cn/k3s/k3s-install.sh"
+assert_not_contains "cn mirror -> nothing from github" "$(cat "$calls")" "github.com"
+assert_not_contains "cn mirror -> nothing from get.k3s.io" "$(cat "$calls")" "get.k3s.io"
+assert_file "cn mirror -> archive cached under the same name" "$cache/k3s-airgap-images-amd64.tar.zst"
+
+# 21. A warm cache downloads nothing in cn mode either -- the mirror's checksums are the same
+#     bytes as github's, so a cache warmed in one mode verifies cleanly in the other.
+: >"$calls"
+run x86_64 --mirror cn
+assert_eq "cn warm cache -> exits 0" "$?" "0"
+assert_eq "cn warm cache -> zero downloads" "$(wc -l <"$calls" | tr -d ' ')" "0"
+drop_world
+
+# 22. An unknown mirror is refused up front, before anything is created or fetched.
+world="$(mktemp -d)"
+if out="$(bash "$script" --release "$release" --cache-dir /tmp/cache --mirror mars 2>&1)"; then
+  no "unknown --mirror -> refused" "exited 0"
+else
+  assert_contains "unknown --mirror -> refused, naming the value" "$out" "'mars'"
+fi
+if out="$(bash "$script" --release "$release" --cache-dir /tmp/cache --mirror 2>&1)"; then
+  no "--mirror with no value -> refused" "exited 0"
+else
+  assert_contains "--mirror with no value -> says which option" "$out" "--mirror needs a value"
+fi
+rm -rf "$world"
 
 if [ "$fail" -ne 0 ]; then
   echo "one or more assertions failed"
