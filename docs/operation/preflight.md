@@ -277,15 +277,17 @@ Three things are worth knowing before you read those rows:
 
 | Manufacturer | Detection reads | Host cross-check | Driver-read row | For which mode | Container probe |
 |---|---|---|---|---|---|
-| NVIDIA | NVML | `nvidia-smi -L` | `mig-partitioning` | `partitioned` | yes |
-| Ascend | DCMI | `npu-smi info -l` | `container-share` | `sliced` | yes |
-| AMD | RSMI, AMDSMI, HSA | `rocm-smi --showuniqueid` | `cu-mask-topology` | `sliced` | yes |
-| T-Head | HGML | — | `mig-partitioning` | `partitioned` | yes |
-| Cambricon | CNDev | — | `smlu-mode` | `sliced` | — |
-| MetaX | MXSML, sGPU sysfs registry | — | `sgpu-mode` | `sliced` | — |
-| Hygon | RSMI, AMDGPU, HSA | — | — | — | yes |
-| Iluvatar | IXML | — | — | — | — |
-| MThreads | MTML | — | — | — | — |
+| NVIDIA | NVML | `nvidia-smi -L` | `mig-partitioning` | `partitioned` | ✅ |
+| Ascend | DCMI | `npu-smi info -l` | `container-share` | `sliced` | ✅ |
+| AMD | RSMI, AMDSMI, HSA | `rocm-smi --showuniqueid` | `cu-mask-topology` | `sliced` | ✅ |
+| T-Head | HGML | | `mig-partitioning` | `partitioned` | ✅ |
+| Cambricon | CNDev | | `smlu-mode` | `sliced` | |
+| MetaX | MXSML, sGPU sysfs registry | | `sgpu-mode` | `sliced` | |
+| Hygon | RSMI, AMDGPU, HSA | | | | ✅ |
+| Iluvatar | IXML | | | | |
+| MThreads | MTML | | | | |
+
+**An empty cell is "this manufacturer has none"**, not a value left out.
 
 > **Read the `mode` column, not the capability name.** Every row in a report carries a `mode`, and it
 > is what makes two manufacturers comparable: `container-share` and `cu-mask-topology` are different
@@ -293,10 +295,10 @@ Three things are worth knowing before you read those rows:
 > name stays the vendor's own so that searching for it finds their documentation; `mode` is what tells
 > you two rows answer the same thing, and which mode nothing answered for on your node.
 
-**A dash is an answer, not a gap.** A manufacturer with no host cross-check has no vendor CLI whose
-output shape this command has established, and says so rather than guessing: a wrong match counts
-zero, and a zero reads as "the host sees nothing either" — the one answer that sends an operator to
-debug the wrong layer.
+**An empty host cross-check is an answer, not a gap.** A manufacturer with none has no vendor CLI
+whose output shape this command has established, and the column says so rather than guessing: a wrong
+match counts zero, and a zero reads as "the host sees nothing either" — the one answer that sends an
+operator to debug the wrong layer.
 
 ### What the driver-read row means, per manufacturer
 

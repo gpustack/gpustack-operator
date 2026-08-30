@@ -247,7 +247,7 @@ Each row carries a **state**, a **depth** and — where a container ran — the 
 |---|---|---|
 | `ok` | the capability works, at the depth stated | 0 |
 | `not-declared` | the accelerator does not offer it, so there is nothing to check | 0 |
-| `unavailable` | it is offered and does not work | **non-zero** |
+| `unavailable` | it is offered and this pass did not establish it | **non-zero** |
 
 | Depth | How the answer was reached |
 |---|---|

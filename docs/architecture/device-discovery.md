@@ -511,9 +511,19 @@ consequence for the allocation it guards:
 
 | State | Meaning | What an allocation does |
 |---|---|---|
-| `ok` | the capability was read and the accelerator can serve the mode | proceeds |
-| `unavailable` | the driver could not be asked — entry point missing, library not loaded, no privilege | is refused |
-| `not-declared` | there is no such capability here to read or to set | proceeds without it |
+| `ok` | the capability works, at the depth the row states | proceeds |
+| `unavailable` | it is offered and this pass did not establish it | is refused |
+| `not-declared` | the accelerator does not offer it, so there is nothing to check | proceeds without it |
+
+**The state says nothing about a driver**, and reading it as one misdiagnoses both directions: a row
+is `ok`/`measured` on a manufacturer whose allocator reads no driver at all, and `unavailable` when a
+probe ran against a healthy driver and observed no quota. A driver refusing to answer produces an
+`unavailable` row too, but that is one case of the state rather than its meaning.
+
+**Nor is `unavailable` a claim that the capability is broken.** A container that could not be got far
+enough to show anything lands there beside one that showed the capability failing — a probe image
+whose client cannot start reads as `unavailable`, because a pass that waived what it could not
+observe would let a node through on an assumption. The row's `reason` is what separates the two.
 
 **And carries the depth it was reached at**, so an assumption is never read as evidence:
 

@@ -522,9 +522,13 @@ const (
 	// guards. What the capability currently says is in the check's detail: a flag the allocator
 	// turns on itself at allocation time is ok while it is still off.
 	PreflightStateOK PreflightState = "ok"
-	// PreflightStateUnavailable means the driver could not be asked -- an entry point that is
-	// missing, a library that never loaded, a privilege the process does not hold. This is the
-	// state an allocation is refused on, so the reason is the operator's whole lead.
+	// PreflightStateUnavailable means the accelerator offers the capability and this pass did not
+	// establish it: a driver that could not be asked, a container that ran and showed the capability
+	// failing, or a container that could not be got far enough to show anything. The last is why
+	// this is not "it does not work" -- a probe image whose client cannot start lands here too,
+	// because a pass that waived what it could not observe would let a node through on an
+	// assumption. This is the state an allocation is refused on, so the reason is the operator's
+	// whole lead, and it is the reason rather than the state that says which of the three it was.
 	PreflightStateUnavailable PreflightState = "unavailable"
 	// PreflightStateNotDeclared means there is no such capability here to read or to set: an API
 	// generation that declares none, or an accelerator whose driver disclaims it. Nothing can fix
