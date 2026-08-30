@@ -89,16 +89,20 @@ locals {
 
   cache_release_dir = "${var.image_archives_dir}/${var.release}"
 
+  # Where the cache is filled FROM; empty leaves the cache steps byte-identical to before. fetch
+  # and artifacts download (artifacts refreshes a missing anchor); stage only copies locally.
+  mirror_arg = var.mirror == "" ? "" : " --mirror '${var.mirror}'"
+
   # Three spliced steps, all no-ops when no cache is configured: warm the cache and fill the
   # installer's directory before the install, then clean up and stage any extra bundles after it.
   cache_prepare = var.image_archives_dir == "" ? "echo 'image_archives_dir is unset; RKE2 will download its artifacts and pull its images from a registry'" : join("\n", [
-    "sudo bash ${local.images_script_path} fetch --release '${var.release}' --cache-dir '${var.image_archives_dir}' --cni '${var.cni}'",
-    "sudo bash ${local.images_script_path} artifacts --release '${var.release}' --cache-dir '${var.image_archives_dir}' --cni '${var.cni}' --staging-dir '${local.artifact_staging_dir}'",
+    "sudo bash ${local.images_script_path} fetch --release '${var.release}' --cache-dir '${var.image_archives_dir}' --cni '${var.cni}'${local.mirror_arg}",
+    "sudo bash ${local.images_script_path} artifacts --release '${var.release}' --cache-dir '${var.image_archives_dir}' --cni '${var.cni}' --staging-dir '${local.artifact_staging_dir}'${local.mirror_arg}",
   ])
 
   cache_finish = var.image_archives_dir == "" ? "echo 'no artifact cache to stage'" : join("\n", [
     "sudo rm -rf '${local.artifact_staging_dir}'",
-    "sudo bash ${local.images_script_path} stage --release '${var.release}' --cache-dir '${var.image_archives_dir}'",
+    "sudo bash ${local.images_script_path} stage --release '${var.release}' --cache-dir '${var.image_archives_dir}'${local.mirror_arg}",
   ])
 
   # INSTALL_RKE2_METHOD=tar is always set: on a host that has yum the installer otherwise defaults
@@ -286,12 +290,17 @@ locals {
   # The fix is Calico-specific, so it follows var.cni unless the caller says otherwise.
   calico_fix_enabled = var.calico_multi_nic_fix == null ? var.cni == "calico" : var.calico_multi_nic_fix
 
-  server_common = [
+  # An Agent/Runtime setting per the RKE2 reference, valid on servers and agents alike, so it
+  # goes into every node's config.yaml. Empty means the key is not written, exactly as before.
+  # The value is double-quoted: a bracketed IPv6 literal is otherwise a YAML flow sequence.
+  system_default_registry_lines = var.system_default_registry == "" ? [] : ["system-default-registry: \"${var.system_default_registry}\""]
+
+  server_common = concat([
     "cni: ${var.cni}",
     "cluster-cidr: ${var.cluster_cidr}",
     "service-cidr: ${var.service_cidr}",
     "service-node-port-range: ${var.service_node_port_range}",
-  ]
+  ], local.system_default_registry_lines)
 
   first_server_config = join("\n", concat(
     ["token: ${random_string.token.result}"],
@@ -317,6 +326,7 @@ locals {
   # listener setting an agent does not know.
   agent_config = { for host, a in local.agent_hosts : host => join("\n", concat(
     ["token: ${random_string.token.result}", "server: ${local.join_url}"],
+    local.system_default_registry_lines,
     local.node_internal_ip_lines[host],
     local.external_ip_lines[host],
   )) }
@@ -403,6 +413,20 @@ resource "null_resource" "server_init" {
     # Tracked so setting or changing the cache re-provisions this node now, rather than taking
     # effect at whatever later reinstall happens to come along.
     image_archives_dir = var.image_archives_dir
+    # Same reason: where the cache is filled from feeds the cache steps, and the registry is
+    # written into this node's config.yaml.
+    mirror                  = var.mirror
+    system_default_registry = var.system_default_registry
+  }
+
+  lifecycle {
+    # Without the cache, the only CN-reachable install path would be the installer's own
+    # INSTALL_RKE2_MIRROR parameter -- which this module deliberately never sets (see the mirror
+    # variable), so the combination is refused rather than silently reaching github.com.
+    precondition {
+      condition     = var.mirror != "cn" || var.image_archives_dir != ""
+      error_message = "mirror = \"cn\" requires image_archives_dir: without the artifact cache the install would still download from github.com and get.rke2.io."
+    }
   }
 
   connection {
@@ -527,11 +551,22 @@ resource "null_resource" "server_join" {
     # See server_init: the pre-start Calico manifest makes this a reinstall, not a re-reconcile.
     calico_multi_nic_fix = local.calico_fix_enabled
     image_archives_dir   = var.image_archives_dir
+    # See server_init: mirror feeds the cache steps, and the registry lands in config.yaml.
+    mirror                  = var.mirror
+    system_default_registry = var.system_default_registry
     # The first server owns the datastore and the cluster CA, so a member that outlives a reinstall
     # of it holds credentials for a cluster that no longer exists. Reinstalling it therefore
     # reinstalls every other member too -- including the case a taint causes, where nothing else
     # about this node changed.
     server_init = null_resource.server_init.id
+  }
+
+  lifecycle {
+    # See server_init.
+    precondition {
+      condition     = var.mirror != "cn" || var.image_archives_dir != ""
+      error_message = "mirror = \"cn\" requires image_archives_dir: without the artifact cache the install would still download from github.com and get.rke2.io."
+    }
   }
 
   connection {
@@ -630,9 +665,21 @@ resource "null_resource" "agent" {
     # route flush can read the CIDR off self.triggers.
     cluster_cidr       = var.cluster_cidr
     image_archives_dir = var.image_archives_dir
+    # See server_init: mirror feeds the cache steps, and the registry lands in this node's
+    # config.yaml (an Agent/Runtime setting, valid on agents too).
+    mirror                  = var.mirror
+    system_default_registry = var.system_default_registry
     # See server_join: an agent that outlives a reinstall of the first server holds credentials for
     # a cluster that no longer exists.
     server_init = null_resource.server_init.id
+  }
+
+  lifecycle {
+    # See server_init.
+    precondition {
+      condition     = var.mirror != "cn" || var.image_archives_dir != ""
+      error_message = "mirror = \"cn\" requires image_archives_dir: without the artifact cache the install would still download from github.com and get.rke2.io."
+    }
   }
 
   connection {
