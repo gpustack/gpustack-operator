@@ -7,7 +7,7 @@
 #     installed before Kueue / Node Feature Discovery / the CSI drivers became
 #     subcharts of the operator chart (a compatibility pass: a chart-mode uninstall
 #     has already taken those workloads down with the release);
-#   - the CRDs those releases and the worker install (kueue / nfd / gpustack);
+#   - the CRDs this release installed (gpustack, and Kueue when this release installed it);
 #   - the finalizers that pin objects once their controllers are gone
 #     (Kueue's `kueue.x-k8s.io/resource-in-use`, the operator's
 #     `gpustack.ai/controlled` on Instances AND InstanceTypes);
@@ -25,12 +25,17 @@
 #   - the chart's gated post-delete hook Job (cleanupOnUninstall=true) runs it
 #     in-cluster with the operator image (which bundles kubectl + helm).
 #
-# Idempotent and safe to re-run. It NEVER deletes namespaces, and only touches
-# gpustack / kueue / nfd owned objects — never the user's own resources.
+# Idempotent and safe to re-run. It NEVER deletes namespaces, and touches only the gpustack CRDs plus
+# the Kueue ones THIS release installed — a Kueue the cluster already had is left alone, as are the
+# user's own resources. NFD's CRDs are left in place entirely; see owned_crds for why.
 set -uo pipefail
 
 NS="${1:-${GPUSTACK_NAMESPACE:-gpustack-system}}"
-echo "[cleanup] namespace=${NS}"
+# The Helm release this install belongs to, used to tell a subchart's Kueue/NFD CRDs from a
+# standalone one's. Defaults to the conventional name for the same reason $2 does: the e2e skills run
+# this script on a host with no release to ask.
+RELEASE="${3:-gpustack-operator}"
+echo "[cleanup] namespace=${NS} release=${RELEASE}"
 
 # 0. Preflight. Every sweep below swallows errors by design, so against a wrong or absent
 #    context the script would print "done" having deleted nothing — or worse, sweep a cluster
@@ -96,28 +101,80 @@ kubectl get apiservices \
 #    the aggregated APIs drain — leaves a CR Terminating and hangs the CRD delete (most often the
 #    ClusterQueue). Strip up front, then (step 4) re-strip while the CRDs drain.
 #
-#    Instances/InstanceTypes are stripped on the real v1alpha1 CRD explicitly: with the worker gone
-#    the aggregated worker.gpustack.ai/v1 proxy is unreachable, so an unversioned get resolves to it
-#    and silently returns nothing. (Cohorts are no longer created — nothing to strip.)
-strip_gpustack_finalizers() {
-  for res in \
-    workloads.kueue.x-k8s.io resourceflavors.kueue.x-k8s.io \
-    clusterqueues.kueue.x-k8s.io admissionchecks.kueue.x-k8s.io \
-    instances.v1alpha1.worker.gpustack.ai instancetypes.v1alpha1.worker.gpustack.ai; do
-    kubectl get "${res}" -A -o name 2>/dev/null \
-      | xargs -r -I{} kubectl patch {} --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
-  done
+#    The kinds are DISCOVERED from the CRDs matching the groups this release owns, not listed: a
+#    list has to be edited every time a kind is added, and the one time it is forgotten the symptom
+#    is an uninstall that hangs on a CRD nobody thought about.
+#
+#    Each is addressed as plural.VERSION.group rather than plural.group, and the version is the
+#    CRD's own STORAGE version. With the worker gone the aggregated worker.gpustack.ai/v1 proxy is
+#    unreachable, so an unversioned name resolves to it and silently returns nothing — which is why
+#    the version is read off the CRD and put back into the name. Kueue's and NFD's kinds have no
+#    aggregated proxy and are unharmed by the same treatment.
+#
+#    owned_crds is the one place ownership is decided, and step 4 deletes from it too — so a kind
+#    can only be stripped here if it would also be deleted there.
+#
+#    A GROUP is not ownership. The gpustack groups are ours however they were installed, but Kueue
+#    and NFD are SUBCHARTS: the CRDs this release installed carry its Helm ownership, while a Kueue
+#    or NFD the cluster already had carries another release's or none at all. Matching the group
+#    alone reached both — an uninstall would strip every finalizer in those groups and then delete
+#    the CRDs, taking a working external installation down with it.
+#
+#    BOTH Helm ownership annotations, because either alone is satisfied by somebody else's release:
+#    a standalone Kueue installed into this same namespace carries the same release-namespace, and a
+#    release of the same name elsewhere carries the same release-name. The pair identifies exactly
+#    one release, which is the only thing that authorises deleting a CRD.
+#
+#    ⛔ NFD IS DELIBERATELY ABSENT, and its CRDs are left in place. Its subchart ships them under
+#    crds/, which Helm installs verbatim and never annotates — so there is no ownership to read and
+#    no way to tell this install's from one the cluster already had. Deleting them on that basis
+#    would be a guess with a cluster-wide blast radius. Nothing hangs as a result: NFD's CRs carry no
+#    finalizer of ours, which is why the enumeration this function replaced never listed them either.
+#    An operator removing NFD entirely removes its chart, which is where that decision belongs.
+owned_crds() {
+  kubectl get crd \
+    -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.names.plural}.{.spec.versions[?(@.storage==true)].name}.{.spec.group}{" "}{.metadata.annotations.meta\.helm\.sh/release-namespace}{" "}{.metadata.annotations.meta\.helm\.sh/release-name}{"\n"}{end}' \
+    2>/dev/null \
+    | while read -r crd res owner_ns owner_name; do
+        case "${crd}" in
+          *.gpustack.ai) ;;
+          *.kueue.x-k8s.io)
+            [ "${owner_ns}" = "${NS}" ] && [ "${owner_name}" = "${RELEASE}" ] || continue ;;
+          *) continue ;;
+        esac
+        echo "${crd} ${res}"
+      done
 }
 
-# 4. Delete the worker / sub-release CRDs (gpustack, kueue, nfd) and drain them. Kick the delete off
+strip_gpustack_finalizers() {
+  owned_crds | while read -r _ res; do
+    # -o name drops the namespace, so `kubectl patch` on its output runs against whatever namespace
+    # is current and silently misses every namespaced object — which is the hang this function
+    # exists to prevent. The namespace is read out alongside the name and passed back explicitly.
+    #
+    # Separated by "/", which neither a namespace nor a name may contain, and NOT by a space: a
+    # cluster-scoped object has an empty namespace, so a space-separated line starts with a blank
+    # field that `read` folds away — putting the NAME in the namespace variable and dropping the
+    # object. KVCacheBackend is cluster-scoped, so that is the very kind this would have missed.
+    kubectl get "${res}" -A \
+      -o jsonpath='{range .items[*]}{.metadata.namespace}{"/"}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+      | while IFS='/' read -r ns name; do
+          [ -n "${name}" ] || continue
+          kubectl patch "${res}" "${name}" ${ns:+-n "${ns}"} \
+            --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+        done
+    done
+}
+
+# 4. Delete the CRDs this release owns (gpustack, and Kueue when ours) and drain them. Kick it off
 #    non-blocking, then keep stripping finalizers so any CR the delete just marked Terminating is
 #    released and the CRD drains instead of hanging.
-crd_pattern='\.(worker\.)?gpustack\.ai$|\.kueue\.x-k8s\.io$|\.nfd\.k8s-sigs\.io$'
 strip_gpustack_finalizers
-kubectl get crd -o name 2>/dev/null | grep -E "${crd_pattern}" \
-  | xargs -r kubectl delete --ignore-not-found --wait=false 2>/dev/null || true
+owned_crds | while read -r crd _; do
+  kubectl delete crd "${crd}" --ignore-not-found --wait=false 2>/dev/null || true
+done
 for _ in $(seq 1 20); do
-  [ "$(kubectl get crd -o name 2>/dev/null | grep -Ec "${crd_pattern}")" = "0" ] && break
+  [ -z "$(owned_crds)" ] && break
   strip_gpustack_finalizers
   sleep 3
 done

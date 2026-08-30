@@ -3,7 +3,7 @@
   "properties": {
     "cleanupOnUninstall": {
       "default": false,
-      "description": "Run a post-delete cleanup Job on `helm uninstall` that removes the leftovers\nthe worker creates at runtime but Helm does not manage: the Kueue / Node Feature\nDiscovery / CSI Helm releases, their CRDs, the finalizers pinning Kueue and\nInstance objects, and the aggregated APIServices / webhooks. Disabled by default\nbecause those CRDs may be shared with other workloads; enable only when this\nrelease exclusively owns them (e.g. CI / e2e).",
+      "description": "Run a post-delete cleanup Job on `helm uninstall` that removes the leftovers\nthe worker creates at runtime but Helm does not manage: the Kueue / Node Feature\nDiscovery / CSI Helm releases, the finalizers pinning Kueue and Instance objects,\nand the aggregated APIServices / webhooks. Of the CRDs it removes this chart's own\nand the Kueue ones this release installed; Node Feature Discovery's are LEFT IN\nPLACE, because its subchart ships them in a way that records no Helm ownership and\ndeleting them would be a guess with a cluster-wide blast radius. Disabled by\ndefault because the CRDs it does remove may be shared with other workloads; enable\nonly when this release exclusively owns them (e.g. CI / e2e).",
       "title": "cleanupOnUninstall",
       "type": "boolean"
     },

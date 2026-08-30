@@ -39,6 +39,7 @@ spec:
           args:
             - {{ include "gpustack-operator.namespace" . | quote }}
             - {{ printf "%s-cert" (include "gpustack-operator.worker.fullname" .) | quote }}
+            - {{ .Release.Name | quote }}
           volumeMounts:
             - name: cleanup-script
               mountPath: /scripts
