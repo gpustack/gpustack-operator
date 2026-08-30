@@ -1,6 +1,6 @@
 # Spec: Hygon DCU hardware partitioning (MIG)
 
-Status: Specified
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -31,7 +31,7 @@ follow, and it is the reason several of the existing partition abstractions cann
   workload reclaims the instance.
 - **G4 — Metrics.** Per-instance memory and compute utilisation reach the `Devices` subresource, the
   exporter and `/monitor/snapshot`, the way the whole-card and logical-slice figures already do.
-- **G5 — Documentation.** A `docs/reference/hygon-mig.md` operations page alongside `nvidia-mig.md`
+- **G5 — Documentation.** A `docs/operation/hygon-mig.md` operations page alongside `nvidia-mig.md`
   and `thead-mig.md`, covering the node-level mode, the forced teardown order, and the failure modes
   an operator will actually hit.
 - **G6 — End-to-end coverage.** Cases for the allocation shapes Hygon can serve, plus explicit
@@ -131,7 +131,7 @@ instances makes every card unusable, so that I do not brick a node during a main
 subresource, the exporter and `/monitor/snapshot`. A figure the library refuses is reported with a
 reason rather than as a zero.
 
-**F5 — `docs/reference/hygon-mig.md`.** Covers the system-wide mode and why it is out of the
+**F5 — `docs/operation/hygon-mig.md`.** Covers the system-wide mode and why it is out of the
 operator's hands, the exclusivity with whole-card and logical slicing, the profile table, the forced
 CI→GI→mode teardown order, and the failure modes below.
 
@@ -247,9 +247,8 @@ make lint docs
 # Unit tests
 go test ./pkg/devicemanager/detector/hygon/... ./pkg/devicemanager/allocator/hygon/... ./binding/dmi/...
 
-# Hardware verification (run against the Hygon lab node; address supplied at run time)
-XB_MODE=ssh XB_HOST=<node> ./.claude/skills/gpustack-operator-xbuild-and-verify/cases/hygon-case-N.sh
-MIG_NODE_SSH=<node> ./.claude/skills/gpustack-operator-e2e/cases/run-partition-block.sh <RAW_DIR>
+# Hardware verification (run against the Hygon lab node; address supplied at run time, never stored)
+MIG_NODE_SSH=<node> ./.claude/skills/gpustack-operator-e2e/cases/case-42.sh <namespace>
 ```
 
 ### Project Structure
@@ -267,7 +266,7 @@ pkg/devicemanager/detector/hygon/
 pkg/devicemanager/allocator/hygon/
   mig.go                    # reserve / adopt / release, placement selection
   mig_visibility.go         # CI conf mount, device nodes, DMI_MIG_VISIBLE_DEVICE
-docs/reference/hygon-mig.md
+docs/operation/hygon-mig.md
 .claude/skills/gpustack-operator-e2e/cases/   # new Hygon partition cases
 ```
 
@@ -343,8 +342,12 @@ Tasks are ordered by dependency. T1 blocks everything; T2 blocks T3 and T4; T5 a
   subresource, the exporter and `/monitor/snapshot`; a refused figure carries a reason.
 
 **T5 — Documentation.**
-`Owns:` `docs/reference/hygon-mig.md`, `docs/README.md`, `docs/architecture/device-discovery.md`
-- The operations page, the index entry, and the cross-links.
+`Owns:` `docs/operation/hygon-mig.md`, `README.md`, `docs/README.md`,
+`docs/accelerator-requests.md`, `docs/architecture/device-discovery.md`,
+`docs/reference/instance-metrics.md`
+- The operations page, the index entries, and the cross-links.
+- The metrics page's availability matrix, which this is the first change to make a partition's
+  compute figure real on.
 
 **T6 — End-to-end cases.**
 `Owns:` `.claude/skills/gpustack-operator-e2e/cases/**`
@@ -376,6 +379,74 @@ Tasks are ordered by dependency. T1 blocks everything; T2 blocks T3 and T4; T5 a
 9. A whole-card request on a MIG-enabled node is refused.
 10. Every case restores the node's mode and instances in a trap.
 
+## What the hardware run established
+
+Run on an 8-card BW (C-3000, gfx936) node. `case-42` is the standing assertion; the rest was proven
+during the build and is recorded here because a later reader cannot re-derive it from the code.
+
+**Verified.** The binding drives the whole vendor API through `RTLD_LOCAL` with no `nvml*` symbol
+referenced at link time; the detector publishes three profiles per card with the driver's own
+geometry and placements, suppresses the whole-card and logical capabilities, and reports the card's
+80 compute units from the profiles; three partitions of one card run concurrently with distinct
+identities; per-instance memory and compute read 1658 MiB and 85% on a busy instance while its idle
+siblings on the same card read zero; and every instance is reclaimed when its Pod goes.
+
+**Every profile is served at the geometry the ledger names, and compute with it.** Each of the three
+was claimed by a container of its own, which reported exactly one device:
+
+| Profile | Ledger says | Container saw |
+| --- | --- | --- |
+| `2g.15gb` | 16380 MiB | 1 device, 16380 MiB, 20 CU |
+| `4g.31gb` | 32760 MiB | 1 device, 32760 MiB, 40 CU |
+| `8g.63gb` | 65520 MiB | 1 device, 65520 MiB, 80 CU |
+
+The compute column is the profile's `computeSlices` share of the card's own 80, derived from the
+published ledger rather than from the profile's name — so a card whose one-slice partitions are right
+cannot hide a four-slice one that is not.
+
+**The node's exclusivity is asserted, not just described.** A whole-card request on the partitioned
+node stays Pending against `hygon.com/dcu: 0`; it never runs. C3 is therefore enforced by the
+advertised capacity rather than only by the container failing to find a device.
+
+**Corrected against the plan.** The refusal of a multi-partition request already existed at
+admission — "a partition request is always a single card" is enforced for every vendor — so the
+allocator's own refusal is a backstop rather than the primary gate, and the e2e case accepts either.
+
+**Found and fixed while running it**, none of which unit tests could have reached: the card name
+flipped between restarts because HSA's availability depends on transient partition state; cards of
+one model could be named differently from each other; the reclaim's accelerator lock was keyed by
+two different identities on its two paths and so serialized with nothing; the reclaim judged records
+younger than its own live-set snapshot; and a container runtime binding a source that had vanished
+left a DIRECTORY in the vendor registry, permanently poisoning that instance id.
+
+**Found by cross-model review and fixed**, three that the hardware run could not have shown because
+each lives on a path a healthy node never takes: a failed mode query was read as "not partitioned",
+which would have advertised whole-card and logical capacity a partitioned node cannot serve — the
+unread mode now publishes neither capability; a failure after the compute instance was created rolled
+back the GPU instance first, an order the driver refuses, stranding both — the compute instance is
+now destroyed by the function that made it; and the library's initialization error was returned as a
+Go string borrowing a thread-local C buffer that the deferred unlock frees to be rewritten — it is
+cloned.
+
+**Not established.** Whether logical slicing survives Multi-Instance mode (Open Question 1) — the
+node publishes partition keys only either way, so it changes how the exclusivity is described rather
+than whether it holds.
+
+**Two pre-existing defects this work surfaced, both out of scope and both filed.** Neither is
+introduced here and both affect every partitioning manufacturer:
+
+- A node's counting capacity keys do not come back when its `Devices` ledger is deleted and
+  recreated. The removal is correct — no ledger, nothing to advertise — but the recreation is dropped
+  by the node-capacity controller's watch, because the ledger is created without the
+  `gpustack.ai/managed` label its create predicate gates on and the update that adds the label
+  carries no accelerator-detail change. The node stays unschedulable until the worker restarts.
+  <https://github.com/gpustack/gpustack-operator/issues/146>
+- The logical-slicing working-directory GC removes the whole per-Pod tree, which is where every
+  partition's ownership record lives. A record deleted under a live Pod makes its partition look
+  abandoned, and the reclaim destroys it — the grace window and the under-lock re-read added during
+  this build both assume the record is on disk, so neither covers it.
+  <https://github.com/gpustack/gpustack-operator/issues/147>
+
 ## Alternatives
 
 - **Generate `binding/dmi` straight from the vendor header, as `binding/nvml` is generated.**
@@ -399,18 +470,16 @@ Tasks are ordered by dependency. T1 blocks everything; T2 blocks T3 and T4; T5 a
 
 ## Open Questions
 
-1. **Does logical slicing survive MIG mode?** C3 shows whole-card access does not. The
-   `vdev<N>.conf` path goes through the same HSA layer and is expected to fail too, but this has not
-   been measured. It only affects how the exclusivity is *described*, not whether it exists — the
-   node will publish partition keys only either way. To be settled early in the build.
-2. **How should a node's MIG mode reach the scheduling chain — a card capability, a node label, or
-   both?** The existing partition families are per-card, so a node-level fact has no established
-   home. Leaning toward recording it as a card capability (every card on the node agrees by
-   construction) so nothing downstream needs a new concept.
+1. **Does logical slicing survive MIG mode?** STILL OPEN. C3 shows whole-card access does not. The
+   `vdev<N>.conf` path goes through the same HSA layer and is expected to fail too, but this was
+   never measured. It affects only how the exclusivity is *described*, not whether it holds — the
+   node publishes partition keys only either way — which is why the build did not stop for it.
+2. **How should a node's MIG mode reach the scheduling chain?** RESOLVED: as a **card capability**.
+   Every card on the node agrees by construction, so nothing downstream needed a new concept, and the
+   mode reaches the chain through the same `PhysicalSliced` path NVIDIA and T-Head already use.
 3. **Should a partition-capable Hygon node still advertise its logical-slice keys when MIG is off?**
-   Yes by default — that is today's behaviour and this spec does not change it — but it means one
-   node model produces two very different advertisements depending on a mode the operator sets out of
-   band. Worth a docs callout.
-4. **Is `/opt/hyhal` already injected into workload containers on a MIG node by the operator's
-   existing Hygon path, or must the allocator add it?** C10 makes it required; where it comes from is
-   an implementation detail to confirm against the current injection code.
+   RESOLVED: yes, unchanged from today's behaviour, and the docs page leads with the fact that one
+   node model advertises two very different things depending on a mode set out of band.
+4. **Where does `/opt/hyhal` come from?** RESOLVED: the allocator mounts it. Both the partition
+   response and the existing logical-slice response inject the host's copy themselves, because the
+   image's own has no `libhydmi.so` (C10).
