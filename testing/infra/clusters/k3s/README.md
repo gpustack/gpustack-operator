@@ -98,6 +98,9 @@ terraform apply \
 - `image_archives_dir`: absolute path **on each node** for the airgap image
   cache, on by default at `/var/lib/k3s-image-archives`; pass `''` to disable it.
   See below.
+- `mirror` / `system_default_registry`: for hosts that cannot reach github.com or
+  get.k3s.io -- where the cache is filled from, and where runtime system-image
+  pulls resolve. See [China networks](#china-networks-mirror-and-system-registry).
 - `node_internal_ip` / `ssh_jumper` / `ssh_jumper_port`: for nodes whose cluster address
   is not the address you SSH to, or that are only reachable through another
   machine. Three shapes, see [Addressing the nodes](#addressing-the-nodes).
@@ -304,6 +307,57 @@ every non-default variable on the command line. In a directory that has agents, 
 makes the plan propose **destroying them**: with the variable empty they are no longer keys in the
 `for_each` map, which reads as "these nodes were removed" rather than "these nodes were not mentioned".
 
+## China networks: mirror and system registry
+
+For hosts that cannot reach github.com or get.k3s.io, two orthogonal variables.
+`mirror` decides where **install-time artifacts** come from;
+`system_default_registry` decides where **runtime system-image pulls**
+(`docker.io/rancher/mirrored-*`) resolve. An airgap-staged node needs no registry;
+an online node may want the registry without the mirror.
+
+`mirror=cn` points the module's own download script at rancher-mirror.rancher.cn:
+
+- release assets come from `https://rancher-mirror.rancher.cn/k3s/<tag with '+' spelled '-'>/`
+  (e.g. `.../k3s/v1.34.9-k3s1/sha256sum-amd64.txt`) -- the same asset names and
+  byte-identical checksum files as GitHub, so a cache warmed in one mode verifies
+  cleanly in the other and the cache layout is unchanged. The mirror serves the
+  airgap images only as `.tar.gz`, even though the checksum anchor lists all three
+  compressions, so that is the one picked in cn mode;
+- the installer comes from `https://rancher-mirror.rancher.cn/k3s/k3s-install.sh`.
+
+```bash
+terraform apply \
+  -var='server=["192.168.1.10"]' \
+  -var='mirror=cn'
+```
+
+Worth knowing:
+
+- **`mirror=cn` requires the artifact cache** and is rejected together with
+  `image_archives_dir=''`: without the cache the only CN-reachable install path
+  would be the installer's own `INSTALL_K3S_MIRROR` parameter, which this module
+  deliberately never sets -- the upstream and CN-hosted `install.sh` variants
+  differ, and a node may already hold a cached copy of either. Mirror downloads
+  are done by the module's script instead, so whichever variant a node has cached
+  is irrelevant.
+- **The mirror can lag a freshly-cut release.** A release absent from it fails at
+  download with the cache's usual error; pick an older `release` rather than
+  working around it.
+
+`system_default_registry` is passed as `--system-default-registry` to the
+**server** installs only -- the k3s agent CLI has no such flag, and agents get
+their system images from the staged archives:
+
+```bash
+terraform apply \
+  -var='server=["192.168.1.10"]' \
+  -var='system_default_registry=registry.rancher.cn'
+```
+
+`registry.rancher.cn` is the CN-reachable example; it is never a default.
+`rancher-mirror.rancher.cn` is **not** an OCI registry and does not work as a
+value here.
+
 ## Known limits
 
 Things the module does not do:
@@ -370,6 +424,8 @@ Things the module does not do:
 | `server_https_listen_port` | Kubernetes apiserver port (`--https-listen-port`) | `6443` |
 | `service_node_port_range` | NodePort Service port range (`--service-node-port-range`) | `30000-32767` |
 | `image_archives_dir` | Absolute path on each node for the per-release airgap image cache; `""` disables it | `/var/lib/k3s-image-archives` |
+| `mirror` | Where the cache is filled from: `""` (github.com / get.k3s.io) or `cn` (rancher-mirror.rancher.cn); requires `image_archives_dir` | `""` |
+| `system_default_registry` | `--system-default-registry` on the server installs, e.g. `registry.rancher.cn`; a host[:port], no path; the k3s agent has no such flag | `""` |
 | `switch_kube_context` | Let the merged context become the current one; `false` restores the previous one | `true` |
 
 ## Outputs

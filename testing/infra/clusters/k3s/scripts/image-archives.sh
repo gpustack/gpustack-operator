@@ -4,7 +4,14 @@
 # invokes sudo itself, so the caller decides. Run once per node, after the reclaim step and
 # before the installer.
 #
-#   image-archives.sh --release <tag> --cache-dir <dir>
+#   image-archives.sh --release <tag> --cache-dir <dir> [--mirror cn]
+#
+# With --mirror cn every download comes from rancher-mirror.rancher.cn instead: the release
+# assets from the mirror's copy of the release directory (same asset names, byte-identical
+# checksum files), and the installer from the mirror's own copy. This is for nodes that cannot
+# reach github.com or get.k3s.io. The installer's own INSTALL_K3S_MIRROR parameter is
+# deliberately not used: the upstream and CN-hosted install.sh variants differ, and a node may
+# already hold a cached script of either variant, so mirror downloads are done here instead.
 #
 # The cache is <cache-dir>/<release>: one directory per release tag, which is what makes a
 # version-skewed install unreachable rather than merely detectable -- what gets staged for a
@@ -45,6 +52,7 @@ die() {
 
 release=""
 cache_root=""
+mirror=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
   --release)
@@ -57,8 +65,13 @@ while [ "$#" -gt 0 ]; do
     [ -n "$cache_root" ] || die "--cache-dir needs a value"
     shift 2
     ;;
+  --mirror)
+    mirror="${2:-}"
+    [ -n "$mirror" ] || die "--mirror needs a value"
+    shift 2
+    ;;
   *)
-    echo "usage: $PROG --release <tag> --cache-dir <dir>" >&2
+    echo "usage: $PROG --release <tag> --cache-dir <dir> [--mirror cn]" >&2
     exit 2
     ;;
   esac
@@ -68,6 +81,10 @@ done
 case "$cache_root" in
 /*) ;;
 *) die "--cache-dir must be absolute, got '${cache_root}'" ;;
+esac
+case "$mirror" in
+"" | cn) ;;
+*) die "unsupported --mirror '${mirror}'; the only mirror this script knows is 'cn'" ;;
 esac
 
 readonly cache="${cache_root%/}/${release}"
@@ -122,8 +139,16 @@ esac
 readonly checksums="sha256sum-${arch}.txt"
 readonly installer="install.sh"
 # GitHub download paths take the tag percent-encoded; the '+' in every k3s tag is otherwise
-# read as a space and the asset is not found.
-readonly base_url="https://github.com/k3s-io/k3s/releases/download/${release//+/%2B}"
+# read as a space and the asset is not found. The cn mirror serves the same assets -- same
+# names, byte-identical checksum files -- under the tag with '+' spelled '-' instead, and hosts
+# its own copy of the installer next to them.
+if [ "$mirror" = cn ]; then
+  readonly base_url="https://rancher-mirror.rancher.cn/k3s/${release//+/-}"
+  readonly installer_url="https://rancher-mirror.rancher.cn/k3s/k3s-install.sh"
+else
+  readonly base_url="https://github.com/k3s-io/k3s/releases/download/${release//+/%2B}"
+  readonly installer_url="https://get.k3s.io"
+fi
 
 download() {
   curl -fL --retry 3 --retry-delay 2 -sS -o "$2" "$1" ||
@@ -223,10 +248,10 @@ ensure_installer() {
     return 0
   fi
   rm -f "$part"
-  log "downloading ${installer} from https://get.k3s.io"
-  download "https://get.k3s.io" "$part"
+  log "downloading ${installer} from ${installer_url}"
+  download "$installer_url" "$part"
   grep -q 'INSTALL_K3S_SKIP_DOWNLOAD' "$part" ||
-    die "https://get.k3s.io did not return the k3s installer"
+    die "${installer_url} did not return the k3s installer"
   mv -f "$part" "${cache}/${installer}"
   log "downloaded ${installer} (covered by no published digest, so trusted only as far as TLS)"
 }
@@ -250,19 +275,37 @@ mkdir -p "$cache"
 
 # k3s publishes .tar, .tar.gz and .tar.zst of the same images. The checksum file decides which
 # one to take, rather than a hardcoded suffix that would reject a release publishing only
-# another; zst first because it is the smallest.
+# another; zst first because it is the smallest. The cn mirror serves only the .tar.gz -- its
+# copy of the checksum anchor still lists all three -- so in cn mode the gz is preferred, and
+# the rest stay as fallbacks for a mirror that one day carries them.
+archive_suffixes=".tar.zst .tar.gz .tar"
+[ "$mirror" = cn ] && archive_suffixes=".tar.gz .tar.zst .tar"
+# A cached archive whose digest already matches the anchor wins over the mode's download
+# preference: the mirror's checksums are the same bytes as github's, so a cache warmed in one
+# mode serves the other without re-downloading the same images in the other compression.
 archive=""
 for suffix in .tar.zst .tar.gz .tar; do
-  if [ -n "$(checksum_lookup "k3s-airgap-images-${arch}${suffix}")" ]; then
-    archive="k3s-airgap-images-${arch}${suffix}"
+  name="k3s-airgap-images-${arch}${suffix}"
+  [ -f "${cache}/${name}" ] || continue
+  expected="$(checksum_lookup "$name")"
+  if [ -n "$expected" ] && [ "$(sha256_of "${cache}/${name}")" = "$expected" ]; then
+    archive="$name"
     break
   fi
 done
 if [ -z "$archive" ]; then
+  for suffix in $archive_suffixes; do
+    if [ -n "$(checksum_lookup "k3s-airgap-images-${arch}${suffix}")" ]; then
+      archive="k3s-airgap-images-${arch}${suffix}"
+      break
+    fi
+  done
+fi
+if [ -z "$archive" ]; then
   # Neither listed: the anchor itself may be truncated, or from another release. Refresh it
   # once before concluding the release has no such asset.
   refresh_checksums
-  for suffix in .tar.zst .tar.gz .tar; do
+  for suffix in $archive_suffixes; do
     if [ -n "$(checksum_lookup "k3s-airgap-images-${arch}${suffix}")" ]; then
       archive="k3s-airgap-images-${arch}${suffix}"
       break
@@ -303,7 +346,14 @@ for path in "$cache"/*.tar "$cache"/*.tar.gz "$cache"/*.tar.zst; do
     present=$((present + 1))
     continue
   fi
-  if [ -n "$(checksum_lookup "$name")" ]; then
+  expected="$(checksum_lookup "$name")"
+  if [ -n "$expected" ]; then
+    # A published name is not proof of the bytes: the selection above hashes only the archive it
+    # picks, so a cached official compression whose digest failed is still sitting here -- and
+    # staging a corrupt archive breaks the import at every k3s start. The anchor is fresh by now
+    # (it is refreshed whenever an artifact disagrees with it), so a mismatch is the file's fault.
+    [ "$(sha256_of "$path")" = "$expected" ] ||
+      die "${name} does not match its published sha256 in ${checksums}: refusing to stage a corrupt archive"
     verified=verified
   else
     # An operator's own bundle has no published digest. Demanding one would break the
