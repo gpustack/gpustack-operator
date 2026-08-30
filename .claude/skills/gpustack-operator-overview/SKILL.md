@@ -33,6 +33,7 @@ pkg/
     controllers/worker/           the scheduling-chain reconcilers
     extensionapis/                aggregated extension-API handlers (Instance, Devices, InstanceType, …)
     webhooks/worker/              admission webhooks (generated + hand-written)
+    kvcache/                      renders a Mooncake store (leader/member workloads) and reads it back
     kuberess/                     installs the bundled operator chart (image mode) + the two CRs
   workergateway/                  worker-gateway subcommand (upstream aggregation)
   devicemanager/                  device-manager subcommand (per-node DaemonSet)
@@ -47,7 +48,7 @@ pkg/
 api/
   v1/                             gpustack.ai/v1 extension API (settings, status)
   worker/v1/                      worker.gpustack.ai/v1 extension API
-  worker/v1alpha1/                worker.gpustack.ai/v1alpha1 CRDs (Instance, Devices, InstanceType)
+  worker/v1alpha1/                worker.gpustack.ai/v1alpha1 CRDs
 binding/<runtime>/                generated CGO bindings (nvml, rsmi, cndev, dcmi, …)
 csrc/<mfr>/                       hand-written C preload libraries injected into sliced containers
 gen/
@@ -81,6 +82,7 @@ controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.
 - The five admission gates, webhook rules, the four-view status → [architecture/admission.md](../../../docs/architecture/admission.md)
 - Chart mode vs image mode, what the worker applies itself → [architecture/installation-modes.md](../../../docs/architecture/installation-modes.md)
 - Startup ordering, the gateway mirror, CGO bindings, the 63-char rule → [architecture/internals.md](../../../docs/architecture/internals.md)
+- Running and observing a pooled KV cache — a chain of its own, not part of the four stages → [kv-cache/backend.md](../../../docs/kv-cache/backend.md)
 - The two accelerator families, their resource keys and request rules → [accelerator-requests.md](../../../docs/accelerator-requests.md)
 - Settings & `GPUSTACK_*` configuration knobs → [settings.md](../../../docs/settings.md)
 - Every command the binary offers, its flags and a runnable invocation → [reference/commands.md](../../../docs/reference/commands.md)
