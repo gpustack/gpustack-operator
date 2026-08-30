@@ -334,6 +334,54 @@ variable "system_default_registry" {
   }
 }
 
+variable "registry_mirrors" {
+  # The third leg of the CN story, and the one that governs WORKLOAD images.
+  # system_default_registry moves only the images k3s ships with; everything a chart pulls still
+  # resolves through docker.io, which is exactly the host a cn-mirrored node cannot reach. So this
+  # is written to the node's registries.yaml, which is where containerd takes per-registry mirror
+  # endpoints from.
+  #
+  # Unset FOLLOWS THE MIRROR, like system_default_registry: 'cn' derives a list of community
+  # docker.io proxies, anything else derives nothing. An explicit {} writes no file at all.
+  #
+  # Endpoints are tried IN ORDER and containerd falls through on failure, so a list costs a
+  # timeout where a single endpoint would cost the pull.
+  #
+  # The derived endpoints are UNAFFILIATED third-party proxies, and pointing docker.io at one
+  # is a trust decision rather than a transport detail: containerd checks a blob against the
+  # digest its manifest names, but the manifest itself comes from the mirror, so a proxy can
+  # serve a different image for a tag than Docker Hub would. This module provisions LAB
+  # clusters, which is the whole reason a default is defensible here -- point this at a
+  # registry you control when the images matter.
+  description = "Per-registry mirror endpoints written to the node's registries.yaml, e.g. {\"docker.io\" = [\"https://mirror.example.com\"]}. Unset follows the mirror ('cn' derives community docker.io proxies); {} writes no file."
+  type        = map(list(string))
+  default     = null
+
+  validation {
+    # Rendered into a YAML document that is spliced single-quoted into the command running on the
+    # node, so the quote character itself is excluded from both sides. A registry key is a
+    # host[:port] or the '*' catch-all containerd accepts; an endpoint is a scheme plus a REAL
+    # authority, with a path allowed because a proxy may serve under one. The host is spelled out
+    # rather than left to a character class: a class permits "https:///path" and "https://:", which
+    # pass validation and then write an endpoint containerd cannot dial, so the node is reprovisioned
+    # before anything says the value was unusable.
+    condition = var.registry_mirrors == null || alltrue(flatten([
+      for reg, eps in var.registry_mirrors : concat(
+        [can(regex("^([A-Za-z0-9._-]+(:[0-9]+)?|\\*)$", reg))],
+        [for e in eps : can(regex("^https?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]+)?(/[A-Za-z0-9._/-]*)?$", e))],
+      )
+    ]))
+    error_message = "registry_mirrors keys must be a registry host[:port] or '*', and every endpoint must be an http(s) URL naming a host -- a hostname or IPv4 literal, an optional numeric port, an optional path (both are spliced into the command that writes the node's registries.yaml)."
+  }
+
+  validation {
+    # An empty endpoint list writes a mirror entry containerd cannot use, and the failure surfaces
+    # as pulls that resolve nowhere rather than as a configuration error.
+    condition     = var.registry_mirrors == null || alltrue([for eps in values(var.registry_mirrors) : length(eps) > 0])
+    error_message = "every registry in registry_mirrors must name at least one endpoint; drop the key instead of giving it an empty list."
+  }
+}
+
 variable "switch_kube_context" {
   # The cluster is merged into ~/.kube/config either way; this only decides whether a
   # bare kubectl points at it afterwards. Set it to false while another cluster is

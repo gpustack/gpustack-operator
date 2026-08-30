@@ -178,6 +178,34 @@ locals {
   # single-quoted: a bracketed IPv6 literal is otherwise a glob pattern to the remote shell.
   system_default_registry_flag = local.system_default_registry == "" ? "" : " --system-default-registry '${local.system_default_registry}'"
 
+  # The docker.io proxies the cn mirror derives, tried in this order. Community endpoints, and they
+  # DO die: sweeping the published list from a CN host found 47 of 76 dead outright, and three more
+  # that served a manifest and then failed the blob -- one of them redirecting to an ad page. So
+  # what is listed here is only what a real containerd pull of a real image completed through,
+  # fastest first, and it is a snapshot rather than a guarantee. registry_mirrors replaces it.
+  cn_docker_io_mirrors = [
+    "https://docker.1panel.live",
+    "https://image.jianmuhub.com",
+    "https://dockerproxy.net",
+    "https://proxy.vvvv.ee",
+  ]
+
+  # Unset follows the mirror, exactly as system_default_registry does. The two are not
+  # interchangeable: that one moves the images k3s ships with, this one moves everything a
+  # workload pulls, and a cn-mirrored node needs both.
+  registry_mirrors = var.registry_mirrors != null ? var.registry_mirrors : (
+    var.mirror == "cn" ? { "docker.io" = local.cn_docker_io_mirrors } : {}
+  )
+
+  # k3s reads registries.yaml when it starts, so this is written after the reclaim (which removes
+  # /etc/rancher/k3s wholesale) and before the install. With nothing to write the file is REMOVED
+  # rather than left alone: a node keeps its config across a re-apply that changed nothing else,
+  # and a stale file would go on routing every pull through a mirror the caller has since dropped.
+  registries_yaml = yamlencode({
+    mirrors = { for reg, eps in local.registry_mirrors : reg => { endpoint = eps } }
+  })
+  write_registries_yaml = length(local.registry_mirrors) == 0 ? "sudo rm -f /etc/rancher/k3s/registries.yaml" : "sudo mkdir -p /etc/rancher/k3s && printf '%s' '${local.registries_yaml}' | sudo tee /etc/rancher/k3s/registries.yaml > /dev/null || exit 1"
+
   # How the installer is obtained, and what it is told about downloading. With a cache the step
   # above has already put that release's own binary in place and pinned a copy of the installer, so
   # INSTALL_K3S_SKIP_DOWNLOAD=true leaves the install with nothing to fetch -- and because the same
@@ -281,6 +309,7 @@ resource "null_resource" "server_init" {
     # every node already in state from before the key existed.
     var.mirror == "" ? {} : { mirror = var.mirror },
     local.system_default_registry == "" ? {} : { system_default_registry = local.system_default_registry },
+    length(local.registry_mirrors) == 0 ? {} : { registry_mirrors = jsonencode(local.registry_mirrors) },
   )
 
   lifecycle {
@@ -341,6 +370,9 @@ resource "null_resource" "server_init" {
       # After the reclaim (which removed the images directory) and before the installer, which
       # is when k3s reads that directory. A warm cache makes this a local copy with no download.
       local.stage_image_archives,
+      # Written here for the same reason the staging above is: the reclaim removed
+      # /etc/rancher/k3s, and the installer starts the service that reads this file.
+      local.write_registries_yaml,
       "${local.install_prefix} ${local.install_sh} server --cluster-init --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} ${local.tls_san_flags[local.first_server.host]} --https-listen-port ${var.server_https_listen_port} --service-node-port-range ${var.service_node_port_range} ${local.node_internal_ip_flag[local.first_server.host]} ${local.node_external_ip_flag[local.first_server.host]} ${local.advertise_flag[local.first_server.host]}${local.system_default_registry_flag} || exit 1",
       local.version_assert,
     ]
@@ -398,6 +430,7 @@ resource "null_resource" "server_join" {
     # node already in state from before the key existed.
     var.mirror == "" ? {} : { mirror = var.mirror },
     local.system_default_registry == "" ? {} : { system_default_registry = local.system_default_registry },
+    length(local.registry_mirrors) == 0 ? {} : { registry_mirrors = jsonencode(local.registry_mirrors) },
   )
 
   lifecycle {
@@ -447,6 +480,9 @@ resource "null_resource" "server_join" {
       "for c in $(echo '${var.cluster_cidr}' | tr ',' ' '); do sudo ip route flush root \"$c\" || true; done",
       local.join_wait,
       local.stage_image_archives,
+      # Written here for the same reason the staging above is: the reclaim removed
+      # /etc/rancher/k3s, and the installer starts the service that reads this file.
+      local.write_registries_yaml,
       "${local.install_prefix} ${local.install_sh} server --server ${local.server_url} --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} ${local.tls_san_flags[each.value.host]} --https-listen-port ${var.server_https_listen_port} --service-node-port-range ${var.service_node_port_range} ${local.node_internal_ip_flag[each.value.host]} ${local.node_external_ip_flag[each.value.host]} ${local.advertise_flag[each.value.host]}${local.system_default_registry_flag} || exit 1",
       local.version_assert,
     ]
@@ -494,11 +530,13 @@ resource "null_resource" "agent" {
     # for a cluster that no longer exists.
     server_init = null_resource.server_init.id
     },
-    # Where this node's cache is filled from feeds its staging command; system_default_registry
-    # is server-only (the k3s agent CLI has no such flag), so it is not tracked here. A
-    # default-valued key is omitted entirely rather than tracked empty: a key added to triggers
-    # replaces -- reinstalls -- every agent already in state from before the key existed.
+    # Where this node's cache is filled from feeds its staging command, and the mirror endpoints
+    # feed its registries.yaml. system_default_registry is server-only (the k3s agent CLI has no
+    # such flag), so that one is not tracked here. A default-valued key is omitted entirely
+    # rather than tracked empty: a key added to triggers replaces -- reinstalls -- every agent
+    # already in state from before the key existed.
     var.mirror == "" ? {} : { mirror = var.mirror },
+    length(local.registry_mirrors) == 0 ? {} : { registry_mirrors = jsonencode(local.registry_mirrors) },
   )
 
   lifecycle {
@@ -548,6 +586,9 @@ resource "null_resource" "agent" {
       "for c in $(echo '${var.cluster_cidr}' | tr ',' ' '); do sudo ip route flush root \"$c\" || true; done",
       local.join_wait,
       local.stage_image_archives,
+      # Written here for the same reason the staging above is: the reclaim removed
+      # /etc/rancher/k3s, and the installer starts the service that reads this file.
+      local.write_registries_yaml,
       "${local.install_prefix} K3S_URL='${local.server_url}' ${local.install_sh} agent ${local.node_internal_ip_flag[each.value.host]} ${local.node_external_ip_flag[each.value.host]} || exit 1",
       local.version_assert,
     ]

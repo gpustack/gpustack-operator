@@ -298,6 +298,39 @@ locals {
     var.mirror == "cn" ? "registry.rancher.cn" : ""
   )
 
+  # The docker.io proxies the cn mirror derives, tried in this order. Community endpoints, and they
+  # DO die: sweeping the published list from a CN host found 47 of 76 dead outright, and three more
+  # that served a manifest and then failed the blob -- one of them redirecting to an ad page. So
+  # what is listed here is only what a real containerd pull of a real image completed through,
+  # fastest first, and it is a snapshot rather than a guarantee. registry_mirrors replaces it.
+  cn_docker_io_mirrors = [
+    "https://docker.1panel.live",
+    "https://image.jianmuhub.com",
+    "https://dockerproxy.net",
+    "https://proxy.vvvv.ee",
+  ]
+
+  # Unset follows the mirror, exactly as system_default_registry does. The two are not
+  # interchangeable: that one moves the images RKE2 ships with, this one moves everything a
+  # workload pulls, and a cn-mirrored node needs both.
+  registry_mirrors = var.registry_mirrors != null ? var.registry_mirrors : (
+    var.mirror == "cn" ? { "docker.io" = local.cn_docker_io_mirrors } : {}
+  )
+
+  # RKE2 reads registries.yaml when it starts, so this is written beside config.yaml and before the
+  # service comes up. With nothing to write the file is REMOVED rather than left alone: the reclaim
+  # does not clear every path, and a stale file would go on routing every pull through a mirror the
+  # caller has since dropped.
+  #
+  # Carries no `|| exit 1`, unlike the k3s module's equivalent, and the difference is not an
+  # oversight: this string is spliced into a heredoc whose first line is `set -e`, so a failing tee
+  # already aborts the step, while k3s splices its own into an inline list that deliberately runs
+  # WITHOUT `set -e` (a `set -e` there would make its uninstall probes fatal on a clean host).
+  registries_yaml = yamlencode({
+    mirrors = { for reg, eps in local.registry_mirrors : reg => { endpoint = eps } }
+  })
+  write_registries_yaml = length(local.registry_mirrors) == 0 ? "sudo rm -f /etc/rancher/rke2/registries.yaml" : "printf '%s' '${local.registries_yaml}' | sudo tee /etc/rancher/rke2/registries.yaml > /dev/null"
+
   # An Agent/Runtime setting per the RKE2 reference, valid on servers and agents alike, so it
   # goes into every node's config.yaml. Empty means the key is not written, exactly as before.
   # The value is double-quoted: a bracketed IPv6 literal is otherwise a YAML flow sequence.
@@ -428,6 +461,7 @@ resource "null_resource" "server_init" {
     # from before the key existed.
     var.mirror == "" ? {} : { mirror = var.mirror },
     local.system_default_registry == "" ? {} : { system_default_registry = local.system_default_registry },
+    length(local.registry_mirrors) == 0 ? {} : { registry_mirrors = jsonencode(local.registry_mirrors) },
   )
 
   lifecycle {
@@ -506,6 +540,8 @@ resource "null_resource" "server_init" {
         sudo touch /etc/rancher/rke2/config.yaml
         sudo chmod 600 /etc/rancher/rke2/config.yaml
         printf '%s\n' '${local.first_server_config}' | sudo tee /etc/rancher/rke2/config.yaml > /dev/null
+        # Beside it and before the start, which is when RKE2 reads the mirror endpoints.
+        ${local.write_registries_yaml}
         # Put the node's own password back before the service starts; see local.node_password_save.
         ${local.node_password_restore}
       EOT
@@ -582,6 +618,7 @@ resource "null_resource" "server_join" {
     # replaces -- reinstalls -- every node already in state from before the key existed.
     var.mirror == "" ? {} : { mirror = var.mirror },
     local.system_default_registry == "" ? {} : { system_default_registry = local.system_default_registry },
+    length(local.registry_mirrors) == 0 ? {} : { registry_mirrors = jsonencode(local.registry_mirrors) },
   )
 
   lifecycle {
@@ -645,6 +682,8 @@ resource "null_resource" "server_join" {
         sudo touch /etc/rancher/rke2/config.yaml
         sudo chmod 600 /etc/rancher/rke2/config.yaml
         printf '%s\n' '${local.server_join_config[each.value.host]}' | sudo tee /etc/rancher/rke2/config.yaml > /dev/null
+        # Beside it and before the start, which is when RKE2 reads the mirror endpoints.
+        ${local.write_registries_yaml}
         # Put the node's own password back before the service starts; see local.node_password_save.
         ${local.node_password_restore}
       EOT
@@ -707,6 +746,7 @@ resource "null_resource" "agent" {
     # agent already in state from before the key existed.
     var.mirror == "" ? {} : { mirror = var.mirror },
     local.system_default_registry == "" ? {} : { system_default_registry = local.system_default_registry },
+    length(local.registry_mirrors) == 0 ? {} : { registry_mirrors = jsonencode(local.registry_mirrors) },
   )
 
   lifecycle {
@@ -769,6 +809,8 @@ resource "null_resource" "agent" {
         sudo touch /etc/rancher/rke2/config.yaml
         sudo chmod 600 /etc/rancher/rke2/config.yaml
         printf '%s\n' '${local.agent_config[each.value.host]}' | sudo tee /etc/rancher/rke2/config.yaml > /dev/null
+        # Beside it and before the start, which is when RKE2 reads the mirror endpoints.
+        ${local.write_registries_yaml}
         # Put the node's own password back before the service starts; see local.node_password_save.
         ${local.node_password_restore}
       EOT
