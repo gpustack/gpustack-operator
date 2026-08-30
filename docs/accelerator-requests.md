@@ -393,7 +393,8 @@ DaemonSet, then let the workloads reschedule.
   **not** required — an existing group's capability is rewritten in place.
 
   Full procedure: [NVIDIA MIG Operations](./operation/nvidia-mig.md#enabling-mig-on-a-node) ·
-  [T-Head MIG Operations](./operation/thead-mig.md#enabling-partitioning-on-a-node).
+  [T-Head MIG Operations](./operation/thead-mig.md#enabling-partitioning-on-a-node) ·
+  [Hygon MIG Operations](./operation/hygon-mig.md#enabling-partitioning-on-a-node).
 - **A non-default `TopologyManager` policy can mis-align a partition.** The Partitioned resource reports
   no NUMA topology (the plugin may not use the accelerator the kubelet aligned to), so under
   `single-numa-node` the CPU and memory providers can settle on one socket while the only accelerator
@@ -403,6 +404,8 @@ DaemonSet, then let the workloads reschedule.
 
 **See also** — [NVIDIA MIG Operations](./operation/nvidia-mig.md) (the administrator runbook for an
 accelerator's partitioning mode, plus a recorded enable → request → reclaim → disable walkthrough) ·
+[Hygon MIG Operations](./operation/hygon-mig.md) (the same runbook for Hygon, whose mode is
+node-wide and whose partitioned nodes serve no whole-card or sliced request at all) ·
 [T-Head MIG Operations](./operation/thead-mig.md) (the same runbook for T-Head's own
 partitioning) · [Admission](./architecture/admission.md) (where these keys are checked) ·
 [Device Discovery](./architecture/device-discovery.md#the-device-plugin-allocator) (where they are served)

@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"gpustack.ai/gpustack/binding"
 	"gpustack.ai/gpustack/binding/dmi"
 	"gpustack.ai/gpustack/pkg/device"
 )
@@ -485,4 +486,47 @@ func TestRejectDivergentGroupProfiles(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Cards of one model must carry one name, because the name is what groups them. Resolving it per
+// card lets the sources disagree between two identical cards -- which is not hypothetical here: with
+// Multi-Instance mode on, HSA answers for at most one card and the device-manager image's pci.ids
+// knows none of them -- and the node's hardware then splits into two groups publishing two
+// InstanceTypes between them.
+func TestModelNameCache(t *testing.T) {
+	bwCard := binding.PCIDevice{Vendor: "1d94", Device: "6320"}
+	otherModel := binding.PCIDevice{Vendor: "1d94", Device: "6321"}
+
+	t.Run("the first answer for a model is the answer for every card of it", func(t *testing.T) {
+		c := make(modelNameCache)
+		answers := []string{"BW", "0x6320", "0x6320"}
+
+		got := make([]string, 0, len(answers))
+		for _, a := range answers {
+			got = append(got, c.resolve(bwCard, func() string { return a }))
+		}
+
+		assert.Equal(t, []string{"BW", "BW", "BW"}, got)
+	})
+
+	t.Run("a different model resolves independently", func(t *testing.T) {
+		c := make(modelNameCache)
+
+		first := c.resolve(bwCard, func() string { return "BW" })
+		second := c.resolve(otherModel, func() string { return "CW" })
+
+		assert.Equal(t, "BW", first)
+		assert.Equal(t, "CW", second)
+	})
+
+	t.Run("an empty answer is not cached, so a later card can still name the model", func(t *testing.T) {
+		c := make(modelNameCache)
+
+		assert.Empty(t, c.resolve(bwCard, func() string { return "" }))
+		assert.Equal(t, "BW", c.resolve(bwCard, func() string { return "BW" }))
+		assert.Equal(t, "BW", c.resolve(bwCard, func() string {
+			t.Fatal("a resolved model must not be resolved again")
+			return ""
+		}))
+	})
 }

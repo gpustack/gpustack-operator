@@ -2,6 +2,7 @@ package hygon
 
 import (
 	"errors"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	klog "k8s.io/klog/v2"
@@ -82,7 +83,7 @@ func (r *migReclaimer) release(entry migMarkerEntry) {
 	logger := r.logger.WithValues(
 		"pod", m.PodUID, "container", m.Container, "card", m.Card, "gpuInstance", m.GiID)
 
-	release := lockMigCard(m.Card)
+	release := lockMigCard(m.PciBusID)
 	defer release()
 
 	if err := r.drv.DestroyInstance(m.PciBusID, m.instance()); err != nil {
@@ -109,6 +110,15 @@ func (r *migReclaimer) release(entry migMarkerEntry) {
 // one when the next request for the same profile arrives, which handles the common case; this
 // handles the rest -- an orphan of a profile nobody asks for again would otherwise hold its slices
 // until the node is rebuilt.
+//
+// The ownership is re-read UNDER THE ACCELERATOR LOCK before anything is destroyed, and the snapshot
+// taken by the caller is only a pre-filter. Without that, this sweep tears down partitions that
+// allocations are still assembling: a reservation writes its record and releases the lock before its
+// caller finishes building the container response, so an unlocked sweep whose record scan predates
+// that write sees a live instance nobody claims and destroys it. That is not a narrow window --
+// observed three times in one second on a node admitting three Pods, each losing the partition it
+// had just been granted -- and it is made likelier by the driver reusing a freed instance id
+// immediately.
 func (r *migReclaimer) collectOrphans(seen map[string]sets.Set[uint32]) {
 	live, err := r.drv.ListInstances()
 	if err != nil {
@@ -124,15 +134,41 @@ func (r *migReclaimer) collectOrphans(seen map[string]sets.Set[uint32]) {
 		logger := r.logger.WithValues("card", card, "gpuInstance", inst.GiID)
 
 		release := lockMigCard(card)
-		err := r.drv.DestroyInstance(card, inst)
+		err := r.destroyIfStillUnclaimed(card, inst)
 		release()
 		switch {
 		case err == nil:
 			logger.Info("collected a partition no allocation claims")
+		case errors.Is(err, errMigInstanceClaimed):
+			logger.V(3).Info("a partition was claimed while this pass was deciding; leaving it alone")
 		case errors.Is(err, errInstanceInUse):
 			logger.V(3).Info("a partition no allocation claims is in use; leaving it for the next pass")
 		default:
 			logger.Error(err, "failed to collect a partition no allocation claims")
 		}
 	}
+}
+
+// errMigInstanceClaimed reports that an ownership record for a candidate appeared between the
+// caller's scan and this lock being taken, so the candidate is not an orphan after all.
+var errMigInstanceClaimed = errors.New("partition is claimed")
+
+// destroyIfStillUnclaimed re-reads the ownership records with the accelerator's lock held and
+// destroys the instance only if nothing claims it now.
+//
+// A record that cannot be read makes ownership unknowable, which is refused for the same reason the
+// caller refuses the whole sweep on one: an instance whose owner might exist but be unreadable must
+// not be taken for an orphan.
+func (r *migReclaimer) destroyIfStillUnclaimed(pciBusID string, inst migInstance) error {
+	entries, corrupt := scanMigMarkers(r.podsDir)
+	if len(corrupt) != 0 {
+		return fmt.Errorf("%w: some ownership records are unreadable", errMigInstanceClaimed)
+	}
+	for i := range entries {
+		m := entries[i].marker
+		if m.PciBusID == pciBusID && m.GiID == inst.GiID {
+			return errMigInstanceClaimed
+		}
+	}
+	return r.drv.DestroyInstance(pciBusID, inst)
 }

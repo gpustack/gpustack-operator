@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,6 +29,9 @@ type fakeMigDriver struct {
 	// listed is what ListInstances reports, and listErr what it fails with.
 	listed  []migLiveInstance
 	listErr error
+	// onList runs inside ListInstances, which is where a test reproduces something happening
+	// between a caller's record scan and its decision.
+	onList func()
 
 	created   []migPlacement
 	destroyed []migInstance
@@ -70,6 +74,9 @@ func (d *fakeMigDriver) DestroyInstance(_ string, inst migInstance) error {
 }
 
 func (d *fakeMigDriver) ListInstances() ([]migLiveInstance, error) {
+	if d.onList != nil {
+		d.onList()
+	}
 	return d.listed, d.listErr
 }
 
@@ -674,4 +681,65 @@ func TestMigReclaimerReconcile(t *testing.T) {
 
 		assert.Empty(t, drv.destroyedGiIDs())
 	})
+}
+
+// A reservation writes its ownership record and releases the accelerator's lock before its caller
+// finishes building the container response, so a sweep that decided from a record scan taken before
+// that write would destroy a partition an allocation had just been granted. Observed three times in
+// one second on a node admitting three Pods, each losing its partition -- and made likelier by the
+// driver handing a freed instance id straight back out.
+//
+// The window is reproduced faithfully rather than raced for: the claim appears while the sweep is
+// enumerating, which is exactly between the scan it decided from and the lock it destroys under.
+func TestMigReclaimerDoesNotCollectAPartitionClaimedMidSweep(t *testing.T) {
+	const card = "GPU-abc"
+	bdf := testCard().PciBusID
+	podsDir := t.TempDir()
+
+	drv := &fakeMigDriver{
+		listed: []migLiveInstance{{PciBusID: bdf, Instance: migInstance{
+			GiID: 4, ProfileID: 3, Placement: migPlacement{1, 1}, UUID: "u4",
+		}}},
+	}
+	drv.onList = func() {
+		require.NoError(t, writeMigMarker(
+			migMarkerPath(podsDir, "just-admitted", "main", card),
+			migMarker{
+				PodUID: "just-admitted", Container: "main", Card: card, PciBusID: bdf,
+				Profile: "2g.15gb", ProfileID: 3, GiID: 4, MigUUID: "u4",
+				ConfPath: "/etc/dmi_mig_config/ci/dev0gi4ci0.conf", Start: 1, Length: 1,
+			}))
+	}
+
+	newMigReclaimer(drv, podsDir, klog.Background()).reconcile([]string{"just-admitted"})
+
+	assert.Empty(t, drv.destroyedGiIDs(),
+		"a partition claimed while the sweep was deciding must survive it")
+}
+
+// The accelerator lock is what makes that re-read exclusive, and it only does so if every caller
+// takes the SAME lock. The reclaim sweep reaches a card through the driver, which knows only PCI
+// addresses, while an allocation starts from the Devices record, which is keyed by UUID -- so keying
+// the lock on the UUID would have the two serialize with nothing at all.
+func TestLockMigCardIsKeyedByPciAddress(t *testing.T) {
+	release := lockMigCard(testCard().PciBusID)
+
+	taken := make(chan struct{})
+	go func() {
+		defer close(taken)
+		lockMigCard(testCard().PciBusID)()
+	}()
+
+	select {
+	case <-taken:
+		t.Fatal("a second holder of the same accelerator's lock was not blocked")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	release()
+	select {
+	case <-taken:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the lock was never released to the waiting holder")
+	}
 }

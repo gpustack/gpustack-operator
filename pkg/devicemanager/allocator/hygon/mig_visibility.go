@@ -67,7 +67,7 @@ func (s *server) ActuatePhysicalSliced(
 		return nil, fmt.Errorf("card %s: absent from the device record: fail closed", card.UUID)
 	}
 
-	release := lockMigCard(card.UUID)
+	release := lockMigCard(card.PciBusID)
 	inst, outcome, err := reserveMigInstance(
 		s.mig, deviceplugin.OperatorPodsDir, string(pod.UID), ctr.Name, card, profile)
 	release()
@@ -108,7 +108,7 @@ func (s *server) rollbackMigInstance(
 		return
 	}
 
-	release := lockMigCard(card.UUID)
+	release := lockMigCard(card.PciBusID)
 	defer release()
 
 	if err := osx.Remove(migMarkerPath(deviceplugin.OperatorPodsDir, podUID, container, card.UUID)); err != nil {
@@ -181,7 +181,7 @@ func (s *server) liveOwnedMigInstance(card migCard, podUID, owner string) (migIn
 			"read the partition record of container %q on card %s: %w", owner, card.UUID, err)
 	}
 
-	release := lockMigCard(card.UUID)
+	release := lockMigCard(card.PciBusID)
 	defer release()
 
 	state, err := s.mig.CardState(card.PciBusID, m.Profile)

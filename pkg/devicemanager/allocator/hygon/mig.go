@@ -109,17 +109,25 @@ type migCard struct {
 	PciBusID string
 }
 
-// migCardLocks serializes the reserve-and-record critical section per accelerator, so two concurrent
-// allocations cannot both pick the same free placement.
+// migCardLocks serializes every mutation of one accelerator's partitions, so two concurrent
+// allocations cannot both pick the same free placement and the reclaim sweep cannot tear down an
+// instance an allocation is still assembling.
 //
 // The lock is per accelerator rather than global because the driver itself is: creating an instance
 // on one card while a workload runs on another is safe and was measured to be, so a global lock
 // would serialize allocations that never contend.
+//
+// It is keyed by the PCI ADDRESS rather than the accelerator UUID, and that is load-bearing rather
+// than a preference. The two identities name the same card, so a caller holding one and a caller
+// holding the other take DIFFERENT locks and serialize with nothing -- which is not theoretical: the
+// reclaim sweep enumerates through the driver, which knows only PCI addresses, while an allocation
+// starts from the Devices record, which is keyed by UUID. Keying on the identity every caller can
+// produce is what makes the exclusion real.
 var migCardLocks sync.Map
 
 // lockMigCard takes the accelerator's lock and returns its release.
-func lockMigCard(cardUUID string) func() {
-	v, _ := migCardLocks.LoadOrStore(cardUUID, &sync.Mutex{})
+func lockMigCard(pciBusID string) func() {
+	v, _ := migCardLocks.LoadOrStore(pciBusID, &sync.Mutex{})
 	mu := v.(*sync.Mutex) //nolint:forcetypeassert
 	mu.Lock()
 	return mu.Unlock
