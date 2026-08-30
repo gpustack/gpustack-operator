@@ -75,22 +75,55 @@ type sliceProbe struct {
 	// monitors this names exit non-zero in a container that has allocated nothing yet, which is
 	// exactly the container a preflight starts.
 	Reader string
+	// LoadEvidence is a string the Reader prints only when this manufacturer's slicing runtime
+	// took effect, and it replaces the mapped-object test for a manufacturer whose injection
+	// carries no shared object of ours.
+	//
+	// Four of the five preload a library this repository builds, so the container's own address
+	// space answers whether the runtime loaded. Hygon's slice is a file the VENDOR's runtime reads
+	// -- there is no shim to find in the mappings, and judging it that way would report every
+	// healthy Hygon accelerator as having no slicing runtime at all. What answers instead is the
+	// driver's own record: the kfd vgpu sysfs gains an instance for a process that entered vgpu
+	// mode, and nothing else creates one.
+	LoadEvidence string
 	// MemoryQuotaEnvPrefix names the environment variable this manufacturer's injection carries
 	// the per-accelerator memory cap in, without the accelerator index the allocator appends.
 	//
 	// It is empty for a manufacturer that carries the cap somewhere other than the environment,
-	// and exactly one does: see the two fields below.
+	// and two do: see the three fields below.
 	MemoryQuotaEnvPrefix string
-	// MemoryQuotaConfigMount and MemoryQuotaConfigKey are the other place a cap is carried: the
-	// container path of a configuration file the injection mounts, and the "key=" whose value is
-	// the figure. Ascend renders one rather than setting an environment variable, so a table that
-	// only knew about environment variables would report the manufacturer this whole branch is for
-	// as having no cap to look for.
+	// MemoryQuotaConfigMount, MemoryQuotaConfigFile and MemoryQuotaConfigKey are the other place a
+	// cap is carried: the container path the injection mounts, the file to read under it when that
+	// path is a directory rather than a file, and the key whose value is the figure. Ascend renders
+	// `memory-quota=<mib>` into a file it mounts directly; Hygon renders `mem: <mib> MiB` into a
+	// vdev<N>.conf inside a mounted directory. A table that only knew about environment variables
+	// would report both of them as having no cap to look for.
 	MemoryQuotaConfigMount string
+	MemoryQuotaConfigFile  string
 	MemoryQuotaConfigKey   string
 }
 
-// sliceProbes holds the four manufacturers whose slice has been observed from inside a container.
+// clientExitMarker prefixes the exit status of a client a Reader had to START, printed only when
+// that client died before the driver published anything for it.
+//
+// A Reader's own exit status is swallowed into a line of output on purpose (see probeShellCommand),
+// so a reader that starts a background client and then reports what the driver published has no way
+// to fail: whatever the client did, the reader ends by tidying up and exits zero. The container
+// therefore carries no ExitError, and a client that could not resolve a library is indistinguishable
+// -- to the judge -- from a driver that refused the slice. Both produce the same absent record, and
+// the second is the one that gets reported.
+//
+// So the reader states the client's fate where the judge can read it. It is printed only on the path
+// where no record appeared, so a healthy probe's output is exactly what it was.
+const clientExitMarker = "gpustack-preflight-client-exit-"
+
+// hygonSliceConf is where the allocator mounts Hygon's slice, and the one file the probe container
+// holds that describes what it was given. Its directory and name are the cap carrier, and its
+// contents are what the reader addresses its own driver record by, so the three are kept as one
+// string: a reader looking at a path the allocator no longer mounts would silently stop correlating.
+const hygonSliceConf = "/etc/vdev/docker/vdev0.conf"
+
+// sliceProbes holds the five manufacturers whose slice has been observed from inside a container.
 var sliceProbes = map[string]sliceProbe{
 	nodefeature.ManufacturerNVIDIA: {
 		Runtime:              "nvidia",
@@ -115,6 +148,131 @@ var sliceProbes = map[string]sliceProbe{
 		Reader:               "/usr/local/vppu/ppu-monitor",
 		MemoryQuotaEnvPrefix: "HGGC_DEVICE_MEMORY_LIMIT_",
 	},
+	// Hygon is the one entry with no LogEnv, and the one whose reader has to CAUSE the thing it
+	// then reads. Both follow from its slicing runtime being the vendor's rather than ours.
+	//
+	// The other four preload a library this repository builds, so raising its log level is our own
+	// switch to throw and a monitor we ship reports the cap. Hygon's is the DTK/hyhal user space
+	// reading a vdev<N>.conf. Its vgpu diagnostics go through hylog, which has an API to set the
+	// level and no environment variable, so there is nothing preflight can turn on from outside --
+	// recorded as it is rather than worked around.
+	//
+	// AND THE SLICE IS INVISIBLE TO EVERYTHING BUT A HIP CLIENT. Measured on an 8-DCU host: under a
+	// full injection capping the card at 1024 MiB, hy-smi still reports the physical 65520 MiB,
+	// because it answers from the DMI layer. The cap binds the HSA/HIP runtime a workload uses, so
+	// only a process that initializes HIP is inside the slice at all -- and only such a process
+	// makes the driver publish the instance under the kfd vgpu sysfs that is the evidence here. A
+	// reader that merely read a file would find nothing and report every healthy accelerator as
+	// unsliced, which is what a first draft of this entry did.
+	//
+	// So the reader starts a HIP client, waits for the driver to publish, and reads. BandwidthTest
+	// is the vendor's own and comes from /opt/dtk, which the allocator already mounts at
+	// /opt/hygondriver -- so it is there whatever the probe image carries, which no tool inside the
+	// image would be. Its own line reports the cap as "Mem=1.0GB", rounded and in GB, so the figure
+	// is taken from the driver's record instead, where it is exact. That record is in bytes and
+	// every other reader in this table prints MiB, so it is converted here rather than in the
+	// judge, which stays one comparison for all five.
+	//
+	// LD_LIBRARY_PATH is what makes "whatever the probe image carries" true rather than nearly
+	// true. Running it out of the mounted tree finds the binary but not its libgalaxyhip, which a
+	// DTK-based image happens to supply from its own /opt/dtk and any other image does not --
+	// measured, a non-DTK image on a different glibc failed there and ran once the three mounted
+	// library directories were named. It is set on the command rather than through LogEnv because
+	// the variables named there are unset before the reader runs.
+	//
+	// The kfd vgpu sysfs is NODE-WIDE, so a reader that took any record lets a slice another workload
+	// holds -- on any card of the node, and started at any time -- satisfy both the load evidence and
+	// the quota search, and a probe that never entered vgpu mode reports ok/measured on the strength
+	// of somebody else's slice. Two things narrow it to this container's own record.
+	//
+	// FIRST, THE RECORD HAS A NAME AND THIS CONTAINER CAN COMPUTE IT. A record's directory is
+	// `0x<gpu_id>@<pipe_id>`, and the slice this container was handed names both halves: hygonSliceConf
+	// carries the accelerator's PciBusId, which the kfd topology maps to its gpu id through
+	// `location_id` (bus<<8 | device<<3 | function, which the arithmetic above rebuilds), and the pipe
+	// id, which is unique among a card's live slices -- the rule HYGON-CASE 5 asserts. The pair is
+	// therefore a unique name for a live slice on this node, resolved before the client starts.
+	// Measured: the same card published `0x563e@3` under an injection carrying pipe_id 3 and
+	// `0x563e@5` under one carrying 5, `0x563e` being the gpu id the topology gives for its bdf.
+	// A part that will not resolve leaves the sweep on every record, which the next narrowing covers.
+	//
+	// SECOND, THE RECORD MUST BE NEW. The name is of a slice, not of a moment: the driver keeps a
+	// record for about a second after the process holding it exits, so this container's own name can
+	// still be its predecessor's instance. Every record carries an `Indentifier` (the driver's
+	// spelling) unique to the process holding it, so the set of them is taken before the client
+	// starts and only a record carrying one that is not in that set counts. Measured, both halves --
+	// a foreign 2048 MiB slice held on the card while this probe read back its own 1024 MiB, and a
+	// record surviving 0s but not 1s past its container.
+	//
+	// The co-tenancy step is what those two narrowings are worth. Two of these run at once behind one
+	// barrier, and an unseen record is not necessarily the reader's own: before the name was
+	// computed, both tenants snapshotted before either client had published and both then took the
+	// first record to appear -- the same one. Measured on an 8-DCU host, four of the eight
+	// accelerators had both tenants reporting one identifier, and because two co-tenants are asked
+	// for equal caps by construction, each found the figure it was looking for and the row reported
+	// two slices it had not seen. With the name, each tenant looks only where its own pipe id puts
+	// it: measured over three consecutive runs, all eight accelerators reach the measured depth, the
+	// two tenants reading `Vgpu device:0` and `Vgpu device:1` on every one of them.
+	//
+	// A record is still CLAIMED before it is read, by creating a directory named for it under the
+	// barrier the two tenants already share: mkdir is atomic, so only one of them takes any given
+	// record and the loser goes on looking. Two names cannot collide, so this now guards the fallback
+	// path -- where a reader that could not compute its name is back to taking the first record it
+	// sees, next to a peer doing the same. A probe with no peer has no barrier mounted and claims
+	// against a directory of its own, where every claim succeeds.
+	//
+	// The wait also ends when the client dies, not only when it times out. This reader has to START
+	// what it then reads, so a client that cannot resolve a library exits immediately, and waiting
+	// the full timeout for a record that can no longer appear costs ten seconds per accelerator to
+	// learn nothing. `kill -0` is a liveness test, not a signal.
+	//
+	// But it is tested AFTER the sweep, not before it, and a failed test costs one more sweep rather
+	// than the loop. Both follow from the same fact: a client that has just exited leaves its record
+	// behind for about a second, and a client exits by FINISHING, not only by failing. Measured: one
+	// accelerator of eight had its tenant report no record at all under a client that had returned
+	// zero, because the loop it was in checked liveness first and never looked again. Breaking
+	// straight out on a failed test leaves the narrower half of the same hole -- a record published
+	// between the sweep and the test is never seen -- so `dead` buys the one extra pass that closes
+	// it, and the record is certainly there by then, because the driver publishes it at HIP init and
+	// the client cannot have exited before it initialized.
+	//
+	// A client that died is then SAID to have died, with its status and its last words -- see
+	// clientExitMarker for why silence there gets reported as a refused slice. Its output goes to a
+	// temporary file rather than to the reader's own stream so that a healthy probe prints only the
+	// driver's record; `mktemp` failing falls back to /dev/null, because an image with nowhere to
+	// write must still be able to run the client at all.
+	nodefeature.ManufacturerHygon: {
+		Reader: `conf=` + hygonSliceConf + `; ` +
+			`set -- $(awk -F'[.: \t]+' '/^PciBusId:/ { print "0x"$3, "0x"$4, $5; exit }' "$conf" 2>/dev/null); ` +
+			`loc=$(( ${1:-0} * 256 + ${2:-0} * 8 + ${3:-0} )); ` +
+			`pipe=$(awk '/^pipe_id:/ { print $2; exit }' "$conf" 2>/dev/null); mine='*'; ` +
+			`[ "$loc" != 0 ] && [ -n "$pipe" ] && ` +
+			`for n in /sys/class/kfd/kfd/topology/nodes/*/; do ` +
+			`grep -qx "location_id $loc" "$n/properties" 2>/dev/null || continue; ` +
+			`g=$(cat "$n/gpu_id" 2>/dev/null); [ "${g:-0}" != 0 ] || continue; ` +
+			`mine=$(printf '0x%x@%s' "$g" "$pipe"); break; done; ` +
+			`before=$(grep -h '^Indentifier:' /sys/devices/virtual/kfd/kfd/vgpu/*/entry 2>/dev/null); ` +
+			`claim=` + coTenancyBarrierDir + `; [ -d "$claim" ] || claim=$(mktemp -d 2>/dev/null || echo /tmp); ` +
+			`log=$(mktemp 2>/dev/null || echo /dev/null); ` +
+			`LD_LIBRARY_PATH=/opt/hygondriver/hip/lib:/opt/hygondriver/lib:/opt/hyhal/lib ` +
+			`/opt/hygondriver/bin/BandwidthTest >"$log" 2>&1 & hip=$!; i=0; new=""; dead=0; ` +
+			`while [ -z "$new" ]; do ` +
+			`for e in /sys/devices/virtual/kfd/kfd/vgpu/$mine/entry; do ` +
+			`[ -r "$e" ] || continue; id=$(grep -h '^Indentifier:' "$e" 2>/dev/null); ` +
+			`[ -n "$id" ] || continue; case "$before" in *"$id"*) continue;; esac; ` +
+			`mkdir "$claim/claimed-${id#Indentifier:}" 2>/dev/null || continue; new="$e"; break; done; ` +
+			`[ -n "$new" ] && break; [ "$dead" = 1 ] && break; ` +
+			`kill -0 "$hip" 2>/dev/null || { dead=1; continue; }; ` +
+			`[ "$i" -lt 100 ] || break; sleep 0.1; i=$((i+1)); done; ` +
+			`if [ -n "$new" ]; then ` +
+			`awk -F: '{ print } /^Vram limit/ { printf "Vram limit MiB: %d\n", $2 / 1048576 }' "$new"; ` +
+			`elif ! kill -0 "$hip" 2>/dev/null; then ` +
+			`wait "$hip" 2>/dev/null; echo ` + clientExitMarker + `$?; tail -n 3 "$log" 2>/dev/null; fi; ` +
+			`kill "$hip" 2>/dev/null || true`,
+		LoadEvidence:           "Vgpu device:",
+		MemoryQuotaConfigMount: filepath.Dir(hygonSliceConf),
+		MemoryQuotaConfigFile:  filepath.Base(hygonSliceConf),
+		MemoryQuotaConfigKey:   "mem",
+	},
 }
 
 // stageLibFor puts this manufacturer's preload-library tree on the host, once for the whole run.
@@ -133,8 +291,15 @@ var sliceProbes = map[string]sliceProbe{
 // Whether this manufacturer's accelerators can host a slice at all is the caller's half of that
 // condition: both container questions skip an accelerator that cannot, so a caller with none must
 // not ask for the tree.
+//
+// A manufacturer whose probe names load evidence has no tree here to stage: its slicing runtime is
+// the vendor's own, already on the host, and this image ships no library for it. Staging is
+// attempted anyway, the image has nothing under the manufacturer's lib directory, and the failure
+// forces both of its container questions to be emitted rather than run -- so every accelerator it
+// has stops at the simulated depth over a tree that was never part of its injection.
 func (p *Preflighter) stageLibFor(manufacturer string) StageResult {
-	if _, probed := sliceProbes[manufacturer]; !probed || p.dryRun || p.host == nil {
+	probe, probed := sliceProbes[manufacturer]
+	if !probed || probe.LoadEvidence != "" || p.dryRun || p.host == nil {
 		return StageResult{Manufacturer: manufacturer}
 	}
 	// A path that is not a mounted host root is still a path, and StageLib would write the tree
@@ -240,19 +405,10 @@ func (p *Preflighter) measureAccelerator(
 		detail := "the allocator produced the slice injection; the container step was emitted " +
 			"rather than run because " + run.Reason
 		if p.dryRun {
-			// Only on a dry run, which is the one path that reaches here having written neither of
-			// the two things the command mounts: the other fallbacks did stage, and telling their
-			// reader to stage again would send them after a file that is already there.
-			//
-			// Both are named, not just the library tree. A dry run also withholds whatever the
-			// manufacturer's own responder renders -- Ascend's npu_info.config, Hygon's vdev.conf --
-			// while the command still mounts it from the host path it would have been promoted to,
-			// so a reader told only about the library tree would run this and find a mount source
-			// missing that nothing had mentioned.
-			detail += ". The command mounts " + filepath.Join(deviceplugin.OperatorLibDir, manufacturer) +
-				" and, where this manufacturer's responder renders one, a file under " +
-				filepath.Join(deviceplugin.OperatorPreflightDir, string(deviceplugin.PreflightPodUID)) +
-				"; a dry run deliberately writes neither: re-run without --dry-run, which writes both"
+			// Only on a dry run, which is the one path that reaches here WITHOUT having written what
+			// the command mounts: the other fallbacks did stage, so telling their reader to stage
+			// again would send them after a file that is already there.
+			detail += dryRunRemediation(injection)
 		}
 		return unreachablePair(accel.ID, device.PreflightStateOK, device.PreflightDepthSimulated,
 			detail, "").withCommand(run.Command)
@@ -501,7 +657,8 @@ func (p *Preflighter) driveResponder(
 	// The library tree is staged separately (stageLibFor) and is already where realLib says; only
 	// what a responder itself rendered has to be carried out of its scratch directory before it
 	// goes. A responder that rendered nothing leaves no such directory, and that is not an error:
-	// only one manufacturer's sliced path writes a host file at all.
+	// only two manufacturers' sliced paths write a host file at all -- Ascend's npu_info.config and
+	// Hygon's vdev<N>.conf, the latter being the whole of its slice.
 	//
 	// Gated on --dry-run for the same reason the library tree is: writing is part of taking the step.
 	// Measured on hardware, this was the half that was not gated -- a dry run left two rendered
@@ -670,6 +827,9 @@ func judgeProbeOutput(
 ) []device.PreflightCheck {
 	evidence := string(run.Output)
 	mappings, readerOut := probeSections(evidence)
+	// Whether the driver recorded nothing for this container, which both rows have to answer to:
+	// the second must not read a cap out of a container the driver never admitted into the slice.
+	noRecord := probe.LoadEvidence != "" && !strings.Contains(readerOut, probe.LoadEvidence)
 
 	loaded := device.PreflightCheck{
 		Accelerator: acceleratorID,
@@ -681,6 +841,42 @@ func judgeProbeOutput(
 		Evidence:    evidence,
 	}
 	switch missing := unloadedObjects(injection, mappings); {
+	case probe.LoadEvidence != "":
+		// A manufacturer that mounts no shared object of ours, so the mappings answer nothing and
+		// the reader's own output is the evidence. See sliceProbe.LoadEvidence.
+		switch died := clientExit(readerOut); {
+		case noRecord && run.ExitError != "":
+			// Both went wrong, and the exit status is the one that explains the other. This reader
+			// has to START the client that makes the driver publish, so a client that could not run
+			// -- a library it could not resolve, a path it could not execute -- produces exactly the
+			// absent record the next clause reports. Naming only the absence sends an operator after
+			// the slice when the answer is in the exit status.
+			loaded.State = device.PreflightStateUnavailable
+			loaded.Reason = "the container exited non-zero and the driver recorded no slicing " +
+				"instance for it, so nothing established whether the vendor runtime takes the " +
+				"slice up: " + run.ExitError
+		case noRecord && died != "":
+			// The container is fine and the client inside it is not, which the container's own exit
+			// status cannot say: the reader tidies up and exits zero whatever its client did. Both
+			// an unresolvable library and a slice the runtime refuses land here, so the row names
+			// the status and leaves which one it was to the evidence rather than guessing.
+			loaded.State = device.PreflightStateUnavailable
+			loaded.Reason = "the client this probe starts to enter the slice exited with status " +
+				died + " and the driver recorded no slicing instance for it, so nothing " +
+				"established whether the vendor runtime takes the slice up"
+		case noRecord:
+			loaded.State = device.PreflightStateUnavailable
+			loaded.Reason = "the allocator produced a slice for this accelerator and the driver " +
+				"recorded no slicing instance for the container, so the vendor runtime did not " +
+				"take the slice up"
+		case run.ExitError != "":
+			loaded.State = device.PreflightStateUnavailable
+			loaded.Reason = "the driver recorded a slicing instance for the container, and the " +
+				"container then exited non-zero under it: " + run.ExitError
+		default:
+			loaded.Detail = "the driver records a slicing instance for the container, so the " +
+				"vendor runtime took the slice up"
+		}
 	case len(missing) == 0 && injectedObjects(injection) == 0:
 		// Not "this manufacturer declares no slicing": the detect pass called this accelerator
 		// sliceable, this manufacturer has a container probe, and the allocator was driven for a
@@ -731,6 +927,16 @@ func judgeProbeOutput(
 		quota.State = device.PreflightStateUnavailable
 		quota.Reason = "the allocator produced a slice whose per-accelerator memory cap this run " +
 			"could not read, so nothing observed bounds this container -- " + absent
+	case noRecord:
+		// The row above already reports why, and the cap cannot be measured through a container the
+		// driver never admitted into the slice. Whatever such a reader printed -- the dying client's
+		// last words among it -- was printed outside the slice, and a figure matched in there would
+		// report a cap in force on the strength of a number that means nothing.
+		quota.Depth = device.PreflightDepthSimulated
+		quota.Detail = "the injection asks for a cap of " + limit + " on this accelerator and the " +
+			"driver recorded no slicing instance for the container, so nothing it printed was " +
+			"printed inside a slice and the cap was not observed in force; the container's own " +
+			"output is carried as evidence"
 	case !reportsFigure(readerOut, limit):
 		quota.Depth = device.PreflightDepthSimulated
 		quota.Detail = "the injection caps this accelerator at " + limit +
@@ -786,6 +992,57 @@ func unloadedObjects(injection *deviceplugin.ContainerAllocateResponse, mappings
 	return missing
 }
 
+// dryRunRemediation names the host trees an emitted command mounts from that a dry run deliberately
+// did not write, as a sentence to append to the row's detail. It is empty where the command mounts
+// from neither.
+//
+// The two are looked for in the injections rather than assumed, because a sentence about what the
+// command mounts has to describe THIS command. Most manufacturers get a preload-library tree, but
+// one whose slicing runtime is the vendor's own is handed none, and telling its operator to stage a
+// tree would send them after a directory that plays no part in the step they just read. The
+// responder-rendered file is the same the other way round: only some manufacturers have one, and a
+// reader told only about the library tree would run this and find a mount source missing that
+// nothing had mentioned.
+func dryRunRemediation(injections ...*deviceplugin.ContainerAllocateResponse) string {
+	mountsFrom := func(root string) bool {
+		for _, injection := range injections {
+			for _, m := range injection.GetMounts() {
+				if strings.HasPrefix(m.GetHostPath(), root) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	var named []string
+	for _, root := range []string{
+		deviceplugin.OperatorLibDir,
+		filepath.Join(deviceplugin.OperatorPreflightDir, string(deviceplugin.PreflightPodUID)),
+	} {
+		if mountsFrom(root) {
+			named = append(named, root)
+		}
+	}
+	if len(named) == 0 {
+		return ""
+	}
+	return ". The command mounts from " + strings.Join(named, " and ") +
+		", which a dry run deliberately does not write: re-run without --dry-run, which writes it"
+}
+
+// clientExit returns the exit status a Reader reported for the client it had to start, or empty
+// where it reported none -- which is every reader that starts no client, and every client that was
+// still running when its reader gave up waiting for the driver.
+func clientExit(readerOut string) string {
+	_, rest, found := strings.Cut(readerOut, clientExitMarker)
+	if !found {
+		return ""
+	}
+	status, _, _ := strings.Cut(rest, "\n")
+	return strings.TrimSpace(status)
+}
+
 // reportsFigure says whether the vendor reader's own output carries figure as a number of its own
 // rather than as part of a longer one -- so a cap of 8184 is not read out of 18184, and the cap is
 // looked for only where the reader answered.
@@ -839,22 +1096,54 @@ func memoryQuota(
 		if m.GetContainerPath() != probe.MemoryQuotaConfigMount {
 			continue
 		}
-		body, err := os.ReadFile(filepath.Join(hostRoot, m.GetHostPath()))
+		// The mount is a file for one manufacturer and the directory holding it for the other, so
+		// the file name is appended where the probe names one.
+		path := filepath.Join(hostRoot, m.GetHostPath())
+		named := probe.MemoryQuotaConfigMount
+		if probe.MemoryQuotaConfigFile != "" {
+			path = filepath.Join(path, probe.MemoryQuotaConfigFile)
+			named = filepath.Join(named, probe.MemoryQuotaConfigFile)
+		}
+		body, err := os.ReadFile(path)
 		if err != nil {
-			return "", "the injection mounts " + probe.MemoryQuotaConfigMount +
+			return "", "the injection mounts " + named +
 				", and the host copy it mounts from could not be read: " + err.Error()
 		}
 		for _, line := range strings.Split(string(body), "\n") {
-			if key, value, ok := strings.Cut(strings.TrimSpace(line), "="); ok &&
-				key == probe.MemoryQuotaConfigKey {
-				return value, ""
+			key, value, ok := cutConfigField(line)
+			if !ok || key != probe.MemoryQuotaConfigKey {
+				continue
 			}
+			// The value may carry a unit the allocator wrote beside the figure ("1024 MiB"); no
+			// reader prints one back, so only the figure is returned.
+			figure, _, _ := strings.Cut(value, " ")
+			return figure, ""
 		}
-		return "", "the injection mounts " + probe.MemoryQuotaConfigMount +
+		return "", "the injection mounts " + named +
 			", and it names no " + probe.MemoryQuotaConfigKey
 	}
 	return "", "the injection mounts no " + probe.MemoryQuotaConfigMount +
 		", which is where this manufacturer's allocator renders the cap"
+}
+
+// cutConfigField splits one configuration line into its key and value.
+//
+// The two manufacturers that render a cap into a file do not agree on the separator: Ascend writes
+// `memory-quota=1024` and Hygon writes `mem: 1024 MiB`. Whichever of the two characters appears
+// first is the separator, so a value that happens to contain the other one -- Hygon's PciBusId
+// carries colons, and it is read by the same loop -- does not split in the wrong place.
+func cutConfigField(line string) (key, value string, ok bool) {
+	line = strings.TrimSpace(line)
+	eq, colon := strings.Index(line, "="), strings.Index(line, ":")
+	switch {
+	case eq < 0 && colon < 0:
+		return "", "", false
+	case eq >= 0 && (colon < 0 || eq < colon):
+		key, value, ok = strings.Cut(line, "=")
+	default:
+		key, value, ok = strings.Cut(line, ":")
+	}
+	return strings.TrimSpace(key), strings.TrimSpace(value), ok
 }
 
 // checkPair is the two rows one accelerator's slice answer always produces, so that a run reports the same

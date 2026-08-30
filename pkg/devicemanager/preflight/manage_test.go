@@ -200,6 +200,114 @@ func amdGroups() device.DevicesGroupList {
 	return groups
 }
 
+func hygonGroups() device.DevicesGroupList {
+	groups := ascendGroups()
+	groups[0].Manufacturer = nodefeature.ManufacturerHygon
+	return groups
+}
+
+// A manufacturer whose evidence is the driver's per-process record, whose two co-tenants both
+// reported the SAME record, read one slice twice. Measured on an 8-DCU host: four of its eight
+// accelerators came back that way, because the two tenants take their snapshot behind one barrier
+// and then both take the first record to appear. Two co-tenants are asked for equal caps by
+// construction, so each found the figure it was looking for and the row reported two slices nobody
+// had observed -- a tenant whose own slice never published would be covered by its peer's record.
+func TestCheckManagement_CoTenancyNeedsTwoDistinctDriverRecords(t *testing.T) {
+	const cap32760 = "\nVgpu device:0\nVram limit:34351349760\nVram limit MiB: 32760\n"
+
+	record := func(identifier string) string {
+		return coTenantsMet + "\n" + mapsBegin + "\n" + mapsEnd +
+			"\nIndentifier:" + identifier + cap32760
+	}
+
+	// What a tenant prints when the client it starts never runs: no record, and the same diagnostic
+	// from both of them.
+	died := coTenantsMet + "\n" + mapsBegin + "\n" + mapsEnd +
+		"\n" + clientExitMarker + "127\nsh: BandwidthTest: not found\n"
+
+	testCases := []struct {
+		name          string
+		first, second string
+		wantDepth     device.PreflightDepth
+		wantDetail    string
+	}{
+		{
+			name:       "the same record read by both tenants is one slice, not two",
+			first:      record("0x155222a21c7abb8a"),
+			second:     record("0x155222a21c7abb8a"),
+			wantDepth:  device.PreflightDepthSimulated,
+			wantDetail: "one slice was observed twice rather than two at once",
+		},
+		{
+			name:       "two records is the co-tenancy this step measures",
+			first:      record("0x155222a21c7abb8a"),
+			second:     record("0x23c212e2d4069836"),
+			wantDepth:  device.PreflightDepthMeasured,
+			wantDetail: "each reporting its own cap",
+		},
+		{
+			// Two tenants that failed the same way print the same output too, and that is not one
+			// record seen twice -- it is no record at all, which the cap clause already answers.
+			// Measured under a probe image whose loader could not start the client: all eight
+			// accelerators had both tenants printing one diagnostic, and naming that a slice seen
+			// twice sends an operator after the wrong thing entirely.
+			name:       "the same failure from both tenants is not a record at all",
+			first:      died,
+			second:     died,
+			wantDepth:  device.PreflightDepthSimulated,
+			wantDetail: "at least one of the two containers produced no driver record",
+		},
+		{
+			// One tenant in a slice, the other only reporting why its client could not start -- and
+			// the soname in that diagnostic carries the cap's own digits. Compared for the figure,
+			// the pair reads as two slices each holding its quota; the second container was never
+			// in one.
+			name:  "a figure in a failing tenant's diagnostic is not its cap",
+			first: record("0x155222a21c7abb8a"),
+			second: coTenantsMet + "\n" + mapsBegin + "\n" + mapsEnd + "\n" +
+				clientExitMarker + "127\nBandwidthTest: cannot open libhsa-runtime64.so.32760\n",
+			wantDepth:  device.PreflightDepthSimulated,
+			wantDetail: "at least one of the two containers produced no driver record",
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := fakeHostRoot(t)
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "etc/vdev"), 0o750))
+			require.NoError(t, os.WriteFile(filepath.Join(root, "etc/vdev/vdev0.conf"),
+				[]byte("PciBusId: 0000:09:00.0\nmem: 32760 MiB\n"), 0o600))
+
+			host, _ := concurrentHostPerCall(root, map[string]tenantAnswer{
+				tenantName(0): {out: tc.first},
+				tenantName(1): {out: tc.second},
+			})
+			p := &Preflighter{
+				host:       host,
+				runtime:    &hostRuntime{Name: "docker"},
+				probeImage: "example.com/probe:test",
+			}
+
+			checks := p.checkManagement(context.Background(), nodefeature.ManufacturerHygon, &manageInjector{
+				build: func(manageCall, string, string) *deviceplugin.ContainerAllocateResponse {
+					return &deviceplugin.ContainerAllocateResponse{
+						Mounts: []*deviceplugin.Mount{
+							{ContainerPath: "/etc/vdev/docker", HostPath: "/etc/vdev"},
+						},
+					}
+				},
+			}, p.stageLibFor(nodefeature.ManufacturerHygon), hygonGroups())
+
+			require.Len(t, checks, 2)
+			row := checks[1]
+
+			assert.Equal(t, capCoTenancy, row.Capability)
+			assert.Equal(t, device.PreflightStateOK, row.State)
+			assert.Equal(t, tc.wantDepth, row.Depth)
+			assert.Contains(t, row.Detail, tc.wantDetail)
+		})
+	}
+}
+
 // The order is the contract: an SSH-enabled Instance's owner container is allocated first and its
 // sidecar second, and the sidecar selects no device of its own -- it is handed the devices the
 // owner was granted, verbatim, which is what ResourceServer.allocateVisibility does.
