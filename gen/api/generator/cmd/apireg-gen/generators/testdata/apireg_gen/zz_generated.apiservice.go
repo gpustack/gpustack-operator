@@ -45,7 +45,7 @@ func GetAPIService(svc apiregistrationv1.ServiceReference, ca []byte) *apiregist
 			Service:               svc.DeepCopy(),
 			Group:                 "server.walrus.seal.io",
 			Version:               "v1",
-			InsecureSkipTLSVerify: true,
+			InsecureSkipTLSVerify: len(ca) == 0,
 			CABundle:              bytes.Clone(ca),
 			GroupPriorityMinimum:  1000,
 			VersionPriority:       100,
