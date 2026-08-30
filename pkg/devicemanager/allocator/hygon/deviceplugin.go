@@ -22,17 +22,38 @@ const Manufacturer = nodefeature.ManufacturerHygon
 
 func New(opts device.AllocatorOptions) device.Allocator {
 	logger := opts.Logger.WithName(Manufacturer)
+
+	// The hardware-partitioning server serves "<base>.partitioned" -- this vendor calls its own
+	// partitioning MIG, in its API and its tooling alike, so it shares that word. A manufacturer with
+	// no partition kind has no such resource name at all, so it registers no server rather than one
+	// advertising an empty name.
+	partitioned := !opts.NoPartitioned &&
+		nodefeature.GetAcceleratableResourceName(Manufacturer, workercore.DeviceAllocationModePartitioned) != ""
+	// The partition driver takes a vendor library load at construction, so it is built once -- only
+	// where partitions are served -- and shared by the two servers that address them: the partitioned
+	// server materializes an instance, the visibility server proves one is still live before naming it
+	// again. A node serving no partitioning loads nothing.
+	var mig migDriver
+	if partitioned {
+		mig = newMigDriver()
+	}
+
 	servers := []deviceplugin.Server{
-		newServer(logger, workercore.DeviceAllocationModeExclusive),
+		newServer(logger, workercore.DeviceAllocationModeExclusive, nil),
 	}
 	if !opts.NoShared {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeShared),
+			newServer(logger, workercore.DeviceAllocationModeShared, nil),
 		)
 	}
 	if !opts.NoSliced {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeSliced),
+			newServer(logger, workercore.DeviceAllocationModeSliced, nil),
+		)
+	}
+	if partitioned {
+		servers = append(servers,
+			newServer(logger, workercore.DeviceAllocationModePartitioned, mig),
 		)
 	}
 	// The visibility server co-allocates a container to the same physical device(s) its owner
@@ -40,13 +61,14 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	// returns the same plain device-visibility response as the non-sliced modes (device-cgroup
 	// access only, no slicing artifacts).
 	servers = append(servers,
-		newServer(logger, workercore.DeviceAllocationModeVisibility),
+		newServer(logger, workercore.DeviceAllocationModeVisibility, mig),
 	)
 
 	return &aggregated{
-		logger:     logger,
-		servers:    servers,
-		kubeSocket: opts.KubeSocket,
+		logger:      logger,
+		servers:     servers,
+		kubeSocket:  opts.KubeSocket,
+		partitioned: partitioned,
 	}
 }
 
@@ -54,6 +76,11 @@ type aggregated struct {
 	logger     klog.Logger
 	servers    []deviceplugin.Server
 	kubeSocket string
+	// partitioned reports whether a Partitioned server is registered, gating the partition reclaim
+	// loop: the loop exists to free the instances that server creates, and nothing else on this node
+	// can free them -- the device-plugin protocol has no release callback, and this vendor cannot
+	// leave Multi-Instance mode while any instance survives.
+	partitioned bool
 	// lifecycle owns the context the tasks below run under, so that stopping this allocator ends
 	// every one of them and not only the ones watching a server.
 	lifecycle gox.Lifecycle
@@ -66,11 +93,19 @@ func (*aggregated) Name() string {
 func (in *aggregated) Start(ctx context.Context) error {
 	in.logger.Info("starting")
 
-	tasks := make([]func(context.Context) error, 0, len(in.servers))
+	tasks := make([]func(context.Context) error, 0, len(in.servers)+1)
 	for i := range in.servers {
 		srv := in.servers[i]
 		tasks = append(tasks, func(ctx context.Context) error {
 			return srv.Start(ctx, in.kubeSocket)
+		})
+	}
+	if in.partitioned {
+		tasks = append(tasks, func(ctx context.Context) error {
+			r := newMigReclaimer(newMigDriver(), deviceplugin.OperatorPodsDir, in.logger.WithName("reclaim"))
+			deviceplugin.RunReclaimLoop(ctx, controllers.Get[*deviceplugin.DevicesReconciler](),
+				Manufacturer, workercore.DeviceAllocationModePartitioned, r.reconcile)
+			return nil
 		})
 	}
 
@@ -88,12 +123,19 @@ func (in *aggregated) Stop() {
 
 type server struct {
 	deviceplugin.ResourceServer
+	// mig is the partition driver, set only on the two servers that address a partition: the
+	// partitioned server and the visibility server that names an owner's partition again. It is nil
+	// everywhere else, and the partition entry points refuse rather than proceed when it is.
+	mig migDriver
 }
 
-func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) deviceplugin.Server {
+func newServer(
+	logger klog.Logger, mode workercore.DeviceAllocationMode, mig migDriver,
+) deviceplugin.Server {
 	logger = logger.WithName(strings.ToLower(mode.String()))
 
 	s := &server{
+		mig: mig,
 		ResourceServer: deviceplugin.ResourceServer{
 			Logger:         logger,
 			Manufacturer:   Manufacturer,

@@ -109,7 +109,7 @@ func TestPreflightResponder_MatchesTheProductionResponder(t *testing.T) {
 			require.NoError(t, err)
 			defer restore()
 
-			prodSrv, ok := newServer(klog.Background(), mode).(deviceplugin.ContainerAllocateResponder)
+			prodSrv, ok := newServer(klog.Background(), mode, nil).(deviceplugin.ContainerAllocateResponder)
 			require.True(t, ok)
 
 			prodPod, prodCtr := slicedPod("drift", "train", 25, 50)
