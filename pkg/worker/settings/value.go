@@ -74,6 +74,25 @@ var (
 		setting.AllowContainerImageReference(),
 	)
 
+	// KVCacheBackendImage is the image every role of a KVCacheBackend runs when the object does
+	// not name one itself.
+	//
+	// It ships blank on purpose, and not for want of a verified image. One value has to be right for
+	// every backend in the cluster at once, and the leader and the members do not want the same
+	// thing: the leader needs no accelerator runtime at all, while a member's transports and the
+	// runtime it links are compiled into its wheel. A backend on the Ascend transport, or a member
+	// group placed on other accelerator hardware, needs a build nothing here can guess at. Blank
+	// makes that an admission refusal naming both places to fix, where a default would make it a
+	// loader error at runtime. The one image measured end to end is also a third party's, unlike
+	// every other image Setting here, which points at something this project publishes.
+	KVCacheBackendImage = settings.NewEditable(
+		"kv-cache-backend-image",
+		"Indicates the image to run a KV cache backend, when the backend does not name one.",
+		setting.InitializeFromEnv(),
+		setting.AllowBlank(),
+		setting.AllowContainerImageReference(),
+	)
+
 	// InstanceAccessStaticAddress is the access static address for all Instances,
 	// which is used to access Instances.
 	InstanceAccessStaticAddress = settings.NewEditable(

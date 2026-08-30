@@ -32,6 +32,7 @@ func GetValidatingWebhookConfiguration(n string, c v1.WebhookClientConfig) *v1.V
 		Webhooks: []v1.ValidatingWebhook{
 			vwh_pkg_worker_webhooks_worker_InstanceTypeWebhook(c),
 			vwh_pkg_worker_webhooks_worker_InstanceWebhook(c),
+			vwh_pkg_worker_webhooks_worker_KVCacheBackendWebhook(c),
 			vwh_pkg_worker_webhooks_worker_PodWebhook(c),
 		},
 	}
@@ -225,6 +226,53 @@ func mwh_pkg_worker_webhooks_worker_InstanceWebhook(c v1.WebhookClientConfig) v1
 						"instances",
 					},
 					Scope: ptr.To[v1.ScopeType]("Namespaced"),
+				},
+				Operations: []v1.OperationType{
+					"CREATE",
+					"UPDATE",
+				},
+			},
+		},
+		FailurePolicy:  ptr.To[v1.FailurePolicyType]("Fail"),
+		MatchPolicy:    ptr.To[v1.MatchPolicyType]("Equivalent"),
+		SideEffects:    ptr.To[v1.SideEffectClass]("None"),
+		TimeoutSeconds: ptr.To[int32](10),
+		AdmissionReviewVersions: []string{
+			"v1",
+		},
+	}
+}
+
+func (*KVCacheBackendWebhook) ValidatePath() string {
+	return "/validate-worker-gpustack-ai-v1alpha1-kvcachebackend"
+}
+
+func vwh_pkg_worker_webhooks_worker_KVCacheBackendWebhook(c v1.WebhookClientConfig) v1.ValidatingWebhook {
+	path := "/validate-worker-gpustack-ai-v1alpha1-kvcachebackend"
+
+	cc := c.DeepCopy()
+	if cc.Service != nil {
+		cc.Service.Path = &path
+	} else if c.URL != nil {
+		cc.URL = ptr.To(*c.URL + path)
+	}
+
+	return v1.ValidatingWebhook{
+		Name:         "validate.worker.gpustack.ai.v1alpha1.kvcachebackend",
+		ClientConfig: *cc,
+		Rules: []v1.RuleWithOperations{
+			{
+				Rule: v1.Rule{
+					APIGroups: []string{
+						"worker.gpustack.ai",
+					},
+					APIVersions: []string{
+						"v1alpha1",
+					},
+					Resources: []string{
+						"kvcachebackends",
+					},
+					Scope: ptr.To[v1.ScopeType]("Cluster"),
 				},
 				Operations: []v1.OperationType{
 					"CREATE",
