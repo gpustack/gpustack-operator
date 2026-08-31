@@ -19,6 +19,14 @@ Layout: controllers and reconcilers live under `pkg/` (`worker`, `devicemanager`
 `binding/`, hand-written C preload shims under `csrc/`, patched k8s modules under
 `staging/`, and the Helm chart under `deploy/gpustack-operator/chart`.
 
+Conventions, for context rather than review: an issue title starts with exactly one of `bug: `,
+`enhancement: `, `support: `, `docs: `, `cleanup: `, `todo: ` and stays at or under 80 characters
+including the prefix. A PR title stays Conventional Commits (`fix(chart): …`) — issue prefixes never
+appear on a PR — and a PR links its issue with one of three verbs: `Fixes #<n>` (fully resolved,
+GitHub closes it on merge), `Addresses #<n>` (advances it, no auto-close), or `Relates #<n>` (context
+only, no auto-close). None of this is enforced anywhere, and none of it is a review rule: a title is
+not a code defect.
+
 When performing a code review, use the `gpustack-operator-code-review` skill in
 `.claude/skills/gpustack-operator-code-review/SKILL.md`, and apply the rules below. Keep feedback
 specific and actionable; cite the file and line.

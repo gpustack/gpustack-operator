@@ -61,3 +61,53 @@ jobs:
           sudo update-alternatives --set awk /usr/bin/original-awk
           awk --version 2>&1 | head -1
           make lint docs
+      # The local check above never resolves an external URL — it only follows relative paths and
+      # in-file anchors — which is how a 404 in PULL_REQUEST_TEMPLATE.md survived unnoticed. This step
+      # fetches them, and it lives here rather than in "make lint docs" so the local check keeps its
+      # "a second or two, no cluster" character instead of gaining network flake.
+      #
+      # Scoped to .github on purpose. The whole markdown corpus is 53 unique URLs, ~15 of which cannot
+      # pass from a GitHub runner: two 127.0.0.1 examples that must always fail, ~10 CN vendor hosts
+      # unreliable from US egress, and three rate-limited img.shields.io. The ignore list that would
+      # make a corpus-wide gate green is worse to own than no gate. Under .github every URL is github.com.
+      #
+      # Deliberately awk-free: the awk pinned above is onetrueawk to match check-docs.sh's portability
+      # floor, and a step leaning on any awk behaviour would silently inherit that constraint too.
+      - name: Check external links under .github
+        run: |
+          urls=$(grep -rhoE 'https?://[^][ )>"`]+' .github --include='*.md' | sed 's/[.,;:]*$//' | sort -u || true)
+          if [[ -z "${urls}" ]]; then
+            echo "No external URL found under .github/**/*.md."
+            exit 0
+          fi
+          echo "Checking $(printf '%s\n' "${urls}" | wc -l | tr -d ' ') unique URL(s) under .github/**/*.md:"
+          failed=""
+          while IFS= read -r url; do
+            [[ -n "${url}" ]] || continue
+            # Retry a transient failure rather than turning the build red on one dropped connection.
+            # A 4xx other than 408/429 is a genuinely broken link, so it fails on the first answer.
+            #
+            # No `|| echo 000` here. curl already writes 000 through -w on a connection failure or a
+            # --max-time timeout AND exits non-zero, so the fallback appended a second one: the code
+            # read 000000, matched neither the retry set nor 2xx/3xx, and turned the build red on the
+            # first dropped connection — the exact case this retry exists to absorb. The default
+            # covers the one path where curl exits before writing anything at all.
+            for attempt in 1 2 3; do
+              code=$(curl -sSL -o /dev/null -w '%{http_code}' --max-time 20 "${url}")
+              code=${code:-000}
+              case "${code}" in
+                000|408|429|5??) [[ "${attempt}" == 3 ]] || sleep 5 ;;
+                *) break ;;
+              esac
+            done
+            case "${code}" in
+              2??|3??) printf '  ok    %s  %s\n' "${code}" "${url}" ;;
+              *) printf '  FAIL  %s  %s\n' "${code}" "${url}"; failed="${failed}${code} ${url}"$'\n' ;;
+            esac
+          done <<< "${urls}"
+          # Report every broken URL, not just the first: a gate that names one of three costs three CI rounds.
+          if [[ -n "${failed}" ]]; then
+            echo "Broken external link(s) under .github/**/*.md (not 2xx/3xx):"
+            printf '%s' "${failed}"
+            exit 1
+          fi

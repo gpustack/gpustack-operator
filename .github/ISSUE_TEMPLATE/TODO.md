@@ -1,12 +1,16 @@
 ---
 name: TODO
 about: Record work a pull request knowingly left undone, usually a verification with no host to run it on
-title: 'TODO: '
-labels: 'postpone task'
+title: 'todo: '
+labels: todo
+type: Task
 
 ---
-<!-- Please only use this template for work that an in-flight or merged PR deliberately deferred.
-     Something that is simply broken is a Bug Report; something not built yet is an Enhancement. -->
+<!-- Keep the title at or under 80 characters, prefix included: one clause naming what was left
+     undone, not why it could not run. Detail belongs in the body.
+
+Please only use this template for work that an in-flight or merged PR deliberately deferred.
+Something that is simply broken is a Bug Report; something not built yet is an Enhancement. -->
 
 **What was left undone**:
 

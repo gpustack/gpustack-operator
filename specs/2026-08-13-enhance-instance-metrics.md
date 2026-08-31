@@ -1023,7 +1023,7 @@ probe binary — the `mode` field arriving as the enum's wire value where the ca
 accelerators on one node and so could not run on the single-card cluster the deployed assertion used.
 The final round of changes this spec's Alternatives records — `mode` as a name, a partition addressed by
 its recorded identifier, one entry per grant, and the T-Head partition reader — was written after that
-cluster was destroyed and has not been read off a driver either. Both are filed as `postpone task`
+cluster was destroyed and has not been read off a driver either. Both are filed as `todo`
 issues so neither is carried as a paragraph nobody owns.
 
 | Task | Host | What the driver answered |

@@ -1,13 +1,20 @@
 ---
 name: Bug Report
 about: Report a bug encountered while using GPUStack Operator
+title: 'bug: '
 labels: kind/bug
+type: Bug
 
 ---
 
-<!-- Please use this template while reporting a bug and provide as much info as possible. Not doing so may result in your bug not being addressed in a timely manner. Thanks!
+<!-- Keep the title at or under 80 characters, prefix included: one clause naming the symptom, not
+     the diagnosis. Detail belongs in the body — a title that needs a comma is usually two issues.
 
-If the matter is security related, please disclose it privately via https://kubernetes.io/security/
+Please use this template while reporting a bug and provide as much info as possible. Not doing so may result in your bug not being addressed in a timely manner. Thanks!
+
+If the matter is security related, do not file it here — disclose it privately to
+security@gpustack.ai, or open a private advisory at
+https://github.com/gpustack/gpustack-operator/security/advisories/new.
 -->
 
 
