@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"gpustack.ai/gpustack/binding"
+	"gpustack.ai/gpustack/binding/dl"
 )
 
 var home string
@@ -51,6 +52,26 @@ func New(opts ...binding.LibraryOption) *AMDSMI {
 			)
 		}
 	}
+
+	// AMD SMI resolves against itself before whatever else is already in the global scope, and the
+	// flag that says so is this library's own rather than any caller's. Measured on ROCm 7.14 and
+	// 10.0: with librocm_smi64.so loaded globally beforehand, amdsmi_get_socket_handles returns
+	// success and a socket count of zero, so every accelerator this library would have enumerated
+	// disappears. Loading ROCm SMI is enough on its own — its initialization is not involved, which
+	// makes this a link-scope effect and not a runtime-state one — and the two export no dynamic
+	// symbol in common, so what is interposed is the vague-linkage C++ internals both are built
+	// from.
+	//
+	// RTLD_GLOBAL stays beside it and is not an alternative to it: this process carries undefined
+	// amdsmi_* symbols of its own, resolved out of the global scope, and taking the library out of
+	// that scope leaves every call in this package unresolvable.
+	//
+	// Prepended, so a caller that means to choose its own flags still overrides these.
+	opts = append(
+		[]binding.LibraryOption{
+			binding.WithLibraryLoadFlags(dl.RTLD_LAZY | dl.RTLD_GLOBAL | dl.RTLD_DEEPBIND),
+		},
+		opts...)
 
 	so := binding.NewLibrary(soPaths, opts...)
 

@@ -24,6 +24,13 @@ type hostVendorCLI struct {
 	// mounts names what a container needs in order to see what this CLI sees. It is the remedy
 	// offered when the host answers and the detect pass did not.
 	mounts []string
+	// libDir is a directory this manufacturer's libraries are loaded from, read for a shape the
+	// mounts above cannot express: here, and still unusable.
+	//
+	// Empty for a manufacturer whose libraries a vendor container runtime injects, because there is
+	// no host directory to point at, and for one whose layout has not been established -- a wrong
+	// path is silent rather than wrong, but it is still a path nobody checked.
+	libDir string
 }
 
 // hostVendorCLIs carries only the manufacturers whose CLI output shape is established. A
@@ -61,6 +68,9 @@ var hostVendorCLIs = map[string]hostVendorCLI{
 			"/dev/kfd", "/dev/dri",
 			"the ROCm user-space libraries (/opt/rocm), which nothing injects for you",
 		},
+		// The default install prefix, which is also what the device-manager DaemonSet mounts. A
+		// host that moved it with ROCM_PATH gets no answer from this rather than a wrong one.
+		libDir: "/opt/rocm/lib",
 	},
 }
 
@@ -120,6 +130,9 @@ func crossCheckHost(
 		return
 	}
 	view.MissingMounts = absentHere(cli.mounts)
+	if note := unresolvableLibDir(cli.libDir); note != "" {
+		view.MissingMounts = append(view.MissingMounts, note)
+	}
 
 	// A detection that already failed keeps the reason it failed for. Its count is zero because the
 	// detect pass could not answer at all, not because this container looked and saw nothing, so the
@@ -138,6 +151,43 @@ func crossCheckHost(
 		"the host's own %s reports %d accelerator(s) where this container detected %d, so what is "+
 			"missing is this container's access to them rather than the hardware",
 		cli.name, view.Accelerators, detection.Accelerators)
+}
+
+// unresolvableLibDir reports that a manufacturer's library directory is here and still cannot be
+// used, and says nothing at all in every other case.
+//
+// It is the one shape the mount list cannot express. That list answers "what is absent", and a
+// reader takes it as what to go and mount -- so a directory a mount already put here, whose contents
+// still cannot be reached, comes back asking for the mount that is already in place. The reader
+// checks, finds it mounted, and has nothing left to act on, which is the one outcome this command
+// exists to prevent. Measured on a host carrying two ROCm versions, where /opt/rocm was mounted and
+// the /opt/rocm/lib inside it linked to a directory that was not.
+//
+// Only a link is reported, because only a link says where the missing part went: the answer can then
+// name the path that is not here, and the mount that would resolve it. A directory unreadable for
+// any other reason is left to the list above, which already says the libraries are not usable.
+func unresolvableLibDir(dir string) string {
+	if dir == "" {
+		return ""
+	}
+
+	// The Lstat and the Stat are what tell "not here at all" from "here and dangling", and only the
+	// second belongs to this answer -- the first is already the mount list's, and naming one gap
+	// twice reads as two.
+	if _, err := os.Lstat(dir); err != nil {
+		return ""
+	}
+	if _, err := os.Stat(dir); err == nil {
+		return ""
+	}
+	target, err := os.Readlink(dir)
+	if err != nil {
+		return ""
+	}
+
+	return dir + " is mounted but does not resolve: it links to " + target +
+		", which is not in this container -- mount " + dir +
+		" itself, which resolves the link on the host"
 }
 
 // countMatchingLines counts the lines of out that carry match.

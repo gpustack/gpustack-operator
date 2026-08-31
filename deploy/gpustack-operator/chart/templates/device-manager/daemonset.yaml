@@ -217,6 +217,26 @@ spec:
             - name: gpustack-amd-driver
               mountPath: /opt/rocm
               readOnly: true
+            {{- /*
+              The library directory, named again as a source of its own. ROCm's packaging puts a
+              symlink somewhere in this path on every install measured, and where it falls decides
+              whether the mount survives it: a link at or above the mount source is resolved by the
+              host and is harmless, while one inside the mounted tree dangles in here.
+
+              Both shapes exist on Ubuntu 24.04. On a single-version host /opt/rocm is itself the
+              link -- resolved, harmless. On one carrying ROCm 7.14 and 10.0, /opt/rocm is a real
+              directory and /opt/rocm/lib links to /etc/alternatives/rocm-lib: mounting /opt/rocm
+              alone leaves that dangling, all three ROCm libraries fail to load, and a node with an
+              accelerator detects as empty. Naming the directory as its own source fixes it, because
+              the host resolves it before mounting.
+
+              Mounting /etc/alternatives instead would also work, and was rejected: it shadows this
+              container's own alternatives with the host's 165 entries, which was measured to take
+              awk out of the image for no benefit on the hosts that do not need the indirection.
+            */}}
+            - name: gpustack-amd-driver-lib
+              mountPath: /opt/rocm/lib
+              readOnly: true
             {{- end }}
             {{- if eq $manu "ascend" }}
             - name: gpustack-ascend-driver
@@ -309,6 +329,13 @@ spec:
         - name: gpustack-amd-driver
           hostPath:
             path: /opt/rocm
+            type: DirectoryOrCreate
+        # Created rather than required, like the one above it: a host with no ROCm carries no such
+        # directory, and failing its device manager over one it does not need would cost a working
+        # node for nothing.
+        - name: gpustack-amd-driver-lib
+          hostPath:
+            path: /opt/rocm/lib
             type: DirectoryOrCreate
         {{- end }}
         {{- if eq $manu "ascend" }}

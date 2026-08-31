@@ -10,15 +10,25 @@ import (
 )
 
 // GetProcessorHandles retrieves the device handles for all AMD GPUs in the system.
+//
+// No devices and success is an answer, not a failure: it is what the library reports on a host whose
+// driver is loaded and carries nothing this library enumerates.
 func (l *AMDSMI) GetProcessorHandles() ([]Device, Return) {
 	if l.so.Lookup("amdsmi_get_socket_handles") != nil {
 		return nil, STATUS_FUNCTION_NOT_FOUND
 	}
 
+	// A nil array is how the library is asked for the count instead of the list.
 	var numSockets uint32
 	ret := amdsmiGetSocketHandles(&numSockets, nil)
 	if !ret.IsSuccess() {
 		return nil, ret
+	}
+	// The count has to be answered before a buffer is sized for it: taking the address of the first
+	// element of an empty slice panics, which reports a host the library enumerated nothing on as a
+	// driver that could not be read at all.
+	if numSockets == 0 {
+		return nil, STATUS_SUCCESS
 	}
 	socketHandles := make([]*SocketHandle, numSockets)
 	ret = amdsmiGetSocketHandles(&numSockets, &socketHandles[0])
@@ -32,6 +42,10 @@ func (l *AMDSMI) GetProcessorHandles() ([]Device, Return) {
 		ret = amdsmiGetProcessorHandles(socketHandles[i], &numProcessors, nil)
 		if !ret.IsSuccess() {
 			return nil, ret
+		}
+		// A socket carrying no processor is skipped rather than sized for, for the same reason.
+		if numProcessors == 0 {
+			continue
 		}
 		processorHandles := make([]*ProcessorHandle, numProcessors)
 		ret = amdsmiGetProcessorHandles(socketHandles[i], &numProcessors, &processorHandles[0])

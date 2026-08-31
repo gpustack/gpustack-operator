@@ -232,6 +232,28 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 	return grpList, nil
 }
 
+// unavailableReading is the value AMD's libraries use to say a reading is unavailable rather than to
+// report one. It is the maximum of uint16, which is the width GpuMetrics reports utilization and
+// temperature in — and it is also what the driver writes into the wider uint32 power fields, rather
+// than their own maximum, which is why one constant serves both.
+//
+// Not widened to the uint32 maximum for those power fields: AMD's own binding compares the whole
+// power block against this value, and widening it would stop catching the reading that is actually
+// reported. The ROCm SMI side of this backend carries a different sentinel at the wider value —
+// kfdStatsInvalid in binding/rsmi/library_device.go — and the two are not interchangeable.
+const unavailableReading uint32 = 0xFFFF
+
+// isUnavailableReading reports whether a driver reading is that sentinel rather than a measurement.
+//
+// It is needed because the call that produced the value succeeded. An SR-IOV virtual function
+// exposes no host-side power telemetry to its guest and answers this instead of failing, as does a
+// metrics field the driver did not fill, so a caller that checks only the return code publishes
+// 65535 as a utilization, a temperature or a wattage. Nothing crashes, which is what makes it worth
+// checking for: the figure travels into monitoring and scheduling as though it had been measured.
+func isUnavailableReading(v uint32) bool {
+	return v == unavailableReading
+}
+
 func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, err error) {
 	defer loggerx.RecoverWithStackScanner(func(s loggerx.Scanner, e error) {
 		in.logger.Error(e, "failed to monitor amd devices")
@@ -312,16 +334,26 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 			if !ret.IsSuccess() {
 				logger.V(3).Error(ret, "failed to get device cores utilization and temperature")
 			} else {
-				coresUtilization = uint32(metricsInfo.Average_gfx_activity)
-				temperature = uint32(metricsInfo.Temperature_hotspot)
+				// Assigned only where the reading is one: an unavailable reading keeps the zero the
+				// variable already holds, rather than being assigned and then repaired.
+				if v := uint32(metricsInfo.Average_gfx_activity); !isUnavailableReading(v) {
+					coresUtilization = v
+				}
+				if v := uint32(metricsInfo.Temperature_hotspot); !isUnavailableReading(v) {
+					temperature = v
+				}
 			}
 
 			powerInfo, ret := dev.GetPowerInfo()
 			if !ret.IsSuccess() {
 				logger.V(3).Error(ret, "failed to get device power usage")
 			} else {
-				powerUsage = powerInfo.Current_socket_power
-				if powerUsage == 0xFFFF {
+				// The current socket power, the average as its fallback, and neither where both are
+				// the sentinel -- which is what a virtual function reports for every one of them.
+				switch {
+				case !isUnavailableReading(powerInfo.Current_socket_power):
+					powerUsage = powerInfo.Current_socket_power
+				case !isUnavailableReading(powerInfo.Average_socket_power):
 					powerUsage = powerInfo.Average_socket_power
 				}
 			}
@@ -354,6 +386,10 @@ func (in *amd) init() {
 		// ROCm 7.2.0: with AMD SMI loaded first, the dlopen of ROCm SMI aborts the process with
 		// SIGBUS inside dlopen itself, while this order leaves both libraries working and agreeing
 		// on every accelerator's identity. Whoever reorders these will not find out from a test.
+		//
+		// The order is not free on a newer stack, and amdsmi.New is where it is paid for: ROCm SMI
+		// in the global scope zeroes AMD SMI's socket enumeration, so that library is loaded
+		// RTLD_DEEPBIND.
 		if ret := in.rsmi.Init(); !ret.IsSuccess() {
 			in.logger.Error(ret, "failed to initialize ROCm SMI library")
 		}

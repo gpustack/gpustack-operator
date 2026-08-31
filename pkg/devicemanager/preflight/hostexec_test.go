@@ -591,6 +591,73 @@ func TestAbsentHere(t *testing.T) {
 	}
 }
 
+// Mounted and still unusable is the one shape the list above cannot say, and it is the shape that
+// leaves a reader with nowhere to go. Measured on a host carrying two ROCm versions: /opt/rocm was
+// mounted, /opt/rocm/lib inside it linked to a directory that was not, every ROCm library failed to
+// load, and the only remedy offered was to mount /opt/rocm -- which the operator had already done.
+//
+// So this answers from what is here rather than from what a manufacturer needs, and says nothing at
+// all unless it found the one thing a mount cannot fix by being repeated.
+func TestUnresolvableLibDir(t *testing.T) {
+	root := t.TempDir()
+
+	resolves := filepath.Join(root, "resolves")
+	require.NoError(t, os.Mkdir(resolves, 0o755))
+
+	linked := filepath.Join(root, "linked")
+	require.NoError(t, os.Symlink(resolves, linked))
+
+	target := filepath.Join(root, "not-mounted")
+	dangling := filepath.Join(root, "dangling")
+	require.NoError(t, os.Symlink(target, dangling))
+
+	notALink := filepath.Join(root, "a-file")
+	require.NoError(t, os.WriteFile(notALink, nil, 0o600))
+
+	testCases := []struct {
+		name string
+		dir  string
+		want string
+	}{
+		{
+			// A manufacturer with no library directory established asks nothing of this.
+			name: "no directory to check",
+			dir:  "",
+		},
+		{
+			name: "a directory that is here",
+			dir:  resolves,
+		},
+		{
+			// The ordinary single-version shape: the link is resolved by the host before the mount.
+			name: "a link that resolves",
+			dir:  linked,
+		},
+		{
+			// Absent is the other list's answer, not this one's -- saying both would name the same
+			// gap twice and read as two problems.
+			name: "a path that is not here at all",
+			dir:  filepath.Join(root, "absent"),
+		},
+		{
+			name: "something here that is not a link and not a directory",
+			dir:  notALink,
+		},
+		{
+			name: "a link that does not resolve",
+			dir:  dangling,
+			want: dangling + " is mounted but does not resolve: it links to " + target +
+				", which is not in this container -- mount " + dangling +
+				" itself, which resolves the link on the host",
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, unresolvableLibDir(tc.dir))
+		})
+	}
+}
+
 // The remedy has to be the remedy. A manufacturer's list says what its detect pass needs, and a
 // reader takes it as what to go and mount -- so an entry this container already has sends them to
 // fix what is not broken, and costs them the one entry that was. Measured on hardware: a run with
