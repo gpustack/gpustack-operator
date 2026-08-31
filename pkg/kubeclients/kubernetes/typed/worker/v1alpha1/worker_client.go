@@ -20,6 +20,7 @@ type WorkerV1alpha1Interface interface {
 	DevicesGetter
 	InstancesGetter
 	InstanceTypesGetter
+	KVCacheBackendsGetter
 }
 
 // WorkerV1alpha1Client is used to interact with features provided by the worker.gpustack.ai group.
@@ -37,6 +38,10 @@ func (c *WorkerV1alpha1Client) Instances(namespace string) InstanceInterface {
 
 func (c *WorkerV1alpha1Client) InstanceTypes() InstanceTypeInterface {
 	return newInstanceTypes(c)
+}
+
+func (c *WorkerV1alpha1Client) KVCacheBackends() KVCacheBackendInterface {
+	return newKVCacheBackends(c)
 }
 
 // NewForConfig creates a new WorkerV1alpha1Client for the given config.

@@ -1,6 +1,7 @@
 package kubeapistatus
 
 import (
+	"fmt"
 	"reflect"
 	"time"
 
@@ -182,9 +183,21 @@ func (c ConditionType) ResetFalse(obj any, reason, message string) {
 }
 
 // upsertTS create to update condition and set last transition time.
+//
+// The field is a meta.Time, so the value has to be built and Set rather than SetString — the same
+// way setTS does it below. ts is RFC3339, which is how a meta.Time serializes, so what getTS gives
+// back is what this takes.
+//
+// An unparseable ts panics: every caller passes a formatted value, so it is programmer error, and
+// this file already panics on the other one it can detect — a non-pointer object.
 func upsertTS(obj any, condName, ts string) {
+	parsed, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		panic(fmt.Sprintf("kubeapistatus: last transition time must be RFC3339, got %q", ts))
+	}
+
 	cond := upsertCond(obj, condName)
-	getFieldValue(cond, "LastTransitionTime").SetString(ts)
+	getFieldValue(cond, "LastTransitionTime").Set(reflect.ValueOf(meta.Time{Time: parsed.UTC()}))
 }
 
 // setTS set last transition time to condition.
@@ -197,12 +210,22 @@ func setTS(value reflect.Value) {
 }
 
 // getTS get last transition time from condition.
+//
+// It reads the meta.Time out of the field and formats it. Calling String() on the field directly
+// would render the struct — "<meta.Time Value>" — rather than a time, which is a value no caller
+// can compare or display. A condition that carries no stamp reports nothing, the same as a
+// condition that is not there: a zero time formatted would read as the year 1.
 func getTS(obj any, condName string) string {
 	cond := findCond(obj, condName)
 	if cond == nil {
 		return ""
 	}
-	return getFieldValue(*cond, "LastTransitionTime").String()
+
+	ts, ok := getFieldValue(*cond, "LastTransitionTime").Interface().(meta.Time)
+	if !ok || ts.IsZero() {
+		return ""
+	}
+	return ts.UTC().Format(time.RFC3339)
 }
 
 // getStatus get status from condition.
@@ -221,12 +244,23 @@ func setStatus(obj any, condName, status, reason, message string) {
 	}
 
 	cond := upsertCond(obj, condName)
+
+	// Read the previous status BEFORE overwriting it. LastTransitionTime marks a TRANSITION, so it
+	// may move only when Status actually changes — a controller that rewrites its conditions on
+	// every pass would otherwise stamp a new time every pass, and a status write guarded by
+	// equality would then fire forever, each write waking the next reconcile.
+	//
+	// getFieldValue, not getValue: cond is already a reflect.Value, while getValue takes an "any"
+	// and reflects over whatever it is handed — given a reflect.Value it reflects over that struct,
+	// whose "Status" field does not exist. The comparison therefore never matched and the timestamp
+	// moved on every write, including a write that changed nothing.
+	transitioned := getFieldValue(cond, "Status").String() != status
+
 	setValue(cond, "Status", status)
 	setValue(cond, "Reason", reason)
 	setValue(cond, "Message", message)
 
-	originalStatus := getValue(cond, "Status").String()
-	if originalStatus != status {
+	if transitioned {
 		setTS(cond)
 	}
 }

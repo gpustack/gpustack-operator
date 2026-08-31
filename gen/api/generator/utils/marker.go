@@ -29,7 +29,13 @@ func ParseMarker(line string) map[string]string {
 			}
 		}
 
+		// Neither branch above claimed the rest, so this is the LAST value on the line and it is
+		// consumed whole. Stopping here matters: continuing would Cut a value that has already been
+		// taken, and a value may legitimately contain "=" — a jsonPath filter is written
+		// `[?(@.name=='X')]`. Without the break that tail came back as two more entries, a bogus
+		// non-empty key and an empty one, both indistinguishable from a mistyped marker.
 		rm[h] = r
+		break
 	}
 
 	return rm

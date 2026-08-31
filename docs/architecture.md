@@ -110,6 +110,8 @@ are in [Device Discovery](architecture/device-discovery.md#device-accelerator-re
 - [Admission](architecture/admission.md) — the five gates and the four-view status.
 - [Installation Modes](architecture/installation-modes.md) — chart mode versus image mode.
 - [Internals](architecture/internals.md) — startup order and the invariants that fail silently.
+- [KV Cache Backend](kv-cache/backend.md) — a separate chain: running and observing a
+  pooled KV cache for inference workloads.
 - [Walkthrough](walkthrough.md) — all of it recorded on a live cluster, with real output.
 
 Every page, with its audience and read time, is in the [documentation index](README.md).

@@ -1,0 +1,6 @@
+# HELP master_key_count Number of keys
+# TYPE master_key_count gauge
+master_key_count 0
+# HELP master_active_clients Number of active clients
+# TYPE master_active_clients gauge
+master_active_clients 0

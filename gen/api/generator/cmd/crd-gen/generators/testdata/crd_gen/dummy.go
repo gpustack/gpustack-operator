@@ -10,7 +10,21 @@ import (
 
 // Dummy is the schema for the projects API.
 //
+// The print columns are here for what they carry rather than for themselves. Priority is an int32
+// and has to be emitted BARE: quoted, it produced a string constant in an int32 field and the
+// generated file did not compile — which no test could catch while no type in this repository used
+// the marker. One column leaves priority at its default and one sets it, so the expected output pins
+// both forms.
+//
+// The third pins a jsonPath FILTER, whose value contains "=" twice. The marker parser splits on "=",
+// so the filter has to survive being a value that looks like more key/value pairs — it once came
+// back split across two junk entries as well as its own, which nothing noticed because unknown keys
+// were dropped in silence.
+//
 // +k8s:crd-gen:resource:categories=["all","walrus"],scope="Namespaced",shortName=["proj"],plural="projects",subResources=["status"]
+// +k8s:crd-gen:printcolumn:name="String",type="string",jsonPath=".spec.string"
+// +k8s:crd-gen:printcolumn:name="Integer",type="integer",jsonPath=".spec.integer",description="an integer",format="int32",priority=1
+// +k8s:crd-gen:printcolumn:name="Filtered",type="string",jsonPath=".status.conditions[?(@.type=='Ready')].status"
 type Dummy struct {
 	meta.TypeMeta   `json:",inline"`
 	meta.ObjectMeta `json:"metadata,omitempty"`

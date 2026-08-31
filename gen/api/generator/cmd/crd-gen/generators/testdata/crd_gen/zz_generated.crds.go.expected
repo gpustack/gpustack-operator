@@ -51,7 +51,7 @@ func crd_crd_gen_generators_testdata_crd_gen_Dummy() *v1.CustomResourceDefinitio
 					Storage: true,
 					Schema: &v1.CustomResourceValidation{
 						OpenAPIV3Schema: &v1.JSONSchemaProps{
-							Description: "Dummy is the schema for the projects API.",
+							Description: "Dummy is the schema for the projects API.\nThe print columns are here for what they carry rather than for themselves. Priority is an int32\nand has to be emitted BARE: quoted, it produced a string constant in an int32 field and the\ngenerated file did not compile — which no test could catch while no type in this repository used\nthe marker. One column leaves priority at its default and one sets it, so the expected output pins\nboth forms.\nThe third pins a jsonPath FILTER, whose value contains \"=\" twice. The marker parser splits on \"=\",\nso the filter has to survive being a value that looks like more key/value pairs — it once came\nback split across two junk entries as well as its own, which nothing noticed because unknown keys\nwere dropped in silence.",
 							Type:        "object",
 							Properties: map[string]v1.JSONSchemaProps{
 								"apiVersion": {
@@ -2091,6 +2091,32 @@ func crd_crd_gen_generators_testdata_crd_gen_Dummy() *v1.CustomResourceDefinitio
 					},
 					Subresources: &v1.CustomResourceSubresources{
 						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+					AdditionalPrinterColumns: []v1.CustomResourceColumnDefinition{
+						{
+							Name:        "String",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.string",
+						},
+						{
+							Name:        "Integer",
+							Type:        "integer",
+							Format:      "int32",
+							Description: "an integer",
+							Priority:    1,
+							JSONPath:    ".spec.integer",
+						},
+						{
+							Name:        "Filtered",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.conditions[?(@.type=='Ready')].status",
+						},
 					},
 				},
 			},

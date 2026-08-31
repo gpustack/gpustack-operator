@@ -16,9 +16,10 @@ import (
 
 func GetCustomResourceDefinitions() map[string]*v1.CustomResourceDefinition {
 	return map[string]*v1.CustomResourceDefinition{
-		"Devices":      crd_gpustack_api_worker_v1alpha1_Devices(),
-		"Instance":     crd_gpustack_api_worker_v1alpha1_Instance(),
-		"InstanceType": crd_gpustack_api_worker_v1alpha1_InstanceType(),
+		"Devices":        crd_gpustack_api_worker_v1alpha1_Devices(),
+		"Instance":       crd_gpustack_api_worker_v1alpha1_Instance(),
+		"InstanceType":   crd_gpustack_api_worker_v1alpha1_InstanceType(),
+		"KVCacheBackend": crd_gpustack_api_worker_v1alpha1_KVCacheBackend(),
 	}
 }
 
@@ -1995,6 +1996,612 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 					},
 					Subresources: &v1.CustomResourceSubresources{
 						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+				},
+			},
+		},
+	}
+}
+
+func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "kvcachebackends.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "kvcachebackends",
+				Singular: "kvcachebackend",
+				ShortNames: []string{
+					"kvcb",
+				},
+				Kind:     "KVCacheBackend",
+				ListKind: "KVCacheBackendList",
+				Categories: []string{
+					"gpustack",
+				},
+			},
+			Scope: "Cluster",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "KVCacheBackend is the schema for worker.gpustack.ai.\nIt declares which machines contribute what medium to one KV cache backend, and reports the\nbackend's OBSERVED state. It is cluster-scoped because it is a privileged physical resource: it\nnames nodes, claims host memory and host paths, and on the RDMA path needs hostNetwork plus\n/dev/infiniband. Tenant isolation is a different axis, owned one layer up.",
+							Type:        "object",
+							Required: []string{
+								"spec",
+							},
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"connection",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"connection": {
+											Description: "Connection describes how this backend is reached: managed by this operator, or external.\nExactly one is set, enforced by the webhook.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"external": {
+													Description: "External names a backend somebody else runs. Nothing is rendered for it; the reconciler\nonly observes.",
+													Type:        "object",
+													Required: []string{
+														"endpoints",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"endpoints": {
+															Description: "Endpoints are the addresses of a backend somebody else runs, one entry per named role.\nBoth roles are required here, and for the same reason they are two entries and not one\nstring: this operator reads the Admin address and publishes the Client address, so an\nexternal backend that named only one leaves either the scrape or every engine with\nnothing to point at.\nIt is a list rather than a single address so that a multi-leader backend needs no API\nchange to describe.",
+															Type:        "array",
+															MinItems:    ptr.To[int64](1),
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"address",
+																		"name",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"address": {
+																			Description: "Address is host:port.\n259 and not 253: the bound is on host:port, and the host alone may be a DNS subdomain of the\nfull 253 characters, which leaves room for a colon and a five-digit port. At 253 the schema\nrefused an address the webhook's own host:port rule accepts.",
+																			Type:        "string",
+																			MaxLength:   ptr.To[int64](259),
+																		},
+																		"name": {
+																			Description: "Name says who the address is for, and the two readers want different things. Client is\nwhat an inference engine connects to. Admin is the port serving the Prometheus exposition\nand the HTTP admin API both, which is what THIS OPERATOR reads. A consumer handed the\nwrong one fails at connect time with nothing to point at, which is why the distinction is\ncarried in the API rather than left to a convention.",
+																			Type:        "string",
+																			Enum: []v1.JSON{
+																				{
+																					Raw: []byte(`"Client"`),
+																				},
+																				{
+																					Raw: []byte(`"Admin"`),
+																				},
+																			},
+																		},
+																	},
+																},
+															},
+															Nullable: true,
+															XListMapKeys: []string{
+																"name",
+															},
+															XListType: ptr.To[string]("map"),
+														},
+													},
+													Nullable: true,
+												},
+												"managed": {
+													Description: "Managed asks this operator to run the leader and the store members.",
+													Type:        "object",
+													Required: []string{
+														"leader",
+														"members",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"leader": {
+															Description: "Leader is the metadata service every member and every client talks to. The name is this\nAPI's, not the artifact's: the rendered flags and environment variables keep the vendor's\nown \"master\" spelling, and the mapping lives in the renderer.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"allocationStrategy": {
+																	Description: "AllocationStrategy is how the leader picks which member takes a new write. Random spreads\nthem; FreeRatioFirst biases toward the emptier member.\nThe enum is deliberately the two that any pooled store would have, rather than every value\nthe current artifact's flag accepts: the others it accepts are specific to one medium or\none locality model, are reachable through ExtraArgs for anyone who needs them, and would\notherwise fix this API to one implementation's vocabulary. Widening the enum later is not\na breaking change.",
+																	Type:        "string",
+																	Default: &v1.JSON{
+																		Raw: []byte(`"FreeRatioFirst"`),
+																	},
+																	Enum: []v1.JSON{
+																		{
+																			Raw: []byte(`"Random"`),
+																		},
+																		{
+																			Raw: []byte(`"FreeRatioFirst"`),
+																		},
+																	},
+																},
+																"extraArgs": {
+																	Description: "ExtraArgs passes flags this API does not enumerate straight through to the leader, after\nthe derived ones. A key that collides with a flag rendered from a field above is refused\nat admission, because two sources for one flag make the rendered command ambiguous.",
+																	Type:        "object",
+																	AdditionalProperties: &v1.JSONSchemaPropsOrBool{
+																		Allows: true,
+																		Schema: &v1.JSONSchemaProps{
+																			Type: "string",
+																		},
+																	},
+																	Nullable: true,
+																},
+																"replicas": {
+																	Description: "Replicas is how many leader processes run. One, and only one, in this scope: electing a\nleader among several needs a backend store this scope does not enter, and the webhook\nrefuses anything else while naming that follow-on rather than silently running one anyway.",
+																	Type:        "integer",
+																	Format:      "int32",
+																	Default: &v1.JSON{
+																		Raw: []byte(`1`),
+																	},
+																	Minimum:  ptr.To[float64](1),
+																	Nullable: true,
+																},
+															},
+														},
+														"members": {
+															Description: "Members are the groups of store members. Each entry selects nodes and names the medium\nthose nodes contribute, so a hot DRAM tier and a cold filesystem tier are expressible in\nthe shape. This scope reconciles exactly one group and the webhook refuses a second,\nnaming the tiering follow-on: a two-group manifest is schema-valid and admission-refused\nrather than half-reconciled.",
+															Type:        "array",
+															MinItems:    ptr.To[int64](1),
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"nodeSelector",
+																		"medium",
+																		"capacityPerMember",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"capacityPerMember": {
+																			Description: "CapacityPerMember sizes ONE member, not one node: a node can eventually run several\nmembers, one per NUMA domain. It becomes the member's global segment size and is counted\ninto the member Pod's own resource request, so a member that does not fit stays Pending\ninstead of overcommitting the node.",
+																			Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																			AnyOf: []v1.JSONSchemaProps{
+																				{
+																					Type: "integer",
+																				},
+																				{
+																					Type: "string",
+																				},
+																			},
+																			XIntOrString: true,
+																		},
+																		"extraArgs": {
+																			Description: "ExtraArgs passes config keys this API does not enumerate straight through to the member. It\nis keyed by CONFIG KEY rather than by environment-variable name — one namespace per side,\neach the one its own binary documents. A key that collides with one derived from a field\nabove is refused at admission.",
+																			Type:        "object",
+																			AdditionalProperties: &v1.JSONSchemaPropsOrBool{
+																				Allows: true,
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "string",
+																				},
+																			},
+																			Nullable: true,
+																		},
+																		"image": {
+																			Description: "Image overrides the backend's Image for this member group only. Left unset, the group runs\nthe backend's Image.\nA group's NodeSelector is what makes this necessary: two groups can select nodes of different\naccelerator vendors or generations, and the store's client ships as one wheel per vendor —\nCUDA 12, CUDA 13, ROCm, NPU — each carrying the transports it was compiled with and the\nruntime it links. The transport itself is backend-wide, so this is not a per-group transport;\nit is the per-group runtime that one transport needs on differing hardware.",
+																			Type:        "string",
+																			MaxLength:   ptr.To[int64](512),
+																		},
+																		"localBufferSize": {
+																			Description: "LocalBufferSize is the member client's local staging buffer, counted into the Pod's\nmemory request beside CapacityPerMember.",
+																			Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																			AnyOf: []v1.JSONSchemaProps{
+																				{
+																					Type: "integer",
+																				},
+																				{
+																					Type: "string",
+																				},
+																			},
+																			XIntOrString: true,
+																		},
+																		"medium": {
+																			Description: "Medium is what this member group physically contributes. DFS covers NFS and 3FS, which\nare media rather than backend implementations.\nThe enum carries all five because all five are media the store itself supports, and the\nshape a tiered backend will need must not change later. Only \"DRAM\" is RECONCILED here:\nthe other four additionally need the leader's file or DAX flags and a mount on the member,\nand nothing renders those yet, so admission refuses them rather than starting a member that\nwould quietly hold its segment in memory under a name that says otherwise.",
+																			Type:        "string",
+																			Enum: []v1.JSON{
+																				{
+																					Raw: []byte(`"DRAM"`),
+																				},
+																				{
+																					Raw: []byte(`"LocalDisk"`),
+																				},
+																				{
+																					Raw: []byte(`"NoF"`),
+																				},
+																				{
+																					Raw: []byte(`"CXL"`),
+																				},
+																				{
+																					Raw: []byte(`"DFS"`),
+																				},
+																			},
+																		},
+																		"nodeSelector": {
+																			Description: "NodeSelector selects the nodes that contribute this medium. One member runs per selected\nnode; widening the selector adds members and the leader admits their segments into\nsubsequent allocation immediately, with no leader or member restart.",
+																			Type:        "object",
+																			AdditionalProperties: &v1.JSONSchemaPropsOrBool{
+																				Allows: true,
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "string",
+																				},
+																			},
+																			Nullable: true,
+																		},
+																	},
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
+														},
+													},
+													Nullable: true,
+												},
+											},
+										},
+										"image": {
+											Description: "Image is the container image every role of this backend runs.\nIt is OPTIONAL. Left unset, the reconciler uses the cluster-wide default pinned in the\n\"kv-cache-backend-image\" Setting, which is where a version this project has verified\nbelongs — an admin pins it once instead of restating it on every object. Set here, it\noverrides that default for this backend alone.\nIt is never DERIVED from the operator's own image the way the Device Manager's is: the\nmaster and the engine client can be builds against different accelerator generations —\nthe base wheel's master links CUDA 12 while a current vLLM image carries CUDA 13 — so a\nderived image would silently pair a master with a runtime it cannot load. Unset here AND\nunset in the Setting is refused at admission, naming both places.",
+											Type:        "string",
+											MaxLength:   ptr.To[int64](512),
+										},
+										"imagePullPolicy": {
+											Description: "ImagePullPolicy is the policy every role of this backend pulls its image with.\nIt is declared here rather than inherited from the cluster-wide \"image-pull-policy\" Setting.\nThat setting is a value of the bundled-application chart install and reaches nothing a\ncontroller renders, so inheriting it would make this the one API in the group whose\nworkloads move when a chart value moves.\nLeft unset, the operator RESOLVES the policy from the image tag by the rule the API server\nwould otherwise have applied — Always for :latest or for an image naming no tag at all,\nIfNotPresent for anything else — and re-resolves it whenever the image or this field moves.\nIt is resolved rather than left empty because a field the server fills in cannot be\nconverged: an operator comparing against that default either rewrites the workload on every\npass or has to skip the comparison, and skipping it strands the value a spec has moved off.",
+											Type:        "string",
+											Enum: []v1.JSON{
+												{
+													Raw: []byte(`"Always"`),
+												},
+												{
+													Raw: []byte(`"IfNotPresent"`),
+												},
+												{
+													Raw: []byte(`"Never"`),
+												},
+											},
+										},
+										"imagePullSecrets": {
+											Description: "ImagePullSecrets names the secrets that pull this backend's images, on every role.\nWithout it a private registry is unreachable: neither the leader Deployment nor a member\nDaemonSet runs under a service account of ours carrying credentials, and the cluster-wide\n\"image-pull-secrets\" Setting reaches only the bundled-application chart. The secrets live in\nthe namespace the workloads run in, which is this operator's own.\nThe list is ATOMIC — it is replaced whole rather than merged. A structural schema may key a\nlist by a field only when that field is required and non-nullable, and LocalObjectReference's\nname is neither.",
+											Type:        "array",
+											MaxItems:    ptr.To[int64](32),
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"name": {
+															Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+															Type:        "string",
+															Default: &v1.JSON{
+																Raw: []byte(`""`),
+															},
+														},
+													},
+												},
+											},
+											Nullable:  true,
+											XListType: ptr.To[string]("atomic"),
+										},
+										"transport": {
+											Description: "Transport describes the data plane the members use.\nThe empty object is the default, and it has to be. Structural-schema defaulting does not\ndescend into an object that is ABSENT, so without this the common spec — one that never\nmentions a transport — would store no protocol at all and the field's own default would\nsilently not apply. Measured against an API server: omitted leaves `transport` empty, while\n`transport: {}` comes back as `{\"protocol\":\"Auto\"}`.",
+											Type:        "object",
+											Default: &v1.JSON{
+												Raw: []byte(`{}`),
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"protocol": {
+													Description: "Protocol is the transport the members use. Auto resolves to TCP, and\nstatus.members[].protocol reports what the leader says each member actually came up on, so\nthe outcome is observed rather than assumed from this field.\nAuto is deliberately NOT a per-node probe that promotes itself to a faster fabric, for two\nreasons. A member group renders one DaemonSet, so a single Pod template covers every node the\ngroup selects and cannot carry a different transport per node. And promoting to RDMA means\ngranting hostNetwork and two capabilities: a privilege is requested, never inferred on an\noperator's behalf.\nIt stays in the enum rather than being dropped because it is the honest answer for an\noperator with no opinion, and because it is where node-level fabric discovery would attach\nlater without an API change.\nTCP is the universal fallback. RDMA, HIP and Ascend are peers of one another — each is a\nfabric- or vendor-specific fast path, not a spelling of TCP: the ROCm build compiles a HIP\ntransport in, and the NPU build ships a separate Ascend transport library linking the CANN\nruntime.\nThe bar for membership here is \"measured as compiled into a published artifact\", which is\nwhat excludes the other ten strings that artifact's config parser accepts. It is NOT\n\"measured to move bytes\": only TCP has been exercised end to end, and RDMA, HIP and Ascend\neach await a run on that hardware. A member also needs the runtime its transport links —\nAscend needs CANN in the member image — and the webhook cannot see inside an image, so\nthat pairing is the operator's to get right.",
+													Type:        "string",
+													Default: &v1.JSON{
+														Raw: []byte(`"Auto"`),
+													},
+													Enum: []v1.JSON{
+														{
+															Raw: []byte(`"Auto"`),
+														},
+														{
+															Raw: []byte(`"TCP"`),
+														},
+														{
+															Raw: []byte(`"RDMA"`),
+														},
+														{
+															Raw: []byte(`"HIP"`),
+														},
+														{
+															Raw: []byte(`"Ascend"`),
+														},
+													},
+												},
+											},
+										},
+										"type": {
+											Description: "Type is the backend IMPLEMENTATION — who does placement, eviction, replication and\nmetadata. It is NOT the medium: where the bytes live is members[].medium, and collapsing\nthe two is the category error this field exists to make impossible.\nOne value ships. It is spelled out rather than assumed so the object says what it is, and\nso a second implementation widens an enum instead of reinterpreting an absent field.",
+											Type:        "string",
+											Default: &v1.JSON{
+												Raw: []byte(`"Mooncake"`),
+											},
+											Enum: []v1.JSON{
+												{
+													Raw: []byte(`"Mooncake"`),
+												},
+											},
+										},
+									},
+								},
+								"status": {
+									Type: "object",
+									Properties: map[string]v1.JSONSchemaProps{
+										"capacity": {
+											Description: "Capacity is what the leader reports it has and has allocated. It is ABSENT until a scrape\nsucceeds, and absent again is not the same as reporting zero.\nA POINTER because omitempty does not omit a zero-valued struct. Held by value it serialized\nas \"capacity\": {} on every failed or gated observation — an empty object where the contract\nsays there should be no field at all, and a shape a client cannot tell from a scrape that\nreturned nothing.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"total": {
+													Pattern: `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													Nullable:     true,
+													XIntOrString: true,
+												},
+												"used": {
+													Pattern: `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													Nullable:     true,
+													XIntOrString: true,
+												},
+											},
+											Nullable: true,
+										},
+										"conditions": {
+											Description: "Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,\nCapacityObserved, Deletable. Every one is derived from an observed document.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"type",
+														"status",
+														"lastTransitionTime",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"lastTransitionTime": {
+															Description: "LastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
+															Type:        "string",
+															Format:      "datetime",
+														},
+														"message": {
+															Description: "Message is a human readable message indicating details about the transition.\nThis may be an empty string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](32768),
+														},
+														"observedGeneration": {
+															Description: "ObservedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9,\nthe condition is out of date with respect to the current state of the instance.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](0),
+														},
+														"reason": {
+															Description: "Reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^$|^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`,
+														},
+														"status": {
+															Description: "Status of the condition, one of True, False, Unknown.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"True"`),
+																},
+																{
+																	Raw: []byte(`"False"`),
+																},
+																{
+																	Raw: []byte(`"Unknown"`),
+																},
+															},
+														},
+														"type": {
+															Description: "Type of condition in CamelCase or in foo.example.com/CamelCase.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](316),
+															Pattern:     `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"type",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"endpoints": {
+											Description: "Endpoints are this backend's addresses, one entry per named role — the same shape the\nexternal branch takes as input. A managed backend fills both from its own Service; an\nexternal one echoes what was declared.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"address",
+														"name",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"address": {
+															Description: "Address is host:port.\n259 and not 253: the bound is on host:port, and the host alone may be a DNS subdomain of the\nfull 253 characters, which leaves room for a colon and a five-digit port. At 253 the schema\nrefused an address the webhook's own host:port rule accepts.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](259),
+														},
+														"name": {
+															Description: "Name says who the address is for, and the two readers want different things. Client is\nwhat an inference engine connects to. Admin is the port serving the Prometheus exposition\nand the HTTP admin API both, which is what THIS OPERATOR reads. A consumer handed the\nwrong one fails at connect time with nothing to point at, which is why the distinction is\ncarried in the API rather than left to a convention.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"Client"`),
+																},
+																{
+																	Raw: []byte(`"Admin"`),
+																},
+															},
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"name",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"members": {
+											Description: "Members is one entry per observed store member.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"segmentName",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"medium": {
+															Description: "Medium is what this member contributes, echoed from the group that selected its node.",
+															Type:        "string",
+														},
+														"nodeName": {
+															Description: "NodeName is the node contributing this member's medium.",
+															Type:        "string",
+														},
+														"protocol": {
+															Description: "Protocol is the transport the LEADER reports this member came up on.\nIt is an OBSERVATION throughout, never an echo of spec.transport.protocol, and the two can\ndisagree: a member handed an RDMA request on a node whose device is missing comes up on TCP.\nRead it as what the data plane is doing, and the spec field as what was asked for.",
+															Type:        "string",
+														},
+														"segmentName": {
+															Description: "SegmentName is the member's segment as the leader knows it, derived from the node.",
+															Type:        "string",
+														},
+														"state": {
+															Description: "State is the member's state AS THE LEADER REPORTS IT, read from the leader's own segment\nlisting rather than inferred from the member Pod. The states the store defines, in this API's\ncasing: OK, Draining, Drained, GracefullyUnmounting, Unmounting, Undefined.\nIt carries no \"unreached\" sentinel, because there is no pass that would write one: a listing\nthat cannot be read leaves the PREVIOUS entries in place and says so through MembersMounted,\nrather than rewriting them as blank. Whether what is here was just refreshed is the\ncondition's question, and this field never answers it.\nDraining and the two unmounting states are what a shrink passes through, so the field can\ndistinguish a member on its way out from one that is simply gone. That is the whole reason it\ncarries the store's vocabulary instead of a summary of it.\nIt carries no enum marker deliberately, unlike every enum on the spec side. The value's domain\nbelongs to the store and not to this API: a store version that adds a state would make the\nwhole status write fail validation — not this one field, the entire object — leaving every\nother status field frozen at its last value. Phase, one field up, is open for the same reason.",
+															Type:        "string",
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"segmentName",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"phase": {
+											Description: "Phase summarizes the conditions: Provisioning, Ready, Degraded, Error, Deleting. It is\nderived from the leader's own health document rather than from its Pod phase — a Running\nPod whose leader reports its service not ready is Provisioning, not Ready.",
+											Type:        "string",
+										},
+										"phaseMessage": {
+											Description: "PhaseMessage carries the reason for the phase.",
+											Type:        "string",
+										},
+										"usedBy": {
+											Description: "UsedBy names the objects that consume this backend. A non-empty UsedBy is what the\nfinalizer refuses deletion on, so the field is the enforcement input and not a display.\nIt is a TypedLocalObjectReference and not a core ObjectReference: five of that type's seven\nfields mean nothing here, all of them are optional — so an entirely empty entry would\nvalidate against a field a finalizer enforces on — and upstream tells new APIs not to embed\nit. \"Local\" here means only that there is no namespace field, which is right: a backend is\ncluster-scoped and so is everything that claims one.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"kind",
+														"name",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"apiGroup": {
+															Description: "APIGroup is the group for the resource being referenced.\nIf APIGroup is not specified, the specified Kind must be in the core API group.\nFor any other third-party types, APIGroup is required.",
+															Type:        "string",
+															Nullable:    true,
+														},
+														"kind": {
+															Description: "Kind is the type of resource being referenced",
+															Type:        "string",
+														},
+														"name": {
+															Description: "Name is the name of resource being referenced",
+															Type:        "string",
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"kind",
+												"name",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+									},
+								},
+							},
+						},
+					},
+					Subresources: &v1.CustomResourceSubresources{
+						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+					AdditionalPrinterColumns: []v1.CustomResourceColumnDefinition{
+						{
+							Name:        "Type",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.type",
+						},
+						{
+							Name:        "Phase",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.phase",
+						},
+						{
+							Name:        "Endpoint",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.endpoints[?(@.name=='Client')].address",
+						},
+						{
+							Name:        "Capacity",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.capacity.total",
+						},
 					},
 				},
 			},

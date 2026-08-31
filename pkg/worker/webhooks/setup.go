@@ -15,6 +15,7 @@ import (
 var setups = []webhook.Setup{
 	new(worker.InstanceWebhook),
 	new(worker.InstanceTypeWebhook),
+	new(worker.KVCacheBackendWebhook),
 	new(worker.PodWebhook),
 }
 

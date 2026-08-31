@@ -97,3 +97,29 @@ func (*InstanceTypeStatus) ProtoMessage() {}
 func (*InstanceTypeUnitResources) ProtoMessage() {}
 
 func (*InstanceVolume) ProtoMessage() {}
+
+func (*KVCacheBackend) ProtoMessage() {}
+
+func (*KVCacheBackendCapacity) ProtoMessage() {}
+
+func (*KVCacheBackendConnection) ProtoMessage() {}
+
+func (*KVCacheBackendEndpoint) ProtoMessage() {}
+
+func (*KVCacheBackendExternal) ProtoMessage() {}
+
+func (*KVCacheBackendLeader) ProtoMessage() {}
+
+func (*KVCacheBackendList) ProtoMessage() {}
+
+func (*KVCacheBackendManaged) ProtoMessage() {}
+
+func (*KVCacheBackendMember) ProtoMessage() {}
+
+func (*KVCacheBackendMemberStatus) ProtoMessage() {}
+
+func (*KVCacheBackendSpec) ProtoMessage() {}
+
+func (*KVCacheBackendStatus) ProtoMessage() {}
+
+func (*KVCacheBackendTransport) ProtoMessage() {}

@@ -9,10 +9,13 @@
 
 # -- Run a post-delete cleanup Job on `helm uninstall` that removes the leftovers
 # the worker creates at runtime but Helm does not manage: the Kueue / Node Feature
-# Discovery / CSI Helm releases, their CRDs, the finalizers pinning Kueue and
-# Instance objects, and the aggregated APIServices / webhooks. Disabled by default
-# because those CRDs may be shared with other workloads; enable only when this
-# release exclusively owns them (e.g. CI / e2e).
+# Discovery / CSI Helm releases, the finalizers pinning Kueue and Instance objects,
+# and the aggregated APIServices / webhooks. Of the CRDs it removes this chart's own
+# and the Kueue ones this release installed; Node Feature Discovery's are LEFT IN
+# PLACE, because its subchart ships them in a way that records no Helm ownership and
+# deleting them would be a guess with a cluster-wide blast radius. Disabled by
+# default because the CRDs it does remove may be shared with other workloads; enable
+# only when this release exclusively owns them (e.g. CI / e2e).
 cleanupOnUninstall: false
 
 # -- Global values shared across the chart and its subcharts.

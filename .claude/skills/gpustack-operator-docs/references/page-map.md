@@ -77,6 +77,16 @@ per-manufacturer package split, the CGO bindings, the 63-character rule.
 
 **Rule of thumb** — if breaking it produces a *silent* failure, it belongs here.
 
+## `docs/kv-cache/backend.md`
+
+**Owns** — the `KVCacheBackend` chain: the managed/external and leader/member axes, the rendered
+leader and member workloads, the admin surface the status is read from, the phase and condition
+algebra, and the two operator surprises (capacity is observed rather than summed; shrinking a member
+group discards that member's cache).
+
+**Never** — the four-stage scheduling chain. This chain is its own; `docs/architecture.md` links to it
+in one clause and does not describe it.
+
 ## `docs/accelerator-requests.md`
 
 **Owns** — the normative contract: the two families, every resource key, a worked example per family,

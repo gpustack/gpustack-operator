@@ -19,6 +19,8 @@ type Interface interface {
 	Instances() InstanceInformer
 	// InstanceTypes returns a InstanceTypeInformer.
 	InstanceTypes() InstanceTypeInformer
+	// KVCacheBackends returns a KVCacheBackendInformer.
+	KVCacheBackends() KVCacheBackendInformer
 }
 
 type version struct {
@@ -45,4 +47,9 @@ func (v *version) Instances() InstanceInformer {
 // InstanceTypes returns a InstanceTypeInformer.
 func (v *version) InstanceTypes() InstanceTypeInformer {
 	return &instanceTypeInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
+}
+
+// KVCacheBackends returns a KVCacheBackendInformer.
+func (v *version) KVCacheBackends() KVCacheBackendInformer {
+	return &kVCacheBackendInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }
