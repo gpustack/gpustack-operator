@@ -33,12 +33,14 @@ Device Manager, allocator), `scheduling-chain.md` (capacity labels, flavors/queu
 ## Development
 
 See `docs/development.md` for build/lint/test commands, code generation, and vendored dependencies.
-Three skills carry the rest:
+Four skills carry the rest:
 
 - `gpustack-operator-overview` — a tour of the directory layout and naming conventions.
 - `gpustack-operator-generate` — runs `make generate` after you edit API types or webhooks.
 - `gpustack-operator-docs` — when a change needs a doc change: routes the fact to the right page,
   checks the index, links and tables of contents.
+- `gpustack-operator-issue-pr` — filing an issue or opening a PR: the title prefixes and cap, the
+  label and type each pairs with, and the three linking verbs.
 
 The `gpustack-operator-lint` hook dispatches on what a turn left dirty. Run the matching one yourself too:
 
