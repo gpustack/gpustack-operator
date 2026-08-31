@@ -381,8 +381,8 @@ time, so no pre-generated specification names it.
 
 ### Partitioned
 
-It materializes the requested hardware instance (NVIDIA MIG, or T-Head's and Hygon's own MIG-named
-partitioning) on an accelerator it selects itself, and injects only that instance. How differs by
+It materializes the requested hardware instance (NVIDIA MIG, or the MIG-named partitioning T-Head and
+Hygon each ship) on an accelerator it selects itself, and injects only that instance. How differs by
 vendor: device nodes for T-Head, which has no container-runtime hook, and the instance's own registry
 file bind-mounted at its host path for Hygon, whose runtime scans that directory by absolute path.
 

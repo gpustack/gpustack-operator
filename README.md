@@ -13,9 +13,9 @@ whole-accelerator and shared allocation it adds:
 - **Logical (software) slicing** — one accelerator serves many workloads, each with an **independent
   compute budget and VRAM budget**, applied at runtime by the manufacturer's own facility, not just in
   accounting.
-- **Physical (hardware) partitioning** — NVIDIA MIG and T-Head's own MIG-named partitioning, as a
-  resource family of its own: the device plugin materializes the instance at allocation and reclaims it
-  when the Pod exits.
+- **Physical (hardware) partitioning** — NVIDIA MIG, plus the MIG-named partitioning T-Head and Hygon
+  each ship, as a resource family of its own: the device plugin materializes the instance at
+  allocation and reclaims it when the Pod exits.
 
 Built on [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) and
 [Kueue](https://github.com/kubernetes-sigs/kueue), both vendored into this chart: install one thing and
@@ -166,7 +166,7 @@ ownership slots each) requests. What differs is whether one accelerator can be *
 | **AMD** | GPU | `amd.com/gpu` | ✅ |  |
 | **Cambricon** | MLU | `cambricon.com/mlu` | ✅ |  |
 | **Huawei Ascend** | NPU | `huawei.com/npu` | ✅ |  |
-| **Hygon** | DCU | `hygon.com/dcu` | ✅ |  |
+| **Hygon** | DCU | `hygon.com/dcu` | ✅ | ✅ **MIG** |
 | **Iluvatar** | GPU | `iluvatar.com/gpu` | ✅ |  |
 | **MetaX** | GPU | `metax-tech.com/gpu` | ✅ |  |
 | **Moore Threads** | GPU | `mthreads.com/gpu` | ✅ |  |
@@ -183,10 +183,15 @@ ownership slots each) requests. What differs is whether one accelerator can be *
   - **AMD** — a hardware compute-unit mask, a *ceiling* rather than a QoS: it carries no
     memory-bandwidth isolation at all, so a bandwidth-hungry neighbour still costs a slice throughput.
 - **Physical partitioning is hardware.** A driver-level configuration mode an administrator enables on
-  the accelerator; the operator observes it, never flips it. See [NVIDIA MIG
-  Operations](./docs/operation/nvidia-mig.md), [T-Head MIG
-  Operations](./docs/operation/thead-mig.md) and [Hygon MIG
-  Operations](./docs/operation/hygon-mig.md).
+  the accelerator; the operator observes it, never flips it. A partitioned accelerator serves *only*
+  partition requests, so its `.sliced` capacity goes to zero — the two columns above are what a
+  manufacturer can do, not what one accelerator does at once.
+  - **On Hygon the mode is the node's, not the card's.** Its switch takes no device selector, so every
+    DCU in a host flips together and a partitioned node advertises no whole-card or sliced capacity at
+    all. Plan such a node as partitioned or not, never as mixed.
+  - See [NVIDIA MIG Operations](./docs/operation/nvidia-mig.md), [T-Head MIG
+    Operations](./docs/operation/thead-mig.md) and [Hygon MIG
+    Operations](./docs/operation/hygon-mig.md).
 - Override any manufacturer's PCI vendor ID, resource name and runtime class — see [Settings &
   Environment Variables](./docs/settings.md#per-manufacturer-overrides).
 
