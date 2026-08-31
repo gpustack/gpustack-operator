@@ -184,8 +184,9 @@ ownership slots each) requests. What differs is whether one accelerator can be *
     memory-bandwidth isolation at all, so a bandwidth-hungry neighbour still costs a slice throughput.
 - **Physical partitioning is hardware.** A driver-level configuration mode an administrator enables on
   the accelerator; the operator observes it, never flips it. See [NVIDIA MIG
-  Operations](./docs/operation/nvidia-mig.md) and [T-Head MIG
-  Operations](./docs/operation/thead-mig.md).
+  Operations](./docs/operation/nvidia-mig.md), [T-Head MIG
+  Operations](./docs/operation/thead-mig.md) and [Hygon MIG
+  Operations](./docs/operation/hygon-mig.md).
 - Override any manufacturer's PCI vendor ID, resource name and runtime class — see [Settings &
   Environment Variables](./docs/settings.md#per-manufacturer-overrides).
 
@@ -227,6 +228,7 @@ The most-used pages, for running the operator, operating a cluster, and changing
 | [Settings & Environment Variables](./docs/settings.md) | Runtime settings and every `GPUSTACK_*` |
 | [NVIDIA MIG Operations](./docs/operation/nvidia-mig.md) | The MIG runbook, mode changes included |
 | [T-Head MIG Operations](./docs/operation/thead-mig.md) | The same runbook for T-Head's own partitioning |
+| [Hygon MIG Operations](./docs/operation/hygon-mig.md) | The same runbook for Hygon, whose mode is node-wide |
 | [High Availability Operations](./docs/operation/high-availability.md) | The replica knob per component |
 | [Development](./docs/development.md) | Build, lint, test, code generation |
 

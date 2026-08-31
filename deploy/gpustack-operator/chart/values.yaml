@@ -129,6 +129,7 @@ global:
     hygon:
       pciVendorID: "1d94"
       resourceName: hygon.com/dcu
+      partitionKind: mig
     iluvatar:
       pciVendorID: "1e3e"
       resourceName: iluvatar.com/gpu

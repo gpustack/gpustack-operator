@@ -49,7 +49,12 @@ const (
 // of the nine manufacturers name a variable ending this way -- ASCEND_VISIBLE_DEVICES,
 // NVIDIA_VISIBLE_DEVICES and so on -- and the rest name device nodes instead, which is why
 // grantedDevices reads both and neither on its own.
-const visibleDevicesEnvSuffix = "_VISIBLE_DEVICES"
+// visibleDevicesEnvSuffix is the tail every manufacturer's visibility variable ends with, near
+// enough. Most spell it plural -- NVIDIA_VISIBLE_DEVICES and its imitators -- but Hygon's
+// Multi-Instance runtime reads DMI_MIG_VISIBLE_DEVICE, singular, because a container there can hold
+// exactly one partition. Matching the singular stem covers both, and widening it only ever adds a
+// variable to the comparison: a plural name still ends with the plural form.
+const visibleDevicesEnvSuffix = "_VISIBLE_DEVICE"
 
 // The two reasons a management answer stops short, said in words on the row that stopped.
 //
@@ -645,7 +650,8 @@ func newCoAllocation(
 func grantedDevices(injection *deviceplugin.ContainerAllocateResponse) []string {
 	var names []string
 	for k, v := range injection.GetEnvs() {
-		if strings.HasSuffix(k, visibleDevicesEnvSuffix) {
+		if strings.HasSuffix(k, visibleDevicesEnvSuffix) ||
+			strings.HasSuffix(k, visibleDevicesEnvSuffix+"S") {
 			names = append(names, k+"="+v)
 		}
 	}

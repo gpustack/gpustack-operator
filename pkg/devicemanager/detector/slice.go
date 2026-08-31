@@ -168,9 +168,13 @@ type SlicePartition struct {
 	MemoryTotalMiB *uint64 `json:"memoryTotalMiB,omitempty"`
 	MemoryUsedMiB  *uint64 `json:"memoryUsedMiB,omitempty"`
 
+	// CoresPercent is the partition's own compute utilization, read on its handle. Absent on every
+	// manufacturer whose library serves no per-partition compute figure, which is most of them; see
+	// device.AcceleratorPartition.CoresPercent.
+	CoresPercent *uint32 `json:"coresPercent,omitempty"`
+
 	// MemoryReason names why the memory figures above are absent, and is empty when they were
-	// produced. CoresReason names why no compute utilization accompanies the partition; no
-	// manufacturer serves a per-partition one today, so it is always populated.
+	// produced. CoresReason names why CoresPercent is absent, and is likewise empty when it was read.
 	MemoryReason device.AcceleratorProcessReason `json:"memoryReason,omitempty"`
 	CoresReason  device.AcceleratorProcessReason `json:"coresReason,omitempty"`
 }
@@ -211,7 +215,12 @@ type SliceDeviceDiagnostics struct {
 // SliceFigures is what a consumer publishes for one (Pod, container, device): each figure either
 // measured — possibly zero — or absent.
 type SliceFigures struct {
-	MemoryUsedMiB           *uint64
+	MemoryUsedMiB *uint64
+
+	// CoresUtilizationPercent is a share of the WHOLE card in every mode but Partitioned, where it is
+	// the partition's own — read on the partition's handle, which knows nothing of the parent. The
+	// consumer restates the former against the holder's cap and leaves the latter alone, since a
+	// partition makes no compute request and so carries no cap to restate against.
 	CoresUtilizationPercent *uint32
 
 	// ID and MemoryTotalMiB describe what was measured rather than what it was measured using, and
@@ -268,6 +277,10 @@ func (s *MonitorSliceSection) Figures(
 		figures.ID = s.Partitions[p].ID
 		figures.MemoryTotalMiB = s.Partitions[p].MemoryTotalMiB
 		figures.MemoryUsedMiB = s.Partitions[p].MemoryUsedMiB
+		// A partition's compute is already stated against the partition, so it travels as-is: the
+		// consumer's cap-relative restatement is a no-op for a mode that makes no compute request.
+		// Absent on every manufacturer whose library serves no per-partition figure.
+		figures.CoresUtilizationPercent = s.Partitions[p].CoresPercent
 		return figures, true
 	}
 
@@ -574,6 +587,12 @@ func withPartitions(
 			ID:           row.partition.ID,
 			MemoryReason: row.partition.MemoryReason,
 			CoresReason:  row.partition.CoresReason,
+		}
+		// Carried through unchanged. It has no whole-card figure to be sanity-checked against the way
+		// the memory pair below does -- a percentage cannot exceed the card by being large -- and it
+		// comes off the partition's own handle, so a manufacturer that serves it has already scoped it.
+		if row.partition.CoresPercent != nil {
+			partition.CoresPercent = ptr.To(*row.partition.CoresPercent)
 		}
 		if row.partition.MemoryUsedBytes != nil && row.partition.MemoryTotalBytes != nil {
 			var (

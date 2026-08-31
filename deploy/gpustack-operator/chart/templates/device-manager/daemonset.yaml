@@ -238,6 +238,12 @@ spec:
             - name: gpustack-hygon-toolkit
               mountPath: /opt/dtk
               readOnly: true
+            # Writable, unlike every other vendor mount here. The library materializes a partition
+            # by writing this registry from inside THIS process, so a read-only mount lets the
+            # device manager enumerate partitions but not create or destroy one -- measured, and it
+            # surfaces as an opaque UNKNOWN from the teardown rather than a permission error.
+            - name: gpustack-hygon-mig-config
+              mountPath: /etc/dmi_mig_config
             {{- end }}
             {{- if eq $manu "iluvatar" }}
             - name: gpustack-iluvatar-toolkit
@@ -329,6 +335,15 @@ spec:
         - name: gpustack-hygon-toolkit
           hostPath:
             path: /opt/dtk
+            type: DirectoryOrCreate
+        # The vendor's registry of live compute instances: what maps a partition's UUID back to the
+        # instance the driver enumerates, what a workload container binds to use one, and what the
+        # library writes when it creates or destroys one. The directory only exists while the node is
+        # in Multi-Instance mode, so it is created rather than required: a node that is not
+        # partitioned simply mounts an empty one.
+        - name: gpustack-hygon-mig-config
+          hostPath:
+            path: /etc/dmi_mig_config
             type: DirectoryOrCreate
         {{- end }}
         {{- if eq $manu "iluvatar" }}

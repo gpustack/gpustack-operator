@@ -22,7 +22,8 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
    GPU Operator components to disable.
 6. [Preflight Operations](operation/preflight.md) — one container run that says what a node can
    detect, slice and manage, before anything is installed on it.
-7. [NVIDIA MIG Operations](operation/nvidia-mig.md) and [T-Head MIG Operations](operation/thead-mig.md) —
+7. [NVIDIA MIG Operations](operation/nvidia-mig.md), [T-Head MIG Operations](operation/thead-mig.md)
+   and [Hygon MIG Operations](operation/hygon-mig.md) —
    the runbook for enabling and disabling partitioning on a node.
 8. Upgrading: [Migrating to Bundled Subcharts](migration/to-subcharts.md) · [Migrating from
    v0.5.x](migration/from-v0.5.md) · [Migration Troubleshooting](migration/troubleshooting.md) when it
@@ -61,6 +62,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [High Availability Operations](operation/high-availability.md) | Which knob to raise per control-plane component, and the one topology that cannot be redundant | operators | ~4 min |
 | [NVIDIA MIG Operations](operation/nvidia-mig.md) | Enabling/disabling MIG, reboot recovery, and a recorded three-configuration walkthrough | operators | ~21 min |
 | [T-Head MIG Operations](operation/thead-mig.md) | Enabling/disabling T-Head's own MIG-named partitioning, the busy-mode-change prerequisite, and reboot recovery | operators | ~10 min |
+| [Hygon MIG Operations](operation/hygon-mig.md) | The same runbook for Hygon, whose mode is node-wide and whose partitioned nodes serve nothing else | operators | ~10 min |
 | [Preflight Operations](operation/preflight.md) | Verifying on a bare host what a node can detect, slice and manage: the command line for both runtimes, every mount and flag, what it starts and removes | operators | ~9 min |
 | [Migrating to Bundled Subcharts](migration/to-subcharts.md) | The one-time ownership transfer from the runtime-installed releases | operators | ~9 min |
 | [Migrating from v0.5.x](migration/from-v0.5.md) | Upgrading across the scheduling-chain refactor | operators | ~5 min |

@@ -1183,7 +1183,9 @@ func TestVisibleDevicesSuffixCoversEveryAllocatorThatNamesOne(t *testing.T) {
 					continue
 				}
 				named++
-				assert.True(t, strings.HasSuffix(field, visibleDevicesEnvSuffix),
+				assert.True(t,
+					strings.HasSuffix(field, visibleDevicesEnvSuffix) ||
+						strings.HasSuffix(field, visibleDevicesEnvSuffix+"S"),
 					"%s names %q, which grantedDevices does not read", e.Name(), field)
 			}
 		}

@@ -129,8 +129,10 @@ Four properties are worth knowing before reading a number off an entry:
 - **A partition names and sizes itself.** Its identity and its capacity are read on the partition's
   **own** device handle, so a `1g.10gb` of an H100 reports 9856 MiB — what the driver says — rather
   than the 10240 the profile name rounds to, or an eighth of the card folded out of the allocation's
-  units. An idle partition reports `0` — measured — rather than an absence. It never reports compute
-  utilization: no manufacturer serves a per-partition figure today.
+  units. An idle partition reports `0` — measured — rather than an absence.
+- **A partition's compute is its own or it is absent.** It is reported where the vendor answers for
+  the partition's handle and absent where none does — the matrix below says which is which — and it
+  is never restated against a cap, because a partition makes no compute request to be capped by.
 
 > **Why** the card's own figures are not reported beside the share's — they answer a different
 > question ("is this card hot"), and putting both in one entry is what made the earlier revision hard
@@ -169,7 +171,7 @@ vary by what the vendor exposes — and by whether we have been able to run it a
 | AMD | ✅ | ⚠️ driver-dependent | ✅ |
 | T-Head | ✅ | ✅ logical · — MIG partition | ✅ logical · — MIG partition |
 | Ascend | ✅ | — | ✅ |
-| Hygon | ✅ | ⚠️ driver-dependent | ✅ |
+| Hygon | ✅ | ⚠️ driver-dependent logical · ✅ MIG partition | ✅ logical · ✅ MIG partition |
 | Cambricon | ✅ | ✅ | — |
 | Iluvatar | ✅ | — | — |
 | Metax | ✅ | — | — |
@@ -201,8 +203,13 @@ vary by what the vendor exposes — and by whether we have been able to run it a
   merely held its allocation, 44 once that same process ran a kernel, and board power moved from
   93 W to 223 W with it. Read it as a measurement of the right quantity rather than as the
   kernel's own number.
+- **Hygon is the one vendor that measures a partition's compute**, and it does so on the partition's
+  own handle rather than by attributing the card's processes: an instance running a kernel read 85%
+  while its idle siblings on the same card read 0. That is why its `coresUtilizationPercent` is a
+  plain `✅` under partitioning while the logical column beside it stays hardware-dependent — the two
+  come from different entry points, and the partition's does not go through `cu_occupancy`.
 - **A partition is addressed by the identifier its allocation recorded**, and by nothing else, on
-  both partitioning manufacturers. The alternative is translating the recorded profile name back into
+  every partitioning manufacturer. The alternative is translating the recorded profile name back into
   a driver profile id, which walks the vendor's whole profile catalog — 17 ids on NVIDIA, 85 on
   T-Head — on every card of every monitor period. A partition allocated by a Device Manager older
   than that field therefore reports an absence with a reason until its Pod is allocated again; the

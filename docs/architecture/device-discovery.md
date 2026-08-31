@@ -381,11 +381,14 @@ time, so no pre-generated specification names it.
 
 ### Partitioned
 
-It materializes the requested hardware instance (NVIDIA MIG, or T-Head's own MIG-named partitioning)
-on an accelerator it selects itself, and injects only that instance — as device nodes rather than an
-environment variable for T-Head, which has no container-runtime hook; see [Accelerator
-Requests](../accelerator-requests.md), [NVIDIA MIG](../operation/nvidia-mig.md) and [T-Head MIG
-Operations](../operation/thead-mig.md).
+It materializes the requested hardware instance (NVIDIA MIG, or T-Head's and Hygon's own MIG-named
+partitioning) on an accelerator it selects itself, and injects only that instance. How differs by
+vendor: device nodes for T-Head, which has no container-runtime hook, and the instance's own registry
+file bind-mounted at its host path for Hygon, whose runtime scans that directory by absolute path.
+
+See [Accelerator Requests](../accelerator-requests.md), [NVIDIA MIG](../operation/nvidia-mig.md),
+[T-Head MIG Operations](../operation/thead-mig.md) and [Hygon MIG
+Operations](../operation/hygon-mig.md).
 
 ### Sliced (logical slicing)
 
@@ -791,8 +794,9 @@ The identity comes from the manufacturer responder's partition capability
 carve one can name it).
 
 It reads the owner's durable node-local ownership record and proves the recorded instance still live
-before naming it — see [NVIDIA MIG](../operation/nvidia-mig.md#requesting-a-mig-instance) and
-[T-Head MIG Operations](../operation/thead-mig.md#requesting-a-partition).
+before naming it — see [NVIDIA MIG](../operation/nvidia-mig.md#requesting-a-partition), [T-Head
+MIG Operations](../operation/thead-mig.md#requesting-a-partition) and [Hygon MIG
+Operations](../operation/hygon-mig.md#requesting-a-partition).
 
 A responder lacking that capability, or unable to substantiate the identity, fails the admission
 closed rather than widening the grant back to the accelerator.
@@ -926,7 +930,8 @@ vcann-rt's `npu_info.config` models a single physical NPU), so any future regres
 
 **See also** — [Accelerator Requests](../accelerator-requests.md) (the resource keys these families
 serve) · [NVIDIA MIG Operations](../operation/nvidia-mig.md) · [T-Head MIG
-Operations](../operation/thead-mig.md) · [Settings](../settings.md)
+Operations](../operation/thead-mig.md) · [Hygon MIG Operations](../operation/hygon-mig.md) ·
+[Settings](../settings.md)
 
 **Next** → [Scheduling Chain](scheduling-chain.md) — how these labels and the ledger become Kueue
 objects.

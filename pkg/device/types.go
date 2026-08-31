@@ -237,10 +237,18 @@ type (
 		// native unit. Nil when the figure was not readable, for the reason below.
 		MemoryUsedBytes *uint64
 
+		// CoresPercent is the partition's own compute utilization, as its handle reports it.
+		//
+		// Nil on every manufacturer whose library serves no per-partition compute figure, which is
+		// most of them: NVML answers neither a per-process nor a per-instance one on a partitioned
+		// card. Hygon's does, on the partition's own handle -- measured at 95% on an instance running
+		// a matmul loop while its three idle siblings on the same card read 0 -- so the field exists
+		// rather than the absence being assumed universal.
+		CoresPercent *uint32
+
 		// MemoryReason is why the two memory figures are nil, empty when they were read.
 		MemoryReason AcceleratorProcessReason
-		// CoresReason is why no compute utilization accompanies the partition. No manufacturer serves
-		// a per-partition one today, so it is always populated.
+		// CoresReason is why CoresPercent is nil, empty when it was read.
 		CoresReason AcceleratorProcessReason
 	}
 

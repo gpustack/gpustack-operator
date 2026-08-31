@@ -1,0 +1,51 @@
+// The vendor's Multi-Instance API, one X() entry per function.
+//
+// This list is the single source of truth for the wrapper: it declares the cached function
+// pointers, the w_-prefixed wrappers around them, and the dlsym calls that fill them in. Adding a
+// function here is the only edit needed to expose it.
+//
+// Every symbol below is spelled the way the vendor exports it -- with NVML's names. Nothing in this
+// package may reference those names at link time, which is the entire reason the wrapper exists;
+// see dmi_mig_wrapper.c.
+
+#define DMI_MIG_API_LIST(X) \
+    X(nvmlReturn_t, nvmlComputeInstanceDestroy, (nvmlComputeInstance_t compute_instance), (compute_instance)) \
+    X(nvmlReturn_t, nvmlComputeInstanceGetInfo, (nvmlComputeInstance_t compute_instance, nvmlComputeInstanceInfo_t *info), (compute_instance, info)) \
+    X(nvmlReturn_t, nvmlDeviceCreateGpuInstance, (nvmlDevice_t device, unsigned int profile_id, nvmlGpuInstance_t *gpu_instance), (device, profile_id, gpu_instance)) \
+    X(nvmlReturn_t, nvmlDeviceCreateGpuInstanceWithPlacement, (nvmlDevice_t device, unsigned int profile_id, const nvmlGpuInstancePlacement_t *placement, nvmlGpuInstance_t *gpu_instance), (device, profile_id, placement, gpu_instance)) \
+    X(nvmlReturn_t, nvmlDeviceGetAttributes, (nvmlDevice_t device, nvmlDeviceAttributes_t *attributes), (device, attributes)) \
+    X(nvmlReturn_t, nvmlDeviceGetComputeInstanceId, (nvmlDevice_t device, unsigned int *compute_instance_id), (device, compute_instance_id)) \
+    X(nvmlReturn_t, nvmlDeviceGetCount, (unsigned int *device_count), (device_count)) \
+    X(nvmlReturn_t, nvmlDeviceGetDeviceHandleFromMigDeviceHandle, (nvmlDevice_t mig_device, nvmlDevice_t *device), (mig_device, device)) \
+    X(nvmlReturn_t, nvmlDeviceGetGpuInstanceById, (nvmlDevice_t device, unsigned int gpu_instance_id, nvmlGpuInstance_t *gpu_instance), (device, gpu_instance_id, gpu_instance)) \
+    X(nvmlReturn_t, nvmlDeviceGetGpuInstanceId, (nvmlDevice_t device, unsigned int *gpu_instance_id), (device, gpu_instance_id)) \
+    X(nvmlReturn_t, nvmlDeviceGetGpuInstancePossiblePlacements, (nvmlDevice_t device, unsigned int profile_id, nvmlGpuInstancePlacement_t *placements, unsigned int *count), (device, profile_id, placements, count)) \
+    X(nvmlReturn_t, nvmlDeviceGetGpuInstanceProfileInfo, (nvmlDevice_t device, unsigned int profile, nvmlGpuInstanceProfileInfo_t *info), (device, profile, info)) \
+    X(nvmlReturn_t, nvmlDeviceGetGpuInstanceRemainingCapacity, (nvmlDevice_t device, unsigned int profile_id, unsigned int *count), (device, profile_id, count)) \
+    X(nvmlReturn_t, nvmlDeviceGetGpuInstances, (nvmlDevice_t device, unsigned int profile_id, nvmlGpuInstance_t *gpu_instances, unsigned int *count), (device, profile_id, gpu_instances, count)) \
+    X(nvmlReturn_t, nvmlDeviceGetHandleByIndex, (unsigned int index, nvmlDevice_t *device), (index, device)) \
+    X(nvmlReturn_t, nvmlDeviceGetHandleByPciBusId, (const char *pci_bus_id, nvmlDevice_t *device), (pci_bus_id, device)) \
+    X(nvmlReturn_t, nvmlDeviceGetHandleBySerial, (const char *serial, nvmlDevice_t *device), (serial, device)) \
+    X(nvmlReturn_t, nvmlDeviceGetHandleByUUID, (const char *uuid, nvmlDevice_t *device), (uuid, device)) \
+    X(nvmlReturn_t, nvmlDeviceGetIndex, (nvmlDevice_t device, unsigned int *index), (device, index)) \
+    X(nvmlReturn_t, nvmlDeviceGetMaxMigDeviceCount, (nvmlDevice_t device, unsigned int *count), (device, count)) \
+    X(nvmlReturn_t, nvmlDeviceGetMemoryInfo, (nvmlDevice_t device, nvmlMemory_t *memory), (device, memory)) \
+    X(nvmlReturn_t, nvmlDeviceGetMigDeviceHandleByIndex, (nvmlDevice_t device, unsigned int index, nvmlDevice_t *mig_device), (device, index, mig_device)) \
+    X(nvmlReturn_t, nvmlDeviceGetMigMode, (nvmlDevice_t device, unsigned int *current_mode, unsigned int *pending_mode), (device, current_mode, pending_mode)) \
+    X(nvmlReturn_t, nvmlDeviceGetName, (nvmlDevice_t device, char *name, unsigned int length), (device, name, length)) \
+    X(nvmlReturn_t, nvmlDeviceGetPciInfo, (nvmlDevice_t device, nvmlPciInfo_t *pci), (device, pci)) \
+    X(nvmlReturn_t, nvmlDeviceGetSerial, (nvmlDevice_t device, char *serial, unsigned int length), (device, serial, length)) \
+    X(nvmlReturn_t, nvmlDeviceGetUtilizationRates, (nvmlDevice_t device, nvmlUtilization_t *utilization), (device, utilization)) \
+    X(nvmlReturn_t, nvmlDeviceIsMigDeviceHandle, (nvmlDevice_t device, unsigned int *is_mig_device), (device, is_mig_device)) \
+    X(nvmlReturn_t, nvmlDeviceSetMigMode, (nvmlDevice_t device, unsigned int mode, nvmlReturn_t *activation_status), (device, mode, activation_status)) \
+    X(nvmlReturn_t, nvmlGetSystemMigMode, (unsigned int *current_mode, unsigned int *pending_mode), (current_mode, pending_mode)) \
+    X(nvmlReturn_t, nvmlGpuInstanceCreateComputeInstance, (nvmlGpuInstance_t gpu_instance, unsigned int profile_id, nvmlComputeInstance_t *compute_instance), (gpu_instance, profile_id, compute_instance)) \
+    X(nvmlReturn_t, nvmlGpuInstanceCreateComputeInstanceWithPlacement, (nvmlGpuInstance_t gpu_instance, unsigned int profile_id, const nvmlComputeInstancePlacement_t *placement, nvmlComputeInstance_t *compute_instance), (gpu_instance, profile_id, placement, compute_instance)) \
+    X(nvmlReturn_t, nvmlGpuInstanceDestroy, (nvmlGpuInstance_t gpu_instance), (gpu_instance)) \
+    X(nvmlReturn_t, nvmlGpuInstanceGetComputeInstanceById, (nvmlGpuInstance_t gpu_instance, unsigned int id, nvmlComputeInstance_t *compute_instance), (gpu_instance, id, compute_instance)) \
+    X(nvmlReturn_t, nvmlGpuInstanceGetComputeInstancePossiblePlacements, (nvmlGpuInstance_t gpu_instance, unsigned int profile_id, nvmlComputeInstancePlacement_t *placements, unsigned int *count), (gpu_instance, profile_id, placements, count)) \
+    X(nvmlReturn_t, nvmlGpuInstanceGetComputeInstanceProfileInfo, (nvmlGpuInstance_t gpu_instance, unsigned int profile, unsigned int eng_profile, nvmlComputeInstanceProfileInfo_t *info), (gpu_instance, profile, eng_profile, info)) \
+    X(nvmlReturn_t, nvmlGpuInstanceGetComputeInstanceRemainingCapacity, (nvmlGpuInstance_t gpu_instance, unsigned int profile_id, unsigned int *count), (gpu_instance, profile_id, count)) \
+    X(nvmlReturn_t, nvmlGpuInstanceGetComputeInstances, (nvmlGpuInstance_t gpu_instance, unsigned int profile_id, nvmlComputeInstance_t *compute_instances, unsigned int *count), (gpu_instance, profile_id, compute_instances, count)) \
+    X(nvmlReturn_t, nvmlGpuInstanceGetInfo, (nvmlGpuInstance_t gpu_instance, nvmlGpuInstanceInfo_t *info), (gpu_instance, info)) \
+    X(nvmlReturn_t, nvmlSetSystemMigMode, (unsigned int mode, nvmlReturn_t *activation_status), (mode, activation_status))

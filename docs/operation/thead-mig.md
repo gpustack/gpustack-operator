@@ -84,8 +84,8 @@ device-manager DaemonSet.
 
 ## How partition profiles are discovered
 
-**Profiles are discovered from the driver, never computed.** There is no static per-product table as on
-NVIDIA's [Supported profiles](nvidia-mig.md#supported-profiles): the detector offers exactly the
+**Profiles are discovered from the driver, never computed.** Where [NVIDIA's are a fixed per-product
+set](nvidia-mig.md#how-partition-profiles-are-discovered), the detector here offers exactly the
 GPU-instance profiles the driver reports for the PPU in front of it.
 
 - **A profile is offered only if its name round-trips.** The published key is the profile's name, resolved
@@ -150,7 +150,7 @@ resources:
 ```
 
 Or through the `Instance` API, as with [NVIDIA's
-`acceleratorPartitionedProfile`](nvidia-mig.md#requesting-a-mig-instance):
+`acceleratorPartitionedProfile`](nvidia-mig.md#requesting-a-partition):
 
 ```yaml
 kind: Instance
@@ -189,7 +189,7 @@ large and unlike the instance ids (229632, its compute instance 229633), determi
 promised by no contract; a read costs one file.
 
 PPU selection, the fungible-token `Partitioned` family, the placement-aware `Remaining` ledger, `credits` quota
-and reclaim on Pod deletion work as for NVIDIA — see [Requesting a MIG instance](nvidia-mig.md#requesting-a-mig-instance)
+and reclaim on Pod deletion work as for NVIDIA — see [Requesting a partition](nvidia-mig.md#requesting-a-partition)
 and [Device Discovery](../architecture/device-discovery.md#the-partitioned-family-fungible-tokens), including
 the SSH sidecar seeing the partition rather than the parent PPU, and the reclaim race a same-profile
 replacement can hit.
@@ -229,6 +229,12 @@ Device-node injection is the one place T-Head's response differs in *shape* from
   disabling complete in place, despite the driver's busy message.
 
 ## Enabling partitioning on a node
+
+The mode switch itself is T-Head's procedure, not this operator's: the PPU MIG chapter of [T-Head's
+developer documentation](https://developer.t-head.cn/docs_center/doc_detail/index.html?projectId=33&chapterId=117)
+is the authority on `ppu-smi mig` and on what the driver requires around it. The steps below are that
+procedure with the GPUStack-side steps it does not know about, and with the traps measured on real
+hardware called out where they bite.
 
 1. Satisfy the [Prerequisites](#prerequisites): no accelerator workloads, no device-manager Pod.
 2. Enable the mode. **`-mig` is a top-level flag, not a `ppu-smi mig` subcommand flag** — the subcommand
