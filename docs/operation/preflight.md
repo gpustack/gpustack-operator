@@ -46,40 +46,161 @@ already carries. `--privileged` is for the driver reads and the device nodes, no
 
 ## The command line
 
-**Docker.** The manufacturer's driver and toolkit paths are the last mounts, and are the same ones
-the device-manager DaemonSet mounts for it — Ascend below:
+**Find your manufacturer below and run the block as it stands.** Each one is complete and needs
+nothing filled in. Add `--dry-run` to any of them to see every step without taking one.
+
+The blocks differ only in their last vendor argument, which is what that manufacturer's library
+loads from — the same host path the device-manager DaemonSet mounts for it, at the same access, which
+is what makes this run reproduce production rather than resemble it.
+
+**On containerd**, swap `docker run` for `nerdctl run`; it resolves its own socket and namespace on
+the host it is invoked on. The two blocks carrying `--runtime` are the exception, and each says what
+to use instead.
+
+> **A vendor path that is not there is created, not refused.** `docker run -v` creates a missing
+> source directory as an empty one, so a typo — or a driver installed somewhere else — mounts nothing
+> over the right place, and the detect pass reports zero accelerators: the same answer a node with no
+> hardware gives. Check the path exists on the host before reading the result.
+
+### AMD
 
 ```bash
 docker run --rm --privileged --network=host \
-    -v /:/host \
-    -v /dev:/dev -v /sys:/sys \
-    -v /usr/local/Ascend:/usr/local/Ascend:ro -v /usr/local/dcmi:/usr/local/dcmi:ro \
+    -v /:/host -v /dev:/dev -v /sys:/sys \
+    -v /opt/rocm:/opt/rocm:ro \
     gpustack/gpustack-operator:latest \
-    gpustack-operator device-manager preflight --manufacturer=ascend
+    gpustack-operator device-manager preflight --manufacturer=amd
 ```
 
-**containerd.** The same run through `nerdctl`, which resolves its own socket and namespace on the
-host it is invoked on:
+> **`/opt/rocm` is a symlink farm on some distributions.** Where `/opt/rocm/lib` points through
+> `/etc/alternatives` at a versioned tree (`/opt/rocm/core-<ver>/lib`), the mount above puts a
+> **dangling** symlink in the container: every ROCm library fails to load and the run reports a
+> detection of zero that reads exactly like missing hardware.
+>
+> Mount the versioned directory instead — `-v /opt/rocm/core-<ver>:/opt/rocm:ro`, which is also how
+> you preflight one ROCm version on a host carrying two — or add
+> `-v /etc/alternatives:/etc/alternatives:ro` beside it to follow whichever is selected.
+
+### Ascend
 
 ```bash
-nerdctl run --rm --privileged --network=host \
-    -v /:/host \
-    -v /dev:/dev -v /sys:/sys \
+docker run --rm --privileged --network=host \
+    -v /:/host -v /dev:/dev -v /sys:/sys \
     -v /usr/local/Ascend:/usr/local/Ascend:ro -v /usr/local/dcmi:/usr/local/dcmi:ro \
     gpustack/gpustack-operator:latest \
     gpustack-operator device-manager preflight --manufacturer=ascend
 ```
 
-**With no vendor mounts at all**, the run still reports every manufacturer and names the mounts the
-rest of the questions need. Only NVIDIA, Ascend and AMD carry a host CLI to cross-check that
-detection against, so for the other six a detection of zero is this container's own view and not the
-host's — the *Host cross-check* column below says which is which:
+No `--runtime ascend` here, although [Vendor Prerequisites](../vendor-prerequisites.md) requires that
+runtime in production: what it injects is device *nodes*, and this command is already `--privileged`
+with `/dev` mounted whole. The driver is the mount above. The Ascend *probe* containers do need it,
+and get it themselves — under `nerdctl` they cannot, and are emitted for you to run instead.
+
+### Cambricon
+
+```bash
+docker run --rm --privileged --network=host \
+    -v /:/host -v /dev:/dev -v /sys:/sys \
+    -v /usr/local/neuware:/usr/local/neuware:ro \
+    gpustack/gpustack-operator:latest \
+    gpustack-operator device-manager preflight --manufacturer=cambricon
+```
+
+### Hygon
+
+```bash
+docker run --rm --privileged --network=host \
+    -v /:/host -v /dev:/dev -v /sys:/sys \
+    -v /opt/hyhal:/opt/hyhal:ro -v /opt/dtk:/opt/dtk:ro \
+    -v /etc/dmi_mig_config:/etc/dmi_mig_config \
+    gpustack/gpustack-operator:latest \
+    gpustack-operator device-manager preflight --manufacturer=hygon
+```
+
+The third mount is the only writable one on this page: the vendor library materializes a partition by
+writing that registry, and the DaemonSet mounts it writable for the same reason. Add
+`--probe-image <image>` to measure the two slice rows — no default is claimed for a Hygon family, and
+what the image has to carry is in [If you are in the "container probe, no driver read"
+tier](#if-you-are-in-the-container-probe-no-driver-read-tier).
+
+### Iluvatar
+
+```bash
+docker run --rm --privileged --network=host \
+    -v /:/host -v /dev:/dev -v /sys:/sys \
+    -v /usr/local/corex:/usr/local/corex:ro \
+    gpustack/gpustack-operator:latest \
+    gpustack-operator device-manager preflight --manufacturer=iluvatar
+```
+
+No `--runtime iluvatar`, for the same reason Ascend needs none: `ix-container-runtime` injects device
+nodes, which `--privileged` and `/dev` already cover, and the driver is the mount above.
+
+### MetaX
+
+```bash
+docker run --rm --privileged --network=host \
+    -v /:/host -v /dev:/dev -v /sys:/sys \
+    -v /opt/mxdriver:/opt/mxdriver:ro -v /opt/maca:/opt/maca:ro \
+    gpustack/gpustack-operator:latest \
+    gpustack-operator device-manager preflight --manufacturer=metax
+```
+
+### Moore Threads
+
+```bash
+docker run --rm --privileged --network=host --runtime mthreads \
+    -v /:/host -v /dev:/dev -v /sys:/sys \
+    gpustack/gpustack-operator:latest \
+    gpustack-operator device-manager preflight --manufacturer=mthreads
+```
+
+Nothing to mount, and a `--runtime` instead: the user-space driver here is injected by the vendor
+container runtime rather than installed at a path you can bind-mount. `mthreads` is the handler that
+runtime registered with your container engine, and the same name the chart's RuntimeClass carries.
+Under `nerdctl`, whose `--runtime` names an OCI shim, that flag is not the door.
+
+### NVIDIA
+
+```bash
+docker run --rm --privileged --network=host --runtime nvidia \
+    -v /:/host -v /dev:/dev -v /sys:/sys \
+    gpustack/gpustack-operator:latest \
+    gpustack-operator device-manager preflight --manufacturer=nvidia
+```
+
+Nothing to mount, for the same reason as Moore Threads above. Under `nerdctl` use `--gpus all` in
+place of `--runtime nvidia`, whose `--runtime` names an OCI shim and rejects the handler name.
+
+**The flag is not optional.** Measured on a host with one RTX 4090: the identical command under
+`--runtime runc` reports `accelerators: 0` against a host whose own `nvidia-smi` reports 1, and exits
+1; under `--runtime nvidia` it reports `ok`, `accelerators: 1`, and exits 0.
+
+### T-Head
+
+```bash
+docker run --rm --privileged --network=host \
+    -v /:/host -v /dev:/dev -v /sys:/sys \
+    -v /usr/local/PPU_SDK:/usr/local/PPU_SDK:ro \
+    gpustack/gpustack-operator:latest \
+    gpustack-operator device-manager preflight --manufacturer=thead
+```
+
+Add `--probe-image <image>` to measure the slice rows: no default is claimed for a PPU family, because
+the workload container brings its own SDK and there is no generation to match an image against.
+
+### Every manufacturer at once
 
 ```bash
 docker run --rm --network=host -v /:/host \
     gpustack/gpustack-operator:latest \
     gpustack-operator device-manager preflight
 ```
+
+**With no vendor mounts at all**, the run still reports every manufacturer and names the mounts the
+rest of the questions need. Only NVIDIA, Ascend and AMD carry a host CLI to cross-check that
+detection against, so for the other six a detection of zero is this container's own view and not the
+host's — the *Host cross-check* column below says which is which.
 
 ## What each mount is for
 
@@ -88,7 +209,7 @@ docker run --rm --network=host -v /:/host \
 | `-v /:/host` | the host's own root. Preflight enters it with `chroot` to run the host's container CLI and the host's vendor CLI, and stages the preload libraries through it. Move it with `--host-root` |
 | `--network=host` | `chroot` changes the root and not the network namespace, so a host CLI entered through it reads the host's `/etc/resolv.conf` inside this container's namespace. Without it, any host CLI asked to pull an image fails on DNS |
 | `-v /dev:/dev`, `-v /sys:/sys` | what preflight's own in-process detect pass and driver reads need. They stay in container context — only the host's executables go through the `chroot` |
-| the vendor driver and toolkit paths, read-only | what the manufacturer's library needs in order to load in this container. Without them the detect pass finds nothing while the host's CLI finds cards, which is exactly the discrepancy the result reports. See [Vendor Prerequisites](../vendor-prerequisites.md) |
+| the vendor arguments for your manufacturer | what the manufacturer's library needs in order to load in this container — a host path to bind-mount, or a `--runtime` for the two whose driver is injected rather than installed. Without them the detect pass finds nothing while the host's CLI finds cards, which is exactly the discrepancy the result reports. Yours is in [The command line](#the-command-line) |
 
 > **Why the host root rather than a mounted runtime socket** — mounting a runtime socket already
 > grants host root, and needs one mount per runtime plus a CLI of ours in the image whose version
