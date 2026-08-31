@@ -62,8 +62,8 @@ device-manager DaemonSet after every change.
 
 ## How partition profiles are discovered
 
-**Profiles are discovered from the driver, never computed.** There is no static per-product table as
-on NVIDIA's [Supported profiles](nvidia-mig.md#supported-profiles): the detector offers exactly the
+**Profiles are discovered from the driver, never computed.** Where [NVIDIA's are a fixed per-product
+set](nvidia-mig.md#how-partition-profiles-are-discovered), the detector here offers exactly the
 GPU-instance profiles the driver reports for the card in front of it, with the geometry and the legal
 placements the driver gives.
 
@@ -83,6 +83,33 @@ the detector reads it from otherwise, exposes at most one partition per process 
 partitioned — so it answers for one card with a partition's geometry rather than for every card with
 the card's. Each profile carries the card's real count factored as its own units times the instances
 that fill the card, and every profile of a measured card agreed.
+
+### The driver's registry, `/etc/dmi_mig_config`
+
+The driver keeps its own on-disk record of what exists, and this operator reads and depends on all
+three parts of it. It is the vendor's directory, created and populated by the driver:
+
+```text
+/etc/dmi_mig_config/
+├── dev0 … dev<N>     one line per physical card: its PCI address, e.g. 0000:09:00.0
+├── gi/               one file per live GPU instance
+└── ci/               one file per live compute instance, dev<N>gi<G>ci<C>.conf
+```
+
+Two of those are the *only* source for what they carry, because the management library does not answer
+for either:
+
+- **`dev<N>` is how a device index becomes a card.** `nvmlDeviceGetPciInfo` returns success and writes
+  an empty string, and `nvmlDeviceGetUUID` is not an exported symbol at all — so tying a Multi-Instance
+  handle back to a physical card goes through this file or nowhere.
+- **A `ci/*.conf` is where a partition's identity lives.** It is the GPU-instance block and the
+  compute-instance block concatenated, ending in a `mig_uuid:` line. The library exposes no getter for
+  it.
+
+**The device manager mounts this directory writable, and that is the one privilege partitioning adds.**
+It creates and destroys instances through the library from inside its own process, and the driver writes
+and removes these files as a side effect of those calls — so a read-only mount would fail the create
+rather than merely hide the record.
 
 ## Requesting a partition
 
@@ -155,6 +182,13 @@ replacement, which is what makes the operator's own reuse checks exact — but i
 partition identity is not a durable name for a *slot*.
 
 ## Enabling partitioning on a node
+
+The mode switch itself is Hygon's procedure, not this operator's: [DCU Multi-Instance
+使用手册](https://developer.sourcefind.cn/document/9169ef18-c10d-11f0-b077-0242ac150003?id=4a82aeed-e242-11f0-b9e4-0242ac150003&title=3+DCU+Multi-Instance%E4%BD%BF%E7%94%A8%E6%89%8B%E5%86%8C&version=9169ef18-c10d-11f0-b077-0242ac150003)
+is the authority on `hy-smi -mig` and on the driver support it needs.
+
+Two things below correct that manual: the long option is `--multi-instance-gpu`, not the
+`--multi-instance-dcu` its screenshot shows, and the switch takes no `-i`.
 
 1. **Drain the node's accelerator workloads**, and park the device-manager DaemonSet — it holds
    `/dev/kfd` and will otherwise block the switch. Confirm with the descriptor scan above.

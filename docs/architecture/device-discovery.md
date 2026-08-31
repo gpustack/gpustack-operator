@@ -794,7 +794,7 @@ The identity comes from the manufacturer responder's partition capability
 carve one can name it).
 
 It reads the owner's durable node-local ownership record and proves the recorded instance still live
-before naming it — see [NVIDIA MIG](../operation/nvidia-mig.md#requesting-a-mig-instance), [T-Head
+before naming it — see [NVIDIA MIG](../operation/nvidia-mig.md#requesting-a-partition), [T-Head
 MIG Operations](../operation/thead-mig.md#requesting-a-partition) and [Hygon MIG
 Operations](../operation/hygon-mig.md#requesting-a-partition).
 

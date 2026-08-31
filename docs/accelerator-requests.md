@@ -392,7 +392,7 @@ DaemonSet, then let the workloads reschedule.
   watches the device set and health, not the partitioning mode. Deleting the node's `Devices` object is
   **not** required — an existing group's capability is rewritten in place.
 
-  Full procedure: [NVIDIA MIG Operations](./operation/nvidia-mig.md#enabling-mig-on-a-node) ·
+  Full procedure: [NVIDIA MIG Operations](./operation/nvidia-mig.md#enabling-partitioning-on-a-node) ·
   [T-Head MIG Operations](./operation/thead-mig.md#enabling-partitioning-on-a-node) ·
   [Hygon MIG Operations](./operation/hygon-mig.md#enabling-partitioning-on-a-node).
 - **A non-default `TopologyManager` policy can mis-align a partition.** The Partitioned resource reports
