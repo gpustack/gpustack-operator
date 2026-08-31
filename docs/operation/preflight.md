@@ -67,19 +67,24 @@ to use instead.
 ```bash
 docker run --rm --privileged --network=host \
     -v /:/host -v /dev:/dev -v /sys:/sys \
-    -v /opt/rocm:/opt/rocm:ro \
+    -v /opt/rocm:/opt/rocm:ro -v /opt/rocm/lib:/opt/rocm/lib:ro \
     gpustack/gpustack-operator:latest \
     gpustack-operator device-manager preflight --manufacturer=amd
 ```
 
-> **`/opt/rocm` is a symlink farm on some distributions.** Where `/opt/rocm/lib` points through
-> `/etc/alternatives` at a versioned tree (`/opt/rocm/core-<ver>/lib`), the mount above puts a
-> **dangling** symlink in the container: every ROCm library fails to load and the run reports a
-> detection of zero that reads exactly like missing hardware.
->
-> Mount the versioned directory instead — `-v /opt/rocm/core-<ver>:/opt/rocm:ro`, which is also how
-> you preflight one ROCm version on a host carrying two — or add
-> `-v /etc/alternatives:/etc/alternatives:ro` beside it to follow whichever is selected.
+The second mount is not a duplicate of the first. ROCm's packaging puts a symlink somewhere in this
+path on every install, and where it falls decides whether the mount survives it: one at or above the
+mount source is resolved by the host and is harmless, while one *inside* the mounted tree dangles in
+the container. Naming the library directory as its own source has the host resolve it first.
+
+> **Both shapes are ordinary.** On a single-version host `/opt/rocm` is itself the link. On one
+> carrying two ROCm versions, `/opt/rocm/lib` is — and mounting `/opt/rocm` alone then loads no ROCm
+> library at all, so a node with an accelerator reports as having none. The device-manager DaemonSet
+> mounts both for the same reason.
+
+> **To pin one ROCm version on a host carrying two**, mount the versioned tree in place of both —
+> `-v /opt/rocm/core-<ver>:/opt/rocm:ro` — which is how the same host is preflighted against 7.14
+> and 10.0 separately.
 
 ### Ascend
 
