@@ -27,15 +27,16 @@ An accelerator is shared in one of two physically incompatible ways, and GPUStac
 | Term | What it is | How isolation is enforced | Example |
 |---|---|---|---|
 | **Logical slicing** (`.sliced*`) | software slicing of a whole accelerator | the manufacturer's own sharing facility caps compute and VRAM per container — [which facility, per manufacturer](architecture/device-discovery.md#sliced-logical-slicing) | 50 % of an A10G |
-| **Physical partitioning** (`.partitioned*`) | hardware partitioning of an accelerator put into a partitioning mode | the hardware itself; the operator materializes the instance | an NVIDIA MIG `3g.40gb` or a T-Head PPU partition |
+| **Physical partitioning** (`.partitioned*`) | hardware partitioning of an accelerator put into a partitioning mode | the hardware itself; the operator materializes the instance | an NVIDIA MIG `3g.40gb`, or a partition of a T-Head PPU or a Hygon DCU |
 
 The two never apply to the same accelerator: one in a partitioning mode advertises **only** the partition
 family, an unpartitioned one **only** the whole-accelerator, shared and logical-slice families. Hence the
 four separate `InstanceType` views (`EX` / `SH` / `SL` / `PT`) — each accelerator feeds exactly one.
 
-`<kind>` is the manufacturer's own word for hardware partitioning, and NVIDIA and T-Head both call it
-`mig`: `nvidia.com/gpu.partitioned.mig-3g.40gb`, `alibabacloud.com/ppu.partitioned.mig-<profile>`. A
-manufacturer with no hardware partitioning has no kind, and no `.partitioned*` keys at all.
+`<kind>` is the manufacturer's own word for hardware partitioning, and all three that offer it call it
+`mig`: `nvidia.com/gpu.partitioned.mig-3g.40gb`, `alibabacloud.com/ppu.partitioned.mig-<profile>`,
+`hygon.com/dcu.partitioned.mig-2g.15gb`. A manufacturer with no hardware partitioning has no kind, and
+no `.partitioned*` keys at all.
 
 ## The resource keys
 
