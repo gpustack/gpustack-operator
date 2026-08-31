@@ -354,6 +354,10 @@ func (in *amd) init() {
 		// ROCm 7.2.0: with AMD SMI loaded first, the dlopen of ROCm SMI aborts the process with
 		// SIGBUS inside dlopen itself, while this order leaves both libraries working and agreeing
 		// on every accelerator's identity. Whoever reorders these will not find out from a test.
+		//
+		// The order is not free on a newer stack, and amdsmi.New is where it is paid for: ROCm SMI
+		// in the global scope zeroes AMD SMI's socket enumeration, so that library is loaded
+		// RTLD_DEEPBIND.
 		if ret := in.rsmi.Init(); !ret.IsSuccess() {
 			in.logger.Error(ret, "failed to initialize ROCm SMI library")
 		}
