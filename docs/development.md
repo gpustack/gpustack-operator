@@ -78,6 +78,14 @@ command to run. For a full install → version-consistency → uninstall cycle o
 commits ahead of `origin/main` (scope in `.commitsar.yml`). Types: `feat`, `fix`, `refactor`, `test`,
 `docs`, `chore`.
 
+### Pull request review
+
+`code-review.yml` runs an AI review on every pull request (opened/synchronize/reopened) and posts
+inline findings plus a summary under the org's GitHub App identity. The pipeline itself lives in
+[`gpustack/.github`](https://github.com/gpustack/.github/blob/main/.github/workflows/code-review.yml)
+as a reusable workflow — this repository only pins its model backing and maps the org secrets. To
+re-review the latest head, comment `/open-code-review` on the PR (MEMBER/OWNER/COLLABORATOR only).
+
 ### Running a single test
 
 `make test` only excludes packages, so target one package or test with `go test` directly:
