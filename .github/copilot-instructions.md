@@ -34,7 +34,8 @@ specific and actionable; cite the file and line.
 ## Out of scope — do not review
 
 - `binding/` (generated CGO bindings), `staging/` (patched k8s modules).
-- Files matching `zz_generated*`, `*_deepcopy*`, `generated.pb.go`, `generated.proto`.
+- Files matching `zz_generated*`, `*_deepcopy*`, `generated.pb.go`, `generated.proto`,
+  `generated.protomessage.pb.go`.
 - Vendored subcharts under `deploy/gpustack-operator/chart/charts/*`.
 
 ## Hard invariants — flag as required changes
