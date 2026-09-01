@@ -86,16 +86,11 @@ inline findings plus a summary under the org's GitHub App identity. The pipeline
 as a reusable workflow — this repository only pins its model backing and maps the org secrets. To
 re-review the latest head, comment `/open-code-review` on the PR (MEMBER/OWNER/COLLABORATOR only).
 
-What each file is reviewed *against* is owned here, in `.opencodereview/rule.json`: path-scoped
-rules for `api/`, `pkg/`, tests, `csrc/`, the chart, and `docs/**`/`README.md`, distilled from the
-code-review and docs skills. The generated and vendored trees (`staging/`, `binding/`,
-`zz_generated*`, vendored subcharts, the swagger-ui bundle) are excluded.
-
-`*_test.go` and the reviewed markdown sit on the `include` list because both fail OCR's built-in
-gates (its test-file patterns, and `.md` is outside its extension whitelist). Verify a rule change
-before committing: `npx -y @alibaba-group/open-code-review rules check <path>` shows which rule a
-file resolves to; `npx -y @alibaba-group/open-code-review review --preview` shows which files a
-diff would send to review.
+What each file is reviewed *against* is owned here, in `.opencodereview/rule.json` — its
+include/exclude lists and path-scoped rules are the single source of truth; a review-scope change
+lands there, not in this document. Verify a rule change before committing: `npx -y
+@alibaba-group/open-code-review rules check <path>` shows which rule a file resolves to; `npx -y
+@alibaba-group/open-code-review review --preview` shows which files a diff would send to review.
 
 ### Running a single test
 

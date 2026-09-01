@@ -13,7 +13,8 @@
     "**/generated.proto",
     "**/generated.protomessage.pb.go",
     "deploy/gpustack-operator/chart/charts/**",
-    "pkg/extensionroute/swagger/ui/**"
+    "pkg/extensionroute/swagger/ui/**",
+    "pkg/kubeclients/**/*.go"
   ],
   "rules": [
     {
