@@ -1,0 +1,52 @@
+{
+  "include": [
+    "**/*_test.go",
+    "docs/**/*.md",
+    "README.md"
+  ],
+  "exclude": [
+    "staging/**",
+    "binding/**",
+    "**/zz_generated*",
+    "**/*_deepcopy*",
+    "**/generated.pb.go",
+    "**/generated.proto",
+    "**/generated.protomessage.pb.go",
+    "deploy/gpustack-operator/chart/charts/**",
+    "pkg/extensionroute/swagger/ui/**"
+  ],
+  "rules": [
+    {
+      "path": "**/*_test.go",
+      "rule": "This repository's test conventions: table-driven tests with a shared execution loop; each case verifies exactly one behavior and stays declarative (data, no control flow); fixtures are built through shared helpers; assertions target observable final state, not implementation details; fake clients are preferred over real dependencies; fail fast when a setup error invalidates the test's assumptions; tests must be deterministic — flag any dependence on time, ordering, or randomness."
+    },
+    {
+      "path": "api/**/*.go",
+      "rule": "These files define Kubernetes CRD and aggregated-API types for the GPUStack Operator. Flag: any breaking change to existing fields (renames, removals, type or json-tag changes) — the API must stay backward compatible; desired spec and observed status mixed together — they are strictly separated; kubebuilder validation markers weakened or removed without justification. A types change must be accompanied by regenerated output (`make generate`); that output is excluded from this review, so state the requirement as a reminder — never claim the regenerated files are present or absent."
+    },
+    {
+      "path": "pkg/**/webhooks/**/*.go",
+      "rule": "Admission webhook sources. Flag: webhook and API inputs used without validation — external data (labels, CR fields, node metadata) is untrusted; admission behavior that drifts from the gates documented in docs/architecture/admission.md. A webhook change must be accompanied by the regenerated output (`make generate` produces the zz_generated.webhooks.go files); that output is excluded from this review, so state the requirement as a reminder — never claim it is present or absent. A bug fix here must ship a regression test in the same PR — flag a fix with no accompanying test."
+    },
+    {
+      "path": "pkg/**/*.go",
+      "rule": "GPUStack Operator controller code. Flag violations of these invariants: reconcile logic is idempotent, level-based (no edge-triggered assumptions), and safe to retry; context.Context is propagated through call paths; errors are handled explicitly — never panics for control flow. The Devices CR ledger is the single authoritative allocation record: every allocation path must have a matching release path, and nothing reads or writes allocation state outside the ledger. Pool isolation: one ClusterQueue per pool, no cross-pool borrowing. Accelerator quota is integer credits (one accelerator = 1,600,000 credit units) — flag floating-point or percentage arithmetic. Layer ownership: label algebra belongs in pkg/nodefeature, device detection/allocation in pkg/devicemanager, Kueue scheduling-chain materialization in pkg/worker controllers, admission rules in the webhooks / AdmissionCheck controllers — flag feature logic leaking into shared or general-purpose packages. A bug fix here must ship a regression test in the same PR — flag a fix with no accompanying test. At the CGO boundary (callers of binding/ and of the csrc/ preload shims): C-returned memory ownership and vendor-library error codes are handled correctly, and injected preload paths and values stay quoted and escaped. Performance: no unbounded lists or per-object API round-trips in reconcile hot paths; watches scoped to resources that actually affect desired state."
+    },
+    {
+      "path": "csrc/**",
+      "rule": "Hand-written C preload shims that interpose on vendor accelerator libraries inside sliced workload containers. Flag: symbol-interposition hazards (dlsym/RTLD_NEXT misuse, assumptions about versioned symbols), unchecked error returns from vendor libraries, allocations without a matching free path, and unsynchronized shared state across threads."
+    },
+    {
+      "path": "deploy/gpustack-operator/chart/**",
+      "rule": "GPUStack Operator Helm chart. Flag: template changes that alter a documented knob or default without a corresponding values.yaml entry. Two invariants of this chart are enforced in CI (chart.yml) and involve files excluded from this review, so state them as reminders rather than verifying: values.yaml changes must ship regenerated README.md and values.schema.json (`make generate chart`), and the vendored subchart trees under chart/charts/* change only via patch files under hack/ (`make deps`)."
+    },
+    {
+      "path": "docs/**/*.md",
+      "rule": "This repository's documentation follows a strict contract; `make lint docs` enforces the mechanical half, so focus on what lint cannot check. Every page except the docs/README.md index keeps a header block, a `## Contents` list mirroring its `##` headings, and a footer with `**See also**` (required) and `**Next**` (expected wherever a next step exists); a new page must be registered in the All-pages table of docs/README.md with a label matching the page's H1 exactly. A fact is stated once — every other page links to it; flag duplicated facts. docs/architecture.md is the overview and is capped near 200 lines: new mechanisms, rationale, or tables belong on a deep page under docs/architecture/, and the overview gains at most one clause and a link. Decision rationale belongs in specs/, not in docs/ — docs state the rule that resulted. Tables pinned to code must change together with it: docs/reference/instance-type-unit-resources.md with pkg/nodefeature/unit_resources_preset.yaml, and docs/settings.md with the GPUSTACK_* variable readers in pkg/worker/settings."
+    },
+    {
+      "path": "README.md",
+      "rule": "The repository front page. Two pins must not drift: the accelerator matrix stays in sync with pkg/nodefeature/knowns.go (resource names, SharedResourceMaxSize, manufacturer partition kinds) and with whether each pkg/devicemanager detector sets LogicalSliced — the matrix is deliberately checkmark/dash only, per-card slice counts and isolation mechanisms live in docs/architecture/device-discovery.md; the Quick Start request shapes stay in sync with docs/accelerator-requests.md — change both together. A fact already stated on a docs/ page is linked, not repeated."
+    }
+  ]
+}

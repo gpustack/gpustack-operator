@@ -163,6 +163,6 @@ problem. Cite file and line for every finding.
 ## Out of scope — never review
 
 - `binding/`, `staging/`, anything matching `zz_generated*`, `*_deepcopy*`,
-  `generated.pb.go`, `generated.proto`.
+  `generated.pb.go`, `generated.proto`, `generated.protomessage.pb.go`.
 - Vendored subchart trees under `deploy/gpustack-operator/chart/charts/*` — except
   to flag that an in-place edit should have been a patch under `hack/`.
