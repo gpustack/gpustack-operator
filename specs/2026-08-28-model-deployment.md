@@ -906,6 +906,42 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
 - **Upstream `DisaggregatedSet` gains Kueue integration and this CR becomes redundant** → the CR is
   kept thin, holds no state the Binding or the pool could not, and adds no new gate to the admission
   chain. Retiring it is deleting a controller and a type, not unpicking the chain.
+- **The Kueue pod-group annotations are inert in this spec, and the operator therefore renders
+  neither.** Both are group-only in the pinned `v0.17.1`:
+  `isServing()` is `p.isGroup && annotation == value`, and `isReclaimable()` is
+  `p.isGroup && !p.isServing()` — so on a Pod that is not part of a group both read false whatever
+  the annotation says. `pod-group-fast-admission` is read only inside `constructGroupPodSets`.
+  Since this spec creates **no pod group** (N replicas are N independent Workloads), rendering
+  either would be emitting a key nothing reads, which is the same mistake as rendering a tenant no
+  engine passes on.
+
+  ⛔ **They stop being inert the moment the P/D spec introduces the group, and that spec inherits
+  two rules:** `pod-group-serving` becomes **mandatory** — without it a group's Pods are
+  `isReclaimable()`, so Kueue applies batch semantics to a resident inference workload and shrinks
+  the Workload as Pods terminate — and `pod-group-fast-admission` must stay **unset**, because it
+  switches PodSet construction to `constructGroupPodSetsFast(items, totalCount)`, which builds the
+  PodSets from the declared total instead of the observed Pods and so collapses the per-role
+  accounting the whole P/D design rests on. Its cost is not free either: without it Kueue refuses to
+  compose the Workload until the observed Pods reach the group total, which is the partial-creation
+  hang this spec's Alternatives already cites.
+- ⛔ **Judging a Binding usable means reading a `Ready` that includes `QuotaGranted`, not the
+  Binding merely existing and not `Phase: Ready` alone.** The KV-cache-pool spec found and fixed a
+  state-machine defect whose only consumer is this spec: the Binding's earlier readiness read two
+  axes, and one of them reported `True` both when the master granted an **effective quota of zero**
+  and when the master carried **no ledger entry for the domain at all**. A Binding could therefore
+  report `Ready` while unable to take a single byte. It was harmless only because nothing in the
+  repository read `effectiveQuota` — and **this spec is what makes it a consumer.** The fix adds a
+  third axis, `QuotaGranted`, whose `False` reasons distinguish `ZeroGranted` from `NoLedgerEntry`
+  from `GrantNotExported`: **nil and zero are separate answers**, because "not exported" is not
+  "granted nothing".
+- ⚠️ **A store leader restart makes every Binding briefly not-Ready, and that is an ordinary
+  operation rather than a fault.** The window was measured at 3.5–32 seconds, and it exists because
+  the leader's readiness probe reads its segment list rather than its quota ledger, so the Pod is
+  Ready while the ledger still answers zero. **The deployment must not do anything irreversible in
+  that window** — not drop its `usedBy` entry, not report a permanent error, not tear down
+  replicas. `DomainRegistered` goes `False` with the Binding's reason, the Pods keep serving (F2),
+  and the next reconcile converges. Waiting is the correct behaviour; punishing a Binding for a
+  routine upgrade is not.
 - **Gate 3's "no flavor assignment" hold cannot reach a `ModelDeployment`, and the reason is a
   timing guarantee rather than a property of this CR.** The node-devices feasibility check is scoped
   per podset's assigned flavor, and it holds a demand whose podset carries no assignment. A reader
@@ -1251,7 +1287,12 @@ truthful); after T13 (the headline claim is measured and recorded).
   Acceptance: a function resolves the named Binding in the deployment's own namespace, reads its
   immutable domain block, and returns the `status.kvCache` projection (`binding`, `pool`, `domain`
   with `name`/`blockSize`/`dtype`). Missing → `DomainRegistered=False`, reason `BindingNotFound`;
-  present but not Ready → `False`, reason `BindingNotReady`; deleted under a running deployment →
+  present but not Ready → `False`, reason `BindingNotReady`. **Readiness is the Binding's `Ready`
+  INCLUDING its `QuotaGranted` axis** — a Binding reporting a granted quota of zero, or no ledger
+  entry, is not usable however its phase reads (see Notes). And because a store leader restart makes
+  every Binding not-Ready for a measured 3.5–32 seconds, this task does **nothing irreversible** on
+  a `False`: no `usedBy` removal, no permanent error, no teardown. A test drives Ready → not-Ready
+  → Ready and asserts the deployment converges without having dropped anything; deleted under a running deployment →
   `False` with the Pods **left running**. No cross-namespace read is attempted, asserted by a fake
   client that fails the test if asked for another namespace.
   Verify: `go test ./pkg/worker/controllers/worker/ -run ModelDeploymentBinding`
