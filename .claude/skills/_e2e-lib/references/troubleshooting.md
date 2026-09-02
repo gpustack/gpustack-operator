@@ -16,6 +16,19 @@ Skill-specific symptoms live in each skill's own `references/`.
   Dockerfile's `GPUSTACK_GIT_COMMIT` build-arg recompiles per commit), then rebuild with a fresh
   `TAG=dev-$(git rev-parse --short HEAD)`, reload, and redeploy pointing at the new tag.
 
+- **A probe against the Mooncake master answers nothing, and the master looks dead** — the mooncake
+  image **ships no `curl`**. A probe built on it produces no output and no error, which is exactly
+  what an unreachable master produces, so the symptom points at the wrong thing. Use `python3` (the
+  image does carry it) and reach the admin port from inside the leader:
+
+  ```bash
+  kubectl -n "$NS" exec "$POD" -c leader -- python3 -c \
+    "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:9003/api/v1/tenant_quotas', timeout=10).read().decode())"
+  ```
+
+  On that surface `tenant_id` is a **query parameter**, never a path segment — asking by path returns
+  the whole ledger instead of one entry, which then fails to decode and reads as a malformed body.
+
 ## Cluster capability / accelerator detection
 
 `nvidia.com/gpu` (and `.sliced` / `.shared`) **allocatable is advertised by the GPUStack DeviceManager
