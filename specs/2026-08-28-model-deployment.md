@@ -871,6 +871,32 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
 - **Upstream `DisaggregatedSet` gains Kueue integration and this CR becomes redundant** → the CR is
   kept thin, holds no state the Binding or the pool could not, and adds no new gate to the admission
   chain. Retiring it is deleting a controller and a type, not unpicking the chain.
+- **Gate 3's "no flavor assignment" hold cannot reach a `ModelDeployment`, and the reason is a
+  timing guarantee rather than a property of this CR.** The node-devices feasibility check is scoped
+  per podset's assigned flavor, and it holds a demand whose podset carries no assignment. A reader
+  reasonably asks whether a single-role deployment can land in that hold. It cannot:
+
+  - The controller's watch admits only a Workload holding a quota reservation
+    (`pkg/worker/controllers/worker/node_devices_admission.go`, the `For` predicate).
+  - `Reconcile` re-checks that **after** its own `Get`, and also skips evicted, finished and
+    deactivated Workloads — a re-check that exists because Kueue drops the reservation and resets
+    the checks in two separate writes.
+  - Only past both of those is the demand parsed at all.
+  - And Kueue's `SetQuotaReservation` (`pkg/workload/workload.go`, pinned at `v0.17.1`) assigns
+    `Status.Admission` and sets the `QuotaReserved` condition **in one function, before a single
+    status write**.
+
+  So a Workload that reaches the parse always carries an admission, and the empty-flavor branch is
+  unreachable *for that reason*. It stays reachable for three others — an assignment naming no
+  entry for the podset, one carrying no accelerator flavor, and two manufacturers' credits resources
+  covered at once — but all three need a ClusterQueue covering more than one resource, which is an
+  admin-written queue rather than the one this CR's entrance label points at. **Recorded because the
+  answer is "the path is dead", and a reader who cannot see that concludes the opposite from the
+  commit message alone.**
+
+  One consequence does land on this spec: Gate 3 deliberately stops evaluating once a Workload is
+  admitted, so `QuotaReserved` (F7) must be read from the Workload's own conditions and never from a
+  fresh feasibility verdict, which after admission is not recomputed.
 - **`MC_TE_METRIC` is silently unavailable on a Transfer Engine TENT build** — the vendor's own
   reference records it as *"Not supported when using Transfer Engine TENT"*. On such a build G1's
   hit rate is unmeasurable, and it fails by producing no metric rather than by refusing to start, so
