@@ -22,6 +22,7 @@ func GetCustomResourceDefinitions() map[string]*v1.CustomResourceDefinition {
 		"KVCacheBackend":     crd_gpustack_api_worker_v1alpha1_KVCacheBackend(),
 		"KVCachePool":        crd_gpustack_api_worker_v1alpha1_KVCachePool(),
 		"KVCachePoolBinding": crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding(),
+		"ModelDeployment":    crd_gpustack_api_worker_v1alpha1_ModelDeployment(),
 	}
 }
 
@@ -3483,6 +3484,728 @@ func crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding() *v1.CustomResourceDef
 							Description: "",
 							Priority:    0,
 							JSONPath:    ".metadata.creationTimestamp",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "modeldeployments.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "modeldeployments",
+				Singular: "modeldeployment",
+				ShortNames: []string{
+					"md",
+				},
+				Kind:     "ModelDeployment",
+				ListKind: "ModelDeploymentList",
+				Categories: []string{
+					"gpustack",
+				},
+			},
+			Scope: "Namespaced",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "ModelDeployment is the schema for worker.gpustack.ai.\nIt is N replicas of one inference-engine role attached to a KV cache pool, so that the replicas\nhit each other's cached prefixes instead of each re-computing the same prefill.\nIt RENDERS PODS DIRECTLY. The admission chain keys on Pods — a plain Pod is a first-class citizen\nof it and an Instance is sugar that renders one — so rendering Pods reuses every existing gate\nwith no new integration point. Instance could not serve as the substrate: it renders exactly one\nPod, and its spec is immutable after creation, which turns a rolling update into\nrecreate-everything.",
+							Type:        "object",
+							Required: []string{
+								"spec",
+							},
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"model",
+										"engine",
+										"kvCache",
+										"roles",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"engine": {
+											Description: "Engine selects the inference engine, which decides how the transfer configuration is\nsynthesized and which argument keys the operator owns. Ownership is per (engine, key): a key\none engine owns is an ordinary user argument on another.",
+											Type:        "string",
+											Enum: []v1.JSON{
+												{
+													Raw: []byte(`"vllm"`),
+												},
+												{
+													Raw: []byte(`"vllm-ascend"`),
+												},
+												{
+													Raw: []byte(`"sglang"`),
+												},
+											},
+										},
+										"kvCache": {
+											Description: "KVCache attaches the deployment to a KV cache pool.",
+											Type:        "object",
+											Required: []string{
+												"poolRef",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"connector": {
+													Description: "Connector selects how the engine's transfer configuration is produced. \"auto\" synthesizes it\nfrom the pool's backend type and the engine. The enum has one value on purpose: it reserves\nthe discriminator, so naming a specific connector later is an enum widening rather than a new\nfield. There is no \"none\" — synthesizing nothing is reachable through a full command\nreplacement, which also marks the role unmanaged and moves CacheAttached to Unknown.",
+													Type:        "string",
+													Default: &v1.JSON{
+														Raw: []byte(`"auto"`),
+													},
+													Enum: []v1.JSON{
+														{
+															Raw: []byte(`"auto"`),
+														},
+													},
+												},
+												"poolRef": {
+													Description: "PoolRef names a KVCachePoolBinding IN THIS NAMESPACE. The Binding is the authorization point:\nan admin creating one in a namespace is what grants that namespace access to the pool. The\ntype is a LocalObjectReference rather than a namespaced one so that reaching another\nnamespace — or naming the cluster-scoped pool, or a bare endpoint URL — is unrepresentable\nrather than merely rejected.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"name": {
+															Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+															Type:        "string",
+															Default: &v1.JSON{
+																Raw: []byte(`""`),
+															},
+														},
+													},
+												},
+											},
+										},
+										"model": {
+											Description: "Model names what the engine serves.",
+											Type:        "object",
+											Required: []string{
+												"name",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"name": {
+													Description: "Name is the identifier the engine serves, e.g. \"Qwen/Qwen2.5-72B-Instruct\".",
+													Type:        "string",
+													MaxLength:   ptr.To[int64](253),
+												},
+											},
+										},
+										"roles": {
+											Description: "Roles are the engine roles this deployment runs.\nIt is a LIST FROM THE FIRST VERSION although only one entry is accepted today, because the\nspec that introduces P/D disaggregation adds entries to it rather than replacing the field.\nThe length-1 bound lives in the validating webhook and not here, so that the refusal can name\nthe spec that lifts it, and so that lifting it is a webhook edit rather than a schema change\nevery stored object would have to survive.",
+											Type:        "array",
+											MinItems:    ptr.To[int64](1),
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"name",
+														"instanceType",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"env": {
+															Description: "Env is appended the same way and refused on the same terms. Keys the operator merely defaults\nare not owned: a user's value wins there and no rejection follows.",
+															Type:        "array",
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"name",
+																		"value",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"name": {
+																			Description: "Name is the name of the environment variable,\neach name in one Instance must be unique.",
+																			Type:        "string",
+																		},
+																		"value": {
+																			Description: "Value is the value of the environment variable.",
+																			Type:        "string",
+																		},
+																	},
+																},
+															},
+															Nullable: true,
+															XListMapKeys: []string{
+																"name",
+															},
+															XListType: ptr.To[string]("map"),
+														},
+														"extraArgs": {
+															Description: "ExtraArgs is appended AFTER the operator-synthesized arguments. An entry naming a key the\noperator owns is REJECTED rather than merged: a silent merge produces two values for one\nconnector argument and no way to tell which one won.",
+															Type:        "array",
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "string",
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
+														},
+														"instanceType": {
+															Description: "InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.\nIt is what the queue-name entrance label is derived from.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+														},
+														"name": {
+															Description: "Name identifies the role. In this version there is exactly one role and its name is free-form;\nthe spec that introduces P/D disaggregation gives the name meaning.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](63),
+														},
+														"replicas": {
+															Description: "Replicas is how many Pods this role runs. Each is an independent Kueue Workload: this version\ncreates no pod group, which is correct for one role whose replicas are independently useful\nand is what the P/D spec replaces with cross-role atomic admission.",
+															Type:        "integer",
+															Format:      "int32",
+															Default: &v1.JSON{
+																Raw: []byte(`1`),
+															},
+															Minimum: ptr.To[float64](1),
+														},
+														"template": {
+															Description: "Template overlays the rendered container. The operator renders first and merges this on top.\nA non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator\nsynthesizes no engine arguments and no client environment, the role is marked unmanaged and\nCacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args,\nbecause a second append tier beside ExtraArgs would have no defined precedence and would make\nthe take-over tier ambiguous — args alone would be neither take-over nor append.\nUnlike the Instance that shares this type, the template is MUTABLE. That immutability is a\nrule the Instance webhook enforces on InstanceSpec, not a property of InstanceTemplate, and\ndropping it is what makes a rollout possible at all.\nIts Resources are refused at admission, because the resource request is InstanceType's to\ndecide and inferring it from container content would make the feasibility check read a ledger\nthat does not match reality.",
+															Type:        "object",
+															Required: []string{
+																"image",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"additionalVolumes": {
+																	Description: "AdditionalVolumes is the list of volumes to mount in the Instance besides its workspace,\neach at a path of its own. They are mounted into the Instance's main container only, which\nthe SSH server also observes.\nImmutable unless the Instance is stopped.",
+																	Type:        "array",
+																	Items: &v1.JSONSchemaPropsOrArray{
+																		Schema: &v1.JSONSchemaProps{
+																			Type: "object",
+																			Required: []string{
+																				"mountPath",
+																			},
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"configMap": {
+																					Description: "ConfigMap is the reference to the ConfigMap to mount, in the same namespace.",
+																					Type:        "object",
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"name": {
+																							Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																							Type:        "string",
+																							Default: &v1.JSON{
+																								Raw: []byte(`""`),
+																							},
+																						},
+																					},
+																					Nullable: true,
+																				},
+																				"hostPath": {
+																					Description: "HostPath is the path on the Kubernetes Node to mount. It crosses the node boundary, so\ntaking it requires the instance-host-path-volume-allowed Setting — at creation, and on any\nlater change that adds or widens such a mount. One the Instance already holds is never\nre-judged, so the Setting going off does not strand it.",
+																					Type:        "object",
+																					Required: []string{
+																						"path",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"path": {
+																							Description: "path of the directory on the host.\nIf the path is a symlink, it will follow the link to the real path.\nMore info: https://kubernetes.io/docs/concepts/storage/volumes#hostpath",
+																							Type:        "string",
+																						},
+																						"type": {
+																							Description: "type for HostPath Volume\nDefaults to \"\"\nMore info: https://kubernetes.io/docs/concepts/storage/volumes#hostpath",
+																							Type:        "string",
+																							Nullable:    true,
+																						},
+																					},
+																					Nullable: true,
+																				},
+																				"mountPath": {
+																					Description: "MountPath is the absolute in-container path to mount the volume at. It must not duplicate\nanother entry's path, nor the workspace's VolumeMount.",
+																					Type:        "string",
+																					MaxLength:   ptr.To[int64](1024),
+																					Pattern:     `^(/[^/]+)+$`,
+																				},
+																				"persistent": {
+																					Description: "Persistent is the reference to the InstancePersistentVolume to mount, in the same namespace.",
+																					Type:        "object",
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"name": {
+																							Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																							Type:        "string",
+																							Default: &v1.JSON{
+																								Raw: []byte(`""`),
+																							},
+																						},
+																					},
+																					Nullable: true,
+																				},
+																				"readOnly": {
+																					Description: "ReadOnly mounts the volume read-only.",
+																					Type:        "boolean",
+																				},
+																				"secret": {
+																					Description: "Secret is the reference to the Secret to mount, in the same namespace.",
+																					Type:        "object",
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"name": {
+																							Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																							Type:        "string",
+																							Default: &v1.JSON{
+																								Raw: []byte(`""`),
+																							},
+																						},
+																					},
+																					Nullable: true,
+																				},
+																				"subPath": {
+																					Description: "SubPath mounts a relative path inside the volume rather than its root.\nIt must not be absolute nor contain a \"..\" element.",
+																					Type:        "string",
+																					MaxLength:   ptr.To[int64](1024),
+																				},
+																			},
+																		},
+																	},
+																	Nullable:  true,
+																	XListType: ptr.To[string]("atomic"),
+																},
+																"command": {
+																	Description: "Command is the command to run in the Instance,\nwhich should overwrite the default command in the container image CMD.",
+																	Type:        "array",
+																	Items: &v1.JSONSchemaPropsOrArray{
+																		Schema: &v1.JSONSchemaProps{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:  true,
+																	XListType: ptr.To[string]("atomic"),
+																},
+																"env": {
+																	Description: "Env is the list of environment variables to set in the Instance.",
+																	Type:        "array",
+																	Items: &v1.JSONSchemaPropsOrArray{
+																		Schema: &v1.JSONSchemaProps{
+																			Type: "object",
+																			Required: []string{
+																				"name",
+																				"value",
+																			},
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"name": {
+																					Description: "Name is the name of the environment variable,\neach name in one Instance must be unique.",
+																					Type:        "string",
+																				},
+																				"value": {
+																					Description: "Value is the value of the environment variable.",
+																					Type:        "string",
+																				},
+																			},
+																		},
+																	},
+																	Nullable: true,
+																	XListMapKeys: []string{
+																		"name",
+																	},
+																	XListType: ptr.To[string]("map"),
+																},
+																"image": {
+																	Description: "Image is the container image to run.",
+																	Type:        "string",
+																},
+																"imagePullPolicy": {
+																	Description: "ImagePullPolicy is the image pull policy to use.",
+																	Type:        "string",
+																	Default: &v1.JSON{
+																		Raw: []byte(`"IfNotPresent"`),
+																	},
+																	Enum: []v1.JSON{
+																		{
+																			Raw: []byte(`"Always"`),
+																		},
+																		{
+																			Raw: []byte(`"IfNotPresent"`),
+																		},
+																		{
+																			Raw: []byte(`"Never"`),
+																		},
+																	},
+																},
+																"imagePullSecret": {
+																	Description: "ImagePullSecret is the reference to the InstanceImagePullSecret that contains the credentials to pull the container image.",
+																	Type:        "object",
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"name": {
+																			Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																			Type:        "string",
+																			Default: &v1.JSON{
+																				Raw: []byte(`""`),
+																			},
+																		},
+																	},
+																	Nullable: true,
+																},
+																"ports": {
+																	Description: "Ports is the list of ports to expose from the Instance.",
+																	Type:        "array",
+																	Items: &v1.JSONSchemaPropsOrArray{
+																		Schema: &v1.JSONSchemaProps{
+																			Type: "object",
+																			Required: []string{
+																				"port",
+																			},
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"name": {
+																					Description: "Name is the name of the port.",
+																					Type:        "string",
+																					MaxLength:   ptr.To[int64](16),
+																				},
+																				"port": {
+																					Description: "Port is the port number to expose on the Instance.",
+																					Type:        "integer",
+																					Format:      "int32",
+																				},
+																				"protocol": {
+																					Description: "Protocol is the protocol to use for the port.",
+																					Type:        "string",
+																					Default: &v1.JSON{
+																						Raw: []byte(`"TCP"`),
+																					},
+																					Enum: []v1.JSON{
+																						{
+																							Raw: []byte(`"TCP"`),
+																						},
+																						{
+																							Raw: []byte(`"UDP"`),
+																						},
+																						{
+																							Raw: []byte(`"SCTP"`),
+																						},
+																					},
+																				},
+																			},
+																		},
+																	},
+																	Nullable: true,
+																	XListMapKeys: []string{
+																		"port",
+																		"protocol",
+																	},
+																	XListType: ptr.To[string]("map"),
+																},
+																"privileged": {
+																	Description: "Privileged indicates whether the container should run in privileged mode.",
+																	Type:        "boolean",
+																	Default: &v1.JSON{
+																		Raw: []byte(`false`),
+																	},
+																},
+																"resources": {
+																	Description: "Resources is the resource requirements for the Instance.",
+																	Type:        "object",
+																	Required: []string{
+																		"cpu",
+																		"ram",
+																		"localStorage",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"accelerator": {
+																			Description: "Accelerator is the accelerator resource requirement for the Instance, e.g. \"1\", \"2\".",
+																			Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																			AnyOf: []v1.JSONSchemaProps{
+																				{
+																					Type: "integer",
+																				},
+																				{
+																					Type: "string",
+																				},
+																			},
+																			Nullable:     true,
+																			XIntOrString: true,
+																		},
+																		"acceleratorPartitionedProfile": {
+																			Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a\npartition-offering InstanceType, e.g. \"3g.40gb\". A non-empty value makes this a\nrequest for one hardware partition of that shape, which is mutually exclusive with\nthe two slice percentages above: hardware partitioning and software slicing cannot\nboth apply to one accelerator. It is ignored by InstanceTypes offering no partition.",
+																			Type:        "string",
+																		},
+																		"acceleratorSlicedCoresPercentage": {
+																			Description: "AcceleratorSlicedCoresPercentage is the per-accelerator compute (SM) budget requested on\na sliced InstanceType, as a percentage in [0,100]. It is independent of\nAcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook\ncopies it to the other. It is ignored by non-sliced requests.",
+																			Type:        "integer",
+																			Format:      "int32",
+																		},
+																		"acceleratorSlicedMemoryPercentage": {
+																			Description: "AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a\nsliced InstanceType, as a percentage in [0,100]. 0 disables slicing (the request\nbecomes an exclusive whole-accelerator request). The Pod webhook folds it into the\nnormalized .sliced.units; it is ignored by non-sliced requests.",
+																			Type:        "integer",
+																			Format:      "int32",
+																		},
+																		"cpu": {
+																			Description: "CPU is the CPU resource requirement for the Instance, e.g. \"4\", \"8\".",
+																			Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																			AnyOf: []v1.JSONSchemaProps{
+																				{
+																					Type: "integer",
+																				},
+																				{
+																					Type: "string",
+																				},
+																			},
+																			XIntOrString: true,
+																		},
+																		"localStorage": {
+																			Description: "LocalStorage is the local storage resource requirement for the Instance, e.g. \"100G\", \"500G\".",
+																			Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																			AnyOf: []v1.JSONSchemaProps{
+																				{
+																					Type: "integer",
+																				},
+																				{
+																					Type: "string",
+																				},
+																			},
+																			XIntOrString: true,
+																		},
+																		"ram": {
+																			Description: "RAM is the RAM resource requirement for the Instance, e.g. \"40G\", \"16G\".",
+																			Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																			AnyOf: []v1.JSONSchemaProps{
+																				{
+																					Type: "integer",
+																				},
+																				{
+																					Type: "string",
+																				},
+																			},
+																			XIntOrString: true,
+																		},
+																	},
+																	Nullable: true,
+																},
+																"volumeMount": {
+																	Description: "VolumeMount is a path to mount the volume in the Instance.",
+																	Type:        "string",
+																	Default: &v1.JSON{
+																		Raw: []byte(`"/workspace"`),
+																	},
+																	MaxLength: ptr.To[int64](1024),
+																	Pattern:   `^(/[^/]+)+$`,
+																},
+															},
+															Nullable: true,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"name",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+									},
+								},
+								"status": {
+									Type: "object",
+									Properties: map[string]v1.JSONSchemaProps{
+										"conditions": {
+											Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,\nCacheAttached. The three are independent — \"quota reserved but cache not attached\" is a real\nand actionable state — which is what a single phase string cannot carry.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"type",
+														"status",
+														"lastTransitionTime",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"lastTransitionTime": {
+															Description: "LastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
+															Type:        "string",
+															Format:      "datetime",
+														},
+														"message": {
+															Description: "Message is a human readable message indicating details about the transition.\nThis may be an empty string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](32768),
+														},
+														"observedGeneration": {
+															Description: "ObservedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9,\nthe condition is out of date with respect to the current state of the instance.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](0),
+														},
+														"reason": {
+															Description: "Reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^$|^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`,
+														},
+														"status": {
+															Description: "Status of the condition, one of True, False, Unknown.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"True"`),
+																},
+																{
+																	Raw: []byte(`"False"`),
+																},
+																{
+																	Raw: []byte(`"Unknown"`),
+																},
+															},
+														},
+														"type": {
+															Description: "Type of condition in CamelCase or in foo.example.com/CamelCase.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](316),
+															Pattern:     `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"type",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"endpoint": {
+											Description: "Endpoint is the one address every replica serves behind, in the form\nhttp://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.",
+											Type:        "string",
+											MaxLength:   ptr.To[int64](512),
+										},
+										"kvCache": {
+											Description: "KVCache is the reuse domain this deployment actually attached to, read from the Binding. It\nexists so an operator can tell a cache-sharing misconfiguration from a cache that is merely\ncold by reading this object alone.\nA POINTER because omitempty does not omit a zero-valued struct: held by value it would\nserialize as an empty object on every pass where the Binding could not be resolved, which a\nreader cannot tell from a domain whose every field happens to be empty.",
+											Type:        "object",
+											Required: []string{
+												"binding",
+												"pool",
+												"domain",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"binding": {
+													Description: "Binding is the KVCachePoolBinding this deployment resolved, in this namespace.",
+													Type:        "string",
+												},
+												"domain": {
+													Description: "Domain is the reuse identity, echoed from the Binding's immutable domain block.",
+													Type:        "object",
+													Required: []string{
+														"name",
+														"blockSize",
+														"dtype",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"blockSize": {
+															Description: "BlockSize and Dtype are what this domain's blocks are made of. They are echoed rather than\nvalidated here: the Binding requires and freezes both, so an entry missing one could only be\na writer bug.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+														"dtype": {
+															Type: "string",
+														},
+														"name": {
+															Description: "Name is the reuse identity, and it is the storage layer's tenant. Two deployments echoing the\nsame name share KV; two echoing different names do not.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](63),
+														},
+													},
+												},
+												"pool": {
+													Description: "Pool is the KVCachePool that Binding points at.",
+													Type:        "string",
+												},
+											},
+											Nullable: true,
+										},
+										"phase": {
+											Description: "Phase summarizes the conditions: Starting, Ready, Degraded, Deleting. Ready means every role's\nready count equals its desired count; Degraded means at least one replica is ready and at\nleast one is not.",
+											Type:        "string",
+										},
+										"phaseMessage": {
+											Description: "PhaseMessage carries the reason for the phase.",
+											Type:        "string",
+										},
+										"roles": {
+											Description: "Roles is one entry per declared role.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"name",
+														"desired",
+														"ready",
+														"unmanaged",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"desired": {
+															Description: "Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Neither\ncarries omitempty: they are counted from a Pod list that succeeded, so a zero here is an\nobserved zero and must serialize as one. A failed list writes no status at all.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+														"name": {
+															Description: "Name is the role this entry describes.",
+															Type:        "string",
+														},
+														"ready": {
+															Type:   "integer",
+															Format: "int32",
+														},
+														"unmanaged": {
+															Description: "Unmanaged is true when the role replaced the whole command line, so the operator synthesized\nno engine argument and no client environment for it. It carries no omitempty for the same\nreason the counts do not: false is the ordinary case and must be visible as an answer rather\nthan as a missing field.",
+															Type:        "boolean",
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"name",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+									},
+								},
+							},
+						},
+					},
+					Subresources: &v1.CustomResourceSubresources{
+						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+					AdditionalPrinterColumns: []v1.CustomResourceColumnDefinition{
+						{
+							Name:        "Engine",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.engine",
+						},
+						{
+							Name:        "Phase",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.phase",
+						},
+						{
+							Name:        "Endpoint",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.endpoint",
 						},
 					},
 				},

@@ -41,6 +41,10 @@ func (c *FakeWorkerV1alpha1) KVCachePoolBindings(namespace string) v1alpha1.KVCa
 	return newFakeKVCachePoolBindings(c, namespace)
 }
 
+func (c *FakeWorkerV1alpha1) ModelDeployments(namespace string) v1alpha1.ModelDeploymentInterface {
+	return newFakeModelDeployments(c, namespace)
+}
+
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
 func (c *FakeWorkerV1alpha1) RESTClient() rest.Interface {

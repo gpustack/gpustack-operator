@@ -1420,6 +1420,24 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.KVCachePoolStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolUsage"):
 		return &applyconfigurationworkerv1alpha1.KVCachePoolUsageApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeployment"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentKVCache"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentKVCacheApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentKVCacheDomain"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentKVCacheDomainApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentKVCacheStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentKVCacheStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentModel"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentModelApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRole"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentStatusApplyConfiguration{}
 
 	}
 	return nil
