@@ -1153,7 +1153,11 @@ truthful); after T13 (the headline claim is measured and recorded).
   Blocked by: T1
   Owns: `pkg/worker/webhooks/worker/model_deployment.go`,
   `pkg/worker/webhooks/worker/model_deployment_test.go`,
-  `pkg/worker/webhooks/worker/zz_generated.webhooks.go`
+  `pkg/worker/webhooks/worker/zz_generated.webhooks.go`, `pkg/worker/webhooks/setup.go`
+  — the last one was missing from this list and is not optional: the generated configuration
+  registers the webhook with the API server, and this hand-written list is what registers the
+  handler with the manager. A webhook present in one and absent from the other is a configuration
+  the API server honours by calling a path nothing serves.
   Gate: review
   Acceptance: one **validating** webhook and no mutating one (defaults are schema markers).
   It enforces: `roles` length exactly 1, rejected with a message naming
