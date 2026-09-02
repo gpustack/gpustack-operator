@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math"
 	"net"
 	"net/url"
 	"slices"
@@ -15,15 +14,15 @@ import (
 	conregname "github.com/google/go-containerregistry/pkg/name"
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/webhook"
-	"gpustack.ai/gpustack/pkg/worker/kvcache"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -156,9 +155,9 @@ func validateKVCacheBackendName(kvcb *workercore.KVCacheBackend) field.ErrorList
 		return nil
 	}
 
-	rendered := []string{kvcache.LeaderObjectName(kvcb)}
+	rendered := []string{mooncake.LeaderObjectName(kvcb)}
 	for i := range managed.Members {
-		rendered = append(rendered, kvcache.MemberObjectName(kvcb, i))
+		rendered = append(rendered, mooncake.MemberObjectName(kvcb, i))
 	}
 
 	for _, name := range rendered {
@@ -387,7 +386,7 @@ func validateKVCacheBackendManaged(
 	}
 
 	errs = append(errs, validateExtraArgs(managed.Leader.ExtraArgs,
-		kvcache.LeaderExtraArgsRules, fldPath.Child("leader", "extraArgs"))...)
+		mooncake.LeaderExtraArgsRules, fldPath.Child("leader", "extraArgs"))...)
 
 	for i := range managed.Members {
 		errs = append(errs, validateKVCacheBackendMember(&managed.Members[i],
@@ -400,26 +399,6 @@ func validateKVCacheBackendManaged(
 const quantityTooLarge = "must not exceed 9223372036854775807 (2^63-1) bytes: the renderer reads " +
 	"this as a signed 64-bit count, and a larger one does not survive the conversion"
 
-// quantityOverflowsInt64 reports whether Quantity.Value() would misreport this quantity.
-//
-// It has to be asked, because Value() does not fail — it answers wrongly, and differently by how the
-// number was written. Measured: `9223372036854775808` comes back as the MINIMUM int64, and `1e30`
-// comes back as 0. Both are then read as "not positive", so the renderer omits the segment size and
-// the member mounts nothing — a request for an impossible amount of memory produces a member that
-// silently holds none.
-//
-// Comparing against an int64 directly does not work: CmpInt64 saturates the same way, and answers
-// "equal" for a quantity above the maximum. Comparing against a Quantity built FROM that maximum
-// does, because that path compares the two as decimals.
-//
-// A binary-suffixed form such as `8Ei` is already gone by the time this runs: ParseQuantity saturates
-// it at the maximum, so the field holds that maximum and Value() reports it faithfully. There is
-// nothing left here to detect and nothing to refuse.
-func quantityOverflowsInt64(q resource.Quantity) bool {
-	largest := resource.NewQuantity(math.MaxInt64, resource.DecimalSI)
-	return q.Cmp(*largest) > 0
-}
-
 // validateKVCacheBackendMember holds the per-group rules a schema cannot carry: a medium the schema
 // accepts but nothing renders, and two quantities whose schema type is a string.
 func validateKVCacheBackendMember(
@@ -427,12 +406,12 @@ func validateKVCacheBackendMember(
 ) field.ErrorList {
 	var errs field.ErrorList
 
-	if !kvcache.MemberMediumIsReconciled(member.Medium) {
+	if !mooncake.MemberMediumIsReconciled(member.Medium) {
 		errs = append(errs, field.Forbidden(fldPath.Child("medium"), fmt.Sprintf(
 			"only %q is reconciled in this scope, and %q was given: the store supports this medium, "+
 				"but running it needs the leader's file or DAX flags and a mount on the member, and "+
 				"rendering those per medium is what the tiering subject owns",
-			kvcache.MemberMediumDRAM, member.Medium)))
+			mooncake.MemberMediumDRAM, member.Medium)))
 	}
 
 	// A resource.Quantity is a STRING in the schema, so no numeric bound in a marker can reach it —
@@ -443,7 +422,7 @@ func validateKVCacheBackendMember(
 		errs = append(errs, field.Invalid(fldPath.Child("capacityPerMember"),
 			member.CapacityPerMember.String(),
 			"must be greater than 0: a member contributing nothing is a Pod with no reason to run"))
-	} else if quantityOverflowsInt64(member.CapacityPerMember) {
+	} else if quantityx.OverflowsInt64(member.CapacityPerMember) {
 		errs = append(errs, field.Invalid(fldPath.Child("capacityPerMember"),
 			member.CapacityPerMember.String(), quantityTooLarge))
 	}
@@ -451,7 +430,7 @@ func validateKVCacheBackendMember(
 		errs = append(errs, field.Invalid(fldPath.Child("localBufferSize"),
 			member.LocalBufferSize.String(),
 			"must not be negative: it is added to the member Pod's memory request"))
-	} else if quantityOverflowsInt64(member.LocalBufferSize) {
+	} else if quantityx.OverflowsInt64(member.LocalBufferSize) {
 		errs = append(errs, field.Invalid(fldPath.Child("localBufferSize"),
 			member.LocalBufferSize.String(), quantityTooLarge))
 	}
@@ -484,7 +463,7 @@ func validateKVCacheBackendMember(
 	}
 
 	errs = append(errs, validateExtraArgs(member.ExtraArgs,
-		kvcache.MemberExtraArgsRules, fldPath.Child("extraArgs"))...)
+		mooncake.MemberExtraArgsRules, fldPath.Child("extraArgs"))...)
 
 	return errs
 }
@@ -492,7 +471,7 @@ func validateKVCacheBackendMember(
 // validateExtraArgs enforces one side's escape-hatch rules. Each refusal says which KIND of problem
 // it is, because the fix differs: use the field instead, drop one of two keys, or drop the key.
 func validateExtraArgs(
-	extraArgs map[string]string, rules kvcache.ExtraArgsRules, fldPath *field.Path,
+	extraArgs map[string]string, rules mooncake.ExtraArgsRules, fldPath *field.Path,
 ) field.ErrorList {
 	var errs field.ErrorList
 

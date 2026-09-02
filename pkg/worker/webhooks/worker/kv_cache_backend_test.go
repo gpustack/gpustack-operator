@@ -209,6 +209,15 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 		{"leader extraArgs pointing the artifact at a config file", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"config_path": "/etc/mc.yaml"}
 		}, "silently discarded"},
+		// The connector URI is derived and so is caught by the rule above it. The TYPE is not
+		// rendered at all — multi-tenancy rides on "file" being the artifact's own default — so
+		// without its own entry this is the one key that can move the policy store out from under
+		// the seeded file while every rendered flag still looks right.
+		{"leader extraArgs changing the kind of quota policy store", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{
+				"tenant_quota_connector_type": "etcd",
+			}
+		}, "a store nothing reads"},
 		{"leader extraArgs with both rpc_address and rpc_interface", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{
 				"rpc_address":   "10.0.0.1:50051",
@@ -364,6 +373,14 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 		{"a blank extraArgs key", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"": "60000"}
 		}, "a key is the bare name of a setting"},
+
+		// Multi-tenancy is rendered from spec.leader.multiTenancy, so reaching it through the
+		// escape hatch is the same two-sources ambiguity every other derived key has. It matters
+		// more than most: another CRD's webhook reads the FIELD to decide whether a quota ledger
+		// exists, and would never see a string typed here.
+		{"a leader extraArgs key that duplicates the multi-tenancy field", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"enable_multi_tenants": "true"}
+		}, "this key is derived from a field of this spec"},
 
 		// The external branch needs both roles, because two readers want different addresses.
 		{"external naming both roles", func(k *workercore.KVCacheBackend) {
