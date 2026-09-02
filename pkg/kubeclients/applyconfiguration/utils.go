@@ -1388,6 +1388,32 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendTransport"):
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendTransportApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheObjectReference"):
+		return &applyconfigurationworkerv1alpha1.KVCacheObjectReferenceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePool"):
+		return &applyconfigurationworkerv1alpha1.KVCachePoolApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolBinding"):
+		return &applyconfigurationworkerv1alpha1.KVCachePoolBindingApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolBindingDomain"):
+		return &applyconfigurationworkerv1alpha1.KVCachePoolBindingDomainApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolBindingPoolReference"):
+		return &applyconfigurationworkerv1alpha1.KVCachePoolBindingPoolReferenceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolBindingReference"):
+		return &applyconfigurationworkerv1alpha1.KVCachePoolBindingReferenceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolBindingSpec"):
+		return &applyconfigurationworkerv1alpha1.KVCachePoolBindingSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolBindingStatus"):
+		return &applyconfigurationworkerv1alpha1.KVCachePoolBindingStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolDomain"):
+		return &applyconfigurationworkerv1alpha1.KVCachePoolDomainApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolQuota"):
+		return &applyconfigurationworkerv1alpha1.KVCachePoolQuotaApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolSpec"):
+		return &applyconfigurationworkerv1alpha1.KVCachePoolSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolStatus"):
+		return &applyconfigurationworkerv1alpha1.KVCachePoolStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolUsage"):
+		return &applyconfigurationworkerv1alpha1.KVCachePoolUsageApplyConfiguration{}
 
 	}
 	return nil

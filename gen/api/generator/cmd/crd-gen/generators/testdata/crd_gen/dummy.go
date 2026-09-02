@@ -21,10 +21,16 @@ import (
 // back split across two junk entries as well as its own, which nothing noticed because unknown keys
 // were dropped in silence.
 //
+// The fourth pins the "date" TYPE. It is the type kubectl's default Age column uses, and it was
+// missing from the generator's accepted set: every date column was dropped, and dropped QUIETLY —
+// the unknown type was logged and the column skipped, so `make generate` still succeeded and no
+// golden file moved. Nothing here would notice it being dropped again without a date column to pin.
+//
 // +k8s:crd-gen:resource:categories=["all","walrus"],scope="Namespaced",shortName=["proj"],plural="projects",subResources=["status"]
 // +k8s:crd-gen:printcolumn:name="String",type="string",jsonPath=".spec.string"
 // +k8s:crd-gen:printcolumn:name="Integer",type="integer",jsonPath=".spec.integer",description="an integer",format="int32",priority=1
 // +k8s:crd-gen:printcolumn:name="Filtered",type="string",jsonPath=".status.conditions[?(@.type=='Ready')].status"
+// +k8s:crd-gen:printcolumn:name="Age",type="date",jsonPath=".metadata.creationTimestamp"
 type Dummy struct {
 	meta.TypeMeta   `json:",inline"`
 	meta.ObjectMeta `json:"metadata,omitempty"`

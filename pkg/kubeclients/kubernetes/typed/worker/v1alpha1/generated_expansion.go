@@ -14,3 +14,7 @@ type InstanceExpansion interface{}
 type InstanceTypeExpansion interface{}
 
 type KVCacheBackendExpansion interface{}
+
+type KVCachePoolExpansion interface{}
+
+type KVCachePoolBindingExpansion interface{}

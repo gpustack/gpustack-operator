@@ -21,8 +21,13 @@ import (
 )
 
 var (
-	knownScopes      = sets.New(apiext.NamespaceScoped, apiext.ClusterScoped)
-	knownDataTypes   = sets.New("integer", "number", "string", "boolean")
+	knownScopes = sets.New(apiext.NamespaceScoped, apiext.ClusterScoped)
+	// Mirrors the API server's own printerColumnDatatypes, which is what actually decides whether a
+	// column is accepted — apiextensions validation lists exactly these five, and its table converter
+	// has a case for "date". Leaving "date" out here dropped every attempt at the Age column kubectl
+	// shows by default on a CRD that declares no columns of its own, and dropped it QUIETLY: an
+	// unknown type is logged and the column skipped, so `make generate` still succeeded.
+	knownDataTypes   = sets.New("integer", "number", "string", "boolean", "date")
 	knownDataFormats = sets.New("int32", "int64", "float", "double", "byte", "binary", "date", "date-time", "password")
 )
 

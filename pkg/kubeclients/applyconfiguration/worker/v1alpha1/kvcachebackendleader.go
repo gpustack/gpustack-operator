@@ -21,6 +21,19 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// otherwise fix this API to one implementation's vocabulary. Widening the enum later is not
 	// a breaking change.
 	AllocationStrategy *string `json:"allocationStrategy,omitempty"`
+	// MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index
+	// behind it. Off, every request falls into one default tenant and the index degrades to a plain
+	// key hash, so two callers using different tenant names read each other's cache.
+	//
+	// It is a FIELD rather than an extraArgs entry because another API validates against it: a
+	// KVCachePool is refused when its backend has no ledger to write quota into. A webhook reading
+	// an unschema'd string — "true", "1", "True" — would be judging a value domain that belongs to
+	// whoever typed it.
+	//
+	// A plain bool, not a pointer, because unset and false mean the same thing here: no ledger.
+	// Unset renders NO flag rather than an explicit false, so a backend that never asked for this
+	// runs the command line it ran before the field existed.
+	MultiTenancy *bool `json:"multiTenancy,omitempty"`
 	// ExtraArgs passes flags this API does not enumerate straight through to the leader, after
 	// the derived ones. A key that collides with a flag rendered from a field above is refused
 	// at admission, because two sources for one flag make the rendered command ambiguous.
@@ -46,6 +59,14 @@ func (b *KVCacheBackendLeaderApplyConfiguration) WithReplicas(value int32) *KVCa
 // If called multiple times, the AllocationStrategy field is set to the value of the last call.
 func (b *KVCacheBackendLeaderApplyConfiguration) WithAllocationStrategy(value string) *KVCacheBackendLeaderApplyConfiguration {
 	b.AllocationStrategy = &value
+	return b
+}
+
+// WithMultiTenancy sets the MultiTenancy field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the MultiTenancy field is set to the value of the last call.
+func (b *KVCacheBackendLeaderApplyConfiguration) WithMultiTenancy(value bool) *KVCacheBackendLeaderApplyConfiguration {
+	b.MultiTenancy = &value
 	return b
 }
 

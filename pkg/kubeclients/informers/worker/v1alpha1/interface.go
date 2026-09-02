@@ -21,6 +21,10 @@ type Interface interface {
 	InstanceTypes() InstanceTypeInformer
 	// KVCacheBackends returns a KVCacheBackendInformer.
 	KVCacheBackends() KVCacheBackendInformer
+	// KVCachePools returns a KVCachePoolInformer.
+	KVCachePools() KVCachePoolInformer
+	// KVCachePoolBindings returns a KVCachePoolBindingInformer.
+	KVCachePoolBindings() KVCachePoolBindingInformer
 }
 
 type version struct {
@@ -52,4 +56,14 @@ func (v *version) InstanceTypes() InstanceTypeInformer {
 // KVCacheBackends returns a KVCacheBackendInformer.
 func (v *version) KVCacheBackends() KVCacheBackendInformer {
 	return &kVCacheBackendInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
+}
+
+// KVCachePools returns a KVCachePoolInformer.
+func (v *version) KVCachePools() KVCachePoolInformer {
+	return &kVCachePoolInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
+}
+
+// KVCachePoolBindings returns a KVCachePoolBindingInformer.
+func (v *version) KVCachePoolBindings() KVCachePoolBindingInformer {
+	return &kVCachePoolBindingInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }

@@ -4,7 +4,6 @@ package v1alpha1
 
 import (
 	v1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/api/v1"
-	corev1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/core/v1"
 )
 
 // KVCacheBackendStatusApplyConfiguration represents a declarative configuration of the KVCacheBackendStatus type for use
@@ -38,12 +37,23 @@ type KVCacheBackendStatusApplyConfiguration struct {
 	// UsedBy names the objects that consume this backend. A non-empty UsedBy is what the
 	// finalizer refuses deletion on, so the field is the enforcement input and not a display.
 	//
-	// It is a TypedLocalObjectReference and not a core ObjectReference: five of that type's seven
-	// fields mean nothing here, all of them are optional — so an entirely empty entry would
+	// It is written by the CONSUMERS, not by this backend's own reconciler, which only reads it and
+	// holds its teardown on it. Today exactly one consumer writes here: a KVCachePool claims the
+	// backend it draws from, under kind KVCachePool, when its reconciler resolves it — and drops the
+	// claim only after removing what it registered on that backend's master.
+	//
+	// It is neither a core ObjectReference nor a TypedLocalObjectReference. The first has seven
+	// fields, five of which mean nothing here, all optional — so an entirely empty entry would
 	// validate against a field a finalizer enforces on — and upstream tells new APIs not to embed
-	// it. "Local" here means only that there is no namespace field, which is right: a backend is
-	// cluster-scoped and so is everything that claims one.
-	UsedBy []corev1.TypedLocalObjectReferenceApplyConfiguration `json:"usedBy,omitempty"`
+	// it. The second is closer but cannot be KEYED: its apiGroup is optional with no default, and a
+	// structural schema takes a list map key only where the field is required or defaulted, so a
+	// list keyed on kind and name would silently merge two objects differing only by group.
+	//
+	// KVCacheObjectReference drops the group and states the constraint that replaces it — an entry
+	// may only name a kind in this API group — so all three of its fields are required and all three
+	// are keys. Entries here leave Namespace empty: a backend is cluster-scoped and so is everything
+	// that claims one.
+	UsedBy []KVCacheObjectReferenceApplyConfiguration `json:"usedBy,omitempty"`
 }
 
 // KVCacheBackendStatusApplyConfiguration constructs a declarative configuration of the KVCacheBackendStatus type for use with
@@ -118,7 +128,7 @@ func (b *KVCacheBackendStatusApplyConfiguration) WithMembers(values ...*KVCacheB
 // WithUsedBy adds the given value to the UsedBy field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, values provided by each call will be appended to the UsedBy field.
-func (b *KVCacheBackendStatusApplyConfiguration) WithUsedBy(values ...*corev1.TypedLocalObjectReferenceApplyConfiguration) *KVCacheBackendStatusApplyConfiguration {
+func (b *KVCacheBackendStatusApplyConfiguration) WithUsedBy(values ...*KVCacheObjectReferenceApplyConfiguration) *KVCacheBackendStatusApplyConfiguration {
 	for i := range values {
 		if values[i] == nil {
 			panic("nil value passed to WithUsedBy")
