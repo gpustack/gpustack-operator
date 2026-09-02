@@ -587,6 +587,37 @@ func TestConstructNodeCapacityLabels_ManualNodeManagement(t *testing.T) {
 	assert.Equal(t, "false", v, "explicit opt-out preserved under manual mode")
 }
 
+// TestIsAcceleratableCreditsResourceName pins the predicate that tells an accelerator's quota
+// resource from any other. A podset's flavor assignment is keyed by covered resource, so this is
+// what picks the entry that scopes an accelerator demand — reading a CPU entry instead would scope
+// the demand to a flavor covering no card.
+//
+// The round trip with GetAcceleratableCreditsResourceName is the first case: the two must agree, or
+// a name this operator writes would not be recognized when it is read back.
+func TestIsAcceleratableCreditsResourceName(t *testing.T) {
+	cases := []struct {
+		name string
+		in   core.ResourceName
+		want bool
+	}{
+		{"the name this package writes", GetAcceleratableCreditsResourceName(ManufacturerNVIDIA), true},
+		{"another known manufacturer", "credits.gpustack.ai/amd", true},
+		{"an unknown manufacturer is not ours", "credits.gpustack.ai/acme", false},
+		{"the prefix alone names no manufacturer", "credits.gpustack.ai/", false},
+		{"a device resource is not a credits resource", "nvidia.com/gpu", false},
+		{"cpu is not a credits resource", core.ResourceCPU, false},
+		// The shorthand a fixture reaches for, which is why it is worth pinning: it is NOT the
+		// resource Kueue accounts, so a test using it would exercise a different path than
+		// production does.
+		{"the bare word is not the resource name", "credits", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, IsAcceleratableCreditsResourceName(c.in))
+		})
+	}
+}
+
 func TestFormatLocalQueueName(t *testing.T) {
 	// The longest realistic ClusterQueue name still maps to a fixed
 	// 31-character LocalQueue name, far below the 63-character label value

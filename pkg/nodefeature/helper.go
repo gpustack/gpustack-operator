@@ -97,7 +97,20 @@ func applyAcceleratorLabels(labels map[string]string, group device.DevicesGroup)
 // ExtractAcceleratableNodeKeys returns the acceleratable node keys of the given Node,
 // each in the format "${manufacturer}-${id}".
 func ExtractAcceleratableNodeKeys(node *core.Node) []string {
-	return mapx.FilterSlice(node.Labels, func(k, v string) (string, bool) {
+	return ExtractAcceleratableKeys(node.Labels)
+}
+
+// ExtractAcceleratableKeys returns the acceleratable keys, each in the format
+// "${manufacturer}-${id}", that the given labels pin. It reads any label map — a Node's, or the
+// spec.nodeLabels a ResourceFlavor pins — so the one predicate that decides what an acceleratable
+// key is has a single home beside ConstructAcceleratableNodeLabels, which writes them.
+//
+// What identifies such a key is the VALUE, not the key's shape: every per-key metadata sibling
+// written beside it (".count", ".product", ".memory", …) carries something other than "true", while
+// a device group id may legally contain a period — device.NormalizeName preserves "-", "_" and "."
+// — so reading a period as a metadata suffix would discard a real identity.
+func ExtractAcceleratableKeys(labels map[string]string) []string {
+	return mapx.FilterSlice(labels, func(k, v string) (string, bool) {
 		if strings.HasPrefix(k, AcceleratableFeatureLabelPrefix) {
 			if v == "true" {
 				v = strings.TrimPrefix(k, AcceleratableFeatureLabelPrefix)
@@ -574,4 +587,14 @@ func FormatLocalQueueName(clusterQueueName string) string {
 // GetAcceleratableCreditsResourceName returns the accelerator credits resource name for the given manufacturer.
 func GetAcceleratableCreditsResourceName(manufacturer string) core.ResourceName {
 	return core.ResourceName(CreditsLabelPrefix + manufacturer)
+}
+
+// IsAcceleratableCreditsResourceName reports whether name is a known manufacturer's accelerator
+// credits resource — the quota currency an accelerated ClusterQueue covers, which Kueue's resource
+// transformation every accelerator key maps onto. It is the inverse of
+// GetAcceleratableCreditsResourceName and lives beside it, so a caller telling an accelerator's
+// quota resource from a CPU's does not restate how that name is spelled.
+func IsAcceleratableCreditsResourceName(name core.ResourceName) bool {
+	manufacturer, ok := strings.CutPrefix(string(name), CreditsLabelPrefix)
+	return ok && IsKnownAcceleratableManufacturer(manufacturer)
 }
