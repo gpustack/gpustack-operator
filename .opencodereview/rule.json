@@ -1,6 +1,5 @@
 {
   "include": [
-    "**/*_test.go",
     "docs/**/*.md",
     "README.md"
   ],
@@ -17,10 +16,6 @@
     "pkg/kubeclients/**/*.go"
   ],
   "rules": [
-    {
-      "path": "**/*_test.go",
-      "rule": "This repository's test conventions: table-driven tests with a shared execution loop; each case verifies exactly one behavior and stays declarative (data, no control flow); fixtures are built through shared helpers; assertions target observable final state, not implementation details; fake clients are preferred over real dependencies; fail fast when a setup error invalidates the test's assumptions; tests must be deterministic — flag any dependence on time, ordering, or randomness."
-    },
     {
       "path": "api/**/*.go",
       "merge_system_rule": true,
