@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -150,12 +151,26 @@ type ModelDeploymentRole struct {
 	// +k8s:validation:maxLength=253
 	InstanceType string `json:"instanceType" protobuf:"bytes,3,name=instanceType"`
 
+	// Resources is what one replica of this role asks of an accelerator, and it is a STRUCTURED
+	// FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.
+	//
+	// It carries only the ACCELERATOR half of a request, because that is the only half a workload
+	// decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit
+	// resources scaled by the requested card count, exactly as the Instance webhook derives them,
+	// so they are not expressible here at all — which is a stronger guarantee than refusing them
+	// would be, since a field that does not exist cannot be shadowed by a template either.
+	//
+	// InstanceType alone cannot supply this. An InstanceType's UnitResources size ONE card, and how
+	// many cards a replica wants is a property of the model being served rather than of the pool it
+	// is admitted against; two deployments on one InstanceType routinely want different counts.
+	Resources *ModelDeploymentRoleResources `json:"resources,omitempty" protobuf:"bytes,4,opt,name=resources"`
+
 	// ExtraArgs is appended AFTER the operator-synthesized arguments. An entry naming a key the
 	// operator owns is REJECTED rather than merged: a silent merge produces two values for one
 	// connector argument and no way to tell which one won.
 	//
 	// +listType=atomic
-	ExtraArgs []string `json:"extraArgs,omitempty" protobuf:"bytes,4,rep,name=extraArgs"`
+	ExtraArgs []string `json:"extraArgs,omitempty" protobuf:"bytes,5,rep,name=extraArgs"`
 
 	// Env is appended the same way and refused on the same terms. Keys the operator merely defaults
 	// are not owned: a user's value wins there and no rejection follows.
@@ -164,7 +179,7 @@ type ModelDeploymentRole struct {
 	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=name
-	Env []InstanceEnvVar `json:"env,omitempty" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,5,rep,name=env"`
+	Env []InstanceEnvVar `json:"env,omitempty" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,6,rep,name=env"`
 
 	// Template overlays the rendered container. The operator renders first and merges this on top.
 	// A non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator
@@ -177,10 +192,44 @@ type ModelDeploymentRole struct {
 	// rule the Instance webhook enforces on InstanceSpec, not a property of InstanceTemplate, and
 	// dropping it is what makes a rollout possible at all.
 	//
-	// Its Resources are refused at admission, because the resource request is InstanceType's to
-	// decide and inferring it from container content would make the feasibility check read a ledger
-	// that does not match reality.
-	Template *InstanceTemplate `json:"template,omitempty" protobuf:"bytes,6,opt,name=template"`
+	// Its Resources are refused at admission. The accelerator request belongs in the role's own
+	// Resources and the rest is derived from the InstanceType, so a template able to shadow either
+	// would make the admission feasibility check read a ledger that does not match reality.
+	Template *InstanceTemplate `json:"template,omitempty" protobuf:"bytes,7,opt,name=template"`
+}
+
+// ModelDeploymentRoleResources is what one replica of a role asks of an accelerator.
+//
+// It deliberately mirrors the accelerator fields of InstanceResources — the same names, the same
+// meanings — rather than inventing a second vocabulary for one request, and it deliberately omits
+// that type's CPU, RAM and LocalStorage, which are derived here rather than declared.
+type ModelDeploymentRoleResources struct {
+	// Accelerator is how many accelerator cards ONE REPLICA asks for. Absent or zero on an
+	// acceleratable InstanceType is a CPU-only replica, which is legitimate for a small model.
+	Accelerator *resource.Quantity `json:"accelerator,omitempty" protobuf:"bytes,1,opt,name=accelerator"`
+
+	// AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced
+	// InstanceType, as a percentage in [0,100]. 0 disables slicing, making the request an exclusive
+	// whole-accelerator one. It is ignored by an InstanceType offering no slicing.
+	//
+	// +k8s:validation:minimum=0
+	// +k8s:validation:maximum=100
+	AcceleratorSlicedMemoryPercentage int32 `json:"acceleratorSlicedMemoryPercentage,omitempty" protobuf:"varint,2,opt,name=acceleratorSlicedMemoryPercentage"` // nolint: lll
+
+	// AcceleratorSlicedCoresPercentage is the per-accelerator compute budget requested on a sliced
+	// InstanceType, as a percentage in [0,100], independent of the memory percentage.
+	//
+	// +k8s:validation:minimum=0
+	// +k8s:validation:maximum=100
+	AcceleratorSlicedCoresPercentage int32 `json:"acceleratorSlicedCoresPercentage,omitempty" protobuf:"varint,3,opt,name=acceleratorSlicedCoresPercentage"` // nolint: lll
+
+	// AcceleratorPartitionedProfile is the hardware partition profile requested on a
+	// partition-offering InstanceType, e.g. "3g.40gb". A non-empty value is mutually exclusive with
+	// the two slice percentages: hardware partitioning and software slicing cannot both apply to one
+	// accelerator. It is ignored by an InstanceType offering no partition.
+	//
+	// +k8s:validation:maxLength=64
+	AcceleratorPartitionedProfile string `json:"acceleratorPartitionedProfile,omitempty" protobuf:"bytes,4,opt,name=acceleratorPartitionedProfile"` // nolint: lll
 }
 
 // ModelDeploymentStatus defines the observed state of ModelDeployment.

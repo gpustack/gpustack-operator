@@ -136,6 +136,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentList{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentList(ref),
 		v1alpha1.ModelDeploymentModel{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentModel(ref),
 		v1alpha1.ModelDeploymentRole{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref),
+		v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref),
 		v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref),
 		v1alpha1.ModelDeploymentSpec{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref),
 		v1alpha1.ModelDeploymentStatus{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref),
@@ -6690,6 +6691,12 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 							Format:      "",
 						},
 					},
+					"resources": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Resources is what one replica of this role asks of an accelerator, and it is a STRUCTURED FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.\n\nIt carries only the ACCELERATOR half of a request, because that is the only half a workload decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit resources scaled by the requested card count, exactly as the Instance webhook derives them, so they are not expressible here at all — which is a stronger guarantee than refusing them would be, since a field that does not exist cannot be shadowed by a template either.\n\nInstanceType alone cannot supply this. An InstanceType's UnitResources size ONE card, and how many cards a replica wants is a property of the model being served rather than of the pool it is admitted against; two deployments on one InstanceType routinely want different counts.",
+							Ref:         ref(v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName()),
+						},
+					},
 					"extraArgs": {
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{
@@ -6736,7 +6743,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 					},
 					"template": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Template overlays the rendered container. The operator renders first and merges this on top. A non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator synthesizes no engine arguments and no client environment, the role is marked unmanaged and CacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args, because a second append tier beside ExtraArgs would have no defined precedence and would make the take-over tier ambiguous — args alone would be neither take-over nor append.\n\nUnlike the Instance that shares this type, the template is MUTABLE. That immutability is a rule the Instance webhook enforces on InstanceSpec, not a property of InstanceTemplate, and dropping it is what makes a rollout possible at all.\n\nIts Resources are refused at admission, because the resource request is InstanceType's to decide and inferring it from container content would make the feasibility check read a ledger that does not match reality.",
+							Description: "Template overlays the rendered container. The operator renders first and merges this on top. A non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator synthesizes no engine arguments and no client environment, the role is marked unmanaged and CacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args, because a second append tier beside ExtraArgs would have no defined precedence and would make the take-over tier ambiguous — args alone would be neither take-over nor append.\n\nUnlike the Instance that shares this type, the template is MUTABLE. That immutability is a rule the Instance webhook enforces on InstanceSpec, not a property of InstanceTemplate, and dropping it is what makes a rollout possible at all.\n\nIts Resources are refused at admission. The accelerator request belongs in the role's own Resources and the rest is derived from the InstanceType, so a template able to shadow either would make the admission feasibility check read a ledger that does not match reality.",
 							Ref:         ref(v1alpha1.InstanceTemplate{}.OpenAPIModelName()),
 						},
 					},
@@ -6745,7 +6752,54 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.InstanceTemplate{}.OpenAPIModelName()},
+			v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.InstanceTemplate{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRoleResources is what one replica of a role asks of an accelerator.\n\nIt deliberately mirrors the accelerator fields of InstanceResources — the same names, the same meanings — rather than inventing a second vocabulary for one request, and it deliberately omits that type's CPU, RAM and LocalStorage, which are derived here rather than declared.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"accelerator": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Accelerator is how many accelerator cards ONE REPLICA asks for. Absent or zero on an acceleratable InstanceType is a CPU-only replica, which is legitimate for a small model.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"acceleratorSlicedMemoryPercentage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced InstanceType, as a percentage in [0,100]. 0 disables slicing, making the request an exclusive whole-accelerator one. It is ignored by an InstanceType offering no slicing.",
+							Minimum:     ptr.To[float64](0),
+							Maximum:     ptr.To[float64](100),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"acceleratorSlicedCoresPercentage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorSlicedCoresPercentage is the per-accelerator compute budget requested on a sliced InstanceType, as a percentage in [0,100], independent of the memory percentage.",
+							Minimum:     ptr.To[float64](0),
+							Maximum:     ptr.To[float64](100),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"acceleratorPartitionedProfile": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a partition-offering InstanceType, e.g. \"3g.40gb\". A non-empty value is mutually exclusive with the two slice percentages: hardware partitioning and software slicing cannot both apply to one accelerator. It is ignored by an InstanceType offering no partition.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
 	}
 }
 

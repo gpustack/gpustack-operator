@@ -22,6 +22,19 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.
 	// It is what the queue-name entrance label is derived from.
 	InstanceType *string `json:"instanceType,omitempty"`
+	// Resources is what one replica of this role asks of an accelerator, and it is a STRUCTURED
+	// FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.
+	//
+	// It carries only the ACCELERATOR half of a request, because that is the only half a workload
+	// decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit
+	// resources scaled by the requested card count, exactly as the Instance webhook derives them,
+	// so they are not expressible here at all — which is a stronger guarantee than refusing them
+	// would be, since a field that does not exist cannot be shadowed by a template either.
+	//
+	// InstanceType alone cannot supply this. An InstanceType's UnitResources size ONE card, and how
+	// many cards a replica wants is a property of the model being served rather than of the pool it
+	// is admitted against; two deployments on one InstanceType routinely want different counts.
+	Resources *ModelDeploymentRoleResourcesApplyConfiguration `json:"resources,omitempty"`
 	// ExtraArgs is appended AFTER the operator-synthesized arguments. An entry naming a key the
 	// operator owns is REJECTED rather than merged: a silent merge produces two values for one
 	// connector argument and no way to tell which one won.
@@ -40,9 +53,9 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// rule the Instance webhook enforces on InstanceSpec, not a property of InstanceTemplate, and
 	// dropping it is what makes a rollout possible at all.
 	//
-	// Its Resources are refused at admission, because the resource request is InstanceType's to
-	// decide and inferring it from container content would make the feasibility check read a ledger
-	// that does not match reality.
+	// Its Resources are refused at admission. The accelerator request belongs in the role's own
+	// Resources and the rest is derived from the InstanceType, so a template able to shadow either
+	// would make the admission feasibility check read a ledger that does not match reality.
 	Template *InstanceTemplateApplyConfiguration `json:"template,omitempty"`
 }
 
@@ -73,6 +86,14 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithReplicas(value int32) *Model
 // If called multiple times, the InstanceType field is set to the value of the last call.
 func (b *ModelDeploymentRoleApplyConfiguration) WithInstanceType(value string) *ModelDeploymentRoleApplyConfiguration {
 	b.InstanceType = &value
+	return b
+}
+
+// WithResources sets the Resources field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Resources field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithResources(value *ModelDeploymentRoleResourcesApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
+	b.Resources = value
 	return b
 }
 

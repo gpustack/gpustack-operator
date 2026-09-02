@@ -509,7 +509,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 			}
 			return sc
 		}(),
-		Resources: getResourceRequirements(inst, instType, true, overcommit, true, false),
+		Resources: getResourceRequirements(inst.Spec.Resources, instType, true, overcommit, true, false),
 		Ports: slicex.Transform(inst.Spec.Ports, func(p workercore.InstancePort) core.ContainerPort {
 			return core.ContainerPort{
 				Name:          getPortName(p),
@@ -560,7 +560,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 					},
 				},
 			},
-			Resources: getResourceRequirements(inst, instType, false, false, false, true),
+			Resources: getResourceRequirements(inst.Spec.Resources, instType, false, false, false, true),
 			Env: []core.EnvVar{
 				{
 					Name:  "VOLUME_MOUNT_PATH",
@@ -1029,8 +1029,14 @@ func getPortName(port workercore.InstancePort) string {
 // count plus the per-card memory/compute percentages, which the Pod webhook folds
 // into .sliced.units; everything else (a non-sliced type, or a 0% request) uses the
 // raw quantity and the exclusive resource name.
+// getResourceRequirements renders the resource keys one container asks for.
+//
+// It takes the RESOURCES rather than the object holding them, because two CRDs now render Pods
+// against one InstanceType and the accelerator-key algebra below — which mode's key to emit, which
+// manufacturer's spelling, which credits the Pod webhook will fold — must exist exactly once. A
+// second copy would be a manifest of the same facts, free to drift from this one.
 func getResourceRequirements(
-	inst *workercore.Instance,
+	instRess *workercore.InstanceResources,
 	instType *worker.InstanceType,
 	withGeneral, withGeneralOvercommit bool,
 	withAccelerator bool,
@@ -1043,9 +1049,9 @@ func getResourceRequirements(
 
 	if withGeneral {
 		for n, q := range map[core.ResourceName]resource.Quantity{
-			core.ResourceCPU:              inst.Spec.Resources.CPU,
-			core.ResourceMemory:           inst.Spec.Resources.RAM,
-			core.ResourceEphemeralStorage: inst.Spec.Resources.LocalStorage,
+			core.ResourceCPU:              instRess.CPU,
+			core.ResourceMemory:           instRess.RAM,
+			core.ResourceEphemeralStorage: instRess.LocalStorage,
 		} {
 			rr.Limits[n] = q
 			if withGeneralOvercommit {
@@ -1057,12 +1063,12 @@ func getResourceRequirements(
 	}
 
 	requestAccelerator := instType.Spec.Acceleratable &&
-		inst.Spec.Resources.Accelerator != nil &&
-		inst.Spec.Resources.Accelerator.Sign() > 0
+		instRess.Accelerator != nil &&
+		instRess.Accelerator.Sign() > 0
 	if requestAccelerator {
-		cardQ := *inst.Spec.Resources.Accelerator
+		cardQ := *instRess.Accelerator
 		manufacturer := instType.Status.Detail.Manufacturer
-		partProfile := inst.Spec.Resources.AcceleratorPartitionedProfile
+		partProfile := instRess.AcceleratorPartitionedProfile
 		partCardResName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModePartitioned)
 		partProfileResName := nodefeature.GetAcceleratablePartitionedProfileResourceName(manufacturer, partProfile)
 		switch {
@@ -1078,7 +1084,7 @@ func getResourceRequirements(
 				rr.Requests[partCardResName] = one
 				rr.Limits[partProfileResName] = one
 				rr.Requests[partProfileResName] = one
-			case instType.Status.Detail.IsLogicallySliceable() && inst.Spec.Resources.AcceleratorSlicedMemoryPercentage > 0:
+			case instType.Status.Detail.IsLogicallySliceable() && instRess.AcceleratorSlicedMemoryPercentage > 0:
 				// A sliced request emits the bare card count C (.sliced, which Kueue
 				// folds into credits via multiplyBy) plus the per-card memory/compute
 				// percentages. The Pod webhook folds .sliced.memory-percentage into the
@@ -1086,8 +1092,8 @@ func getResourceRequirements(
 				slicedResName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModeSliced)
 				memResName := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(manufacturer)
 				coresResName := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(manufacturer)
-				memQ := *resource.NewQuantity(int64(inst.Spec.Resources.AcceleratorSlicedMemoryPercentage), resource.DecimalSI)
-				coresQ := *resource.NewQuantity(int64(inst.Spec.Resources.AcceleratorSlicedCoresPercentage), resource.DecimalSI)
+				memQ := *resource.NewQuantity(int64(instRess.AcceleratorSlicedMemoryPercentage), resource.DecimalSI)
+				coresQ := *resource.NewQuantity(int64(instRess.AcceleratorSlicedCoresPercentage), resource.DecimalSI)
 				rr.Limits[slicedResName] = cardQ
 				rr.Requests[slicedResName] = cardQ
 				rr.Limits[memResName] = memQ

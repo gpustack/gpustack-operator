@@ -7,7 +7,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
@@ -112,6 +114,8 @@ func TestValidateModelDeployment(t *testing.T) {
 			})),
 		},
 		{
+			// The refusal must name the structured field that DOES decide the request. Naming only
+			// instanceType would send a user to a field that cannot express a card count.
 			name: "template_resources",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
 				r.Template = &workercore.InstanceTemplate{
@@ -119,7 +123,66 @@ func TestValidateModelDeployment(t *testing.T) {
 					Resources: &workercore.InstanceResources{},
 				}
 			})),
-			wantMessage: "instanceType",
+			wantMessage: "roles[0].resources",
+		},
+		{
+			name: "resources_accelerator_only",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(resource.MustParse("1")),
+				}
+			})),
+		},
+		{
+			name: "resources_sliced_percentages",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator:                       ptr.To(resource.MustParse("1")),
+					AcceleratorSlicedMemoryPercentage: 50,
+					AcceleratorSlicedCoresPercentage:  50,
+				}
+			})),
+		},
+		{
+			name: "resources_partition_profile_only",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator:                   ptr.To(resource.MustParse("1")),
+					AcceleratorPartitionedProfile: "3g.40gb",
+				}
+			})),
+		},
+		{
+			// One accelerator cannot serve both, and the renderer resolves the pair by precedence —
+			// so accepting this would silently discard the percentages.
+			name: "resources_partition_and_slice_together",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator:                       ptr.To(resource.MustParse("1")),
+					AcceleratorSlicedMemoryPercentage: 50,
+					AcceleratorPartitionedProfile:     "3g.40gb",
+				}
+			})),
+			wantMessage: "cannot both apply to one accelerator",
+		},
+		{
+			name: "resources_partition_and_cores_together",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator:                      ptr.To(resource.MustParse("1")),
+					AcceleratorSlicedCoresPercentage: 25,
+					AcceleratorPartitionedProfile:    "3g.40gb",
+				}
+			})),
+			wantMessage: "cannot both apply to one accelerator",
+		},
+		{
+			// A CPU-only replica is legitimate for a small model, so an absent resources block is
+			// not a refusal.
+			name: "resources_absent",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+				r.Resources = nil
+			})),
 		},
 		{
 			name: "template_command",

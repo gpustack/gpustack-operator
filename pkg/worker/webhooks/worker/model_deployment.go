@@ -115,6 +115,7 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 		errs = append(errs, validateModelDeploymentRoleExtraArgs(md.Spec.Engine, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleEnv(md.Spec.Engine, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleTemplate(role, rolePath)...)
+		errs = append(errs, validateModelDeploymentRoleResources(role, rolePath)...)
 	}
 
 	return errs
@@ -181,7 +182,7 @@ func validateModelDeploymentRoleEnv(
 //
 // The template may override container content and never the resource request. Inferring the request
 // from container content would make the admission feasibility check read a ledger that does not
-// match reality, so the refusal names the field that does decide it.
+// match reality, so the refusal names the structured field that does decide it.
 func validateModelDeploymentRoleTemplate(
 	role *workercore.ModelDeploymentRole, rolePath *field.Path,
 ) field.ErrorList {
@@ -192,10 +193,43 @@ func validateModelDeploymentRoleTemplate(
 	return field.ErrorList{field.Invalid(
 		rolePath.Child("template", "resources"), role.Template.Resources,
 		fmt.Sprintf(
-			"resources are decided by %s, which admission and scheduling read; a template that "+
-				"could shadow them would make the feasibility check read a ledger that does not "+
-				"match reality",
-			rolePath.Child("instanceType"),
+			"the accelerator request belongs in %s and the rest is derived from %s; a template "+
+				"that could shadow either would make the feasibility check read a ledger that "+
+				"does not match reality",
+			rolePath.Child("resources"), rolePath.Child("instanceType"),
+		),
+	)}
+}
+
+// validateModelDeploymentRoleResources refuses a request that asks for hardware partitioning and
+// software slicing at once.
+//
+// One accelerator cannot serve both, so a request naming both has no correct reading — and the
+// operator's renderer resolves the pair by precedence, which would silently grant the profile and
+// discard the percentages. The two other things worth validating here — that the InstanceType
+// actually offers the requested mode, and that the request fits its per-unit ceiling — need the
+// InstanceType, so they arrive with the Binding-resolution rule that gives this handler a client.
+func validateModelDeploymentRoleResources(
+	role *workercore.ModelDeploymentRole, rolePath *field.Path,
+) field.ErrorList {
+	ress := role.Resources
+	if ress == nil || ress.AcceleratorPartitionedProfile == "" {
+		return nil
+	}
+
+	if ress.AcceleratorSlicedMemoryPercentage == 0 && ress.AcceleratorSlicedCoresPercentage == 0 {
+		return nil
+	}
+
+	ressPath := rolePath.Child("resources")
+
+	return field.ErrorList{field.Invalid(
+		ressPath.Child("acceleratorPartitionedProfile"), ress.AcceleratorPartitionedProfile,
+		fmt.Sprintf(
+			"a partition profile cannot be combined with %s or %s: hardware partitioning and "+
+				"software slicing cannot both apply to one accelerator",
+			ressPath.Child("acceleratorSlicedMemoryPercentage"),
+			ressPath.Child("acceleratorSlicedCoresPercentage"),
 		),
 	)}
 }

@@ -3680,8 +3680,48 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															},
 															Minimum: ptr.To[float64](1),
 														},
+														"resources": {
+															Description: "Resources is what one replica of this role asks of an accelerator, and it is a STRUCTURED\nFIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.\nIt carries only the ACCELERATOR half of a request, because that is the only half a workload\ndecides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit\nresources scaled by the requested card count, exactly as the Instance webhook derives them,\nso they are not expressible here at all — which is a stronger guarantee than refusing them\nwould be, since a field that does not exist cannot be shadowed by a template either.\nInstanceType alone cannot supply this. An InstanceType's UnitResources size ONE card, and how\nmany cards a replica wants is a property of the model being served rather than of the pool it\nis admitted against; two deployments on one InstanceType routinely want different counts.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"accelerator": {
+																	Description: "Accelerator is how many accelerator cards ONE REPLICA asks for. Absent or zero on an\nacceleratable InstanceType is a CPU-only replica, which is legitimate for a small model.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
+																},
+																"acceleratorPartitionedProfile": {
+																	Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a\npartition-offering InstanceType, e.g. \"3g.40gb\". A non-empty value is mutually exclusive with\nthe two slice percentages: hardware partitioning and software slicing cannot both apply to one\naccelerator. It is ignored by an InstanceType offering no partition.",
+																	Type:        "string",
+																	MaxLength:   ptr.To[int64](64),
+																},
+																"acceleratorSlicedCoresPercentage": {
+																	Description: "AcceleratorSlicedCoresPercentage is the per-accelerator compute budget requested on a sliced\nInstanceType, as a percentage in [0,100], independent of the memory percentage.",
+																	Type:        "integer",
+																	Format:      "int32",
+																	Maximum:     ptr.To[float64](100),
+																	Minimum:     ptr.To[float64](0),
+																},
+																"acceleratorSlicedMemoryPercentage": {
+																	Description: "AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced\nInstanceType, as a percentage in [0,100]. 0 disables slicing, making the request an exclusive\nwhole-accelerator one. It is ignored by an InstanceType offering no slicing.",
+																	Type:        "integer",
+																	Format:      "int32",
+																	Maximum:     ptr.To[float64](100),
+																	Minimum:     ptr.To[float64](0),
+																},
+															},
+															Nullable: true,
+														},
 														"template": {
-															Description: "Template overlays the rendered container. The operator renders first and merges this on top.\nA non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator\nsynthesizes no engine arguments and no client environment, the role is marked unmanaged and\nCacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args,\nbecause a second append tier beside ExtraArgs would have no defined precedence and would make\nthe take-over tier ambiguous — args alone would be neither take-over nor append.\nUnlike the Instance that shares this type, the template is MUTABLE. That immutability is a\nrule the Instance webhook enforces on InstanceSpec, not a property of InstanceTemplate, and\ndropping it is what makes a rollout possible at all.\nIts Resources are refused at admission, because the resource request is InstanceType's to\ndecide and inferring it from container content would make the feasibility check read a ledger\nthat does not match reality.",
+															Description: "Template overlays the rendered container. The operator renders first and merges this on top.\nA non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator\nsynthesizes no engine arguments and no client environment, the role is marked unmanaged and\nCacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args,\nbecause a second append tier beside ExtraArgs would have no defined precedence and would make\nthe take-over tier ambiguous — args alone would be neither take-over nor append.\nUnlike the Instance that shares this type, the template is MUTABLE. That immutability is a\nrule the Instance webhook enforces on InstanceSpec, not a property of InstanceTemplate, and\ndropping it is what makes a rollout possible at all.\nIts Resources are refused at admission. The accelerator request belongs in the role's own\nResources and the rest is derived from the InstanceType, so a template able to shadow either\nwould make the admission feasibility check read a ledger that does not match reality.",
 															Type:        "object",
 															Required: []string{
 																"image",

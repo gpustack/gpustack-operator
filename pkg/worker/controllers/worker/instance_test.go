@@ -380,7 +380,7 @@ func TestGetResourceRequirements(t *testing.T) {
 				},
 			}
 
-			rr := getResourceRequirements(inst, instType,
+			rr := getResourceRequirements(inst.Spec.Resources, instType,
 				c.withGeneral, c.withGeneralOvercommit, c.withAccelerator, c.withVisibility)
 
 			assert.NotNil(t, rr.Limits, "limits map should be initialized")

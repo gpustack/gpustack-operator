@@ -1432,6 +1432,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentModelApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRole"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleResources"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleResourcesApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentSpec"):
