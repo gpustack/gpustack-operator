@@ -2,6 +2,7 @@ package worker
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -224,6 +225,34 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 	}
 
 	return render, nil
+}
+
+// ModelDeploymentEngineCommand renders the argv that starts one engine on one model.
+//
+// The OPERATOR OWNS THE WHOLE ARGV, and that follows from the template type rather than from
+// preference: InstanceTemplate carries Command and deliberately no Args, so there is nowhere to put
+// arguments beside an image's own entrypoint. Either the operator builds the command line — base
+// command, then the synthesized connector arguments, then the role's ExtraArgs — or the user
+// replaces all of it through the take-over tier. There is no middle where the operator contributes
+// arguments to a command line it did not build.
+//
+// The base commands are the engines' own documented entry points: vLLM installs a "vllm" console
+// script whose serve subcommand takes the model as a POSITIONAL argument, and SGLang is launched as
+// a module with the model named by --model-path. vllm-ascend is a vLLM plugin and shares its
+// entry point.
+func ModelDeploymentEngineCommand(engine, model string) ([]string, error) {
+	if model == "" {
+		return nil, errors.New("model name is empty")
+	}
+
+	switch engine {
+	case workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentEngineVLLMAscend:
+		return []string{"vllm", "serve", model}, nil
+	case workercore.ModelDeploymentEngineSGLang:
+		return []string{"python3", "-m", "sglang.launch_server", "--model-path", model}, nil
+	default:
+		return nil, fmt.Errorf("unsupported engine %q", engine)
+	}
 }
 
 // modelDeploymentKVTransferConfigArg renders vLLM's --kv-transfer-config for one connector.

@@ -350,3 +350,64 @@ func TestModelDeploymentOwnedAndDefaultedCannotDisagree(t *testing.T) {
 func isFlag(s string) bool {
 	return len(s) > 2 && s[0] == '-' && s[1] == '-'
 }
+
+func TestModelDeploymentEngineCommand(t *testing.T) {
+	testCases := []struct {
+		name    string
+		engine  string
+		model   string
+		want    []string
+		wantErr bool
+	}{
+		{
+			// The model is POSITIONAL on vLLM's serve subcommand, not a flag.
+			name:   "vllm_serves_the_model_positionally",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			model:  "Qwen/Qwen2.5-72B-Instruct",
+			want:   []string{"vllm", "serve", "Qwen/Qwen2.5-72B-Instruct"},
+		},
+		{
+			// vllm-ascend is a vLLM plugin and shares its entry point.
+			name:   "vllm_ascend_shares_vllms_entrypoint",
+			engine: workercore.ModelDeploymentEngineVLLMAscend,
+			model:  "Qwen/Qwen2.5-72B-Instruct",
+			want:   []string{"vllm", "serve", "Qwen/Qwen2.5-72B-Instruct"},
+		},
+		{
+			name:   "sglang_launches_a_module_with_model_path",
+			engine: workercore.ModelDeploymentEngineSGLang,
+			model:  "Qwen/Qwen2.5-72B-Instruct",
+			want: []string{
+				"python3", "-m", "sglang.launch_server",
+				"--model-path", "Qwen/Qwen2.5-72B-Instruct",
+			},
+		},
+		{
+			name:    "unsupported_engine",
+			engine:  "tensorrt-llm",
+			model:   "Qwen/Qwen2.5-72B-Instruct",
+			wantErr: true,
+		},
+		{
+			// An empty model would render an argv the engine refuses at startup, which is a
+			// failure one layer away from its cause.
+			name:    "empty_model",
+			engine:  workercore.ModelDeploymentEngineVLLM,
+			model:   "",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ModelDeploymentEngineCommand(tc.engine, tc.model)
+			if tc.wantErr {
+				require.Error(t, err)
+
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
