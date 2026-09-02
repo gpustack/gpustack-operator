@@ -545,7 +545,27 @@ refused, since one accelerator cannot serve both and the renderer resolves the p
 which would grant the profile and discard the percentages with nothing said.
 
 **Arguments fold into `Command`; there is no `Args`.** `InstanceTemplate` has `Command []string` and
-no `Args`, and this spec does not add one. Adding `args` would create a **second append tier beside
+no `Args`, and this spec does not add one.
+
+⛔ **That has a consequence the earlier draft left implicit: the operator builds the WHOLE argv, not
+just the arguments.** With no `Args` field there is nowhere to put arguments beside an image's own
+entrypoint, so the append tier cannot mean "add to whatever the image runs". Either the operator
+renders base command + synthesized connector arguments + `extraArgs` into `Command`, or the user
+replaces all of it (take-over). There is no middle where the operator contributes arguments to a
+command line it did not build. The base commands are the engines' own entry points, verified in
+their sources rather than assumed:
+
+| Engine | Base command | Note |
+|---|---|---|
+| `vllm` | `vllm serve <model>` | the console script is `vllm`, and `serve` takes the model **positionally** |
+| `vllm-ascend` | `vllm serve <model>` | a vLLM plugin, sharing its entry point |
+| `sglang` | `python3 -m sglang.launch_server --model-path <model>` | `--model-path` is required; `--model` is its alias |
+
+⚠️ It follows that `roles[].template.image` is effectively **required** for a role to render at all —
+the engine argv is the operator's, but the image carrying that engine is the user's, and there is no
+default image this spec could pick. The renderer refuses a role with no image rather than creating a
+Pod the API server would reject; making that a webhook rule is a client-free check worth adding when
+the webhook next changes. Adding `args` would create a **second append tier beside
 `extraArgs` with no defined precedence** — precisely the "which one wins" state Rule 1 exists to
 prevent — and would make the take-over tier ambiguous, since `args` alone (no `command`) would mean
 neither take-over nor append. With one field the tier boundary is a predicate: `template.command`
