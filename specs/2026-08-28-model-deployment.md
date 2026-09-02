@@ -138,6 +138,8 @@ spec:
   - name: server
     replicas: 4
     instanceType: h20-8x                   # reuses the existing pool -> ClusterQueue mapping
+    resources:                             # the ACCELERATOR half only; CPU/memory are derived
+      accelerator: 1                       # from the InstanceType's per-unit resources
     extraArgs: []                          # tier 1, see F5
     env: []                                # tier 1
     template: { ... }                      # an InstanceTemplate overlay, tier 2/3
@@ -503,11 +505,44 @@ The rule needs a precise notion of "owned", because the operator sets more keys 
   `MOONCAKE_TENANT_ID` is not.
 
 **Rule 2 — the scheduling scalars must not be inferrable from the template.** `replicas`,
-`instanceType` and (in the next spec) `parallelism` are inputs to admission and scheduling — Kueue
-PodSet counts, flavor selection, topology domains. They stay **structured fields**. The template may
-override container content and **never** the replica count or the resource requests; a template
-carrying `resources` is rejected, naming `roles[].instanceType` as where that decision lives.
-Otherwise **the admission feasibility check reads a ledger that does not match reality**.
+`instanceType`, `resources` and (in the next spec) `parallelism` are inputs to admission and
+scheduling — Kueue PodSet counts, flavor selection, topology domains. They stay **structured
+fields**. The template may override container content and **never** the replica count or the
+resource request; a template carrying `resources` is rejected, naming `roles[].resources` as where
+the accelerator request lives. Otherwise **the admission feasibility check reads a ledger that does
+not match reality**.
+
+⛔ **`roles[].resources` exists because `instanceType` cannot supply the request, and the earlier
+draft of this rule was wrong about that.** It said the resource decision "lives on
+`roles[].instanceType`". Verified against the code, it does not:
+
+- `getResourceRequirements` in `pkg/worker/controllers/worker/instance.go` reads every **amount** —
+  card count, slice percentages, partition profile — off the workload's own `Resources`. The
+  InstanceType supplies only *how to spell* the resource keys: whether it is acceleratable, the
+  manufacturer, and whether it slices or partitions.
+- `InstanceTypeSpec` carries `UnitResources`, which size **one card**, plus a fixed `LocalStorage`.
+  How many cards a replica wants is a property of the model being served, not of the pool it is
+  admitted against — two deployments on one InstanceType routinely want different counts.
+- CPU and memory are **derived**, not declared: the `Instance` webhook computes them as
+  `UnitResources × card count` and then caps them. `ModelDeployment` has no mutating webhook, so its
+  **renderer** performs the same derivation.
+
+So the role carries the accelerator half of a request and nothing else. That is a *stronger* form of
+Rule 2 than refusing a full `resources` block would have been: CPU and memory are not merely
+refused in the template, they are **inexpressible anywhere**, and a field that does not exist cannot
+be shadowed. `ModelDeploymentRoleResources` mirrors `InstanceResources`'s accelerator field names
+exactly rather than inventing a second vocabulary for one request.
+
+The two rules that need the InstanceType itself — that it offers the mode being asked for, and that
+the request fits its per-unit ceiling — are not in the validating webhook, which holds no client.
+They arrive with the Binding-resolution rule that gives it one. **Recorded rather than left as a
+silent hole**: until then an infeasible request is refused by the admission chain's own gates rather
+than at the API, which is a worse message but not a wrong outcome.
+
+One rule *is* enforced without a client, because it needs no cross-object read and its silent
+failure is the dangerous kind: a request naming both a partition profile and a slice percentage is
+refused, since one accelerator cannot serve both and the renderer resolves the pair by precedence —
+which would grant the profile and discard the percentages with nothing said.
 
 **Arguments fold into `Command`; there is no `Args`.** `InstanceTemplate` has `Command []string` and
 no `Args`, and this spec does not add one. Adding `args` would create a **second append tier beside
@@ -1123,14 +1158,24 @@ type ModelDeploymentRole struct {
 	// --kv-transfer-config values and no way to tell which one won.
 	//
 	// +listType=atomic
-	ExtraArgs []string `json:"extraArgs,omitempty" protobuf:"bytes,4,rep,name=extraArgs"`
+	// Resources is what one replica asks of an accelerator, and it is a STRUCTURED FIELD for the
+	// same reason Replicas and InstanceType are. It carries only the ACCELERATOR half: CPU, memory
+	// and ephemeral storage are DERIVED from the InstanceType's per-unit resources scaled by the
+	// card count, so they are not expressible here — a stronger guarantee than refusing them, since
+	// a field that does not exist cannot be shadowed by a template either.
+	//
+	// InstanceType alone cannot supply this: its UnitResources size ONE card, and how many cards a
+	// replica wants is a property of the model served rather than of the pool it is admitted against.
+	Resources *ModelDeploymentRoleResources `json:"resources,omitempty" protobuf:"bytes,4,opt,name=resources"`
+
+	ExtraArgs []string `json:"extraArgs,omitempty" protobuf:"bytes,5,rep,name=extraArgs"`
 
 	// Env is appended the same way and refused on the same terms. Keys the operator merely defaults
 	// — MC_TE_METRIC — are not owned: a user's value wins and no rejection follows.
 	//
 	// +listType=map
 	// +listMapKey=name
-	Env []InstanceEnvVar `json:"env,omitempty" protobuf:"bytes,5,rep,name=env"`
+	Env []InstanceEnvVar `json:"env,omitempty" protobuf:"bytes,6,rep,name=env"`
 
 	// Template overlays the rendered container. The operator renders first and merges this on top.
 	// A non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator
@@ -1140,7 +1185,7 @@ type ModelDeploymentRole struct {
 	//
 	// Unlike the Instance that shares this type, the template is MUTABLE — that immutability is a
 	// rule the Instance webhook enforces on InstanceSpec, not a property of InstanceTemplate.
-	Template *InstanceTemplate `json:"template,omitempty" protobuf:"bytes,6,opt,name=template"`
+	Template *InstanceTemplate `json:"template,omitempty" protobuf:"bytes,7,opt,name=template"`
 }
 ```
 
@@ -1165,7 +1210,8 @@ truthful); after T13 (the headline claim is measured and recorded).
   Gate: review
   Acceptance: `ModelDeployment`, `ModelDeploymentList`, `ModelDeploymentSpec`,
   `ModelDeploymentKVCache`, `ModelDeploymentRole`, `ModelDeploymentStatus`,
-  `ModelDeploymentRoleStatus` and `ModelDeploymentKVCacheStatus` exist with the markers in Code
+  `ModelDeploymentRoleResources`, `ModelDeploymentRoleStatus` and `ModelDeploymentKVCacheStatus`
+  exist with the markers in Code
   Style; the status reuses `api/v1.Condition` and declares **no** new condition type; `roles` carries
   `minItems=1` and **no** `maxItems`; there is no domain field anywhere in the spec; there is no
   `Args` field. Nothing else changes — no controller, no webhook, no `setup.go` entry. The generated
@@ -1189,7 +1235,8 @@ truthful); after T13 (the headline claim is measured and recorded).
   It enforces: `roles` length exactly 1, rejected with a message naming
   `specs/*-pd-atomic-admission.md` as the spec that lifts it; `extraArgs`/`env` carrying an owned key
   rejected, naming the key, reading the owned-key table rather than a hard-coded list;
-  `template.resources` rejected, naming `roles[].instanceType`; a `poolRef` naming no Binding in this
+  `template.resources` rejected, naming `roles[].resources`; a role asking for both a partition
+  profile and a slice percentage rejected; a `poolRef` naming no Binding in this
   namespace rejected with an actionable message. The length-1 rule is a separable predicate, so the
   next spec lifts it by deleting one call — asserted by a unit test that calls the remaining
   validation with two roles and gets no error.
@@ -1406,7 +1453,12 @@ accepted bad spec is worse than a refusal.
 | `extra_args_unowned_key` | `--max-model-len=32768` | accept |
 | `env_owned_key` | `MOONCAKE_CONFIG_PATH` | reject |
 | `env_defaulted_key` | `MC_TE_METRIC=0` | accept; the user's value wins |
-| `template_resources` | `template.resources` set | reject; names `roles[].instanceType` |
+| `template_resources` | `template.resources` set | reject; names `roles[].resources` |
+| `resources_accelerator_only` | a card count alone | accept |
+| `resources_sliced_percentages` | a card count plus both slice percentages | accept |
+| `resources_partition_profile_only` | a card count plus a profile | accept |
+| `resources_partition_and_slice_together` | a profile plus a slice percentage | reject; one accelerator cannot serve both |
+| `resources_absent` | no resources block | accept — a CPU-only replica is legitimate |
 | `template_command` | `template.command` non-empty | accept; take-over |
 | `pool_ref_missing` | names no existing Binding | reject; the message names namespace + Binding |
 | `pool_ref_cross_namespace` | a namespace supplied as an unknown field | rejected or pruned; assert the observed behaviour |
