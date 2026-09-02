@@ -694,6 +694,16 @@
           "title": "certmanager",
           "type": "object"
         },
+        "hub": {
+          "default": "",
+          "description": "Alias for `imageRegistry`, consulted only when that is empty. Present so an umbrella\nchart can set a single registry value for Istio-derived subcharts and this one alike.",
+          "required": [],
+          "title": "hub",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "imageNamespace": {
           "default": "",
           "description": "Image namespace override applied to every image this chart renders, the subcharts'\nworkloads, sidecars and hook Jobs included. When non-empty it replaces the namespace\nsegment of each image reference (e.g. \"gpustack\").",
@@ -722,7 +732,7 @@
         },
         "imageRegistry": {
           "default": "",
-          "description": "Image registry override applied to every image this chart renders, the subcharts'\nworkloads, sidecars and hook Jobs included (e.g. \"docker.io\"). When empty, the registry\neach image reference already encodes is used as-is.",
+          "description": "Image registry override applied to every image this chart renders, the subcharts'\nworkloads, sidecars and hook Jobs included (e.g. \"docker.io\"). When empty, `global.hub`\nis consulted next — an alias for umbrella charts that also carry Istio-derived subcharts,\nwhich read `hub` and will keep doing so upstream, so one value can mirror every image\ninstead of two that have to be kept equal. When both are empty, the registry each image\nreference already encodes is used as-is.",
           "title": "imageRegistry",
           "type": "string"
         },

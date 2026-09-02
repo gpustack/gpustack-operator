@@ -21,9 +21,18 @@ cleanupOnUninstall: false
 # -- Global values shared across the chart and its subcharts.
 global:
   # -- Image registry override applied to every image this chart renders, the subcharts'
-  # workloads, sidecars and hook Jobs included (e.g. "docker.io"). When empty, the registry
-  # each image reference already encodes is used as-is.
+  # workloads, sidecars and hook Jobs included (e.g. "docker.io"). When empty, `global.hub`
+  # is consulted next — an alias for umbrella charts that also carry Istio-derived subcharts,
+  # which read `hub` and will keep doing so upstream, so one value can mirror every image
+  # instead of two that have to be kept equal. When both are empty, the registry each image
+  # reference already encodes is used as-is.
   imageRegistry: ""
+  # @schema
+  # type: [string, null]
+  # @schema
+  # -- Alias for `imageRegistry`, consulted only when that is empty. Present so an umbrella
+  # chart can set a single registry value for Istio-derived subcharts and this one alike.
+  hub: ""
   # -- Image namespace override applied to every image this chart renders, the subcharts'
   # workloads, sidecars and hook Jobs included. When non-empty it replaces the namespace
   # segment of each image reference (e.g. "gpustack").

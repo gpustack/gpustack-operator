@@ -76,7 +76,13 @@ image tag no registry serves.
 {{- with $root.Values.global.imageNamespace -}}
 {{- $repository = printf "%s/%s" . (last (splitList "/" $repository)) -}}
 {{- end -}}
-{{- with $root.Values.global.imageRegistry -}}
+{{- /*
+    `global.hub` is accepted as an alias so an umbrella chart carrying Istio-derived
+    subcharts — which read `hub` and will keep doing so upstream — can mirror every
+    image with one value instead of two that must be kept equal. `imageRegistry` wins
+    when both are set, so a release already setting it is unaffected.
+  */ -}}
+{{- with (coalesce $root.Values.global.imageRegistry $root.Values.global.hub) -}}
 {{- $registry = trimSuffix "/" . -}}
 {{- end -}}
 {{- with $registry -}}

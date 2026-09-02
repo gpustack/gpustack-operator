@@ -192,7 +192,13 @@ Pass a dict: (dict "root" $ "image" .Values.controllerManager.manager.image).
 {{- with $global.imageNamespace -}}
 {{- $repository = printf "%s/%s" . (last (splitList "/" $repository)) -}}
 {{- end -}}
-{{- with $global.imageRegistry -}}
+{{- /*
+    `global.hub` is accepted as an alias so an umbrella chart carrying Istio-derived
+    subcharts — which read `hub` and will keep doing so upstream — can mirror every
+    image with one value instead of two that must be kept equal. `imageRegistry` wins
+    when both are set, so a release already setting it is unaffected.
+  */ -}}
+{{- with (coalesce $global.imageRegistry $global.hub) -}}
 {{- $registry = trimSuffix "/" . -}}
 {{- end -}}
 {{- with $registry -}}
