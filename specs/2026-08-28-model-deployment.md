@@ -1259,8 +1259,11 @@ Checkpoints: after T1 (nothing user-visible; the CRD installs); after T4 (a depl
 Pods that reach Ready); after T6 (the connector is rendered); after T9 (the whole status is
 truthful); after T13 (the headline claim is measured and recorded).
 
-- [ ] **T1 · Land the API type and get `make generate` green, nothing else**
+- [x] **T1 · Land the API type and get `make generate` green, nothing else**
   Blocked by: none
+  Delivered: `api/worker/v1alpha1/model_deployment.go` plus the generated set under
+  `api/worker/**` and `pkg/kubeclients/**`. No commit hash is recorded here on purpose: the ship
+  flow squashes this branch by module, so any hash written into this file would stop resolving.
   Owns: `api/worker/v1alpha1/model_deployment.go`, `api/worker/v1alpha1/zz_generated.*`,
   `api/worker/v1alpha1/generated.proto`, `api/worker/v1alpha1/generated.pb.go`
   Gate: review
@@ -1277,8 +1280,12 @@ truthful); after T13 (the headline claim is measured and recorded).
   --exit-code`; `go build ./api/...`; `git diff --stat api/` shows the new file plus regenerated
   files and nothing under `pkg/`.
 
-- [ ] **T2 · The validating webhook: every shape rule**
+- [x] **T2 · The validating webhook: every shape rule**
   Blocked by: T1
+  Delivered: `pkg/worker/webhooks/worker/model_deployment.go` and its test, registered in
+  `pkg/worker/webhooks/setup.go`. **Partially:** the `poolRef` existence rule and the two
+  InstanceType-dependent resource rules are not written, because both need a client and a type this
+  branch does not have yet; they land with T3.
   Owns: `pkg/worker/webhooks/worker/model_deployment.go`,
   `pkg/worker/webhooks/worker/model_deployment_test.go`,
   `pkg/worker/webhooks/worker/zz_generated.webhooks.go`, `pkg/worker/webhooks/setup.go`
@@ -1347,7 +1354,9 @@ truthful); after T13 (the headline claim is measured and recorded).
   both.
   Verify: `go test ./pkg/worker/controllers/worker/ -run ModelDeploymentRender`
 
-- [ ] **T6 · Connector synthesis for the three engines**
+- [x] **T6 · Connector synthesis for the three engines**
+  Delivered: `pkg/worker/controllers/worker/model_deployment_connector.go` and its test — the
+  owned-key table, the per-engine client config, and each engine's own launch command.
   Blocked by: T1 — **not T3**: the function takes the domain and the pool endpoints as plain values,
   so it is written and tested against a local input struct that T3 later fills from the Binding.
   Owns: `pkg/worker/controllers/worker/model_deployment_connector.go` + its test
