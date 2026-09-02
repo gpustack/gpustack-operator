@@ -32,6 +32,7 @@ one, not to widen the overview.
 | Chart mode vs image mode, `disableApplications`, what the worker applies itself | `docs/architecture/installation-modes.md` |
 | Startup ordering, the gateway mirror, the device-plugin registration loop, per-manufacturer packages, CGO bindings, the 63-char rule | `docs/architecture/internals.md` |
 | A `KVCacheBackend`'s workloads, its admin surface, its phase or capacity | `docs/kv-cache/backend.md` |
+| A `KVCachePool` or `KVCachePoolBinding`: the grant, the reuse domain, a quota ceiling or grant, what a full quota does | `docs/kv-cache/pool.md` |
 | A resource key, a request rule, a request example | `docs/accelerator-requests.md` |
 | A `Setting` or a `GPUSTACK_*` variable | `docs/settings.md` |
 | A make target, a subchart patch, code generation, a vendored dependency | `docs/development.md` |

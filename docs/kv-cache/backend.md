@@ -417,7 +417,8 @@ judging on another is how an object goes missing from its own teardown.
 
 ---
 
-**See also** — [Admission](../architecture/admission.md) (the gates and the four-view status pattern) ·
+**See also** — [KV Cache Pool](pool.md) (how a namespace is granted a quota on this store, and what a
+quota ceiling buys) · [Admission](../architecture/admission.md) (the gates and the four-view status pattern) ·
 [Settings & Environment Variables](../settings.md) (the `kv-cache-backend-image` Setting) ·
 [Installation Modes](../architecture/installation-modes.md) (why the CRD is applied by the worker, not the chart)
 

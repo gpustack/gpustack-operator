@@ -111,7 +111,8 @@ are in [Device Discovery](architecture/device-discovery.md#device-accelerator-re
 - [Installation Modes](architecture/installation-modes.md) — chart mode versus image mode.
 - [Internals](architecture/internals.md) — startup order and the invariants that fail silently.
 - [KV Cache Backend](kv-cache/backend.md) — a separate chain: running and observing a
-  pooled KV cache for inference workloads.
+  pooled KV cache for inference workloads; quota over that cache is granted per namespace through
+  [KV Cache Pool](kv-cache/pool.md).
 - [Walkthrough](walkthrough.md) — all of it recorded on a live cluster, with real output.
 
 Every page, with its audience and read time, is in the [documentation index](README.md).

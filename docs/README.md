@@ -55,6 +55,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [Installation Modes](architecture/installation-modes.md) | Chart mode vs image mode; which objects the worker must apply itself | operators, contributors | ~3 min |
 | [Internals](architecture/internals.md) | Startup ordering, the gateway mirror, the device-plugin registration loop, per-manufacturer packages, CGO bindings, the 63-char rule | contributors | ~5 min |
 | [KV Cache Backend](kv-cache/backend.md) | How a Mooncake store is run and observed; why capacity is read and not summed, and why shrinking a group drops its cache | operators, contributors | ~14 min |
+| [KV Cache Pool](kv-cache/pool.md) | How a namespace is granted a quota on a store, what a quota ceiling buys, and why a full quota discards data instead of refusing writes | operators, contributors | ~12 min |
 | [Accelerator Requests](accelerator-requests.md) | The resource keys per family and the seven rules admission enforces, with worked examples | users, contributors | ~11 min |
 | [Walkthrough](walkthrough.md) | A recorded end-to-end run: every object, before/after each operation | everyone | ~12 min |
 | [Settings & Environment Variables](settings.md) | Online-adjustable settings, every `GPUSTACK_*` env, per-manufacturer overrides, toolkit paths | operators | ~8 min |
