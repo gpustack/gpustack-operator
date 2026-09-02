@@ -14,14 +14,19 @@ while the `Instance` CRD — one Pod, hard, and immutable after creation — cou
 replicas nor the one-replica-many-Pods shape the next spec needs.
 
 The workload does **not** declare its reuse domain; it inherits the Binding's. Two `ModelDeployment`s
-referencing the same Binding share KV, two referencing different Bindings do not, and name matching
-between workloads disappears along with a whole class of typo. The engine command line is the
-fastest-moving thing in the design, so it has a three-tier escape hatch — append, overlay, take over
-— guarded by two webhook rules that refuse a silent merge on a key the operator owns and keep the
-scheduling scalars out of the template. And because a flag being accepted proves nothing about it
-being in effect, `CacheAttached` is judged on the cache client's own health server answering on each
-replica — never on the operator having rendered the flag, and never on a figure the whole reuse
-domain shares.
+referencing the same Binding share KV, and name matching between workloads disappears along with a
+whole class of typo. ⛔ **The domain is not yet enforced at the storage layer, and this spec ships
+saying so**: `tenant_id` is a parameter past the positional cut every supported engine stops at, so
+every deployment reaches the cache as the tenant named `default` (F4). The API property that matters
+survives — a workload still cannot name a domain, so it cannot mint tenants to escape a quota
+ceiling — and the missing half is enforcement downstream of the API, which is upstream's to land.
+
+The engine command line is the fastest-moving thing in the design, so it has a three-tier escape
+hatch — append, overlay, take over — guarded by two webhook rules that refuse a silent merge on a
+key the operator owns and keep the scheduling scalars out of the template. And because a flag being
+accepted proves nothing about it being in effect, `CacheAttached` is judged on each replica's own
+engine reporting its connector initialized — never on the operator having rendered the flag, and
+never on a figure a whole shared tenant contributes to.
 
 This spec delivers the **single-role** form. `roles` exists as a list and is validated as length 1;
 multiple roles, P/D disaggregation and cross-role atomic admission are the next spec's.
@@ -51,7 +56,11 @@ matters of taste:
   exceeds what a single replica achieves on the same request stream. This is the claim the whole
   spec exists to make demonstrable; the numbers are recorded (F10, Test Plan).
 - **G2** The reuse domain is an **admin-controlled** property a workload inherits, never one it
-  names — so the namespace quota ceiling cannot be escaped by minting tenants (F3).
+  names — so the namespace quota ceiling cannot be escaped by minting tenants (F3). ⛔ This is met at
+  the **API** layer, which is where the escape it prevents would have happened. It is **not** met
+  downstream: `tenant_id` reaches no supported engine, so the domain a deployment inherits does not
+  yet reach the cache (F4). The spec reports that rather than implying otherwise, and closing it is
+  upstream's to land.
 - **G3** A `ModelDeployment` enters the existing five-gate admission chain **as Pods**, with no new
   gate, no new controller in the chain, and no change to the four-view status (F1).
 - **G4** The engine command line has an **escape hatch that the reconcile loop respects**: a user's
@@ -289,8 +298,12 @@ Acceptance:
   rather than assuming pruning or rejection.
 - `status.kvCache.domain` echoes the Binding's `name`, `blockSize` and `dtype`, so an operator reads
   the attached domain off this object alone (G6).
-- Two deployments on one Binding, and two on two Bindings, behave as stated above — asserted end to
-  end (Test Plan).
+- Two deployments on one Binding share KV — asserted end to end (Test Plan).
+- ⛔ Two on **two** Bindings not sharing is **not** asserted, because no supported engine passes
+  `tenant_id` to the cache client, so every deployment lands in the tenant named `default` (F4). The
+  semantics above are the API's and the design's; the enforcement is upstream's and is not there
+  yet. The gap is stated here, in `status`, in the reference page and in case-47 rather than being
+  left for a reader to infer from a passing test suite.
 
 #### F4 — `connector: auto` — the operator synthesizes the transfer config
 
@@ -308,61 +321,105 @@ answers (routing plane / workload / cache CR), of which **workload is the most d
 the connector is tightly coupled to the *engine version*, and the engine version belongs to the
 workload.**
 
-Under `auto`, and per engine, the operator renders:
+**Each engine reads a config reader of its own, and the operator renders what that reader reads.**
+This is the single most important measured fact in F4, because the obvious design — drive Mooncake's
+own configuration loader, which documents every key including the reuse domain — configures a loader
+that **no supported engine calls**. Each of the three ships its *own* `MooncakeStoreConfig` class,
+with its own key set and its own mandatory source:
 
-| Engine | Argument the operator adds | Where `tenant_id` goes |
+| Engine (pinned) | Its config reader | Source it demands | Keys it reads |
+|---|---|---|---|
+| `vllm` `v0.25.1` | `vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/worker.py` | **`MOONCAKE_CONFIG_PATH`, or it raises** | `metadata_server`, `master_server_address`, `protocol`, `device_name`, `mode`, `global_segment_size`, `local_buffer_size`, `enable_offload` |
+| `vllm-ascend` `v0.19.1rc1` | `vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/backend/mooncake_backend.py` | **`MOONCAKE_CONFIG_PATH`, or it raises** (its `load_from_env` only reads that one path) | `metadata_server`, `global_segment_size`, `local_buffer_size`, `protocol`, `device_name`, `master_server_address` |
+| `sglang` `gateway-v0.3.1-1689` | `python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_store.py` | in order: `--hicache-storage-backend-extra-config` → `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` → its own `MOONCAKE_*` environment | the six above plus `master_metrics_port`, `check_server`, `standalone_storage`, `client_server_address` |
+
+So, under `auto`, per engine, the operator renders:
+
+| Engine | Argument the operator adds | How the client is configured |
 |---|---|---|
-| `vllm` | `--kv-transfer-config` enabling `MooncakeStoreConnector` | `MOONCAKE_TENANT_ID` |
-| `vllm-ascend` | `--kv-transfer-config` selecting `MultiConnector` | `MOONCAKE_TENANT_ID` |
-| `sglang` | `--hicache-storage-backend` + `--hicache-storage-backend-extra-config` | `MOONCAKE_TENANT_ID` |
+| `vllm` | `--kv-transfer-config` selecting `MooncakeStoreConnector` | a mounted JSON + `MOONCAKE_CONFIG_PATH` |
+| `vllm-ascend` | `--kv-transfer-config` selecting `AscendStoreConnector` | a mounted JSON + `MOONCAKE_CONFIG_PATH` |
+| `sglang` | `--hicache-storage-backend mooncake` + `--hicache-storage-backend-extra-config` | a mounted JSON + `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` |
 
-**The client is configured entirely through environment, and there is no ConfigMap.** The three
-engines differ in the argument that selects the connector; they do not differ in how the client
-underneath is configured, so the environment block below is the same for all three:
+⚠️ **`vllm-ascend` selects `AscendStoreConnector`, not `MultiConnector`**, and the difference is
+not cosmetic. `vllm-ascend` re-registers `MultiConnector` to its own `AscendMultiConnector`, which
+is a **composite** for running several connectors at once — a P2P connector beside a store
+connector, say. The connector that reaches the Mooncake store is `AscendStoreConnector` (also
+registered as `MooncakeConnectorStoreV1`), and its worker resolves the store backend from a
+`backend` extra-config key that **already defaults to `mooncake`**, so the operator sets that key
+too: not at all. Selecting the composite for a single-role deployment would add a layer with
+nothing to compose.
 
-| Variable | Source | Note |
-|---|---|---|
-| `MOONCAKE_MASTER` | the pool's `status.clientEndpoint` | its presence is what selects the environment branch at all |
-| `MOONCAKE_TE_META_DATA_SERVER` | the pool | |
-| `MOONCAKE_PROTOCOL` | the pool | |
-| `MOONCAKE_DEVICE` | the pool | the client's *environment* spelling of the RDMA device list |
-| `MOONCAKE_TENANT_ID` | the Binding's domain `name` | the reuse domain |
-| `MOONCAKE_LOCAL_HOSTNAME` | **`fieldRef: status.podIP`**, per replica | see below |
-| `MOONCAKE_ENABLE_CLIENT_HTTP_SERVER` | `true`, set by the operator | the observation surface F8 judges on |
-| `MOONCAKE_CLIENT_HTTP_PORT` | `9300`, the client's own default | |
-| `MC_TE_METRIC` | `1`, **defaulted** not owned (F5, F10) | |
+`kv_role` is rendered as `kv_both`, and it is not optional: vLLM refuses a `kv_connector` with no
+`kv_role`. `kv_both` is the value that is simultaneously a valid producer and a valid consumer,
+which is what a store-backed cache shared between replicas needs — each replica both fills the
+cache and reads from it.
 
-**Why environment rather than a mounted JSON, stated from the shipped client.** In
-`mooncake-wheel/mooncake/mooncake_config.py` (measured at `v0.3.13-rc1`):
+The JSON is rendered into a `ConfigMap` owned by the `ModelDeployment` and mounted read-only into
+every replica of the role. It is **one ConfigMap per deployment rather than one per replica**, and
+that is now a measured claim rather than an assumption: every key any of the three readers takes is
+deployment-wide, because **none of them reads `local_hostname` from the file at all** — each derives
+it per process (see below). The key set rendered is the union the selected engine reads, and no
+more: a key an engine's reader ignores is a key that documents a wiring that is not happening.
 
-- `local_hostname` is listed in `_REQUIRED_NON_EMPTY_FIELDS`, and `MooncakeConfig.from_file()` raises
-  `Missing required config field: local_hostname` when the key is absent. **It is not defaulted from
-  the host's own address.** A deployment-wide JSON therefore cannot omit the key — and cannot supply
-  it either, because one file is one string for every replica, while the value is the address peers
-  reach *this* replica's segment on.
-- `MooncakeConfig.load_from_env()` reads `MOONCAKE_LOCAL_HOSTNAME`, and its own default is the
-  literal `"localhost"` — also not the host address, so the environment branch does not rescue an
-  unset value either. The operator therefore always sets it, from the downward API.
-- The two branches are **exclusive, not layered**: `load_from_env()` returns
-  `MooncakeConfig.from_file(config_file_path)` as soon as `MOONCAKE_CONFIG_PATH` is set, and reads no
-  environment variable at all on that path. There is no hybrid where a JSON carries the
-  deployment-wide values and an environment variable carries the per-replica one.
+⛔ **The reuse domain does not reach the storage layer on any of the three engines, and this spec
+ships saying so rather than implying otherwise.** `tenant_id` is the **11th** parameter of
+`MooncakeDistributedStore.setup()`. All three engines call `setup()` **positionally**, stopping at
+the 7th or 8th argument:
 
-The downward API supplies the one per-replica value with no ConfigMap, no per-replica object, and no
-entrypoint prelude — the last of which would have collided with the take-over tier, since a user who
-owns the whole argv owns the entrypoint too.
+- `vllm` `.../store/worker.py:1040` — 7 positional arguments, through `master_server_address`.
+- `vllm-ascend` `.../mooncake_backend.py:42` — 8, adding the transfer engine.
+- `sglang` `.../mooncake_store.py:372` — 8, likewise.
+
+And there is **no fallback that could rescue it**: in `mooncake-integration/store/store_py.cpp:2234`
+`tenant_id` is a pybind argument defaulting to the literal `"default"`; the C++ client reads no
+`MOONCAKE_TENANT_ID` anywhere; and the only reader of that variable is Mooncake's own
+`mooncake_config.py` / `mooncake_store_service.py`, which no engine uses. **None of the three
+engines' config classes carries a `tenant_id` key at all** — `tenant` does not appear anywhere under
+`vllm/distributed/kv_transfer/` or `python/sglang/`.
+
+⚠️ The vendor's own `docs/source/deployment/multi-tenancy.md` has a *SGLang* section and a *vLLM*
+section describing exactly this wiring. **The shipped engine integrations do not implement it.** This
+is the same failure this spec's F8 was written for, one level up: the documentation is not the
+artifact, and a documented key is worth no more than a rendered flag.
+
+Consequences, stated plainly so that nobody reads this CR as delivering more than it does:
+
+- Every deployment on these engine versions writes into the tenant named `default`, whatever domain
+  its Binding declares.
+- **F3's API property still holds and is the durable half**: a workload cannot name its own domain,
+  so the escape-hatch-to-unlimited-tenants attack the design exists to prevent is still
+  unrepresentable. What is missing is enforcement *downstream* of the API, not in it.
+- **The isolation half of case-47 cannot pass yet** and is recorded as deferred with this reason,
+  rather than being quietly dropped or asserted against a mechanism that is not there. The sharing
+  half — and G1's headline measurement — are unaffected, because one shared `default` tenant shares
+  KV perfectly well.
+- `status.kvCache.domain` therefore reports **what the Binding declares**, which is what the operator
+  needs in order to diagnose sharing, and the reference page states in one line that the domain is
+  not yet enforced at the storage layer. A status field that claimed enforcement would be the
+  design's own anti-pattern.
+
+The route to enforcement is upstream: `tenant_id` reaching `setup()` in each engine. When it lands,
+the operator adds one key to the rendered JSON and case-47's second half flips from deferred to
+asserted — **nothing lands here that would have to be un-landed.**
+
+⚠️ **`local_hostname` needs nothing from the operator, and this is why the earlier plan to render it
+was wrong.** Each engine derives it per process: `vllm` from
+`get_requester_local_hostname(get_ip())`, overridable by `MOONCAKE_REQUESTER_LOCAL_HOSTNAME`;
+`vllm-ascend` from `get_ip()`; `sglang` from `MOONCAKE_LOCAL_HOSTNAME`, falling back to
+`LOCAL_HOSTNAME` and then to its own default. **The operator sets none of them**, because a
+per-replica value the engine already computes correctly is one the operator can only get wrong.
 
 ⚠️ **Three surfaces spell the RDMA device list three different ways** — `setup()`'s positional
-parameter is `rdma_devices`, the JSON key is `device_name`, and the environment variable is
-`MOONCAKE_DEVICE`. This spec renders the environment, so `MOONCAKE_DEVICE` is the one that matters
-here; the other two are recorded because the same fact under three names is how a reader concludes
-one of them is a typo.
+parameter is `rdma_devices`, the JSON key every engine uses is `device_name`, and Mooncake's own
+environment variable is `MOONCAKE_DEVICE`. This spec renders the engines' JSON, so **`device_name`**
+is the spelling that matters here; the other two are recorded because the same fact under three
+names is how a reader concludes one of them is a typo.
 
-⚠️ **The environment branch is Mooncake's own config loader.** Whether each engine's connector
-reaches the client through that loader — rather than through a config reader of its own that insists
-on `MOONCAKE_CONFIG_PATH` — is per-engine, and T6 confirms it per engine before the golden fixtures
-freeze. An engine that turns out to need the JSON gets the JSON *and* a per-replica object, which is
-why the fixtures are frozen after the check rather than before.
+⚠️ **`vllm` alone has a `mode` key with a cross-field rule**: `embedded` requires
+`global_segment_size > 0` and `standalone-store` requires it to be exactly `0`. Since the operator
+does not choose segment sizes (below), it does not choose `mode` either — it renders neither, and
+lets that reader's defaults agree with each other.
 
 **What the operator does not choose.** `global_segment_size` and `local_buffer_size` size a
 replica's own contribution to the pool. The operator leaves them at the client's defaults and does
@@ -381,13 +438,19 @@ at admission can see inside an image.
 
 Acceptance:
 
-- For each of the three engines, the rendered Pod carries exactly the arguments and environment in
-  the tables above, asserted against a golden fixture per engine.
-- `MOONCAKE_TENANT_ID` equals the Binding's domain name, and `MOONCAKE_LOCAL_HOSTNAME` is a
-  `fieldRef` to `status.podIP` rather than a literal — asserted on the rendered `EnvVar`, because a
-  literal that happens to be correct for one replica is wrong for the other three.
-- **No ConfigMap is created**, and no volume is mounted for client configuration.
-- Changing the Binding's pool endpoint re-renders the environment; the replicas restart to pick it up
+- For each of the three engines, the rendered Pod carries exactly the argument and the config-path
+  variable in the tables above, and the ConfigMap carries exactly the keys that engine's reader
+  reads — asserted against a golden fixture per engine.
+- The ConfigMap is owned by the `ModelDeployment` and mounted read-only into every replica; one
+  ConfigMap per deployment, mounted into all of them.
+- **No `local_hostname` key is rendered**, for any engine — a test asserts its absence, because the
+  engine computes it per process and a deployment-wide value would be wrong for every replica but
+  one.
+- **No `tenant_id` key is rendered either, and a test asserts that absence too** — rendering a key
+  no reader reads would document a wiring that is not happening, which is the failure mode this
+  spec's whole `CacheAttached` design exists to refuse. The test carries the reason, so that whoever
+  deletes it when upstream lands `tenant_id` knows what they are changing.
+- Changing the Binding's pool endpoint re-renders the ConfigMap; the replicas restart to pick it up
   under F10's recreate policy rather than silently.
 
 #### F5 — Three-tier override of the engine command line, and two webhook rules
@@ -412,31 +475,32 @@ tier that owns it.
 The rule needs a precise notion of "owned", because the operator sets more keys than it owns:
 
 - **Owned** — the operator will refuse a user-supplied duplicate, because duplication is
-  undiagnosable. The catalogue is a data table keyed by (engine, key): the `--kv-transfer-config`
-  family, `--hicache-storage-backend` and `--hicache-storage-backend-extra-config`; and, for every
-  engine, the client environment the operator renders — `MOONCAKE_MASTER`,
-  `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_TENANT_ID`,
-  `MOONCAKE_LOCAL_HOSTNAME`, `MOONCAKE_ENABLE_CLIENT_HTTP_SERVER`, `MOONCAKE_CLIENT_HTTP_PORT` and
-  `MOONCAKE_CONFIG_PATH`. Adding an engine adds rows; the webhook reads the table rather than a
-  hard-coded list, so the rule and the renderer can never disagree about what is owned.
+  undiagnosable. The catalogue is a data table keyed by (engine, key), and it holds exactly what the
+  operator renders for that engine:
 
-  Two of those are owned for a reason worth stating, because neither is a duplicate of anything the
-  operator renders:
+  | Engine | Owned arguments | Owned environment |
+  |---|---|---|
+  | `vllm` | `--kv-transfer-config` | `MOONCAKE_CONFIG_PATH` |
+  | `vllm-ascend` | `--kv-transfer-config` | `MOONCAKE_CONFIG_PATH` |
+  | `sglang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config` | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` |
 
-  - **`MOONCAKE_CONFIG_PATH` is owned although the operator never sets it.** Setting it flips the
-    client from the environment branch to `from_file` and discards *every* variable above in
-    silence — the deployment then runs against whatever that file says, including another tenant's
-    domain. It is refused rather than rendered: the one key whose ownership is about what it
-    destroys rather than what it duplicates.
-  - **`MOONCAKE_ENABLE_CLIENT_HTTP_SERVER` and `MOONCAKE_CLIENT_HTTP_PORT` are owned** because F8's
-    primary observation is read from that server. A user free to turn it off would move
-    `CacheAttached` to `Unknown` permanently with nothing saying why; refusing the key says why at
-    the moment of the attempt.
+  Adding an engine adds rows; the webhook reads the table rather than a hard-coded list, so the rule
+  and the renderer can never disagree about what is owned.
+
+  The config-path variable is the load-bearing one, and it is owned for a reason worth stating: it
+  is the **only** pointer to the file the operator wrote. A user who re-points it silently swaps the
+  whole client configuration — pool endpoint, protocol, transport — for whatever that other file
+  says, and every symptom appears one layer away from the cause. The refusal names the tier that
+  owns it.
+
+  ⚠️ **Ownership is per engine and the table is what says so.** `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`
+  is meaningless to `vllm` and is an ordinary user variable there. This is exactly the case the
+  `extra_args_owned_key_wrong_engine` test pins.
 - **Defaulted** — the operator supplies a value only where the user supplied none, because
   duplication is harmless and last-wins is well defined. `MC_TE_METRIC` is the case that matters
-  (F10): the operator sets it, and a user may turn it off. `MC_STORE_CLIENT_METRIC` is defaulted too
-  — the operator leaves it alone, and a user setting it to `0` makes `/metrics` answer `503` while
-  `/health` keeps working, which is why F8 reads `/health`.
+  (F10): the operator sets it, and a user may turn it off. It is read by the transfer engine itself
+  rather than by any engine's config class, which is why it is reachable at all where
+  `MOONCAKE_TENANT_ID` is not.
 
 **Rule 2 — the scheduling scalars must not be inferrable from the template.** `replicas`,
 `instanceType` and (in the next spec) `parallelism` are inputs to admission and scheduling — Kueue
@@ -546,17 +610,30 @@ Level-based, evaluated every reconcile:
 
 Two signals, in order:
 
-1. **Primary — the Mooncake store client's own HTTP server answers `GET /health` on a replica of
-   this deployment.** The operator enables it (`MOONCAKE_ENABLE_CLIENT_HTTP_SERVER`, F4) and knows
-   its port, and it is scraped per replica at the Pod's own address. It has the three properties the
-   condition needs and nothing else has all three:
-   - **Attributable.** It is answered by *this* replica's client process, so a sibling deployment
-     sharing the same reuse domain cannot answer for it.
-   - **Available at init, without traffic.** The server binds when the client comes up, so an
-     attached but idle deployment is not reported detached.
-   - **An effect, not an echo.** A client that failed to import its wheel, or failed to reach the
-     master, never binds the port at all — so a bound port is downstream of the thing being judged,
-     unlike a rendered flag or a log line repeating one back.
+1. **Primary — the engine's own metrics endpoint, on a replica of this deployment, reports its KV
+   connector initialized.** It is scraped per replica at the Pod's own address. It has the three
+   properties the condition needs, and it is the only reachable signal that has all three:
+   - **Attributable.** It is *this* replica answering about its own connector, so a sibling
+     deployment sharing the same reuse domain cannot answer for it.
+   - **Available at init, without traffic.** Connector initialization happens when the engine comes
+     up, so an attached but idle deployment is not reported detached.
+   - **An effect, not an echo.** A connector that failed to import its per-vendor wheel, or failed
+     to reach the master, does not report itself initialized — so the report is downstream of the
+     thing being judged, unlike a rendered flag or a log line repeating one back.
+
+   It is the engine's own account of itself, which is a real limitation, but it is the account of
+   the component that either did or did not attach.
+
+   ⛔ **Why not the cache client's own health server, which would have been better.** The Mooncake
+   store client can serve `GET /health`, `/metrics` and `/metrics/summary` on port 9300 —
+   per-client, bound at init, one layer closer to the thing being judged than the engine's own
+   report. **It is unreachable on all three supported engines.** `enable_client_http_server` is the
+   **12th** parameter of `setup()`, past the 7-or-8 positional arguments every engine passes (F4);
+   there is no `MOONCAKE_ENABLE_CLIENT_HTTP_SERVER` in the C++ client; and the one escape hatch,
+   `FLAGS_enable_http_server` at `mooncake-store/src/real_client.cpp:1147`, is a gflags flag whose
+   `ParseCommandLineFlags` is called only by standalone binaries — never inside the Python
+   extension, so loaded in an engine process it stays at its compiled `false`. Recorded because it
+   is the signal to switch to the moment any engine passes that argument.
 2. **Corroborating — the Binding's `status.usage` / `status.blocks` show the reuse domain holding
    data.** This is stronger evidence in one respect: it is the master's own account of bytes that
    actually landed. It is used where signal 1 cannot be read at all.
@@ -585,9 +662,9 @@ Acceptance:
 
 - Breaking the config on purpose drives `CacheAttached` away from `True` — asserted by a test that
   breaks it, not by asserting the happy path only. Two vehicles:
-  - **Unit, deterministic:** a fake scraper whose `/health` probe fails on every replica, over a
-    deployment whose replicas have been Ready past the window and whose Binding reports no held
-    data, yields `False` / `NoCacheActivity`.
+  - **Unit, deterministic:** a fake scraper reporting the connector uninitialized on every replica,
+    over a deployment whose replicas have been Ready past the window and whose Binding reports no
+    held data, yields `False` / `NoCacheActivity`.
   - **End to end:** an engine image without the matching per-vendor `mooncake-transfer-engine`
     wheel, and separately a Binding pointing at an unreachable pool. The engine's failure policy on
     a broken connector is not something this spec can predict — it may abort at init or serve on
@@ -737,17 +814,17 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
   #  or setup(config: dict) -> int
   ```
 
-  The parameter is **`rdma_devices`**; the JSON key for the same thing is `device_name` and the
-  environment variable is `MOONCAKE_DEVICE` — one fact under three spellings, which is worth writing
-  down once so a reader does not conclude two of them are typos. `tenant_id` is what carries the
-  reuse domain.
+  The parameter is **`rdma_devices`**; the JSON key for the same thing is `device_name` and
+  Mooncake's own environment variable is `MOONCAKE_DEVICE` — one fact under three spellings, which is
+  worth writing down once so a reader does not conclude two of them are typos.
 
-  The last two parameters are F8's observation surface: `enable_client_http_server` binds a
-  client-local HTTP server on `client_http_port` (default 9300) serving `GET /health`,
-  `GET /metrics` and `GET /metrics/summary`. F8 reads `/health` and not `/metrics`, because
-  `MC_STORE_CLIENT_METRIC=0` makes the metrics routes answer `503 metrics not available` while the
-  client is attached and healthy — a knob a user may legitimately set, and one that would otherwise
-  read as a detached deployment.
+  ⛔ **Read this signature by argument POSITION, because that is what decides what is reachable.**
+  `tenant_id` is 11th and `enable_client_http_server` is 12th, and every supported engine calls
+  `setup()` positionally with 7 or 8 arguments (F4). So the two parameters this design would most
+  like to use — the one that carries the reuse domain, and the one that binds the client's own
+  `/health` and `/metrics` on port 9300 — are both **past the cut and unreachable**, with no
+  environment fallback in the C++ client and no in-process gflags path. A signature is not an
+  interface until a caller passes the argument.
 - **Go names stay snake_case per file** (`model_deployment.go`, `model_deployment_render.go`), never
   flat-concatenated. The API group is `worker.gpustack.ai/v1alpha1`; types live in
   `api/worker/v1alpha1/`, controllers in `pkg/worker/controllers/worker/`, webhooks in
@@ -758,8 +835,11 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
 - **External references:**
   - Mooncake repository — <https://github.com/kvcache-ai/Mooncake>
   - Mooncake Store design — <https://kvcache-ai.github.io/Mooncake/design/mooncake-store.html>
-  - Mooncake multi-tenancy deployment (`tenant_id` wiring for vLLM and SGLang) —
+  - Mooncake multi-tenancy deployment —
     <https://kvcache-ai.github.io/Mooncake/deployment/multi-tenancy.html>
+    ⚠️ Its *vLLM* and *SGLang* sections describe a `tenant_id` wiring that the shipped engine
+    integrations of those two projects **do not implement** (F4). Cited for the master-side quota
+    API, which is accurate, and **not** as authority for how an engine reaches a tenant.
   - vLLM KV transfer / connector configuration — <https://docs.vllm.ai/>
   - SGLang HiCache storage backend — <https://docs.sglang.ai/>
   - Kueue concepts (queue-name entrance label, PodSets) —
@@ -811,16 +891,32 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
 - **A user's take-over command line silently drops the cache** → that is the point of marking the
   role `Unmanaged` and moving `CacheAttached` to `Unknown`: the deployment reports that nobody is
   claiming the cache works, instead of claiming it does.
+- **A reader takes the CR's domain plumbing for isolation it does not yet have** → this is the
+  largest honesty risk in the spec, because every layer *above* the engine does the right thing: the
+  admin declares the domain, the workload inherits it, `status` reports it, the pool registers it.
+  Only the last hop is missing, and a missing last hop is invisible from every layer above it. The
+  mitigation is that the gap is written in four places a reader actually reaches — the Summary, G2,
+  the reference page and case-47 — and that case-47 asserts the gap's own signature, so the claim
+  cannot silently drift back to being true-by-omission.
 - **A wrong `blockSize`/`dtype` pollutes the cache silently** → not fixable here (the fields are the
   Binding's, validated and immutable there), so this spec makes the attached domain visible on the
   workload object. The mitigation is visibility, and the spec says so rather than implying it
   prevents the failure.
-- **An idle deployment is reported as detached** → the `CacheAttached` predicate is the client's own
-  `/health`, which answers from init, not cache traffic, which appears only under load.
-- **A broken deployment reads as attached because a sibling on the same Binding is healthy** → the
+- **An idle deployment is reported as detached** → the `CacheAttached` predicate is the engine
+  reporting its connector initialized, which happens at startup, not cache traffic, which appears
+  only under load.
+- **A broken deployment reads as attached because a sibling sharing its tenant is healthy** → the
   predicate is scraped per replica at the Pod's own address, so a sibling cannot answer for it. The
   domain-level figures, which cannot attribute, are corroboration only and never the sole basis for
-  `True` while `/health` is readable.
+  `True` while the engine's report is readable. ⚠️ With `tenant_id` unreachable (F4) the shared
+  tenant is `default` and therefore **cluster-wide**, so the corroborating signal cannot even
+  distinguish namespaces — which makes the per-replica predicate load-bearing rather than merely
+  preferable.
+- **The engine's metrics report the connector only once traffic has been scheduled** → then the
+  init-time attributable signal does not exist on that engine version, and an idle deployment sits
+  at `Unknown` / `NoObservationAvailable`. That is the designed behaviour rather than a gap: the rule
+  is never `True` by assumption, and `Unknown` is what "nobody can say" looks like. T9 records, per
+  engine, which of the two shapes was observed.
 - **The engine aborts rather than degrades on a broken connector** → the e2e assertion is
   `CacheAttached != True`, which holds in both shapes, and the case records which one the engine
   took rather than assuming.
@@ -872,7 +968,7 @@ existing e2e skill:
 # from .claude/skills/gpustack-operator-e2e/ — build & load the dev image, helm install, run cases
 bash cases/case-45.sh    # replicas reach ready, endpoint serves
 bash cases/case-46.sh    # the headline: shared cache, hit rate beats a single replica
-bash cases/case-47.sh    # same Binding shares, different Bindings do not
+bash cases/case-47.sh    # same Binding shares; the isolation half is deferred, and says why
 bash cases/case-48.sh    # the deliberate break: CacheAttached is never True
 ```
 
@@ -1119,18 +1215,18 @@ truthful); after T13 (the headline claim is measured and recorded).
   Owns: `pkg/worker/controllers/worker/model_deployment_connector.go` + its test
   Gate: review
   Acceptance: a pure function over (engine, backend type, domain, pool endpoints) returns the
-  arguments and the environment, matching F4's two tables for `vllm`, `vllm-ascend` and `sglang`,
-  asserted against one golden fixture per engine. `MOONCAKE_TENANT_ID` = the domain name;
-  `MOONCAKE_LOCAL_HOSTNAME` is a `fieldRef` to `status.podIP` and never a literal; the RDMA device
-  list is `MOONCAKE_DEVICE`, not the JSON's `device_name` nor `setup()`'s `rdma_devices`. It sets
-  **neither** `MOONCAKE_GLOBAL_SEGMENT_SIZE` **nor** `MOONCAKE_LOCAL_BUFFER_SIZE` — a test asserts
-  their absence, because the operator inventing them is a silent capacity error. It sets
-  `MOONCAKE_ENABLE_CLIENT_HTTP_SERVER` and `MOONCAKE_CLIENT_HTTP_PORT`, which F8 has nothing to
-  scrape without, and `MC_TE_METRIC=1` as a **defaulted** key. **No ConfigMap and no config volume.**
-  Before the fixtures freeze, confirm per engine that its connector reaches the client through
-  Mooncake's own loader rather than one that insists on `MOONCAKE_CONFIG_PATH`; an engine that needs
-  the JSON gets a per-replica object and this task says so rather than rendering an environment the
-  engine ignores.
+  argument, the config-path environment variable and the client JSON, matching F4's tables for
+  `vllm`, `vllm-ascend` and `sglang`, asserted against one golden fixture per engine. **The JSON
+  carries exactly the keys the selected engine's own reader reads and no others** — the three key
+  sets differ, and rendering a key an engine ignores documents a wiring that is not happening. The
+  device list is the JSON's `device_name`, not `setup()`'s `rdma_devices` nor Mooncake's
+  `MOONCAKE_DEVICE`. It sets **neither** `global_segment_size` **nor** `local_buffer_size` — a test
+  asserts their absence, because the operator inventing them is a silent capacity error — and for
+  `vllm` therefore no `mode` either, so that reader's own defaults stay consistent. It sets
+  **no `local_hostname`** (every engine derives it per process) and **no `tenant_id`** (unreachable
+  on all three, F4), each absence asserted by a test that carries its reason. `MC_TE_METRIC=1` is
+  set as a **defaulted** key. The JSON is rendered into one deployment-owned ConfigMap mounted
+  read-only into every replica.
   Verify: `go test ./pkg/worker/controllers/worker/ -run ModelDeploymentConnector`
 
 - [ ] **T7 · One Service, one endpoint**
@@ -1160,20 +1256,23 @@ truthful); after T13 (the headline claim is measured and recorded).
   Blocked by: T3, T5, T8
   Owns: `pkg/worker/controllers/worker/model_deployment_cache_attached.go` + its test
   Gate: review
-  Acceptance: the condition follows F8's table exactly. The predicate is the **Mooncake store
-  client's own `GET /health`, scraped per replica at the Pod's address** — not cache traffic. A test
-  with `/health` answering and **zero** traffic yields `True`, which is the case that proves an idle
-  deployment is not reported detached. `/health` rather than `/metrics`, because a user setting
-  `MC_STORE_CLIENT_METRIC=0` makes `/metrics` answer `503` while the client is perfectly attached.
-  Where `/health` cannot be scraped, the Binding's `usage`/`blocks` corroborate; where neither can be
-  read the condition is `Unknown` / `NoObservationAvailable`. **An absent (nil) `usage`/`blocks` is
-  `Unknown`, never `False`** — absent is not an observed zero. It is **never** `True` because a flag
-  was rendered or a log line echoed it. A role marked `unmanaged` yields `Unknown` / `Unmanaged`
-  whatever is observed.
-  Two deterministic negative tests live here: a fake scraper failing `/health` on every replica of a
-  deployment Ready past the window, whose Binding holds nothing, yields `False` / `NoCacheActivity`;
-  and the same deployment sharing a Binding with a healthy sibling that *is* filling the domain still
-  yields `False`, which is the assertion that pins the predicate to a per-replica signal.
+  Acceptance: the condition follows F8's table exactly. The predicate is **the engine's own metrics
+  endpoint, scraped per replica at the Pod's address, reporting its KV connector initialized** — not
+  cache traffic. A test with the connector reported initialized and **zero** traffic yields `True`,
+  which is the case that proves an idle deployment is not reported detached. Where the engine cannot
+  be scraped, the Binding's `usage`/`blocks` corroborate; where neither can be read the condition is
+  `Unknown` / `NoObservationAvailable`. **An absent (nil) `usage`/`blocks` is `Unknown`, never
+  `False`** — absent is not an observed zero. It is **never** `True` because a flag was rendered or a
+  log line echoed it. A role marked `unmanaged` yields `Unknown` / `Unmanaged` whatever is observed.
+  The scraper is an **interface the reconciler takes**, not a dial it makes, because every case that
+  matters here is a failure and a real dial cannot be made to fail on demand.
+  Two deterministic negative tests live here: a fake scraper reporting the connector uninitialized on
+  every replica of a deployment Ready past the window, whose Binding holds nothing, yields `False` /
+  `NoCacheActivity`; and the same deployment sharing its tenant with a healthy sibling that *is*
+  filling the domain still yields `False`, which is the assertion that pins the predicate to a
+  per-replica signal. This task also records, per engine, whether the connector report appears at
+  startup or only once traffic has been scheduled — the second shape leaves an idle deployment at
+  `Unknown`, which is correct but worth knowing once.
   Verify: `go test ./pkg/worker/controllers/worker/ -run ModelDeploymentCacheAttached`
 
 - [ ] **T10 · Losing a replica: the event and the lease window**
@@ -1192,7 +1291,10 @@ truthful); after T13 (the headline claim is measured and recorded).
   Owns: `docs/reference/model-deployment.md`, `docs/README.md`, `docs/architecture.md`
   Gate: review
   Acceptance: a reference page states the CR's contract — the Binding-inherited domain and *why* a
-  workload cannot name one; the three override tiers with the owned-vs-defaulted key distinction and
+  workload cannot name one, **plus one plain sentence saying the domain is not yet enforced at the
+  storage layer on any supported engine and what that means for two deployments on two Bindings**
+  (F4), because a user who reads only the docs must not conclude they have isolation they do not
+  have; the three override tiers with the owned-vs-defaulted key distinction and
   the full owned-key table; `CacheAttached`'s predicate and every reason string; the recreate rollout
   policy and its cache cost; the **port-range, not port-list** NetworkPolicy requirement; and the
   benign startup error `E transfer_metadata.cpp:991] Local segment descriptor not found` with a line
@@ -1212,7 +1314,9 @@ truthful); after T13 (the headline claim is measured and recorded).
   `status.endpoint` serves inference; the rejections all fire (two roles with the message naming the
   spec, an owned key in `extraArgs`, `template.resources`, a missing Binding, a cross-namespace
   `poolRef`, a self-declared domain). **case-47** — two deployments on the **same** Binding share
-  blocks; two on **different** Bindings do not see each other's. **case-48** — the deliberate break:
+  blocks; the isolation half is deferred with `tenant_id`'s unreachability as the stated reason, and
+  asserts the gap's own signature so that the case fails when the gap closes. **case-48** — the
+  deliberate break:
   an image without the matching per-vendor wheel, and separately a Binding pointing at an unreachable
   pool; the assertion is `CacheAttached != True` in both, and the case **records which shape the
   engine took**. Each case reports its verdict through the suite's `lib.sh` rather than deciding for
@@ -1240,7 +1344,7 @@ make this code solid enough prior to committing the changes necessary to impleme
 
 #### Prerequisite testing updates
 
-- `pkg/worker/controllers/worker` needs a fake `KVCachePoolBinding` and a fake per-replica `/health`
+- `pkg/worker/controllers/worker` needs a fake `KVCachePoolBinding` and a fake per-replica connector
   scraper, so T3 and T9 test without a live pool or a live engine. Neither exists today. The scraper
   is a seam the reconciler takes as an interface rather than dialling directly, because the negative
   cases are the ones that matter and a real dial cannot be made to fail on demand.
@@ -1299,34 +1403,36 @@ accepted bad spec is worse than a refusal.
 
 | Case | Condition | Expected |
 |---|---|---|
-| `vllm_golden` | engine `vllm` | `--kv-transfer-config` enabling `MooncakeStoreConnector`, plus the client environment block |
-| `vllm_ascend_golden` | engine `vllm-ascend` | `--kv-transfer-config` selecting `MultiConnector` |
-| `sglang_golden` | engine `sglang` | `--hicache-storage-backend` + `-extra-config`, plus the client environment block |
-| `tenant_id_is_domain_name` | any engine | `MOONCAKE_TENANT_ID` equals the Binding's domain name |
-| `device_env_key` | any engine | the RDMA device list is rendered as `MOONCAKE_DEVICE`, never `device_name` or `rdma_devices` — the two spellings the other two surfaces use |
-| `local_hostname_is_fieldref` | 4 replicas | `MOONCAKE_LOCAL_HOSTNAME` is a `fieldRef` to `status.podIP`, never a literal — a literal is correct for at most one replica |
-| `no_segment_sizes` | any engine | `MOONCAKE_GLOBAL_SEGMENT_SIZE` and `MOONCAKE_LOCAL_BUFFER_SIZE` are **absent** |
-| `client_http_server_enabled` | any engine | `MOONCAKE_ENABLE_CLIENT_HTTP_SERVER` and `MOONCAKE_CLIENT_HTTP_PORT` are set — F8 has nothing to scrape otherwise |
+| `vllm_golden` | engine `vllm` | `--kv-transfer-config` selecting `MooncakeStoreConnector` with `kv_role: kv_both`, plus `MOONCAKE_CONFIG_PATH` |
+| `vllm_ascend_golden` | engine `vllm-ascend` | `--kv-transfer-config` selecting `AscendStoreConnector` — **not** `MultiConnector`, which is that project's composite |
+| `sglang_golden` | engine `sglang` | `--hicache-storage-backend mooncake` + `-extra-config`, plus `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` |
+| `keys_are_exactly_this_engines` | each engine | the JSON carries exactly the key set that engine's reader reads — no key it ignores, no key it needs missing |
+| `device_json_key` | any engine | the device list is the JSON's `device_name`, never `rdma_devices` or `MOONCAKE_DEVICE` — the two spellings the other surfaces use |
+| `no_local_hostname` | any engine | `local_hostname` is **absent**; the engine derives it per process and one file cannot hold a per-replica value |
+| `no_tenant_id` | any engine | `tenant_id` is **absent**, because no supported engine passes it to `setup()`; the test states the reason so its deletion is deliberate |
+| `no_segment_sizes` | any engine | `global_segment_size` and `local_buffer_size` are **absent** |
+| `no_mode_for_vllm` | engine `vllm` | `mode` is **absent**, so its cross-field rule against the segment size cannot be violated by an operator-chosen half |
+| `config_path_env_per_engine` | each engine | `vllm`/`vllm-ascend` get `MOONCAKE_CONFIG_PATH`, `sglang` gets `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` |
 | `mc_te_metric_default` | user set nothing | `MC_TE_METRIC=1` present |
 | `mc_te_metric_user_off` | user set `MC_TE_METRIC=0` | the user's value, no duplicate entry |
-| `no_configmap` | 4 replicas | **no ConfigMap is created and no config volume is mounted** |
+| `one_configmap_per_deployment` | 4 replicas | one ConfigMap, mounted read-only into all four |
 
 **`CacheAttached` cases** (`pkg/worker/controllers/worker`) — the negative cases are why this
 condition exists.
 
 | Case | Condition | Expected |
 |---|---|---|
-| `health_ok_no_traffic` | `/health` answers, zero cache traffic | `True` / `CacheActive` — an idle deployment is attached |
-| `ready_health_fails_past_window` | Ready past the window, `/health` fails on every replica, Binding reports nothing held | `False` / `NoCacheActivity` |
-| `ready_health_fails_within_window` | Ready, still inside the window | `Unknown` / `NoReplicaReady` → not yet `False` |
+| `initialized_no_traffic` | the engine reports its connector initialized, zero cache traffic | `True` / `CacheActive` — an idle deployment is attached |
+| `ready_uninitialized_past_window` | Ready past the window, connector uninitialized on every replica, Binding reports nothing held | `False` / `NoCacheActivity` |
+| `ready_uninitialized_within_window` | Ready, still inside the window | `Unknown` / `NoReplicaReady` → not yet `False` |
 | `no_replica_ready` | no replica Ready | `Unknown` / `NoReplicaReady` |
-| `health_unreachable_binding_holds_data` | `/health` unscrapeable; Binding's `usage`/`blocks` observed above zero | `True` / `CacheActive` via the corroborating signal |
-| `neither_signal_readable` | `/health` unreachable and the Binding's figures **absent** | `Unknown` / `NoObservationAvailable` — never `True` |
+| `engine_unscrapeable_binding_holds_data` | the engine cannot be scraped; Binding's `usage`/`blocks` observed above zero | `True` / `CacheActive` via the corroborating signal |
+| `neither_signal_readable` | engine unscrapeable and the Binding's figures **absent** | `Unknown` / `NoObservationAvailable` — never `True` |
 | `binding_figures_absent_is_not_zero` | `usage`/`blocks` are nil pointers | `Unknown`, **not** `False` — absent is not an observed zero |
-| `sibling_deployment_holds_the_domain` | two deployments on one Binding; this one's `/health` fails, the other's writes fill the shared domain | `False` — the domain-level figures must not attribute the sibling's data to this deployment |
+| `sibling_holds_the_shared_tenant` | two deployments sharing a tenant; this one's connector uninitialized, the other's writes fill the domain | `False` — the domain-level figures must not attribute the sibling's data to this deployment |
 | `flag_rendered_only` | the argument is present, nothing else observed | **never** `True` — the case the condition exists for |
 | `log_line_echo_only` | the engine logged the flag back | **never** `True` |
-| `unmanaged_role_health_ok` | take-over, and `/health` does answer | `Unknown` / `Unmanaged` — the operator claims nothing it did not render |
+| `unmanaged_role_initialized` | take-over, and the engine does report the connector initialized | `Unknown` / `Unmanaged` — the operator claims nothing it did not render |
 
 **Status and binding cases** (`pkg/worker/controllers/worker`).
 
@@ -1367,9 +1473,17 @@ Run against a local two-node cluster with two consumer GPUs on one node. No RDMA
   a `replicas: 1` deployment and a `replicas: 4` deployment on the same Binding. Asserted: the pool
   shows one domain with blocks contributed by more than one replica, and the four-replica hit rate
   exceeds the single-replica hit rate. **Recorded** in the table below.
-- **case-47 — the isolation claim.** Two deployments on the same Binding share blocks; two on
-  different Bindings do not see each other's. The second half is the one that matters: a shared cache
-  that leaks across reuse boundaries is worse than no shared cache.
+- **case-47 — the isolation claim, one half asserted and one half deferred.** Two deployments on the
+  same Binding share blocks: asserted. Two on **different** Bindings not seeing each other's:
+  **deferred, and the case says why** — `tenant_id` reaches no supported engine (F4), so both land
+  in the tenant named `default` and there is no isolation mechanism to test. The case asserts the
+  sharing half, and for the isolation half asserts the *observable consequence of the gap* — that
+  both deployments' blocks appear under one domain — so that the day an engine starts passing
+  `tenant_id`, this case **fails** and tells whoever is looking that the deferral is over. A deferral
+  that cannot detect its own end is a deletion. The isolation half remains the one that matters —
+  a shared cache that leaks across reuse boundaries is worse than no shared cache — which is exactly
+  why the gap is written into the case, the status and the reference page instead of being left for
+  a reader to discover.
 - **case-48 — the deliberate break.** Two vehicles, run separately: an engine image without the
   matching per-vendor `mooncake-transfer-engine` wheel, and a Binding pointing at an unreachable
   pool. The assertion in both is `CacheAttached != True`; the case records which shape the engine
@@ -1449,7 +1563,7 @@ comparison with one side missing is an assertion about nothing.
   deployment would report `False`, a false alarm on the most common steady state there is; and those
   figures are **per reuse domain**, which F3 makes shared across every deployment on one Binding, so
   they cannot attribute and a healthy sibling would report a broken deployment as attached. The
-  client's own `/health` answers from connector init and is per replica, so it is the predicate.
+  engine's own report of its connector is per replica and appears at startup, so it is the predicate.
   `usage`/`blocks` moving is strictly stronger evidence that data landed, which is why it corroborates
   and is what the headline test measures — but it is not what the condition tests.
 - **Per-Pod NodePort Services, as `instance.go` renders.** Rejected: right for one addressable
@@ -1464,16 +1578,29 @@ comparison with one side missing is an assertion about nothing.
 
 ## Open Questions
 
-- ~~**How does a replica supply `local_hostname` to the client?**~~ **Settled against the shipped
-  client, and the working assumption was wrong.** `local_hostname` is in
-  `_REQUIRED_NON_EMPTY_FIELDS`; `from_file()` raises `Missing required config field: local_hostname`
-  when it is absent, and `load_from_env()`'s own default is the literal `"localhost"`. The client
-  never derives it from the host's address on either branch. The spec's two listed options — an
-  entrypoint prelude, a per-replica ConfigMap — were both avoidable: the environment branch carries
-  the **whole** config including `tenant_id`, so F4 renders environment instead of a mounted JSON and
-  supplies `MOONCAKE_LOCAL_HOSTNAME` per replica from the downward API (`fieldRef: status.podIP`).
-  The residual is per-engine and stays with T6: whether each engine's connector reaches the client
-  through Mooncake's own loader rather than one that insists on `MOONCAKE_CONFIG_PATH`.
+- ~~**How does a replica supply `local_hostname` to the client?**~~ **Settled: it does not, and the
+  question was aimed at the wrong loader.** The worry was real for Mooncake's own
+  `MooncakeConfig` — `local_hostname` sits in its `_REQUIRED_NON_EMPTY_FIELDS`, `from_file()` raises
+  when the key is absent, and `load_from_env()`'s own default is the literal `"localhost"`, so on
+  that loader the value is neither omittable nor expressible in a deployment-wide file. **But no
+  supported engine uses that loader.** Each of the three ships its own reader, none of which takes
+  `local_hostname` from the config file at all: `vllm` computes it from
+  `get_requester_local_hostname(get_ip())`, `vllm-ascend` from `get_ip()`, and `sglang` from
+  `MOONCAKE_LOCAL_HOSTNAME`/`LOCAL_HOSTNAME` with its own default. So neither listed option — an
+  entrypoint prelude, a per-replica ConfigMap — is needed, and the operator renders no
+  `local_hostname` at all (F4). The general lesson is the expensive half: **a client's documented
+  configuration surface is not the surface its callers use**, and this question could only be
+  answered by reading the callers.
+- **When does `tenant_id` become reachable, and through which engine first?** Enforcement of the
+  reuse domain waits on an engine passing `setup()`'s 11th argument (F4). The two vehicles that would
+  not wait — a `sitecustomize` shim that wraps `MooncakeDistributedStore.setup`, and a patch carried
+  in this project's own per-vendor engine images — were both weighed and left unused here: each
+  reaches inside an engine internal that moves faster than this operator releases, which is the kind
+  of coupling this CR's whole thinness argument exists to avoid. The open part is which engine lands
+  it first, because that decides whether the operator's first enforcement path is a JSON key
+  (`sglang`, whose reader already merges three sources) or a `--kv-transfer-config` field. Until
+  then, case-47's isolation half stays deferred and asserts the gap's signature so the deferral
+  cannot outlive the gap.
 - **Rolling update semantics beyond recreate.** Surge and unavailable knobs are deferred to a later
   spec, informed by T13's numbers. The open part is what the right default trade is: a replica's
   cached blocks are lost when it goes away, so a fast rollout has a measurable cache cost that this
@@ -1490,11 +1617,18 @@ comparison with one side missing is an assertion about nothing.
   adds only per-domain `Blocks` and `HitRate`. A registered-client count would in any case have read
   an **action** ("a client connected"), and this design judges **effects**.
 
-  The replacement is the Mooncake store client's own `GET /health`, scraped per replica (F8). It is
-  the one signal that is attributable, available without traffic, and downstream of the thing being
-  judged. The domain-level `Usage`/`Blocks` corroborate it and cannot replace it: they are shared by
-  every deployment on one Binding, so they cannot attribute, and they only move under load, so an
-  idle attached deployment is indistinguishable from a detached one.
+  The replacement is **the engine's own metrics endpoint reporting its KV connector initialized,
+  scraped per replica** (F8) — attributable, available without traffic, and downstream of the thing
+  being judged. The domain-level `Usage`/`Blocks` corroborate it and cannot replace it: they are
+  shared by every deployment on one domain, so they cannot attribute, and they only move under load,
+  so an idle attached deployment is indistinguishable from a detached one.
+
+  ⛔ **The better replacement was tried and is unreachable.** The Mooncake store client can serve its
+  own `/health` on port 9300 — per client, bound at init, one layer closer to the truth than the
+  engine's own report. But `enable_client_http_server` is `setup()`'s 12th parameter and every
+  supported engine passes 7 or 8 positionally, with no environment fallback in the C++ and no
+  in-process gflags path (F4, F8). It is recorded as the signal to switch to the moment an engine
+  passes that argument.
 - **What the engine actually does when the connector cannot initialize** — abort, or serve on
   without the cache. Not predictable from the sources, and it differs per engine and per version.
   case-48 records the observed shape rather than asserting one; if it turns out to be "abort", the
