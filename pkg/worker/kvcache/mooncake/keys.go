@@ -1,4 +1,20 @@
-// Package kvcache renders the workloads of a KVCacheBackend and reads back what they report.
+// Package mooncake is everything specific to ONE kv cache backend implementation: the Mooncake
+// store. It renders that store's workloads and reads back what they report.
+//
+// It is a package of its own because every fact in it comes from Mooncake's own source — the
+// entrypoint names, the gflag spellings, the admin routes, the Prometheus series, the tenant quota
+// policy schema — and none of it would survive contact with a second implementation. The parent
+// package holds what is true of any backend. Nothing here is an abstraction over backends: there is
+// one, `spec.type` admits one value, and nothing dispatches on it. The split is where a second one
+// would be added, not a seam already built for it.
+//
+// Two conventions the whole package follows:
+//
+//   - Renderers are PURE functions with deterministic output, so the full surface is testable without
+//     a cluster and a re-render diffs cleanly against the last.
+//   - Every observed figure is a POINTER. The store serializes only what it has observed, so absent
+//     and zero are different facts, and publishing the second for the first is how a warm cache comes
+//     to look empty.
 //
 // This file holds only the rules governing the extraArgs escape hatch, because two callers must
 // agree on them: the renderers emit the derived flags, and the admission webhook refuses an
@@ -6,7 +22,7 @@
 // makes "two sources for one flag" impossible.
 //
 // Every entry below is read from the artifact's own source at the version this project pins.
-package kvcache
+package mooncake
 
 // ExtraArgsRules is what admission enforces on one side's extraArgs. The three kinds are separate
 // because they refuse for different reasons and an operator needs to hear which:
@@ -28,10 +44,16 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 	// Keys are the flag's own name without its leading dash, which is how extraArgs is keyed.
 	Derived: []string{
 		"allocation_strategy",
+		"enable_multi_tenants",
 		"metrics_port",
 		"pod_name",
 		"pod_namespace",
 		"rpc_port",
+		// Rendered from MultiTenancy alongside enable_multi_tenants, and listed here for the same
+		// reason. Left out, a passthrough key could point the master at a file this operator neither
+		// seeds nor rewrites — every quota write would land somewhere nothing reads, and the pool
+		// would go on reporting Ready over it.
+		"tenant_quota_connector_uri",
 	},
 
 	// The artifact accepts an explicit RPC address or the interface to derive one from. Setting
@@ -50,6 +72,16 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 		// ports, the allocation strategy, the pod identity. Nothing would report it.
 		"config_path": "it makes the artifact ignore the rest of the command line, " +
 			"so every flag rendered from this spec would be silently discarded",
+
+		// The counterpart to reserving the URI, and reserved here rather than in Derived because
+		// this operator never renders it: multi-tenancy is built on "file" being the artifact's
+		// own default, which is exactly what makes the omission reachable from extraArgs. Changed
+		// to another kind of source, the URI rendered alongside it stops naming a file, and the
+		// seeded policy, the writable copy the leader keeps and every quota write the reconciler
+		// makes address a store the master is no longer reading.
+		"tenant_quota_connector_type": "it decides what kind of source the master reads the " +
+			"tenant quota policy from, so anything other than the default file connector leaves " +
+			"the policy this operator seeds and rewrites addressing a store nothing reads",
 	},
 }
 

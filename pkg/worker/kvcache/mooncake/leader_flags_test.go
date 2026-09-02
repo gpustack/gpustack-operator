@@ -1,4 +1,4 @@
-package kvcache
+package mooncake
 
 import (
 	"strings"
@@ -53,6 +53,44 @@ func TestRenderLeaderFlags(t *testing.T) {
 			want: []string{
 				"-rpc_port=50051",
 				"-metrics_port=9003",
+				"-pod_name=$(KUBERNETES_POD_NAME)",
+				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
+			},
+		},
+		{
+			// The connector URI is rendered WITH the switch and not separately. The master builds
+			// its quota policy store when multi-tenancy is on, the file connector refuses the empty
+			// URI that is the flag's own default, and the constructor rethrows that refusal — so the
+			// switch without the URI is a process that does not start, every time.
+			name: "multi-tenancy renders the flag the tenant ledger needs, and the URI without which it will not start",
+			leader: workercore.KVCacheBackendLeader{
+				Replicas:           ptr.To[int32](1),
+				AllocationStrategy: "FreeRatioFirst",
+				MultiTenancy:       true,
+			},
+			want: []string{
+				"-rpc_port=50051",
+				"-metrics_port=9003",
+				"-allocation_strategy=free_ratio_first",
+				"-enable_multi_tenants=true",
+				"-tenant_quota_connector_uri=/var/lib/mooncake/tenant-quota-policy.yaml",
+				"-pod_name=$(KUBERNETES_POD_NAME)",
+				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
+			},
+		},
+		{
+			// Both flags are absent rather than rendered false and empty, so a backend nobody asked
+			// to be multi-tenant runs the command line it ran before this field existed.
+			name: "multi-tenancy off renders nothing at all",
+			leader: workercore.KVCacheBackendLeader{
+				Replicas:           ptr.To[int32](1),
+				AllocationStrategy: "FreeRatioFirst",
+				MultiTenancy:       false,
+			},
+			want: []string{
+				"-rpc_port=50051",
+				"-metrics_port=9003",
+				"-allocation_strategy=free_ratio_first",
 				"-pod_name=$(KUBERNETES_POD_NAME)",
 				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
 			},

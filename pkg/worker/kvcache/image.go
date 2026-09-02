@@ -1,8 +1,6 @@
-// Package kvcache renders the workloads of a KVCacheBackend and reads back what they report.
-//
-// This file holds what both renderers have to know about an image beyond its name. Only the pull
-// policy so far, and it is here rather than in either workload file because the leader and the
-// members must resolve it the same way: a backend declares one policy for every role it runs.
+// This file holds what any backend's renderers have to know about an image beyond its name. Only the
+// pull policy so far, and it is here rather than beside a renderer because every role of every
+// backend must resolve it the same way: a backend declares one policy for everything it runs.
 package kvcache
 
 import (

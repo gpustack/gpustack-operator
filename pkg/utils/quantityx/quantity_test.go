@@ -260,3 +260,52 @@ func TestStringDivide(t *testing.T) {
 	_, err = StringDivide("not-a-quantity", 8)
 	assert.Error(t, err)
 }
+
+func TestOverflowsInt64(t *testing.T) {
+	cases := []struct {
+		name string
+		q    string
+		want bool
+	}{
+		{"the largest int64 survives", "9223372036854775807", false},
+		{"one past the largest int64, which Value() reports as MinInt64", "9223372036854775808", true},
+		{"an exponent form Value() reports as 0", "1e30", true},
+		{"a binary suffix ParseQuantity already saturated", "8Ei", false},
+		{"an ordinary size", "1Gi", false},
+		{"zero", "0", false},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, OverflowsInt64(resource.MustParse(c.q)), "OverflowsInt64(%s)", c.q)
+		})
+	}
+}
+
+// TestOverflowsInt64_BothBounds pins the contract the name states, at both ends.
+//
+// The lower bound catches nothing in production today — every caller rejects a negative sign first —
+// but Value() misreports below MinInt64 exactly as it does above MaxInt64, and the measured answers
+// are what these cases are built from rather than what the doc comment used to assert.
+func TestOverflowsInt64_BothBounds(t *testing.T) {
+	testCases := []struct {
+		name     string
+		quantity string
+		expected bool
+	}{
+		{name: "above the maximum", quantity: "9223372036854775808", expected: true},
+		{name: "far above, decimal exponent", quantity: "1e30", expected: true},
+		{name: "below the minimum", quantity: "-9223372036854775809", expected: true},
+		{name: "far below, decimal exponent", quantity: "-1e30", expected: true},
+		{name: "the maximum itself", quantity: "9223372036854775807", expected: false},
+		{name: "the minimum itself", quantity: "-9223372036854775808", expected: false},
+		{name: "an ordinary ceiling", quantity: "20Ti", expected: false},
+		{name: "zero", quantity: "0", expected: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, OverflowsInt64(resource.MustParse(tc.quantity)))
+		})
+	}
+}
