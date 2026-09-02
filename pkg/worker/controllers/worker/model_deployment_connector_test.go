@@ -6,6 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
 
 // connectorInput is one pool-and-domain fixture every case renders from.
@@ -42,7 +44,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 	}{
 		{
 			name:   "vllm_golden",
-			engine: ModelDeploymentEngineVLLM,
+			engine: workercore.ModelDeploymentEngineVLLM,
 			wantArgs: []string{
 				"--kv-transfer-config",
 				`{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_both"}`,
@@ -54,7 +56,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 		},
 		{
 			name:   "vllm_ascend_golden",
-			engine: ModelDeploymentEngineVLLMAscend,
+			engine: workercore.ModelDeploymentEngineVLLMAscend,
 			wantArgs: []string{
 				"--kv-transfer-config",
 				`{"kv_connector":"AscendStoreConnector","kv_role":"kv_both"}`,
@@ -66,7 +68,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 		},
 		{
 			name:   "sglang_golden",
-			engine: ModelDeploymentEngineSGLang,
+			engine: workercore.ModelDeploymentEngineSGLang,
 			wantArgs: []string{
 				"--hicache-storage-backend", "mooncake",
 				"--hicache-storage-backend-extra-config",
@@ -136,9 +138,9 @@ func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
 	}
 
 	engines := []string{
-		ModelDeploymentEngineVLLM,
-		ModelDeploymentEngineVLLMAscend,
-		ModelDeploymentEngineSGLang,
+		workercore.ModelDeploymentEngineVLLM,
+		workercore.ModelDeploymentEngineVLLMAscend,
+		workercore.ModelDeploymentEngineSGLang,
 	}
 
 	for _, tc := range testCases {
@@ -156,7 +158,7 @@ func TestSynthesizeModelDeploymentConnector_DeviceSpelling(t *testing.T) {
 	// The same fact has three spellings across three surfaces. Only the JSON one applies here, and
 	// asserting the other two are absent is what keeps a future edit from picking the wrong one.
 	got, err := SynthesizeModelDeploymentConnector(ModelDeploymentConnectorInput{
-		Engine:              ModelDeploymentEngineVLLM,
+		Engine:              workercore.ModelDeploymentEngineVLLM,
 		Domain:              "team-a-shared",
 		MasterServerAddress: "master:50051",
 		MetadataServer:      "P2PHANDSHAKE",
@@ -228,25 +230,25 @@ func TestModelDeploymentOwnership(t *testing.T) {
 	}{
 		{
 			name:     "vllm_owns_its_transfer_config",
-			engine:   ModelDeploymentEngineVLLM,
+			engine:   workercore.ModelDeploymentEngineVLLM,
 			arg:      "--kv-transfer-config",
 			wantsArg: true,
 		},
 		{
 			name:     "ownership_ignores_an_inline_value",
-			engine:   ModelDeploymentEngineVLLM,
+			engine:   workercore.ModelDeploymentEngineVLLM,
 			arg:      `--kv-transfer-config={"kv_connector":"Other"}`,
 			wantsArg: true,
 		},
 		{
 			name:     "vllm_does_not_own_an_ordinary_argument",
-			engine:   ModelDeploymentEngineVLLM,
+			engine:   workercore.ModelDeploymentEngineVLLM,
 			arg:      "--max-model-len=32768",
 			wantsArg: false,
 		},
 		{
 			name:     "sglang_owns_its_hicache_arguments",
-			engine:   ModelDeploymentEngineSGLang,
+			engine:   workercore.ModelDeploymentEngineSGLang,
 			arg:      "--hicache-storage-backend-extra-config",
 			wantsArg: true,
 		},
@@ -254,31 +256,31 @@ func TestModelDeploymentOwnership(t *testing.T) {
 			// Ownership is per (engine, key). SGLang's key is an ordinary user argument on vLLM,
 			// and refusing it there would refuse something harmless.
 			name:     "vllm_does_not_own_sglangs_key",
-			engine:   ModelDeploymentEngineVLLM,
+			engine:   workercore.ModelDeploymentEngineVLLM,
 			arg:      "--hicache-storage-backend-extra-config",
 			wantsArg: false,
 		},
 		{
 			name:     "sglang_does_not_own_vllms_key",
-			engine:   ModelDeploymentEngineSGLang,
+			engine:   workercore.ModelDeploymentEngineSGLang,
 			arg:      "--kv-transfer-config",
 			wantsArg: false,
 		},
 		{
 			name:     "vllm_owns_its_config_path",
-			engine:   ModelDeploymentEngineVLLM,
+			engine:   workercore.ModelDeploymentEngineVLLM,
 			env:      "MOONCAKE_CONFIG_PATH",
 			wantsEnv: true,
 		},
 		{
 			name:     "sglang_owns_its_own_config_path_only",
-			engine:   ModelDeploymentEngineSGLang,
+			engine:   workercore.ModelDeploymentEngineSGLang,
 			env:      "SGLANG_HICACHE_MOONCAKE_CONFIG_PATH",
 			wantsEnv: true,
 		},
 		{
 			name:     "sglang_does_not_own_the_mooncake_config_path",
-			engine:   ModelDeploymentEngineSGLang,
+			engine:   workercore.ModelDeploymentEngineSGLang,
 			env:      "MOONCAKE_CONFIG_PATH",
 			wantsEnv: false,
 		},
@@ -286,7 +288,7 @@ func TestModelDeploymentOwnership(t *testing.T) {
 			// A defaulted key is deliberately not owned: duplication is harmless because last-wins
 			// is well defined, so a user turning metrics off gets their value rather than a refusal.
 			name:     "the_metrics_switch_is_not_owned",
-			engine:   ModelDeploymentEngineVLLM,
+			engine:   workercore.ModelDeploymentEngineVLLM,
 			env:      "MC_TE_METRIC",
 			wantsEnv: false,
 		},
@@ -309,9 +311,9 @@ func TestModelDeploymentOwnership(t *testing.T) {
 // added to one and forgotten in the other fails here instead of in production.
 func TestModelDeploymentOwnedAndDefaultedCannotDisagree(t *testing.T) {
 	engines := []string{
-		ModelDeploymentEngineVLLM,
-		ModelDeploymentEngineVLLMAscend,
-		ModelDeploymentEngineSGLang,
+		workercore.ModelDeploymentEngineVLLM,
+		workercore.ModelDeploymentEngineVLLMAscend,
+		workercore.ModelDeploymentEngineSGLang,
 	}
 
 	for _, engine := range engines {

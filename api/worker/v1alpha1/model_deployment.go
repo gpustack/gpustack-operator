@@ -70,6 +70,16 @@ type ModelDeploymentSpec struct {
 	Roles []ModelDeploymentRole `json:"roles" protobuf:"bytes,4,rep,name=roles"`
 }
 
+// The engines a ModelDeployment can run, which are the values of ModelDeploymentSpec.Engine's enum.
+//
+// They are declared beside the field whose schema closes the set, so that a reader of either finds
+// the other, and so that a value outside the set cannot reach the operator through this API.
+const (
+	ModelDeploymentEngineVLLM       = "vllm"
+	ModelDeploymentEngineVLLMAscend = "vllm-ascend"
+	ModelDeploymentEngineSGLang     = "sglang"
+)
+
 // ModelDeploymentModel names the model the engine serves.
 //
 // It provisions nothing. Weights arrive through the role template's volumes or through the engine's

@@ -7,14 +7,8 @@ import (
 	"strings"
 
 	core "k8s.io/api/core/v1"
-)
 
-// The engines a ModelDeployment can run. The set is closed by the CRD's enum, so a value outside it
-// cannot reach this package through the API.
-const (
-	ModelDeploymentEngineVLLM       = "vllm"
-	ModelDeploymentEngineVLLMAscend = "vllm-ascend"
-	ModelDeploymentEngineSGLang     = "sglang"
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
 
 const (
@@ -102,15 +96,15 @@ var modelDeploymentOwnedKeys = map[string]struct {
 	Args []string
 	Env  []string
 }{
-	ModelDeploymentEngineVLLM: {
+	workercore.ModelDeploymentEngineVLLM: {
 		Args: []string{"--kv-transfer-config"},
 		Env:  []string{"MOONCAKE_CONFIG_PATH"},
 	},
-	ModelDeploymentEngineVLLMAscend: {
+	workercore.ModelDeploymentEngineVLLMAscend: {
 		Args: []string{"--kv-transfer-config"},
 		Env:  []string{"MOONCAKE_CONFIG_PATH"},
 	},
-	ModelDeploymentEngineSGLang: {
+	workercore.ModelDeploymentEngineSGLang: {
 		Args: []string{"--hicache-storage-backend", "--hicache-storage-backend-extra-config"},
 		Env:  []string{"SGLANG_HICACHE_MOONCAKE_CONFIG_PATH"},
 	},
@@ -189,7 +183,7 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 	}
 
 	switch in.Engine {
-	case ModelDeploymentEngineVLLM:
+	case workercore.ModelDeploymentEngineVLLM:
 		args, err := modelDeploymentKVTransferConfigArg("MooncakeStoreConnector")
 		if err != nil {
 			return ModelDeploymentConnectorRender{}, err
@@ -197,7 +191,7 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		render.Args = args
 		render.Env = []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: ModelDeploymentClientConfigPath}}
 
-	case ModelDeploymentEngineVLLMAscend:
+	case workercore.ModelDeploymentEngineVLLMAscend:
 		// AscendStoreConnector and not MultiConnector: vllm-ascend re-registers MultiConnector to
 		// its own composite, which exists to run several connectors at once. The connector that
 		// reaches the store is this one, and the store backend it resolves already defaults to
@@ -209,7 +203,7 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		render.Args = args
 		render.Env = []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: ModelDeploymentClientConfigPath}}
 
-	case ModelDeploymentEngineSGLang:
+	case workercore.ModelDeploymentEngineSGLang:
 		extra, err := json.Marshal(map[string]string{"master_server_address": in.MasterServerAddress})
 		if err != nil {
 			return ModelDeploymentConnectorRender{}, fmt.Errorf("marshaling hicache extra config: %w", err)
