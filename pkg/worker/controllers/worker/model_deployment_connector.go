@@ -82,10 +82,14 @@ type ModelDeploymentConnectorRender struct {
 	// ClientConfig is the client JSON, rendered into one ConfigMap per deployment and mounted
 	// read-only into every replica of the role.
 	//
-	// One ConfigMap for all replicas rather than one each, because every key here is
-	// deployment-wide. That holds because of what is ABSENT as much as what is present: no engine
-	// reads local_hostname from the file — each derives it from its own process — so the one value
-	// that would have differed per replica never enters the file.
+	// IT IS NIL FOR AN ENGINE CONFIGURED THROUGH THE ENVIRONMENT, and nil means no ConfigMap:
+	// mounting one an engine never reads would claim a wiring that is not happening.
+	//
+	// Where it is used, one ConfigMap serves all replicas rather than one each, because every key
+	// in it is deployment-wide. That holds for vLLM and vLLM-Ascend because of what is ABSENT as
+	// much as what is present: neither reads local_hostname from the file, each deriving it from
+	// its own process, so the one value that would have differed per replica never enters the file.
+	// It does NOT hold for SGLang, which is why SGLang does not get a file.
 	ClientConfig map[string]string
 }
 
@@ -105,9 +109,24 @@ var modelDeploymentOwnedKeys = map[string]struct {
 		Args: []string{"--kv-transfer-config"},
 		Env:  []string{"MOONCAKE_CONFIG_PATH"},
 	},
+	// SGLang is configured through the environment, so its owned set covers both the variables it
+	// actually reads AND the two keys that would divert it onto a different loader. Ownership here
+	// is for what a user entry would DESTROY, not for what it would duplicate: this engine picks
+	// its config source in the order extra-config, then file, then environment, and each of the
+	// first two is loaded by a function whose per-key fallbacks are compile-time literals. So a
+	// user setting either one does not merely override a value, it silently replaces the whole
+	// configuration with defaults — a 4 GiB segment and a "localhost" identity.
 	workercore.ModelDeploymentEngineSGLang: {
 		Args: []string{"--hicache-storage-backend", "--hicache-storage-backend-extra-config"},
-		Env:  []string{"SGLANG_HICACHE_MOONCAKE_CONFIG_PATH"},
+		Env: []string{
+			"SGLANG_HICACHE_MOONCAKE_CONFIG_PATH",
+			"MOONCAKE_MASTER",
+			"MOONCAKE_TE_META_DATA_SERVER",
+			"MOONCAKE_PROTOCOL",
+			"MOONCAKE_DEVICE",
+			"MOONCAKE_GLOBAL_SEGMENT_SIZE",
+			"MOONCAKE_LOCAL_HOSTNAME",
+		},
 	},
 }
 
@@ -158,26 +177,9 @@ func ModelDeploymentArgName(arg string) string {
 // It is PURE: same input, same output, no client and no clock. Everything it needs about the pool
 // and the domain arrives as values.
 func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (ModelDeploymentConnectorRender, error) {
-	// The client JSON is the same four keys on all three engines, and that is a conclusion rather
-	// than a coincidence: the three readers' key sets differ only in keys the operator deliberately
-	// does not choose — the segment sizes, vLLM's mode, SGLang's master metrics port. What is left
-	// is the intersection, and all three read all of it.
-	//
-	// The segment sizes stay absent because they size a replica's own contribution to the pool, and
-	// an operator-invented value there is a silent capacity error rather than a visible refusal.
-	// vLLM's mode stays absent for a reason one step further on: it carries a cross-field rule
-	// against global_segment_size — embedded demands a positive size, standalone-store demands
-	// exactly zero — so choosing one half of a pair whose other half is not ours to choose is how
-	// an engine ends up refusing its own configuration.
-	config := map[string]string{
-		"master_server_address": in.MasterServerAddress,
-		"metadata_server":       in.MetadataServer,
-		"protocol":              modelDeploymentClientProtocol(in.Protocol),
-		"device_name":           in.DeviceName,
-	}
+	protocol := modelDeploymentClientProtocol(in.Protocol)
 
 	render := ModelDeploymentConnectorRender{
-		ClientConfig: config,
 		DefaultedEnv: []core.EnvVar{
 			{Name: "MC_TE_METRIC", Value: "1"},
 		},
@@ -191,6 +193,7 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		}
 		render.Args = args
 		render.Env = []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: ModelDeploymentClientConfigPath}}
+		render.ClientConfig = modelDeploymentFileClientConfig(in, protocol)
 
 	case workercore.ModelDeploymentEngineVLLMAscend:
 		// AscendStoreConnector and not MultiConnector: vllm-ascend re-registers MultiConnector to
@@ -203,28 +206,72 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		}
 		render.Args = args
 		render.Env = []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: ModelDeploymentClientConfigPath}}
+		render.ClientConfig = modelDeploymentFileClientConfig(in, protocol)
 
 	case workercore.ModelDeploymentEngineSGLang:
-		extra, err := json.Marshal(map[string]string{"master_server_address": in.MasterServerAddress})
-		if err != nil {
-			return ModelDeploymentConnectorRender{}, fmt.Errorf("marshaling hicache extra config: %w", err)
-		}
-		// The extra config carries the master address as well as the mounted file, because this
-		// reader takes the extra config in preference to the file: supplying only the file would
-		// work, and would stop working the day anything else set an extra config.
-		render.Args = []string{
-			"--hicache-storage-backend", "mooncake",
-			"--hicache-storage-backend-extra-config", string(extra),
-		}
-		render.Env = []core.EnvVar{
-			{Name: "SGLANG_HICACHE_MOONCAKE_CONFIG_PATH", Value: ModelDeploymentClientConfigPath},
-		}
+		render.Args = []string{"--hicache-storage-backend", "mooncake"}
+		render.Env = modelDeploymentSGLangClientEnv(in, protocol)
 
 	default:
 		return ModelDeploymentConnectorRender{}, fmt.Errorf("unsupported engine %q", in.Engine)
 	}
 
 	return render, nil
+}
+
+// modelDeploymentFileClientConfig renders the client JSON the vLLM-family readers load from a file.
+//
+// Neither of them has an environment fallback for the values themselves: their loader uses the
+// environment only to locate the path, so a file is the only carrier that reaches them.
+//
+// The segment sizes and vLLM's mode are absent, and THAT IS A KNOWN DEFECT rather than a decision.
+// The pair declares a role: a positive global_segment_size makes the rank an in-process store
+// member contributing that much memory, and only an explicit zero makes it the pure client this
+// design wants. Both classes default to 4 GiB, so omitting them selects the wrong role silently.
+// The one remaining unknown is now settled too — the store's own setup_internal accepts zero,
+// commented "A size of 0 keeps the pure client/server setup semantics", and its validator requires
+// the value to be zero or at least MIN_SEGMENT_SIZE — so nothing blocks the fix except its owner:
+// the shared rendering package takes this over wholesale, and two fixes to code about to be deleted
+// are two fixes that need re-verifying in their new home.
+func modelDeploymentFileClientConfig(in ModelDeploymentConnectorInput, protocol string) map[string]string {
+	return map[string]string{
+		"master_server_address": in.MasterServerAddress,
+		"metadata_server":       in.MetadataServer,
+		"protocol":              protocol,
+		"device_name":           in.DeviceName,
+	}
+}
+
+// modelDeploymentSGLangClientEnv renders the environment SGLang's own loader reads.
+//
+// SGLANG IS CONFIGURED THROUGH THE ENVIRONMENT AND NOT A FILE, and the reason is evaluation time
+// rather than expressiveness. This engine needs local_hostname, which is the replica's Pod IP; a
+// file and an extra-config argument are both fixed when the object is admitted, when no Pod IP
+// exists yet. Only an environment variable can carry a fieldRef that kubelet evaluates as the
+// container starts. Its other two loaders would each fall back to a compile-time literal for that
+// key — "localhost" for every replica — and to a 4 GiB segment, which is the wrong role.
+//
+// Leaving SGLANG_HICACHE_MOONCAKE_CONFIG_PATH unset is what SELECTS this loader: the engine tries
+// the extra-config argument, then that variable, then the environment. So the config path is unset
+// deliberately and the extra-config argument is deliberately not passed, both of them owned keys so
+// that a user cannot reintroduce the diversion.
+//
+// global_segment_size is written as an explicit zero because this client contributes no storage
+// segment; the pool's own members do. The store accepts zero for exactly this purpose.
+func modelDeploymentSGLangClientEnv(in ModelDeploymentConnectorInput, protocol string) []core.EnvVar {
+	return []core.EnvVar{
+		{Name: "MOONCAKE_MASTER", Value: in.MasterServerAddress},
+		{Name: "MOONCAKE_TE_META_DATA_SERVER", Value: in.MetadataServer},
+		{Name: "MOONCAKE_PROTOCOL", Value: protocol},
+		{Name: "MOONCAKE_DEVICE", Value: in.DeviceName},
+		{Name: "MOONCAKE_GLOBAL_SEGMENT_SIZE", Value: "0"},
+		{
+			Name: "MOONCAKE_LOCAL_HOSTNAME",
+			ValueFrom: &core.EnvVarSource{
+				FieldRef: &core.ObjectFieldSelector{FieldPath: "status.podIP"},
+			},
+		},
+	}
 }
 
 // ModelDeploymentEngineCommand renders the argv that starts one engine on one model.

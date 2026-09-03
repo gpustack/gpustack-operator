@@ -26,9 +26,9 @@ func connectorInput(engine string) ModelDeploymentConnectorInput {
 }
 
 func TestSynthesizeModelDeploymentConnector(t *testing.T) {
-	// The client JSON is the same on all three engines, which is the point rather than an
-	// oversight: the three readers' key sets differ only in keys the operator does not choose.
-	wantConfig := map[string]string{
+	// The file carrier's key set is shared by the two vLLM-family readers, which load configuration
+	// from a file because their loader uses the environment only to locate the path.
+	wantFileConfig := map[string]string{
 		"master_server_address": "shared-kv-master.gpustack-system.svc:50051",
 		"metadata_server":       "P2PHANDSHAKE",
 		"protocol":              "tcp",
@@ -41,6 +41,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 		wantArgs         []string
 		wantEnv          []core.EnvVar
 		wantDefaultedEnv []core.EnvVar
+		wantConfig       map[string]string
 	}{
 		{
 			name:   "vllm_golden",
@@ -53,6 +54,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 				{Name: "MOONCAKE_CONFIG_PATH", Value: "/etc/gpustack/kvcache/mooncake.json"},
 			},
 			wantDefaultedEnv: []core.EnvVar{{Name: "MC_TE_METRIC", Value: "1"}},
+			wantConfig:       wantFileConfig,
 		},
 		{
 			name:   "vllm_ascend_golden",
@@ -65,19 +67,35 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 				{Name: "MOONCAKE_CONFIG_PATH", Value: "/etc/gpustack/kvcache/mooncake.json"},
 			},
 			wantDefaultedEnv: []core.EnvVar{{Name: "MC_TE_METRIC", Value: "1"}},
+			wantConfig:       wantFileConfig,
 		},
 		{
+			// SGLang takes the environment, and every part of this case is load-bearing: no
+			// extra-config argument and no config-path variable, because either one diverts the
+			// engine onto a loader whose per-key fallbacks are compile-time literals; and no
+			// ClientConfig, because a mounted file nothing reads claims a wiring that is not
+			// happening. The one value that cannot be known at admission time arrives as a
+			// fieldRef, which is the whole reason this engine does not get a file.
 			name:   "sglang_golden",
 			engine: workercore.ModelDeploymentEngineSGLang,
 			wantArgs: []string{
 				"--hicache-storage-backend", "mooncake",
-				"--hicache-storage-backend-extra-config",
-				`{"master_server_address":"shared-kv-master.gpustack-system.svc:50051"}`,
 			},
 			wantEnv: []core.EnvVar{
-				{Name: "SGLANG_HICACHE_MOONCAKE_CONFIG_PATH", Value: "/etc/gpustack/kvcache/mooncake.json"},
+				{Name: "MOONCAKE_MASTER", Value: "shared-kv-master.gpustack-system.svc:50051"},
+				{Name: "MOONCAKE_TE_META_DATA_SERVER", Value: "P2PHANDSHAKE"},
+				{Name: "MOONCAKE_PROTOCOL", Value: "tcp"},
+				{Name: "MOONCAKE_DEVICE", Value: ""},
+				{Name: "MOONCAKE_GLOBAL_SEGMENT_SIZE", Value: "0"},
+				{
+					Name: "MOONCAKE_LOCAL_HOSTNAME",
+					ValueFrom: &core.EnvVarSource{
+						FieldRef: &core.ObjectFieldSelector{FieldPath: "status.podIP"},
+					},
+				},
 			},
 			wantDefaultedEnv: []core.EnvVar{{Name: "MC_TE_METRIC", Value: "1"}},
+			wantConfig:       nil,
 		},
 	}
 
@@ -91,9 +109,54 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 			assert.Equal(t, tc.wantDefaultedEnv, got.DefaultedEnv)
 			// Exact equality, not containment: "exactly the keys this engine's reader reads" is a
 			// claim about what is absent as much as about what is present.
-			assert.Equal(t, wantConfig, got.ClientConfig)
+			assert.Equal(t, tc.wantConfig, got.ClientConfig)
 		})
 	}
+}
+
+// TestSynthesizeModelDeploymentConnector_SGLangEnvironmentCarrier states the four properties that
+// make the environment carrier correct, each of which a plausible-looking edit would break.
+//
+// It exists as its own test rather than as more rows in the golden case because the golden case
+// asserts the whole rendering by equality, and an equality assertion tells whoever broke it WHAT
+// changed but not WHY it mattered. These carry the why.
+func TestSynthesizeModelDeploymentConnector_SGLangEnvironmentCarrier(t *testing.T) {
+	got, err := SynthesizeModelDeploymentConnector(connectorInput(workercore.ModelDeploymentEngineSGLang))
+	require.NoError(t, err)
+
+	// The engine resolves its config source in the order extra-config, then config path, then
+	// environment. Either of the first two wins over the environment, so rendering one does not
+	// add a fallback, it REPLACES this configuration with one whose missing keys become literals.
+	assert.NotContains(t, got.Args, "--hicache-storage-backend-extra-config",
+		"its loader is key-for-key identical to the file loader and sits at higher precedence")
+	for _, e := range got.Env {
+		assert.NotEqual(t, "SGLANG_HICACHE_MOONCAKE_CONFIG_PATH", e.Name,
+			"setting it selects the file loader, whose fallback for local_hostname is the literal localhost")
+	}
+
+	// The identity has to be evaluated by kubelet at container start, because no Pod IP exists when
+	// the object is admitted. A literal here is the defect being avoided, INCLUDING a literal that
+	// looks correct, so the assertion is on the fieldRef and on the absence of a value.
+	var hostname *core.EnvVar
+	for i := range got.Env {
+		if got.Env[i].Name == "MOONCAKE_LOCAL_HOSTNAME" {
+			hostname = &got.Env[i]
+		}
+	}
+	require.NotNil(t, hostname, "SGLang reads this key and its own fallback is the literal localhost")
+	assert.Empty(t, hostname.Value, "a literal identity registers every replica as the same peer")
+	require.NotNil(t, hostname.ValueFrom)
+	require.NotNil(t, hostname.ValueFrom.FieldRef)
+	assert.Equal(t, "status.podIP", hostname.ValueFrom.FieldRef.FieldPath)
+
+	// A pure client contributes no storage segment. The value must be an explicit zero: this
+	// engine's own fallback is the string "4gb", so an absent key is a 4 GiB in-process member.
+	// The store accepts zero for exactly this purpose -- its setup_internal skips mounting a
+	// segment and its validator requires zero or at least MIN_SEGMENT_SIZE.
+	assert.Contains(t, got.Env, core.EnvVar{Name: "MOONCAKE_GLOBAL_SEGMENT_SIZE", Value: "0"})
+
+	// No file is rendered, so no ConfigMap is created for this engine.
+	assert.Nil(t, got.ClientConfig)
 }
 
 // TestSynthesizeModelDeploymentConnector_KeysNeverRendered states, per key, WHY the operator leaves
@@ -119,8 +182,10 @@ func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
 		{
 			name: "no_local_hostname",
 			key:  "local_hostname",
-			why: "every engine derives it from its own process, and one deployment-wide file " +
-				"cannot hold a value that differs per replica",
+			why: "these two readers derive it from their own process, so a deployment-wide file " +
+				"holding a value that differs per replica would be wrong for all but one. " +
+				"THIS IS TRUE OF THESE TWO ONLY -- SGLang reads the key from the file and falls " +
+				"back to a literal, which is why it takes the environment instead",
 		},
 		// THE NEXT THREE PIN A KNOWN DEFECT, NOT A DECISION. They are kept so that the fix is
 		// noticed as a change rather than slipping in, and they must be DELETED by the task that
@@ -133,13 +198,20 @@ func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
 		// __post_init__ requires a positive global segment in embedded mode — so omitting all three
 		// makes the engine rank an in-process store MEMBER contributing 4 GiB, when it should be a
 		// pure client. A pure client on vLLM is the coherent triple
-		// mode=standalone-store + global_segment_size=0 + local_buffer_size>0; on vllm-ascend and
-		// sglang there is no `mode` field, so it is the pair — and sglang additionally divides the
-		// global segment by its TP factor, so the value is not portable either.
+		// mode=standalone-store + global_segment_size=0 + local_buffer_size>0; on vllm-ascend there
+		// is no `mode` field, so it is the pair.
 		//
 		// The old reason was right about the COUPLING and wrong about the conclusion: a cross-field
 		// pair is dangerous when split, which is an argument for rendering the whole triple, not for
 		// rendering none of it.
+		//
+		// THE LAST TECHNICAL BLOCKER IS GONE, so what remains is only ownership. The store's own
+		// setup_internal accepts a zero global segment and skips mounting one, commented "A size of
+		// 0 keeps the pure client/server setup semantics", and its validator requires the value to
+		// be zero or at least MIN_SEGMENT_SIZE. The fix belongs to the shared rendering package
+		// that takes this synthesis over, because fixing it here means re-verifying it there.
+		// SGLang already carries the equivalent, as MOONCAKE_GLOBAL_SEGMENT_SIZE=0 on its own
+		// carrier -- so this defect is now the vLLM family's alone.
 		{
 			name: "no_segment_sizes_global",
 			key:  "global_segment_size",
@@ -148,7 +220,9 @@ func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
 		{
 			name: "no_segment_sizes_local",
 			key:  "local_buffer_size",
-			why:  "KNOWN DEFECT: omitting it takes the 4 GiB default rather than a client staging buffer",
+			why: "KNOWN DEFECT: omitting it takes the 4 GiB default rather than a client staging " +
+				"buffer. The 128 MiB replacement is a vLLM-family value only: SGLang has no such " +
+				"key and passes a hardcoded 16 MiB to setup()",
 		},
 		{
 			name: "no_mode",
@@ -157,17 +231,24 @@ func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
 		},
 	}
 
+	// SGLANG IS DELIBERATELY NOT IN THIS LIST, and leaving it in would be worse than useless. It
+	// renders no ClientConfig at all, so every NotContains below would pass against a nil map --
+	// vacuously, proving nothing, while reading as three more engines' worth of coverage. Its own
+	// keys are asserted positively in TestSynthesizeModelDeploymentConnector_SGLangEnvironmentCarrier,
+	// where an absent key fails instead of passing.
 	engines := []string{
 		workercore.ModelDeploymentEngineVLLM,
 		workercore.ModelDeploymentEngineVLLMAscend,
-		workercore.ModelDeploymentEngineSGLang,
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, engine := range engines {
 				got, err := SynthesizeModelDeploymentConnector(connectorInput(engine))
+				// A nil map would make every assertion below vacuous, so the carrier itself is
+				// checked first: this test only means anything where a file is rendered.
 				require.NoError(t, err)
+				require.NotEmpty(t, got.ClientConfig, "%s renders a file carrier", engine)
 				assert.NotContains(t, got.ClientConfig, tc.key, "%s: %s", engine, tc.why)
 			}
 		})
@@ -293,12 +374,39 @@ func TestModelDeploymentOwnership(t *testing.T) {
 			wantsEnv: true,
 		},
 		{
-			name:     "sglang_owns_its_own_config_path_only",
+			// Owned even though the operator never sets it: setting it would divert the engine onto
+			// the file loader, whose per-key fallbacks are literals. Ownership here is for what a
+			// user entry would DESTROY, not for what it would duplicate.
+			name:     "sglang_owns_the_config_path_it_deliberately_leaves_unset",
 			engine:   workercore.ModelDeploymentEngineSGLang,
 			env:      "SGLANG_HICACHE_MOONCAKE_CONFIG_PATH",
 			wantsEnv: true,
 		},
 		{
+			name:     "sglang_owns_its_identity_variable",
+			engine:   workercore.ModelDeploymentEngineSGLang,
+			env:      "MOONCAKE_LOCAL_HOSTNAME",
+			wantsEnv: true,
+		},
+		{
+			name:     "sglang_owns_its_segment_size",
+			engine:   workercore.ModelDeploymentEngineSGLang,
+			env:      "MOONCAKE_GLOBAL_SEGMENT_SIZE",
+			wantsEnv: true,
+		},
+		{
+			// Per (engine, key) again, in the direction that is easy to get wrong: vLLM loads no
+			// value from the environment, so these names carry nothing there and refusing them
+			// would refuse something harmless.
+			name:     "vllm_does_not_own_sglangs_environment",
+			engine:   workercore.ModelDeploymentEngineVLLM,
+			env:      "MOONCAKE_GLOBAL_SEGMENT_SIZE",
+			wantsEnv: false,
+		},
+		{
+			// SGLang owns six MOONCAKE_-prefixed names and NOT this one, which is the case that
+			// fails if ownership is ever reduced to a prefix test. MOONCAKE_CONFIG_PATH is the
+			// vLLM family's config path; this engine does not read it.
 			name:     "sglang_does_not_own_the_mooncake_config_path",
 			engine:   workercore.ModelDeploymentEngineSGLang,
 			env:      "MOONCAKE_CONFIG_PATH",
