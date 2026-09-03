@@ -231,24 +231,9 @@ func getPCIDevices(vendors, classPrefixes []string) PCIDevices {
 			devSubDevice = devSubDevice[2:]
 		}
 
-		// switches + root
-		var switches []string
-		root := resolvedPath
-
-		for {
-			parent := filepath.Dir(root)
-			if parent == sysfsPCIPath {
-				break
-			}
-
-			name := filepath.Base(parent)
-			if strings.Count(name, ":") != 2 {
-				break
-			}
-
-			switches = append(switches, name)
-			root = parent
-		}
+		// switches + root, shared with the caller that derives the same coordinates for network
+		// interfaces so the two cannot drift apart.
+		root, switches := ResolvePCITopology(resolvedPath)
 
 		devices[devAddress] = PCIDevice{
 			Address:   devAddress,
@@ -256,7 +241,7 @@ func getPCIDevices(vendors, classPrefixes []string) PCIDevices {
 			Vendor:    devVendor,
 			Device:    devDevice,
 			Path:      resolvedPath,
-			Root:      filepath.Base(root),
+			Root:      root,
 			Config:    devConfig,
 			SubVendor: devSubVendor,
 			SubDevice: devSubDevice,
