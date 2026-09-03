@@ -51,7 +51,7 @@ func crd_crd_gen_generators_testdata_crd_gen_Dummy() *v1.CustomResourceDefinitio
 					Storage: true,
 					Schema: &v1.CustomResourceValidation{
 						OpenAPIV3Schema: &v1.JSONSchemaProps{
-							Description: "Dummy is the schema for the projects API.\nThe print columns are here for what they carry rather than for themselves. Priority is an int32\nand has to be emitted BARE: quoted, it produced a string constant in an int32 field and the\ngenerated file did not compile — which no test could catch while no type in this repository used\nthe marker. One column leaves priority at its default and one sets it, so the expected output pins\nboth forms.\nThe third pins a jsonPath FILTER, whose value contains \"=\" twice. The marker parser splits on \"=\",\nso the filter has to survive being a value that looks like more key/value pairs — it once came\nback split across two junk entries as well as its own, which nothing noticed because unknown keys\nwere dropped in silence.",
+							Description: "Dummy is the schema for the projects API.\nThe print columns are here for what they carry rather than for themselves. Priority is an int32\nand has to be emitted BARE: quoted, it produced a string constant in an int32 field and the\ngenerated file did not compile — which no test could catch while no type in this repository used\nthe marker. One column leaves priority at its default and one sets it, so the expected output pins\nboth forms.\nThe third pins a jsonPath FILTER, whose value contains \"=\" twice. The marker parser splits on \"=\",\nso the filter has to survive being a value that looks like more key/value pairs — it once came\nback split across two junk entries as well as its own, which nothing noticed because unknown keys\nwere dropped in silence.\nThe fourth pins the \"date\" TYPE. It is the type kubectl's default Age column uses, and it was\nmissing from the generator's accepted set: every date column was dropped, and dropped QUIETLY —\nthe unknown type was logged and the column skipped, so `make generate` still succeeded and no\ngolden file moved. Nothing here would notice it being dropped again without a date column to pin.",
 							Type:        "object",
 							Properties: map[string]v1.JSONSchemaProps{
 								"apiVersion": {
@@ -2116,6 +2116,14 @@ func crd_crd_gen_generators_testdata_crd_gen_Dummy() *v1.CustomResourceDefinitio
 							Description: "",
 							Priority:    0,
 							JSONPath:    ".status.conditions[?(@.type=='Ready')].status",
+						},
+						{
+							Name:        "Age",
+							Type:        "date",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".metadata.creationTimestamp",
 						},
 					},
 				},

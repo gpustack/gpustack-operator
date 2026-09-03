@@ -1,6 +1,9 @@
-package kvcache
+package mooncake
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,6 +16,96 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
+
+// TestLeaderWorkload_TheQuotaPolicySeedTellsAbsentFromFailed RUNS the seed command rather than
+// matching it, because what is under test is a shell exit status and no assertion about the string
+// reaches that.
+//
+// The init container has one job with two legitimate outcomes — copy the pool's policy, or seed an
+// empty one when no pool has written it — and exactly one illegitimate one: seeding an empty policy
+// when a document DID exist. That last case is invisible by construction. The container exits 0, the
+// master starts against an empty ledger, and the pool reports Ready over quotas that no longer exist.
+func TestLeaderWorkload_TheQuotaPolicySeedTellsAbsentFromFailed(t *testing.T) {
+	empty, err := RenderQuotaPolicy(nil)
+	require.NoError(t, err)
+
+	const policy = "tenant_quotas:\n  team-a: 1073741824\n"
+
+	cases := []struct {
+		name string
+		// seed prepares the source and returns the path the command should read.
+		seed      func(t *testing.T, dir string) string
+		wantErr   bool
+		wantFile  string
+		wantWhy   string
+		rootBreak bool
+	}{
+		{
+			name:     "no ConfigMap is mounted, which is a backend with no pool bound to it yet",
+			seed:     func(_ *testing.T, dir string) string { return filepath.Join(dir, "absent.yaml") },
+			wantFile: string(empty),
+			wantWhy:  "the optional volume mounts empty, and the master will not start on no file at all",
+		},
+		{
+			name: "the pool's policy is there",
+			seed: func(t *testing.T, dir string) string {
+				p := filepath.Join(dir, "policy.yaml")
+				require.NoError(t, os.WriteFile(p, []byte(policy), 0o644))
+				return p
+			},
+			wantFile: policy,
+			wantWhy:  "the ConfigMap is the desired state and this is the master's copy of it",
+		},
+		{
+			// The case the old `cp || fallback` could not express. Everything about it looks like
+			// the first case from the outside: no source arrives at the destination.
+			name: "the policy is there but cannot be read",
+			seed: func(t *testing.T, dir string) string {
+				p := filepath.Join(dir, "policy.yaml")
+				require.NoError(t, os.WriteFile(p, []byte(policy), 0o000))
+				return p
+			},
+			wantErr:   true,
+			wantWhy:   "a copy that failed must not be laundered into the no-pool case",
+			rootBreak: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.rootBreak && os.Geteuid() == 0 {
+				t.Skip("running as root, which reads a mode-000 file and cannot stage this failure")
+			}
+
+			dir := t.TempDir()
+			target := filepath.Join(dir, "tenant-quota-policy.yaml")
+
+			// The command as shipped, read from the constant the init container is built from.
+			cmd := exec.Command("sh", "-c", quotaPolicySeedCommand)
+			cmd.Env = append(os.Environ(),
+				quotaPolicySeedEnv+"="+tc.seed(t, dir),
+				quotaPolicyFileEnv+"="+target,
+				quotaPolicyEmptyEnv+"="+string(empty))
+			out, runErr := cmd.CombinedOutput()
+
+			if tc.wantErr {
+				require.Error(t, runErr, "%s (command said: %s)", tc.wantWhy, out)
+
+				got, readErr := os.ReadFile(target)
+				if readErr == nil {
+					assert.NotEqual(t, string(empty), string(got),
+						"an empty policy written here is the ledger silently emptied")
+				}
+				return
+			}
+
+			require.NoError(t, runErr, "%s (command said: %s)", tc.wantWhy, out)
+			got, readErr := os.ReadFile(target)
+			require.NoError(t, readErr, "the master reads this file and will not start without it")
+			assert.Equal(t, tc.wantFile, string(got), tc.wantWhy)
+		})
+	}
+}
 
 // testBackend is the canonical managed backend, as admission leaves it. Every case starts from this
 // and mutates the one field it is about, so a case says what it changes and nothing else.
@@ -208,6 +301,131 @@ func TestLeaderWorkload_ClaimsNoHost(t *testing.T) {
 		assert.NotEqual(t, ptr.To(true), container.SecurityContext.Privileged,
 			"never privileged")
 	}
+}
+
+// multiTenantBackend is the canonical backend with the quota ledger turned on — the one shape that
+// makes the leader mount anything at all.
+func multiTenantBackend() *workercore.KVCacheBackend {
+	return testBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Connection.Managed.Leader.MultiTenancy = true
+	})
+}
+
+// TestLeaderWorkload_QuotaPolicyVolumeIsWritable is about the one thing the master cannot start
+// without, and the three shortcuts that each look like they would work.
+//
+// The master persists to its policy connector BEFORE applying an admin-API change and answers
+// PERSISTENT_FAIL when that write fails, so the file has to be somewhere writable — which a ConfigMap
+// mount is not. It also loads the file at startup and rethrows an unopenable one, so the volume
+// cannot start out empty. The shape that satisfies both is an emptyDir seeded by an initContainer,
+// and this test pins each half of it.
+func TestLeaderWorkload_QuotaPolicyVolumeIsWritable(t *testing.T) {
+	deploy := RenderLeaderDeployment(multiTenantBackend(), "mooncake:v0.3.13")
+	podSpec := deploy.Spec.Template.Spec
+
+	policy := volumeNamed(t, podSpec.Volumes, "tenant-quota-policy")
+	require.NotNil(t, policy.EmptyDir,
+		"the policy file lives on an emptyDir: the master renames a temp file over it on every "+
+			"admin write, and a ConfigMap mount is read-only")
+
+	seed := volumeNamed(t, podSpec.Volumes, "tenant-quota-policy-seed")
+	require.NotNil(t, seed.ConfigMap)
+	assert.Equal(t, "mooncake-dram-tenant-quota-policy", seed.ConfigMap.Name,
+		"the seed is the ConfigMap the pool reconciler renders for this backend")
+	require.NotNil(t, seed.ConfigMap.Optional)
+	assert.True(t, *seed.ConfigMap.Optional,
+		"optional, because the POOL reconciler writes that ConfigMap: a multi-tenant backend no "+
+			"pool has bound yet would otherwise wait forever for a volume nobody is going to create")
+
+	require.Len(t, podSpec.InitContainers, 1)
+	initContainer := podSpec.InitContainers[0]
+	assert.Equal(t, "mooncake:v0.3.13", initContainer.Image,
+		"the leader's own image, so an air-gapped install pulls nothing extra for the copy")
+	assert.Equal(t, podSpec.Containers[0].ImagePullPolicy, initContainer.ImagePullPolicy)
+
+	// The initContainer writes the emptyDir and reads the seed; the leader only reads the emptyDir.
+	// A leader that could see the seed would invite a future change to point the URI straight at it.
+	assert.ElementsMatch(t,
+		[]string{"tenant-quota-policy", "tenant-quota-policy-seed"},
+		mountedVolumeNames(initContainer),
+		"the initContainer is the only thing that reads the seed")
+	assert.Equal(t, []string{"tenant-quota-policy"}, mountedVolumeNames(podSpec.Containers[0]))
+
+	mount := podSpec.Containers[0].VolumeMounts[0]
+	assert.False(t, mount.ReadOnly, "read-only here would break every quota write")
+	assert.Equal(t, "/var/lib/mooncake", mount.MountPath)
+	assert.Contains(t, podSpec.Containers[0].Args,
+		"-tenant_quota_connector_uri=/var/lib/mooncake/tenant-quota-policy.yaml",
+		"the URI names a file inside the writable mount, not inside the seed")
+}
+
+// TestLeaderWorkload_QuotaPolicySeedFallsBackToTheEmptyPolicy is about the case nobody would
+// construct on purpose: multi-tenancy on, and no pool bound to the backend yet.
+//
+// Nothing has written the ConfigMap at that point, so the optional volume mounts as an empty
+// directory and the copy finds no source. The master's parser refuses an empty file as firmly as a
+// missing one — it wants a YAML map with version 1 and a tenants sequence — so the initContainer has
+// to write a real document, and the document has to be the renderer's own.
+func TestLeaderWorkload_QuotaPolicySeedFallsBackToTheEmptyPolicy(t *testing.T) {
+	deploy := RenderLeaderDeployment(multiTenantBackend(), "mooncake:v0.3.13")
+	initContainer := deploy.Spec.Template.Spec.InitContainers[0]
+
+	// The document and both paths travel as environment variables so the command is a fixed string:
+	// a policy interpolated into the shell would put a rendered YAML document inside quoting rules.
+	env := map[string]string{}
+	for _, e := range initContainer.Env {
+		env[e.Name] = e.Value
+	}
+	assert.Equal(t, "/etc/mooncake/tenant-quota-policy/tenant-quota-policy.yaml", env["POLICY_SEED"])
+	assert.Equal(t, "/var/lib/mooncake/tenant-quota-policy.yaml", env["POLICY_FILE"])
+
+	rendered, err := RenderQuotaPolicy(nil)
+	require.NoError(t, err)
+	assert.Equal(t, string(rendered), env["POLICY_EMPTY"],
+		"the fallback is what the renderer emits for an empty tenant set, not a second literal")
+
+	require.Len(t, initContainer.Command, 3)
+	assert.Equal(t, []string{"sh", "-c"}, initContainer.Command[:2])
+	for _, want := range []string{"$POLICY_SEED", "$POLICY_FILE", "$POLICY_EMPTY"} {
+		assert.Contains(t, initContainer.Command[2], want)
+	}
+}
+
+// TestLeaderWorkload_QuotaPolicyVolumeIsGatedOnMultiTenancy is the negative half, asserted field by
+// field rather than as one shape comparison, so the switch cannot half-apply.
+func TestLeaderWorkload_QuotaPolicyVolumeIsGatedOnMultiTenancy(t *testing.T) {
+	deploy := RenderLeaderDeployment(testBackend(), "mooncake:v0.3.13")
+	podSpec := deploy.Spec.Template.Spec
+
+	assert.Empty(t, podSpec.Volumes)
+	assert.Empty(t, podSpec.InitContainers)
+	assert.Empty(t, podSpec.Containers[0].VolumeMounts)
+	for _, arg := range podSpec.Containers[0].Args {
+		assert.NotContains(t, arg, "tenant_quota_connector")
+	}
+}
+
+// volumeNamed returns the named volume, failing the test rather than panicking when the render
+// produced no such volume.
+func volumeNamed(t *testing.T, volumes []core.Volume, name string) core.Volume {
+	t.Helper()
+	for _, v := range volumes {
+		if v.Name == name {
+			return v
+		}
+	}
+	require.FailNow(t, "no volume named "+name)
+	return core.Volume{}
+}
+
+// mountedVolumeNames is what a container reads, by volume name, so a case can assert the whole set
+// at once instead of one mount at a time.
+func mountedVolumeNames(container core.Container) []string {
+	names := make([]string, 0, len(container.VolumeMounts))
+	for _, m := range container.VolumeMounts {
+		names = append(names, m.Name)
+	}
+	return names
 }
 
 // TestLeaderWorkload_SelectorSurvivesASpecChange is about an immutable field.

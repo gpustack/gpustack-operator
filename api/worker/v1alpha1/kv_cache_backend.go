@@ -24,6 +24,7 @@ import (
 // +k8s:crd-gen:printcolumn:name="Phase",type="string",jsonPath=".status.phase"
 // +k8s:crd-gen:printcolumn:name="Endpoint",type="string",jsonPath=".status.endpoints[?(@.name=='Client')].address"
 // +k8s:crd-gen:printcolumn:name="Capacity",type="string",jsonPath=".status.capacity.total"
+// +k8s:crd-gen:printcolumn:name="Age",type="date",jsonPath=".metadata.creationTimestamp"
 type KVCacheBackend struct {
 	meta.TypeMeta   `json:",inline"`
 	meta.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
@@ -225,6 +226,20 @@ type KVCacheBackendLeader struct {
 	// +k8s:validation:enum=["Random","FreeRatioFirst"]
 	AllocationStrategy string `json:"allocationStrategy,omitempty" protobuf:"bytes,2,opt,name=allocationStrategy"`
 
+	// MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index
+	// behind it. Off, every request falls into one default tenant and the index degrades to a plain
+	// key hash, so two callers using different tenant names read each other's cache.
+	//
+	// It is a FIELD rather than an extraArgs entry because another API validates against it: a
+	// KVCachePool is refused when its backend has no ledger to write quota into. A webhook reading
+	// an unschema'd string — "true", "1", "True" — would be judging a value domain that belongs to
+	// whoever typed it.
+	//
+	// A plain bool, not a pointer, because unset and false mean the same thing here: no ledger.
+	// Unset renders NO flag rather than an explicit false, so a backend that never asked for this
+	// runs the command line it ran before the field existed.
+	MultiTenancy bool `json:"multiTenancy,omitempty" protobuf:"varint,4,opt,name=multiTenancy"`
+
 	// ExtraArgs passes flags this API does not enumerate straight through to the leader, after
 	// the derived ones. A key that collides with a flag rendered from a field above is refused
 	// at admission, because two sources for one flag make the rendered command ambiguous.
@@ -363,16 +378,28 @@ type KVCacheBackendStatus struct {
 	// UsedBy names the objects that consume this backend. A non-empty UsedBy is what the
 	// finalizer refuses deletion on, so the field is the enforcement input and not a display.
 	//
-	// It is a TypedLocalObjectReference and not a core ObjectReference: five of that type's seven
-	// fields mean nothing here, all of them are optional — so an entirely empty entry would
+	// It is written by the CONSUMERS, not by this backend's own reconciler, which only reads it and
+	// holds its teardown on it. Today exactly one consumer writes here: a KVCachePool claims the
+	// backend it draws from, under kind KVCachePool, when its reconciler resolves it — and drops the
+	// claim only after removing what it registered on that backend's master.
+	//
+	// It is neither a core ObjectReference nor a TypedLocalObjectReference. The first has seven
+	// fields, five of which mean nothing here, all optional — so an entirely empty entry would
 	// validate against a field a finalizer enforces on — and upstream tells new APIs not to embed
-	// it. "Local" here means only that there is no namespace field, which is right: a backend is
-	// cluster-scoped and so is everything that claims one.
+	// it. The second is closer but cannot be KEYED: its apiGroup is optional with no default, and a
+	// structural schema takes a list map key only where the field is required or defaulted, so a
+	// list keyed on kind and name would silently merge two objects differing only by group.
+	//
+	// KVCacheObjectReference drops the group and states the constraint that replaces it — an entry
+	// may only name a kind in this API group — so all three of its fields are required and all three
+	// are keys. Entries here leave Namespace empty: a backend is cluster-scoped and so is everything
+	// that claims one.
 	//
 	// +listType=map
 	// +listMapKey=kind
+	// +listMapKey=namespace
 	// +listMapKey=name
-	UsedBy []core.TypedLocalObjectReference `json:"usedBy,omitempty" protobuf:"bytes,7,rep,name=usedBy"`
+	UsedBy []KVCacheObjectReference `json:"usedBy,omitempty" protobuf:"bytes,7,rep,name=usedBy"`
 }
 
 // KVCacheBackendCapacity is the backend's capacity AS THE LEADER REPORTS IT. Both figures are

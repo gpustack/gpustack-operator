@@ -1,4 +1,4 @@
-package kvcache
+package mooncake
 
 import (
 	"context"
@@ -334,7 +334,7 @@ func (c *AdminClient) Health(ctx context.Context) (LeaderHealth, error) {
 
 // Capacity reads /metrics.
 //
-// ⚠️ It is not gated either, and that has a consequence a caller must handle rather than this
+// It is not gated either, and that has a consequence a caller must handle rather than this
 // method: a leader whose service plane is not up still answers 200 here, with its capacity gauges
 // reading zero because no segment has mounted. A successful read is therefore NOT evidence that
 // anything was observed, and the caller gates publishing on service_ready.

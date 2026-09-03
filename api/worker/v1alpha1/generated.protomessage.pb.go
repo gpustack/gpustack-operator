@@ -123,3 +123,33 @@ func (*KVCacheBackendSpec) ProtoMessage() {}
 func (*KVCacheBackendStatus) ProtoMessage() {}
 
 func (*KVCacheBackendTransport) ProtoMessage() {}
+
+func (*KVCacheObjectReference) ProtoMessage() {}
+
+func (*KVCachePool) ProtoMessage() {}
+
+func (*KVCachePoolBinding) ProtoMessage() {}
+
+func (*KVCachePoolBindingDomain) ProtoMessage() {}
+
+func (*KVCachePoolBindingList) ProtoMessage() {}
+
+func (*KVCachePoolBindingPoolReference) ProtoMessage() {}
+
+func (*KVCachePoolBindingReference) ProtoMessage() {}
+
+func (*KVCachePoolBindingSpec) ProtoMessage() {}
+
+func (*KVCachePoolBindingStatus) ProtoMessage() {}
+
+func (*KVCachePoolDomain) ProtoMessage() {}
+
+func (*KVCachePoolList) ProtoMessage() {}
+
+func (*KVCachePoolQuota) ProtoMessage() {}
+
+func (*KVCachePoolSpec) ProtoMessage() {}
+
+func (*KVCachePoolStatus) ProtoMessage() {}
+
+func (*KVCachePoolUsage) ProtoMessage() {}

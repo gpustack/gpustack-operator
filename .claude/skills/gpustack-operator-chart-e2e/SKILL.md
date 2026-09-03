@@ -25,7 +25,7 @@ Run as a **test-orchestration lead** (main agent) coordinating read-only **domai
 - **Specialists are read-only** — the lead is the sole writer.
 
 **Layout:**
-- `../_e2e-lib/scripts/` — `preflight.sh`, `build-load.sh <TAG>`, `deploy.sh <NS> <TAG> [--set …]`, `assert-core.sh <NS>`, `teardown.sh <NS>` (self-contained cleanup; mirrors the chart's `cleanup.sh`), `kube-context.sh <ctx>` (read-only; targets a context that is not the current one).
+- `../_e2e-lib/scripts/` — `preflight.sh`, `build-load.sh <TAG>`, `deploy.sh <NS> <TAG> [--set …]`, `assert-core.sh <NS>`, `teardown.sh <NS>` (test artifacts, release uninstall and a CRD-drain verdict; the cleanup itself is delegated to the chart's `files/cleanup.sh`), `kube-context.sh <ctx>` (read-only; targets a context that is not the current one).
 - `cases/case-N.sh` — one scenario each; ends in a `STATUS | CHECK | OBJECT` table, exits non-zero on any FAIL.
 - `references/version-contract.md`; shared `../_e2e-lib/references/{orchestration,troubleshooting}.md`.
 

@@ -1,0 +1,41 @@
+# The SAME two tenants as tenant-metrics.txt, as v0.3.13 serializes them. It is RECONSTRUCTED from
+# that tag's own exposition code — the order of the families, the six per-tenant lines and the three
+# global gauges are what MasterAdminService renders — not from a run: the capability experiment was
+# against 0.3.12.post1 and this build was never measured.
+#
+# What it exists to pin is the SHAPE, not the figures: four series 0.3.12.post1 emits are gone here,
+# and charged_bytes and admission_closed are new. team-a's charged_bytes is non-zero so a test can
+# tell "read the newer occupancy" apart from "read nothing".
+# HELP mooncake_tenant_quota_requested_bytes Requested tenant quota policy in bytes
+# TYPE mooncake_tenant_quota_requested_bytes gauge
+# HELP mooncake_tenant_quota_effective_bytes Effective tenant quota in bytes
+# TYPE mooncake_tenant_quota_effective_bytes gauge
+# HELP mooncake_tenant_quota_charged_bytes Tenant quota charge in bytes
+# TYPE mooncake_tenant_quota_charged_bytes gauge
+# HELP mooncake_tenant_quota_admission_closed Tenant quota admission-closed flag
+# TYPE mooncake_tenant_quota_admission_closed gauge
+# HELP mooncake_tenant_quota_over_quota Tenant over-quota flag
+# TYPE mooncake_tenant_quota_over_quota gauge
+# HELP mooncake_tenant_quota_explicit_policy Tenant explicit policy flag
+# TYPE mooncake_tenant_quota_explicit_policy gauge
+mooncake_tenant_quota_requested_bytes{tenant_id="team-a"} 1073741824
+mooncake_tenant_quota_effective_bytes{tenant_id="team-a"} 1073741824
+mooncake_tenant_quota_charged_bytes{tenant_id="team-a"} 268435456
+mooncake_tenant_quota_admission_closed{tenant_id="team-a"} 0
+mooncake_tenant_quota_over_quota{tenant_id="team-a"} 0
+mooncake_tenant_quota_explicit_policy{tenant_id="team-a"} 1
+mooncake_tenant_quota_requested_bytes{tenant_id="team-b"} 4294967296
+mooncake_tenant_quota_effective_bytes{tenant_id="team-b"} 4294967296
+mooncake_tenant_quota_charged_bytes{tenant_id="team-b"} 0
+mooncake_tenant_quota_admission_closed{tenant_id="team-b"} 0
+mooncake_tenant_quota_over_quota{tenant_id="team-b"} 0
+mooncake_tenant_quota_explicit_policy{tenant_id="team-b"} 1
+# HELP mooncake_tenant_quota_allocatable_capacity_bytes Global tenant quota allocatable capacity in bytes
+# TYPE mooncake_tenant_quota_allocatable_capacity_bytes gauge
+mooncake_tenant_quota_allocatable_capacity_bytes 5368709120
+# HELP mooncake_tenant_quota_requested_bytes_sum Global requested tenant quota sum in bytes
+# TYPE mooncake_tenant_quota_requested_bytes_sum gauge
+mooncake_tenant_quota_requested_bytes_sum 5368709120
+# HELP mooncake_tenant_quota_effective_bytes_sum Global effective tenant quota sum in bytes
+# TYPE mooncake_tenant_quota_effective_bytes_sum gauge
+mooncake_tenant_quota_effective_bytes_sum 5368709120

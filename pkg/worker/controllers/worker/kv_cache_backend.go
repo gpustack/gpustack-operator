@@ -20,6 +20,7 @@ import (
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlcontroller "sigs.k8s.io/controller-runtime/pkg/controller"
+	ctrlhandler "sigs.k8s.io/controller-runtime/pkg/handler"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -35,6 +36,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 	"gpustack.ai/gpustack/pkg/worker/kvcache"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -179,7 +181,7 @@ const kvCacheBackendMaxMembersBytes = 512 << 10
 
 // segmentListingSize measures what a listing would contribute to status, without building it.
 // Identifiers only: the per-entry JSON overhead is fixed and the count guard already bounds it.
-func segmentListingSize(segments []kvcache.SegmentDetail) int {
+func segmentListingSize(segments []mooncake.SegmentDetail) int {
 	var n int
 	for i := range segments {
 		n += encodedStringSize(segments[i].Name) + encodedStringSize(segments[i].State) +
@@ -282,7 +284,7 @@ func (r *KVCacheBackendReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// independent values.
 	holder := &workercore.KVCacheBackend{
 		ObjectMeta: *kvcb.ObjectMeta.DeepCopy(),
-		Status:     r.computeStatus(kvcb),
+		Status:     r.computeStatus(kvcb, r.liveKVCacheBackendConsumers(ctx, kvcb)),
 	}
 	// That status is a copy of the OBSERVED one, so it arrives carrying the addresses the previous
 	// pass published. Every branch below derives its own, and a branch that derives none has to leave
@@ -326,12 +328,12 @@ func (r *KVCacheBackendReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			// reason: a derived name is a query, not a proof.
 			svc := new(core.Service)
 			switch getErr := r.Client.Get(ctx, ctrlcli.ObjectKey{
-				Name:      kvcache.LeaderObjectName(kvcb),
+				Name:      mooncake.LeaderObjectName(kvcb),
 				Namespace: kuberess.SystemNamespaceName,
 			}, svc); {
 			case getErr == nil:
 				if renderedForKVCacheBackend(svc, kvcb) {
-					holder.Status.Endpoints = kvcache.LeaderEndpoints(kvcb)
+					holder.Status.Endpoints = mooncake.LeaderEndpoints(kvcb)
 				}
 			case !kerrors.IsNotFound(getErr):
 				return ctrl.Result{}, getErr
@@ -346,7 +348,7 @@ func (r *KVCacheBackendReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			// Published only after both objects converged, so an address in status always names
 			// something that exists. Whether it yet ANSWERS is a different question, and the
 			// conditions are where that one is reported.
-			holder.Status.Endpoints = kvcache.LeaderEndpoints(kvcb)
+			holder.Status.Endpoints = mooncake.LeaderEndpoints(kvcb)
 		}
 		renderBlocked = imageErr
 
@@ -497,7 +499,7 @@ func (r *KVCacheBackendReconciler) leaderPodIsReady(
 ) bool {
 	deploy := new(apps.Deployment)
 	err := r.Client.Get(ctx, ctrlcli.ObjectKey{
-		Name:      kvcache.LeaderObjectName(kvcb),
+		Name:      mooncake.LeaderObjectName(kvcb),
 		Namespace: kuberess.SystemNamespaceName,
 	}, deploy)
 	if err != nil {
@@ -599,7 +601,7 @@ func (r *KVCacheBackendReconciler) leaderPods(
 ) []core.Pod {
 	deploy := new(apps.Deployment)
 	err := r.Client.Get(ctx, ctrlcli.ObjectKey{
-		Name:      kvcache.LeaderObjectName(kvcb),
+		Name:      mooncake.LeaderObjectName(kvcb),
 		Namespace: kuberess.SystemNamespaceName,
 	}, deploy)
 	if err != nil || deploy.Spec.Selector == nil {
@@ -670,7 +672,7 @@ func (r *KVCacheBackendReconciler) observeCapacity(
 	ctx context.Context,
 	kvcb *workercore.KVCacheBackend,
 	holder *workercore.KVCacheBackend,
-	client *kvcache.AdminClient,
+	client *mooncake.AdminClient,
 ) {
 	capacity, err := adminRead(ctx, client.Capacity)
 	if err != nil {
@@ -704,7 +706,7 @@ func (r *KVCacheBackendReconciler) observeMembers(
 	ctx context.Context,
 	kvcb *workercore.KVCacheBackend,
 	holder *workercore.KVCacheBackend,
-	client *kvcache.AdminClient,
+	client *mooncake.AdminClient,
 ) {
 	logger := ctrllog.FromContext(ctx)
 
@@ -748,7 +750,7 @@ func (r *KVCacheBackendReconciler) observeMembers(
 		member := workercore.KVCacheBackendMemberStatus{
 			SegmentName: segment.Name,
 			Protocol:    segment.Protocol,
-			State:       kvcache.SegmentState(segment.State),
+			State:       mooncake.SegmentState(segment.State),
 		}
 		if pod, ok := pods[hostOf(segment.TEEndpoint)]; ok {
 			member.NodeName = pod.nodeName
@@ -869,7 +871,7 @@ func (r *KVCacheBackendReconciler) memberPodFaults(
 		pods := new(core.PodList)
 		err := r.Client.List(ctx, pods,
 			ctrlcli.InNamespace(kuberess.SystemNamespaceName),
-			ctrlcli.MatchingLabels(kvcache.MemberSelectorLabels(kvcb, group)))
+			ctrlcli.MatchingLabels(mooncake.MemberSelectorLabels(kvcb, group)))
 		if err != nil {
 			return nil
 		}
@@ -879,7 +881,7 @@ func (r *KVCacheBackendReconciler) memberPodFaults(
 			if pod.DeletionTimestamp != nil || podIsReady(pod) {
 				continue
 			}
-			if !memberPodIsOurs(pod, kvcache.MemberObjectName(kvcb, group)) {
+			if !memberPodIsOurs(pod, mooncake.MemberObjectName(kvcb, group)) {
 				continue
 			}
 			if fault, stuck := memberPodStuck(pod); stuck {
@@ -975,7 +977,7 @@ func (r *KVCacheBackendReconciler) listMemberPods(
 		pods := new(core.PodList)
 		err := r.Client.List(ctx, pods,
 			ctrlcli.InNamespace(kuberess.SystemNamespaceName),
-			ctrlcli.MatchingLabels(kvcache.MemberSelectorLabels(kvcb, group)))
+			ctrlcli.MatchingLabels(mooncake.MemberSelectorLabels(kvcb, group)))
 		if err != nil {
 			return facts, ready, err
 		}
@@ -988,7 +990,7 @@ func (r *KVCacheBackendReconciler) listMemberPods(
 			// A stranger carrying these labels would otherwise be indexed by ITS node and address —
 			// so a segment could be joined to the wrong node and medium — and counted as ready,
 			// inventing a shortfall against a listing that was never going to name it.
-			if !memberPodIsOurs(pod, kvcache.MemberObjectName(kvcb, group)) {
+			if !memberPodIsOurs(pod, mooncake.MemberObjectName(kvcb, group)) {
 				continue
 			}
 
@@ -1053,7 +1055,7 @@ func hostOf(address string) string {
 // tier to pick and the two pools are added instead. A backend using only one of them reads the same
 // either way, because the one it does not use contributes its zero.
 func selectKVCacheBackendCapacity(
-	kvcb *workercore.KVCacheBackend, capacity kvcache.LeaderCapacity,
+	kvcb *workercore.KVCacheBackend, capacity mooncake.LeaderCapacity,
 ) (total, used *int64) {
 	managed := kvcb.Spec.Connection.Managed
 	if managed == nil {
@@ -1065,7 +1067,7 @@ func selectKVCacheBackendCapacity(
 		return nil, nil
 	}
 
-	if kvcache.MemberMediumIsFileBacked(managed.Members[0].Medium) {
+	if mooncake.MemberMediumIsFileBacked(managed.Members[0].Medium) {
 		return capacity.TotalFileBytes, capacity.AllocatedFileBytes
 	}
 	return capacity.TotalBytes, capacity.AllocatedBytes
@@ -1103,12 +1105,12 @@ func sumCapacityGauges(memory, file *int64) *int64 {
 // is read is exactly what a consumer of this object would read.
 func (r *KVCacheBackendReconciler) adminClientFor(
 	endpoints []workercore.KVCacheBackendEndpoint,
-) *kvcache.AdminClient {
+) *mooncake.AdminClient {
 	for _, endpoint := range endpoints {
 		if endpoint.Name != workercore.KVCacheBackendEndpointNameAdmin || endpoint.Address == "" {
 			continue
 		}
-		return &kvcache.AdminClient{Address: endpoint.Address, HTTP: r.AdminHTTP}
+		return &mooncake.AdminClient{Address: endpoint.Address, HTTP: r.AdminHTTP}
 	}
 	return nil
 }
@@ -1119,7 +1121,7 @@ func (r *KVCacheBackendReconciler) syncLeaderWorkload(
 ) error {
 	logger := ctrllog.FromContext(ctx)
 
-	eDeploy := kvcache.RenderLeaderDeployment(kvcb, image)
+	eDeploy := mooncake.RenderLeaderDeployment(kvcb, image)
 	_, err := kubeclientset.CreateWithCtrlClient(ctx, r.Client, eDeploy,
 		kubeclientset.WithUpdateIfExisted(alignLeaderDeploymentFn(kvcb, eDeploy)))
 	if err != nil {
@@ -1127,7 +1129,7 @@ func (r *KVCacheBackendReconciler) syncLeaderWorkload(
 		return err
 	}
 
-	eSvc := kvcache.RenderLeaderService(kvcb)
+	eSvc := mooncake.RenderLeaderService(kvcb)
 	_, err = kubeclientset.CreateWithCtrlClient(ctx, r.Client, eSvc,
 		kubeclientset.WithUpdateIfExisted(alignLeaderServiceFn(kvcb, eSvc)))
 	if err != nil {
@@ -1214,6 +1216,39 @@ func alignLeaderDeploymentFn(
 		) {
 			aDeploy.Spec.Template.Spec.ImagePullSecrets = eDeploy.Spec.Template.Spec.ImagePullSecrets
 			skip = false
+		}
+
+		// Converged because the container pass below moves VolumeMounts. A pass that carried a mount
+		// across without the volume it names hands the API server a pod template it refuses outright
+		// — `volumeMounts[0].name: Not found` — and goes on refusing it every pass afterwards. What
+		// makes that worse than a loud failure is how it presents: the Deployment stays at the
+		// generation it had, so this object keeps reporting Ready and its conditions stay True while
+		// the master runs on without the flag the edit turned on. Multi-tenancy is exactly such an
+		// edit, and it is one the pool webhook TELLS an operator to make.
+		//
+		// The whole slice is compared, which is what also takes the volumes away again when the
+		// switch goes back off. That is only safe because the renderer spells out the fields the API
+		// server would otherwise default — see quotaPolicyVolumes.
+		if !kubemeta.DeepEqual(aDeploy.Spec.Template.Spec.Volumes, eDeploy.Spec.Template.Spec.Volumes) {
+			aDeploy.Spec.Template.Spec.Volumes = eDeploy.Spec.Template.Spec.Volumes
+			skip = false
+		}
+
+		// The init containers go field by field, through the same function the containers use, for
+		// the same reason it exists: the server defaults fields inside a container, so comparing one
+		// whole would make every pass a write.
+		if len(aDeploy.Spec.Template.Spec.InitContainers) != len(eDeploy.Spec.Template.Spec.InitContainers) {
+			aDeploy.Spec.Template.Spec.InitContainers = eDeploy.Spec.Template.Spec.InitContainers
+			skip = false
+		} else {
+			for i := range eDeploy.Spec.Template.Spec.InitContainers {
+				if alignRenderedContainer(
+					&aDeploy.Spec.Template.Spec.InitContainers[i],
+					eDeploy.Spec.Template.Spec.InitContainers[i],
+				) {
+					skip = false
+				}
+			}
 		}
 
 		if len(aDeploy.Spec.Template.Spec.Containers) != len(eDeploy.Spec.Template.Spec.Containers) {
@@ -1338,7 +1373,7 @@ func (r *KVCacheBackendReconciler) syncMemberWorkloads(
 	logger := ctrllog.FromContext(ctx)
 
 	for group := range kvcb.Spec.Connection.Managed.Members {
-		eDs := kvcache.RenderMemberDaemonSet(kvcb, group, image)
+		eDs := mooncake.RenderMemberDaemonSet(kvcb, group, image)
 		// The LIVE object, not the rendered one: it is what carries the UID, and the restart below
 		// proves a Pod is this DaemonSet's by that UID rather than by a selector.
 		aDs, err := kubeclientset.CreateWithCtrlClient(ctx, r.Client, eDs,
@@ -1390,7 +1425,7 @@ func (r *KVCacheBackendReconciler) restartOutdatedMemberPods(
 ) error {
 	logger := ctrllog.FromContext(ctx)
 
-	want := ds.Spec.Template.Annotations[kvcache.MemberPodSpecHashAnnotation]
+	want := ds.Spec.Template.Annotations[mooncake.MemberPodSpecHashAnnotation]
 	if want == "" {
 		// Nothing to compare against. Deleting every Pod on an unknown fingerprint would turn a
 		// rendering bug into a cluster-wide restart, so this does nothing instead.
@@ -1410,7 +1445,7 @@ func (r *KVCacheBackendReconciler) restartOutdatedMemberPods(
 		if pod.DeletionTimestamp != nil {
 			continue
 		}
-		if pod.Annotations[kvcache.MemberPodSpecHashAnnotation] == want {
+		if pod.Annotations[mooncake.MemberPodSpecHashAnnotation] == want {
 			continue
 		}
 		if !memberPodIsOurs(pod, ds.Name) {
@@ -1631,15 +1666,20 @@ func equalLeaderServicePorts(actual, expected []core.ServicePort) bool {
 // what the two waits are watching: usedBy is a field on this object, which cannot change without
 // waking this reconcile, while the workloads are three other kinds whose deletion events all dedup
 // down to this one request.
+//
+// What it refuses on is the claims that still name something — not the raw list. A consumer that
+// vanished without clearing its entry cannot come back to clear it, so refusing on the raw list would
+// hold this teardown forever with no event able to end it.
 func (r *KVCacheBackendReconciler) teardownKVCacheBackend(
 	ctx context.Context, kvcb *workercore.KVCacheBackend,
 ) (ctrl.Result, error) {
 	logger := ctrllog.FromContext(ctx)
 
-	if len(kvcb.Status.UsedBy) > 0 {
+	live := r.liveKVCacheBackendConsumers(ctx, kvcb)
+	if len(live) > 0 {
 		logger.V(2).Info("kv cache backend is in use; holding the lock",
-			"usedBy", len(kvcb.Status.UsedBy))
-		return ctrl.Result{}, r.syncStatus(ctx, kvcb, r.computeStatus(kvcb))
+			"usedBy", len(live))
+		return ctrl.Result{}, r.syncStatus(ctx, kvcb, r.computeStatus(kvcb, live))
 	}
 
 	// The rendered objects go FIRST, and the lock is what makes that ordering mean anything.
@@ -1665,7 +1705,7 @@ func (r *KVCacheBackendReconciler) teardownKVCacheBackend(
 		// backend takes as long as its workloads take to terminate, and without this the object
 		// keeps whatever phase it had — usually Ready — for that whole window, while the API
 		// contract says Deleting is reported until the teardown finishes.
-		if err = r.syncStatus(ctx, kvcb, r.computeStatus(kvcb)); err != nil {
+		if err = r.syncStatus(ctx, kvcb, r.computeStatus(kvcb, live)); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: kvCacheBackendTeardownInterval}, nil
@@ -1706,7 +1746,7 @@ func (r *KVCacheBackendReconciler) deleteRenderedWorkloads(
 	logger := ctrllog.FromContext(ctx)
 
 	leaderKey := ctrlcli.ObjectKey{
-		Name:      kvcache.LeaderObjectName(kvcb),
+		Name:      mooncake.LeaderObjectName(kvcb),
 		Namespace: kuberess.SystemNamespaceName,
 	}
 	for _, obj := range []ctrlcli.Object{&apps.Deployment{}, &core.Service{}} {
@@ -1843,19 +1883,30 @@ func (r *KVCacheBackendReconciler) syncStatus(
 // that can observe them — there is no leader to ask and no member to count yet — and inventing them
 // here would report a state nothing measured. Everything already in status that this pass does not
 // derive is carried forward, so a later task's figures are not erased by this one.
+//
+// The claims arrive as an argument rather than being read off the object, because deciding which of
+// them still name something is a lookup and this stays a pure function of what was observed.
 func (r *KVCacheBackendReconciler) computeStatus(
-	kvcb *workercore.KVCacheBackend,
+	kvcb *workercore.KVCacheBackend, live []workercore.KVCacheObjectReference,
 ) workercore.KVCacheBackendStatus {
 	// The condition accessors mutate the object they are given, so they work on a copy: the caller
 	// compares this result against the observed status and writes only on a difference.
 	desired := &workercore.KVCacheBackend{Status: *kvcb.Status.DeepCopy()}
 
-	inUseBy := formatKVCacheBackendConsumers(kvcb)
-	if inUseBy == "" {
-		KVCacheBackendConditionDeletable.True(desired, "Unused", "no object claims this backend")
-	} else {
+	inUseBy := formatKVCacheBackendConsumers(live)
+	switch {
+	case inUseBy != "":
 		KVCacheBackendConditionDeletable.False(desired, "InUse",
 			fmt.Sprintf("in use by %s", inUseBy))
+	case len(kvcb.Status.UsedBy) > 0:
+		// Every claim on this backend names something that is gone. Saying so, rather than reporting
+		// the plain "no object claims this backend", is what tells a reader why usedBy and Deletable
+		// disagree — the alternative is a status that looks self-contradictory and explains nothing.
+		KVCacheBackendConditionDeletable.True(desired, "Unused",
+			fmt.Sprintf("no object claims this backend; status.usedBy still names %s, which no longer "+
+				"exists", formatKVCacheBackendConsumers(kvcb.Status.UsedBy)))
+	default:
+		KVCacheBackendConditionDeletable.True(desired, "Unused", "no object claims this backend")
 	}
 
 	switch {
@@ -1957,12 +2008,84 @@ func deriveKVCacheBackendPhase(holder *workercore.KVCacheBackend, renderBlocked 
 // entry per consumer, and this message is what carries Deletable=False and the Deleting phase. An
 // unbounded join would take the refusal down with it — the delete would be refused and the object
 // would not say so.
-func formatKVCacheBackendConsumers(kvcb *workercore.KVCacheBackend) string {
-	names := make([]string, 0, len(kvcb.Status.UsedBy))
-	for _, ref := range kvcb.Status.UsedBy {
+func formatKVCacheBackendConsumers(refs []workercore.KVCacheObjectReference) string {
+	names := make([]string, 0, len(refs))
+	for _, ref := range refs {
 		names = append(names, ref.Kind+"/"+ref.Name)
 	}
 	return listBoundedNames(names)
+}
+
+// liveKVCacheBackendConsumers keeps the entries of status.usedBy that still name an object which
+// exists.
+//
+// The list is written by the consumers themselves and cleared by them on the way out, so ordinarily
+// every entry is live and this returns all of them. It exists for the case where a consumer went away
+// WITHOUT clearing its entry — an operator forcing a wedged KVCachePool's finalizer off, say. Nothing
+// can clean up after that consumer, because the consumer is what would have done the cleaning, so the
+// reader has to work without the cleanup ever happening. Otherwise an entry naming a pool that is
+// gone holds this backend's teardown for good, and the only sign of it is a Deletable=False naming an
+// object nobody can find.
+//
+// An entry is dropped only on a definite NOT FOUND. A kind this reconciler cannot look up, or a read
+// that failed, is KEPT: turning "cannot verify" into "does not exist" is the wrong direction for a
+// claim whose whole purpose is to hold a deletion.
+//
+// That rule is only as good as the read behind it, so the read is stated rather than assumed. It goes
+// through the manager's informer cache, and the cache's error is ONE-DIRECTIONAL: an entry enters the
+// indexer on an ADD and leaves on a DELETE, so a cache running behind still holds a pool it has not
+// yet seen deleted. It errs towards refusing a teardown, never towards allowing one.
+//
+// Erring the other way takes a cache that has never seen the pool, and there are two ways to get one.
+// A cache that has not started is closed by controller-runtime, which syncs every informer before it
+// starts a controller. A pool created moments ago, its ADD still in flight, is closed by what must
+// already have happened for this loop to be reading the entry at all: that entry was written by the
+// POOL's own reconciler, which runs on the same manager and therefore out of the same cache, so that
+// cache had seen the pool before the entry existed. "This cache does not hold the pool" and "usedBy
+// names the pool" cannot both be true.
+//
+// Deliberately NO ResourceVersion option. A cached Get ignores it — CacheReader.Get reads only
+// UnsafeDisableDeepCopy off the options — so passing one would advertise a staleness trade-off this
+// call does not actually make, on the one read in this file where getting staleness wrong would
+// release a lock that cannot be taken back.
+func (r *KVCacheBackendReconciler) liveKVCacheBackendConsumers(
+	ctx context.Context, kvcb *workercore.KVCacheBackend,
+) []workercore.KVCacheObjectReference {
+	if len(kvcb.Status.UsedBy) == 0 {
+		return nil
+	}
+
+	live := make([]workercore.KVCacheObjectReference, 0, len(kvcb.Status.UsedBy))
+	for _, ref := range kvcb.Status.UsedBy {
+		if ref.Kind != KVCachePoolKind {
+			live = append(live, ref)
+			continue
+		}
+		err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: ref.Name}, new(workercore.KVCachePool))
+		if err == nil || !kerrors.IsNotFound(err) {
+			live = append(live, ref)
+		}
+	}
+	return live
+}
+
+// enqueueKVCacheBackendWhenPoolChanged maps a pool back to every backend it draws from.
+//
+// It reads the pool's spec rather than the backends' usedBy, because the event that matters most is
+// the pool's DELETE — and a delete carries the object's last known state, which still names them.
+func (r *KVCacheBackendReconciler) enqueueKVCacheBackendWhenPoolChanged(
+	_ context.Context, obj ctrlcli.Object,
+) []ctrlreconcile.Request {
+	kvcp, ok := obj.(*workercore.KVCachePool)
+	if !ok {
+		return nil
+	}
+
+	reqs := make([]ctrlreconcile.Request, 0, len(kvcp.Spec.Backends))
+	for _, name := range kvcp.Spec.Backends {
+		reqs = append(reqs, ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: name}})
+	}
+	return reqs
 }
 
 // enqueueKVCacheBackendWhenWorkloadChanged maps a rendered object back to the backend that owns it.
@@ -2006,6 +2129,18 @@ func (r *KVCacheBackendReconciler) SetupController(_ context.Context, opts contr
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("kvcachebackend").
 		For(&workercore.KVCacheBackend{}).
+		Watches(
+			// A pool claims this backend by writing itself into status.usedBy, and its own reconciler
+			// clears that entry on the way out — so ordinarily this backend is woken by its own status
+			// changing and this watch adds nothing. What it covers is the pool going away WITHOUT
+			// clearing the entry, which nothing else can wake: the claim would name an object that no
+			// longer exists and hold the teardown with no event ever arriving to re-examine it.
+			//
+			// Not deduped, unlike the workload watches. Those fire per rendered object and collapse
+			// onto one backend; this one fires per pool, and a pool names each of its backends once.
+			&workercore.KVCachePool{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueueKVCacheBackendWhenPoolChanged),
+		).
 		Watches(
 			// Watch the leader's Deployment and enqueue the backend that owns it. Without this the
 			// reconciler converges the rendered objects only when the BACKEND changes, so a hand
@@ -2085,7 +2220,7 @@ const kvCacheBackendConcurrency = 4
 func kvCacheBackendLeaderPodPredicate() ctrlpredicate.Predicate {
 	return ctrlpredicate.NewPredicateFuncs(func(obj ctrlcli.Object) bool {
 		return obj.GetNamespace() == kuberess.SystemNamespaceName &&
-			kvcache.LeaderPodBackendName(obj.GetLabels()) != ""
+			mooncake.LeaderPodBackendName(obj.GetLabels()) != ""
 	})
 }
 
@@ -2093,7 +2228,7 @@ func kvCacheBackendLeaderPodPredicate() ctrlpredicate.Predicate {
 func (r *KVCacheBackendReconciler) enqueueKVCacheBackendWhenLeaderPodChanged(
 	_ context.Context, obj ctrlcli.Object,
 ) []ctrlreconcile.Request {
-	name := kvcache.LeaderPodBackendName(obj.GetLabels())
+	name := mooncake.LeaderPodBackendName(obj.GetLabels())
 	if name == "" {
 		return nil
 	}

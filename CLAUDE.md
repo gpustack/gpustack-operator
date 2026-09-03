@@ -61,6 +61,8 @@ The `gpustack-operator-lint` hook dispatches on what a turn left dirty. Run the 
 - Keep concurrency simple, safe, justified, and minimally applied.
 - Minimize mutable shared state to reduce synchronization complexity.
 - Document exported APIs with behavior, expectations, and constraints.
+- Keep comments plain and short: no emoji, no decorative symbols, no circled digits. State the point
+  in words. Applies to every commented source file, Go and shell alike.
 
 ### Kubernetes conventions
 

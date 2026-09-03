@@ -26,3 +26,15 @@ type InstanceTypeListerExpansion interface{}
 // KVCacheBackendListerExpansion allows custom methods to be added to
 // KVCacheBackendLister.
 type KVCacheBackendListerExpansion interface{}
+
+// KVCachePoolListerExpansion allows custom methods to be added to
+// KVCachePoolLister.
+type KVCachePoolListerExpansion interface{}
+
+// KVCachePoolBindingListerExpansion allows custom methods to be added to
+// KVCachePoolBindingLister.
+type KVCachePoolBindingListerExpansion interface{}
+
+// KVCachePoolBindingNamespaceListerExpansion allows custom methods to be added to
+// KVCachePoolBindingNamespaceLister.
+type KVCachePoolBindingNamespaceListerExpansion interface{}

@@ -1,0 +1,52 @@
+# team-a's eight series and the three global gauges are TRANSCRIBED from the capability experiment
+# of 2026-08-28 against 0.3.12.post1. team-b is RECONSTRUCTED: the experiment recorded the global
+# mooncake_tenant_quota_requested_bytes_sum as 5368709120, which is more than team-a asked for, so a
+# second tenant requesting the remaining 4294967296 is what makes the recorded total add up. Its
+# figures are derived from a measured one; they were never observed on their own.
+# HELP master_total_capacity_bytes Total memory capacity in bytes
+# TYPE master_total_capacity_bytes gauge
+master_total_capacity_bytes 1082331758592
+# HELP master_allocated_bytes Allocated memory in bytes
+# TYPE master_allocated_bytes gauge
+master_allocated_bytes 5476083302
+# HELP mooncake_tenant_quota_requested_bytes Requested tenant quota in bytes
+# TYPE mooncake_tenant_quota_requested_bytes gauge
+mooncake_tenant_quota_requested_bytes{tenant_id="team-a"} 1073741824
+mooncake_tenant_quota_requested_bytes{tenant_id="team-b"} 4294967296
+# HELP mooncake_tenant_quota_effective_bytes Effective tenant quota in bytes
+# TYPE mooncake_tenant_quota_effective_bytes gauge
+mooncake_tenant_quota_effective_bytes{tenant_id="team-a"} 0
+mooncake_tenant_quota_effective_bytes{tenant_id="team-b"} 0
+# HELP mooncake_tenant_quota_used_bytes Tenant used bytes
+# TYPE mooncake_tenant_quota_used_bytes gauge
+mooncake_tenant_quota_used_bytes{tenant_id="team-a"} 0
+mooncake_tenant_quota_used_bytes{tenant_id="team-b"} 0
+# HELP mooncake_tenant_quota_reserved_bytes Tenant reserved bytes
+# TYPE mooncake_tenant_quota_reserved_bytes gauge
+mooncake_tenant_quota_reserved_bytes{tenant_id="team-a"} 0
+mooncake_tenant_quota_reserved_bytes{tenant_id="team-b"} 0
+# HELP mooncake_tenant_quota_committed_count Tenant committed object count
+# TYPE mooncake_tenant_quota_committed_count gauge
+mooncake_tenant_quota_committed_count{tenant_id="team-a"} 0
+mooncake_tenant_quota_committed_count{tenant_id="team-b"} 0
+# HELP mooncake_tenant_quota_metadata_object_count Tenant metadata object count
+# TYPE mooncake_tenant_quota_metadata_object_count gauge
+mooncake_tenant_quota_metadata_object_count{tenant_id="team-a"} 0
+mooncake_tenant_quota_metadata_object_count{tenant_id="team-b"} 0
+# HELP mooncake_tenant_quota_over_quota Tenant over-quota flag
+# TYPE mooncake_tenant_quota_over_quota gauge
+mooncake_tenant_quota_over_quota{tenant_id="team-a"} 0
+mooncake_tenant_quota_over_quota{tenant_id="team-b"} 0
+# HELP mooncake_tenant_quota_explicit_policy Tenant explicit policy flag
+# TYPE mooncake_tenant_quota_explicit_policy gauge
+mooncake_tenant_quota_explicit_policy{tenant_id="team-a"} 1
+mooncake_tenant_quota_explicit_policy{tenant_id="team-b"} 1
+# HELP mooncake_tenant_quota_allocatable_capacity_bytes Global tenant quota allocatable capacity in bytes
+# TYPE mooncake_tenant_quota_allocatable_capacity_bytes gauge
+mooncake_tenant_quota_allocatable_capacity_bytes 0
+# HELP mooncake_tenant_quota_requested_bytes_sum Global requested tenant quota sum in bytes
+# TYPE mooncake_tenant_quota_requested_bytes_sum gauge
+mooncake_tenant_quota_requested_bytes_sum 5368709120
+# HELP mooncake_tenant_quota_effective_bytes_sum Global effective tenant quota sum in bytes
+# TYPE mooncake_tenant_quota_effective_bytes_sum gauge
+mooncake_tenant_quota_effective_bytes_sum 0

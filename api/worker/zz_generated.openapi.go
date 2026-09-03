@@ -111,6 +111,21 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.KVCacheBackendSpec{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_KVCacheBackendSpec(ref),
 		v1alpha1.KVCacheBackendStatus{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_KVCacheBackendStatus(ref),
 		v1alpha1.KVCacheBackendTransport{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_KVCacheBackendTransport(ref),
+		v1alpha1.KVCacheObjectReference{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_KVCacheObjectReference(ref),
+		v1alpha1.KVCachePool{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_KVCachePool(ref),
+		v1alpha1.KVCachePoolBinding{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_KVCachePoolBinding(ref),
+		v1alpha1.KVCachePoolBindingDomain{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingDomain(ref),
+		v1alpha1.KVCachePoolBindingList{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingList(ref),
+		v1alpha1.KVCachePoolBindingPoolReference{}.OpenAPIModelName():        schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingPoolReference(ref),
+		v1alpha1.KVCachePoolBindingReference{}.OpenAPIModelName():            schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingReference(ref),
+		v1alpha1.KVCachePoolBindingSpec{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingSpec(ref),
+		v1alpha1.KVCachePoolBindingStatus{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingStatus(ref),
+		v1alpha1.KVCachePoolDomain{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_KVCachePoolDomain(ref),
+		v1alpha1.KVCachePoolList{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_KVCachePoolList(ref),
+		v1alpha1.KVCachePoolQuota{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_KVCachePoolQuota(ref),
+		v1alpha1.KVCachePoolSpec{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_KVCachePoolSpec(ref),
+		v1alpha1.KVCachePoolStatus{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_KVCachePoolStatus(ref),
+		v1alpha1.KVCachePoolUsage{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_KVCachePoolUsage(ref),
 		corev1.AWSElasticBlockStoreVolumeSource{}.OpenAPIModelName():         schema_k8sio_api_core_v1_AWSElasticBlockStoreVolumeSource(ref),
 		corev1.Affinity{}.OpenAPIModelName():                                 schema_k8sio_api_core_v1_Affinity(ref),
 		corev1.AppArmorProfile{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_AppArmorProfile(ref),
@@ -4884,6 +4899,13 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref common.Referen
 							Format:      "",
 						},
 					},
+					"multiTenancy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index behind it. Off, every request falls into one default tenant and the index degrades to a plain key hash, so two callers using different tenant names read each other's cache.\n\nIt is a FIELD rather than an extraArgs entry because another API validates against it: a KVCachePool is refused when its backend has no ledger to write quota into. A webhook reading an unschema'd string — \"true\", \"1\", \"True\" — would be judging a value domain that belongs to whoever typed it.\n\nA plain bool, not a pointer, because unset and false mean the same thing here: no ledger. Unset renders NO flag rather than an explicit false, so a backend that never asked for this runs the command line it ran before the field existed.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
 					"extraArgs": {
 						SchemaProps: spec.SchemaProps{
 							Description: "ExtraArgs passes flags this API does not enumerate straight through to the leader, after the derived ones. A key that collides with a flag rendered from a field above is refused at admission, because two sources for one flag make the rendered command ambiguous.",
@@ -5297,19 +5319,20 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendStatus(ref common.Referen
 							Extensions: spec.Extensions{
 								"x-kubernetes-list-map-keys": []interface{}{
 									"kind",
+									"namespace",
 									"name",
 								},
 								"x-kubernetes-list-type": "map",
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "UsedBy names the objects that consume this backend. A non-empty UsedBy is what the finalizer refuses deletion on, so the field is the enforcement input and not a display.\n\nIt is a TypedLocalObjectReference and not a core ObjectReference: five of that type's seven fields mean nothing here, all of them are optional — so an entirely empty entry would validate against a field a finalizer enforces on — and upstream tells new APIs not to embed it. \"Local\" here means only that there is no namespace field, which is right: a backend is cluster-scoped and so is everything that claims one.",
+							Description: "UsedBy names the objects that consume this backend. A non-empty UsedBy is what the finalizer refuses deletion on, so the field is the enforcement input and not a display.\n\nIt is written by the CONSUMERS, not by this backend's own reconciler, which only reads it and holds its teardown on it. Today exactly one consumer writes here: a KVCachePool claims the backend it draws from, under kind KVCachePool, when its reconciler resolves it — and drops the claim only after removing what it registered on that backend's master.\n\nIt is neither a core ObjectReference nor a TypedLocalObjectReference. The first has seven fields, five of which mean nothing here, all optional — so an entirely empty entry would validate against a field a finalizer enforces on — and upstream tells new APIs not to embed it. The second is closer but cannot be KEYED: its apiGroup is optional with no default, and a structural schema takes a list map key only where the field is required or defaulted, so a list keyed on kind and name would silently merge two objects differing only by group.\n\nKVCacheObjectReference drops the group and states the constraint that replaces it — an entry may only name a kind in this API group — so all three of its fields are required and all three are keys. Entries here leave Namespace empty: a backend is cluster-scoped and so is everything that claims one.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
 									SchemaProps: spec.SchemaProps{
 										Default: map[string]interface{}{},
-										Ref:     ref(corev1.TypedLocalObjectReference{}.OpenAPIModelName()),
+										Ref:     ref(v1alpha1.KVCacheObjectReference{}.OpenAPIModelName()),
 									},
 								},
 							},
@@ -5319,7 +5342,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendStatus(ref common.Referen
 			},
 		},
 		Dependencies: []string{
-			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.KVCacheBackendCapacity{}.OpenAPIModelName(), v1alpha1.KVCacheBackendEndpoint{}.OpenAPIModelName(), v1alpha1.KVCacheBackendMemberStatus{}.OpenAPIModelName(), corev1.TypedLocalObjectReference{}.OpenAPIModelName()},
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.KVCacheBackendCapacity{}.OpenAPIModelName(), v1alpha1.KVCacheBackendEndpoint{}.OpenAPIModelName(), v1alpha1.KVCacheBackendMemberStatus{}.OpenAPIModelName(), v1alpha1.KVCacheObjectReference{}.OpenAPIModelName()},
 	}
 }
 
@@ -5340,6 +5363,738 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendTransport(ref common.Refe
 				},
 			},
 		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCacheObjectReference(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCacheObjectReference names an object that consumes another one in this group. It is the ONE shape every usedBy in this family carries, so a reader learns it once.\n\nIt names NO API GROUP, and that is a constraint rather than an omission: a usedBy entry may only name a kind in this API group. Within one group, kind and name identify an object, so the group would be a constant on every entry. The constraint is what makes that safe, and it is the reason the list can be keyed at all — core.TypedLocalObjectReference carries an optional, defaultless apiGroup, which a structural schema refuses as a list map key, so keying on kind and name alone would silently merge two objects that differ only by group.\n\nAll three fields are REQUIRED, and all three are list map keys — a structural schema accepts a key only where it is required or defaulted, and two consumers collapsing into one entry would let a finalizer release while a consumer still holds. Namespace is required but carries the EMPTY STRING when the referent is in the holder's own scope: a cluster-scoped object naming another, or a namespaced object naming something in its own namespace. Empty is a value here, not an absence.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"namespace": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+				},
+				Required: []string{"kind", "namespace", "name"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCachePool(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePool is the schema for worker.gpustack.ai.\n\nA KVCacheBackend declares the physical cache; this declares which namespaces are granted a quota on it, how much of it, and under which reuse identity. It is the quota domain over exactly one backend, and the registry of the reuse domains its Bindings have claimed.\n\nIt grants and accounts; it does not admit. Nothing here keeps a pod that knows a reuse domain's name from reaching that domain on the store — see KVCachePoolBinding for what the grant is and what it is not.\n\nIt is cluster-scoped, for the reason the backend it references is: the backend is a privileged physical resource only an admin declares, pools must be shareable across namespaces, and a cross-namespace reference FROM a namespaced object is an anti-pattern. Data-plane isolation is a different axis, and the storage layer's tenant — not this object's scope — is what solves it. This is Kueue's ClusterQueue to KVCachePoolBinding's LocalQueue.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.KVCachePoolSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.KVCachePoolStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.KVCachePoolSpec{}.OpenAPIModelName(), v1alpha1.KVCachePoolStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCachePoolBinding(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolBinding is the schema for worker.gpustack.ai.\n\nIt is the PROVISIONING POINT: creating one in a namespace is what gives that namespace a quota on a pool and registers the reuse domain it will write under, so both are objects an admin can RBAC and audit rather than strings a tenant types into a workload.\n\nIt is NOT an enforcement boundary, and must not be described as one. The store accepts whatever tenant id a caller sends, over a Service any pod in the cluster can dial; nothing derives a credential from this object. So a workload that knows another namespace's domain name can read and write that domain's cache today. What a Binding governs is who is GRANTED capacity and under which name — provisioning and accounting, not access control. Enforcement needs an authenticated proxy or network isolation, and neither exists yet.\n\nIt is also where a reuse domain is registered, and exactly one. Because the storage layer's tenant IS the domain, registering one creates a quota ledger — which makes naming a domain a privileged act, and is why it is declared here and never by a workload that could otherwise mint tenants at will. Workloads pointing at the SAME Binding share KV; a namespace needing two reuse boundaries creates two Bindings, exactly as one with two scheduling boundaries has two Kueue LocalQueues.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.KVCachePoolBindingSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.KVCachePoolBindingStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.KVCachePoolBindingSpec{}.OpenAPIModelName(), v1alpha1.KVCachePoolBindingStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingDomain(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolBindingDomain is the reuse identity: what the cache isolates on, and what its blocks are shaped like.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the domain, and it becomes the storage layer's tenant_id verbatim.\n\nIt must be claimed by no other Binding CLUSTER-WIDE, which the webhook enforces: two Bindings on one domain would share cache — possibly intended — but collide on one quota ledger, which never is. Uniqueness is cluster-wide rather than per pool because one master can serve several pools and the tenant space is master-global.\n\nThe accepted shape is a DNS-1123 label, checked by the webhook. That is strictly inside what the master accepts as a tenant_id and is what a Kubernetes object name already looks like, so nobody learns a second naming rule. This is the ONLY place the shape is judged: every consumer downstream copies the name rather than re-judging it.",
+							Default:     "",
+							MaxLength:   ptr.To[int64](63),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"blockSize": {
+						SchemaProps: spec.SchemaProps{
+							Description: "BlockSize is the number of tokens one cache block holds.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"dtype": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Dtype is the element type the cached tensors carry, in the engine's own lowercase spelling.\n\nThe exhaustive set belongs to whatever spec owns workloads, so this API does not enumerate it and the webhook judges the syntactic form only. Enumerating it here would make a new engine dtype an API change.\n\nIt is spelled to match its JSON name exactly; DType would not, and the openapi generator records every such mismatch as a checked-in API rule violation.",
+							Default:     "",
+							MaxLength:   ptr.To[int64](32),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"name", "blockSize", "dtype"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolBindingList holds the list of KVCachePoolBinding.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.KVCachePoolBinding{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.KVCachePoolBinding{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingPoolReference(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolBindingPoolReference names the cluster-scoped pool this Binding grants.\n\nIt carries no namespace, and that is the point: a pool is cluster-scoped, so there is none to name, and no namespaced object here ever reads across a namespace boundary.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingReference(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolBindingReference names one KVCachePoolBinding.\n\nIt carries no kind, unlike KVCacheObjectReference, because it is not a usedBy: it is the back pointer from a registered domain to the one object that could have declared it, and only a KVCachePoolBinding ever can. Both fields are required, because a Binding is namespaced and the namespace is half of its identity.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"namespace": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+				},
+				Required: []string{"namespace", "name"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolBindingSpec defines the desired spec of KVCachePoolBinding.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"poolRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PoolRef names the pool this namespace is being granted. It is IMMUTABLE, webhook-enforced: re-pointing a Binding would move a namespace's grant silently and leave its bytes on the old master.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.KVCachePoolBindingPoolReference{}.OpenAPIModelName()),
+						},
+					},
+					"domain": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Domain is the reuse identity this Binding registers, and it is REQUIRED. It maps to the storage layer's tenant_id (isolation) and cache_salt (prefix identity), so registering a domain creates a tenant with a quota ledger of its own.\n\nIt is a struct rather than a list deliberately. One Binding is one tenant, so every figure in Status is a single series rather than a sum, and no rule for dividing one ceiling among several domains has to be invented. The cardinality is structural, not a webhook rule.\n\nEVERY FIELD IS IMMUTABLE, webhook-enforced. Name re-points this namespace at a different ledger and strands the old one. BlockSize or Dtype changed under a warm cache is silent corruption: the writes succeed, the reads succeed, and the tensors are wrong.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.KVCachePoolBindingDomain{}.OpenAPIModelName()),
+						},
+					},
+					"quotaCeiling": {
+						SchemaProps: spec.SchemaProps{
+							Description: "QuotaCeiling is what this namespace may consume in its reuse domain. It is written verbatim into that one tenant's requested quota, so it is the storage layer's own request figure rather than a total this operator maintains.\n\nIT IS A REQUEST, NOT A GRANT. The pool reduces every tenant's effective quota in proportion when the sum of requests exceeds allocatable capacity, and Status.EffectiveQuota is what was actually granted.\n\nREQUIRED, because the state it would otherwise allow does not work. The storage layer has no default policy to fall back on: a tenant it holds no policy for is refused outright, with the same error a reuse domain that was never declared gets — measured on a real master, and stated in the artifact's own header, where the code is spelled `TENANT_NOT_REGISTERED = -1701, ///< Tenant has no quota policy.` A Binding without this field would pass admission, report Ready and refuse every byte its workloads wrote.\n\nRequired is also the direction that can be taken back. Should the storage layer ever grow a default quota, relaxing this to optional keeps every object already written valid; going the other way — optional today, required later — invalidates every object that omitted it.\n\nHeld BY VALUE, like the pool's own ceiling and for the same reason: the schema guarantees the key is present, so there is no unset to distinguish and a pointer would only add a nil case nothing can produce. The webhook still refuses a value that is not positive.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"poolRef", "domain", "quotaCeiling"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.KVCachePoolBindingDomain{}.OpenAPIModelName(), v1alpha1.KVCachePoolBindingPoolReference{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolBindingStatus is the namespace's own view of the pool: what it asked for, what the pool actually granted, what it is using, and whether it is over.\n\nEvery figure below is read from ONE tenant's series, because a Binding registers exactly one reuse domain and the storage layer's tenant IS that domain. Nothing here is summed, and no figure can hide a second domain behind it.\n\nEvery observed figure is a POINTER, for one reason shared by all of them: a resource.Quantity is a struct and omitempty does not omit a zero-valued struct, so a value-held figure serializes as \"0\" on exactly the passes whose contract says there must be no field at all.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"phase": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Phase summarizes the conditions: Provisioning, Ready, Degraded, Error, Deleting.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"phaseMessage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PhaseMessage carries the reason for the phase.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"conditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"type",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "type",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Conditions is the finer view, one condition per axis.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(apiv1.Condition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"requestedQuota": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RequestedQuota is what the operator asked the pool for on this namespace's behalf: the requested quota it wrote for this Binding's one tenant. It is absent, with a Condition saying why, whenever the operator refused to write — a master that answered that multi-tenancy is off, or a policy source it cannot rewrite.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"effectiveQuota": {
+						SchemaProps: spec.SchemaProps{
+							Description: "EffectiveQuota is what the pool actually granted. It is LOWER than RequestedQuota whenever the sum of every tenant's request exceeds the pool's allocatable capacity: the pool then recomputes each tenant's effective quota in proportion to what that tenant requested. A pool with no mounted members grants ZERO to everyone, and that case carries its own Condition rather than appearing as an ordinary shortfall — which is what makes the pointer load-bearing, because a granted zero and an unobserved quota must not serialize the same way.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"usage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Usage is what the master reports this namespace's reuse domain as holding, and WHICH figure that is depends on the master's version rather than on this API.\n\nA master that exposes used bytes apart from reservations is read as committed bytes, and in-flight writes are deliberately left out — a burst of concurrent writes would otherwise read as consumption that never happened. A master that exposes one charged figure instead, the shape 0.3.13 introduced, charges it when a write STARTS: there is no committed figure to isolate, so in-flight reservations are inside this number and cannot be subtracted. The Binding's own QuotaObserved message says which of the two answered.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"overQuota": {
+						SchemaProps: spec.SchemaProps{
+							Description: "OverQuota is true when Usage exceeds EffectiveQuota, and it does NOT mean the domain tried to write more than it was granted. The two are unrelated in the direction a reader expects, and the mechanism is the only thing that makes that credible: the store never charges a domain past its grant — the charge is refused rather than allowed to overshoot — so writing past the grant leaves Usage AT the grant and this false. What happens on that path instead is that the store evicts the domain's OWN objects to make room and admits the write; a write fails only while every object holding the grant is pinned and nothing can be evicted.\n\nSo this reports one situation: the grant was RECUT below what the domain already holds, which is what a proportional cut does when the pool's members shrink or another Binding joins. Waiting on it as the signal that writes are being refused is waiting for something that never arrives.\n\nA POINTER for the same reason the quantities around it are, and it is the easiest one to get wrong: held by value with omitempty, an OBSERVED false — the ordinary, healthy case — omits itself and becomes indistinguishable from a tenant nobody could scrape. A client asking \"does my domain hold more than it is now granted\" would get the same answer for \"no\" and for \"unknown\".",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"blocks": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Blocks and HitRate are OBSERVED from the master and the engine, never declared. They are absent when the scrape does not carry this tenant, because a fabricated zero hit rate on a warm cache is worse than no number at all. Blocks is a pointer for that reason one level down: zero blocks and \"not in the scrape\" are different facts, and an int64 held by value cannot tell them apart.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"hitRate": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HitRate is a ratio held as a STRING with a pattern, never a float. See the pool's own HitRate for why a pattern is safe on a computed ratio and what it obliges of whoever writes it.",
+							Pattern:     "^(0(\\.[0-9]{1,4})?|1(\\.0{1,4})?)$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"usedBy": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"kind",
+									"namespace",
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "UsedBy names the workloads in THIS namespace that hold the pool through this Binding. It is always a single-scope query — nothing here ever looks across namespaces — and a non-empty UsedBy is what the finalizer refuses deletion on.\n\nIT IS WRITTEN BY THE CONSUMER, NOT BY THIS API'S OWN RECONCILER, which only reads it and enforces on it. The kind that will write it is ModelDeployment, declared by the model-deployment feature of this same operator, whose spec.kvCache.poolRef names a Binding in its own namespace. Until that feature ships there is no writer at all, so this list is empty on every pass and the finalizer always releases: the refusal is a mechanism that is complete and tested, over a fact nothing supplies yet. A reader must not take a non-empty UsedBy for something the operator will produce on its own.\n\nEntries leave Namespace empty: everything that can appear is in this Binding's own namespace, so naming it would restate the object's own metadata on every entry.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.KVCacheObjectReference{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.KVCacheObjectReference{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCachePoolDomain(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolDomain is one reuse identity registered against this pool: what it is, who declared it, and what the master reports about it.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the reuse identity, and it is the storage layer's tenant_id.",
+							Default:     "",
+							MaxLength:   ptr.To[int64](63),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"binding": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Binding is the object that declared this domain. It is the only place a domain can be declared, which is what keeps naming one a privileged act.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.KVCachePoolBindingReference{}.OpenAPIModelName()),
+						},
+					},
+					"blockSize": {
+						SchemaProps: spec.SchemaProps{
+							Description: "BlockSize and Dtype are echoed from the Binding that registered the domain, so a reader of the registry does not have to fetch every Binding to learn what a domain's blocks are.\n\nBoth are REQUIRED, unlike the observed figures below, and the difference is where they come from: these are copied from a Binding that already requires them, so an entry missing one could only be a writer bug. Leaving them optional would let the registry answer \"this domain's blocks are of unknown shape\", which is not a state that exists.\n\nDtype is spelled to match its JSON name exactly. DType would not, and the openapi generator records every such mismatch as a checked-in API rule violation — a list worth keeping for the names that genuinely cannot match.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"dtype": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"blocks": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Blocks and HitRate are OBSERVED, never declared, and they are ABSENT when the scrape does not carry this domain. A fabricated zero hit rate on a warm cache is worse than no number, and zero blocks is a different fact from \"not in the scrape\", which is why Blocks is a pointer.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"hitRate": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HitRate is a ratio held as a STRING with a pattern, never a float, matching the shape the measured surface itself uses.\n\nThe pattern is safe here in a way an enum on an echoed vendor value would not be: this ratio is COMPUTED by this operator, so its spelling is ours to guarantee. It does oblige whoever writes it to format to this shape, because a value that fails the pattern fails the WHOLE status write — every other field frozen at its last value — and not this one field.",
+							Pattern:     "^(0(\\.[0-9]{1,4})?|1(\\.0{1,4})?)$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"name", "binding", "blockSize", "dtype"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.KVCachePoolBindingReference{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCachePoolList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolList holds the list of KVCachePool.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.KVCachePool{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.KVCachePool{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCachePoolQuota(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolQuota is the pool's declared ceiling.\n\nIt is OUR number, not the master's. The master reports its own allocatable capacity and the two can disagree; the case where the disagreement is total — a ceiling declared over a backend that has mounted nothing — is a Condition rather than a silence.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"total": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Total is required, which is why it is held by value: a pool with no declared ceiling has nothing to write into any ledger.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"total"},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCachePoolSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolSpec defines the desired spec of KVCachePool.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"backends": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Backends names the KVCacheBackend this pool draws from. It holds NAMES rather than a typed reference so this package needs no compile-time dependency on that type.\n\nExactly one entry is admitted, and the rule is the webhook's rather than the schema's so the refusal can carry its reason: quota lands on a single master's per-tenant ledger, and one master cannot account for bytes held in another backend. A schema bound would refuse the same object with a message that explains nothing.\n\nIt is immutable, webhook-enforced. Moving a pool to another backend would strand every tenant quota on the old master's ledger with nothing left to delete them with.\n\nThe reverse is NOT exclusive: one backend may be referenced by several pools, which is why the ledger and the rendered policy converge per MASTER rather than per pool.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+					"quota": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Quota is the ceiling this pool declares over its backend.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.KVCachePoolQuota{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"backends", "quota"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.KVCachePoolQuota{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCachePoolStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolStatus defines the observed state of KVCachePool.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"phase": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Phase summarizes the conditions: Provisioning, Ready, Degraded, Error, Deleting.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"phaseMessage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PhaseMessage carries the reason for the phase.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"conditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"type",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "type",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Conditions is the finer view, one condition per axis.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(apiv1.Condition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"clientEndpoint": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ClientEndpoint is the address an inference engine connects to, echoed from the backend's Client endpoint.\n\nThe backend's ADMIN address is deliberately republished NOWHERE. That one port serves the Prometheus exposition and the HTTP admin API both, so it is the write face of the quota ledger, while this object is cluster-scoped and readable by anyone holding a pool RBAC rule. The operator dials it; nobody reads it here.\n\nIt is absent, with a Condition saying why, whenever the backend has published no endpoints yet. It is never filled from a Service name derived from the backend's own — a guessed address that happens to resolve is how a pool would silently drive the wrong master.",
+							MaxLength:   ptr.To[int64](259),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"usage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Usage is what this pool's own tenants are holding. It is ABSENT until a scrape succeeds, and absent is not the same as reporting zero.",
+							Ref:         ref(v1alpha1.KVCachePoolUsage{}.OpenAPIModelName()),
+						},
+					},
+					"domains": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Domains is the registry of reuse identities claimed against this pool, one entry per Binding.\n\nIt is AUTHORITATIVE rather than advisory: an entry exists because a Binding declares it, not because a workload announced itself, so assembling it is one pass over the Binding index and needs no watch on any workload kind.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.KVCachePoolDomain{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"usedBy": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"kind",
+									"namespace",
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "UsedBy names the Bindings that hold this pool. A non-empty UsedBy is what the finalizer refuses deletion on, so the field is the enforcement input and not a display.\n\nUnlike the Binding's own list, THIS one is written by this API's reconciler, which already lists the Bindings of a pool through its index. The two levels of usedBy therefore have different writers, and only this one is self-contained.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.KVCacheObjectReference{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.KVCacheObjectReference{}.OpenAPIModelName(), v1alpha1.KVCachePoolDomain{}.OpenAPIModelName(), v1alpha1.KVCachePoolUsage{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCachePoolUsage(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolUsage is what the pool's tenants hold, as the master reports it.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"total": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Total is the sum of the occupancy the master reports for the tenants THIS pool owns — never its whole ledger, which a shared backend makes larger than this pool.\n\nWHAT occupancy means is the master's choice, not this API's, and it changed: a master exposing used bytes apart from reservations is summed as committed bytes, while one exposing a single charged figure — the shape 0.3.13 introduced — charges at the start of a write, so in-flight reservations are already inside this total. Do not read it as committed usage without knowing which the backend runs.\n\nA POINTER because omitempty does not omit a zero-valued struct, and an unobserved total must not serialize as a cache that is empty.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
 	}
 }
 

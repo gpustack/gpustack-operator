@@ -1,4 +1,4 @@
-package kvcache
+package mooncake
 
 import (
 	"fmt"
@@ -13,20 +13,10 @@ import (
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
+	"gpustack.ai/gpustack/pkg/worker/kvcache"
 )
 
 const (
-	// ResourceType is what every object rendered for a backend is noted as, and ResourceNoteBackend
-	// is the note carrying which backend it belongs to.
-	//
-	// They are exported because the reconciler's watches read them: a Deployment changing anywhere
-	// in the cluster is filtered down to this operator's own by the type, and then mapped back to
-	// the backend to re-enqueue by the note. Without that pair, the watch would either wake on
-	// every Deployment in the cluster or need a label selector that duplicates what the note
-	// already says.
-	ResourceType        = "kvcachebackends"
-	ResourceNoteBackend = "backend"
-
 	// leaderResourceNoteRole distinguishes the leader's objects from a member group's, which are
 	// noted the same way and land in the same namespace.
 	leaderResourceNoteRole = "leader"
@@ -57,6 +47,45 @@ const (
 	// liveness may NOT reuse the readiness path — a leader that is merely slow to activate would be
 	// killed for being slow.
 	leaderLivenessPath = "/health"
+
+	// The two volumes the quota policy needs, and the container that bridges them. They are separate
+	// volumes because they answer opposite requirements: one has to be writable and cannot be a
+	// ConfigMap, the other has to carry the operator's desired state and can only be a ConfigMap.
+	quotaPolicyVolumeName     = "tenant-quota-policy"
+	quotaPolicySeedVolumeName = "tenant-quota-policy-seed"
+	quotaPolicyInitName       = "seed-tenant-quota-policy"
+
+	// The environment variables the seed command reads. The command itself is a fixed string and
+	// every value it touches arrives this way — a rendered YAML document interpolated into a shell
+	// command would be a policy passing through quoting rules.
+	quotaPolicySeedEnv  = "POLICY_SEED"
+	quotaPolicyFileEnv  = "POLICY_FILE"
+	quotaPolicyEmptyEnv = "POLICY_EMPTY"
+
+	// quotaPolicySeedCommand copies the operator's desired policy onto the writable volume, and
+	// writes an empty one when there is nothing to copy. The variables it reads are the three
+	// constants above; a test pins both sides to the same literal names.
+	//
+	// The fallback is not defensive: the ConfigMap is rendered by the POOL reconciler, so a backend
+	// with multi-tenancy on and no pool bound to it yet has nobody to write one. Its volume is
+	// optional and mounts as an empty directory, the copy finds no source, and without a document
+	// here the master would refuse to start — an empty file does not satisfy its parser either.
+	//
+	// Which is why the fallback is gated on the source EXISTING, and not on the copy failing.
+	// `cp || fallback` cannot tell the intended case apart from a copy that failed for any other
+	// reason — a permission, a truncated mount, a transient IO error — and `2>/dev/null` removed
+	// the last trace of it. Laundered into the no-pool case, a real failure seeds an EMPTY ledger,
+	// the init container exits 0, the master starts with no tenant quotas, and the pool goes on
+	// reporting Ready over grants that are gone. Gated on the test, that same failure fails the
+	// init container with cp's own message, which is the only place it can still be seen.
+	//
+	// This runs on every Pod start, so it OVERWRITES whatever the master last wrote through the
+	// admin API. That is the intended direction: the ConfigMap is the desired state and the file is
+	// the master's copy of it, so a restart resets the copy to what the operator wants and the next
+	// reconcile pass re-converges the ledger to match.
+	quotaPolicySeedCommand = `if [ -f "$POLICY_SEED" ]; then ` +
+		`cp "$POLICY_SEED" "$POLICY_FILE"; else ` +
+		`printf '%s' "$POLICY_EMPTY" > "$POLICY_FILE"; fi`
 )
 
 // LeaderObjectName is the name of every object rendered for a backend's leader.
@@ -166,16 +195,24 @@ func RenderLeaderDeployment(kvcb *workercore.KVCacheBackend, image string) *apps
 					AutomountServiceAccountToken: ptr.To(false),
 					ImagePullSecrets:             kvcb.Spec.ImagePullSecrets,
 					Containers: []core.Container{
-						leaderContainerSpec(leader, image, EffectivePullPolicy(kvcb, image)),
+						leaderContainerSpec(leader, image, kvcache.EffectivePullPolicy(kvcb, image)),
 					},
 				},
 			},
 		},
 	}
 
-	systemmeta.NoteResource(deploy, ResourceType, map[string]string{
-		ResourceNoteBackend: kvcb.Name,
-		"role":              leaderResourceNoteRole,
+	if leader.MultiTenancy {
+		podSpec := &deploy.Spec.Template.Spec
+		podSpec.Volumes = quotaPolicyVolumes(kvcb)
+		podSpec.InitContainers = []core.Container{
+			quotaPolicySeedContainer(image, kvcache.EffectivePullPolicy(kvcb, image)),
+		}
+	}
+
+	systemmeta.NoteResource(deploy, kvcache.ResourceType, map[string]string{
+		kvcache.ResourceNoteBackend: kvcb.Name,
+		"role":                      leaderResourceNoteRole,
 	})
 	kubemeta.ControlOnWithoutBlock(deploy, kvcb,
 		workercore.SchemeGroupVersion.WithKind("KVCacheBackend"))
@@ -185,12 +222,26 @@ func RenderLeaderDeployment(kvcb *workercore.KVCacheBackend, image string) *apps
 
 // leaderContainerSpec is the container the Deployment runs.
 //
-// What it does NOT ask for is load-bearing: no hostNetwork, no device, no volume, no privilege. The
-// leader is a metadata service that holds no cache bytes — the members are the side that needs the
-// host — so anything here would be a privilege nobody asked for.
+// What it does NOT ask for is load-bearing: no hostNetwork, no device, no privilege, and no volume
+// beyond the one multi-tenancy cannot start without. The leader is a metadata service that holds no
+// cache bytes — the members are the side that needs the host — so anything here would be a privilege
+// nobody asked for.
 func leaderContainerSpec(
 	leader workercore.KVCacheBackendLeader, image string, pullPolicy core.PullPolicy,
 ) core.Container {
+	var volumeMounts []core.VolumeMount
+	if leader.MultiTenancy {
+		// Not read-only, and that is the point: the master writes a temp file into this directory
+		// and renames it over the policy on every admin-API change.
+		//
+		// The seed volume is deliberately absent here. The leader has no reason to read the
+		// ConfigMap, and a mount it could see would invite pointing the connector URI straight at
+		// it — which fails on the first quota write rather than at startup.
+		volumeMounts = []core.VolumeMount{
+			{Name: quotaPolicyVolumeName, MountPath: QuotaPolicyDir},
+		}
+	}
+
 	return core.Container{
 		Name:            "leader",
 		Image:           image,
@@ -201,8 +252,9 @@ func leaderContainerSpec(
 		// The entrypoint is named rather than inherited from the image, so what runs is visible in
 		// `kubectl get deploy -o yaml` without entering the container — the same reason the flags
 		// are argv and not environment variables.
-		Command: []string{"mooncake_master"},
-		Args:    RenderLeaderFlags(leader),
+		Command:      []string{"mooncake_master"},
+		Args:         RenderLeaderFlags(leader),
+		VolumeMounts: volumeMounts,
 		Ports: []core.ContainerPort{
 			{Name: leaderRPCPortName, ContainerPort: LeaderRPCPort, Protocol: core.ProtocolTCP},
 			{Name: leaderAdminPortName, ContainerPort: LeaderMetricsPort, Protocol: core.ProtocolTCP},
@@ -249,6 +301,69 @@ func leaderContainerSpec(
 	}
 }
 
+// quotaPolicyVolumes is the pair the tenant quota policy needs: the writable one the master runs
+// from, and the read-only one it is seeded from.
+//
+// The ConfigMap is optional because the two objects have different authors — the POOL reconciler
+// renders it, and a backend with multi-tenancy on that no pool has bound to yet has nobody to write
+// one. A required volume would leave that backend's Pod waiting on a ConfigMap nothing is going to
+// create; an optional one mounts as an empty directory and the seed command falls back.
+func quotaPolicyVolumes(kvcb *workercore.KVCacheBackend) []core.Volume {
+	return []core.Volume{
+		{
+			Name:         quotaPolicyVolumeName,
+			VolumeSource: core.VolumeSource{EmptyDir: &core.EmptyDirVolumeSource{}},
+		},
+		{
+			Name: quotaPolicySeedVolumeName,
+			VolumeSource: core.VolumeSource{
+				ConfigMap: &core.ConfigMapVolumeSource{
+					LocalObjectReference: core.LocalObjectReference{
+						Name: QuotaPolicyObjectName(kvcb),
+					},
+					Optional: ptr.To(true),
+					// Spelled out although it is exactly what the API server would default it to,
+					// because the aligner compares this list as a WHOLE. A field left for the server
+					// to fill comes back differing from what was rendered, and the comparison would
+					// then move it on every pass — a write per resync on a Deployment nothing asked
+					// to change.
+					DefaultMode: ptr.To[int32](0o644),
+				},
+			},
+		},
+	}
+}
+
+// quotaPolicySeedContainer puts a policy document on the writable volume before the master looks for
+// one.
+//
+// It runs the leader's own image rather than a copy utility, so an air-gapped install pulls nothing
+// extra and the pull policy question has one answer instead of two. What that image can run is a
+// property of the image, not of this render, and is asserted against a real one by the e2e case.
+func quotaPolicySeedContainer(image string, pullPolicy core.PullPolicy) core.Container {
+	// The error is dropped rather than plumbed out: RenderQuotaPolicy fails only on a tenant it
+	// refuses, and an empty set has none. A renderer that returned an error here would have to be
+	// fallible all the way up to a reconciler for a case that cannot happen.
+	emptyPolicy, _ := RenderQuotaPolicy(nil)
+
+	return core.Container{
+		Name:                     quotaPolicyInitName,
+		Image:                    image,
+		ImagePullPolicy:          pullPolicy,
+		TerminationMessagePolicy: core.TerminationMessageFallbackToLogsOnError,
+		Command:                  []string{"sh", "-c", quotaPolicySeedCommand},
+		Env: []core.EnvVar{
+			{Name: quotaPolicySeedEnv, Value: QuotaPolicySeedFilePath},
+			{Name: quotaPolicyFileEnv, Value: QuotaPolicyFilePath},
+			{Name: quotaPolicyEmptyEnv, Value: string(emptyPolicy)},
+		},
+		VolumeMounts: []core.VolumeMount{
+			{Name: quotaPolicyVolumeName, MountPath: QuotaPolicyDir},
+			{Name: quotaPolicySeedVolumeName, MountPath: QuotaPolicySeedDir, ReadOnly: true},
+		},
+	}
+}
+
 // RenderLeaderService renders the ClusterIP Service in front of the leader.
 //
 // Both ports are published because both are read, by different audiences: the RPC port is what an
@@ -283,9 +398,9 @@ func RenderLeaderService(kvcb *workercore.KVCacheBackend) *core.Service {
 		},
 	}
 
-	systemmeta.NoteResource(svc, ResourceType, map[string]string{
-		ResourceNoteBackend: kvcb.Name,
-		"role":              leaderResourceNoteRole,
+	systemmeta.NoteResource(svc, kvcache.ResourceType, map[string]string{
+		kvcache.ResourceNoteBackend: kvcb.Name,
+		"role":                      leaderResourceNoteRole,
 	})
 	kubemeta.ControlOnWithoutBlock(svc, kvcb,
 		workercore.SchemeGroupVersion.WithKind("KVCacheBackend"))

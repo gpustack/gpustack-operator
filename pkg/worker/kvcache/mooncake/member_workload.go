@@ -1,4 +1,4 @@
-package kvcache
+package mooncake
 
 import (
 	"crypto/sha256"
@@ -20,6 +20,7 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
+	"gpustack.ai/gpustack/pkg/worker/kvcache"
 )
 
 const (
@@ -223,10 +224,10 @@ func RenderMemberDaemonSet(
 		MemberPodSpecHashAnnotation: MemberPodSpecHash(ds.Spec.Template),
 	}
 
-	systemmeta.NoteResource(ds, ResourceType, map[string]string{
-		ResourceNoteBackend: kvcb.Name,
-		"role":              memberResourceNoteRole,
-		"group":             strconv.Itoa(group),
+	systemmeta.NoteResource(ds, kvcache.ResourceType, map[string]string{
+		kvcache.ResourceNoteBackend: kvcb.Name,
+		"role":                      memberResourceNoteRole,
+		"group":                     strconv.Itoa(group),
 	})
 	kubemeta.ControlOnWithoutBlock(ds, kvcb,
 		workercore.SchemeGroupVersion.WithKind("KVCacheBackend"))
@@ -243,7 +244,7 @@ func memberContainerSpec(
 	return core.Container{
 		Name:            "member",
 		Image:           image,
-		ImagePullPolicy: EffectivePullPolicy(kvcb, image),
+		ImagePullPolicy: kvcache.EffectivePullPolicy(kvcb, image),
 		// An image lacking the transport's vendor runtime — ascend needs CANN — dies in the dynamic
 		// linker on stderr, which the default policy does not read.
 		TerminationMessagePolicy: core.TerminationMessageFallbackToLogsOnError,
@@ -330,7 +331,7 @@ func renderMemberEnv(
 // different things. The entrypoint applies these AFTER the environment and they win over it, which
 // is what makes the hatch useful for a key the renderer derives from a node-specific fact.
 //
-// ⚠️ A key the client's config object does not carry is IGNORED SILENTLY — the entrypoint guards the
+// A key the client's config object does not carry is IGNORED SILENTLY — the entrypoint guards the
 // assignment with hasattr and warns only when the "=" is missing. So a typo here costs a
 // configuration that never applied and never said so.
 func renderMemberOverrides(member workercore.KVCacheBackendMember) []string {
@@ -407,7 +408,7 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
 // master_total_file_capacity_bytes / master_allocated_file_size_bytes for segments backed by a file
 // — and a group read from the wrong pair reports another group's figures or a zero.
 //
-// ⚠️ Only DRAM is exercised end to end. The rest are classified by the flags the leader documents
+// Only DRAM is exercised end to end. The rest are classified by the flags the leader documents
 // for them: LocalDisk and DFS are two of its three file backends, NoF is block storage reached the
 // same way, and CXL is a DAX device the leader treats as memory. A run on any of the four is what
 // would turn these from classified into measured.

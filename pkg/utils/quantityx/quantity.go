@@ -3,6 +3,7 @@
 package quantityx
 
 import (
+	"math"
 	"math/big"
 	"strconv"
 
@@ -194,4 +195,31 @@ func StringDivide(quantityStr string, divisor int64) (resource.Quantity, error) 
 		return resource.Quantity{}, err
 	}
 	return Divide(q, divisor), nil
+}
+
+// OverflowsInt64 reports whether Quantity.Value() would misreport this quantity.
+//
+// It has to be asked, because Value() does not fail — it answers wrongly, and differently by how the
+// number was written. Measured, at both ends:
+//
+//	9223372036854775808   Value() = -9223372036854775808
+//	1e30                  Value() = 0
+//	-1e30                 Value() = 0
+//	-9223372036854775809  Value() = -1
+//
+// The first two are then read as "not positive", so a caller converting the quantity into a byte
+// count sees an impossible amount of memory as no memory at all, with nothing raised anywhere.
+//
+// BOTH bounds are checked, because the name and this sentence promise that. Every caller today
+// rejects a negative sign separately, so the lower bound catches nothing yet — but a function that
+// answered only for one end would be wrong for the contract it states rather than merely narrow, and
+// the sign check is the caller's rule, not this one's.
+//
+// A binary-suffixed form such as `8Ei` is already gone by the time this runs: ParseQuantity saturates
+// it at the maximum, so the field holds that maximum and Value() reports it faithfully. There is
+// nothing left here to detect and nothing to refuse.
+func OverflowsInt64(quantity resource.Quantity) bool {
+	largest := resource.NewQuantity(math.MaxInt64, resource.DecimalSI)
+	smallest := resource.NewQuantity(math.MinInt64, resource.DecimalSI)
+	return quantity.Cmp(*largest) > 0 || quantity.Cmp(*smallest) < 0
 }

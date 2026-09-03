@@ -33,6 +33,14 @@ func (c *FakeWorkerV1alpha1) KVCacheBackends() v1alpha1.KVCacheBackendInterface 
 	return newFakeKVCacheBackends(c)
 }
 
+func (c *FakeWorkerV1alpha1) KVCachePools() v1alpha1.KVCachePoolInterface {
+	return newFakeKVCachePools(c)
+}
+
+func (c *FakeWorkerV1alpha1) KVCachePoolBindings(namespace string) v1alpha1.KVCachePoolBindingInterface {
+	return newFakeKVCachePoolBindings(c, namespace)
+}
+
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
 func (c *FakeWorkerV1alpha1) RESTClient() rest.Interface {

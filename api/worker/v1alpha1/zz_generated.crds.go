@@ -16,10 +16,12 @@ import (
 
 func GetCustomResourceDefinitions() map[string]*v1.CustomResourceDefinition {
 	return map[string]*v1.CustomResourceDefinition{
-		"Devices":        crd_gpustack_api_worker_v1alpha1_Devices(),
-		"Instance":       crd_gpustack_api_worker_v1alpha1_Instance(),
-		"InstanceType":   crd_gpustack_api_worker_v1alpha1_InstanceType(),
-		"KVCacheBackend": crd_gpustack_api_worker_v1alpha1_KVCacheBackend(),
+		"Devices":            crd_gpustack_api_worker_v1alpha1_Devices(),
+		"Instance":           crd_gpustack_api_worker_v1alpha1_Instance(),
+		"InstanceType":       crd_gpustack_api_worker_v1alpha1_InstanceType(),
+		"KVCacheBackend":     crd_gpustack_api_worker_v1alpha1_KVCacheBackend(),
+		"KVCachePool":        crd_gpustack_api_worker_v1alpha1_KVCachePool(),
+		"KVCachePoolBinding": crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding(),
 	}
 }
 
@@ -2145,6 +2147,10 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																	},
 																	Nullable: true,
 																},
+																"multiTenancy": {
+																	Description: "MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index\nbehind it. Off, every request falls into one default tenant and the index degrades to a plain\nkey hash, so two callers using different tenant names read each other's cache.\nIt is a FIELD rather than an extraArgs entry because another API validates against it: a\nKVCachePool is refused when its backend has no ledger to write quota into. A webhook reading\nan unschema'd string — \"true\", \"1\", \"True\" — would be judging a value domain that belongs to\nwhoever typed it.\nA plain bool, not a pointer, because unset and false mean the same thing here: no ledger.\nUnset renders NO flag rather than an explicit false, so a backend that never asked for this\nruns the command line it ran before the field existed.",
+																	Type:        "boolean",
+																},
 																"replicas": {
 																	Description: "Replicas is how many leader processes run. One, and only one, in this scope: electing a\nleader among several needs a backend store this scope does not enter, and the webhook\nrefuses anything else while naming that follow-on rather than silently running one anyway.",
 																	Type:        "integer",
@@ -2528,28 +2534,25 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 											Type:        "string",
 										},
 										"usedBy": {
-											Description: "UsedBy names the objects that consume this backend. A non-empty UsedBy is what the\nfinalizer refuses deletion on, so the field is the enforcement input and not a display.\nIt is a TypedLocalObjectReference and not a core ObjectReference: five of that type's seven\nfields mean nothing here, all of them are optional — so an entirely empty entry would\nvalidate against a field a finalizer enforces on — and upstream tells new APIs not to embed\nit. \"Local\" here means only that there is no namespace field, which is right: a backend is\ncluster-scoped and so is everything that claims one.",
+											Description: "UsedBy names the objects that consume this backend. A non-empty UsedBy is what the\nfinalizer refuses deletion on, so the field is the enforcement input and not a display.\nIt is written by the CONSUMERS, not by this backend's own reconciler, which only reads it and\nholds its teardown on it. Today exactly one consumer writes here: a KVCachePool claims the\nbackend it draws from, under kind KVCachePool, when its reconciler resolves it — and drops the\nclaim only after removing what it registered on that backend's master.\nIt is neither a core ObjectReference nor a TypedLocalObjectReference. The first has seven\nfields, five of which mean nothing here, all optional — so an entirely empty entry would\nvalidate against a field a finalizer enforces on — and upstream tells new APIs not to embed\nit. The second is closer but cannot be KEYED: its apiGroup is optional with no default, and a\nstructural schema takes a list map key only where the field is required or defaulted, so a\nlist keyed on kind and name would silently merge two objects differing only by group.\nKVCacheObjectReference drops the group and states the constraint that replaces it — an entry\nmay only name a kind in this API group — so all three of its fields are required and all three\nare keys. Entries here leave Namespace empty: a backend is cluster-scoped and so is everything\nthat claims one.",
 											Type:        "array",
 											Items: &v1.JSONSchemaPropsOrArray{
 												Schema: &v1.JSONSchemaProps{
 													Type: "object",
 													Required: []string{
 														"kind",
+														"namespace",
 														"name",
 													},
 													Properties: map[string]v1.JSONSchemaProps{
-														"apiGroup": {
-															Description: "APIGroup is the group for the resource being referenced.\nIf APIGroup is not specified, the specified Kind must be in the core API group.\nFor any other third-party types, APIGroup is required.",
-															Type:        "string",
-															Nullable:    true,
-														},
 														"kind": {
-															Description: "Kind is the type of resource being referenced",
-															Type:        "string",
+															Type: "string",
 														},
 														"name": {
-															Description: "Name is the name of resource being referenced",
-															Type:        "string",
+															Type: "string",
+														},
+														"namespace": {
+															Type: "string",
 														},
 													},
 												},
@@ -2557,6 +2560,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 											Nullable: true,
 											XListMapKeys: []string{
 												"kind",
+												"namespace",
 												"name",
 											},
 											XListType: ptr.To[string]("map"),
@@ -2601,6 +2605,689 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 							Description: "",
 							Priority:    0,
 							JSONPath:    ".status.capacity.total",
+						},
+						{
+							Name:        "Age",
+							Type:        "date",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".metadata.creationTimestamp",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func crd_gpustack_api_worker_v1alpha1_KVCachePool() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "kvcachepools.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "kvcachepools",
+				Singular: "kvcachepool",
+				ShortNames: []string{
+					"kvcp",
+				},
+				Kind:     "KVCachePool",
+				ListKind: "KVCachePoolList",
+				Categories: []string{
+					"gpustack",
+				},
+			},
+			Scope: "Cluster",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "KVCachePool is the schema for worker.gpustack.ai.\nA KVCacheBackend declares the physical cache; this declares which namespaces are granted a quota on\nit, how much of it, and under which reuse identity. It is the quota domain over exactly one\nbackend, and the registry of the reuse domains its Bindings have claimed.\nIt grants and accounts; it does not admit. Nothing here keeps a pod that knows a reuse domain's\nname from reaching that domain on the store — see KVCachePoolBinding for what the grant is and\nwhat it is not.\nIt is cluster-scoped, for the reason the backend it references is: the backend is a privileged\nphysical resource only an admin declares, pools must be shareable across namespaces, and a\ncross-namespace reference FROM a namespaced object is an anti-pattern. Data-plane isolation is a\ndifferent axis, and the storage layer's tenant — not this object's scope — is what solves it.\nThis is Kueue's ClusterQueue to KVCachePoolBinding's LocalQueue.",
+							Type:        "object",
+							Required: []string{
+								"spec",
+							},
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"backends",
+										"quota",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"backends": {
+											Description: "Backends names the KVCacheBackend this pool draws from. It holds NAMES rather than a typed\nreference so this package needs no compile-time dependency on that type.\nExactly one entry is admitted, and the rule is the webhook's rather than the schema's so the\nrefusal can carry its reason: quota lands on a single master's per-tenant ledger, and one\nmaster cannot account for bytes held in another backend. A schema bound would refuse the same\nobject with a message that explains nothing.\nIt is immutable, webhook-enforced. Moving a pool to another backend would strand every tenant\nquota on the old master's ledger with nothing left to delete them with.\nThe reverse is NOT exclusive: one backend may be referenced by several pools, which is why the\nledger and the rendered policy converge per MASTER rather than per pool.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "string",
+												},
+											},
+											Nullable:  true,
+											XListType: ptr.To[string]("atomic"),
+										},
+										"quota": {
+											Description: "Quota is the ceiling this pool declares over its backend.",
+											Type:        "object",
+											Required: []string{
+												"total",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"total": {
+													Description: "Total is required, which is why it is held by value: a pool with no declared ceiling has\nnothing to write into any ledger.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+											},
+										},
+									},
+								},
+								"status": {
+									Type: "object",
+									Properties: map[string]v1.JSONSchemaProps{
+										"clientEndpoint": {
+											Description: "ClientEndpoint is the address an inference engine connects to, echoed from the backend's\nClient endpoint.\nThe backend's ADMIN address is deliberately republished NOWHERE. That one port serves the\nPrometheus exposition and the HTTP admin API both, so it is the write face of the quota\nledger, while this object is cluster-scoped and readable by anyone holding a pool RBAC rule.\nThe operator dials it; nobody reads it here.\nIt is absent, with a Condition saying why, whenever the backend has published no endpoints\nyet. It is never filled from a Service name derived from the backend's own — a guessed\naddress that happens to resolve is how a pool would silently drive the wrong master.",
+											Type:        "string",
+											MaxLength:   ptr.To[int64](259),
+										},
+										"conditions": {
+											Description: "Conditions is the finer view, one condition per axis.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"type",
+														"status",
+														"lastTransitionTime",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"lastTransitionTime": {
+															Description: "LastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
+															Type:        "string",
+															Format:      "datetime",
+														},
+														"message": {
+															Description: "Message is a human readable message indicating details about the transition.\nThis may be an empty string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](32768),
+														},
+														"observedGeneration": {
+															Description: "ObservedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9,\nthe condition is out of date with respect to the current state of the instance.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](0),
+														},
+														"reason": {
+															Description: "Reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^$|^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`,
+														},
+														"status": {
+															Description: "Status of the condition, one of True, False, Unknown.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"True"`),
+																},
+																{
+																	Raw: []byte(`"False"`),
+																},
+																{
+																	Raw: []byte(`"Unknown"`),
+																},
+															},
+														},
+														"type": {
+															Description: "Type of condition in CamelCase or in foo.example.com/CamelCase.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](316),
+															Pattern:     `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"type",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"domains": {
+											Description: "Domains is the registry of reuse identities claimed against this pool, one entry per Binding.\nIt is AUTHORITATIVE rather than advisory: an entry exists because a Binding declares it, not\nbecause a workload announced itself, so assembling it is one pass over the Binding index and\nneeds no watch on any workload kind.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"name",
+														"binding",
+														"blockSize",
+														"dtype",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"binding": {
+															Description: "Binding is the object that declared this domain. It is the only place a domain can be\ndeclared, which is what keeps naming one a privileged act.",
+															Type:        "object",
+															Required: []string{
+																"namespace",
+																"name",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"name": {
+																	Type: "string",
+																},
+																"namespace": {
+																	Type: "string",
+																},
+															},
+														},
+														"blockSize": {
+															Description: "BlockSize and Dtype are echoed from the Binding that registered the domain, so a reader of\nthe registry does not have to fetch every Binding to learn what a domain's blocks are.\nBoth are REQUIRED, unlike the observed figures below, and the difference is where they come\nfrom: these are copied from a Binding that already requires them, so an entry missing one\ncould only be a writer bug. Leaving them optional would let the registry answer \"this domain's\nblocks are of unknown shape\", which is not a state that exists.\nDtype is spelled to match its JSON name exactly. DType would not, and the openapi generator\nrecords every such mismatch as a checked-in API rule violation — a list worth keeping for the\nnames that genuinely cannot match.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+														"blocks": {
+															Description: "Blocks and HitRate are OBSERVED, never declared, and they are ABSENT when the scrape does not\ncarry this domain. A fabricated zero hit rate on a warm cache is worse than no number, and\nzero blocks is a different fact from \"not in the scrape\", which is why Blocks is a pointer.",
+															Type:        "integer",
+															Format:      "int64",
+															Nullable:    true,
+														},
+														"dtype": {
+															Type: "string",
+														},
+														"hitRate": {
+															Description: "HitRate is a ratio held as a STRING with a pattern, never a float, matching the shape the\nmeasured surface itself uses.\nThe pattern is safe here in a way an enum on an echoed vendor value would not be: this ratio is\nCOMPUTED by this operator, so its spelling is ours to guarantee. It does oblige whoever writes\nit to format to this shape, because a value that fails the pattern fails the WHOLE status\nwrite — every other field frozen at its last value — and not this one field.",
+															Type:        "string",
+															Pattern:     `^(0(\.[0-9]{1,4})?|1(\.0{1,4})?)$`,
+														},
+														"name": {
+															Description: "Name is the reuse identity, and it is the storage layer's tenant_id.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](63),
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"name",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"phase": {
+											Description: "Phase summarizes the conditions: Provisioning, Ready, Degraded, Error, Deleting.",
+											Type:        "string",
+										},
+										"phaseMessage": {
+											Description: "PhaseMessage carries the reason for the phase.",
+											Type:        "string",
+										},
+										"usage": {
+											Description: "Usage is what this pool's own tenants are holding. It is ABSENT until a scrape succeeds, and\nabsent is not the same as reporting zero.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"total": {
+													Description: "Total is the sum of the occupancy the master reports for the tenants THIS pool owns — never its\nwhole ledger, which a shared backend makes larger than this pool.\nWHAT occupancy means is the master's choice, not this API's, and it changed: a master exposing\nused bytes apart from reservations is summed as committed bytes, while one exposing a single\ncharged figure — the shape 0.3.13 introduced — charges at the start of a write, so in-flight\nreservations are already inside this total. Do not read it as committed usage without knowing\nwhich the backend runs.\nA POINTER because omitempty does not omit a zero-valued struct, and an unobserved total must\nnot serialize as a cache that is empty.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													Nullable:     true,
+													XIntOrString: true,
+												},
+											},
+											Nullable: true,
+										},
+										"usedBy": {
+											Description: "UsedBy names the Bindings that hold this pool. A non-empty UsedBy is what the finalizer\nrefuses deletion on, so the field is the enforcement input and not a display.\nUnlike the Binding's own list, THIS one is written by this API's reconciler, which already\nlists the Bindings of a pool through its index. The two levels of usedBy therefore have\ndifferent writers, and only this one is self-contained.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"kind",
+														"namespace",
+														"name",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"kind": {
+															Type: "string",
+														},
+														"name": {
+															Type: "string",
+														},
+														"namespace": {
+															Type: "string",
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"kind",
+												"namespace",
+												"name",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+									},
+								},
+							},
+						},
+					},
+					Subresources: &v1.CustomResourceSubresources{
+						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+					AdditionalPrinterColumns: []v1.CustomResourceColumnDefinition{
+						{
+							Name:        "Quota",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.quota.total",
+						},
+						{
+							Name:        "Usage",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.usage.total",
+						},
+						{
+							Name:        "Phase",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.phase",
+						},
+						{
+							Name:        "Endpoint",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.clientEndpoint",
+						},
+						{
+							Name:        "Age",
+							Type:        "date",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".metadata.creationTimestamp",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "kvcachepoolbindings.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "kvcachepoolbindings",
+				Singular: "kvcachepoolbinding",
+				ShortNames: []string{
+					"kvcpb",
+				},
+				Kind:     "KVCachePoolBinding",
+				ListKind: "KVCachePoolBindingList",
+				Categories: []string{
+					"gpustack",
+				},
+			},
+			Scope: "Namespaced",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "KVCachePoolBinding is the schema for worker.gpustack.ai.\nIt is the PROVISIONING POINT: creating one in a namespace is what gives that namespace a quota on\na pool and registers the reuse domain it will write under, so both are objects an admin can RBAC\nand audit rather than strings a tenant types into a workload.\nIt is NOT an enforcement boundary, and must not be described as one. The store accepts whatever\ntenant id a caller sends, over a Service any pod in the cluster can dial; nothing derives a\ncredential from this object. So a workload that knows another namespace's domain name can read and\nwrite that domain's cache today. What a Binding governs is who is GRANTED capacity and under which\nname — provisioning and accounting, not access control. Enforcement needs an authenticated proxy\nor network isolation, and neither exists yet.\nIt is also where a reuse domain is registered, and exactly one. Because the storage layer's tenant\nIS the domain, registering one creates a quota ledger — which makes naming a domain a privileged\nact, and is why it is declared here and never by a workload that could otherwise mint tenants at\nwill. Workloads pointing at the SAME Binding share KV; a namespace needing two reuse boundaries\ncreates two Bindings, exactly as one with two scheduling boundaries has two Kueue LocalQueues.",
+							Type:        "object",
+							Required: []string{
+								"spec",
+							},
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"poolRef",
+										"domain",
+										"quotaCeiling",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"domain": {
+											Description: "Domain is the reuse identity this Binding registers, and it is REQUIRED. It maps to the\nstorage layer's tenant_id (isolation) and cache_salt (prefix identity), so registering a\ndomain creates a tenant with a quota ledger of its own.\nIt is a struct rather than a list deliberately. One Binding is one tenant, so every figure in\nStatus is a single series rather than a sum, and no rule for dividing one ceiling among\nseveral domains has to be invented. The cardinality is structural, not a webhook rule.\nEVERY FIELD IS IMMUTABLE, webhook-enforced. Name re-points this namespace at a different\nledger and strands the old one. BlockSize or Dtype changed under a warm cache is silent\ncorruption: the writes succeed, the reads succeed, and the tensors are wrong.",
+											Type:        "object",
+											Required: []string{
+												"name",
+												"blockSize",
+												"dtype",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"blockSize": {
+													Description: "BlockSize is the number of tokens one cache block holds.",
+													Type:        "integer",
+													Format:      "int32",
+												},
+												"dtype": {
+													Description: "Dtype is the element type the cached tensors carry, in the engine's own lowercase spelling.\nThe exhaustive set belongs to whatever spec owns workloads, so this API does not enumerate it\nand the webhook judges the syntactic form only. Enumerating it here would make a new engine\ndtype an API change.\nIt is spelled to match its JSON name exactly; DType would not, and the openapi generator\nrecords every such mismatch as a checked-in API rule violation.",
+													Type:        "string",
+													MaxLength:   ptr.To[int64](32),
+												},
+												"name": {
+													Description: "Name is the domain, and it becomes the storage layer's tenant_id verbatim.\nIt must be claimed by no other Binding CLUSTER-WIDE, which the webhook enforces: two Bindings\non one domain would share cache — possibly intended — but collide on one quota ledger, which\nnever is. Uniqueness is cluster-wide rather than per pool because one master can serve several\npools and the tenant space is master-global.\nThe accepted shape is a DNS-1123 label, checked by the webhook. That is strictly inside what\nthe master accepts as a tenant_id and is what a Kubernetes object name already looks like, so\nnobody learns a second naming rule. This is the ONLY place the shape is judged: every consumer\ndownstream copies the name rather than re-judging it.",
+													Type:        "string",
+													MaxLength:   ptr.To[int64](63),
+												},
+											},
+										},
+										"poolRef": {
+											Description: "PoolRef names the pool this namespace is being granted. It is IMMUTABLE, webhook-enforced:\nre-pointing a Binding would move a namespace's grant silently and leave its bytes on\nthe old master.",
+											Type:        "object",
+											Required: []string{
+												"name",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"name": {
+													Type: "string",
+												},
+											},
+										},
+										"quotaCeiling": {
+											Description: "QuotaCeiling is what this namespace may consume in its reuse domain. It is written verbatim\ninto that one tenant's requested quota, so it is the storage layer's own request figure\nrather than a total this operator maintains.\nIT IS A REQUEST, NOT A GRANT. The pool reduces every tenant's effective quota in proportion\nwhen the sum of requests exceeds allocatable capacity, and Status.EffectiveQuota is what was\nactually granted.\nREQUIRED, because the state it would otherwise allow does not work. The storage layer has no\ndefault policy to fall back on: a tenant it holds no policy for is refused outright, with the\nsame error a reuse domain that was never declared gets — measured on a real master, and stated\nin the artifact's own header, where the code is spelled `TENANT_NOT_REGISTERED = -1701,\n///< Tenant has no quota policy.` A Binding without this field would pass admission, report\nReady and refuse every byte its workloads wrote.\nRequired is also the direction that can be taken back. Should the storage layer ever grow a\ndefault quota, relaxing this to optional keeps every object already written valid; going the\nother way — optional today, required later — invalidates every object that omitted it.\nHeld BY VALUE, like the pool's own ceiling and for the same reason: the schema guarantees the\nkey is present, so there is no unset to distinguish and a pointer would only add a nil case\nnothing can produce. The webhook still refuses a value that is not positive.",
+											Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+											AnyOf: []v1.JSONSchemaProps{
+												{
+													Type: "integer",
+												},
+												{
+													Type: "string",
+												},
+											},
+											XIntOrString: true,
+										},
+									},
+								},
+								"status": {
+									Type: "object",
+									Properties: map[string]v1.JSONSchemaProps{
+										"blocks": {
+											Description: "Blocks and HitRate are OBSERVED from the master and the engine, never declared. They are absent\nwhen the scrape does not carry this tenant, because a fabricated zero hit rate on a warm cache\nis worse than no number at all. Blocks is a pointer for that reason one level down: zero blocks\nand \"not in the scrape\" are different facts, and an int64 held by value cannot tell them apart.",
+											Type:        "integer",
+											Format:      "int64",
+											Nullable:    true,
+										},
+										"conditions": {
+											Description: "Conditions is the finer view, one condition per axis.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"type",
+														"status",
+														"lastTransitionTime",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"lastTransitionTime": {
+															Description: "LastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
+															Type:        "string",
+															Format:      "datetime",
+														},
+														"message": {
+															Description: "Message is a human readable message indicating details about the transition.\nThis may be an empty string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](32768),
+														},
+														"observedGeneration": {
+															Description: "ObservedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9,\nthe condition is out of date with respect to the current state of the instance.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](0),
+														},
+														"reason": {
+															Description: "Reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^$|^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`,
+														},
+														"status": {
+															Description: "Status of the condition, one of True, False, Unknown.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"True"`),
+																},
+																{
+																	Raw: []byte(`"False"`),
+																},
+																{
+																	Raw: []byte(`"Unknown"`),
+																},
+															},
+														},
+														"type": {
+															Description: "Type of condition in CamelCase or in foo.example.com/CamelCase.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](316),
+															Pattern:     `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"type",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"effectiveQuota": {
+											Description: "EffectiveQuota is what the pool actually granted. It is LOWER than RequestedQuota whenever the\nsum of every tenant's request exceeds the pool's allocatable capacity: the pool then recomputes\neach tenant's effective quota in proportion to what that tenant requested. A pool with no\nmounted members grants ZERO to everyone, and that case carries its own Condition rather than\nappearing as an ordinary shortfall — which is what makes the pointer load-bearing, because a\ngranted zero and an unobserved quota must not serialize the same way.",
+											Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+											AnyOf: []v1.JSONSchemaProps{
+												{
+													Type: "integer",
+												},
+												{
+													Type: "string",
+												},
+											},
+											Nullable:     true,
+											XIntOrString: true,
+										},
+										"hitRate": {
+											Description: "HitRate is a ratio held as a STRING with a pattern, never a float. See the pool's own HitRate\nfor why a pattern is safe on a computed ratio and what it obliges of whoever writes it.",
+											Type:        "string",
+											Pattern:     `^(0(\.[0-9]{1,4})?|1(\.0{1,4})?)$`,
+										},
+										"overQuota": {
+											Description: "OverQuota is true when Usage exceeds EffectiveQuota, and it does NOT mean the domain tried to\nwrite more than it was granted. The two are unrelated in the direction a reader expects, and the\nmechanism is the only thing that makes that credible: the store never charges a domain past its\ngrant — the charge is refused rather than allowed to overshoot — so writing past the grant leaves\nUsage AT the grant and this false. What happens on that path instead is that the store evicts the\ndomain's OWN objects to make room and admits the write; a write fails only while every object\nholding the grant is pinned and nothing can be evicted.\nSo this reports one situation: the grant was RECUT below what the domain already holds, which is\nwhat a proportional cut does when the pool's members shrink or another Binding joins. Waiting on\nit as the signal that writes are being refused is waiting for something that never arrives.\nA POINTER for the same reason the quantities around it are, and it is the easiest one to get\nwrong: held by value with omitempty, an OBSERVED false — the ordinary, healthy case — omits\nitself and becomes indistinguishable from a tenant nobody could scrape. A client asking \"does my\ndomain hold more than it is now granted\" would get the same answer for \"no\" and for \"unknown\".",
+											Type:        "boolean",
+											Nullable:    true,
+										},
+										"phase": {
+											Description: "Phase summarizes the conditions: Provisioning, Ready, Degraded, Error, Deleting.",
+											Type:        "string",
+										},
+										"phaseMessage": {
+											Description: "PhaseMessage carries the reason for the phase.",
+											Type:        "string",
+										},
+										"requestedQuota": {
+											Description: "RequestedQuota is what the operator asked the pool for on this namespace's behalf: the\nrequested quota it wrote for this Binding's one tenant. It is absent, with a Condition saying\nwhy, whenever the operator refused to write — a master that answered that multi-tenancy is\noff, or a policy source it cannot rewrite.",
+											Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+											AnyOf: []v1.JSONSchemaProps{
+												{
+													Type: "integer",
+												},
+												{
+													Type: "string",
+												},
+											},
+											Nullable:     true,
+											XIntOrString: true,
+										},
+										"usage": {
+											Description: "Usage is what the master reports this namespace's reuse domain as holding, and WHICH figure\nthat is depends on the master's version rather than on this API.\nA master that exposes used bytes apart from reservations is read as committed bytes, and\nin-flight writes are deliberately left out — a burst of concurrent writes would otherwise read\nas consumption that never happened. A master that exposes one charged figure instead, the shape\n0.3.13 introduced, charges it when a write STARTS: there is no committed figure to isolate, so\nin-flight reservations are inside this number and cannot be subtracted. The Binding's own\nQuotaObserved message says which of the two answered.",
+											Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+											AnyOf: []v1.JSONSchemaProps{
+												{
+													Type: "integer",
+												},
+												{
+													Type: "string",
+												},
+											},
+											Nullable:     true,
+											XIntOrString: true,
+										},
+										"usedBy": {
+											Description: "UsedBy names the workloads in THIS namespace that hold the pool through this Binding. It is\nalways a single-scope query — nothing here ever looks across namespaces — and a non-empty\nUsedBy is what the finalizer refuses deletion on.\nIT IS WRITTEN BY THE CONSUMER, NOT BY THIS API'S OWN RECONCILER, which only reads it and\nenforces on it. The kind that will write it is ModelDeployment, declared by the\nmodel-deployment feature of this same operator, whose spec.kvCache.poolRef names a Binding in\nits own namespace. Until that feature ships there is no writer at all, so this list is empty on\nevery pass and the finalizer always releases: the refusal is a mechanism that is complete and\ntested, over a fact nothing supplies yet. A reader must not take a non-empty UsedBy for\nsomething the operator will produce on its own.\nEntries leave Namespace empty: everything that can appear is in this Binding's own namespace,\nso naming it would restate the object's own metadata on every entry.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"kind",
+														"namespace",
+														"name",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"kind": {
+															Type: "string",
+														},
+														"name": {
+															Type: "string",
+														},
+														"namespace": {
+															Type: "string",
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"kind",
+												"namespace",
+												"name",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+									},
+								},
+							},
+						},
+					},
+					Subresources: &v1.CustomResourceSubresources{
+						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+					AdditionalPrinterColumns: []v1.CustomResourceColumnDefinition{
+						{
+							Name:        "Pool",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.poolRef.name",
+						},
+						{
+							Name:        "Domain",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.domain.name",
+						},
+						{
+							Name:        "Effective",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.effectiveQuota",
+						},
+						{
+							Name:        "Usage",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.usage",
+						},
+						{
+							Name:        "Phase",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.phase",
+						},
+						{
+							Name:        "Age",
+							Type:        "date",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".metadata.creationTimestamp",
 						},
 					},
 				},

@@ -43,6 +43,11 @@ TAG="${2:?usage: deploy.sh <NS> <TAG> [extra --set args...]}"
 shift 2
 
 CHART="deploy/gpustack-operator/chart"
+
+# One name, fixed, and the same one teardown.sh and case-2.sh use. See teardown.sh for why it is not
+# overridable: the chart derives the worker Certificate and its Secret from this name, so an override
+# honoured here and not there leaves objects behind that the teardown never looks for.
+RELEASE=gpustack-operator
 # Prefer the client hack/lib/helm.sh pins (3.21+). A PATH helm can be old enough to lack
 # flags this suite needs — a 3.13 client has no --take-ownership at all.
 HELM=helm
@@ -59,13 +64,69 @@ HELM=helm
 ATTEMPTS="${E2E_DEPLOY_ATTEMPTS:-3}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# A release that is ALREADY THERE is not residue, and this is what stops the retry below from
+# treating it as such.
+#
+# The loop cannot tell the two apart on its own: an interrupted install and a healthy prior install
+# both come back non-zero, and only the first is safe to clean up after. Cleaning up after the second
+# uninstalls the release, takes its CRDs and every custom object with them, and then installs
+# again — which SUCCEEDS, so the caller sees an ordinary deployment and never learns that the state
+# it was standing on is gone.
+#
+# Asked by querying the release rather than by matching helm's refusal text: "cannot reuse a name" is
+# a sentence helm is free to reword, and a check that reads it would go quiet on some future upgrade
+# instead of failing.
+#
+# It also makes the retry's cleanup SOUND rather than merely tolerable: reaching the loop now means
+# the release did not exist, so whatever is left behind really is this attempt's own residue —
+# exactly the precondition that comment assumed and nothing had established.
+# Asked with `list -q`, not `status`, and the difference is the whole guard: `status` exits
+# non-zero for "no such release" AND for a timeout, an RBAC denial or an unreachable API server, so a
+# guard built on it treats a failed QUESTION as the answer "absent" — and then walks into the very
+# path it exists to prevent. `list -q` exits ZERO with empty output when the release is simply not
+# there, so absence and failure are separable, and a failure aborts instead of proceeding.
+#
+# stderr is kept OUT of the captured value. Folding it in with 2>&1 would undo the separation this
+# guard is built on: helm exiting 0 with a deprecation warning on stderr would land in the captured
+# release list, and a harmless warning would then be indistinguishable from a real match — the same
+# conflation as `status`, one level down. The diagnostic is read from a separate capture.
+#
+# Matched with `grep -Fx` below rather than helm's own --filter, which takes a REGEX. An exact-name
+# question deserves an exact-name match; a widened match here refuses an install that should have
+# proceeded.
+release_query_err="$(mktemp)"
+if ! all_releases="$("$HELM" list --all --namespace "$NS" -q \
+  2>"$release_query_err")"; then
+  echo "cannot query helm releases in ${NS}: $(cat "$release_query_err")" >&2
+  echo "refusing to install: whether a release is already there could not be established, and" >&2
+  echo "installing over one destroys it and every object it holds." >&2
+  rm -f "$release_query_err"
+  exit 1
+fi
+rm -f "$release_query_err"
+if printf '%s\n' "$all_releases" | grep -Fxq "$RELEASE"; then
+  cat >&2 <<USAGE
+release ${RELEASE} already exists in ${NS}. deploy.sh installs; it never upgrades.
+
+Left to run, it would fail on the name, tear that release down as if it were the residue of its own
+failed attempt, and install again — a reinstall that reports success while every object the previous
+release held, CRDs included, is gone.
+
+  to replace it       bash ${HERE}/teardown.sh ${NS}   (then re-run this)
+  to change the image helm upgrade ${RELEASE} ${CHART} -n ${NS} --reuse-values \\
+                        --set image.tag=${TAG} --set image.pullPolicy=IfNotPresent
+                      kubectl -n ${NS} rollout restart deploy/${RELEASE}-worker
+USAGE
+  exit 1
+fi
+
 for attempt in $(seq 1 "$ATTEMPTS"); do
-  echo "== helm install gpustack-operator into ${NS} (image tag ${TAG})${attempt:+  [attempt ${attempt}/${ATTEMPTS}]} =="
+  echo "== helm install ${RELEASE} into ${NS} (image tag ${TAG})${attempt:+  [attempt ${attempt}/${ATTEMPTS}]} =="
   # The status is captured from the install itself, never from an `if` around it: a compound
   # command whose condition fails and which has no `else` branch exits 0, so `rc=$?` after
   # `if helm install; then exit 0; fi` reads 0 on every failure — and the last attempt would
   # then exit 0 too, reporting a wholly failed install as a successful one.
-  "$HELM" install gpustack-operator "$CHART" \
+  "$HELM" install "$RELEASE" "$CHART" \
     -n "$NS" --create-namespace \
     --set image.tag="$TAG" \
     --set image.pullPolicy=IfNotPresent \

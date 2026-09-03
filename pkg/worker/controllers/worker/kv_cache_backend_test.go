@@ -30,12 +30,12 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
-	"gpustack.ai/gpustack/pkg/worker/kvcache"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 )
 
 // newKVCacheBackendObject builds a managed backend with the given consumers already recorded in
 // status, which is the only input this task's status derivation reads.
-func newKVCacheBackendObject(usedBy ...core.TypedLocalObjectReference) *workercore.KVCacheBackend {
+func newKVCacheBackendObject(usedBy ...workercore.KVCacheObjectReference) *workercore.KVCacheBackend {
 	kvcb := &workercore.KVCacheBackend{
 		ObjectMeta: meta.ObjectMeta{Name: "mooncake-dram"},
 		Spec: workercore.KVCacheBackendSpec{
@@ -55,6 +55,22 @@ func newKVCacheBackendObject(usedBy ...core.TypedLocalObjectReference) *workerco
 	}
 	kvcb.Status.UsedBy = usedBy
 	return kvcb
+}
+
+// kvCachePoolsNamedBy materializes the pools a usedBy list names.
+//
+// The backend refuses on the claims that still RESOLVE, not on the raw list, so a fixture that names
+// a pool without creating it is not describing a claimed backend — it is describing one whose
+// claimant has already gone, which is a different test.
+func kvCachePoolsNamedBy(refs ...workercore.KVCacheObjectReference) []ctrlcli.Object {
+	objs := make([]ctrlcli.Object, 0, len(refs))
+	for _, ref := range refs {
+		if ref.Kind != KVCachePoolKind {
+			continue
+		}
+		objs = append(objs, &workercore.KVCachePool{ObjectMeta: meta.ObjectMeta{Name: ref.Name}})
+	}
+	return objs
 }
 
 func newKVCacheBackendClient(objs ...ctrlcli.Object) ctrlcli.Client {
@@ -151,16 +167,16 @@ func TestKVCacheBackendReconciler_IsIdempotent(t *testing.T) {
 // claims the backend the lock is held, the object stays present, and the refusal says which object
 // to go and remove. Clearing the last claim then lets the teardown complete.
 func TestKVCacheBackendReconciler_RefusesAUsedDelete(t *testing.T) {
-	kvcb := newKVCacheBackendObject(core.TypedLocalObjectReference{
-		APIGroup: ptr.To("worker.gpustack.ai"),
-		Kind:     "KVCachePool",
-		Name:     "team-a-pool",
-	})
+	claim := workercore.KVCacheObjectReference{
+		Kind: "KVCachePool",
+		Name: "team-a-pool",
+	}
+	kvcb := newKVCacheBackendObject(claim)
 	systemmeta.Lock(kvcb)
 	now := meta.Now()
 	kvcb.DeletionTimestamp = &now
 
-	cli := newKVCacheBackendClient(kvcb)
+	cli := newKVCacheBackendClient(append([]ctrlcli.Object{kvcb}, kvCachePoolsNamedBy(claim)...)...)
 
 	got := reconcileKVCacheBackend(t, cli, kvcb.Name)
 	require.NotNil(t, got, "a claimed backend must not be released")
@@ -186,6 +202,137 @@ func TestKVCacheBackendReconciler_RefusesAUsedDelete(t *testing.T) {
 	assert.True(t, kerrors.IsNotFound(err), "expected NotFound, got %v", err)
 }
 
+// TestKVCacheBackendReconciler_ReadsUsedByAsClaimsThatStillExist pins the READ side of usedBy, which
+// is the side that has to work when the write side never happens.
+//
+// A consumer writes its own entry and clears it on the way out, so nothing else is in a position to
+// clear one it left behind — and an operator forcing a wedged pool's finalizer off leaves exactly
+// that. Refusing on the raw list would then hold this backend's teardown with no event able to end
+// it, and the only symptom would be a Deletable=False naming an object nobody can find.
+//
+// The last case is the boundary, and it is deliberately the opposite of convenient: an entry this
+// reconciler cannot resolve is KEPT. Dropping it would turn "cannot verify" into "does not exist" on
+// a claim whose whole purpose is to hold a deletion.
+func TestKVCacheBackendReconciler_ReadsUsedByAsClaimsThatStillExist(t *testing.T) {
+	poolRef := func(name string) workercore.KVCacheObjectReference {
+		return workercore.KVCacheObjectReference{Kind: KVCachePoolKind, Name: name}
+	}
+
+	testCases := []struct {
+		name string
+		// usedBy is what the status carries; livePools is which of those objects the cluster still
+		// holds. A name in the first and not the second is the claimant that went away without
+		// clearing up after itself.
+		usedBy    []workercore.KVCacheObjectReference
+		livePools []string
+		deleting  bool
+
+		wantReleased     bool
+		wantDeletable    bool
+		wantInMessage    []string
+		wantNotInMessage []string
+	}{
+		{
+			name:          "a claim whose pool still exists holds the teardown",
+			usedBy:        []workercore.KVCacheObjectReference{poolRef("team-a")},
+			livePools:     []string{"team-a"},
+			deleting:      true,
+			wantDeletable: false,
+			wantInMessage: []string{"in use by", "KVCachePool/team-a"},
+		},
+		{
+			name:         "a claim whose pool is gone does not",
+			usedBy:       []workercore.KVCacheObjectReference{poolRef("team-a")},
+			deleting:     true,
+			wantReleased: true,
+		},
+		{
+			name:             "one live claim among stale ones holds, and names only the live one",
+			usedBy:           []workercore.KVCacheObjectReference{poolRef("gone"), poolRef("team-b")},
+			livePools:        []string{"team-b"},
+			deleting:         true,
+			wantDeletable:    false,
+			wantInMessage:    []string{"KVCachePool/team-b"},
+			wantNotInMessage: []string{"KVCachePool/gone"},
+		},
+		{
+			name:          "an entry of a kind this reconciler cannot resolve is kept",
+			usedBy:        []workercore.KVCacheObjectReference{{Kind: "SomethingElse", Name: "x"}},
+			deleting:      true,
+			wantDeletable: false,
+			wantInMessage: []string{"SomethingElse/x"},
+		},
+		{
+			name:          "a live backend reports Deletable and says why the list disagrees",
+			usedBy:        []workercore.KVCacheObjectReference{poolRef("gone")},
+			wantDeletable: true,
+			wantInMessage: []string{
+				"no object claims this backend",
+				"KVCachePool/gone",
+				"no longer exists",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			kvcb := newKVCacheBackendObject(tc.usedBy...)
+			systemmeta.Lock(kvcb)
+			if tc.deleting {
+				now := meta.Now()
+				kvcb.DeletionTimestamp = &now
+			}
+
+			objs := []ctrlcli.Object{kvcb}
+			for _, name := range tc.livePools {
+				objs = append(objs, &workercore.KVCachePool{ObjectMeta: meta.ObjectMeta{Name: name}})
+			}
+
+			got := reconcileKVCacheBackend(t, newKVCacheBackendClient(objs...), kvcb.Name)
+			if tc.wantReleased {
+				require.Nil(t, got,
+					"a backend whose every claim names something gone has nothing left to hold it")
+				return
+			}
+			require.NotNil(t, got)
+
+			assert.Equal(t, tc.wantDeletable, KVCacheBackendConditionDeletable.IsTrue(got))
+
+			message := KVCacheBackendConditionDeletable.GetMessage(got)
+			for _, want := range tc.wantInMessage {
+				assert.Contains(t, message, want)
+			}
+			for _, notWant := range tc.wantNotInMessage {
+				assert.NotContains(t, message, notWant,
+					"a claim that no longer resolves must not be named as one that does")
+			}
+		})
+	}
+}
+
+// TestKVCacheBackendReconciler_EnqueuesEveryBackendAPoolNames pins the watch that makes the read
+// above level-based rather than lucky.
+//
+// Without it the only thing that wakes this reconciler on a claim change is the consumer's own write
+// onto this status — and a consumer that vanished writes nothing. The pool's own disappearance has to
+// be the event, and a delete carries the object's last known state, which still names its backends.
+func TestKVCacheBackendReconciler_EnqueuesEveryBackendAPoolNames(t *testing.T) {
+	r := &KVCacheBackendReconciler{}
+
+	got := r.enqueueKVCacheBackendWhenPoolChanged(context.Background(), &workercore.KVCachePool{
+		ObjectMeta: meta.ObjectMeta{Name: "team-a"},
+		Spec:       workercore.KVCachePoolSpec{Backends: []string{"mooncake-dram", "mooncake-ssd"}},
+	})
+
+	assert.Equal(t, []ctrlreconcile.Request{
+		{NamespacedName: ctrlcli.ObjectKey{Name: "mooncake-dram"}},
+		{NamespacedName: ctrlcli.ObjectKey{Name: "mooncake-ssd"}},
+	}, got)
+
+	assert.Empty(t, r.enqueueKVCacheBackendWhenPoolChanged(context.Background(), &workercore.KVCacheBackend{}),
+		"an object of another kind enqueues nothing rather than panicking")
+}
+
 // TestKVCacheBackendReconciler_DeletesTheWorkloadsBeforeReleasingTheLock pins the ORDER, which is
 // the only thing that separates a teardown from a promise of one.
 //
@@ -209,7 +356,7 @@ func TestKVCacheBackendReconciler_DeletesTheWorkloadsBeforeReleasingTheLock(t *t
 	require.NoError(t, err)
 
 	leaderKey := ctrlcli.ObjectKey{
-		Name:      kvcache.LeaderObjectName(kvcb),
+		Name:      mooncake.LeaderObjectName(kvcb),
 		Namespace: kuberess.SystemNamespaceName,
 	}
 	require.NoError(t, cli.Get(ctx, leaderKey, new(apps.Deployment)))
@@ -274,7 +421,7 @@ func TestKVCacheBackendReconciler_TeardownSparesObjectsItDidNotRender(t *testing
 	kvcb.DeletionTimestamp = ptr.To(meta.Now())
 
 	leaderKey := ctrlcli.ObjectKey{
-		Name:      kvcache.LeaderObjectName(kvcb),
+		Name:      mooncake.LeaderObjectName(kvcb),
 		Namespace: kuberess.SystemNamespaceName,
 	}
 	// Three strangers: two holding the derived names, one carrying the labels the member sweep
@@ -297,7 +444,7 @@ func TestKVCacheBackendReconciler_TeardownSparesObjectsItDidNotRender(t *testing
 		ObjectMeta: meta.ObjectMeta{
 			Name:      "not-ours",
 			Namespace: kuberess.SystemNamespaceName,
-			Labels:    kvcache.BackendLabels(kvcb),
+			Labels:    mooncake.BackendLabels(kvcb),
 		},
 	}
 
@@ -537,7 +684,7 @@ func TestKVCacheBackendReconciler_ConvergesADriftedLeader(t *testing.T) {
 	require.NoError(t, cli.Get(ctx, leaderObjectKey(kvcb), after))
 	assert.Equal(t, kvcb.Spec.Image, after.Spec.Template.Spec.Containers[0].Image,
 		"a hand-edited image is put back")
-	assert.Equal(t, kvcache.RenderLeaderFlags(kvcb.Spec.Connection.Managed.Leader),
+	assert.Equal(t, mooncake.RenderLeaderFlags(kvcb.Spec.Connection.Managed.Leader),
 		after.Spec.Template.Spec.Containers[0].Args,
 		"a hand-edited argv is put back; extraArgs is the supported way to change it")
 	assert.Equal(t, core.TerminationMessageFallbackToLogsOnError,
@@ -554,7 +701,7 @@ func TestKVCacheBackendReconciler_ConvergesADriftedLeader(t *testing.T) {
 // every time. Nothing is rendered in either case, because rendering an empty image would produce an
 // API-server rejection pointing at a container instead of at the setting somebody cleared.
 //
-// ⛔ What must NOT happen is returning. The workloads an earlier pass created keep running and keep
+// What must NOT happen is returning. The workloads an earlier pass created keep running and keep
 // serving, so bailing out froze status on a stale reading — with an exponential backoff behind it
 // and nothing on the object saying why.
 //
@@ -607,20 +754,20 @@ func TestKVCacheBackendReconciler_WithoutAnImage(t *testing.T) {
 			kvcb := newKVCacheBackendObject()
 			kvcb.Spec.Image = ""
 			if c.wasPublished {
-				kvcb.Status.Endpoints = kvcache.LeaderEndpoints(kvcb)
+				kvcb.Status.Endpoints = mooncake.LeaderEndpoints(kvcb)
 				require.NotEmpty(t, kvcb.Status.Endpoints)
 			}
 
 			objs := []ctrlcli.Object{kvcb}
 			if c.rendered {
 				// What an earlier pass left behind, before the setting was cleared.
-				objs = append(objs, kvcache.RenderLeaderService(kvcb))
+				objs = append(objs, mooncake.RenderLeaderService(kvcb))
 			}
 			if c.foreignSvc {
 				// Same name, none of the marks: no resource note, no owner. The rendered one is
 				// stripped rather than hand-built, so this stays a Service the aligner would
 				// otherwise accept and differs from ours in exactly the judged field.
-				foreign := kvcache.RenderLeaderService(kvcb)
+				foreign := mooncake.RenderLeaderService(kvcb)
 				foreign.Annotations = nil
 				foreign.OwnerReferences = nil
 				objs = append(objs, foreign)
@@ -673,9 +820,9 @@ func TestKVCacheBackendReconciler_EnqueuesFromTheResourceNote(t *testing.T) {
 	predicate := kvCacheBackendWorkloadPredicate()
 
 	for name, obj := range map[string]ctrlcli.Object{
-		"deployment": kvcache.RenderLeaderDeployment(kvcb, "example.com/mooncake:v0"),
-		"service":    kvcache.RenderLeaderService(kvcb),
-		"daemonset":  kvcache.RenderMemberDaemonSet(kvcb, 0, "example.com/mooncake:v0"),
+		"deployment": mooncake.RenderLeaderDeployment(kvcb, "example.com/mooncake:v0"),
+		"service":    mooncake.RenderLeaderService(kvcb),
+		"daemonset":  mooncake.RenderMemberDaemonSet(kvcb, 0, "example.com/mooncake:v0"),
 	} {
 		assert.True(t, predicate.Create(ctrlevent.CreateEvent{Object: obj}),
 			"%s: a rendered object must pass the watch predicate", name)
@@ -700,7 +847,7 @@ func TestKVCacheBackendReconciler_EnqueuesFromTheResourceNote(t *testing.T) {
 	// resolves it, because the mapper only ever reads that note. The predicate is what has to refuse
 	// it: nothing outside the system namespace is ever rendered, so a match there is somebody else's
 	// claim, and honoring it would spend a reconcile and three admin reads per event.
-	impostor := kvcache.RenderLeaderDeployment(kvcb, "example.com/mooncake:v0")
+	impostor := mooncake.RenderLeaderDeployment(kvcb, "example.com/mooncake:v0")
 	impostor.Namespace = "default"
 	assert.False(t, predicate.Create(ctrlevent.CreateEvent{Object: impostor}),
 		"a resource note written outside the system namespace must not wake this reconciler")
@@ -752,6 +899,74 @@ func TestKVCacheBackendReconciler_ConvergesAFabricSwitch(t *testing.T) {
 	assert.Empty(t, tcp.Volumes, "and unmounts the device tree")
 	assert.Nil(t, tcp.Containers[0].SecurityContext,
 		"and drops the capabilities entirely, rather than leaving an empty context behind")
+}
+
+// TestKVCacheBackendReconciler_ConvergesAMultiTenancySwitch pins the edit an operator is TOLD to
+// make: the pool webhook refuses a pool whose backend runs without multi-tenancy and names the field
+// to set, so turning it on for a backend that already has a leader is the ordinary path, not a
+// corner. Turning it on adds a volume pair and a seed container beside the mount the container pass
+// already moves, and a pass that moved one without the other would be refused by the API server on
+// every reconcile — while this object went on reporting Ready.
+func TestKVCacheBackendReconciler_ConvergesAMultiTenancySwitch(t *testing.T) {
+	kvcb := newKVCacheBackendObject()
+	cli := newKVCacheBackendClient(kvcb)
+	ctx := context.Background()
+
+	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+
+	setMultiTenancy := func(on bool) {
+		got := new(workercore.KVCacheBackend)
+		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, got))
+		got.Spec.Connection.Managed.Leader.MultiTenancy = on
+		require.NoError(t, cli.Update(ctx, got))
+		require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+	}
+
+	leaderPod := func() core.PodSpec {
+		deploy := new(apps.Deployment)
+		require.NoError(t, cli.Get(ctx, leaderObjectKey(kvcb), deploy))
+		return deploy.Spec.Template.Spec
+	}
+
+	// Every mount names a volume the pod carries. The API server enforces this and answers
+	// `volumeMounts[0].name: Not found` when it does not, rejecting the whole update — but the fake
+	// client runs NO pod-spec validation, so without asserting it here the suite would happily
+	// accept a template a real cluster refuses forever.
+	mountsResolve := func(t *testing.T, pod core.PodSpec) {
+		t.Helper()
+		carried := make(map[string]struct{}, len(pod.Volumes))
+		for _, v := range pod.Volumes {
+			carried[v.Name] = struct{}{}
+		}
+		containers := append(append([]core.Container{}, pod.InitContainers...), pod.Containers...)
+		for _, c := range containers {
+			for _, m := range c.VolumeMounts {
+				assert.Contains(t, carried, m.Name,
+					"container %q mounts %q and the pod carries no such volume", c.Name, m.Name)
+			}
+		}
+	}
+
+	off := leaderPod()
+	mountsResolve(t, off)
+	assert.Empty(t, off.Volumes, "multi-tenancy off carries no policy volume")
+	assert.Empty(t, off.InitContainers, "and nothing to seed one")
+
+	setMultiTenancy(true)
+	on := leaderPod()
+	mountsResolve(t, on)
+	assert.Len(t, on.Volumes, 2, "turning it on brings the writable volume and the seed beside it")
+	assert.Len(t, on.InitContainers, 1, "and the container that seeds one before the master looks")
+	assert.Contains(t, on.Containers[0].Args, "-enable_multi_tenants=true",
+		"and the flag, which is the whole reason the edit was made")
+
+	setMultiTenancy(false)
+	back := leaderPod()
+	mountsResolve(t, back)
+	assert.Empty(t, back.Volumes, "turning it back off takes the volumes away")
+	assert.Empty(t, back.InitContainers,
+		"and the seed container with them, rather than leaving one that runs on every start")
+	assert.NotContains(t, back.Containers[0].Args, "-enable_multi_tenants=true")
 }
 
 // adminResponse is one canned reply. A nil err with a status and a body is a reply that arrived; a
@@ -1031,7 +1246,7 @@ func memberPodOn(
 ) *core.Pod {
 	t.Helper()
 
-	ds := kvcache.RenderMemberDaemonSet(kvcb, 0, "example.com/mooncake:v0")
+	ds := mooncake.RenderMemberDaemonSet(kvcb, 0, "example.com/mooncake:v0")
 	labels := make(map[string]string, len(ds.Spec.Selector.MatchLabels))
 	for k, v := range ds.Spec.Selector.MatchLabels {
 		labels[k] = v
@@ -1042,7 +1257,7 @@ func memberPodOn(
 			Name:        "member-" + node,
 			Namespace:   kuberess.SystemNamespaceName,
 			Labels:      labels,
-			Annotations: map[string]string{kvcache.MemberPodSpecHashAnnotation: fingerprint},
+			Annotations: map[string]string{mooncake.MemberPodSpecHashAnnotation: fingerprint},
 			// The DaemonSet controller stamps this on every Pod it makes, and the restart path
 			// reads it: a selector says a Pod LOOKS like ours, this says it IS. A fixture without
 			// it would agree with a restart path that deleted on the selector alone.
@@ -1059,8 +1274,8 @@ func memberPodOn(
 
 func currentMemberFingerprint(t *testing.T, kvcb *workercore.KVCacheBackend) string {
 	t.Helper()
-	ds := kvcache.RenderMemberDaemonSet(kvcb, 0, "example.com/mooncake:v0")
-	return ds.Spec.Template.Annotations[kvcache.MemberPodSpecHashAnnotation]
+	ds := mooncake.RenderMemberDaemonSet(kvcb, 0, "example.com/mooncake:v0")
+	return ds.Spec.Template.Annotations[mooncake.MemberPodSpecHashAnnotation]
 }
 
 func livingMemberPods(t *testing.T, cli ctrlcli.Client) []string {
@@ -1175,7 +1390,7 @@ func TestKVCacheBackendScale_IgnoresForeignPods(t *testing.T) {
 			Name:        "somebody-elses",
 			Namespace:   kuberess.SystemNamespaceName,
 			Labels:      map[string]string{"app.kubernetes.io/name": "something-else"},
-			Annotations: map[string]string{kvcache.MemberPodSpecHashAnnotation: "stale"},
+			Annotations: map[string]string{mooncake.MemberPodSpecHashAnnotation: "stale"},
 		},
 	}
 
@@ -1895,12 +2110,11 @@ func TestKVCacheBackendStatus_AnOversizedHealthFieldIsBounded(t *testing.T) {
 // consumers would have its delete refused by a status write that could not be persisted, so the
 // object would refuse and not say why.
 func TestKVCacheBackendStatus_ARefusalNamesASampleOfItsConsumers(t *testing.T) {
-	refs := make([]core.TypedLocalObjectReference, 0, 30)
+	refs := make([]workercore.KVCacheObjectReference, 0, 30)
 	for i := range 30 {
-		refs = append(refs, core.TypedLocalObjectReference{
-			APIGroup: ptr.To("worker.gpustack.ai"),
-			Kind:     "KVCachePool",
-			Name:     fmt.Sprintf("pool-%d", i),
+		refs = append(refs, workercore.KVCacheObjectReference{
+			Kind: "KVCachePool",
+			Name: fmt.Sprintf("pool-%d", i),
 		})
 	}
 
@@ -1909,7 +2123,8 @@ func TestKVCacheBackendStatus_ARefusalNamesASampleOfItsConsumers(t *testing.T) {
 	now := meta.Now()
 	kvcb.DeletionTimestamp = &now
 
-	got := reconcileKVCacheBackend(t, newKVCacheBackendClient(kvcb), kvcb.Name)
+	cli := newKVCacheBackendClient(append([]ctrlcli.Object{kvcb}, kvCachePoolsNamedBy(refs...)...)...)
+	got := reconcileKVCacheBackend(t, cli, kvcb.Name)
 	require.NotNil(t, got, "a claimed backend must not be released")
 
 	message := KVCacheBackendConditionDeletable.GetMessage(got)
@@ -2086,7 +2301,7 @@ const externalAdminAddress = "mooncake.corp.example:9003"
 // the connection branch is looked at — and this mode never reads it. That is a fair thing for a test
 // to encode: the fixture is the object an admin can actually create.
 func newExternalKVCacheBackendObject(
-	usedBy ...core.TypedLocalObjectReference,
+	usedBy ...workercore.KVCacheObjectReference,
 ) *workercore.KVCacheBackend {
 	kvcb := &workercore.KVCacheBackend{
 		ObjectMeta: meta.ObjectMeta{Name: "mooncake-shared"},
@@ -2391,16 +2606,16 @@ func TestKVCacheBackendExternal_DoesNotFollowARedirect(t *testing.T) {
 // this operator having rendered anything. Nothing here is ours to tear down, and the refusal is
 // about the CONSUMERS rather than about the workloads.
 func TestKVCacheBackendExternal_RefusesAUsedDelete(t *testing.T) {
-	kvcb := newExternalKVCacheBackendObject(core.TypedLocalObjectReference{
-		APIGroup: ptr.To("worker.gpustack.ai"),
-		Kind:     "KVCachePool",
-		Name:     "team-a-pool",
-	})
+	claim := workercore.KVCacheObjectReference{
+		Kind: "KVCachePool",
+		Name: "team-a-pool",
+	}
+	kvcb := newExternalKVCacheBackendObject(claim)
 	systemmeta.Lock(kvcb)
 	now := meta.Now()
 	kvcb.DeletionTimestamp = &now
 
-	cli := newClientRefusingCreates(t, kvcb)
+	cli := newClientRefusingCreates(t, append([]ctrlcli.Object{kvcb}, kvCachePoolsNamedBy(claim)...)...)
 	r := &KVCacheBackendReconciler{
 		Client: cli,
 		AdminHTTP: &http.Client{Transport: &adminRoundTripper{byPath: map[string]adminResponse{
@@ -2496,7 +2711,7 @@ func TestKVCacheBackendStatus_AnUnschedulableLeaderIsAFaultNotAStart(t *testing.
 	// restated here, so this test cannot pass against a renderer that labels its Pods differently.
 	deploy := new(apps.Deployment)
 	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{
-		Name:      kvcache.LeaderObjectName(kvcb),
+		Name:      mooncake.LeaderObjectName(kvcb),
 		Namespace: kuberess.SystemNamespaceName,
 	}, deploy))
 	require.NotNil(t, deploy.Spec.Selector)
@@ -2504,7 +2719,7 @@ func TestKVCacheBackendStatus_AnUnschedulableLeaderIsAFaultNotAStart(t *testing.
 
 	placeLeaderPod(t, cli, kvcb, &core.Pod{
 		ObjectMeta: meta.ObjectMeta{
-			Name:      kvcache.LeaderObjectName(kvcb) + "-refused",
+			Name:      mooncake.LeaderObjectName(kvcb) + "-refused",
 			Namespace: kuberess.SystemNamespaceName,
 			Labels:    deploy.Spec.Selector.MatchLabels,
 		},
@@ -2591,7 +2806,7 @@ func TestKVCacheBackendWatch_OnlyALeadersPodMapsBack(t *testing.T) {
 
 	deploy := new(apps.Deployment)
 	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{
-		Name:      kvcache.LeaderObjectName(kvcb),
+		Name:      mooncake.LeaderObjectName(kvcb),
 		Namespace: kuberess.SystemNamespaceName,
 	}, deploy))
 	leaderPodLabels := deploy.Spec.Template.Labels
@@ -2599,7 +2814,7 @@ func TestKVCacheBackendWatch_OnlyALeadersPodMapsBack(t *testing.T) {
 
 	ds := new(apps.DaemonSet)
 	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{
-		Name:      kvcache.MemberObjectName(kvcb, 0),
+		Name:      mooncake.MemberObjectName(kvcb, 0),
 		Namespace: kuberess.SystemNamespaceName,
 	}, ds))
 	memberPodLabels := ds.Spec.Template.Labels
@@ -3018,10 +3233,10 @@ func placeLeaderPod(
 ) {
 	t.Helper()
 
-	deploy := kvcache.RenderLeaderDeployment(kvcb, "example.com/mooncake:v0")
+	deploy := mooncake.RenderLeaderDeployment(kvcb, "example.com/mooncake:v0")
 	rs := &apps.ReplicaSet{
 		ObjectMeta: meta.ObjectMeta{
-			Name:      kvcache.LeaderObjectName(kvcb) + "-7d9cf6b8c4",
+			Name:      mooncake.LeaderObjectName(kvcb) + "-7d9cf6b8c4",
 			Namespace: kuberess.SystemNamespaceName,
 			Labels:    deploy.Spec.Selector.MatchLabels,
 			OwnerReferences: []meta.OwnerReference{{
@@ -3054,7 +3269,7 @@ func leaderPodInState(
 ) *core.Pod {
 	t.Helper()
 
-	deploy := kvcache.RenderLeaderDeployment(kvcb, "example.com/mooncake:v0")
+	deploy := mooncake.RenderLeaderDeployment(kvcb, "example.com/mooncake:v0")
 	labels := make(map[string]string, len(deploy.Spec.Selector.MatchLabels))
 	for k, v := range deploy.Spec.Selector.MatchLabels {
 		labels[k] = v
@@ -3062,7 +3277,7 @@ func leaderPodInState(
 
 	return &core.Pod{
 		ObjectMeta: meta.ObjectMeta{
-			Name:      kvcache.LeaderObjectName(kvcb) + "-abcde",
+			Name:      mooncake.LeaderObjectName(kvcb) + "-abcde",
 			Namespace: kuberess.SystemNamespaceName,
 			Labels:    labels,
 		},
@@ -3096,7 +3311,7 @@ func TestKVCacheBackendConverge_TakesBackWhatWasGrantedByHand(t *testing.T) {
 	require.NoError(t, err)
 
 	deployKey := ctrlcli.ObjectKey{
-		Name:      kvcache.LeaderObjectName(kvcb),
+		Name:      mooncake.LeaderObjectName(kvcb),
 		Namespace: kuberess.SystemNamespaceName,
 	}
 
@@ -3203,7 +3418,7 @@ func TestKVCacheBackendConverge_RestoresThePullCredentials(t *testing.T) {
 	require.NoError(t, err)
 
 	deployKey := ctrlcli.ObjectKey{
-		Name:      kvcache.LeaderObjectName(kvcb),
+		Name:      mooncake.LeaderObjectName(kvcb),
 		Namespace: kuberess.SystemNamespaceName,
 	}
 
@@ -3238,7 +3453,7 @@ func TestKVCacheBackendConverge_RestoresTheReadinessProbes(t *testing.T) {
 	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
 
 	deployKey := ctrlcli.ObjectKey{
-		Name:      kvcache.LeaderObjectName(kvcb),
+		Name:      mooncake.LeaderObjectName(kvcb),
 		Namespace: kuberess.SystemNamespaceName,
 	}
 
@@ -3287,7 +3502,7 @@ func TestKVCacheBackendConverge_DoesNotFightTheServersPullPolicyDefault(t *testi
 	require.NoError(t, err)
 
 	deployKey := ctrlcli.ObjectKey{
-		Name:      kvcache.LeaderObjectName(kvcb),
+		Name:      mooncake.LeaderObjectName(kvcb),
 		Namespace: kuberess.SystemNamespaceName,
 	}
 
@@ -3330,7 +3545,7 @@ func TestKVCacheBackendConverge_ClearingThePullPolicyRestoresTheDefault(t *testi
 	require.NoError(t, err)
 
 	deployKey := ctrlcli.ObjectKey{
-		Name:      kvcache.LeaderObjectName(kvcb),
+		Name:      mooncake.LeaderObjectName(kvcb),
 		Namespace: kuberess.SystemNamespaceName,
 	}
 	deploy := new(apps.Deployment)
@@ -3371,7 +3586,7 @@ func TestKVCacheBackendConverge_MovingToLatestMovesThePullPolicy(t *testing.T) {
 	require.NoError(t, err)
 
 	deployKey := ctrlcli.ObjectKey{
-		Name:      kvcache.LeaderObjectName(kvcb),
+		Name:      mooncake.LeaderObjectName(kvcb),
 		Namespace: kuberess.SystemNamespaceName,
 	}
 	deploy := new(apps.Deployment)

@@ -1,0 +1,9 @@
+# HELP mooncake_tenant_quota_requested_bytes Requested tenant quota in bytes
+# TYPE mooncake_tenant_quota_requested_bytes gauge
+mooncake_tenant_quota_requested_bytes{tenant_id="team-a"} 1073741824
+# HELP mooncake_tenant_quota_effective_bytes Effective tenant quota in bytes
+# TYPE mooncake_tenant_quota_effective_bytes gauge
+mooncake_tenant_quota_effective_bytes{tenant_id="team-a"} 0
+# HELP mooncake_tenant_quota_used_bytes Tenant used bytes
+# TYPE mooncake_tenant_quota_used_bytes gauge
+mooncake_tenant_quota_used_bytes{tenant_id="team-a

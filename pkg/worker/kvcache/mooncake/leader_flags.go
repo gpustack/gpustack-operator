@@ -1,4 +1,4 @@
-package kvcache
+package mooncake
 
 import (
 	"fmt"
@@ -66,6 +66,21 @@ func RenderLeaderFlags(leader workercore.KVCacheBackendLeader) []string {
 	// an empty value means the object never went through admission.
 	if mapped, ok := leaderAllocationStrategies[leader.AllocationStrategy]; ok {
 		flags = append(flags, "-allocation_strategy="+mapped)
+	}
+
+	// Rendered only when asked for. An explicit -enable_multi_tenants=false would be the artifact's
+	// own default restated, and would move the command line of every backend that never wanted it.
+	//
+	// The connector URI is rendered WITH the switch and never apart from it. The master builds its
+	// quota policy store when multi-tenancy is on, the file connector refuses the empty URI that is
+	// that flag's own default, and the constructor rethrows the refusal rather than degrading — so
+	// the switch alone is a process that does not start. -tenant_quota_connector_type stays absent
+	// under the rule above: "file" is already its default, and the workload provides no other kind
+	// of source.
+	if leader.MultiTenancy {
+		flags = append(flags,
+			"-enable_multi_tenants=true",
+			"-tenant_quota_connector_uri="+QuotaPolicyFilePath)
 	}
 
 	flags = append(flags,

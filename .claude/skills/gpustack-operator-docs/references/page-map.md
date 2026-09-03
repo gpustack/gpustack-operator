@@ -87,6 +87,18 @@ group discards that member's cache).
 **Never** — the four-stage scheduling chain. This chain is its own; `docs/architecture.md` links to it
 in one clause and does not describe it.
 
+## `docs/kv-cache/pool.md`
+
+**Owns** — the `KVCachePool` / `KVCachePoolBinding` pair: why they split by scope, the Binding as the
+provisioning point, one Binding to one reuse domain, ceiling-versus-grant, the immutable `spec.domain`
+fields, the quota policy file, the zero-mounted-members condition, and what a full quota actually does
+(the store discards this domain's own objects; `overQuota` reports something else).
+
+**Never** — how the store itself is run, scaled or observed. That is `backend.md`; this page names a
+backend and links to it. And never the *enforcement* the Binding does not do: the one paragraph saying
+it is a grant and not an isolation boundary belongs here, but the mechanism a real boundary would need
+is not this page's to design.
+
 ## `docs/accelerator-requests.md`
 
 **Owns** — the normative contract: the two families, every resource key, a worked example per family,

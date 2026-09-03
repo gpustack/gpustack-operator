@@ -61,6 +61,8 @@ specific and actionable; cite the file and line.
 - Prefer short, single-purpose functions; favor composition and value semantics.
 - Keep concurrency simple and minimal; flag shared mutable state that risks data races.
 - Exported APIs need doc comments describing behavior, expectations, and constraints.
+- Comments stay plain and short; flag emoji, decorative symbols and circled digits in any commented
+  source file, Go and shell alike.
 
 ## Kubernetes conventions
 
