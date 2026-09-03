@@ -1072,7 +1072,7 @@ cluster changed, which is the case the reconciler already re-reads on every pass
 Two fields are per deployment and three are per role, so one `engine` plus one `engineVersion`
 synthesizes a *different* image for each role, following each role's own hardware. A prefill role on
 NVIDIA and a decode role on Ascend, both `vllm` `0.20.2`, render
-`gpustack/runner:cuda12.9-vllm0.20.2` and `gpustack/runner:cann8.2-910b-vllm0.20.2`. The later spec
+`gpustack/runner:cuda12.9-vllm0.20.2` and `gpustack/runner:cann9.0-910b-vllm0.20.2`. The later spec
 that lifts the length-1 bound on `roles` gets cross-vendor images for free.
 
 That works only because the version sets overlap, so it is measured rather than hoped for: for
@@ -1165,7 +1165,7 @@ convention this spec introduces.
 
 **The failure mode this buys, stated plainly.** A node reporting CUDA `12.4` under a role asking for
 `vllm` `0.25.1` synthesizes `gpustack/runner:cuda12.4-vllm0.25.1`, and that image **does not exist**
-— the matrix publishes `0.25.1` for `12.9` and `13.0` only. The replica then sits in
+— on `cuda` the matrix publishes `0.25.1` for `12.9` and `13.0` only. The replica then sits in
 `ImagePullBackOff`. This is accepted, not overlooked: the decision on version alignment is that the
 user guarantees it and the operator only assembles a name from the information it has. A gate that
 rejected the combination would need the release matrix compiled into the operator, which is the
