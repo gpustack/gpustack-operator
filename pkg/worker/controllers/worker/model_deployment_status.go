@@ -32,9 +32,9 @@ const (
 // reserved but cache not attached" is a real and actionable state, which is what a single phase
 // string cannot carry.
 //
-// DomainRegistered is declared beside the rule that resolves the Binding. CacheAttached arrives with
-// the task that can observe it — there is no connector to scrape yet — and writing it here would
-// report a state nothing measured.
+// DomainRegistered is declared beside the rule that resolves the Binding, and CacheAttached beside
+// the reading that judges it, so that each condition's vocabulary sits with the code that can
+// actually observe it.
 const (
 	ModelDeploymentConditionQuotaReserved kubeapistatus.ConditionType = "QuotaReserved"
 )
@@ -86,6 +86,8 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 	if err := r.observeModelDeploymentQuota(ctx, md, pods, holder); err != nil {
 		return nil, err
 	}
+
+	r.observeModelDeploymentCache(ctx, md, pods, domain, holder)
 
 	deriveModelDeploymentPhase(md, holder)
 

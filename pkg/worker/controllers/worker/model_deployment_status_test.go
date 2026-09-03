@@ -290,9 +290,13 @@ func TestSyncModelDeploymentStatus_WritesNothingWhenUnchanged(t *testing.T) {
 	assert.Equal(t, 1, writes.statusUpdates, "an unchanged status must not be written again")
 }
 
-// TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved states the boundary this task stops
-// at. DomainRegistered and CacheAttached belong to the tasks that can observe them; writing them
-// here — even as Unknown — would report a state nothing measured.
+// TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved states the difference between a
+// condition this pass DECLARED and a field it INVENTED.
+//
+// A pass that observed nothing still declares the two conditions it evaluates every time — an axis
+// with no answer is Unknown, which is an answer — but it must not fabricate the domain projection.
+// DomainRegistered is the one condition absent here, and for a reason worth keeping: this pass was
+// handed no reading of the Binding at all, and a pass that did not look must not report.
 func TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved(t *testing.T) {
 	md := newRenderDeployment()
 	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
@@ -304,6 +308,15 @@ func TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved(t *testing.T) {
 	for _, c := range status.Conditions {
 		declared = append(declared, c.Type)
 	}
-	assert.Equal(t, []string{string(ModelDeploymentConditionQuotaReserved)}, declared)
-	assert.Nil(t, status.KVCache, "the domain is read by the task that resolves the Binding")
+	assert.ElementsMatch(t, []string{
+		string(ModelDeploymentConditionQuotaReserved),
+		string(ModelDeploymentConditionCacheAttached),
+	}, declared)
+	assert.NotContains(t, declared, string(ModelDeploymentConditionDomainRegistered),
+		"this pass was handed no reading of the Binding, and a pass that did not look must not report")
+
+	holder := &workercore.ModelDeployment{Status: *status}
+	assert.True(t, ModelDeploymentConditionQuotaReserved.IsUnknown(holder))
+	assert.True(t, ModelDeploymentConditionCacheAttached.IsUnknown(holder))
+	assert.Nil(t, status.KVCache, "and it invents no domain to report")
 }

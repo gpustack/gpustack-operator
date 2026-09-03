@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -44,6 +45,13 @@ type modelDeploymentDomain struct {
 	Ready   bool
 	Reason  string
 	Message string
+
+	// Blocks and Usage are the master's own account of what this reuse domain holds, carried
+	// straight off the Binding and NOT flattened to zero. Both are pointers there with omitempty,
+	// and absent means the scrape did not carry this domain — a different fact from a domain holding
+	// nothing, and the only reader that needs the difference is the cache-attachment reading.
+	Blocks *int64
+	Usage  *resource.Quantity
 }
 
 // resolveModelDeploymentDomain reads the KVCachePoolBinding this deployment references and projects
@@ -87,6 +95,7 @@ func (r *ModelDeploymentReconciler) resolveModelDeploymentDomain(
 		},
 	}
 	observed.Ready, observed.Reason, observed.Message = modelDeploymentBindingUsable(kvcpb)
+	observed.Blocks, observed.Usage = kvcpb.Status.Blocks, kvcpb.Status.Usage
 
 	return observed, nil
 }

@@ -41,6 +41,15 @@ type ModelDeploymentReconciler struct {
 	Client    ctrlcli.Client
 	APIReader ctrlcli.Reader
 	Recorder  ctrlrecord.EventRecorder
+
+	// CacheScraper reads each replica's own account of its cache client. It is an interface rather
+	// than a dial this reconciler makes, because every case the condition it feeds has to get right
+	// is a failure, and a real dial cannot be made to fail on demand.
+	//
+	// A nil scraper is every replica unreadable, which the condition reports as Unknown. It is nil
+	// today: the concrete per-engine reader is not written, and inventing a metric name would be the
+	// exact assumption the condition exists to refuse.
+	CacheScraper ModelDeploymentCacheScraper
 }
 
 var _ ctrlreconcile.Reconciler = (*ModelDeploymentReconciler)(nil)
