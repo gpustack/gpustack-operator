@@ -1471,7 +1471,9 @@ truthful); after T13 (the headline claim is measured and recorded).
   `Unknown`, which is correct but worth knowing once.
   Verify: `go test ./pkg/worker/controllers/worker/ -run ModelDeploymentCacheAttached`
 
-- [ ] **T10 · Losing a replica: the event and the lease window**
+- [x] **T10 · Losing a replica: the event and the lease window**
+  Delivered: `pkg/worker/controllers/worker/model_deployment_events.go` and its test, which also
+  completes the half T4 left as a log line.
   Blocked by: T8
   Owns: `pkg/worker/controllers/worker/model_deployment_events.go` + its test
   Gate: review
@@ -1481,6 +1483,17 @@ truthful); after T13 (the headline claim is measured and recorded).
   emitted from observed Pod state rather than from a delete hook, so it survives a missed watch
   event.
   Verify: `go test ./pkg/worker/controllers/worker/ -run ModelDeploymentEvents`
+
+  ⛔ **Two consequences of reading departures from observed state, both found by implementing it.**
+  A departing replica has to still be there to be read, so the reconciler deletes replicas with
+  their own grace period and **never** with `ctrlclix.Terminated` — which `instance.go` uses, and
+  which is the obvious thing to copy. And a name still held by a terminating replica must not end
+  the pass early: it did, which meant that during exactly the window a departure event is for,
+  neither the event nor the status was written. The pass now carries the requeue to the end.
+
+  ⚠️ The `30s` in the message is stated as `kv_lease_duration`'s **default**, not read from the
+  pool. The value lives on the backend, which T3 resolves; naming a number this operator did not
+  read would be worse than naming the default and saying so.
 
 - [ ] **T11 · Documentation**
   Blocked by: T2, T5, T7, T9
