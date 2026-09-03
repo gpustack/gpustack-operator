@@ -146,7 +146,19 @@ func newPreflightCommand() *cobra.Command {
 			// Every manufacturer is reported, including the ones nothing was read for, so the
 			// result never has to be read as a pass by omission. Reporting also decides the exit
 			// code, which is what a script reads instead of the document.
-			return preflight.Report(os.Stdout, groups)
+			// The link states are read here rather than inside the pass above: a NIC belongs
+			// to the machine, so it is neither one manufacturer's answer nor gated by the
+			// accelerators being readable.
+			//
+			// Cancellation is rechecked AFTER it, because this is a second host scan and the
+			// check above happened before it ran. Reporting a hardware verdict assembled while
+			// the operator was interrupting it would answer a question that was withdrawn.
+			network := preflight.PreflightNetwork()
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("preflight was interrupted before it could report: %w", err)
+			}
+
+			return preflight.Report(os.Stdout, groups, network)
 		},
 	}
 

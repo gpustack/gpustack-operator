@@ -463,14 +463,19 @@ func TestReport_WritesTheDocumentEvenWhenTheNodeFailed(t *testing.T) {
 	}}
 
 	var buf bytes.Buffer
-	err := Report(&buf, grpList)
+	err := Report(&buf, grpList, NetworkReport{})
 
 	require.Error(t, err, "an unavailable capability is a failure")
 	assert.Contains(t, err.Error(), "nvml: function not found", "the driver's own words reach the caller")
 
-	var decoded device.PreflightGroupList
+	// The document's top level is a map holding both sections. Decoding it as the bare accelerator
+	// list — which is what this assertion did while that list WAS the top level — now fails
+	// loudly, and that is the property the shape was chosen for: appending the network section as
+	// a second YAML document instead would have left this decode succeeding while silently seeing
+	// none of it.
+	var decoded preflightResult
 	require.NoError(t, yaml.Unmarshal(buf.Bytes(), &decoded), "the document is still valid YAML")
-	assert.Equal(t, grpList, decoded, "and it is the whole result, not a truncated one")
+	assert.Equal(t, grpList, decoded.Accelerators, "and it is the whole result, not a truncated one")
 }
 
 // Every manufacturer asked about appears in the result, whatever it had to report. A manufacturer
