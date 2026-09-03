@@ -1151,9 +1151,9 @@ func TestInstanceTypeReconciler_ComputesDetail(t *testing.T) {
 
 		// A SECOND NODE IN THE SAME POOL, mid driver rollout: same accelerator group, an OLDER
 		// runtime, and no cards -- so it changes the runtime-version aggregate without touching the
-		// SlicedDetail assertions below. Two DIFFERENT versions is what gives the invariant
-		// assertion its discriminating power: with one node the list's first and last elements are
-		// the same element, and a single value taken from the wrong end would still match.
+		// SlicedDetail assertions below. Two DIFFERENT versions is what gives the value assertions
+		// below their discriminating power: with one node the list's first and last elements are the
+		// same element, and a single value taken from the wrong end would still match.
 		groupB := slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g")
 		groupB.RuntimeVersion = "12.4"
 		devB := devicesWithGroups("node-b", groupB)
@@ -1191,10 +1191,16 @@ func TestInstanceTypeReconciler_ComputesDetail(t *testing.T) {
 			"every distinct version the pool reports, ascending")
 		assert.Equal(t, "12.4", d.RuntimeVersion,
 			"the minimum, because admission picks the node after the image is already fixed")
-		require.NotEmpty(t, d.RuntimeVersions, "otherwise the invariant below is vacuous")
+		// THE INVARIANT, AND IT HAS NO DISCRIMINATING POWER TODAY. The two assertions above pin both
+		// fields to exact values, so every mutation that breaks the invariant is already red before
+		// reaching this line, and deleting this line would change nothing. It is kept because it
+		// states a RELATION instead of a value: when this case's versions are legitimately updated,
+		// the assertions above are rewritten and this one still holds the two fields together.
+		// Do not read it as a guard that catches something the rest of this case misses.
+		require.NotEmpty(t, d.RuntimeVersions, "an empty list would panic on the index below")
 		assert.Equal(t, d.RuntimeVersions[0], d.RuntimeVersion,
-			"THE INVARIANT: a redundant field with nothing holding it is two facts that can "+
-				"contradict each other, so the single value must be the list's first element")
+			"a redundant field with nothing holding it is two facts that can contradict each other, "+
+				"so the single value must be the list's first element")
 		assert.Len(t, d.RuntimeVersions, 2,
 			"a consumer reads disagreement as len() > 1, which is a length comparison rather than "+
 				"a second copy of the aggregation")
