@@ -9,10 +9,30 @@ package v1alpha1
 type ModelDeploymentSpecApplyConfiguration struct {
 	// Model names what the engine serves.
 	Model *ModelDeploymentModelApplyConfiguration `json:"model,omitempty"`
-	// Engine selects the inference engine, which decides how the transfer configuration is
-	// synthesized and which argument keys the operator owns. Ownership is per (engine, key): a key
-	// one engine owns is an ordinary user argument on another.
+	// Engine selects the inference engine, which decides which argument keys the operator owns and
+	// which carrier the transfer configuration arrives on. Ownership is per (engine, key): a key one
+	// engine owns is an ordinary user argument on another.
+	//
+	// It does NOT decide the connector, which follows the role's hardware instead. An Ascend pool
+	// running this engine gets a different connector than an NVIDIA pool running it, because the
+	// connector is a property of the accelerator backend.
 	Engine *string `json:"engine,omitempty"`
+	// EngineVersion is the engine's own version, e.g. "0.25.1" for vllm or "0.5.18" for sglang.
+	//
+	// It is free-form and UNVALIDATED, by decision. Together with each role's observed hardware it
+	// assembles that role's runner image; the operator checks neither that the combination was ever
+	// published nor that the version supports the installed driver. The user guarantees version
+	// alignment. A gate would need the runner's release matrix compiled into the operator, and the
+	// failure it would prevent is already legible without one, as an ImagePullBackOff on a tag that
+	// does not exist.
+	//
+	// It is per deployment rather than per role, which is what lets one engine and one version
+	// assemble a DIFFERENT image for each role: the backend half of the tag comes from the role's
+	// own InstanceType. A prefill role on NVIDIA and a decode role on Ascend therefore need no extra
+	// field. That works because the published version sets overlap across backends, which is
+	// measured rather than assumed - though not across ALL of them, so a per-role override is a
+	// thing the P/D spec may need and this one does not.
+	EngineVersion *string `json:"engineVersion,omitempty"`
 	// KVCache attaches the deployment to a KV cache pool.
 	KVCache *ModelDeploymentKVCacheApplyConfiguration `json:"kvCache,omitempty"`
 	// Roles are the engine roles this deployment runs.
@@ -44,6 +64,14 @@ func (b *ModelDeploymentSpecApplyConfiguration) WithModel(value *ModelDeployment
 // If called multiple times, the Engine field is set to the value of the last call.
 func (b *ModelDeploymentSpecApplyConfiguration) WithEngine(value string) *ModelDeploymentSpecApplyConfiguration {
 	b.Engine = &value
+	return b
+}
+
+// WithEngineVersion sets the EngineVersion field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the EngineVersion field is set to the value of the last call.
+func (b *ModelDeploymentSpecApplyConfiguration) WithEngineVersion(value string) *ModelDeploymentSpecApplyConfiguration {
+	b.EngineVersion = &value
 	return b
 }
 

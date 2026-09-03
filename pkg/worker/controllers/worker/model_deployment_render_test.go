@@ -22,9 +22,10 @@ func newRenderDeployment(mutate ...func(*workercore.ModelDeployment)) *workercor
 	md := &workercore.ModelDeployment{
 		ObjectMeta: meta.ObjectMeta{Name: "qwen", Namespace: "team-a", UID: "md-uid"},
 		Spec: workercore.ModelDeploymentSpec{
-			Model:   workercore.ModelDeploymentModel{Name: "Qwen/Qwen2.5-72B-Instruct"},
-			Engine:  workercore.ModelDeploymentEngineVLLM,
-			KVCache: workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
+			Model:         workercore.ModelDeploymentModel{Name: "Qwen/Qwen2.5-72B-Instruct"},
+			Engine:        workercore.ModelDeploymentEngineVLLM,
+			EngineVersion: "0.25.1",
+			KVCache:       workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
 			Roles: []workercore.ModelDeploymentRole{{
 				Name:         "server",
 				Replicas:     2,

@@ -3547,24 +3547,27 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 									Required: []string{
 										"model",
 										"engine",
+										"engineVersion",
 										"kvCache",
 										"roles",
 									},
 									Properties: map[string]v1.JSONSchemaProps{
 										"engine": {
-											Description: "Engine selects the inference engine, which decides how the transfer configuration is\nsynthesized and which argument keys the operator owns. Ownership is per (engine, key): a key\none engine owns is an ordinary user argument on another.",
+											Description: "Engine selects the inference engine, which decides which argument keys the operator owns and\nwhich carrier the transfer configuration arrives on. Ownership is per (engine, key): a key one\nengine owns is an ordinary user argument on another.\nIt does NOT decide the connector, which follows the role's hardware instead. An Ascend pool\nrunning this engine gets a different connector than an NVIDIA pool running it, because the\nconnector is a property of the accelerator backend.",
 											Type:        "string",
 											Enum: []v1.JSON{
 												{
 													Raw: []byte(`"vllm"`),
 												},
 												{
-													Raw: []byte(`"vllm-ascend"`),
-												},
-												{
 													Raw: []byte(`"sglang"`),
 												},
 											},
+										},
+										"engineVersion": {
+											Description: "EngineVersion is the engine's own version, e.g. \"0.25.1\" for vllm or \"0.5.18\" for sglang.\nIt is free-form and UNVALIDATED, by decision. Together with each role's observed hardware it\nassembles that role's runner image; the operator checks neither that the combination was ever\npublished nor that the version supports the installed driver. The user guarantees version\nalignment. A gate would need the runner's release matrix compiled into the operator, and the\nfailure it would prevent is already legible without one, as an ImagePullBackOff on a tag that\ndoes not exist.\nIt is per deployment rather than per role, which is what lets one engine and one version\nassemble a DIFFERENT image for each role: the backend half of the tag comes from the role's\nown InstanceType. A prefill role on NVIDIA and a decode role on Ascend therefore need no extra\nfield. That works because the published version sets overlap across backends, which is\nmeasured rather than assumed - though not across ALL of them, so a per-role override is a\nthing the P/D spec may need and this one does not.",
+											Type:        "string",
+											MaxLength:   ptr.To[int64](64),
 										},
 										"kvCache": {
 											Description: "KVCache attaches the deployment to a KV cache pool.",

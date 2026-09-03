@@ -8,15 +8,17 @@ import (
 	core "k8s.io/api/core/v1"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
 // connectorInput is one pool-and-domain fixture every case renders from.
 //
 // It carries a NON-EMPTY Domain on purpose: the cases asserting that no tenant key is rendered are
 // only worth anything if a domain was available to render.
-func connectorInput(engine string) ModelDeploymentConnectorInput {
+func connectorInput(engine, manufacturer string) ModelDeploymentConnectorInput {
 	return ModelDeploymentConnectorInput{
 		Engine:              engine,
+		Manufacturer:        manufacturer,
 		Domain:              "team-a-shared",
 		MasterServerAddress: "shared-kv-master.gpustack-system.svc:50051",
 		MetadataServer:      "P2PHANDSHAKE",
@@ -53,14 +55,16 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 	testCases := []struct {
 		name             string
 		engine           string
+		manufacturer     string
 		wantArgs         []string
 		wantEnv          []core.EnvVar
 		wantDefaultedEnv []core.EnvVar
 		wantConfig       map[string]any
 	}{
 		{
-			name:   "vllm_golden",
-			engine: workercore.ModelDeploymentEngineVLLM,
+			name:         "vllm_golden",
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerNVIDIA,
 			wantArgs: []string{
 				"--kv-transfer-config",
 				`{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_both"}`,
@@ -72,8 +76,11 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 			wantConfig:       wantVLLMConfig,
 		},
 		{
-			name:   "vllm_ascend_golden",
-			engine: workercore.ModelDeploymentEngineVLLMAscend,
+			// SAME ENGINE VALUE AS THE CASE ABOVE, different hardware. That is the whole point of
+			// narrowing the enum: the connector name changed and nothing about the engine did.
+			name:         "vllm_on_ascend_golden",
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerAscend,
 			wantArgs: []string{
 				"--kv-transfer-config",
 				`{"kv_connector":"AscendStoreConnector","kv_role":"kv_both"}`,
@@ -91,8 +98,9 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 			// ClientConfig, because a mounted file nothing reads claims a wiring that is not
 			// happening. The one value that cannot be known at admission time arrives as a
 			// fieldRef, which is the whole reason this engine does not get a file.
-			name:   "sglang_golden",
-			engine: workercore.ModelDeploymentEngineSGLang,
+			name:         "sglang_golden",
+			engine:       workercore.ModelDeploymentEngineSGLang,
+			manufacturer: nodefeature.ManufacturerNVIDIA,
 			wantArgs: []string{
 				"--hicache-storage-backend", "mooncake",
 			},
@@ -116,7 +124,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := SynthesizeModelDeploymentConnector(connectorInput(tc.engine))
+			got, err := SynthesizeModelDeploymentConnector(connectorInput(tc.engine, tc.manufacturer))
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.wantArgs, got.Args)
@@ -136,7 +144,8 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 // asserts the whole rendering by equality, and an equality assertion tells whoever broke it WHAT
 // changed but not WHY it mattered. These carry the why.
 func TestSynthesizeModelDeploymentConnector_SGLangEnvironmentCarrier(t *testing.T) {
-	got, err := SynthesizeModelDeploymentConnector(connectorInput(workercore.ModelDeploymentEngineSGLang))
+	got, err := SynthesizeModelDeploymentConnector(
+		connectorInput(workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA))
 	require.NoError(t, err)
 
 	// The engine resolves its config source in the order extra-config, then config path, then
@@ -216,20 +225,21 @@ func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
 	// vacuously, proving nothing, while reading as three more engines' worth of coverage. Its own
 	// keys are asserted positively in TestSynthesizeModelDeploymentConnector_SGLangEnvironmentCarrier,
 	// where an absent key fails instead of passing.
-	engines := []string{
-		workercore.ModelDeploymentEngineVLLM,
-		workercore.ModelDeploymentEngineVLLMAscend,
+	// Both file carriers, which is now one engine on two backends rather than two engines.
+	carriers := []struct{ engine, manufacturer string }{
+		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA},
+		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, engine := range engines {
-				got, err := SynthesizeModelDeploymentConnector(connectorInput(engine))
+			for _, c := range carriers {
+				got, err := SynthesizeModelDeploymentConnector(connectorInput(c.engine, c.manufacturer))
 				// A nil map would make every assertion below vacuous, so the carrier itself is
 				// checked first: this test only means anything where a file is rendered.
 				require.NoError(t, err)
-				require.NotEmpty(t, got.ClientConfig, "%s renders a file carrier", engine)
-				assert.NotContains(t, got.ClientConfig, tc.key, "%s: %s", engine, tc.why)
+				require.NotEmpty(t, got.ClientConfig, "%s on %s renders a file carrier", c.engine, c.manufacturer)
+				assert.NotContains(t, got.ClientConfig, tc.key, "%s on %s: %s", c.engine, c.manufacturer, tc.why)
 			}
 		})
 	}
@@ -248,30 +258,33 @@ func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
 // declaration means the rendering does not depend on that parser staying where it is.
 func TestSynthesizeModelDeploymentConnector_FileCarrierDeclaresPureClient(t *testing.T) {
 	testCases := []struct {
-		name     string
-		engine   string
-		wantMode bool
+		name         string
+		manufacturer string
+		wantMode     bool
 	}{
 		{
-			// vLLM has `mode`, and it is one half of a cross-field rule its own __post_init__
-			// enforces in both directions: embedded rejects a zero segment, standalone-store
-			// rejects a non-zero one. Rendering the segment without the mode raises at startup.
-			name:     "vllm_declares_standalone_store",
-			engine:   workercore.ModelDeploymentEngineVLLM,
-			wantMode: true,
+			// vLLM proper has `mode`, and it is one half of a cross-field rule its own
+			// __post_init__ enforces in both directions: embedded rejects a zero segment,
+			// standalone-store rejects a non-zero one. Rendering the segment without the mode
+			// raises at startup.
+			name:         "vllm_on_nvidia_declares_standalone_store",
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+			wantMode:     true,
 		},
 		{
-			// vLLM-Ascend has no `mode` field at all, so the segment size stands alone here.
-			// Rendering a mode for it would be a key its reader ignores.
-			name:     "vllm_ascend_has_no_mode_to_declare",
-			engine:   workercore.ModelDeploymentEngineVLLMAscend,
-			wantMode: false,
+			// The Ascend package has no `mode` field at all, so the segment size stands alone.
+			// Rendering a mode there would be a key its reader ignores -- and note this row and
+			// the one above share an ENGINE and differ only in hardware.
+			name:         "vllm_on_ascend_has_no_mode_to_declare",
+			manufacturer: nodefeature.ManufacturerAscend,
+			wantMode:     false,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := SynthesizeModelDeploymentConnector(connectorInput(tc.engine))
+			got, err := SynthesizeModelDeploymentConnector(
+				connectorInput(workercore.ModelDeploymentEngineVLLM, tc.manufacturer))
 			require.NoError(t, err)
 
 			assert.Equal(t, 0, got.ClientConfig["global_segment_size"],
@@ -308,7 +321,7 @@ func TestSynthesizeModelDeploymentConnector_DeviceSpelling(t *testing.T) {
 }
 
 func TestSynthesizeModelDeploymentConnector_UnsupportedEngine(t *testing.T) {
-	_, err := SynthesizeModelDeploymentConnector(connectorInput("tensorrt-llm"))
+	_, err := SynthesizeModelDeploymentConnector(connectorInput("tensorrt-llm", nodefeature.ManufacturerNVIDIA))
 	require.Error(t, err)
 }
 
@@ -472,15 +485,20 @@ func TestModelDeploymentOwnership(t *testing.T) {
 // render from drifting apart. It reads the renderer's actual output rather than the table, so a key
 // added to one and forgotten in the other fails here instead of in production.
 func TestModelDeploymentOwnedAndDefaultedCannotDisagree(t *testing.T) {
-	engines := []string{
-		workercore.ModelDeploymentEngineVLLM,
-		workercore.ModelDeploymentEngineVLLMAscend,
-		workercore.ModelDeploymentEngineSGLang,
+	// Every (engine, backend) the renderer can be called with, not every engine. The Ascend row is
+	// the load-bearing one: the ownership table is keyed on the ENGINE alone, so this is what
+	// proves that claim - if any key the Ascend backend renders were not in vLLM's own entry, this
+	// fails, and the table would have to be re-keyed.
+	carriers := []struct{ engine, manufacturer string }{
+		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA},
+		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend},
+		{workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA},
 	}
 
-	for _, engine := range engines {
-		t.Run(engine, func(t *testing.T) {
-			got, err := SynthesizeModelDeploymentConnector(connectorInput(engine))
+	for _, c := range carriers {
+		t.Run(c.engine+"_on_"+c.manufacturer, func(t *testing.T) {
+			engine := c.engine
+			got, err := SynthesizeModelDeploymentConnector(connectorInput(engine, c.manufacturer))
 			require.NoError(t, err)
 
 			for _, arg := range got.Args {
@@ -529,11 +547,16 @@ func TestModelDeploymentEngineCommand(t *testing.T) {
 			want:   []string{"vllm", "serve", "Qwen/Qwen2.5-72B-Instruct"},
 		},
 		{
-			// vllm-ascend is a vLLM plugin and shares its entry point.
-			name:   "vllm_ascend_shares_vllms_entrypoint",
-			engine: workercore.ModelDeploymentEngineVLLMAscend,
-			model:  "Qwen/Qwen2.5-72B-Instruct",
-			want:   []string{"vllm", "serve", "Qwen/Qwen2.5-72B-Instruct"},
+			// The former enum value, kept as a case so that it stays refused. It adds no execution
+			// path the unsupported_engine case below does not already cover -- what it records is
+			// the DECISION: the runner's service dimension has no such value, every Ascend image is
+			// service=vllm, and putting it back would hang the connector on the engine again.
+			// An Ascend pool gets its command from the vllm row above, because the entry point does
+			// not vary with the backend even though the connector does.
+			name:    "the_former_vllm_ascend_value_is_not_an_engine",
+			engine:  "vllm-ascend",
+			model:   "Qwen/Qwen2.5-72B-Instruct",
+			wantErr: true,
 		},
 		{
 			name:   "sglang_launches_a_module_with_model_path",

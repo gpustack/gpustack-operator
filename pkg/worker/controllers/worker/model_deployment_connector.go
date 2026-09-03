@@ -10,6 +10,7 @@ import (
 	core "k8s.io/api/core/v1"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
 const (
@@ -30,9 +31,17 @@ const (
 // KVCachePoolBinding, a KVCachePool or a live master. Resolving the Binding into this shape is a
 // separate responsibility.
 type ModelDeploymentConnectorInput struct {
-	// Engine selects which engine's argument and config-path variable to render, and it is the
-	// left half of every owned-key decision.
+	// Engine selects which engine's argument keys and carrier to render, and it is the left half of
+	// every owned-key decision.
 	Engine string
+
+	// Manufacturer is the accelerator vendor of the role's pool, as this project spells it, e.g.
+	// "nvidia" or "ascend". It selects the CONNECTOR, which the engine does not.
+	//
+	// Empty means the pool's hardware is not yet observed, which renders the vendor-neutral
+	// connector rather than failing: the alternative is refusing to attach a cache because a status
+	// has not converged.
+	Manufacturer string
 
 	// Domain is the reuse identity the Binding declares.
 	//
@@ -133,11 +142,11 @@ var modelDeploymentOwnedKeys = map[string]struct {
 	Args []string
 	Env  []string
 }{
+	// One entry covers the whole vLLM family, on every backend. That is the evidence the
+	// connector was hung on the wrong dimension: when this map had a separate vllm-ascend key,
+	// its value was IDENTICAL to this one, because the owned keys follow the engine while only the
+	// connector name follows the backend.
 	workercore.ModelDeploymentEngineVLLM: {
-		Args: []string{"--kv-transfer-config"},
-		Env:  []string{"MOONCAKE_CONFIG_PATH"},
-	},
-	workercore.ModelDeploymentEngineVLLMAscend: {
 		Args: []string{"--kv-transfer-config"},
 		Env:  []string{"MOONCAKE_CONFIG_PATH"},
 	},
@@ -219,29 +228,35 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 
 	switch in.Engine {
 	case workercore.ModelDeploymentEngineVLLM:
-		args, err := modelDeploymentKVTransferConfigArg("MooncakeStoreConnector")
-		if err != nil {
-			return ModelDeploymentConnectorRender{}, err
-		}
-		render.Args = args
-		render.Env = []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: ModelDeploymentClientConfigPath}}
-		render.ClientConfig = modelDeploymentFileClientConfig(in, protocol)
-		// vLLM alone has `mode`, and it is the partner of the zero segment size: this engine
-		// rejects a zero segment in embedded mode, and rejects a non-zero one here.
-		render.ClientConfig["mode"] = modelDeploymentModeStandaloneStore
+		// ONE BOOLEAN DECIDES BOTH DIFFERENCES IN THIS BRANCH, and both are properties of the
+		// backend rather than of the engine. That is why "vllm-ascend" is not an engine value: on
+		// CANN the runner installs the vllm_ascend package, which ships a different store connector
+		// and no `mode` field, while owning exactly the same argument and environment keys.
+		ascend := in.Manufacturer == nodefeature.ManufacturerAscend
 
-	case workercore.ModelDeploymentEngineVLLMAscend:
-		// AscendStoreConnector and not MultiConnector: vllm-ascend re-registers MultiConnector to
-		// its own composite, which exists to run several connectors at once. The connector that
-		// reaches the store is this one, and the store backend it resolves already defaults to
-		// mooncake, so that key is not rendered either.
-		args, err := modelDeploymentKVTransferConfigArg("AscendStoreConnector")
+		// AscendStoreConnector, also registered as MooncakeConnectorStoreV1, and NOT
+		// MultiConnector: that project re-registers MultiConnector to its own composite, which
+		// exists to run several connectors at once, and a single-role deployment has nothing to
+		// compose. Its store backend already defaults to mooncake, so that key is not rendered.
+		connector := "MooncakeStoreConnector"
+		if ascend {
+			connector = "AscendStoreConnector"
+		}
+
+		args, err := modelDeploymentKVTransferConfigArg(connector)
 		if err != nil {
 			return ModelDeploymentConnectorRender{}, err
 		}
 		render.Args = args
 		render.Env = []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: ModelDeploymentClientConfigPath}}
 		render.ClientConfig = modelDeploymentFileClientConfig(in, protocol)
+
+		// `mode` is the partner of the zero segment size on vLLM proper, which rejects a zero
+		// segment in embedded mode and a non-zero one here. The Ascend package has no such field,
+		// so rendering it there would be a key its reader ignores.
+		if !ascend {
+			render.ClientConfig["mode"] = modelDeploymentModeStandaloneStore
+		}
 
 	case workercore.ModelDeploymentEngineSGLang:
 		render.Args = []string{"--hicache-storage-backend", "mooncake"}
@@ -316,15 +331,19 @@ func modelDeploymentSGLangClientEnv(in ModelDeploymentConnectorInput, protocol s
 //
 // The base commands are the engines' own documented entry points: vLLM installs a "vllm" console
 // script whose serve subcommand takes the model as a POSITIONAL argument, and SGLang is launched as
-// a module with the model named by --model-path. vllm-ascend is a vLLM plugin and shares its
-// entry point.
+// a module with the model named by --model-path.
+//
+// The command does not vary with the backend, which is why this function takes no manufacturer:
+// vllm_ascend is a vLLM plugin and shares the same entry point. It is the one place where the two
+// vLLM-family variants genuinely coincide, as opposed to the owned keys, where they coincide
+// because the keys were never a backend property to begin with.
 func ModelDeploymentEngineCommand(engine, model string) ([]string, error) {
 	if model == "" {
 		return nil, errors.New("model name is empty")
 	}
 
 	switch engine {
-	case workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentEngineVLLMAscend:
+	case workercore.ModelDeploymentEngineVLLM:
 		return []string{"vllm", "serve", model}, nil
 	case workercore.ModelDeploymentEngineSGLang:
 		return []string{"python3", "-m", "sglang.launch_server", "--model-path", model}, nil

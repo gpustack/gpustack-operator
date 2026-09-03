@@ -4843,6 +4843,11 @@ func (m *ModelDeploymentSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.EngineVersion)
+	copy(dAtA[i:], m.EngineVersion)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.EngineVersion)))
+	i--
+	dAtA[i] = 0x2a
 	if len(m.Roles) > 0 {
 		for iNdEx := len(m.Roles) - 1; iNdEx >= 0; iNdEx-- {
 			{
@@ -6645,6 +6650,8 @@ func (m *ModelDeploymentSpec) Size() (n int) {
 			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
+	l = len(m.EngineVersion)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -8033,6 +8040,7 @@ func (this *ModelDeploymentSpec) String() string {
 		`Engine:` + fmt.Sprintf("%v", this.Engine) + `,`,
 		`KVCache:` + strings.Replace(strings.Replace(this.KVCache.String(), "ModelDeploymentKVCache", "ModelDeploymentKVCache", 1), `&`, ``, 1) + `,`,
 		`Roles:` + repeatedStringForRoles + `,`,
+		`EngineVersion:` + fmt.Sprintf("%v", this.EngineVersion) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -23158,6 +23166,38 @@ func (m *ModelDeploymentSpec) Unmarshal(dAtA []byte) error {
 			if err := m.Roles[len(m.Roles)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EngineVersion", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EngineVersion = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

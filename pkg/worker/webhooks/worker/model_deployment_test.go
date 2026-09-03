@@ -28,10 +28,11 @@ func modelDeployment(engine string, roles ...workercore.ModelDeploymentRole) *wo
 	return &workercore.ModelDeployment{
 		ObjectMeta: meta.ObjectMeta{Name: "qwen-72b", Namespace: "team-a"},
 		Spec: workercore.ModelDeploymentSpec{
-			Model:   workercore.ModelDeploymentModel{Name: "Qwen/Qwen2.5-72B-Instruct"},
-			Engine:  engine,
-			KVCache: workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
-			Roles:   roles,
+			Model:         workercore.ModelDeploymentModel{Name: "Qwen/Qwen2.5-72B-Instruct"},
+			Engine:        engine,
+			EngineVersion: "0.25.1",
+			KVCache:       workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
+			Roles:         roles,
 		},
 	}
 }
