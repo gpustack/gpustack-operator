@@ -78,10 +78,16 @@ takes a Binding *name*; the Binding is what put that domain on the store and wha
 
 ### What a Binding does not do
 
-⚠️ **It is not an isolation boundary, and nothing here enforces one.** The store accepts whatever
-tenant id a caller sends, over a Service any pod in the cluster can dial, and no credential is derived
-from this object. A workload that knows another namespace's domain name **can read and write that
-domain's cache today** — Binding or no Binding.
+⚠️ **It is not an isolation boundary, and nothing here enforces one.** The store is reached over a
+Service any pod in the cluster can dial, no credential is derived from this object, and nothing ties
+a tenant id to the identity of whoever sent it. A workload that knows another namespace's domain name
+**can read and write that domain's cache today** — Binding or no Binding.
+
+The one thing a tenant id must be is *registered*: a multi-tenant master refuses a name absent from
+its ledger, and a Binding is what puts one there (see the next section). That constrains which names
+**exist**, never who may use one. A backend running without multi-tenancy has no ledger and makes no
+such check — a `KVCachePool` over a *managed* backend in that state is refused at admission, but an
+external backend is not inspected, so there the id is accepted as sent.
 
 What a Binding governs is who is *granted* capacity and under which name: provisioning and accounting.
 Real enforcement needs an authenticated proxy or network isolation between workloads and the store,
@@ -91,16 +97,19 @@ separate Bindings as the thing keeping them apart.
 ## One Binding, one reuse domain
 
 `spec.domain` declares exactly one reuse domain, and the domain **is** the store's tenant id. That
-identity is what makes the rest follow:
+identity is what makes the rest follow. Everything below is about *registering* a name; using one
+somebody else registered is a separate question, answered in
+[What a Binding does not do](#what-a-binding-does-not-do).
 
 - **A domain name is claimed cluster-wide.** A second Binding naming a domain another Binding already
   holds is **rejected at admission**, with a message naming the holder — anywhere in the cluster, not
   just in that namespace.
 - **A workload may not *register* its own domain.** It necessarily sends a domain name at runtime —
-  that is how the store is addressed — but the name has to be one an admin already registered through
-  a Binding. Every distinct registered name is a new tenant with its own ceiling, so a workload free
-  to mint them would draw a fresh ceiling for each. Registration stays on the object an admin
-  controls; sending an unregistered name gets `TENANT_NOT_REGISTERED`, not a new quota.
+  that is how the store is addressed — but on a multi-tenant master the name has to be one an admin
+  already registered through a Binding. Every distinct registered name is a new tenant with its own
+  ceiling, so a workload free to mint them would draw a fresh ceiling for each. Registration stays on
+  the object an admin controls; sending an unregistered name gets `TENANT_NOT_REGISTERED`, not a new
+  quota.
 - **Sharing a pool works; sharing a domain does not.** Two namespaces on one pool is the ordinary
   case. Two Bindings on one domain would share cache — sometimes the intent — but collide on one
   ledger, which never is.
@@ -279,8 +288,9 @@ is the section above.
 ---
 
 **See also** — [KV Cache Backend](backend.md) (the store this pool publishes, and where eviction is
-configured) · [Admission](../architecture/admission.md) (the gates and the four-view status pattern) ·
-[Settings & Environment Variables](../settings.md)
+configured) · [KV Cache Injection](../reference/kv-cache-injection.md) (how a Pod consumes the grant
+this page describes) · [Admission](../architecture/admission.md) (the gates and the four-view status
+pattern) · [Settings & Environment Variables](../settings.md)
 
 **Next** → [Accelerator Requests](../accelerator-requests.md) — how a workload asks for the devices it
 runs on.

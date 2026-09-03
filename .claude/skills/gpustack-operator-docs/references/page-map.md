@@ -172,14 +172,20 @@ transition, so do not "modernize" its version numbers.
 ## `docs/reference/*.md`
 
 **Owns** — lookup tables with provenance. Today: the per-product unit-resources presets
-(`instance-type-unit-resources.md`), and every command the binary offers with its flags and exit
-codes (`commands.md`).
+(`instance-type-unit-resources.md`), every command the binary offers with its flags and exit codes
+(`commands.md`), and the KV cache injection contract — opt-in keys, what each engine receives, every
+refusal with its fix (`kv-cache-injection.md`).
 
 **Not** — `commands.md` states what a flag does, not when to reach for the command. The procedure a
 one-shot belongs to lives on its operator page (`docs/operation/preflight.md` for `device-manager
 preflight`), and the reference row links to it rather than restating it.
 
-**Pinned** — `instance-type-unit-resources.md` is matched row-by-row by `TestUnitResourcesPresetDocs`,
+**Pinned** — `kv-cache-injection.md` carries per-engine facts read from engine source at named
+versions. Those rows go stale silently when an engine ships a new build, so a change there is a
+re-read rather than an edit; the same facts are mirrored in `pkg/worker/kvcache/inject/engine.go`,
+which carries the line numbers to re-read from.
+
+`instance-type-unit-resources.md` is matched row-by-row by `TestUnitResourcesPresetDocs`,
 by path. Do not rename it or reshape its tables. `commands.md` has no test behind it: its flag tables
 are only as true as the last person who ran `--help`, so change a flag and change the row in the same
 commit.
