@@ -492,7 +492,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 
 	overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
 
-	additionalVols, additionalMounts := convertAdditionalVolumes(inst)
+	additionalVols, additionalMounts := convertAdditionalVolumes(inst.Spec.AdditionalVolumes)
 
 	// Construct containers.
 	// Main container.
@@ -682,8 +682,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 //
 // An entry with no source is skipped rather than rendered: admission rejects one, and a volume with
 // an empty source would make the API server refuse the whole Pod on every reconcile.
-func convertAdditionalVolumes(inst *workercore.Instance) (vols []core.Volume, mounts []core.VolumeMount) {
-	avs := inst.Spec.AdditionalVolumes
+func convertAdditionalVolumes(avs []workercore.InstanceAdditionalVolume) (vols []core.Volume, mounts []core.VolumeMount) {
 	if len(avs) == 0 {
 		return nil, nil
 	}
