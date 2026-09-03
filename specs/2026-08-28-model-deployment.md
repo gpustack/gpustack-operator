@@ -471,6 +471,14 @@ names** — `MOONCAKE_CONFIG_PATH` and `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`. Le
 is what selects the environment path: `_load_config` tries `extra_config`, then the file variable,
 then the environment (`mooncake_store.py:242-260`).
 
+**The deepest reason for the split is evaluation time, and it is worth stating separately because it
+survives even if every literal fallback above were fixed upstream.** A file's contents and an
+argument's contents are both fixed when the object is admitted. **No Pod IP exists at that moment**;
+it is assigned when the Pod is scheduled and bound. The only carrier whose value is produced later is
+an environment variable with a `fieldRef`, which kubelet evaluates as the container starts. So for
+any key whose correct value is a per-replica runtime fact, a declarative carrier is not a worse
+option — it is not an option. That is why this is a carrier decision rather than a defaulting one.
+
 **And the file carrier fails asymmetrically for SGLang, which is worse than failing outright.**
 `setup()`'s first argument is `client_hostname`, which is `config.local_hostname` only when the
 shared transfer engine cannot be reused; when `metadata_server == "P2PHANDSHAKE"` **and**
@@ -522,13 +530,28 @@ defaults it to 4 GiB, and `sglang`'s default is the string `"4gb"` parsed by
 `_parse_global_segment_size` (`mooncake_store.py:63-76`, which accepts a bare `0` as well) — the same
 4 GiB by a different route. Neither engine's default is a pure client.
 
-The fix lands with the connector-wiring task, in the shared `pkg/worker/kvcache/inject` package that
-owns this rendering across specs — not here, and not twice. Until then the renderer's own test pins
-the omission and **names it a defect** rather than a decision, so the fix is noticed as a change.
+**The two carriers are at different stages, and the split is deliberate.** SGLang's environment
+carrier was built when the carrier decision was made, because its defect was not a missing key but a
+*wrong source*: it was reading configuration from an argument whose absent keys became literals, so
+there was no version of "defer this" that left a correct client behind. The vLLM family's segment
+group is a missing key on a carrier that is otherwise right, and it lands with the connector-wiring
+task in the shared `pkg/worker/kvcache/inject` package that owns this rendering across specs — not
+here, and not twice. Until then the renderer's own test pins the omission and **names it a defect**
+rather than a decision, so the fix is noticed as a change.
 
-One link is deliberately still open: whether Mooncake's C++ `setup()` accepts
-`global_segment_size == 0` at all. All three engines only pass the value down, so acceptance is
-decided one layer below them, and the package that owns the rendering is where that gets measured.
+**That link is now closed, and it closed in the strongest available way.** The question was whether
+Mooncake's C++ `setup()` accepts `global_segment_size == 0` at all — all three engines only pass the
+value down, so acceptance is decided a layer below them. Measured in `real_client.cpp`'s
+`setup_internal` (pinned at v0.3.13-rc1): a zero **skips mounting a segment**, with the comment
+**"A size of 0 keeps the pure client/server setup semantics"**, and the validator reads
+`if (value != 0 && value < MIN_SEGMENT_SIZE)` — rejecting a small non-zero value while admitting
+zero. So zero is not merely tolerated; upstream names it with the same words this design uses for
+the role it wants. `local_buffer_size == 0` is handled the same way, logging
+"Local buffer size is 0, skip registering local memory".
+
+⇒ Nothing technical blocks writing the group any more. What remains is ownership: the shared
+rendering package takes this synthesis over wholesale, so fixing it in the CR's own renderer means
+verifying the same behaviour twice, in the second place under a different structure.
 
 **The per-vendor client is an image concern, not a pool concern.** Per-vendor client wheels exist and
 are versioned in lockstep (all at 0.3.13 when measured): `mooncake-transfer-engine` (base, a CUDA 12
@@ -1929,9 +1952,13 @@ truthful); after T13 (the headline claim is measured and recorded).
   Four things the shared renderer has to get right, each measured rather than assumed:
   - **The carrier is per engine**, as F4's carrier table records it: a file for `vllm` and
     `vllm-ascend`, `MOONCAKE_*` environment variables for `sglang` with `MOONCAKE_LOCAL_HOSTNAME`
-    from `fieldRef: status.podIP`, and **no** `--hicache-storage-backend-extra-config`. This is the
-    reason the task cannot be skipped for a single-engine deployment: the current renderer's file
-    carrier is not merely duplicated work for `sglang`, it is wrong for it.
+    from `fieldRef: status.podIP`, and **no** `--hicache-storage-backend-extra-config`.
+    **This is already implemented in the CR's own renderer, so the risk here runs the other way:**
+    a shared package modelled on the file carrier alone would reintroduce the defect while looking
+    like a consolidation. The shared package's interface therefore has to be able to return
+    environment variables — including one with a `ValueFrom` rather than a value — and not just a
+    config document. A signature returning only a document cannot express this, and would force the
+    caller back to a file.
   - **The pure-client group**, per engine, as F4 records it. `global_segment_size: 0` on all three.
     A `local_buffer_size` of **128 MiB** is the documented client staging size (the store's own
     `setup` example spells `128*1024*1024 # local_buffer_size (128MB)`, described as short-lived
