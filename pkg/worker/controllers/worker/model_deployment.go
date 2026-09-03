@@ -91,6 +91,13 @@ func (r *ModelDeploymentReconciler) teardownModelDeployment(
 		}
 
 		if len(pods) > 0 {
+			// Report the phase before issuing the deletes, so an operator watching the object sees
+			// Deleting rather than the last Ready it happened to reach.
+			if err = r.syncModelDeploymentStatus(ctx, md, pods); err != nil {
+				logger.Error(err, "update model deployment status to deleting")
+				return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+			}
+
 			for i := range pods {
 				if pods[i].DeletionTimestamp != nil {
 					continue
@@ -197,7 +204,57 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		logger.Info("created replica", "pod", name)
 	}
 
+	if err = r.syncModelDeploymentService(ctx, md); err != nil {
+		logger.Error(err, "sync service")
+		return ctrl.Result{}, err
+	}
+
+	// Read the replicas back rather than reusing the list this pass started from: status must
+	// describe what exists now, not the snapshot the convergence decided against.
+	actual, err = r.listModelDeploymentPods(ctx, md)
+	if err != nil {
+		logger.Error(err, "list replicas")
+		return ctrl.Result{}, err
+	}
+
+	if err = r.syncModelDeploymentStatus(ctx, md, actual); err != nil {
+		logger.Error(err, "sync status")
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
+}
+
+// syncModelDeploymentService converges the one Service the deployment is reached through.
+//
+// It aligns an existing Service rather than replacing it, because the allocated ClusterIP is state
+// the operator did not write and every client that resolved the name is still using.
+func (r *ModelDeploymentReconciler) syncModelDeploymentService(
+	ctx context.Context, md *workercore.ModelDeployment,
+) error {
+	expected := renderModelDeploymentService(md)
+
+	actual := new(core.Service)
+	err := r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(expected), actual, ctrlclix.WithoutQuorum)
+	if err != nil {
+		if !kerrors.IsNotFound(err) {
+			return err
+		}
+
+		return ctrlcli.IgnoreAlreadyExists(r.Client.Create(ctx, expected))
+	}
+
+	if !modelDeploymentOwns(actual, md) {
+		// A Service of this name that belongs to something else is left alone: taking it over would
+		// redirect whatever already points at it.
+		return fmt.Errorf("service %s/%s is not owned by this deployment", actual.Namespace, actual.Name)
+	}
+
+	if !alignModelDeploymentService(actual, expected) {
+		return nil
+	}
+
+	return r.Client.Update(ctx, actual)
 }
 
 // renderModelDeploymentPods renders every replica of every role, keyed by Pod name.

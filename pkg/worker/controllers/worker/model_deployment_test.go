@@ -34,6 +34,11 @@ func newModelDeploymentClient(objs ...ctrlcli.Object) ctrlcli.Client {
 // wrote nothing from one that deleted and rebuilt everything.
 type modelDeploymentWrites struct {
 	creates, updates, deletes int
+	// statusUpdates is counted separately because a status write goes through the subresource
+	// client, which the Update hook never sees. Leaving it out would leave the most likely churn
+	// uncounted: a status rebuilt from scratch every pass is one careless field away from
+	// differing from itself forever.
+	statusUpdates int
 }
 
 func newCountingModelDeploymentClient(w *modelDeploymentWrites, objs ...ctrlcli.Object) ctrlcli.Client {
@@ -53,6 +58,13 @@ func newCountingModelDeploymentClient(w *modelDeploymentWrites, objs ...ctrlcli.
 			Delete: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.DeleteOption) error {
 				w.deletes++
 				return c.Delete(ctx, obj, opts...)
+			},
+			SubResourceUpdate: func(
+				ctx context.Context, c ctrlcli.Client, sub string, obj ctrlcli.Object,
+				opts ...ctrlcli.SubResourceUpdateOption,
+			) error {
+				w.statusUpdates++
+				return c.Status().Update(ctx, obj, opts...)
 			},
 		}).
 		Build()
@@ -142,15 +154,16 @@ func TestModelDeploymentReconciler_SecondPassWritesNothing(t *testing.T) {
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 2)
-	require.Equal(t, 2, writes.creates, "the first pass creates the replicas")
+	require.Equal(t, 3, writes.creates, "the first pass creates two replicas and one Service")
 	require.Equal(t, 1, writes.updates, "and adds the finalizer")
+	require.Equal(t, 1, writes.statusUpdates, "and reports the status once")
 
 	*writes = modelDeploymentWrites{}
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
 	assert.Equal(t, modelDeploymentWrites{}, *writes,
-		"an unchanged spec must issue no create, no update and no delete at all")
+		"an unchanged spec must issue no create, no update, no delete and no status write at all")
 }
 
 // TestModelDeploymentReconciler_RecreatesADeletedReplica states the difference between converging
