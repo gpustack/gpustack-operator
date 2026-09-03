@@ -572,6 +572,21 @@ neither take-over nor append. With one field the tier boundary is a predicate: `
 non-empty means the user owns the whole argv. `instance.go` already renders `Command:
 inst.Spec.Command` with no `Args`, so both CRDs keep one argv source and render identically.
 
+**Which template fields the overlay honours, and the one it cannot.** `Image`, `ImagePullPolicy`,
+`Command`, `Privileged`, `Ports`, `Env`, `ImagePullSecret` and `AdditionalVolumes` all reach the
+rendered container; `Resources` is refused at admission (Rule 2). `VolumeMount` is the exception:
+it names where an `Instance`'s workspace volume is mounted, and a `ModelDeployment` has no workspace
+volume — weights arrive through `AdditionalVolumes` or the engine's own hub client. It is
+**ignored rather than refused**, and the reason is that refusing it would refuse every template:
+the field carries the schema default `/workspace`, so it is set on any template a user writes and
+**its presence carries no user intent to read**. A role that needs a path mounted names it in
+`AdditionalVolumes`, where the mount path is the user's own.
+
+⚠️ **A replica always exposes a port**, defaulting to `8000` named `http` when the template names
+none, because a replica nothing can reach serves nothing and the Service fronting the deployment
+(F9) needs a target. `8000` is the port every supported engine's OpenAI-compatible server listens
+on by default.
+
 Acceptance:
 
 - An `extraArgs` entry containing an owned key is **rejected by the webhook**, with a message naming
@@ -796,7 +811,7 @@ The verification ladder, cheapest first:
 | Level | Vehicle | What it settles |
 |---|---|---|
 | unit | table-driven tests over the render, merge, validate and status functions | every rule in F1–F10 that does not need a live engine |
-| integration | envtest + a fake client, the reconciler against a fake Binding and a fake pool status | convergence, ownership, condition transitions, the `CacheAttached=False` path |
+| integration | a fake client, the reconciler driven directly against a fake Binding and a fake pool status | convergence, ownership, condition transitions, the `CacheAttached=False` path |
 | e2e | the dev image on the two-node cluster, `.claude/skills/gpustack-operator-e2e/cases/` | the four cases in the Test Plan, including the headline measurement |
 
 The headline measurement (G1) is the one that cannot be faked at a lower level: it needs two real
@@ -1324,7 +1339,11 @@ truthful); after T13 (the headline claim is measured and recorded).
   client that fails the test if asked for another namespace.
   Verify: `go test ./pkg/worker/controllers/worker/ -run ModelDeploymentBinding`
 
-- [ ] **T4 · The reconciler: one Pod per replica, converge, own them**
+- [x] **T4 · The reconciler: one Pod per replica, converge, own them**
+  Delivered: `pkg/worker/controllers/worker/model_deployment.go` and its test, registered in
+  `pkg/worker/controllers/setup.go` and asserted there by `pkg/worker/controllers/setup_test.go`.
+  **Partially:** the recreate path logs the replica it rebuilds but records no Event yet — the
+  recorder and the lease-window wording arrive with T10, which owns every replica-leaving event.
   Blocked by: T1
   Owns: `pkg/worker/controllers/worker/model_deployment.go` + its test,
   `pkg/worker/controllers/setup.go`
@@ -1337,10 +1356,10 @@ truthful); after T13 (the headline claim is measured and recorded).
   over an unchanged spec issues no writes, and a scale down deletes the highest ordinals. A spec
   change that changes a rendered Pod recreates it (F10's recreate policy) and records an event naming
   the replica and the 30 s lease window. **No `Instance` is created.**
-  Verify: `go test ./pkg/worker/controllers/worker/ -run ModelDeployment_` and the envtest
-  convergence case.
+  Verify: `go test ./pkg/worker/controllers/ ./pkg/worker/controllers/worker/ -run ModelDeployment`.
 
-- [ ] **T5 · The owned-key table and the three-tier merge**
+- [x] **T5 · The owned-key table and the three-tier merge**
+  Delivered: `pkg/worker/controllers/worker/model_deployment_render.go` and its test.
   Blocked by: T4, T6
   Owns: `pkg/worker/controllers/worker/model_deployment_render.go` + its test
   Gate: review
@@ -1603,13 +1622,20 @@ condition exists.
 
 #### Integration tests
 
-- The reconciler under envtest against a fake Binding: create → four Pods → delete one → converged;
-  scale 4 → 2 → 4; change the image → recreate; delete the deployment → Pods and Service garbage
-  collected through the owner reference.
-- The webhook under envtest: every rejection in the validation table arrives as a `Invalid` status
+⛔ **These are fake-client tests, not envtest.** An earlier draft of this spec said envtest; the
+repository has no envtest harness anywhere — every controller test in `pkg/worker/controllers/`
+drives the reconciler directly against `sigs.k8s.io/controller-runtime/pkg/client/fake`, with
+`interceptor.Funcs` where a call has to be counted rather than inferred. Introducing a second
+harness for one CRD would be a project-wide decision this spec has no reason to make.
+
+- The reconciler against a fake Binding: create → four Pods → delete one → converged; scale 4 → 2 →
+  4; change the image → recreate; delete the deployment → the finalizer is held until the Pods are
+  gone. Garbage collection through the owner reference is the API server's and is not asserted here,
+  because a fake client does not run it.
+- The webhook called directly: every rejection in the validation table arrives as an `Invalid` status
   error whose message is the one the table names.
-- The `CacheAttached=False` path end to end within envtest, driven by the fake pool status — the
-  deterministic half of the deliberate break, so the e2e case is confirming rather than discovering.
+- The `CacheAttached=False` path driven by the fake pool status — the deterministic half of the
+  deliberate break, so the e2e case is confirming rather than discovering.
 
 #### e2e tests
 
