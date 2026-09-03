@@ -12,6 +12,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlhandler "sigs.k8s.io/controller-runtime/pkg/handler"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -94,8 +95,10 @@ func (r *ModelDeploymentReconciler) teardownModelDeployment(
 
 		if len(pods) > 0 {
 			// Report the phase before issuing the deletes, so an operator watching the object sees
-			// Deleting rather than the last Ready it happened to reach.
-			if err = r.syncModelDeploymentStatus(ctx, md, pods); err != nil {
+			// Deleting rather than the last Ready it happened to reach. The Binding is deliberately
+			// not re-read: a teardown pass has no question to ask it, and the domain a replica is
+			// still writing into is the one that was last observed.
+			if err = r.syncModelDeploymentStatus(ctx, md, pods, nil); err != nil {
 				logger.Error(err, "update model deployment status to deleting")
 				return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
 			}
@@ -113,6 +116,13 @@ func (r *ModelDeploymentReconciler) teardownModelDeployment(
 			logger.V(3).Info("replica deletion in progress; requeue in 2s", "replicas", len(pods))
 
 			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		}
+
+		// The last replica has left, so the claim on the Binding can go. Released any earlier, the
+		// authorization could be deleted from under a process that is still writing through it.
+		if err := r.releaseModelDeploymentBinding(ctx, md); err != nil {
+			logger.Error(err, "release kv cache pool binding")
+			return ctrl.Result{}, err
 		}
 	}
 
@@ -139,6 +149,25 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) (ctrl.Result, error) {
 	logger := ctrllog.FromContext(ctx)
+
+	// Resolved first, and its verdict deliberately does NOT gate the convergence below. A Binding
+	// that is missing or briefly not usable — a store leader restart makes every Binding not-Ready
+	// for tens of seconds — leaves the replicas serving; the condition is the signal. Refusing to
+	// converge here would turn a routine upgrade of the store into an outage of every deployment on
+	// it.
+	domain, err := r.resolveModelDeploymentDomain(ctx, md)
+	if err != nil {
+		logger.Error(err, "resolve kv cache pool binding")
+		return ctrl.Result{}, err
+	}
+
+	// Claimed whatever the verdict was, so long as the Binding could be read at all: the claim is
+	// what holds an admin's delete off a deployment that is still writing, and a claim that came and
+	// went with readiness would open exactly that window.
+	if err = r.claimModelDeploymentBinding(ctx, md); err != nil {
+		logger.Error(err, "claim kv cache pool binding")
+		return ctrl.Result{}, err
+	}
 
 	desired, err := r.renderModelDeploymentPods(ctx, md)
 	if err != nil {
@@ -228,7 +257,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 
 	r.recordModelDeploymentDepartures(md, actual)
 
-	if err = r.syncModelDeploymentStatus(ctx, md, actual); err != nil {
+	if err = r.syncModelDeploymentStatus(ctx, md, actual, domain); err != nil {
 		logger.Error(err, "sync status")
 		return ctrl.Result{}, err
 	}
@@ -311,9 +340,13 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 			InstanceType:               instType,
 			RuntimeClassName:           r.getModelDeploymentRuntimeClassName(ctx, instType),
 			GeneralResourcesOvercommit: overcommit,
-			// The connector and its ConfigMap arrive with the rule that resolves the referenced
-			// Binding. Until then a replica is rendered with no connector at all, which is also what
-			// a deployment whose Binding cannot be read gets.
+			// The connector and its ConfigMap are still absent, and resolving the Binding did not
+			// bring them: synthesis additionally needs the members' transport, which no namespaced
+			// object republishes — the pool publishes its client endpoint and nothing about the data
+			// plane. Rendering a guessed protocol would configure the client for a fabric the members
+			// are not on, which fails as a transfer error one layer away from its cause. So a replica
+			// is rendered with no connector at all, which is also what a deployment whose Binding
+			// cannot be read gets.
 		}
 
 		for ordinal := range role.Replicas {
@@ -450,5 +483,44 @@ func (r *ModelDeploymentReconciler) SetupController(_ context.Context, opts cont
 				}),
 			),
 		).
+		Watches(
+			// A Binding's readiness is observed rather than declared, so the deployment has to be
+			// woken when it moves. Without this the transition would only be noticed at the next
+			// resync, which is hours away: a store leader restart would leave every deployment on it
+			// reporting a domain it had already regained.
+			&workercore.KVCachePoolBinding{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentBinding),
+		).
 		Complete(r)
+}
+
+// mapModelDeploymentBinding enqueues the deployments in a Binding's namespace that reference it.
+//
+// The scan is a namespaced List rather than an index because the reference is a plain field on a
+// namespaced object: the query never crosses a namespace, so the set it walks is one team's
+// deployments.
+func (r *ModelDeploymentReconciler) mapModelDeploymentBinding(
+	ctx context.Context, obj ctrlcli.Object,
+) []ctrlreconcile.Request {
+	mdList := new(workercore.ModelDeploymentList)
+	if err := r.Client.List(ctx, mdList,
+		ctrlcli.InNamespace(obj.GetNamespace()), ctrlclix.WithoutQuorum); err != nil {
+		ctrllog.FromContext(ctx).Error(err, "list model deployments for kv cache pool binding",
+			"kv cache pool binding", ctrlcli.ObjectKeyFromObject(obj))
+
+		return nil
+	}
+
+	var reqs []ctrlreconcile.Request
+	for i := range mdList.Items {
+		md := &mdList.Items[i]
+		if md.Spec.KVCache.PoolRef.Name != obj.GetName() {
+			continue
+		}
+		reqs = append(reqs, ctrlreconcile.Request{
+			NamespacedName: ctrlcli.ObjectKeyFromObject(md),
+		})
+	}
+
+	return reqs
 }

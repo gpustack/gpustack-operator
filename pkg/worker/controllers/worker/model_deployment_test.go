@@ -24,7 +24,10 @@ import (
 func newModelDeploymentClient(objs ...ctrlcli.Object) ctrlcli.Client {
 	return ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
-		WithStatusSubresource(&workercore.ModelDeployment{}).
+		// The Binding is here because the deployment writes its usedBy through the status
+		// subresource. Left out, the claim would be written as a whole-object update, and the
+		// counting fixture would attribute the most frequent cross-object write to the wrong hook.
+		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{}).
 		WithObjects(objs...).
 		Build()
 }
@@ -49,7 +52,10 @@ type modelDeploymentWrites struct {
 func newCountingModelDeploymentClient(w *modelDeploymentWrites, objs ...ctrlcli.Object) ctrlcli.Client {
 	return ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
-		WithStatusSubresource(&workercore.ModelDeployment{}).
+		// The Binding is here because the deployment writes its usedBy through the status
+		// subresource. Left out, the claim would be written as a whole-object update, and the
+		// counting fixture would attribute the most frequent cross-object write to the wrong hook.
+		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{}).
 		WithObjects(objs...).
 		WithInterceptorFuncs(ctrlinterceptor.Funcs{
 			Create: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.CreateOption) error {

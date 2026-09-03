@@ -100,7 +100,7 @@ func TestComputeModelDeploymentStatus_Phase(t *testing.T) {
 			}
 
 			r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(objs...)}
-			status, err := r.computeModelDeploymentStatus(context.Background(), md, pods)
+			status, err := r.computeModelDeploymentStatus(context.Background(), md, pods, nil)
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.wantPhase, status.Phase)
@@ -123,7 +123,7 @@ func TestComputeModelDeploymentStatus_Roles(t *testing.T) {
 	}
 	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
 
-	status, err := r.computeModelDeploymentStatus(context.Background(), md, pods)
+	status, err := r.computeModelDeploymentStatus(context.Background(), md, pods, nil)
 	require.NoError(t, err)
 
 	require.Len(t, status.Roles, 1)
@@ -141,7 +141,7 @@ func TestComputeModelDeploymentStatus_Unmanaged(t *testing.T) {
 	})
 	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
 
-	status, err := r.computeModelDeploymentStatus(context.Background(), md, nil)
+	status, err := r.computeModelDeploymentStatus(context.Background(), md, nil, nil)
 	require.NoError(t, err)
 	require.Len(t, status.Roles, 1)
 	assert.True(t, status.Roles[0].Unmanaged)
@@ -262,7 +262,7 @@ func TestSyncModelDeploymentStatus_RebuiltWholesale(t *testing.T) {
 	cli := newModelDeploymentClient(md, newRenderInstanceType())
 	r := &ModelDeploymentReconciler{Client: cli}
 
-	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods))
+	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil))
 
 	stored := getModelDeployment(t, cli)
 	assert.Equal(t, ModelDeploymentPhaseDegraded, stored.Status.Phase)
@@ -283,10 +283,10 @@ func TestSyncModelDeploymentStatus_WritesNothingWhenUnchanged(t *testing.T) {
 	r := &ModelDeploymentReconciler{Client: cli}
 
 	pods := []core.Pod{*readyReplica(md, 0, true), *readyReplica(md, 1, true)}
-	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods))
+	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil))
 	require.Equal(t, 1, writes.statusUpdates)
 
-	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods))
+	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil))
 	assert.Equal(t, 1, writes.statusUpdates, "an unchanged status must not be written again")
 }
 
@@ -297,7 +297,7 @@ func TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved(t *testing.T) {
 	md := newRenderDeployment()
 	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
 
-	status, err := r.computeModelDeploymentStatus(context.Background(), md, nil)
+	status, err := r.computeModelDeploymentStatus(context.Background(), md, nil, nil)
 	require.NoError(t, err)
 
 	declared := make([]string, 0, len(status.Conditions))
