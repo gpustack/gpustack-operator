@@ -653,6 +653,28 @@ Acceptance:
 - Status is rebuilt from observed state on every reconcile, so a stale field cannot survive a
   disagreement with the Pods.
 
+**Two facts `QuotaReserved` rests on, both verified rather than assumed.**
+
+⛔ **It must read each Workload's own conditions, and cannot be derived from the admission gate.**
+Gate 3 stops evaluating a Workload once it is admitted (Notes), so a `QuotaReserved` derived from
+the gate would answer for the moment of admission and never again — a Workload preempted since
+would still read as reserved. The Workload's own `QuotaReserved` condition is the only reading that
+stays true over time.
+
+⭐ **The ClusterQueue a refusal names is read off the spec, with no lookup.** The ClusterQueue is
+named after the InstanceType — `instance.go` renders the entrance label as
+`nodefeature.FormatLocalQueueName(inst.Spec.Type)` and states that the LocalQueue is "named by the
+hash of the ClusterQueue(InstanceType) name". So `roles[].instanceType` **is** the queue's name, and
+the message can point at something the user wrote rather than at a hash they cannot map back.
+
+⚠️ **The Workload belonging to a replica is found through its controller reference, not by
+recomputing its name.** Kueue's `jobframework` calls `SetControllerReference(pod, wl, …)`, so the
+reference is exact. Deriving the name instead means calling
+`kueue/pkg/controller/jobs/pod.GetWorkloadNameForPod` — measured, that import pulls
+`kueue/pkg/controller/jobframework`, which needs `github.com/ray-project/kuberay` and
+`sigs.k8s.io/jobset` in `go.sum`. Two new module dependencies to recompute a fact the object
+already carries.
+
 #### F8 — `CacheAttached` is an observation, never an assumption
 
 **A flag being accepted proves nothing.** Measured on the shipped artifact:
@@ -1395,7 +1417,10 @@ truthful); after T13 (the headline claim is measured and recorded).
   read-only into every replica.
   Verify: `go test ./pkg/worker/controllers/worker/ -run ModelDeploymentConnector`
 
-- [ ] **T7 · One Service, one endpoint**
+- [x] **T7 · One Service, one endpoint**
+  Delivered: `pkg/worker/controllers/worker/model_deployment_service.go` and its test.
+  It fronts `roles[0]`, which is the only reading with one role; the P/D spec decides which of
+  several roles is the front door, knowing what a router before them means.
   Blocked by: T4
   Owns: `pkg/worker/controllers/worker/model_deployment_service.go` + its test
   Gate: review
@@ -1404,9 +1429,14 @@ truthful); after T13 (the headline claim is measured and recorded).
   `Ports` entry or 8000. Scaling changes the Service's endpoints without recreating the Service. A
   test states why this is not `instance.go`'s per-Pod NodePort shape: N interchangeable replicas
   behind one address, not one addressable box.
-  Verify: `go test ./pkg/worker/controllers/worker/ -run ModelDeploymentService`
+  Verify: `go test ./pkg/worker/controllers/worker/ -run 'ModelDeploymentService|ModelDeploymentEndpoint|AlignModelDeploymentService'`
 
-- [ ] **T8 · Status: phase, per-role readiness, `QuotaReserved`**
+- [x] **T8 · Status: phase, per-role readiness, `QuotaReserved`**
+  Delivered: `pkg/worker/controllers/worker/model_deployment_status.go` and its test.
+  `DomainRegistered` and `CacheAttached` are deliberately **not written**, not even as `Unknown`:
+  there is no Binding to resolve and no connector to scrape yet, and a condition written before
+  anything can observe it reports a state nothing measured. They arrive with T3 and T9, folding into
+  the same compute function — a second status writer would be free to leave its own field behind.
   Blocked by: T4
   Owns: `pkg/worker/controllers/worker/model_deployment_status.go` + its test
   Gate: review
@@ -1416,7 +1446,7 @@ truthful); after T13 (the headline claim is measured and recorded).
   and `Degraded` meaning some ready and some not. `roles[]` carries `name`, `desired`, `ready`,
   `unmanaged`. `QuotaReserved` is `True` only when every replica's Workload has quota reserved, and
   its `False` reason names the ClusterQueue.
-  Verify: `go test ./pkg/worker/controllers/worker/ -run ModelDeploymentStatus`
+  Verify: `go test ./pkg/worker/controllers/worker/ -run 'ComputeModelDeployment|ObserveModelDeployment|SyncModelDeployment'`
 
 - [ ] **T9 · `CacheAttached`, judged on an observation**
   Blocked by: T3, T5, T8
