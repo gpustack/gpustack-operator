@@ -140,6 +140,14 @@ func (b *InstanceTypeDetailApplyConfiguration) WithComputeCapability(value strin
 	return b
 }
 
+// WithRuntimeVersion sets the RuntimeVersion field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the RuntimeVersion field is set to the value of the last call.
+func (b *InstanceTypeDetailApplyConfiguration) WithRuntimeVersion(value string) *InstanceTypeDetailApplyConfiguration {
+	b.InstanceTypeAcceleratorDetailApplyConfiguration.RuntimeVersion = &value
+	return b
+}
+
 // WithSlicedDetail sets the SlicedDetail field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the SlicedDetail field is set to the value of the last call.

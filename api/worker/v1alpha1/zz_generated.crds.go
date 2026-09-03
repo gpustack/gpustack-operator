@@ -2100,6 +2100,10 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 													Description: "Product is the name of the InstanceType product.",
 													Type:        "string",
 												},
+												"runtimeVersion": {
+													Description: "RuntimeVersion is the accelerator runtime version observed across the pool, normalized to\n\"major.minor\" by the detectors, e.g. \"12.9\" for CUDA or \"8.2\" for CANN.\nIt is the MINIMUM over every node backing the accelerator group, not an arbitrary\nrepresentative. One InstanceType spans every such node, and a driver rollout makes them\ndisagree for as long as it runs; a container built against an older runtime runs on a newer\ndriver but not the reverse, so the lowest version present is the one whose image every node\ncan run. That is the property that matters, because a workload's image is fixed before\nadmission chooses which node it lands on.\nAn empty value means NOTHING WAS OBSERVED - no synced flavor, or a pool with no accelerator\ngroup of its own - and is distinct from a pool whose nodes all report the same version. A\nconsumer must not read it as a default.",
+													Type:        "string",
+												},
 												"slicedDetail": {
 													Description: "SlicedDetail is the pool's aggregated slicing capability for this accelerator group.",
 													Type:        "object",

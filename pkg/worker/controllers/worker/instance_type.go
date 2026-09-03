@@ -32,6 +32,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
 	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
+	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/worker/apistatus"
 	"gpustack.ai/gpustack/pkg/worker/kuberequest"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -459,6 +460,7 @@ func (r *InstanceTypeReconciler) computeDetail(
 		detail.Memory = notes["memory"]
 		detail.Cores = notes["cores"]
 		detail.SlicedDetail = poolAcceleratorSlicedDetail(devices, it.Spec.AcceleratorGroup)
+		detail.RuntimeVersion = poolAcceleratorRuntimeVersion(devices, it.Spec.AcceleratorGroup)
 		// The cpuDetail note rides an accelerated flavor only when CPU-manufacturer awareness is
 		// on (a CPU flavor always carries it), matching how the flavor reconciler records it.
 		if settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx) {
@@ -511,6 +513,66 @@ func poolAcceleratorSlicedDetail(
 		}
 	}
 	return device.AggregateAcceleratorSlicedDetail(cards)
+}
+
+// poolAcceleratorRuntimeVersion returns the LOWEST accelerator runtime version any node backing the
+// accelerator group reports, or empty when no node reports one.
+//
+// It walks the structure poolAcceleratorSlicedDetail walks - every node's Devices ledger, groups
+// matched on the full "${manufacturer}-${group ID}" key - and takes RuntimeVersion where that
+// function takes the cards.
+//
+// The lowest, not an arbitrary representative: one InstanceType spans every node in the pool, and a
+// driver rollout makes them disagree for as long as it runs. A container built against an older
+// runtime runs on a newer driver but not the reverse, so the minimum is the only value whose image
+// every node can run - and which node a replica lands on is decided by admission, after the image
+// is already fixed in the Pod spec.
+//
+// Empty means nothing was observed, which is not the same as a pool that agrees on a version. A
+// group present but reporting no version contributes nothing rather than an empty minimum.
+func poolAcceleratorRuntimeVersion(devices []workercore.Devices, acceleratorKey string) string {
+	var lowest string
+	for i := range devices {
+		for j := range devices[i].Spec.Groups {
+			g := &devices[i].Spec.Groups[j]
+			if !acceleratorGroupMatches(g.Manufacturer, g.ID, acceleratorKey) || g.RuntimeVersion == "" {
+				continue
+			}
+			if lowest == "" || compareRuntimeVersions(g.RuntimeVersion, lowest) < 0 {
+				lowest = g.RuntimeVersion
+			}
+		}
+	}
+
+	return lowest
+}
+
+// compareRuntimeVersions orders two runtime versions NUMERICALLY on (major, minor).
+//
+// Lexical order is wrong here and wrong in a way that looks right on the common cases: "12.8"
+// precedes "12.9" either way, but "12.9" precedes "9.0" lexically while 12.9 is the newer runtime.
+// Any pool spanning a single-digit and a double-digit major would pick the wrong minimum.
+//
+// The detectors normalize every version through device.NormalizeVersion, whose output is
+// "major.minor" - or the original string when it has no minor part. A segment that does not parse
+// counts as zero, which is the correct reading of "9" and the only defined one for anything else.
+func compareRuntimeVersions(a, b string) int {
+	aMajor, aMinor := splitRuntimeVersion(a)
+	bMajor, bMinor := splitRuntimeVersion(b)
+	if c := cmp.Compare(aMajor, bMajor); c != 0 {
+		return c
+	}
+
+	return cmp.Compare(aMinor, bMinor)
+}
+
+// splitRuntimeVersion splits a "major.minor" runtime version into its two numeric parts.
+func splitRuntimeVersion(v string) (int, int) {
+	majorStr, minorStr, _ := strings.Cut(v, ".")
+	major, _ := strconvx.Atoi[int](majorStr)
+	minor, _ := strconvx.Atoi[int](minorStr)
+
+	return major, minor
 }
 
 // instanceTypeScheduleLabels builds the schedule discriminator labels stamped on the backing

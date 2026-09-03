@@ -2283,6 +2283,11 @@ func (m *InstanceTypeAcceleratorDetail) MarshalToSizedBuffer(dAtA []byte) (int, 
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.RuntimeVersion)
+	copy(dAtA[i:], m.RuntimeVersion)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.RuntimeVersion)))
+	i--
+	dAtA[i] = 0x32
 	{
 		size, err := m.CPU.MarshalToSizedBuffer(dAtA[:i])
 		if err != nil {
@@ -5728,6 +5733,8 @@ func (m *InstanceTypeAcceleratorDetail) Size() (n int) {
 	n += 1 + l + sovGenerated(uint64(l))
 	l = m.CPU.Size()
 	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.RuntimeVersion)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -7285,6 +7292,7 @@ func (this *InstanceTypeAcceleratorDetail) String() string {
 		`ComputeCapability:` + fmt.Sprintf("%v", this.ComputeCapability) + `,`,
 		`SlicedDetail:` + strings.Replace(strings.Replace(this.SlicedDetail.String(), "AcceleratorSlicedDetail", "AcceleratorSlicedDetail", 1), `&`, ``, 1) + `,`,
 		`CPU:` + strings.Replace(strings.Replace(this.CPU.String(), "InstanceTypeAcceleratorCPU", "InstanceTypeAcceleratorCPU", 1), `&`, ``, 1) + `,`,
+		`RuntimeVersion:` + fmt.Sprintf("%v", this.RuntimeVersion) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -14948,6 +14956,38 @@ func (m *InstanceTypeAcceleratorDetail) Unmarshal(dAtA []byte) error {
 			if err := m.CPU.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
+			iNdEx = postIndex
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RuntimeVersion", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.RuntimeVersion = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
