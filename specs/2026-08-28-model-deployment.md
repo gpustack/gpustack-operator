@@ -480,14 +480,24 @@ any key whose correct value is a per-replica runtime fact, a declarative carrier
 option — it is not an option. That is why this is a carrier decision rather than a defaulting one.
 
 **And the file carrier fails asymmetrically for SGLang, which is worse than failing outright.**
-`setup()`'s first argument is `client_hostname`, which is `config.local_hostname` only when the
-shared transfer engine cannot be reused; when `metadata_server == "P2PHANDSHAKE"` **and**
-`protocol == "rdma"` **and** the device matches, it is `get_session_id()` from the shared engine
-instead — self-derived, correct, and `local_hostname` goes unread (`mooncake_store.py:352-372`).
-Since `metadata_server` is unconditionally `P2PHANDSHAKE` here, the literal `localhost` is invisible
-under RDMA and certain under TCP. **The verification hardware is a local cluster with no RDMA, so the
-e2e path exercises the failing branch** — which is the only reason this is checkable at the level
-this spec verifies at.
+`setup()`'s first argument is `client_hostname`, which is `config.local_hostname` **unless all four
+of these hold**: the shared transfer engine was initialized at all (`_shared_mooncake_transfer_engine
+is not None`), `metadata_server == "P2PHANDSHAKE"`, `protocol == "rdma"`, and the device matches. In
+that case it is `get_session_id()` from the shared engine — self-derived, correct, and
+`local_hostname` goes unread (`mooncake_store.py:352-372`). Four conjuncts is a *narrower* escape
+than three, so `config.local_hostname` is reached more often than a first reading suggests. Since
+`metadata_server` is unconditionally `P2PHANDSHAKE` here, the literal `localhost` is invisible under
+RDMA-with-a-working-engine and certain otherwise. **The verification hardware is a local cluster with
+no RDMA, so the e2e path exercises the failing branch** — which is the only reason this is checkable
+at the level this spec verifies at.
+
+One more property of the environment carrier, recorded because it is a dependency and not a
+guarantee: `load_from_env()` reads `MOONCAKE_LOCAL_HOSTNAME` and, when that is unset, falls back to
+the legacy **`LOCAL_HOSTNAME`** (`mooncake_store.py:160-165`) — a generic name any base image or
+entrypoint could already be exporting. The operator sets the specific one, so the legacy path is
+never reached. **The correctness therefore rests on the operator setting it, not on nothing else
+supplying it**, and a change that stops setting it would not fail loudly; it would inherit whatever
+`LOCAL_HOSTNAME` happens to hold.
 
 **Three surfaces spell the RDMA device list three different ways** — `setup()`'s positional
 parameter is `rdma_devices`, the JSON key every engine uses is `device_name`, and Mooncake's own
@@ -530,14 +540,19 @@ defaults it to 4 GiB, and `sglang`'s default is the string `"4gb"` parsed by
 `_parse_global_segment_size` (`mooncake_store.py:63-76`, which accepts a bare `0` as well) — the same
 4 GiB by a different route. Neither engine's default is a pure client.
 
-**The two carriers are at different stages, and the split is deliberate.** SGLang's environment
-carrier was built when the carrier decision was made, because its defect was not a missing key but a
-*wrong source*: it was reading configuration from an argument whose absent keys became literals, so
-there was no version of "defer this" that left a correct client behind. The vLLM family's segment
-group is a missing key on a carrier that is otherwise right, and it lands with the connector-wiring
-task in the shared `pkg/worker/kvcache/inject` package that owns this rendering across specs — not
-here, and not twice. Until then the renderer's own test pins the omission and **names it a defect**
-rather than a decision, so the fix is noticed as a change.
+**Both carriers render the group, and the reason neither was deferred is a scheduling fact rather
+than a technical one.** The plan had been to leave this to the task that consolidates rendering into
+the shared `pkg/worker/kvcache/inject` package, on the grounds that fixing it in the CR's own
+renderer means verifying the same behaviour twice. That reasoning has a hole: **the remaining tasks
+before ship do not depend on that package**, so this branch could reach `main` with the omission
+intact, and every vLLM replica in it would contribute 4 GiB it was never asked for. A defect whose
+fix depends on a cross-spec ordering that nothing enforces is not deferred — it is scheduled for
+never. The double-verification cost is also smaller than it looked: the shared package's own
+assertions for these keys already exist, so consolidation deletes a duplicate rather than moving an
+unverified one.
+
+⇒ The consolidation task therefore becomes a **pure deletion** of this renderer, which is a
+stronger position to consolidate from than "delete this one and hope the new one covers it".
 
 **That link is now closed, and it closed in the strongest available way.** The question was whether
 Mooncake's C++ `setup()` accepts `global_segment_size == 0` at all — all three engines only pass the
@@ -1051,6 +1066,33 @@ thing the P/D spec may need and this one does not: with `roles` bounded at lengt
 and role-level are the same field, and adding the override now would be configurability nobody has
 asked for.
 
+**`runtimeVersion` is the minimum across the pool, and the disagreement it hides is reported.**
+One `InstanceType` covers every node carrying its accelerator group, and a driver rollout makes
+those nodes disagree for as long as it runs. The formula consumes one value, so the aggregate has to
+choose one.
+
+The minimum is the only value whose image *every* node can run — a container built against an older
+toolkit runs on a newer driver, not the reverse — and that matters because **which node a replica
+lands on is decided by admission, after the image is already in the Pod spec.** The alternative,
+publishing nothing while the nodes disagree, takes the pool out of service for the whole rollout
+window; a rolling driver upgrade is a routine operation, and a routine operation must not do that.
+
+**The minimum's one real cost is that its failure mode is far from its cause.** A single
+un-upgraded node drags the pool onto a version the matrix may not publish for the requested engine
+version, and the user sees an `ImagePullBackOff` with nothing pointing at the node responsible. So
+the disagreement is reported rather than absorbed: a **Warning Event on the `ModelDeployment`**,
+naming the value taken and the other values present in the pool. It goes on the deployment and not
+on the `InstanceType` because the deployment is the object whose failure sent the user looking.
+
+⇒ **That event is reachable, and the contrast with the `deprecated` warning is the point.** This one
+needs only "the nodes disagree", which is in this project's own `Devices` ledger; it reads nothing
+outside the cluster. The `deprecated` flag lives in the runner's release matrix, which F11 reads
+nothing from — so one warning can be built and the other cannot, and the difference is not effort.
+
+An `InstanceType` with **no** `runtimeVersion` is a distinct state from one whose nodes all agree:
+no synced flavor, or a generic collapsed pool, observes nothing at all. The field has to
+distinguish those, so it does not default to a version it never saw.
+
 **`manufacturer` maps to `backend`, and one vendor has no image at all:**
 
 | Manufacturer | `backend` | | Manufacturer | `backend` |
@@ -1112,11 +1154,18 @@ lookup this whole feature is defined as not doing.
 
 Two consequences follow from that, and both are named here so neither is mistaken for an oversight:
 
-- **A synthesized image cannot carry a `deprecated` warning.** 78 of the 338 records are flagged
-  deprecated, per image rather than per engine. Reading that flag requires the matrix; the formula
-  does not read the matrix. So the earlier intent to accept a deprecated image and record a Warning
-  Event has no reachable signal behind it in this design, and this spec does not claim it. See Open
-  Questions.
+- **A synthesized image carries no `deprecated` warning, and that is a decision taken here rather
+  than an omission.** 78 of the 338 records are flagged deprecated, per image rather than per
+  engine. Reading that flag requires the matrix, and the formula reads no matrix — so there is no
+  signal for a warning to fire on. An earlier intent was to accept a deprecated image and record a
+  Warning Event; **that intent required this feature's central premise to be false**, and it took
+  measuring the flag's location to notice. The three ways to get the signal all cost in the same
+  place: compile a snapshot of the matrix in (the lookup this feature is defined as not doing, and
+  it goes stale against every runner release), query it at admission (a new outbound dependency on
+  the request path), or leave deprecation to whatever surface publishes the matrix to users. **This
+  spec takes the third**, because deprecation is a fact about the runner repository and belongs
+  where that repository is presented. It is stated rather than left silent, since silence and
+  oversight read identically to whoever comes next.
 - **`roles[].template.image` stays as the override,** and remains the only way to run an image the
   formula cannot name — a cambricon pool, an unmapped Ascend family, a private build. A role that
   names an image gets it verbatim; synthesis never overwrites a stated value.
@@ -1760,21 +1809,26 @@ truthful); after T13 (the headline claim is measured and recorded).
   three, F4), each absence asserted by a test that carries its reason. `MC_TE_METRIC=1` is set as a
   **defaulted** key. The JSON is rendered into one deployment-owned ConfigMap mounted read-only into
   every replica.
-  **This acceptance carries a second defect, found after it was ticked: it renders a file carrier for
-  every engine, and `sglang` must not have one.** The `local_hostname` reasoning above holds only for
-  the two vLLM-family readers; `sglang` reads that key from the file and falls back to the literal
-  `localhost`, so a file-carried SGLang deployment registers every replica under one identity. The
-  carrier split is F4's, and it is delivered by the connector-wiring task rather than patched here —
-  the same reason the size keys are: this package's rendering is being replaced wholesale by the
-  shared one, and two fixes to code that is about to be deleted is two fixes that have to be
-  re-verified in their new home anyway.
-  **This acceptance also said it sets neither `global_segment_size` nor `local_buffer_size` nor
-  `mode`, "because the operator inventing them is a silent capacity error". That reason is
-  backwards** — the group declares a ROLE, and omitting it makes every engine Pod a 4 GiB in-process
-  store member instead of a pure client (F4 carries the measurement). The delivered renderer has the
-  defect; its test now pins the omission and **names it a defect** rather than a decision, so the fix
-  is noticed as a change rather than slipping in. The fix itself lands with the connector-wiring task,
-  in the shared package that owns this rendering across specs.
+  **Two defects were found after this task was ticked, and both are now fixed in place rather than
+  deferred.** They are recorded here because the acceptance above states the reasoning that produced
+  them, and that reasoning is what a reader would otherwise reuse.
+
+  1. **It rendered a file carrier for every engine, and `sglang` must not have one.** The
+     `local_hostname` claim above holds for the two vLLM-family readers only. `sglang` reads that
+     key from the file — and from the extra-config argument, whose loader is key-for-key identical —
+     falling back to the literal `localhost`, so a file-carried SGLang deployment registered every
+     replica under one identity. F4 now carries the carrier split and the evaluation-time reason
+     behind it.
+  2. **It set neither `global_segment_size` nor `local_buffer_size` nor `mode`, "because the
+     operator inventing them is a silent capacity error". That reason is backwards** — the group
+     declares a ROLE, and omitting it makes every engine Pod a 4 GiB in-process store member instead
+     of a pure client (F4 carries the measurement).
+
+  **Both were originally deferred to the connector-wiring task, and that deferral was wrong for the
+  same reason in both cases:** the remaining tasks before ship do not depend on the shared package,
+  so deferring meant shipping the defects. The "two fixes need two verifications" objection also
+  overstated the cost — the shared package's assertions for these keys already exist, so
+  consolidation now deletes a duplicate instead of moving an unverified implementation.
   Verify: `go test ./pkg/worker/controllers/worker/ -run ModelDeploymentConnector`
 
 - [x] **T7 · One Service, one endpoint**
@@ -1959,12 +2013,19 @@ truthful); after T13 (the headline claim is measured and recorded).
     environment variables — including one with a `ValueFrom` rather than a value — and not just a
     config document. A signature returning only a document cannot express this, and would force the
     caller back to a file.
-  - **The pure-client group**, per engine, as F4 records it. `global_segment_size: 0` on all three.
+  - **The pure-client group**, per engine, as F4 records it — **also already implemented here, so
+    this too is a property to preserve rather than to add.** `global_segment_size: 0` on all three.
     A `local_buffer_size` of **128 MiB** is the documented client staging size (the store's own
     `setup` example spells `128*1024*1024 # local_buffer_size (128MB)`, described as short-lived
     client-side staging), not a number picked for looking small — **and it is a vLLM-family key
     only.** `sglang` has no such key; it passes a hardcoded 16 MiB to `setup()`, so rendering the
-    128 MiB for it writes a key nothing reads.
+    128 MiB for it writes a key nothing reads. `mode: standalone-store` is vLLM's alone and cannot
+    be split from the segment size, in either direction.
+  - **The size keys render as JSON numbers, not strings.** All three engines run them through a
+    parser that accepts `"0"` as well, so a string works today and the difference is invisible in
+    testing — which is exactly why it is pinned: if this renderer emits strings and the shared one
+    emits numbers, consolidation changes the rendered document inside what reads as a deletion.
+    Both sides emit numbers, so it stays a deletion.
   - **`protocol` comes from `mooncake.MemberProtocol(kvcb)`**, never from reading
     `spec.transport.protocol` here. That function already falls back to `Auto` for an empty value
     (`member_workload.go:142-152`, because the artifact looks the protocol up in a transport map and
@@ -1979,7 +2040,8 @@ truthful); after T13 (the headline claim is measured and recorded).
   Blocked by: T5 — the three-tier merge is where a synthesized image has to lose to a stated one
   Owns: `api/worker/v1alpha1/instance_type.go` (one new observed field),
   `pkg/worker/controllers/worker/instance_type.go` (the aggregation),
-  `pkg/worker/controllers/worker/model_deployment_image.go` + its test
+  `pkg/worker/controllers/worker/model_deployment_image.go` + its test,
+  and one event reason in `pkg/worker/controllers/worker/model_deployment_events.go`
   Gate: none — both sources already exist (`Devices.Groups[].RuntimeVersion`, and the manufacturer
   and family already on `InstanceTypeDetail`)
   **Two commits, and the split is a requirement rather than tidiness:** the `InstanceType` field is a
@@ -1994,9 +2056,18 @@ truthful); after T13 (the headline claim is measured and recorded).
   image and says why; a role naming `template.image` gets it verbatim and synthesis does not run; a
   role on a manufacturer with no runner backend (`cambricon`) or an Ascend family with no published
   variant (`910`, `310B`) is refused by the validating webhook naming the manufacturer or the family.
-  The mapping tables are data, not a `strings.ToLower` call — `910C` maps to `a3`, and a test that
-  passes with a lowercasing implementation is not testing the table.
-  Verify: `go test ./pkg/worker/controllers/worker/ -run 'ModelDeploymentImage|InstanceTypeDetail'`
+  The mapping tables are data, not a `strings.ToLower` call — `910C` maps to `a3`, and **a test that
+  passes with a lowercasing implementation is not testing the table**, so each row is pinned as a
+  literal. `cambricon` and the unmapped Ascend families are **refused**, not rendered with an empty
+  image: an empty image fails as an `ImagePullBackOff`, whose symptom is far from its cause, while a
+  refusal carries the reason.
+  The aggregate is the **minimum across the pool**, and a pool whose nodes disagree also produces a
+  **Warning Event on the `ModelDeployment`** naming the value taken and the others present — the
+  event exists because the minimum's failure mode is otherwise untraceable to the node that caused
+  it. Its input is entirely local (the `Devices` ledger), which is what makes it buildable where the
+  `deprecated` warning is not.
+  Verify: `go test ./pkg/worker/controllers/worker/ -run 'ModelDeploymentImage|InstanceTypeDetail'`,
+  plus a case asserting the event fires on a mixed pool and **does not** fire on a uniform one
 
 - [ ] **T16 · Narrow the engine enum onto the dimension the connector actually varies with**
   Blocked by: T15's first commit only, to keep two API-plus-generate changes off each other
@@ -2098,9 +2169,8 @@ accepted bad spec is worse than a refusal.
 | `no_configmap_for_sglang` | `sglang` | **no** ConfigMap is created for the deployment at all; an unused one would claim a wiring that is not happening |
 | `no_extra_config_argument` | `sglang` | `--hicache-storage-backend-extra-config` is **absent**. Its loader is key-for-key identical to the file loader and sits at *higher* precedence, so passing it would make the environment carrier unreachable |
 | `no_tenant_id` | any engine | `tenant_id` is **absent**, because no supported engine passes it to `setup()`; the test states the reason so its deletion is deliberate |
-| `no_segment_sizes` | any engine | **pins a defect, not a decision**: both keys are absent today, which makes the rank a 4 GiB store member. The case carries `KNOWN DEFECT` in its reason and is deleted by the connector-wiring task |
-| `no_mode_for_vllm` | engine `vllm` | **pins the same defect**: `mode` is absent, which leaves vLLM's default of `embedded` — the half that makes the omission silent instead of raising |
-| `pure_client_group_after_the_fix` | each engine | the coherent group is rendered per engine, and the three differ: `vllm` gets `mode: standalone-store` + `global_segment_size: 0` + `local_buffer_size` 128 MiB; `vllm-ascend` the same without `mode`; `sglang` gets `global_segment_size: 0` **and no `local_buffer_size` key at all** — it passes a hardcoded 16 MiB to `setup()` and never reads that key, so writing it would be a key no reader reads |
+| `pure_client_group` | each engine | the coherent group, **asserted positively per key** because the failure mode is a MISSING key and an absence assertion cannot catch one going missing. The three differ: `vllm` gets `mode: standalone-store` + `global_segment_size: 0` + `local_buffer_size` 128 MiB; `vllm-ascend` the same without `mode`; `sglang` gets `MOONCAKE_GLOBAL_SEGMENT_SIZE=0` on its own carrier **and no `local_buffer_size` at all** — it passes a hardcoded 16 MiB to `setup()`, so that key would be one no reader reads |
+| `sizes_are_json_numbers` | `vllm`, `vllm-ascend` | the two size keys render as numbers, not strings. Both work today, so this pins the choice rather than a behaviour: the shared package models them as `int64`, and a mismatch would let consolidation change the document inside what reads as a deletion |
 | `config_path_env_per_engine` | each engine | `vllm`/`vllm-ascend` get `MOONCAKE_CONFIG_PATH`, `sglang` gets `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` |
 | `mc_te_metric_default` | user set nothing | `MC_TE_METRIC=1` present |
 | `mc_te_metric_user_off` | user set `MC_TE_METRIC=0` | the user's value, no duplicate entry |
@@ -2348,30 +2418,19 @@ comparison with one side missing is an assertion about nothing.
   serving deployment because an admin object vanished is worse than serving without a cache. That is
   a policy choice an admin might reasonably want inverted, and inverting it is a Binding-side
   decision (a `deletionPolicy`) rather than a workload-side one.
-- **Should a deprecated runner image be flagged, and with what?** 78 of the matrix's 338 records
-  carry `deprecated: true`, per image rather than per engine. F11 synthesizes a tag by formula and
-  never reads the matrix, so the flag is **not observable from inside the operator** — there is
-  nothing for a Warning Event to fire on. The three ways out all cost in the same place: compile a
-  snapshot of the matrix in (the lookup F11 excludes, and it goes stale against every runner
-  release), query it at admission time (a new outbound dependency on the request path), or leave
-  deprecation to whatever surface publishes the matrix to users. This spec takes the third and claims
-  nothing. The question is whether that is the intended trade, because the earlier intent — accept the
-  image and record a Warning Event — reads as achievable and is not.
-- **How should `runtimeVersion` be aggregated when a pool's nodes disagree?** One `InstanceType`
-  covers every node carrying its accelerator group, and a driver rollout makes those nodes disagree
-  for as long as it runs. The aggregate has to be a single value, because the formula consumes one.
-  Three candidates, with the recommendation first:
-  - **The minimum across the pool.** A container built against an older toolkit runs on a newer
-    driver, not the reverse, so the lowest version in the pool is the one whose image every node can
-    run — and which node a replica lands on is decided by admission, after the image is already in
-    the Pod spec. Its failure mode is real and should be stated: one un-upgraded node drags the whole
-    pool onto a version the matrix may not publish for the requested engine version, taking a
-    working deployment to `ImagePullBackOff`.
-  - **Empty when the nodes disagree**, so the role reports why it rendered nothing. Safer in that it
-    never names a wrong image, and worse in that a pool is unusable for the whole rollout window.
-  - **Publish the set** and make the user choose. Honest, and it moves a hardware fact back onto the
-    user surface, which is the thing F11 argues against.
-
-  Whichever is chosen, the aggregation must not report a value it did not observe: an
-  `InstanceType` with no synced flavor has **no** `runtimeVersion`, which is different from a pool
-  whose nodes all report the same one, and the field has to distinguish those.
+- ~~**Should a deprecated runner image be flagged, and with what?**~~ **Settled: no, and the
+  question was only askable because two decisions contradicted each other.** F11's premise is that
+  the operator reads no release matrix; the `deprecated` flag lives in that matrix. So the intent to
+  "accept the image and record a Warning Event" required the premise to be false, and nothing in
+  either statement made that visible — each reads fine alone. It surfaced only from asking *where
+  the flag physically is*. Deprecation now belongs to whatever surface publishes the matrix; F11
+  states the non-goal rather than leaving it silent.
+  ⇒ The general form is worth keeping: **two decisions can each be reasonable and jointly
+  impossible, and reviewing them one at a time will not show it.** What showed it was locating the
+  data each one needs.
+- ~~**How should `runtimeVersion` be aggregated when a pool's nodes disagree?**~~ **Settled: the
+  minimum across the pool, plus a Warning Event naming the disagreement** (F11). The deciding
+  argument was not correctness — all three candidates can be made correct — but that **a rolling
+  driver upgrade is a routine operation**, and refusing to publish a value during one takes the pool
+  out of service every time it happens. The minimum's own weakness, a symptom (`ImagePullBackOff`)
+  far from its cause (one un-upgraded node), is what the event exists to close.
