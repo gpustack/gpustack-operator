@@ -192,6 +192,90 @@ func TestAlignDeviceGroups(t *testing.T) {
 // a node that grew a second accelerator model ended up with that model's group first, and no later
 // pass ever moved it. The list is now ordered by the hardware: accelerators by their enumeration
 // index, groups by manufacturer and then by the first accelerator each holds.
+// TestNodeWideDeviceGroups pins which accelerators the node-scoped RDMA distance is reduced over.
+//
+// One device-manager DaemonSet runs per manufacturer while a node has ONE NodeFeature, so on a
+// mixed-vendor node several writers set `rdma.distance` on the same object. Reducing over this
+// pass's groups alone made the key last-writer-wins between two values that are each correct for
+// their own writer, and — because the stale-key removal deletes an RDMA key a pass did not report —
+// made the two writers overwrite each other on every pass. The label's own definition is the closest
+// distance ANY accelerator on the node has, so the reduction has to see the whole node.
+func TestNodeWideDeviceGroups(t *testing.T) {
+	group := func(manufacturer, id string) device.DevicesGroup {
+		return device.DevicesGroup{
+			ID:           id,
+			Manufacturer: manufacturer,
+			Accelerators: []device.Accelerator{{ID: id + "-0"}},
+		}
+	}
+	ids := func(groups device.DevicesGroupList) []string {
+		out := make([]string, 0, len(groups))
+		for i := range groups {
+			out = append(out, groups[i].Manufacturer+"/"+groups[i].ID)
+		}
+		return out
+	}
+
+	testCases := []struct {
+		name    string
+		own     device.DevicesGroupList
+		stored  device.DevicesGroupList
+		mine    sets.Set[string]
+		want    []string
+		wantOwn []string
+	}{
+		{
+			name:    "another manufacturer's stored groups join the reduction",
+			own:     device.DevicesGroupList{group("nvidia", "g0")},
+			stored:  device.DevicesGroupList{group("nvidia", "g0"), group("amd", "g1")},
+			mine:    sets.New("nvidia"),
+			want:    []string{"nvidia/g0", "amd/g1"},
+			wantOwn: []string{"nvidia/g0"},
+		},
+		{
+			// THE criterion for the ownership filter. A stored group for a manufacturer this pass
+			// owns is stale by definition — the pass just measured that hardware — so taking it back
+			// would resurrect an accelerator that was removed.
+			name:    "a stored group for a manufacturer this pass owns is not taken back",
+			own:     device.DevicesGroupList{},
+			stored:  device.DevicesGroupList{group("nvidia", "gone")},
+			mine:    sets.New("nvidia"),
+			want:    []string{},
+			wantOwn: []string{},
+		},
+		{
+			name:    "nothing to add returns this pass's own groups",
+			own:     device.DevicesGroupList{group("amd", "g0")},
+			stored:  device.DevicesGroupList{group("amd", "g0")},
+			mine:    sets.New("amd"),
+			want:    []string{"amd/g0"},
+			wantOwn: []string{"amd/g0"},
+		},
+		{
+			// The first pass on a node: nothing is stored yet, so the reduction is this pass's own
+			// and converges once the other DaemonSet has written.
+			name:    "an empty stored record adds nothing",
+			own:     device.DevicesGroupList{group("nvidia", "g0")},
+			stored:  nil,
+			mine:    sets.New("nvidia"),
+			want:    []string{"nvidia/g0"},
+			wantOwn: []string{"nvidia/g0"},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// own is capped to its length so a same-backing-array append would be visible below
+			// rather than silently fitting in spare capacity.
+			own := tc.own[:len(tc.own):len(tc.own)]
+			got := nodeWideDeviceGroups(own, tc.stored, tc.mine)
+			assert.Equal(t, tc.want, ids(got), "the groups the distance is reduced over")
+			// The detected inventory is published from the same slice, so the merge must not have
+			// reached into it.
+			assert.Equal(t, tc.wantOwn, ids(own), "the caller's own groups must be untouched")
+		})
+	}
+}
+
 func TestAlignDeviceGroupsOrder(t *testing.T) {
 	group := func(manufacturer, id string, indexes ...uint32) device.DevicesGroup {
 		accels := make([]device.Accelerator, 0, len(indexes))
