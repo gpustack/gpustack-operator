@@ -115,6 +115,13 @@ matters of taste:
   group today — but it must not be a substrate for this CR.
 - **Rewriting the existing `Instance` CRD.** `ModelDeployment` is additive. `Instance` keeps its
   one-Pod, immutable-spec contract.
+- **Version feasibility checking.** The operator assembles an image name out of the engine, the
+  engine version and the observed hardware (F11). It does not check that the combination was ever
+  published, that the engine version supports the installed driver, or the reverse. **The user
+  guarantees version alignment.** Any such gate would need the runner's release matrix compiled into
+  the operator, which is precisely what F11 is defined as not doing; and the failure it would prevent
+  is already legible without it, as an `ImagePullBackOff` on a tag that does not exist. This also
+  means the enum on `engine` is not a claim that every listed engine can run on every pool.
 - **Throughput and latency claims.** Only functional correctness is in scope. Throughput belongs to
   the P/D specs and needs an RDMA window this spec does not have.
 
@@ -127,7 +134,10 @@ metadata: { name: qwen-72b, namespace: team-a }
 spec:
   model:
     name: Qwen/Qwen2.5-72B-Instruct        # the identifier the engine serves
-  engine: vllm                             # vllm | sglang | vllm-ascend
+  engine: vllm                             # vllm | sglang. The connector follows the role's
+                                           # InstanceType backend, not this field (F4)
+  engineVersion: 0.25.1                    # free-form, unvalidated. With each role's observed
+                                           # backend it synthesizes that role's image (F11)
   kvCache:
     poolRef: { name: shared-kv }           # a KVCachePoolBinding in THIS namespace — not a bare URL,
                                            # and never a cross-namespace reference. The reuse DOMAIN
@@ -329,19 +339,40 @@ own configuration loader, which documents every key including the reuse domain �
 that **no supported engine calls**. Each of the three ships its *own* `MooncakeStoreConfig` class,
 with its own key set and its own mandatory source:
 
-| Engine (pinned) | Its config reader | Source it demands | Keys it reads |
+| Engine package in the runner image (pinned) | Its config reader | Source it demands | Keys it reads |
 |---|---|---|---|
 | `vllm` `v0.25.1` | `vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/worker.py` | **`MOONCAKE_CONFIG_PATH`, or it raises** | `metadata_server`, `master_server_address`, `protocol`, `device_name`, `mode`, `global_segment_size`, `local_buffer_size`, `enable_offload` |
 | `vllm-ascend` `v0.19.1rc1` | `vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/backend/mooncake_backend.py` | **`MOONCAKE_CONFIG_PATH`, or it raises** (its `load_from_env` only reads that one path) | `metadata_server`, `global_segment_size`, `local_buffer_size`, `protocol`, `device_name`, `master_server_address` |
 | `sglang` `gateway-v0.3.1-1689` | `python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_store.py` | in order: `--hicache-storage-backend-extra-config` → `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` → its own `MOONCAKE_*` environment | the six above plus `master_metrics_port`, `check_server`, `standalone_storage`, `client_server_address` |
 
-So, under `auto`, per engine, the operator renders:
+So, under `auto`, the operator renders:
 
-| Engine | Argument the operator adds | How the client is configured |
-|---|---|---|
-| `vllm` | `--kv-transfer-config` selecting `MooncakeStoreConnector` | a mounted JSON + `MOONCAKE_CONFIG_PATH` |
-| `vllm-ascend` | `--kv-transfer-config` selecting `AscendStoreConnector` | a mounted JSON + `MOONCAKE_CONFIG_PATH` |
-| `sglang` | `--hicache-storage-backend mooncake` + `--hicache-storage-backend-extra-config` | a mounted JSON + `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` |
+| `engine` | `backend` | Argument the operator adds | How the client is configured |
+|---|---|---|---|
+| `vllm` | `cann` | `--kv-transfer-config` selecting `AscendStoreConnector` | a mounted JSON + `MOONCAKE_CONFIG_PATH` |
+| `vllm` | any other | `--kv-transfer-config` selecting `MooncakeStoreConnector` | a mounted JSON + `MOONCAKE_CONFIG_PATH` |
+| `sglang` | any | `--hicache-storage-backend mooncake`, and **no** `--hicache-storage-backend-extra-config` | `MOONCAKE_*` environment variables, with `local_hostname` from `fieldRef: status.podIP` |
+
+**The `sglang` row's omission is load-bearing, so it is written as an omission rather than left
+blank.** `_load_config` tries three carriers in order — `extra_config`, then the file variable, then
+the environment — and `load_from_extra_config()` is **key-for-key identical to `from_file()`**, all
+ten keys falling back to the same literals (`mooncake_store.py:183-222`). So the extra-config
+argument is not the safe alternative to the file; it is the *same* defect at *higher* precedence.
+Passing it, with either address key in it, makes the environment carrier unreachable. An earlier
+draft of this table named that argument, which would have shipped the bug at the one precedence level
+where nothing downstream can override it.
+
+**That table is keyed on two fields because the connector name was always a property of the backend,
+never of the engine.** An earlier draft made `vllm-ascend` a third value of the `engine` enum and gave
+it its own row, which read as a third engine and is not one: the runner matrix's own `service`
+dimension takes `vllm`, `sglang`, `mindie` and `voxbox`, and every Ascend image is
+`service=vllm, backend=cann`. The 128 `cann` records in that matrix spell the engine `vllm`. The
+package that gets installed — `vllm_ascend` — is what the runner puts in the image when the backend
+is `cann`, not something a user selects. So narrowing the enum to `{vllm, sglang}` is not a
+compatibility concession; it removes a value that had been hung on the wrong dimension, and the row
+that used to be `vllm-ascend`'s becomes a `(vllm, cann)` cell. The config-reader table above keeps
+three rows for exactly the same reason it always had them: those are three Python packages with three
+different readers, and which of them is present follows from `(engine, backend)`.
 
 **`vllm-ascend` selects `AscendStoreConnector`, not `MultiConnector`**, and the difference is
 not cosmetic. `vllm-ascend` re-registers `MultiConnector` to its own `AscendMultiConnector`, which
@@ -357,12 +388,14 @@ nothing to compose.
 which is what a store-backed cache shared between replicas needs — each replica both fills the
 cache and reads from it.
 
-The JSON is rendered into a `ConfigMap` owned by the `ModelDeployment` and mounted read-only into
-every replica of the role. It is **one ConfigMap per deployment rather than one per replica**, and
-that is now a measured claim rather than an assumption: every key any of the three readers takes is
-deployment-wide, because **none of them reads `local_hostname` from the file at all** — each derives
-it per process (see below). The key set rendered is the union the selected engine reads, and no
-more: a key an engine's reader ignores is a key that documents a wiring that is not happening.
+For the file carrier, the JSON is rendered into a `ConfigMap` owned by the `ModelDeployment` and
+mounted read-only into every replica of the role. It is **one ConfigMap per deployment rather than
+one per replica**, and the claim that makes that safe is narrower than an earlier draft asserted:
+every key `vllm` and `vllm-ascend` read from the file is deployment-wide, because neither reads
+`local_hostname` from the file at all — each computes it per process. **That is a property of the two
+engines that take a file, not of all three**; `sglang` does read it from the file, which is why it
+does not get one (see below). The key set rendered is what the selected engine reads, and no more: a
+key an engine's reader ignores is a key that documents a wiring that is not happening.
 
 **The reuse domain does not reach the storage layer on any of the three engines, and this spec
 ships saying so rather than implying otherwise.** `tenant_id` is the **11th** parameter of
@@ -405,12 +438,48 @@ The route to enforcement is upstream: `tenant_id` reaching `setup()` in each eng
 the operator adds one key to the rendered JSON and case-47's second half flips from deferred to
 asserted — **nothing lands here that would have to be un-landed.**
 
-**`local_hostname` needs nothing from the operator, and this is why the earlier plan to render it
-was wrong.** Each engine derives it per process: `vllm` from
-`get_requester_local_hostname(get_ip())`, overridable by `MOONCAKE_REQUESTER_LOCAL_HOSTNAME`;
-`vllm-ascend` from `get_ip()`; `sglang` from `MOONCAKE_LOCAL_HOSTNAME`, falling back to
-`LOCAL_HOSTNAME` and then to its own default. **The operator sets none of them**, because a
-per-replica value the engine already computes correctly is one the operator can only get wrong.
+**`local_hostname` splits the two engines apart, and the earlier claim here that no engine reads it
+from the file was wrong.** It held for `vllm` and `vllm-ascend` — they compute it per process, from
+`get_requester_local_hostname(get_ip())` (overridable by `MOONCAKE_REQUESTER_LOCAL_HOSTNAME`) and
+`get_ip()` respectively. It does **not** hold for `sglang`, and the error has a shape worth naming:
+that engine's config class has **two loader paths with different behaviour**, and the earlier
+measurement was taken on the one this design does not use.
+
+- `MooncakeStoreConfig.load_from_env()` reads `MOONCAKE_LOCAL_HOSTNAME`, falling back to
+  `LOCAL_HOSTNAME`. Environment-driven, so a Pod can supply it.
+- `MooncakeStoreConfig.from_file()` reads `local_hostname` **from the JSON**, falling back to
+  `envs.MOONCAKE_LOCAL_HOSTNAME.default` (`mooncake_store.py:114-116`). And `EnvField` stores
+  `default` as a plain attribute in `__init__`, with `os.getenv` reached only from `get()`
+  (`environ.py:38-54`) — so **that fallback never consults the environment**. Its value is the
+  literal `EnvStr("localhost")` (`environ.py:296`). All ten keys `from_file()` loads fall back the
+  same way.
+
+So a file-carried SGLang config either names a `local_hostname` the operator cannot know at admission
+time (it is the Pod IP) or leaves every replica registering its transfer-engine identity as
+`localhost`.
+
+**Hence the carrier is per engine: `vllm` and `vllm-ascend` take a file, `sglang` takes environment
+variables.** The two directions are forced independently and in opposite ways:
+
+| Engine | Carrier | Why the other one cannot work |
+|---|---|---|
+| `vllm`, `vllm-ascend` | **file** | `load_from_config()` uses the environment only to locate the *path*; the configuration itself has to come from the file, with no per-key environment fallback |
+| `sglang` | **environment** | the file path is what selects `from_file()`, whose fallbacks are literals; the environment path is the only one where `local_hostname` can arrive as `fieldRef: status.podIP` at container start |
+
+The two carriers do not collide, because the two engines look for a file under **different variable
+names** — `MOONCAKE_CONFIG_PATH` and `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`. Leaving the latter unset
+is what selects the environment path: `_load_config` tries `extra_config`, then the file variable,
+then the environment (`mooncake_store.py:242-260`).
+
+**And the file carrier fails asymmetrically for SGLang, which is worse than failing outright.**
+`setup()`'s first argument is `client_hostname`, which is `config.local_hostname` only when the
+shared transfer engine cannot be reused; when `metadata_server == "P2PHANDSHAKE"` **and**
+`protocol == "rdma"` **and** the device matches, it is `get_session_id()` from the shared engine
+instead — self-derived, correct, and `local_hostname` goes unread (`mooncake_store.py:352-372`).
+Since `metadata_server` is unconditionally `P2PHANDSHAKE` here, the literal `localhost` is invisible
+under RDMA and certain under TCP. **The verification hardware is a local cluster with no RDMA, so the
+e2e path exercises the failing branch** — which is the only reason this is checkable at the level
+this spec verifies at.
 
 **Three surfaces spell the RDMA device list three different ways** — `setup()`'s positional
 parameter is `rdma_devices`, the JSON key every engine uses is `device_name`, and Mooncake's own
@@ -438,11 +507,20 @@ immediately, while omitting both **does not raise** and is silent.
 
 The old reasoning was right about the coupling and wrong about the conclusion: a cross-field pair
 is dangerous **when split**, which argues for rendering the whole coherent group rather than none of
-it. The group is per engine, because the readers differ: `vllm` needs the triple
-(`mode: standalone-store`, `global_segment_size: 0`, `local_buffer_size > 0`); `vllm-ascend` has no
-`mode` field, so it needs the pair; `sglang` has no `mode` either and additionally divides the global
-segment by its TP factor (`.../mooncake_store/mooncake_store.py:295`), so a value is not portable
-across the three.
+it. **The group is per engine, and no single key set is right for two of them:**
+
+| Engine | `mode` | `global_segment_size` | `local_buffer_size` |
+|---|---|---|---|
+| `vllm` | **required** as `standalone-store`, or `0` raises | `0` | `> 0` — **128 MiB**, the documented client staging size |
+| `vllm-ascend` | no such field | `0` | `> 0` |
+| `sglang` | no such field | `0`, then divided by the TP factor (`mooncake_store.py:295`) | **no such key** — `DEFAULT_LOCAL_BUFFER_SIZE` (16 MiB) is passed to `setup()` as a literal, commented "Zero copy interface does not need local buffer" (`mooncake_store.py:22`, `:336`, `:376`) |
+
+So the **128 MiB is a vLLM-family constant, not a shared one.** Writing it for `sglang` would render
+a key no reader reads, which is the exact failure this section is otherwise arguing against.
+`global_segment_size` is the one that must be written explicitly on **every** engine: `vllm`'s class
+defaults it to 4 GiB, and `sglang`'s default is the string `"4gb"` parsed by
+`_parse_global_segment_size` (`mooncake_store.py:63-76`, which accepts a bare `0` as well) — the same
+4 GiB by a different route. Neither engine's default is a pure client.
 
 The fix lands with the connector-wiring task, in the shared `pkg/worker/kvcache/inject` package that
 owns this rendering across specs — not here, and not twice. Until then the renderer's own test pins
@@ -463,14 +541,21 @@ at admission can see inside an image.
 
 Acceptance:
 
-- For each of the three engines, the rendered Pod carries exactly the argument and the config-path
-  variable in the tables above, and the ConfigMap carries exactly the keys that engine's reader
-  reads — asserted against a golden fixture per engine.
-- The ConfigMap is owned by the `ModelDeployment` and mounted read-only into every replica; one
-  ConfigMap per deployment, mounted into all of them.
-- **No `local_hostname` key is rendered**, for any engine — a test asserts its absence, because the
-  engine computes it per process and a deployment-wide value would be wrong for every replica but
-  one.
+- For each `(engine, backend)` cell, the rendered Pod carries exactly the argument and the carrier in
+  the tables above, and the carrier holds exactly the keys that engine's reader reads — asserted
+  against a golden fixture per cell.
+- On the file carrier, the ConfigMap is owned by the `ModelDeployment` and mounted read-only into
+  every replica; one ConfigMap per deployment, mounted into all of them. On the environment carrier
+  there is **no ConfigMap at all**, and a test asserts none is created — an unused ConfigMap would
+  claim a wiring that is not happening.
+- **`local_hostname` follows the carrier, and the rule inverts between them.** On the file carrier
+  it is **absent**, and a test asserts the absence: `vllm` and `vllm-ascend` compute it per process,
+  and a deployment-wide value would be wrong for every replica but one. On the environment carrier it
+  is **present and required**, as `MOONCAKE_LOCAL_HOSTNAME` valued from `fieldRef: status.podIP` — a
+  test asserts the `fieldRef` rather than any literal, because a literal is exactly the failure being
+  avoided.
+- **`--hicache-storage-backend-extra-config` is not passed**, and a test asserts its absence for
+  `sglang`, with the precedence order as the recorded reason.
 - **No `tenant_id` key is rendered either, and a test asserts that absence too** — rendering a key
   no reader reads would document a wiring that is not happening, which is the failure mode this
   spec's whole `CacheAttached` design exists to refuse. The test carries the reason, so that whoever
@@ -891,6 +976,141 @@ Acceptance:
 - Changing `roles[0].template.image` recreates every replica and the deployment returns to `Ready`.
 - `MC_TE_METRIC` is present in every rendered replica unless the user set it, in which case the
   user's value stands.
+
+#### F11 — The runner image is a formula over five fields, never a lookup in a release matrix
+
+F5 left `roles[].template.image` effectively required: a role that named no image rendered no
+container. This feature makes the common case work without it, by synthesizing the image from fields
+the API already has or gains here. It synthesizes by **string formula**, and deliberately does not
+consult the runner's own release matrix — a decision whose consequences are stated below rather than
+discovered later.
+
+The published tag shape, checked against `gpustack_runner` 0.1.28's `runner.py.json` — all **338**
+records, **zero** mismatches:
+
+```
+gpustack/runner:<backend><backend_version>[-<backend_variant>]-<engine><engineVersion>
+```
+
+That check needs a control, because a formula that reproduced nothing would also score zero
+mismatches against an empty comparison: the same 338 records scored against a deliberately wrong
+field order mismatch **all 338**.
+
+Five fields, and the reason each comes from where it does:
+
+| Field | Source | Scope | Why there |
+|---|---|---|---|
+| `engine` | `spec.engine` | deployment | the user's choice of serving stack |
+| `engineVersion` | `spec.engineVersion` — new here | deployment | the user's choice of version, free-form |
+| `backend` | the role's `InstanceType`'s `status.detail.manufacturer` | **role** | a property of the hardware, fixed by the admin when the pool was created |
+| `backend_variant` | the same object's `status.detail.family`, mapped | **role** | likewise, and non-empty for exactly one vendor |
+| `backend_version` | the same object's `status.detail.runtimeVersion` — new, aggregated | **role** | an observed fact about the nodes, not a choice anyone makes |
+
+**The last three are on the `InstanceType`, not on the `ModelDeployment`, because they are not the
+user's to state.** A user who could type a driver version could type one no node has. Putting them
+on the observed side of an object the admin owns means the only way they can be wrong is that the
+cluster changed, which is the case the reconciler already re-reads on every pass.
+
+**The split of scopes in that table is what makes heterogeneous roles work without a new field.**
+Two fields are per deployment and three are per role, so one `engine` plus one `engineVersion`
+synthesizes a *different* image for each role, following each role's own hardware. A prefill role on
+NVIDIA and a decode role on Ascend, both `vllm` `0.20.2`, render
+`gpustack/runner:cuda12.9-vllm0.20.2` and `gpustack/runner:cann8.2-910b-vllm0.20.2`. The later spec
+that lifts the length-1 bound on `roles` gets cross-vendor images for free.
+
+That works only because the version sets overlap, so it is measured rather than hoped for: for
+`vllm`, `cuda` publishes 19 versions and `cann` 15, and their intersection is **9**
+(`0.10.0`, `0.10.1.1`, `0.10.2`, `0.11.0`, `0.12.0`, `0.13.0`, `0.14.1`, `0.16.0`, `0.20.2`); for
+`sglang` the same pair intersects in **8**. **But the intersection across all backends of either
+engine is empty**, so a single deployment-level `engineVersion` is sufficient for the two-vendor case
+this programme targets and would not be for an arbitrary mix. A per-role override is therefore a
+thing the P/D spec may need and this one does not: with `roles` bounded at length 1, deployment-level
+and role-level are the same field, and adding the override now would be configurability nobody has
+asked for.
+
+**`manufacturer` maps to `backend`, and one vendor has no image at all:**
+
+| Manufacturer | `backend` | | Manufacturer | `backend` |
+|---|---|---|---|---|
+| `nvidia` | `cuda` | | `metax` | `maca` |
+| `ascend` | `cann` | | `mthreads` | `musa` |
+| `amd` | `rocm` | | `iluvatar` | `corex` |
+| `hygon` | `dtk` | | `thead` | `hggc` |
+| `cambricon` | **none** | | | |
+
+`hggc` is `thead`'s: this repository's own `csrc/thead/ppu-slicing-shim/hggc/` carries the same name,
+which is what settles it — the runner data itself only ever spells the backend, never the vendor.
+`cambricon` is in `pkg/nodefeature/knowns.go`'s manufacturer list and has **no** runner backend, so a
+role on a cambricon pool cannot have an image synthesized and must name one. That is a validation
+rule, not a silent empty string.
+
+**`backend_variant` is non-empty for `cann` alone.** Across all 338 records the variant is populated
+for `cann` (`310p` 26, `910b` 54, `a3` 46, `950` 2) and empty for the other seven backends. So the
+mapping is needed for exactly one vendor — and it is not a lowercasing:
+
+| `status.detail.family` (from `getFamilyFromSocName`) | `backend_variant` |
+|---|---|
+| `310P` | `310p` |
+| `910B` | `910b` |
+| `910C` | **`a3`** |
+| `950` | `950` |
+| `910`, `310B` | **none** |
+
+`910C` becoming `a3` is the whole reason this table exists instead of a `strings.ToLower` call. The
+detector's own comments name the pairs (`"910C" // 910C/A3`), and two families the detector can emit
+have no published variant at all, which is the same case as `cambricon`: no synthesized image.
+
+**`platform` is not a field in the formula, and that is measured rather than assumed.** No tag
+contains `amd64` or `arm64` (zero of 338). The 338 records collapse to **208** distinct image names
+and **338** distinct `(image, platform)` pairs, which is the signature of one multi-arch manifest per
+name. So the operator never selects an architecture; the node's runtime does, at pull time.
+
+**The runner matrix's ambiguity is not the operator's ambiguity.** Keyed by
+`(engine, engineVersion, backend, backend_variant)` the matrix has 160 keys, of which **38 carry more
+than one `backend_version`** — `('vllm', '0.25.1', 'cuda', '')` offers `12.9` and `13.0`, and so on.
+That reads like an ambiguity the operator has to resolve, and it is not: every one of the 38 is a
+`backend_variant == ''` key on `cuda` (29) or `rocm` (9), and each set is a **candidate set across
+driver versions**. The cluster supplies the coordinate that picks one. A multi-valued key is
+therefore evidence the formula can hit, not evidence it cannot.
+
+The version shapes line up on their own, which is why no parsing is needed: the runner data carries
+both `original_backend_version` (`9.1.0`) and `backend_version` (`9.1`), so its own published field is
+already `major.minor`; and `device.NormalizeVersion` reduces every detector's runtime version to
+`major.minor` by construction. The same shape on both sides is a fact about the two sources, not a
+convention this spec introduces.
+
+**The failure mode this buys, stated plainly.** A node reporting CUDA `12.4` under a role asking for
+`vllm` `0.25.1` synthesizes `gpustack/runner:cuda12.4-vllm0.25.1`, and that image **does not exist**
+— the matrix publishes `0.25.1` for `12.9` and `13.0` only. The replica then sits in
+`ImagePullBackOff`. This is accepted, not overlooked: the decision on version alignment is that the
+user guarantees it and the operator only assembles a name from the information it has. A gate that
+rejected the combination would need the release matrix compiled into the operator, which is the
+lookup this whole feature is defined as not doing.
+
+Two consequences follow from that, and both are named here so neither is mistaken for an oversight:
+
+- **A synthesized image cannot carry a `deprecated` warning.** 78 of the 338 records are flagged
+  deprecated, per image rather than per engine. Reading that flag requires the matrix; the formula
+  does not read the matrix. So the earlier intent to accept a deprecated image and record a Warning
+  Event has no reachable signal behind it in this design, and this spec does not claim it. See Open
+  Questions.
+- **`roles[].template.image` stays as the override,** and remains the only way to run an image the
+  formula cannot name — a cambricon pool, an unmapped Ascend family, a private build. A role that
+  names an image gets it verbatim; synthesis never overwrites a stated value.
+
+Acceptance:
+
+- A role with `engine: vllm`, `engineVersion: 0.25.1` and no `template.image`, on an `InstanceType`
+  whose detail says `nvidia` / `12.9`, renders `gpustack/runner:cuda12.9-vllm0.25.1`.
+- The same role on an `ascend` / `910C` / `9.1` InstanceType renders
+  `gpustack/runner:cann9.1-a3-vllm0.25.1`, exercising the one mapping that is not a lowercasing.
+- A role naming `template.image` explicitly renders that image, whatever the detail says.
+- A role on a `cambricon` pool, or an Ascend `910`/`310B` family, with no `template.image` is
+  **rejected by the validating webhook** naming the manufacturer or family, rather than rendering a
+  Pod with an empty image.
+- An `InstanceType` whose detail carries no `runtimeVersion` yet — a flavor not synced, a generic
+  collapsed pool — renders no image and the role reports the reason; it does not render a tag with a
+  hole in it.
 
 ### Verification
 
@@ -1513,10 +1733,18 @@ truthful); after T13 (the headline claim is measured and recorded).
   carries exactly the keys the selected engine's own reader reads and no others** — the three key
   sets differ, and rendering a key an engine ignores documents a wiring that is not happening. The
   device list is the JSON's `device_name`, not `setup()`'s `rdma_devices` nor Mooncake's
-  `MOONCAKE_DEVICE`. It sets **no `local_hostname`** (every engine derives it per process) and
-  **no `tenant_id`** (unreachable on all three, F4), each absence asserted by a test that carries its
-  reason. `MC_TE_METRIC=1` is set as a **defaulted** key. The JSON is rendered into one
-  deployment-owned ConfigMap mounted read-only into every replica.
+  `MOONCAKE_DEVICE`. It sets **no `local_hostname`** and **no `tenant_id`** (unreachable on all
+  three, F4), each absence asserted by a test that carries its reason. `MC_TE_METRIC=1` is set as a
+  **defaulted** key. The JSON is rendered into one deployment-owned ConfigMap mounted read-only into
+  every replica.
+  **This acceptance carries a second defect, found after it was ticked: it renders a file carrier for
+  every engine, and `sglang` must not have one.** The `local_hostname` reasoning above holds only for
+  the two vLLM-family readers; `sglang` reads that key from the file and falls back to the literal
+  `localhost`, so a file-carried SGLang deployment registers every replica under one identity. The
+  carrier split is F4's, and it is delivered by the connector-wiring task rather than patched here —
+  the same reason the size keys are: this package's rendering is being replaced wholesale by the
+  shared one, and two fixes to code that is about to be deleted is two fixes that have to be
+  re-verified in their new home anyway.
   **This acceptance also said it sets neither `global_segment_size` nor `local_buffer_size` nor
   `mode`, "because the operator inventing them is a silent capacity error". That reason is
   backwards** — the group declares a ROLE, and omitting it makes every engine Pod a 4 GiB in-process
@@ -1698,11 +1926,18 @@ truthful); after T13 (the headline claim is measured and recorded).
   ⇒ If the package is not there when this task starts, coordinate rather than writing a second copy
   "to merge later".
 
-  Three things the shared renderer has to get right, each measured rather than assumed:
-  - **The pure-client group**, per engine, as F4 records it. A `local_buffer_size` of **128 MiB** is
-    the documented client staging size (the store's own `setup` example spells
-    `128*1024*1024 # local_buffer_size (128MB)`, described as short-lived client-side staging), not a
-    number picked for looking small.
+  Four things the shared renderer has to get right, each measured rather than assumed:
+  - **The carrier is per engine**, as F4's carrier table records it: a file for `vllm` and
+    `vllm-ascend`, `MOONCAKE_*` environment variables for `sglang` with `MOONCAKE_LOCAL_HOSTNAME`
+    from `fieldRef: status.podIP`, and **no** `--hicache-storage-backend-extra-config`. This is the
+    reason the task cannot be skipped for a single-engine deployment: the current renderer's file
+    carrier is not merely duplicated work for `sglang`, it is wrong for it.
+  - **The pure-client group**, per engine, as F4 records it. `global_segment_size: 0` on all three.
+    A `local_buffer_size` of **128 MiB** is the documented client staging size (the store's own
+    `setup` example spells `128*1024*1024 # local_buffer_size (128MB)`, described as short-lived
+    client-side staging), not a number picked for looking small — **and it is a vLLM-family key
+    only.** `sglang` has no such key; it passes a hardcoded 16 MiB to `setup()`, so rendering the
+    128 MiB for it writes a key nothing reads.
   - **`protocol` comes from `mooncake.MemberProtocol(kvcb)`**, never from reading
     `spec.transport.protocol` here. That function already falls back to `Auto` for an empty value
     (`member_workload.go:142-152`, because the artifact looks the protocol up in a transport map and
@@ -1712,6 +1947,48 @@ truthful); after T13 (the headline claim is measured and recorded).
     scope's metadata plane takes unconditionally; after the merge there must not be two constants of
     the same value in two packages.
   Verify: `go test ./pkg/worker/controllers/worker/ -run 'ModelDeploymentConfig|ModelDeploymentRender'`
+
+- [ ] **T15 · Aggregate the observed runtime version, then synthesize the image from it**
+  Blocked by: T5 — the three-tier merge is where a synthesized image has to lose to a stated one
+  Owns: `api/worker/v1alpha1/instance_type.go` (one new observed field),
+  `pkg/worker/controllers/worker/instance_type.go` (the aggregation),
+  `pkg/worker/controllers/worker/model_deployment_image.go` + its test
+  Gate: none — both sources already exist (`Devices.Groups[].RuntimeVersion`, and the manufacturer
+  and family already on `InstanceTypeDetail`)
+  **Two commits, and the split is a requirement rather than tidiness:** the `InstanceType` field is a
+  change to another spec's object and drags generated artifacts, so it lands alone with
+  `make generate` run in the same commit; the synthesis lands second on top of it.
+  Acceptance: the formula and both mapping tables of F11, with the cases that are not
+  round-trippable spelled out. The aggregation walks the same structure `poolAcceleratorSlicedDetail`
+  already walks — every node's `Devices` ledger, groups matched on the full
+  `${manufacturer}-${group ID}` key — and takes `RuntimeVersion` where that function takes
+  `Accelerators`, so a group that matches nothing yields **no** version rather than an empty string
+  that reads like a version of `""`. A role whose `InstanceType` has no `runtimeVersion` renders no
+  image and says why; a role naming `template.image` gets it verbatim and synthesis does not run; a
+  role on a manufacturer with no runner backend (`cambricon`) or an Ascend family with no published
+  variant (`910`, `310B`) is refused by the validating webhook naming the manufacturer or the family.
+  The mapping tables are data, not a `strings.ToLower` call — `910C` maps to `a3`, and a test that
+  passes with a lowercasing implementation is not testing the table.
+  Verify: `go test ./pkg/worker/controllers/worker/ -run 'ModelDeploymentImage|InstanceTypeDetail'`
+
+- [ ] **T16 · Narrow the engine enum onto the dimension the connector actually varies with**
+  Blocked by: T15's first commit only, to keep two API-plus-generate changes off each other
+  Owns: `api/worker/v1alpha1/model_deployment.go` (the enum and the new `engineVersion`),
+  `pkg/worker/webhooks/worker/model_deployment.go`,
+  `pkg/worker/controllers/worker/model_deployment_connector.go` + its test
+  Acceptance: `spec.engine` becomes `{vllm, sglang}` and `ModelDeploymentEngineVLLMAscend` is
+  deleted; connector selection takes `(engine, backend)` instead of `engine`, with the backend read
+  from the role's `InstanceType` detail; the owned-key table is keyed the same way. A `(vllm, cann)`
+  case asserts `AscendStoreConnector` and a `(vllm, cuda)` case asserts `MooncakeStoreConnector`, so
+  the table is exercised on both sides of the branch that used to be a third enum value.
+  `spec.engineVersion` is added as required and free-form: **no format validation, no cross-check
+  against the engine, and no list of known versions**, per the Non-Goal.
+  **Deleting an enum value is allowed here for a reason worth stating:** `ModelDeployment` is created
+  by this spec and has never been in a tagged release or on `main`, so the enum has no stored objects
+  and no downstream consumer. That is the whole of the licence — it does not extend to
+  `InstanceType`, whose new field in T15 is therefore purely additive.
+  Verify: `go test ./api/... ./pkg/worker/... -run 'ModelDeployment'`, and `make generate` leaves the
+  tree clean
 
 ### Test Plan
 
@@ -1785,15 +2062,18 @@ accepted bad spec is worse than a refusal.
 | Case | Condition | Expected |
 |---|---|---|
 | `vllm_golden` | engine `vllm` | `--kv-transfer-config` selecting `MooncakeStoreConnector` with `kv_role: kv_both`, plus `MOONCAKE_CONFIG_PATH` |
-| `vllm_ascend_golden` | engine `vllm-ascend` | `--kv-transfer-config` selecting `AscendStoreConnector` — **not** `MultiConnector`, which is that project's composite |
-| `sglang_golden` | engine `sglang` | `--hicache-storage-backend mooncake` + `-extra-config`, plus `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` |
-| `keys_are_exactly_this_engines` | each engine | the JSON carries exactly the key set that engine's reader reads — no key it ignores, no key it needs missing |
+| `vllm_ascend_golden` | `(vllm, cann)` | `--kv-transfer-config` selecting `AscendStoreConnector` — **not** `MultiConnector`, which is that project's composite. Keyed on the backend, so it also pins that `cann` is what selects this row |
+| `sglang_golden` | engine `sglang` | `--hicache-storage-backend mooncake`, the `MOONCAKE_*` environment set, and **no** config-path variable and **no** `-extra-config` |
+| `keys_are_exactly_this_engines` | each engine | the carrier holds exactly the key set that engine's reader reads — no key it ignores, no key it needs missing |
 | `device_json_key` | any engine | the device list is the JSON's `device_name`, never `rdma_devices` or `MOONCAKE_DEVICE` — the two spellings the other surfaces use |
-| `no_local_hostname` | any engine | `local_hostname` is **absent**; the engine derives it per process and one file cannot hold a per-replica value |
+| `no_local_hostname_on_file` | `vllm`, `vllm-ascend` | `local_hostname` is **absent**; those two compute it per process and one file cannot hold a per-replica value |
+| `local_hostname_is_a_fieldref` | `sglang` | `MOONCAKE_LOCAL_HOSTNAME` is **present** and valued from `fieldRef: status.podIP`. **A literal fails the case** — including a correct-looking one, because the defect being avoided is a literal that happens to parse |
+| `no_configmap_for_sglang` | `sglang` | **no** ConfigMap is created for the deployment at all; an unused one would claim a wiring that is not happening |
+| `no_extra_config_argument` | `sglang` | `--hicache-storage-backend-extra-config` is **absent**. Its loader is key-for-key identical to the file loader and sits at *higher* precedence, so passing it would make the environment carrier unreachable |
 | `no_tenant_id` | any engine | `tenant_id` is **absent**, because no supported engine passes it to `setup()`; the test states the reason so its deletion is deliberate |
 | `no_segment_sizes` | any engine | **pins a defect, not a decision**: both keys are absent today, which makes the rank a 4 GiB store member. The case carries `KNOWN DEFECT` in its reason and is deleted by the connector-wiring task |
 | `no_mode_for_vllm` | engine `vllm` | **pins the same defect**: `mode` is absent, which leaves vLLM's default of `embedded` — the half that makes the omission silent instead of raising |
-| `pure_client_group_after_the_fix` | each engine | the coherent group is rendered per engine: `vllm` gets `mode: standalone-store` + `global_segment_size: 0` + a positive `local_buffer_size`; `vllm-ascend` the pair without `mode`; `sglang` the pair, with its TP division noted |
+| `pure_client_group_after_the_fix` | each engine | the coherent group is rendered per engine, and the three differ: `vllm` gets `mode: standalone-store` + `global_segment_size: 0` + `local_buffer_size` 128 MiB; `vllm-ascend` the same without `mode`; `sglang` gets `global_segment_size: 0` **and no `local_buffer_size` key at all** — it passes a hardcoded 16 MiB to `setup()` and never reads that key, so writing it would be a key no reader reads |
 | `config_path_env_per_engine` | each engine | `vllm`/`vllm-ascend` get `MOONCAKE_CONFIG_PATH`, `sglang` gets `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` |
 | `mc_te_metric_default` | user set nothing | `MC_TE_METRIC=1` present |
 | `mc_te_metric_user_off` | user set `MC_TE_METRIC=0` | the user's value, no duplicate entry |
@@ -1970,19 +2250,27 @@ comparison with one side missing is an assertion about nothing.
 
 ## Open Questions
 
-- ~~**How does a replica supply `local_hostname` to the client?**~~ **Settled: it does not, and the
-  question was aimed at the wrong loader.** The worry was real for Mooncake's own
-  `MooncakeConfig` — `local_hostname` sits in its `_REQUIRED_NON_EMPTY_FIELDS`, `from_file()` raises
-  when the key is absent, and `load_from_env()`'s own default is the literal `"localhost"`, so on
-  that loader the value is neither omittable nor expressible in a deployment-wide file. **But no
-  supported engine uses that loader.** Each of the three ships its own reader, none of which takes
-  `local_hostname` from the config file at all: `vllm` computes it from
-  `get_requester_local_hostname(get_ip())`, `vllm-ascend` from `get_ip()`, and `sglang` from
-  `MOONCAKE_LOCAL_HOSTNAME`/`LOCAL_HOSTNAME` with its own default. So neither listed option — an
-  entrypoint prelude, a per-replica ConfigMap — is needed, and the operator renders no
-  `local_hostname` at all (F4). The general lesson is the expensive half: **a client's documented
-  configuration surface is not the surface its callers use**, and this question could only be
-  answered by reading the callers.
+- ~~**How does a replica supply `local_hostname` to the client?**~~ **Settled, but not the way this
+  entry first recorded, and the correction is the more instructive half.** The worry was real for
+  Mooncake's own `MooncakeConfig` — `local_hostname` sits in its `_REQUIRED_NON_EMPTY_FIELDS`,
+  `from_file()` raises when the key is absent, and the environment default is the literal
+  `"localhost"`. This entry then answered "no supported engine uses that loader; each of the three
+  computes it per process", and **that generalized one measurement onto three engines**. It holds for
+  `vllm` and `vllm-ascend`. It is false for `sglang`, whose `from_file()` and
+  `load_from_extra_config()` both read the key and both fall back to the literal `"localhost"`,
+  because `EnvField.default` is a plain attribute that never consults the environment. The answer is
+  therefore **per carrier**, not per engine: absent on the file carrier, and required as
+  `fieldRef: status.podIP` on the environment carrier (F4).
+
+  This entry's own stated lesson was **"a client's documented configuration surface is not the surface
+  its callers use, and this could only be answered by reading the callers."** That lesson was right,
+  and the error above is its next layer: the callers were read, but on `sglang` only one of its
+  **three** loader paths was, and not the one this design selects. ⇒ **Reading the caller is not
+  enough when the caller has more than one path in; the path has to be the one your configuration
+  actually arrives on.** Which of `load_from_extra_config` / `from_file` / `load_from_env` runs is
+  decided by what the operator renders, so the operator's own choice selects which measurement
+  applies — and measuring before making that choice reads whichever path the measurer happened to
+  look at.
 - **When does `tenant_id` become reachable, and through which engine first?** Enforcement of the
   reuse domain waits on an engine passing `setup()`'s 11th argument (F4). The two vehicles that would
   not wait — a `sitecustomize` shim that wraps `MooncakeDistributedStore.setup`, and a patch carried
@@ -2033,3 +2321,30 @@ comparison with one side missing is an assertion about nothing.
   serving deployment because an admin object vanished is worse than serving without a cache. That is
   a policy choice an admin might reasonably want inverted, and inverting it is a Binding-side
   decision (a `deletionPolicy`) rather than a workload-side one.
+- **Should a deprecated runner image be flagged, and with what?** 78 of the matrix's 338 records
+  carry `deprecated: true`, per image rather than per engine. F11 synthesizes a tag by formula and
+  never reads the matrix, so the flag is **not observable from inside the operator** — there is
+  nothing for a Warning Event to fire on. The three ways out all cost in the same place: compile a
+  snapshot of the matrix in (the lookup F11 excludes, and it goes stale against every runner
+  release), query it at admission time (a new outbound dependency on the request path), or leave
+  deprecation to whatever surface publishes the matrix to users. This spec takes the third and claims
+  nothing. The question is whether that is the intended trade, because the earlier intent — accept the
+  image and record a Warning Event — reads as achievable and is not.
+- **How should `runtimeVersion` be aggregated when a pool's nodes disagree?** One `InstanceType`
+  covers every node carrying its accelerator group, and a driver rollout makes those nodes disagree
+  for as long as it runs. The aggregate has to be a single value, because the formula consumes one.
+  Three candidates, with the recommendation first:
+  - **The minimum across the pool.** A container built against an older toolkit runs on a newer
+    driver, not the reverse, so the lowest version in the pool is the one whose image every node can
+    run — and which node a replica lands on is decided by admission, after the image is already in
+    the Pod spec. Its failure mode is real and should be stated: one un-upgraded node drags the whole
+    pool onto a version the matrix may not publish for the requested engine version, taking a
+    working deployment to `ImagePullBackOff`.
+  - **Empty when the nodes disagree**, so the role reports why it rendered nothing. Safer in that it
+    never names a wrong image, and worse in that a pool is unusable for the whole rollout window.
+  - **Publish the set** and make the user choose. Honest, and it moves a hardware fact back onto the
+    user surface, which is the thing F11 argues against.
+
+  Whichever is chosen, the aggregation must not report a value it did not observe: an
+  `InstanceType` with no synced flavor has **no** `runtimeVersion`, which is different from a pool
+  whose nodes all report the same one, and the field has to distinguish those.
