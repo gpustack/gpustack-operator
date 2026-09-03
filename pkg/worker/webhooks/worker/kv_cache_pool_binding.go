@@ -175,6 +175,14 @@ func validateKVCachePoolBindingDomain(
 // tenant space is master-global. The check is one unscoped List through the manager's cache — it
 // walks no namespaces itself, and the cache is already holding every Binding for the reconciler.
 //
+// THAT REASON DOES NOT COVER SEVERAL MASTERS, and the gap is real: "one master can serve several
+// pools" argues for uniqueness across THOSE pools, not across pools on a DIFFERENT master. With two
+// independent backends, a domain every no-tenant engine writes under — "default" — can be registered
+// only once cluster-wide, so injected Pods on the second backend are admitted and then fail every
+// write with TENANT_NOT_REGISTERED. Tracked as #166, which also records why the fix may never be
+// needed. Left as written rather than narrowed here: changing the scope is an admission-semantics
+// change to a merged API, and it is on a mechanism that a planned opt-in tenant would remove.
+//
 // It races: two creates admitted against one cache state both pass. That is why F9's reconcile-time
 // refusal exists, and why this check is the one that produces a good message rather than the one that
 // guarantees the invariant.

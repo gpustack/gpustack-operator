@@ -19,6 +19,7 @@ var setups = []webhook.Setup{
 	new(worker.KVCachePoolWebhook),
 	new(worker.KVCachePoolBindingWebhook),
 	new(worker.PodWebhook),
+	new(worker.PodKVCacheWebhook),
 }
 
 // cfgGetters is the list of all webhook configuration getters.
