@@ -16,6 +16,9 @@ type (
 	// Topology represents the topology information of a device,
 	// including its NUMA node and PCI information.
 	Topology = workercore.DeviceTopology
+	// Interface represents one of the worker's network interfaces, including its bus
+	// coordinates and its RDMA link state.
+	Interface = workercore.DeviceInterface
 	// Ethernet represents the Ethernet information of a device,
 	// including its name and PCI information.
 	Ethernet = workercore.DeviceEthernet

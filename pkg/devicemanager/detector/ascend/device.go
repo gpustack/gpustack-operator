@@ -206,7 +206,7 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 				grpIndex = len(grpList) - 1
 			}
 
-			topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)
+			topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class, pciDev.Switches)
 
 			// RoCE networking belongs to the dcmi card, a hardware level above the
 			// accelerator that carries several NPUs; it is recorded on the topology of

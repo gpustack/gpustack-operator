@@ -196,7 +196,7 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 			grpIndex = len(grpList) - 1
 		}
 
-		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)
+		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class, pciDev.Switches)
 
 		var status device.AcceleratorStatus
 		{

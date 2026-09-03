@@ -155,7 +155,7 @@ func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLi
 
 		physicalIndexes := []uint32{uint32(i)}
 
-		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)
+		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class, pciDev.Switches)
 
 		var status device.AcceleratorStatus
 		{

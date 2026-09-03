@@ -219,7 +219,7 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			grpIndex = len(grpList) - 1
 		}
 
-		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)
+		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class, pciDev.Switches)
 
 		var status device.AcceleratorStatus
 		{
