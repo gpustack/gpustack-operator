@@ -75,6 +75,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [Instance Metrics Reference](reference/instance-metrics.md) | The `instances/<name>/metrics` subresource and the Device Manager's Prometheus exporter: the fields, the gauges, their sources and limits | users, operators, console developers | ~9 min |
 | [Command Reference](reference/commands.md) | Every command the binary offers: what each does, who runs it, its flags, and a runnable invocation | operators, developers | ~10 min |
 | [KV Cache Injection Reference](reference/kv-cache-injection.md) | How any Pod joins a KV cache pool with one label: the contract, what is injected per engine, every refusal, and what a cache changes about a workload | users, operators | ~14 min |
+| [Model Deployment Reference](reference/model-deployment.md) | The `ModelDeployment` contract: the inherited reuse domain, the three override tiers and the owned-key table, the runner-image formula, and what each condition means | users, operators, contributors | ~13 min |
 
 ## Conventions
 

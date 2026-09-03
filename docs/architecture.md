@@ -80,7 +80,7 @@ cannot:
 
 | Step | What happens | Detail |
 |---|---|---|
-| Submit | a Pod (or a GPUStack `Instance`, which renders one) carries the pool's entrance label `kueue.x-k8s.io/queue-name: gpustack-fnv64-…` and requests `nvidia.com/gpu.sliced: 1` + `nvidia.com/gpu.sliced.memory-percentage: 50` | [Accelerator Requests](accelerator-requests.md) |
+| Submit | a Pod — plain, or rendered by a GPUStack `Instance` or by a [`ModelDeployment`](reference/model-deployment.md) replica — carries the pool's entrance label `kueue.x-k8s.io/queue-name: gpustack-fnv64-…` and requests `nvidia.com/gpu.sliced: 1` + `nvidia.com/gpu.sliced.memory-percentage: 50` | [Accelerator Requests](accelerator-requests.md) |
 | Gate 1 — Pod webhook | validates the request rules and folds the memory budget into `nvidia.com/gpu.sliced.units`, the credit input | [Admission](architecture/admission.md#gate-1--the-pod-webhook) |
 | Gate 2 — Kueue | reserves against the pool ClusterQueue's `credits.gpustack.ai/nvidia` quota — a scalar total, so it can over-admit a fragmented pool | [Admission](architecture/admission.md#gate-2--kueue-credits) |
 | Gate 3 — AdmissionCheck | asks the pool's `Devices` ledger whether one accelerator can really host the slice; holds the workload with `Retry` if not | [Admission](architecture/admission.md#gate-3--the-per-accelerator-admissioncheck) |
