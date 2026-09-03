@@ -26,13 +26,28 @@ func connectorInput(engine string) ModelDeploymentConnectorInput {
 }
 
 func TestSynthesizeModelDeploymentConnector(t *testing.T) {
-	// The file carrier's key set is shared by the two vLLM-family readers, which load configuration
-	// from a file because their loader uses the environment only to locate the path.
-	wantFileConfig := map[string]string{
+	// The two vLLM-family readers load configuration from a file, because their loader uses the
+	// environment only to locate the path. Their key sets differ by exactly one key: `mode` exists
+	// on vLLM alone. Both are written out in full rather than derived from each other, so that the
+	// one difference is visible instead of being a line of test logic.
+	//
+	// The size values are JSON numbers, matching the int the config classes declare.
+	wantVLLMConfig := map[string]any{
 		"master_server_address": "shared-kv-master.gpustack-system.svc:50051",
 		"metadata_server":       "P2PHANDSHAKE",
 		"protocol":              "tcp",
 		"device_name":           "",
+		"global_segment_size":   0,
+		"local_buffer_size":     134217728,
+		"mode":                  "standalone-store",
+	}
+	wantAscendConfig := map[string]any{
+		"master_server_address": "shared-kv-master.gpustack-system.svc:50051",
+		"metadata_server":       "P2PHANDSHAKE",
+		"protocol":              "tcp",
+		"device_name":           "",
+		"global_segment_size":   0,
+		"local_buffer_size":     134217728,
 	}
 
 	testCases := []struct {
@@ -41,7 +56,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 		wantArgs         []string
 		wantEnv          []core.EnvVar
 		wantDefaultedEnv []core.EnvVar
-		wantConfig       map[string]string
+		wantConfig       map[string]any
 	}{
 		{
 			name:   "vllm_golden",
@@ -54,7 +69,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 				{Name: "MOONCAKE_CONFIG_PATH", Value: "/etc/gpustack/kvcache/mooncake.json"},
 			},
 			wantDefaultedEnv: []core.EnvVar{{Name: "MC_TE_METRIC", Value: "1"}},
-			wantConfig:       wantFileConfig,
+			wantConfig:       wantVLLMConfig,
 		},
 		{
 			name:   "vllm_ascend_golden",
@@ -67,7 +82,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 				{Name: "MOONCAKE_CONFIG_PATH", Value: "/etc/gpustack/kvcache/mooncake.json"},
 			},
 			wantDefaultedEnv: []core.EnvVar{{Name: "MC_TE_METRIC", Value: "1"}},
-			wantConfig:       wantFileConfig,
+			wantConfig:       wantAscendConfig,
 		},
 		{
 			// SGLang takes the environment, and every part of this case is load-bearing: no
@@ -163,9 +178,10 @@ func TestSynthesizeModelDeploymentConnector_SGLangEnvironmentCarrier(t *testing.
 // it out. Exact map equality above already fails if any of them appears; these cases exist so that
 // whoever deletes one has to read the reason first.
 //
-// TWO OF THE FIVE REASONS ARE DECISIONS AND THREE PIN A DEFECT, and the difference is marked
-// inline. A green case here is not by itself an endorsement of the behavior it asserts — which is
-// exactly why each one has to carry its reason instead of just its key.
+// BOTH REMAINING REASONS ARE DECISIONS. Three others used to pin a defect instead, and the
+// distinction was marked inline precisely so that this could happen: a green case is not by itself
+// an endorsement of the behavior it asserts, so each one carries its reason rather than just its
+// key, and the three whose reason stopped holding were deleted rather than left green.
 func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
 	testCases := []struct {
 		name string
@@ -187,48 +203,12 @@ func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
 				"THIS IS TRUE OF THESE TWO ONLY -- SGLang reads the key from the file and falls " +
 				"back to a literal, which is why it takes the environment instead",
 		},
-		// THE NEXT THREE PIN A KNOWN DEFECT, NOT A DECISION. They are kept so that the fix is
-		// noticed as a change rather than slipping in, and they must be DELETED by the task that
-		// wires the connector into the replicas.
-		//
-		// The reason recorded here originally was that these keys size a replica's contribution and
-		// the operator must not invent a capacity. Measured on vLLM v0.25.1
-		// (.../mooncake/store/worker.py's config class), that is backwards: the pair DECLARES A
-		// ROLE. `mode` defaults to "embedded", `global_segment_size` defaults to 4 GiB, and
-		// __post_init__ requires a positive global segment in embedded mode — so omitting all three
-		// makes the engine rank an in-process store MEMBER contributing 4 GiB, when it should be a
-		// pure client. A pure client on vLLM is the coherent triple
-		// mode=standalone-store + global_segment_size=0 + local_buffer_size>0; on vllm-ascend there
-		// is no `mode` field, so it is the pair.
-		//
-		// The old reason was right about the COUPLING and wrong about the conclusion: a cross-field
-		// pair is dangerous when split, which is an argument for rendering the whole triple, not for
-		// rendering none of it.
-		//
-		// THE LAST TECHNICAL BLOCKER IS GONE, so what remains is only ownership. The store's own
-		// setup_internal accepts a zero global segment and skips mounting one, commented "A size of
-		// 0 keeps the pure client/server setup semantics", and its validator requires the value to
-		// be zero or at least MIN_SEGMENT_SIZE. The fix belongs to the shared rendering package
-		// that takes this synthesis over, because fixing it here means re-verifying it there.
-		// SGLang already carries the equivalent, as MOONCAKE_GLOBAL_SEGMENT_SIZE=0 on its own
-		// carrier -- so this defect is now the vLLM family's alone.
-		{
-			name: "no_segment_sizes_global",
-			key:  "global_segment_size",
-			why:  "KNOWN DEFECT: omitting it selects the embedded role, contributing 4 GiB",
-		},
-		{
-			name: "no_segment_sizes_local",
-			key:  "local_buffer_size",
-			why: "KNOWN DEFECT: omitting it takes the 4 GiB default rather than a client staging " +
-				"buffer. The 128 MiB replacement is a vLLM-family value only: SGLang has no such " +
-				"key and passes a hardcoded 16 MiB to setup()",
-		},
-		{
-			name: "no_mode",
-			key:  "mode",
-			why:  "KNOWN DEFECT: omitting it leaves vLLM's default, which is embedded",
-		},
+		// THREE MORE CASES USED TO SIT HERE, pinning the absence of `global_segment_size`,
+		// `local_buffer_size` and `mode` as a KNOWN DEFECT. They are gone because the defect is
+		// fixed: those keys declare a role rather than sizing a contribution, and the coherent
+		// group is now rendered. What replaced them is a POSITIVE assertion in
+		// TestSynthesizeModelDeploymentConnector_FileCarrierDeclaresPureClient -- the direction
+		// that fails when a key goes missing, rather than the direction that passes.
 	}
 
 	// SGLANG IS DELIBERATELY NOT IN THIS LIST, and leaving it in would be worse than useless. It
@@ -250,6 +230,60 @@ func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
 				require.NoError(t, err)
 				require.NotEmpty(t, got.ClientConfig, "%s renders a file carrier", engine)
 				assert.NotContains(t, got.ClientConfig, tc.key, "%s: %s", engine, tc.why)
+			}
+		})
+	}
+}
+
+// TestSynthesizeModelDeploymentConnector_FileCarrierDeclaresPureClient asserts the group that makes
+// a replica a client of the pool rather than a member of it.
+//
+// It is stated positively and per key, because the failure it guards is a MISSING key: every
+// engine's config class defaults `global_segment_size` to 4 GiB, so an absent key does not fall
+// back to "no contribution", it selects the wrong role and does so without any error. An assertion
+// that a key is absent cannot catch that; only one that it is present with the right value can.
+//
+// The values are asserted as JSON numbers. All three engines run these keys through a parser that
+// would also accept "0", but the type the config classes declare is int, and matching the
+// declaration means the rendering does not depend on that parser staying where it is.
+func TestSynthesizeModelDeploymentConnector_FileCarrierDeclaresPureClient(t *testing.T) {
+	testCases := []struct {
+		name     string
+		engine   string
+		wantMode bool
+	}{
+		{
+			// vLLM has `mode`, and it is one half of a cross-field rule its own __post_init__
+			// enforces in both directions: embedded rejects a zero segment, standalone-store
+			// rejects a non-zero one. Rendering the segment without the mode raises at startup.
+			name:     "vllm_declares_standalone_store",
+			engine:   workercore.ModelDeploymentEngineVLLM,
+			wantMode: true,
+		},
+		{
+			// vLLM-Ascend has no `mode` field at all, so the segment size stands alone here.
+			// Rendering a mode for it would be a key its reader ignores.
+			name:     "vllm_ascend_has_no_mode_to_declare",
+			engine:   workercore.ModelDeploymentEngineVLLMAscend,
+			wantMode: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := SynthesizeModelDeploymentConnector(connectorInput(tc.engine))
+			require.NoError(t, err)
+
+			assert.Equal(t, 0, got.ClientConfig["global_segment_size"],
+				"a positive value, including the 4 GiB default, makes this replica a store member")
+			assert.Equal(t, 128*1024*1024, got.ClientConfig["local_buffer_size"],
+				"the documented client staging size; a non-positive value is rejected outright")
+
+			if tc.wantMode {
+				assert.Equal(t, "standalone-store", got.ClientConfig["mode"])
+			} else {
+				assert.NotContains(t, got.ClientConfig, "mode",
+					"this engine has no such field, so the key would document nothing")
 			}
 		})
 	}

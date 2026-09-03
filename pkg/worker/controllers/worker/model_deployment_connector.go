@@ -82,6 +82,11 @@ type ModelDeploymentConnectorRender struct {
 	// ClientConfig is the client JSON, rendered into one ConfigMap per deployment and mounted
 	// read-only into every replica of the role.
 	//
+	// The values are typed rather than all strings, because two of the keys are integers in every
+	// engine's own config class. All three engines happen to run their size keys through a parser
+	// that would accept "0", but a JSON number matches what the dataclass declares and does not
+	// depend on that parser continuing to exist.
+	//
 	// IT IS NIL FOR AN ENGINE CONFIGURED THROUGH THE ENVIRONMENT, and nil means no ConfigMap:
 	// mounting one an engine never reads would claim a wiring that is not happening.
 	//
@@ -90,8 +95,35 @@ type ModelDeploymentConnectorRender struct {
 	// much as what is present: neither reads local_hostname from the file, each deriving it from
 	// its own process, so the one value that would have differed per replica never enters the file.
 	// It does NOT hold for SGLang, which is why SGLang does not get a file.
-	ClientConfig map[string]string
+	ClientConfig map[string]any
 }
+
+const (
+	// modelDeploymentGlobalSegmentSize is the segment this client contributes to the pool: none.
+	//
+	// It has to be written, and written as exactly zero. The key DECLARES A ROLE rather than sizing
+	// a contribution: every engine's config class defaults it to 4 GiB, so an absent key makes each
+	// replica an in-process store member. The pool's own members provide the storage. The store
+	// accepts zero for exactly this purpose -- its setup_internal skips mounting a segment and its
+	// validator requires the value to be zero or at least MIN_SEGMENT_SIZE, so a small non-zero
+	// value is what would be rejected.
+	modelDeploymentGlobalSegmentSize = 0
+
+	// modelDeploymentLocalBufferSize is the client-side staging buffer, 128 MiB.
+	//
+	// It is the size the store's own setup example uses, spelled `128*1024*1024` and described as
+	// short-lived client-side staging. It must be positive: vLLM's config class rejects a
+	// non-positive value outright. This is a vLLM-family key -- SGLang has none, passing a
+	// hardcoded 16 MiB to setup() instead.
+	modelDeploymentLocalBufferSize = 128 * 1024 * 1024
+
+	// modelDeploymentModeStandaloneStore is the topology a pure client declares, on vLLM only.
+	//
+	// It is half of a cross-field rule and cannot be split from the other half: vLLM's
+	// __post_init__ rejects embedded mode with a zero segment AND standalone-store with a non-zero
+	// one. vLLM-Ascend and SGLang have no such field, so for them the segment size stands alone.
+	modelDeploymentModeStandaloneStore = "standalone-store"
+)
 
 // modelDeploymentOwnedKeys is the (engine, key) catalog of what the operator owns.
 //
@@ -194,6 +226,9 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		render.Args = args
 		render.Env = []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: ModelDeploymentClientConfigPath}}
 		render.ClientConfig = modelDeploymentFileClientConfig(in, protocol)
+		// vLLM alone has `mode`, and it is the partner of the zero segment size: this engine
+		// rejects a zero segment in embedded mode, and rejects a non-zero one here.
+		render.ClientConfig["mode"] = modelDeploymentModeStandaloneStore
 
 	case workercore.ModelDeploymentEngineVLLMAscend:
 		// AscendStoreConnector and not MultiConnector: vllm-ascend re-registers MultiConnector to
@@ -224,21 +259,17 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 // Neither of them has an environment fallback for the values themselves: their loader uses the
 // environment only to locate the path, so a file is the only carrier that reaches them.
 //
-// The segment sizes and vLLM's mode are absent, and THAT IS A KNOWN DEFECT rather than a decision.
-// The pair declares a role: a positive global_segment_size makes the rank an in-process store
-// member contributing that much memory, and only an explicit zero makes it the pure client this
-// design wants. Both classes default to 4 GiB, so omitting them selects the wrong role silently.
-// The one remaining unknown is now settled too — the store's own setup_internal accepts zero,
-// commented "A size of 0 keeps the pure client/server setup semantics", and its validator requires
-// the value to be zero or at least MIN_SEGMENT_SIZE — so nothing blocks the fix except its owner:
-// the shared rendering package takes this over wholesale, and two fixes to code about to be deleted
-// are two fixes that need re-verifying in their new home.
-func modelDeploymentFileClientConfig(in ModelDeploymentConnectorInput, protocol string) map[string]string {
-	return map[string]string{
+// It renders the size pair but NOT vLLM's mode, which only that engine has: the caller adds it.
+// Keeping the cross-field partner at the one call site that needs it is what stops the pair from
+// being split, and splitting it is the failure both halves guard against.
+func modelDeploymentFileClientConfig(in ModelDeploymentConnectorInput, protocol string) map[string]any {
+	return map[string]any{
 		"master_server_address": in.MasterServerAddress,
 		"metadata_server":       in.MetadataServer,
 		"protocol":              protocol,
 		"device_name":           in.DeviceName,
+		"global_segment_size":   modelDeploymentGlobalSegmentSize,
+		"local_buffer_size":     modelDeploymentLocalBufferSize,
 	}
 }
 
