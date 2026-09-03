@@ -460,7 +460,13 @@ func (r *InstanceTypeReconciler) computeDetail(
 		detail.Memory = notes["memory"]
 		detail.Cores = notes["cores"]
 		detail.SlicedDetail = poolAcceleratorSlicedDetail(devices, it.Spec.AcceleratorGroup)
-		detail.RuntimeVersion = poolAcceleratorRuntimeVersion(devices, it.Spec.AcceleratorGroup)
+		// THE INVARIANT LIVES HERE: both fields come from one sorted list, so the single value is
+		// the list's first element by construction rather than by a second computation that could
+		// drift from it.
+		detail.RuntimeVersions = poolAcceleratorRuntimeVersions(devices, it.Spec.AcceleratorGroup)
+		if len(detail.RuntimeVersions) > 0 {
+			detail.RuntimeVersion = detail.RuntimeVersions[0]
+		}
 		// The cpuDetail note rides an accelerated flavor only when CPU-manufacturer awareness is
 		// on (a CPU flavor always carries it), matching how the flavor reconciler records it.
 		if settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx) {
@@ -515,36 +521,45 @@ func poolAcceleratorSlicedDetail(
 	return device.AggregateAcceleratorSlicedDetail(cards)
 }
 
-// poolAcceleratorRuntimeVersion returns the LOWEST accelerator runtime version any node backing the
-// accelerator group reports, or empty when no node reports one.
+// poolAcceleratorRuntimeVersions returns every distinct accelerator runtime version the nodes
+// backing the accelerator group report, ASCENDING, or nil when none reports one.
 //
 // It walks the structure poolAcceleratorSlicedDetail walks - every node's Devices ledger, groups
 // matched on the full "${manufacturer}-${group ID}" key - and takes RuntimeVersion where that
 // function takes the cards.
 //
-// The lowest, not an arbitrary representative: one InstanceType spans every node in the pool, and a
-// driver rollout makes them disagree for as long as it runs. A container built against an older
-// runtime runs on a newer driver but not the reverse, so the minimum is the only value whose image
-// every node can run - and which node a replica lands on is decided by admission, after the image
-// is already fixed in the Pod spec.
+// ONE SORTED LIST IS THE ONLY OUTPUT, and that is what makes the two published fields unable to
+// disagree: the single runtimeVersion is this list's first element, assigned at the one call site
+// below rather than computed a second way. A redundant field with no invariant behind it is not one
+// fact and one view of it, it is two facts that can contradict each other.
 //
-// Empty means nothing was observed, which is not the same as a pool that agrees on a version. A
-// group present but reporting no version contributes nothing rather than an empty minimum.
-func poolAcceleratorRuntimeVersion(devices []workercore.Devices, acceleratorKey string) string {
-	var lowest string
+// Ascending, because the first element has to be the minimum: a container built against an older
+// runtime runs on a newer driver but not the reverse, so the lowest version present is the only one
+// whose image every node in the pool can run - and which node a replica lands on is decided by
+// admission, after the image is already fixed in the Pod spec.
+//
+// Nil means nothing was observed, which is not the same as a pool that agrees on one version. A
+// group present but reporting no version contributes nothing rather than an empty entry.
+//
+// De-duplication is NUMERIC rather than textual, so that a pool reporting "9" on one node and "9.0"
+// on another reads as agreement. Two spellings of one version are not a rollout in progress, and a
+// consumer decides that question by this list's length.
+func poolAcceleratorRuntimeVersions(devices []workercore.Devices, acceleratorKey string) []string {
+	var versions []string
 	for i := range devices {
 		for j := range devices[i].Spec.Groups {
 			g := &devices[i].Spec.Groups[j]
 			if !acceleratorGroupMatches(g.Manufacturer, g.ID, acceleratorKey) || g.RuntimeVersion == "" {
 				continue
 			}
-			if lowest == "" || compareRuntimeVersions(g.RuntimeVersion, lowest) < 0 {
-				lowest = g.RuntimeVersion
-			}
+			versions = append(versions, g.RuntimeVersion)
 		}
 	}
+	slices.SortFunc(versions, compareRuntimeVersions)
 
-	return lowest
+	return slices.CompactFunc(versions, func(a, b string) bool {
+		return compareRuntimeVersions(a, b) == 0
+	})
 }
 
 // compareRuntimeVersions orders two runtime versions NUMERICALLY on (major, minor).

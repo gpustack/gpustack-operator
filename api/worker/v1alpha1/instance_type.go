@@ -203,7 +203,23 @@ type InstanceTypeAcceleratorDetail struct {
 	// An empty value means NOTHING WAS OBSERVED - no synced flavor, or a pool with no accelerator
 	// group of its own - and is distinct from a pool whose nodes all report the same version. A
 	// consumer must not read it as a default.
+	//
+	// IT IS ALWAYS THE FIRST ELEMENT OF RuntimeVersions, which is where that invariant is
+	// maintained: both are assigned from one sorted list, so they cannot disagree by construction.
 	RuntimeVersion string `json:"runtimeVersion,omitempty" protobuf:"bytes,6,opt,name=runtimeVersion"`
+
+	// RuntimeVersions is every distinct runtime version the pool's nodes report, ascending.
+	//
+	// It exists so that a consumer can tell a pool that AGREES from one that does not, which the
+	// single value above cannot express. A driver rollout makes the nodes disagree for as long as
+	// it runs, and a workload built from the minimum needs to be able to say what it skipped.
+	//
+	// A consumer reads disagreement as len() > 1 and the skipped versions as the tail. That is a
+	// length comparison rather than a second copy of the aggregation, which is the whole reason
+	// this is published instead of being recomputed from the Devices ledger downstream.
+	//
+	// +listType=atomic
+	RuntimeVersions []string `json:"runtimeVersions,omitempty" protobuf:"bytes,7,rep,name=runtimeVersions"`
 
 	// SlicedDetail is the pool's aggregated slicing capability for this accelerator group.
 	SlicedDetail AcceleratorSlicedDetail `json:"slicedDetail,omitempty" protobuf:"bytes,4,opt,name=slicedDetail"`

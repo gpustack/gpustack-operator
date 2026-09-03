@@ -2283,6 +2283,15 @@ func (m *InstanceTypeAcceleratorDetail) MarshalToSizedBuffer(dAtA []byte) (int, 
 	_ = i
 	var l int
 	_ = l
+	if len(m.RuntimeVersions) > 0 {
+		for iNdEx := len(m.RuntimeVersions) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.RuntimeVersions[iNdEx])
+			copy(dAtA[i:], m.RuntimeVersions[iNdEx])
+			i = encodeVarintGenerated(dAtA, i, uint64(len(m.RuntimeVersions[iNdEx])))
+			i--
+			dAtA[i] = 0x3a
+		}
+	}
 	i -= len(m.RuntimeVersion)
 	copy(dAtA[i:], m.RuntimeVersion)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.RuntimeVersion)))
@@ -5740,6 +5749,12 @@ func (m *InstanceTypeAcceleratorDetail) Size() (n int) {
 	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.RuntimeVersion)
 	n += 1 + l + sovGenerated(uint64(l))
+	if len(m.RuntimeVersions) > 0 {
+		for _, s := range m.RuntimeVersions {
+			l = len(s)
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
 	return n
 }
 
@@ -7300,6 +7315,7 @@ func (this *InstanceTypeAcceleratorDetail) String() string {
 		`SlicedDetail:` + strings.Replace(strings.Replace(this.SlicedDetail.String(), "AcceleratorSlicedDetail", "AcceleratorSlicedDetail", 1), `&`, ``, 1) + `,`,
 		`CPU:` + strings.Replace(strings.Replace(this.CPU.String(), "InstanceTypeAcceleratorCPU", "InstanceTypeAcceleratorCPU", 1), `&`, ``, 1) + `,`,
 		`RuntimeVersion:` + fmt.Sprintf("%v", this.RuntimeVersion) + `,`,
+		`RuntimeVersions:` + fmt.Sprintf("%v", this.RuntimeVersions) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -14996,6 +15012,38 @@ func (m *InstanceTypeAcceleratorDetail) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.RuntimeVersion = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 7:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RuntimeVersions", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.RuntimeVersions = append(m.RuntimeVersions, string(dAtA[iNdEx:postIndex]))
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

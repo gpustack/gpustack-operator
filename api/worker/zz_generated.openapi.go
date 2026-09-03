@@ -4396,9 +4396,29 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeAcceleratorDetail(ref commo
 					},
 					"runtimeVersion": {
 						SchemaProps: spec.SchemaProps{
-							Description: "RuntimeVersion is the accelerator runtime version observed across the pool, normalized to \"major.minor\" by the detectors, e.g. \"12.9\" for CUDA or \"8.2\" for CANN.\n\nIt is the MINIMUM over every node backing the accelerator group, not an arbitrary representative. One InstanceType spans every such node, and a driver rollout makes them disagree for as long as it runs; a container built against an older runtime runs on a newer driver but not the reverse, so the lowest version present is the one whose image every node can run. That is the property that matters, because a workload's image is fixed before admission chooses which node it lands on.\n\nAn empty value means NOTHING WAS OBSERVED - no synced flavor, or a pool with no accelerator group of its own - and is distinct from a pool whose nodes all report the same version. A consumer must not read it as a default.",
+							Description: "RuntimeVersion is the accelerator runtime version observed across the pool, normalized to \"major.minor\" by the detectors, e.g. \"12.9\" for CUDA or \"8.2\" for CANN.\n\nIt is the MINIMUM over every node backing the accelerator group, not an arbitrary representative. One InstanceType spans every such node, and a driver rollout makes them disagree for as long as it runs; a container built against an older runtime runs on a newer driver but not the reverse, so the lowest version present is the one whose image every node can run. That is the property that matters, because a workload's image is fixed before admission chooses which node it lands on.\n\nAn empty value means NOTHING WAS OBSERVED - no synced flavor, or a pool with no accelerator group of its own - and is distinct from a pool whose nodes all report the same version. A consumer must not read it as a default.\n\nIT IS ALWAYS THE FIRST ELEMENT OF RuntimeVersions, which is where that invariant is maintained: both are assigned from one sorted list, so they cannot disagree by construction.",
 							Type:        []string{"string"},
 							Format:      "",
+						},
+					},
+					"runtimeVersions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "RuntimeVersions is every distinct runtime version the pool's nodes report, ascending.\n\nIt exists so that a consumer can tell a pool that AGREES from one that does not, which the single value above cannot express. A driver rollout makes the nodes disagree for as long as it runs, and a workload built from the minimum needs to be able to say what it skipped.\n\nA consumer reads disagreement as len() > 1 and the skipped versions as the tail. That is a length comparison rather than a second copy of the aggregation, which is the whole reason this is published instead of being recomputed from the Devices ledger downstream.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
 						},
 					},
 					"slicedDetail": {
@@ -4642,9 +4662,29 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeDetail(ref common.Reference
 					},
 					"runtimeVersion": {
 						SchemaProps: spec.SchemaProps{
-							Description: "RuntimeVersion is the accelerator runtime version observed across the pool, normalized to \"major.minor\" by the detectors, e.g. \"12.9\" for CUDA or \"8.2\" for CANN.\n\nIt is the MINIMUM over every node backing the accelerator group, not an arbitrary representative. One InstanceType spans every such node, and a driver rollout makes them disagree for as long as it runs; a container built against an older runtime runs on a newer driver but not the reverse, so the lowest version present is the one whose image every node can run. That is the property that matters, because a workload's image is fixed before admission chooses which node it lands on.\n\nAn empty value means NOTHING WAS OBSERVED - no synced flavor, or a pool with no accelerator group of its own - and is distinct from a pool whose nodes all report the same version. A consumer must not read it as a default.",
+							Description: "RuntimeVersion is the accelerator runtime version observed across the pool, normalized to \"major.minor\" by the detectors, e.g. \"12.9\" for CUDA or \"8.2\" for CANN.\n\nIt is the MINIMUM over every node backing the accelerator group, not an arbitrary representative. One InstanceType spans every such node, and a driver rollout makes them disagree for as long as it runs; a container built against an older runtime runs on a newer driver but not the reverse, so the lowest version present is the one whose image every node can run. That is the property that matters, because a workload's image is fixed before admission chooses which node it lands on.\n\nAn empty value means NOTHING WAS OBSERVED - no synced flavor, or a pool with no accelerator group of its own - and is distinct from a pool whose nodes all report the same version. A consumer must not read it as a default.\n\nIT IS ALWAYS THE FIRST ELEMENT OF RuntimeVersions, which is where that invariant is maintained: both are assigned from one sorted list, so they cannot disagree by construction.",
 							Type:        []string{"string"},
 							Format:      "",
+						},
+					},
+					"runtimeVersions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "RuntimeVersions is every distinct runtime version the pool's nodes report, ascending.\n\nIt exists so that a consumer can tell a pool that AGREES from one that does not, which the single value above cannot express. A driver rollout makes the nodes disagree for as long as it runs, and a workload built from the minimum needs to be able to say what it skipped.\n\nA consumer reads disagreement as len() > 1 and the skipped versions as the tail. That is a length comparison rather than a second copy of the aggregation, which is the whole reason this is published instead of being recomputed from the Devices ledger downstream.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
 						},
 					},
 					"slicedDetail": {
