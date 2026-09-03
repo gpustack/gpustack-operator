@@ -13,6 +13,7 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 )
 
@@ -23,6 +24,9 @@ func readyReplica(md *workercore.ModelDeployment, ordinal int32, ready bool) *co
 	pod.Namespace = md.Namespace
 	pod.UID = types.UID(pod.Name + "-uid")
 	pod.Labels = modelDeploymentPodLabels(md, &md.Spec.Roles[0])
+	// The controller reference is what the reconciler selects on, so a fixture without one is
+	// invisible to every path that lists replicas rather than being handed them.
+	kubemeta.ControlOnWithoutBlock(pod, md, workercore.SchemeGroupVersionKind("ModelDeployment"))
 	if ready {
 		pod.Status.Conditions = []core.PodCondition{{Type: core.PodReady, Status: core.ConditionTrue}}
 	}

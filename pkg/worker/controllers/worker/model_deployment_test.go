@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrlrecord "k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -34,6 +35,10 @@ func newModelDeploymentClient(objs ...ctrlcli.Object) ctrlcli.Client {
 // wrote nothing from one that deleted and rebuilt everything.
 type modelDeploymentWrites struct {
 	creates, updates, deletes int
+	// deleteGrace records the grace period each delete was issued with, nil meaning the object's
+	// own default. Reading departures off the Pods only works while a departing Pod is still there
+	// to read, so how a delete is issued is part of this controller's contract.
+	deleteGrace []*int64
 	// statusUpdates is counted separately because a status write goes through the subresource
 	// client, which the Update hook never sees. Leaving it out would leave the most likely churn
 	// uncounted: a status rebuilt from scratch every pass is one careless field away from
@@ -57,6 +62,10 @@ func newCountingModelDeploymentClient(w *modelDeploymentWrites, objs ...ctrlcli.
 			},
 			Delete: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.DeleteOption) error {
 				w.deletes++
+				do := new(ctrlcli.DeleteOptions)
+				do.ApplyOptions(opts)
+				w.deleteGrace = append(w.deleteGrace, do.GracePeriodSeconds)
+
 				return c.Delete(ctx, obj, opts...)
 			},
 			SubResourceUpdate: func(
@@ -73,11 +82,30 @@ func newCountingModelDeploymentClient(w *modelDeploymentWrites, objs ...ctrlcli.
 func reconcileModelDeployment(t *testing.T, cli ctrlcli.Client) (ctrl.Result, error) {
 	t.Helper()
 
-	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+	return reconcileModelDeploymentWith(t, &ModelDeploymentReconciler{
+		Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64),
+	})
+}
+
+func reconcileModelDeploymentWith(t *testing.T, r *ModelDeploymentReconciler) (ctrl.Result, error) {
+	t.Helper()
 
 	return r.Reconcile(context.Background(), ctrlreconcile.Request{
 		NamespacedName: ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"},
 	})
+}
+
+// drainEvents collects everything a fake recorder has buffered without blocking on an empty one.
+func drainEvents(recorder *ctrlrecord.FakeRecorder) []string {
+	var events []string
+	for {
+		select {
+		case e := <-recorder.Events:
+			events = append(events, e)
+		default:
+			return events
+		}
+	}
 }
 
 // replicaNames lists the replicas the deployment owns, sorted, so a case can state the whole set it

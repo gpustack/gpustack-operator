@@ -8,6 +8,7 @@ import (
 	core "k8s.io/api/core/v1"
 	node "k8s.io/api/node/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	ctrlrecord "k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,6 +39,7 @@ import (
 type ModelDeploymentReconciler struct {
 	Client    ctrlcli.Client
 	APIReader ctrlcli.Reader
+	Recorder  ctrlrecord.EventRecorder
 }
 
 var _ ctrlreconcile.Reconciler = (*ModelDeploymentReconciler)(nil)
@@ -188,14 +190,21 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		}
 	}
 
+	// A name still held by a terminating replica is not a failure, so it does not end the pass: the
+	// observations below run either way. Returning here instead would mean that during exactly the
+	// window a departure event is for — a replica on its way out — no event and no status were
+	// written at all.
+	var requeue bool
 	for name := range desired {
 		if err = r.Client.Create(ctx, desired[name]); err != nil {
 			if kerrors.IsAlreadyExists(err) {
-				// A Pod under this name is still terminating. It is deleted, not adopted: adopting
-				// one would keep a replica built from an earlier spec alive under a name the
-				// current spec claims.
+				// A Pod under this name is still terminating. It is waited for, not adopted:
+				// adopting one would keep a replica built from an earlier spec alive under a name
+				// the current spec claims.
 				logger.V(3).Info("replica name still taken; requeue in 2s", "pod", name)
-				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+				requeue = true
+
+				continue
 			}
 			logger.Error(err, "create replica", "pod", name)
 
@@ -217,12 +226,33 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		return ctrl.Result{}, err
 	}
 
+	r.recordModelDeploymentDepartures(md, actual)
+
 	if err = r.syncModelDeploymentStatus(ctx, md, actual); err != nil {
 		logger.Error(err, "sync status")
 		return ctrl.Result{}, err
 	}
 
+	if requeue {
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
+
 	return ctrl.Result{}, nil
+}
+
+// recordModelDeploymentDepartures records one event per replica that has left, so an operator
+// correlating a burst of failed requests with a preemption has the correlation written down rather
+// than having to infer it.
+func (r *ModelDeploymentReconciler) recordModelDeploymentDepartures(
+	md *workercore.ModelDeployment, pods []core.Pod,
+) {
+	if r.Recorder == nil {
+		return
+	}
+
+	for _, d := range modelDeploymentReplicaDepartures(pods) {
+		r.Recorder.Event(md, core.EventTypeWarning, d.reason, d.message)
+	}
 }
 
 // syncModelDeploymentService converges the one Service the deployment is reached through.
@@ -399,6 +429,7 @@ func modelDeploymentOwns(obj ctrlcli.Object, md *workercore.ModelDeployment) boo
 func (r *ModelDeploymentReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
 	r.APIReader = opts.Manager.GetAPIReader()
+	r.Recorder = opts.Manager.GetEventRecorderFor("modeldeployment")
 
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("modeldeployment").
