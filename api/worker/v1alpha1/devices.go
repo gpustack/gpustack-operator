@@ -29,6 +29,35 @@ type DevicesSpec struct {
 	// +listMapKey=id
 	// +listMapKey=manufacturer
 	Groups []DevicesGroup `json:"groups" yaml:"groups" protobuf:"bytes,1,name=groups"`
+
+	// Interfaces is the list of network interfaces on the worker.
+	//
+	// It hangs on the worker rather than on a device group because a network interface belongs to
+	// the machine, not to a manufacturer's accelerators: correlating the two is the reader's job
+	// and is done by comparing the bus coordinates both sides carry, never by storing a
+	// cross-reference here.
+	//
+	// Absence covers two cases and does not separate them: a worker with no interfaces, which is
+	// not a state real hardware reaches, and a worker whose enumeration has never succeeded. A pass
+	// that fails leaves whatever was recorded before it in place rather than replacing it with an
+	// empty list, so on a worker profiled even once the previous inventory is what remains here.
+	// Only a first pass that fails leaves the field absent, and that failure is reported in the
+	// device manager's log at Error rather than modeled here — a state that resolves on the next
+	// pass does not earn API surface. A reader must not treat absence as "this worker has no
+	// interfaces".
+	//
+	// Every kernel interface is recorded, EPHEMERAL VIRTUAL ONES INCLUDED — and for those the list
+	// is not guaranteed current. A change confined to virtual interfaces carrying no RDMA device and
+	// no link verdict does not itself trigger a re-read: every Pod that starts or stops adds or
+	// removes a veth, and treating that as a hardware change rewrote this cluster-scoped object on
+	// every Pod event, once per manufacturer. So such an interface's arrival or departure is
+	// published when some other change reports, not when it happens. Anything carrying an RDMA
+	// record is exempt and is always current. A consumer that needs an up-to-the-second veth list
+	// must read the node, not this field.
+	//
+	// +listType=map
+	// +listMapKey=name
+	Interfaces []DeviceInterface `json:"interfaces,omitempty" yaml:"interfaces,omitempty" protobuf:"bytes,2,opt,name=interfaces"`
 }
 
 // DevicesStatus defines the observed state of Devices.
@@ -87,7 +116,14 @@ type (
 		// PciBusID is the PCI bus ID of the device.
 		PciBusID string `json:"pciBusId" yaml:"pciBusId" protobuf:"bytes,1,name=pciBusId"`
 
-		// PciRootID is the PCI root ID of the device.
+		// PciRootID is the address of the OUTERMOST PCI BRIDGE above the device, or the device's own
+		// address when no bridge sits above it.
+		//
+		// It is NOT the root complex's identifier, despite the name. Two devices sharing this value
+		// reached it through one bridge subtree; they are not thereby behind the same switch, which
+		// is the tighter fact PciSwitches below carries. For a device attached directly to the root
+		// complex the value is the device itself, so equality there is an identity check rather
+		// than a same-root-complex claim.
 		PciRootID string `json:"pciRootId" yaml:"pciRootId" protobuf:"bytes,2,name=pciRootId"`
 
 		// PciClass is the PCI class of the device.
@@ -101,6 +137,19 @@ type (
 
 		// RoCE is the RoCE (RDMA over Converged Ethernet) network information of the device.
 		RoCE *DeviceEthernet `json:"roce,omitempty" yaml:"roce,omitempty" protobuf:"bytes,6,opt,name=roce"`
+
+		// PciSwitches is the upstream PCI bridge/switch path of the device, innermost first.
+		//
+		// Two devices sharing the whole path sit behind the same switch, which is strictly tighter
+		// proximity than sharing the outermost bridge. PciRootID above is the OUTERMOST BRIDGE and
+		// not a switch: reporting equality there as switch-level proximity advertises closeness
+		// nobody measured, so the two fields are never read as the same claim.
+		//
+		// Absent for a device with no PCI path at all, never an empty-but-present marker. Ordered
+		// by construction, so two consecutive reads of unchanged hardware are byte-identical.
+		//
+		// +listType=atomic
+		PciSwitches []string `json:"pciSwitches,omitempty" yaml:"pciSwitches,omitempty" protobuf:"bytes,7,rep,name=pciSwitches"`
 	}
 
 	// DeviceEthernet describes the Ethernet information of the device.
@@ -113,6 +162,157 @@ type (
 
 		// Gateway is the gateway of the Ethernet interface of the device.
 		Gateway string `json:"gateway" yaml:"gateway" protobuf:"bytes,3,name=gateway"`
+	}
+
+	// DeviceInterface describes one network interface of the worker.
+	//
+	// Enumeration is interface-first: the interface is the identity and its PCI device is resolved
+	// as an attribute, which is the inverse of walking the PCI bus and correlating back. An
+	// interface reached over a non-PCI interconnect is invisible to a PCI-rooted walk, and that is
+	// exactly the case this record must not lose — so every PCI field here is optional and their
+	// joint absence is a KIND of interface, not a hole in the record.
+	DeviceInterface struct {
+		// Name is the kernel interface name, and is this interface's identity.
+		Name string `json:"name" yaml:"name" protobuf:"bytes,1,name=name"`
+
+		// Bus names the interconnect the interface was found on, so an interface with no PCI
+		// coordinates reports what it is instead of reading as a failed PCI lookup.
+		Bus string `json:"bus,omitempty" yaml:"bus,omitempty" protobuf:"bytes,2,opt,name=bus"`
+
+		// PciBusID is the PCI bus ID of the interface. Absent for a non-PCI interface.
+		PciBusID string `json:"pciBusId,omitempty" yaml:"pciBusId,omitempty" protobuf:"bytes,3,opt,name=pciBusId"`
+
+		// PciRootID is the address of the OUTERMOST PCI BRIDGE above the interface, or the
+		// interface's own address when no bridge sits above it. Despite the name it is not a root
+		// complex, and reading it as one advertises closeness nobody measured. Absent for a
+		// non-PCI interface. It comes from the same walk the accelerator side uses, so the two
+		// values are comparable.
+		PciRootID string `json:"pciRootId,omitempty" yaml:"pciRootId,omitempty" protobuf:"bytes,4,opt,name=pciRootId"`
+
+		// PciSwitches is the upstream PCI bridge/switch path, innermost first — the same
+		// coordinate DeviceTopology carries, so an accelerator and an interface can be compared
+		// without a translation layer. Absent for a non-PCI interface.
+		//
+		// +listType=atomic
+		PciSwitches []string `json:"pciSwitches,omitempty" yaml:"pciSwitches,omitempty" protobuf:"bytes,5,rep,name=pciSwitches"`
+
+		// PciVendor and PciDevice are the raw hex PCI ids, deliberately not resolved to a model
+		// name: resolving one reads a host data file a minimal image may not carry, and a name
+		// that resolves on one worker but not another is worse than a hex id that always does.
+		PciVendor string `json:"pciVendor,omitempty" yaml:"pciVendor,omitempty" protobuf:"bytes,6,opt,name=pciVendor"`
+
+		// PciDevice is the raw hex PCI device id. See PciVendor.
+		PciDevice string `json:"pciDevice,omitempty" yaml:"pciDevice,omitempty" protobuf:"bytes,7,opt,name=pciDevice"`
+
+		// NumaAffinity is the NUMA node the interface is attached to. Empty means UNKNOWN and is
+		// never normalised to node 0 — that would report an affinity nobody read.
+		NumaAffinity string `json:"numaAffinity,omitempty" yaml:"numaAffinity,omitempty" protobuf:"bytes,8,opt,name=numaAffinity"`
+
+		// CpuAffinity is the CPU cores close to the interface. Empty means unknown.
+		CpuAffinity string `json:"cpuAffinity,omitempty" yaml:"cpuAffinity,omitempty" protobuf:"bytes,9,opt,name=cpuAffinity"`
+
+		// MTU is the link MTU. Zero means it was not read, not an MTU of zero — no operational
+		// interface reports zero, so the absent value carries no ambiguity.
+		MTU int32 `json:"mtu,omitempty" yaml:"mtu,omitempty" protobuf:"varint,10,opt,name=mtu"`
+
+		// Up reports the interface's operational state.
+		Up bool `json:"up,omitempty" yaml:"up,omitempty" protobuf:"varint,11,opt,name=up"`
+
+		// Virtual marks an interface with no device behind it (loopback, bridge, veth). Such an
+		// interface is RECORDED AND MARKED, never dropped: a worker whose only interface is a
+		// bridge must read as "one virtual interface", not as "no interfaces".
+		Virtual bool `json:"virtual,omitempty" yaml:"virtual,omitempty" protobuf:"varint,12,opt,name=virtual"`
+
+		// RDMA reports that an RDMA device is bound to this interface. It says nothing about
+		// whether the link works — that is Link below, and the two differ on real hardware.
+		RDMA bool `json:"rdma,omitempty" yaml:"rdma,omitempty" protobuf:"varint,13,opt,name=rdma"`
+
+		// RDMADevice is the bound RDMA device's name. Empty when RDMA is false.
+		RDMADevice string `json:"rdmaDevice,omitempty" yaml:"rdmaDevice,omitempty" protobuf:"bytes,14,opt,name=rdmaDevice"`
+
+		// SRIOV reports that this interface is an SR-IOV physical function. It is a SEPARATE fact
+		// from the length of VirtualFunctions: "a PF with zero VFs configured" and "not a PF at
+		// all" are different states, and deriving the second from an empty VF list collapses them.
+		SRIOV bool `json:"sriov,omitempty" yaml:"sriov,omitempty" protobuf:"varint,15,opt,name=sriov"`
+
+		// VirtualFunctions are this physical function's virtual functions, NESTED here rather
+		// than listed as siblings: a PF with eight VFs is one entry with eight nested, never nine
+		// top-level entries. Ordered by bus id, so two consecutive reads are byte-identical.
+		//
+		// +listType=atomic
+		VirtualFunctions []DeviceInterfaceVirtualFunction `json:"virtualFunctions,omitempty" yaml:"virtualFunctions,omitempty" protobuf:"bytes,16,rep,name=virtualFunctions"` // nolint: lll
+
+		// Link is the result of verifying that this interface's RDMA link is usable. Nil when
+		// there is no RDMA link to verify.
+		Link *DeviceInterfaceLink `json:"link,omitempty" yaml:"link,omitempty" protobuf:"bytes,17,opt,name=link"`
+	}
+
+	// DeviceInterfaceVirtualFunction describes one SR-IOV virtual function of a physical function.
+	//
+	// It is a type of its own rather than a nested DeviceInterface because SR-IOV nests exactly
+	// one level deep — a virtual function cannot itself be partitioned into virtual functions — so
+	// a self-referential shape would carry a level nothing can ever fill.
+	//
+	// What a VF shares with its parent is the UPSTREAM BRIDGE PATH — `pciRootId` (the outermost
+	// bridge, not a root complex) and `pciSwitches` — so those are read from the parent and not
+	// repeated here. A VF is its own PCI function with its own address, so that sharing is a claim
+	// about the path above both of them and nothing more. What can differ per VF is recorded:
+	// its own address, its own NUMA node and CPU list, and its own RDMA device and link verdict.
+	DeviceInterfaceVirtualFunction struct {
+		// Name is the kernel interface name of the virtual function.
+		Name string `json:"name" yaml:"name" protobuf:"bytes,1,name=name"`
+
+		// PciBusID is the PCI bus ID of the virtual function, which is what distinguishes it from
+		// its siblings and from its parent.
+		PciBusID string `json:"pciBusId,omitempty" yaml:"pciBusId,omitempty" protobuf:"bytes,2,opt,name=pciBusId"`
+
+		// NumaAffinity is the NUMA node the virtual function is attached to. Empty means unknown.
+		NumaAffinity string `json:"numaAffinity,omitempty" yaml:"numaAffinity,omitempty" protobuf:"bytes,3,opt,name=numaAffinity"`
+
+		// CpuAffinity is the CPU cores close to the virtual function. Empty means unknown.
+		CpuAffinity string `json:"cpuAffinity,omitempty" yaml:"cpuAffinity,omitempty" protobuf:"bytes,4,opt,name=cpuAffinity"`
+
+		// MTU is the link MTU. Zero means it was not read. See DeviceInterface.MTU.
+		MTU int32 `json:"mtu,omitempty" yaml:"mtu,omitempty" protobuf:"varint,5,opt,name=mtu"`
+
+		// Up reports the virtual function's operational state.
+		Up bool `json:"up,omitempty" yaml:"up,omitempty" protobuf:"varint,6,opt,name=up"`
+
+		// RDMA reports that an RDMA device is bound to this virtual function.
+		RDMA bool `json:"rdma,omitempty" yaml:"rdma,omitempty" protobuf:"varint,7,opt,name=rdma"`
+
+		// RDMADevice is the bound RDMA device's name. Empty when RDMA is false.
+		RDMADevice string `json:"rdmaDevice,omitempty" yaml:"rdmaDevice,omitempty" protobuf:"bytes,8,opt,name=rdmaDevice"`
+
+		// Link is the result of verifying this virtual function's RDMA link. Nil when there is no
+		// RDMA link to verify.
+		Link *DeviceInterfaceLink `json:"link,omitempty" yaml:"link,omitempty" protobuf:"bytes,9,opt,name=link"`
+	}
+
+	// DeviceInterfaceLink is the outcome of verifying that an RDMA-capable interface's link is
+	// actually usable.
+	//
+	// Reporting and enforcement are separated by making the outcome an explicit state rather than
+	// a boolean: only Failed withholds the node's RDMA label, because "we have no check for this
+	// interface" must not be published as "this worker has no RDMA".
+	DeviceInterfaceLink struct {
+		// State is the verification outcome.
+		State DeviceInterfaceLinkState `json:"state" yaml:"state" protobuf:"bytes,1,name=state,casttype=DeviceInterfaceLinkState"`
+
+		// Reason carries the checker's own words, verbatim — including the attribute values it
+		// read. A non-ok state without a reason leaves the operator's actual question ("why?")
+		// unanswerable from the record alone.
+		Reason string `json:"reason,omitempty" yaml:"reason,omitempty" protobuf:"bytes,2,opt,name=reason"`
+
+		// FirstSeenTime is when an ONGOING FAILED state was first observed. It is stable across
+		// passes for as long as the failure persists, and is cleared the moment the state is
+		// anything else. Refreshing it every pass would make "how long has this been down?"
+		// unanswerable, which is the question the field exists to answer.
+		//
+		// Nil for both other states, `unverified` included: a state that reached no verdict has no
+		// outage for a clock to be the start of, so this is not "the current non-ok state" but
+		// specifically the failed one.
+		FirstSeenTime *meta.Time `json:"firstSeenTime,omitempty" yaml:"firstSeenTime,omitempty" protobuf:"bytes,3,opt,name=firstSeenTime"`
 	}
 
 	// DevicesAllocationGroup describes the allocated device group.
@@ -129,6 +329,30 @@ type (
 		// +listMapKey=id
 		Accelerators []AcceleratorAllocation `json:"accelerators,omitempty" yaml:"accelerators,omitempty" protobuf:"bytes,3,opt,name=accelerators"`
 	}
+)
+
+// DeviceInterfaceLinkState is the outcome of an interface's RDMA link verification.
+//
+// The three states exist because "the link is fine" and "nobody could ask" are different facts
+// with different consequences, and collapsing them into a boolean forces one of them to be a lie.
+// +enum
+type DeviceInterfaceLinkState string
+
+const (
+	// DeviceInterfaceLinkStateOK indicates the link was checked and verified.
+	DeviceInterfaceLinkStateOK DeviceInterfaceLinkState = "ok"
+	// DeviceInterfaceLinkStateUnverified indicates the check reached no verdict: an attribute it
+	// needs was unreadable, the port directory could not be listed, or the RDMA tree is present
+	// and could not be read at all. There is no per-manufacturer checker to be missing — the
+	// check reads the RDMA subsystem's own port attributes and dispatches on nothing.
+	//
+	// It is REPORTED, and it does not withhold the node's RDMA label: a link we cannot interrogate
+	// must not silently exclude its worker from scheduling.
+	DeviceInterfaceLinkStateUnverified DeviceInterfaceLinkState = "unverified"
+	// DeviceInterfaceLinkStateFailed indicates a check ran and the link is not usable. This is
+	// the only state that withholds the node's RDMA label, and it is never reached from a missing
+	// or unreadable file — an unreadable attribute is Unverified.
+	DeviceInterfaceLinkStateFailed DeviceInterfaceLinkState = "failed"
 )
 
 // DeviceAllocationMode describes the allocation mode of the accelerator device.

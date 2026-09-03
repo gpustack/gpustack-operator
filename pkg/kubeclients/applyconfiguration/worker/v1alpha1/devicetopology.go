@@ -9,7 +9,14 @@ package v1alpha1
 type DeviceTopologyApplyConfiguration struct {
 	// PciBusID is the PCI bus ID of the device.
 	PciBusID *string `json:"pciBusId,omitempty"`
-	// PciRootID is the PCI root ID of the device.
+	// PciRootID is the address of the OUTERMOST PCI BRIDGE above the device, or the device's own
+	// address when no bridge sits above it.
+	//
+	// It is NOT the root complex's identifier, despite the name. Two devices sharing this value
+	// reached it through one bridge subtree; they are not thereby behind the same switch, which
+	// is the tighter fact PciSwitches below carries. For a device attached directly to the root
+	// complex the value is the device itself, so equality there is an identity check rather
+	// than a same-root-complex claim.
 	PciRootID *string `json:"pciRootId,omitempty"`
 	// PciClass is the PCI class of the device.
 	PciClass *string `json:"pciClass,omitempty"`
@@ -19,6 +26,16 @@ type DeviceTopologyApplyConfiguration struct {
 	CpuAffinity *string `json:"cpuAffinity,omitempty"`
 	// RoCE is the RoCE (RDMA over Converged Ethernet) network information of the device.
 	RoCE *DeviceEthernetApplyConfiguration `json:"roce,omitempty"`
+	// PciSwitches is the upstream PCI bridge/switch path of the device, innermost first.
+	//
+	// Two devices sharing the whole path sit behind the same switch, which is strictly tighter
+	// proximity than sharing the outermost bridge. PciRootID above is the OUTERMOST BRIDGE and
+	// not a switch: reporting equality there as switch-level proximity advertises closeness
+	// nobody measured, so the two fields are never read as the same claim.
+	//
+	// Absent for a device with no PCI path at all, never an empty-but-present marker. Ordered
+	// by construction, so two consecutive reads of unchanged hardware are byte-identical.
+	PciSwitches []string `json:"pciSwitches,omitempty"`
 }
 
 // DeviceTopologyApplyConfiguration constructs a declarative configuration of the DeviceTopology type for use with
@@ -72,5 +89,15 @@ func (b *DeviceTopologyApplyConfiguration) WithCpuAffinity(value string) *Device
 // If called multiple times, the RoCE field is set to the value of the last call.
 func (b *DeviceTopologyApplyConfiguration) WithRoCE(value *DeviceEthernetApplyConfiguration) *DeviceTopologyApplyConfiguration {
 	b.RoCE = value
+	return b
+}
+
+// WithPciSwitches adds the given value to the PciSwitches field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the PciSwitches field.
+func (b *DeviceTopologyApplyConfiguration) WithPciSwitches(values ...string) *DeviceTopologyApplyConfiguration {
+	for i := range values {
+		b.PciSwitches = append(b.PciSwitches, values[i])
+	}
 	return b
 }

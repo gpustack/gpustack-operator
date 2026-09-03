@@ -9,6 +9,31 @@ package v1alpha1
 type DevicesSpecApplyConfiguration struct {
 	// Groups is the list of device groups on the worker.
 	Groups []DevicesGroupApplyConfiguration `json:"groups,omitempty"`
+	// Interfaces is the list of network interfaces on the worker.
+	//
+	// It hangs on the worker rather than on a device group because a network interface belongs to
+	// the machine, not to a manufacturer's accelerators: correlating the two is the reader's job
+	// and is done by comparing the bus coordinates both sides carry, never by storing a
+	// cross-reference here.
+	//
+	// Absence covers two cases and does not separate them: a worker with no interfaces, which is
+	// not a state real hardware reaches, and a worker whose enumeration has never succeeded. A pass
+	// that fails leaves whatever was recorded before it in place rather than replacing it with an
+	// empty list, so on a worker profiled even once the previous inventory is what remains here.
+	// Only a first pass that fails leaves the field absent, and that failure is reported in the
+	// device manager's log at Error rather than modeled here — a state that resolves on the next
+	// pass does not earn API surface. A reader must not treat absence as "this worker has no
+	// interfaces".
+	//
+	// Every kernel interface is recorded, EPHEMERAL VIRTUAL ONES INCLUDED — and for those the list
+	// is not guaranteed current. A change confined to virtual interfaces carrying no RDMA device and
+	// no link verdict does not itself trigger a re-read: every Pod that starts or stops adds or
+	// removes a veth, and treating that as a hardware change rewrote this cluster-scoped object on
+	// every Pod event, once per manufacturer. So such an interface's arrival or departure is
+	// published when some other change reports, not when it happens. Anything carrying an RDMA
+	// record is exempt and is always current. A consumer that needs an up-to-the-second veth list
+	// must read the node, not this field.
+	Interfaces []DeviceInterfaceApplyConfiguration `json:"interfaces,omitempty"`
 }
 
 // DevicesSpecApplyConfiguration constructs a declarative configuration of the DevicesSpec type for use with
@@ -26,6 +51,19 @@ func (b *DevicesSpecApplyConfiguration) WithGroups(values ...*DevicesGroupApplyC
 			panic("nil value passed to WithGroups")
 		}
 		b.Groups = append(b.Groups, *values[i])
+	}
+	return b
+}
+
+// WithInterfaces adds the given value to the Interfaces field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the Interfaces field.
+func (b *DevicesSpecApplyConfiguration) WithInterfaces(values ...*DeviceInterfaceApplyConfiguration) *DevicesSpecApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithInterfaces")
+		}
+		b.Interfaces = append(b.Interfaces, *values[i])
 	}
 	return b
 }

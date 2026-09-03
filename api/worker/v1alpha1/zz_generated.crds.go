@@ -324,8 +324,19 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																					Type:        "string",
 																				},
 																				"pciRootId": {
-																					Description: "PciRootID is the PCI root ID of the device.",
+																					Description: "PciRootID is the address of the OUTERMOST PCI BRIDGE above the device, or the device's own\naddress when no bridge sits above it.\nIt is NOT the root complex's identifier, despite the name. Two devices sharing this value\nreached it through one bridge subtree; they are not thereby behind the same switch, which\nis the tighter fact PciSwitches below carries. For a device attached directly to the root\ncomplex the value is the device itself, so equality there is an identity check rather\nthan a same-root-complex claim.",
 																					Type:        "string",
+																				},
+																				"pciSwitches": {
+																					Description: "PciSwitches is the upstream PCI bridge/switch path of the device, innermost first.\nTwo devices sharing the whole path sit behind the same switch, which is strictly tighter\nproximity than sharing the outermost bridge. PciRootID above is the OUTERMOST BRIDGE and\nnot a switch: reporting equality there as switch-level proximity advertises closeness\nnobody measured, so the two fields are never read as the same claim.\nAbsent for a device with no PCI path at all, never an empty-but-present marker. Ordered\nby construction, so two consecutive reads of unchanged hardware are byte-identical.",
+																					Type:        "array",
+																					Items: &v1.JSONSchemaPropsOrArray{
+																						Schema: &v1.JSONSchemaProps{
+																							Type: "string",
+																						},
+																					},
+																					Nullable:  true,
+																					XListType: ptr.To[string]("atomic"),
 																				},
 																				"roce": {
 																					Description: "RoCE is the RoCE (RDMA over Converged Ethernet) network information of the device.",
@@ -406,6 +417,190 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 											XListMapKeys: []string{
 												"id",
 												"manufacturer",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"interfaces": {
+											Description: "Interfaces is the list of network interfaces on the worker.\nIt hangs on the worker rather than on a device group because a network interface belongs to\nthe machine, not to a manufacturer's accelerators: correlating the two is the reader's job\nand is done by comparing the bus coordinates both sides carry, never by storing a\ncross-reference here.\nAbsence covers two cases and does not separate them: a worker with no interfaces, which is\nnot a state real hardware reaches, and a worker whose enumeration has never succeeded. A pass\nthat fails leaves whatever was recorded before it in place rather than replacing it with an\nempty list, so on a worker profiled even once the previous inventory is what remains here.\nOnly a first pass that fails leaves the field absent, and that failure is reported in the\ndevice manager's log at Error rather than modeled here — a state that resolves on the next\npass does not earn API surface. A reader must not treat absence as \"this worker has no\ninterfaces\".\nEvery kernel interface is recorded, EPHEMERAL VIRTUAL ONES INCLUDED — and for those the list\nis not guaranteed current. A change confined to virtual interfaces carrying no RDMA device and\nno link verdict does not itself trigger a re-read: every Pod that starts or stops adds or\nremoves a veth, and treating that as a hardware change rewrote this cluster-scoped object on\nevery Pod event, once per manufacturer. So such an interface's arrival or departure is\npublished when some other change reports, not when it happens. Anything carrying an RDMA\nrecord is exempt and is always current. A consumer that needs an up-to-the-second veth list\nmust read the node, not this field.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"name",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"bus": {
+															Description: "Bus names the interconnect the interface was found on, so an interface with no PCI\ncoordinates reports what it is instead of reading as a failed PCI lookup.",
+															Type:        "string",
+														},
+														"cpuAffinity": {
+															Description: "CpuAffinity is the CPU cores close to the interface. Empty means unknown.",
+															Type:        "string",
+														},
+														"link": {
+															Description: "Link is the result of verifying that this interface's RDMA link is usable. Nil when\nthere is no RDMA link to verify.",
+															Type:        "object",
+															Required: []string{
+																"state",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"firstSeenTime": {
+																	Description: "FirstSeenTime is when an ONGOING FAILED state was first observed. It is stable across\npasses for as long as the failure persists, and is cleared the moment the state is\nanything else. Refreshing it every pass would make \"how long has this been down?\"\nunanswerable, which is the question the field exists to answer.\nNil for both other states, `unverified` included: a state that reached no verdict has no\noutage for a clock to be the start of, so this is not \"the current non-ok state\" but\nspecifically the failed one.",
+																	Type:        "string",
+																	Format:      "date-time",
+																	Nullable:    true,
+																},
+																"reason": {
+																	Description: "Reason carries the checker's own words, verbatim — including the attribute values it\nread. A non-ok state without a reason leaves the operator's actual question (\"why?\")\nunanswerable from the record alone.",
+																	Type:        "string",
+																},
+																"state": {
+																	Description: "State is the verification outcome.",
+																	Type:        "string",
+																},
+															},
+															Nullable: true,
+														},
+														"mtu": {
+															Description: "MTU is the link MTU. Zero means it was not read, not an MTU of zero — no operational\ninterface reports zero, so the absent value carries no ambiguity.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+														"name": {
+															Description: "Name is the kernel interface name, and is this interface's identity.",
+															Type:        "string",
+														},
+														"numaAffinity": {
+															Description: "NumaAffinity is the NUMA node the interface is attached to. Empty means UNKNOWN and is\nnever normalised to node 0 — that would report an affinity nobody read.",
+															Type:        "string",
+														},
+														"pciBusId": {
+															Description: "PciBusID is the PCI bus ID of the interface. Absent for a non-PCI interface.",
+															Type:        "string",
+														},
+														"pciDevice": {
+															Description: "PciDevice is the raw hex PCI device id. See PciVendor.",
+															Type:        "string",
+														},
+														"pciRootId": {
+															Description: "PciRootID is the address of the OUTERMOST PCI BRIDGE above the interface, or the\ninterface's own address when no bridge sits above it. Despite the name it is not a root\ncomplex, and reading it as one advertises closeness nobody measured. Absent for a\nnon-PCI interface. It comes from the same walk the accelerator side uses, so the two\nvalues are comparable.",
+															Type:        "string",
+														},
+														"pciSwitches": {
+															Description: "PciSwitches is the upstream PCI bridge/switch path, innermost first — the same\ncoordinate DeviceTopology carries, so an accelerator and an interface can be compared\nwithout a translation layer. Absent for a non-PCI interface.",
+															Type:        "array",
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "string",
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
+														},
+														"pciVendor": {
+															Description: "PciVendor and PciDevice are the raw hex PCI ids, deliberately not resolved to a model\nname: resolving one reads a host data file a minimal image may not carry, and a name\nthat resolves on one worker but not another is worse than a hex id that always does.",
+															Type:        "string",
+														},
+														"rdma": {
+															Description: "RDMA reports that an RDMA device is bound to this interface. It says nothing about\nwhether the link works — that is Link below, and the two differ on real hardware.",
+															Type:        "boolean",
+														},
+														"rdmaDevice": {
+															Description: "RDMADevice is the bound RDMA device's name. Empty when RDMA is false.",
+															Type:        "string",
+														},
+														"sriov": {
+															Description: "SRIOV reports that this interface is an SR-IOV physical function. It is a SEPARATE fact\nfrom the length of VirtualFunctions: \"a PF with zero VFs configured\" and \"not a PF at\nall\" are different states, and deriving the second from an empty VF list collapses them.",
+															Type:        "boolean",
+														},
+														"up": {
+															Description: "Up reports the interface's operational state.",
+															Type:        "boolean",
+														},
+														"virtual": {
+															Description: "Virtual marks an interface with no device behind it (loopback, bridge, veth). Such an\ninterface is RECORDED AND MARKED, never dropped: a worker whose only interface is a\nbridge must read as \"one virtual interface\", not as \"no interfaces\".",
+															Type:        "boolean",
+														},
+														"virtualFunctions": {
+															Description: "VirtualFunctions are this physical function's virtual functions, NESTED here rather\nthan listed as siblings: a PF with eight VFs is one entry with eight nested, never nine\ntop-level entries. Ordered by bus id, so two consecutive reads are byte-identical.",
+															Type:        "array",
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"name",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"cpuAffinity": {
+																			Description: "CpuAffinity is the CPU cores close to the virtual function. Empty means unknown.",
+																			Type:        "string",
+																		},
+																		"link": {
+																			Description: "Link is the result of verifying this virtual function's RDMA link. Nil when there is no\nRDMA link to verify.",
+																			Type:        "object",
+																			Required: []string{
+																				"state",
+																			},
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"firstSeenTime": {
+																					Description: "FirstSeenTime is when an ONGOING FAILED state was first observed. It is stable across\npasses for as long as the failure persists, and is cleared the moment the state is\nanything else. Refreshing it every pass would make \"how long has this been down?\"\nunanswerable, which is the question the field exists to answer.\nNil for both other states, `unverified` included: a state that reached no verdict has no\noutage for a clock to be the start of, so this is not \"the current non-ok state\" but\nspecifically the failed one.",
+																					Type:        "string",
+																					Format:      "date-time",
+																					Nullable:    true,
+																				},
+																				"reason": {
+																					Description: "Reason carries the checker's own words, verbatim — including the attribute values it\nread. A non-ok state without a reason leaves the operator's actual question (\"why?\")\nunanswerable from the record alone.",
+																					Type:        "string",
+																				},
+																				"state": {
+																					Description: "State is the verification outcome.",
+																					Type:        "string",
+																				},
+																			},
+																			Nullable: true,
+																		},
+																		"mtu": {
+																			Description: "MTU is the link MTU. Zero means it was not read. See DeviceInterface.MTU.",
+																			Type:        "integer",
+																			Format:      "int32",
+																		},
+																		"name": {
+																			Description: "Name is the kernel interface name of the virtual function.",
+																			Type:        "string",
+																		},
+																		"numaAffinity": {
+																			Description: "NumaAffinity is the NUMA node the virtual function is attached to. Empty means unknown.",
+																			Type:        "string",
+																		},
+																		"pciBusId": {
+																			Description: "PciBusID is the PCI bus ID of the virtual function, which is what distinguishes it from\nits siblings and from its parent.",
+																			Type:        "string",
+																		},
+																		"rdma": {
+																			Description: "RDMA reports that an RDMA device is bound to this virtual function.",
+																			Type:        "boolean",
+																		},
+																		"rdmaDevice": {
+																			Description: "RDMADevice is the bound RDMA device's name. Empty when RDMA is false.",
+																			Type:        "string",
+																		},
+																		"up": {
+																			Description: "Up reports the virtual function's operational state.",
+																			Type:        "boolean",
+																		},
+																	},
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"name",
 											},
 											XListType: ptr.To[string]("map"),
 										},
