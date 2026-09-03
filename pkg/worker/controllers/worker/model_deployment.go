@@ -293,6 +293,36 @@ func (r *ModelDeploymentReconciler) recordModelDeploymentDepartures(
 	}
 }
 
+// recordModelDeploymentRuntimeVersionSkew records that a role's pool disagrees on a runtime
+// version, and does so only for a role whose image the operator SYNTHESIZES.
+//
+// A role that states its own image is unaffected by the pool's version spread: the operator did not
+// choose that tag and the spread tells its owner nothing actionable. Emitting it anyway would train
+// readers to ignore the reason they need when the image IS synthesized.
+//
+// It fires on every pass while the disagreement lasts, which is deliberate. A driver rollout is a
+// standing condition rather than an edge, and the API server folds repeats of one
+// (object, reason, message) into a single event with a count -- so a standing warning stays visible
+// for as long as it is true instead of scrolling away, which is precisely what an operator
+// diagnosing an ImagePullBackOff hours later needs.
+func (r *ModelDeploymentReconciler) recordModelDeploymentRuntimeVersionSkew(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, instType *worker.InstanceType,
+) {
+	if r.Recorder == nil {
+		return
+	}
+	if role.Template != nil && role.Template.Image != "" {
+		return
+	}
+
+	message, ok := modelDeploymentRuntimeVersionSkew(role.Name, instType.Status.Detail)
+	if !ok {
+		return
+	}
+
+	r.Recorder.Event(md, core.EventTypeWarning, modelDeploymentEventRuntimeVersionSkew, message)
+}
+
 // syncModelDeploymentService converges the one Service the deployment is reached through.
 //
 // It aligns an existing Service rather than replacing it, because the allocated ClusterIP is state
@@ -342,6 +372,11 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 		if err != nil {
 			return nil, err
 		}
+
+		// Recorded here rather than in a pass of its own, because this is the one place that
+		// already holds both the role and its InstanceType: a second loop would read the same
+		// object again for a message.
+		r.recordModelDeploymentRuntimeVersionSkew(md, role, instType)
 
 		in := ModelDeploymentRenderInput{
 			Deployment:                 md,
@@ -500,7 +535,56 @@ func (r *ModelDeploymentReconciler) SetupController(_ context.Context, opts cont
 			&workercore.KVCachePoolBinding{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentBinding),
 		).
+		Watches(
+			// The InstanceType's OBSERVED detail is now an input to the rendered Pod: a role that
+			// names no image has one synthesized from the pool's accelerator runtime version, so a
+			// driver rollout changes the image every replica should be running. Without this watch
+			// that change would be picked up only when something else woke the deployment, and the
+			// spec-hash comparison would go on matching a Pod built from a version the pool no
+			// longer reports.
+			//
+			// No GenerationChangedPredicate here, and that is the point: what moves is the status,
+			// which does not bump the generation. The predicate on the primary object would filter
+			// out exactly the updates this watch exists for.
+			&worker.InstanceType{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentInstanceType),
+		).
 		Complete(r)
+}
+
+// mapModelDeploymentInstanceType enqueues every deployment with a role admitted against the type.
+//
+// The scan crosses namespaces, unlike the Binding's, and it has to: an InstanceType is
+// cluster-scoped, so the deployments referencing one are not confined to any namespace. The set
+// walked is every ModelDeployment on the cluster, which is bounded by how many a cluster has rather
+// than by how many nodes or Pods it runs.
+func (r *ModelDeploymentReconciler) mapModelDeploymentInstanceType(
+	ctx context.Context, obj ctrlcli.Object,
+) []ctrlreconcile.Request {
+	mdList := new(workercore.ModelDeploymentList)
+	if err := r.Client.List(ctx, mdList, ctrlclix.WithoutQuorum); err != nil {
+		ctrllog.FromContext(ctx).Error(err, "list model deployments for instance type",
+			"instance type", ctrlcli.ObjectKeyFromObject(obj))
+
+		return nil
+	}
+
+	var reqs []ctrlreconcile.Request
+	for i := range mdList.Items {
+		md := &mdList.Items[i]
+		for j := range md.Spec.Roles {
+			if md.Spec.Roles[j].InstanceType != obj.GetName() {
+				continue
+			}
+			reqs = append(reqs, ctrlreconcile.Request{
+				NamespacedName: ctrlcli.ObjectKeyFromObject(md),
+			})
+
+			break // one request per deployment, however many of its roles match
+		}
+	}
+
+	return reqs
 }
 
 // mapModelDeploymentBinding enqueues the deployments in a Binding's namespace that reference it.

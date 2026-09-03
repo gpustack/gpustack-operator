@@ -10,7 +10,9 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlrecord "k8s.io/client-go/tools/record"
 
+	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
 // TestModelDeploymentEvents_Departures walks every way a replica stops serving from the cache it
@@ -178,4 +180,147 @@ func TestModelDeploymentEvents_TheReconcilerLeavesReplicasObservableWhileTheyGo(
 	require.Len(t, writes.deleteGrace, 1)
 	assert.Nil(t, writes.deleteGrace[0],
 		"a replica deleted with no grace at all can be gone before any pass observes it leave")
+}
+
+// skewDetail is an observed detail reporting the given versions, with the published single value
+// taken from the list exactly as the reconciler takes it.
+//
+// It derives the single value rather than taking it as a second argument on purpose: a fixture that
+// let a case state them independently could set up a state the aggregation cannot produce, and a
+// test passing against an impossible input proves nothing about the real one.
+func skewDetail(versions ...string) workercore.InstanceTypeDetail {
+	d := workercore.InstanceTypeDetail{
+		Manufacturer: nodefeature.ManufacturerNVIDIA,
+		InstanceTypeAcceleratorDetail: workercore.InstanceTypeAcceleratorDetail{
+			RuntimeVersions: versions,
+		},
+	}
+	if len(versions) > 0 {
+		d.RuntimeVersion = versions[0]
+	}
+
+	return d
+}
+
+func TestModelDeploymentRuntimeVersionSkew(t *testing.T) {
+	testCases := []struct {
+		name     string
+		detail   workercore.InstanceTypeDetail
+		wantSkew bool
+		contains []string
+		why      string
+	}{
+		{
+			name:     "a pool that agrees says nothing",
+			detail:   skewDetail("12.9"),
+			wantSkew: false,
+			why:      "one version is the normal state; warning about it would train readers to ignore this",
+		},
+		{
+			name:     "nothing observed says nothing",
+			detail:   skewDetail(),
+			wantSkew: false,
+			why:      "an unconverged detail is a wait, and there is no value to report yet",
+		},
+		{
+			name:     "a disagreeing pool names the value taken and the ones skipped",
+			detail:   skewDetail("12.4", "12.9"),
+			wantSkew: true,
+			// EACH SUBSTRING IS ANCHORED SO THAT ONLY ONE SOURCE CAN PRODUCE IT. A bare "12.4"
+			// would not do: it appears both as the version chosen and inside the full list, so an
+			// implementation that dropped the chosen value would still satisfy it. "runtime
+			// version 12.4," can only come from the first position, and the parenthesised list only
+			// from the join.
+			contains: []string{`role "server"`, "runtime version 12.4,", "the lowest of 2", "(12.4, 12.9)"},
+			why: "either half alone leaves the operator guessing which end of the range to act on, " +
+				"and the taken value is what the image was actually built from",
+		},
+		{
+			name:     "three versions",
+			detail:   skewDetail("12.4", "12.8", "12.9"),
+			wantSkew: true,
+			contains: []string{"runtime version 12.4,", "the lowest of 3", "(12.4, 12.8, 12.9)"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			message, ok := modelDeploymentRuntimeVersionSkew("server", tc.detail)
+			assert.Equal(t, tc.wantSkew, ok, tc.why)
+			if !tc.wantSkew {
+				assert.Empty(t, message, "no skew renders no message")
+
+				return
+			}
+			for _, want := range tc.contains {
+				assert.Contains(t, message, want, tc.why)
+			}
+		})
+	}
+}
+
+// TestRecordModelDeploymentRuntimeVersionSkew covers the gate the pure function above cannot: the
+// event is for a role whose image the OPERATOR chose, and a role that stated its own image is
+// unaffected by the pool's version spread.
+func TestRecordModelDeploymentRuntimeVersionSkew(t *testing.T) {
+	testCases := []struct {
+		name      string
+		image     string
+		versions  []string
+		wantEvent bool
+		why       string
+	}{
+		{
+			name:      "synthesized image on a disagreeing pool warns",
+			image:     "",
+			versions:  []string{"12.4", "12.9"},
+			wantEvent: true,
+			why:       "this is the case where the operator picked the version, so it owes the reason",
+		},
+		{
+			name:      "a stated image on the same pool is silent",
+			image:     "my-registry/vllm:custom",
+			versions:  []string{"12.4", "12.9"},
+			wantEvent: false,
+			why: "the operator did not choose that tag, so the spread tells its owner nothing " +
+				"actionable -- and a warning that is usually noise gets ignored when it is not",
+		},
+		{
+			name:      "synthesized image on an agreeing pool is silent",
+			image:     "",
+			versions:  []string{"12.9"},
+			wantEvent: false,
+			why:       "the gate is the disagreement, not the synthesis",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := ctrlrecord.NewFakeRecorder(8)
+			r := &ModelDeploymentReconciler{Recorder: recorder}
+
+			md := &workercore.ModelDeployment{
+				ObjectMeta: meta.ObjectMeta{Name: "qwen-72b", Namespace: "team-a"},
+			}
+			role := &workercore.ModelDeploymentRole{Name: "server"}
+			if tc.image != "" {
+				role.Template = &workercore.InstanceTemplate{Image: tc.image}
+			}
+			it := &worker.InstanceType{
+				Status: workercore.InstanceTypeStatus{Detail: skewDetail(tc.versions...)},
+			}
+
+			r.recordModelDeploymentRuntimeVersionSkew(md, role, it)
+
+			events := drainEvents(recorder)
+			if !tc.wantEvent {
+				assert.Empty(t, events, tc.why)
+
+				return
+			}
+			require.Len(t, events, 1, tc.why)
+			assert.Contains(t, events[0], "Warning")
+			assert.Contains(t, events[0], modelDeploymentEventRuntimeVersionSkew)
+		})
+	}
 }

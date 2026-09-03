@@ -52,7 +52,15 @@ func newRenderInstanceType(mutate ...func(*worker.InstanceType)) *worker.Instanc
 			LocalStorage:  "512Gi",
 		},
 		Status: workercore.InstanceTypeStatus{
-			Detail: workercore.InstanceTypeDetail{Manufacturer: nodefeature.ManufacturerNVIDIA},
+			// The observed detail carries what image synthesis needs, so a role naming no image
+			// still renders. A case that wants the unsynthesizable path clears one of these.
+			Detail: workercore.InstanceTypeDetail{
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				InstanceTypeAcceleratorDetail: workercore.InstanceTypeAcceleratorDetail{
+					RuntimeVersion:  "12.9",
+					RuntimeVersions: []string{"12.9"},
+				},
+			},
 		},
 	}
 	for _, m := range mutate {
@@ -466,21 +474,71 @@ func TestRenderModelDeploymentPod_Ports(t *testing.T) {
 	assert.Equal(t, int32(9000), pod.Spec.Containers[0].Ports[0].ContainerPort)
 }
 
-// TestRenderModelDeploymentPod_RefusesARoleWithoutAnImage states the one thing the operator cannot
-// synthesize. It builds the argv but never the image, and there is no default engine image to fall
-// back to: rendering one would run something other than what the user asked for.
-func TestRenderModelDeploymentPod_RefusesARoleWithoutAnImage(t *testing.T) {
-	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Roles[0].Template = nil
+// TestRenderModelDeploymentPod_SynthesizesTheImage covers the role that names none.
+//
+// The operator used to refuse this outright, on the grounds that it builds the argv but never the
+// image. It now assembles one from the engine and the observed hardware -- but only when the
+// hardware HAS been observed, which is why the second case matters as much as the first: an
+// InstanceType whose detail has not converged must not produce a tag with a hole in it.
+func TestRenderModelDeploymentPod_SynthesizesTheImage(t *testing.T) {
+	t.Run("no template at all still renders", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Template = nil
+		})
+
+		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			Deployment:   md,
+			Role:         &md.Spec.Roles[0],
+			InstanceType: newRenderInstanceType(),
+		})
+		require.NoError(t, err, "a nil template is not an error once the image can be synthesized")
+		assert.Equal(t, "gpustack/runner:cuda12.9-vllm0.25.1", pod.Spec.Containers[0].Image)
 	})
 
-	_, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
-		Deployment:   md,
-		Role:         &md.Spec.Roles[0],
-		InstanceType: newRenderInstanceType(),
+	t.Run("a stated image wins over synthesis", func(t *testing.T) {
+		md := newRenderDeployment()
+		pod := renderOne(t, md, newRenderInstanceType())
+		assert.NotEqual(t, "gpustack/runner:cuda12.9-vllm0.25.1", pod.Spec.Containers[0].Image,
+			"synthesis must not overwrite a value the user stated")
 	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no template image")
+
+	t.Run("an unobserved runtime version refuses rather than rendering a hole", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Template = nil
+		})
+		it := newRenderInstanceType(func(it *worker.InstanceType) {
+			it.Status.Detail.RuntimeVersion = ""
+			it.Status.Detail.RuntimeVersions = nil
+		})
+
+		_, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			Deployment:   md,
+			Role:         &md.Spec.Roles[0],
+			InstanceType: it,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "names no image and none could be synthesized")
+		assert.Contains(t, err.Error(), "has not observed a runtime version yet",
+			"the reason has to distinguish a wait from a refusal, because only one of them resolves")
+	})
+
+	t.Run("a manufacturer with no runner backend refuses", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Template = nil
+		})
+		it := newRenderInstanceType(func(it *worker.InstanceType) {
+			it.Status.Detail.Manufacturer = nodefeature.ManufacturerCambricon
+		})
+
+		_, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			Deployment:   md,
+			Role:         &md.Spec.Roles[0],
+			InstanceType: it,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "has no runner backend",
+			"this one never resolves, so the message must name the manufacturer")
+	})
 }
 
 // TestRenderModelDeploymentPod_ClientConfigMount pins where the rendered client configuration is

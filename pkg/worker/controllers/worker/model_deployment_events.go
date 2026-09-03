@@ -2,8 +2,11 @@ package worker
 
 import (
 	"fmt"
+	"strings"
 
 	core "k8s.io/api/core/v1"
+
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
 
 const (
@@ -31,6 +34,10 @@ const (
 	modelDeploymentEventReplicaEvicted   = "ReplicaEvicted"
 	modelDeploymentEventReplicaLeaving   = "ReplicaLeaving"
 	modelDeploymentEventReplicaRestarted = "ReplicaRestarted"
+
+	// modelDeploymentEventRuntimeVersionSkew reports a pool whose nodes do not agree on an
+	// accelerator runtime version, which is what a driver rollout looks like while it runs.
+	modelDeploymentEventRuntimeVersionSkew = "RuntimeVersionSkew"
 )
 
 // modelDeploymentReplicaDeparture is one replica that has stopped serving from the cache it shared,
@@ -114,4 +121,34 @@ func modelDeploymentReplicaRestarts(pod *core.Pod) int32 {
 	}
 
 	return restarts
+}
+
+// modelDeploymentRuntimeVersionSkew describes a pool whose nodes disagree on a runtime version, or
+// reports false when they agree or when nothing was observed.
+//
+// IT EXISTS BECAUSE THE MINIMUM'S FAILURE MODE IS UNTRACEABLE WITHOUT IT. A synthesized image takes
+// the lowest version in the pool, since that is the only one every node can run and admission picks
+// the node after the image is fixed. When one un-upgraded node holds the pool back onto a version
+// the runner never published for the requested engine version, the user sees an ImagePullBackOff
+// with nothing pointing at the node responsible. This event is that pointer.
+//
+// It reads len() > 1 on the published list rather than re-deriving anything, which is why the list
+// is published at all: a consumer needs a length comparison, not a second copy of the aggregation.
+//
+// The message names the value taken AND the ones skipped, because either alone leaves the operator
+// guessing which end of the range to act on.
+func modelDeploymentRuntimeVersionSkew(
+	roleName string, detail workercore.InstanceTypeDetail,
+) (string, bool) {
+	if len(detail.RuntimeVersions) < 2 {
+		return "", false
+	}
+
+	return fmt.Sprintf(
+		"role %q builds its image from accelerator runtime version %s, the lowest of %d the pool "+
+			"reports (%s); the lowest is used because a workload's image is fixed before admission "+
+			"chooses its node, and only that version runs everywhere",
+		roleName, detail.RuntimeVersion, len(detail.RuntimeVersions),
+		strings.Join(detail.RuntimeVersions, ", "),
+	), true
 }

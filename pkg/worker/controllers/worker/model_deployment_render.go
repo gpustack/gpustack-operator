@@ -119,10 +119,25 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 	md, role := in.Deployment, in.Role
 
 	tmpl := role.Template
-	if tmpl == nil || tmpl.Image == "" {
-		// The operator builds the argv but never the image: there is no default engine image to
-		// fall back to, and inventing one would run something other than what the user asked for.
-		return nil, fmt.Errorf("role %q has no template image", role.Name)
+	if tmpl == nil {
+		// A role may name no template at all and still render, because the image can be
+		// synthesized. Every other template field then takes its zero value.
+		tmpl = new(workercore.InstanceTemplate)
+	}
+
+	// A STATED IMAGE ALWAYS WINS, and synthesis is the fallback rather than the rule: it is how a
+	// role runs a private build, a vendor with no published runner backend, or an Ascend family the
+	// matrix does not carry. The formula reads no release matrix, so it cannot know the tag it
+	// assembles was ever published - that is the accepted trade, and its failure is an
+	// ImagePullBackOff rather than a silent misconfiguration.
+	image := tmpl.Image
+	if image == "" {
+		synthesized, err := SynthesizeModelDeploymentImage(
+			md.Spec.Engine, md.Spec.EngineVersion, in.InstanceType.Status.Detail)
+		if err != nil {
+			return nil, fmt.Errorf("role %q names no image and none could be synthesized: %w", role.Name, err)
+		}
+		image = synthesized
 	}
 
 	ress, err := deriveModelDeploymentResources(role, in.InstanceType)
@@ -163,7 +178,7 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 
 	mainC := core.Container{
 		Name:            "main",
-		Image:           tmpl.Image,
+		Image:           image,
 		ImagePullPolicy: tmpl.ImagePullPolicy,
 		Command:         command,
 		Resources: getResourceRequirements(

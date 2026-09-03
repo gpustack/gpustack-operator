@@ -16,6 +16,7 @@ import (
 	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/systemmeta"
@@ -387,3 +388,51 @@ func TestModelDeploymentReconciler_MissingInstanceTypeIsRetried(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+// TestMapModelDeploymentInstanceType covers the watch that keeps a synthesized image current.
+//
+// NOTE ON WHAT THE CROSS-NAMESPACE CASE DOES NOT PROVE: an InstanceType is cluster-scoped, so
+// obj.GetNamespace() is empty, and a List scoped to that empty namespace is a List over all of
+// them. An implementation that copied the Binding mapper's InNamespace(obj.GetNamespace()) would
+// therefore pass a cross-namespace assertion by coincidence. The assertions that do discriminate
+// are the name filter and the per-deployment de-duplication.
+func TestMapModelDeploymentInstanceType(t *testing.T) {
+	matching := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Name = "matching"
+		md.Spec.Roles[0].InstanceType = "h20-8x"
+	})
+	otherNamespace := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Name = "elsewhere"
+		md.Namespace = "team-b"
+		md.Spec.Roles[0].InstanceType = "h20-8x"
+	})
+	otherType := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Name = "other-type"
+		md.Spec.Roles[0].InstanceType = "l4-1x"
+	})
+	// Two roles on the SAME type. The mapper must still enqueue one request: a duplicate is not
+	// wrong so much as it is a second full reconcile for nothing, and the loop that produces it is
+	// the easy thing to write.
+	twoRoles := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Name = "two-roles"
+		md.Spec.Roles[0].InstanceType = "h20-8x"
+		second := md.Spec.Roles[0]
+		second.Name = "decode"
+		md.Spec.Roles = append(md.Spec.Roles, second)
+	})
+
+	cli := newModelDeploymentClient(matching, otherNamespace, otherType, twoRoles)
+	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+
+	it := &worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: "h20-8x"}}
+	reqs := r.mapModelDeploymentInstanceType(context.Background(), it)
+
+	got := make([]string, 0, len(reqs))
+	for _, req := range reqs {
+		got = append(got, req.Namespace+"/"+req.Name)
+	}
+	slices.Sort(got)
+
+	assert.Equal(t, []string{"team-a/matching", "team-a/two-roles", "team-b/elsewhere"}, got,
+		"every deployment with a role on this type, once each, and none on another type")
+}
