@@ -999,6 +999,18 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
   replicas. `DomainRegistered` goes `False` with the Binding's reason, the Pods keep serving (F2),
   and the next reconcile converges. Waiting is the correct behaviour; punishing a Binding for a
   routine upgrade is not.
+- ⛔ **The connector needs the members' transport, and no namespaced object republishes it.** Three of
+  the four client keys have a source a `ModelDeployment` can read: `master_server_address` is the
+  pool's `status.clientEndpoint`, `metadata_server` is the literal `P2PHANDSHAKE` the metadata plane
+  takes unconditionally in this scope, and `device_name` has **no source at all** — the pool and the
+  backend APIs carry no RDMA device list, so it is empty and the client auto-discovers, which is the
+  right default on every transport that does not use one. `protocol` is the exception: it lives on
+  the cluster-scoped `KVCacheBackend` as `spec.transport.protocol`, and the pool publishes its client
+  endpoint and **nothing about the data plane**. The two ways out are for the deployment to read the
+  backend the pool names, or for the pool to republish the transport; the second keeps every read a
+  workload does inside one namespaced object, the first needs no cross-spec API change. Guessing is
+  not one of them: a client configured for a fabric the members are not on fails as a transfer error
+  one layer away from its cause. Resolving this is what the connector-wiring task waits on.
 - **Gate 3's "no flavor assignment" hold cannot reach a `ModelDeployment`, and the reason is a
   timing guarantee rather than a property of this CR.** The node-devices feasibility check is scoped
   per podset's assigned flavor, and it holds a demand whose podset carries no assignment. A reader
@@ -1143,6 +1155,7 @@ pkg/worker/controllers/
     model_deployment_binding.go        # poolRef resolution, the domain read (T3)
     model_deployment_render.go         # base Pod render + the three-tier merge (T5)
     model_deployment_connector.go      # per-engine synthesis + the owned-key table (T6)
+    model_deployment_config.go         # the client ConfigMap and the connector wiring (T14)
     model_deployment_service.go        # the Service and status.endpoint (T7)
     model_deployment_status.go         # phase, role readiness, the three conditions (T8, T9, T10)
 
@@ -1344,7 +1357,26 @@ truthful); after T13 (the headline claim is measured and recorded).
   `git diff pkg/worker/webhooks/worker/zz_generated.webhooks.go` shows the ModelDeployment
   registration **and nothing else**.
 
-- [ ] **T3 · Resolve `poolRef`, read the domain, own `DomainRegistered`**
+- [x] **T3 · Resolve `poolRef`, read the domain, own `DomainRegistered`**
+  Delivered: `pkg/worker/controllers/worker/model_deployment_binding.go` and its test; the reading
+  folds into `model_deployment_status.go`'s one compute function and the reconciler gained a watch on
+  `KVCachePoolBinding`.
+  **Beyond the acceptance below, and not optional:** the deployment writes itself into the Binding's
+  `status.usedBy`. That list's API declares `ModelDeployment` its **only** writer and the Binding's
+  finalizer refuses to release a Binding the list is not empty on — so until something writes it, the
+  refusal enforces over a list that is always empty, which is the harm it was built to prevent. The
+  acceptance below only presupposed the entry (it forbids *removing* it on a `False`); the writing was
+  never spelled out. Claimed on every pass that can read the Binding **including an unusable one**,
+  released only once the last replica has left.
+  Three reasons rather than two: `BindingDeleting` is its own, because it sends a reader somewhere
+  else entirely — find who deleted the authorization, rather than wait for it or look at the pool.
+  `status.kvCache` is **retained** when the Binding cannot be read at all, and a teardown pass passes
+  no reading rather than an empty one: the record of which cache the replicas are still writing into
+  is what the field exists for, and the condition is what says the reading is stale.
+  Usability reads **two** independent facts — the Binding's own phase and the `QuotaGranted` axis
+  directly — because each covers the other's failure mode: a copied axis list here would miss an axis
+  added later while still reporting usable, and the phase alone would miss a regression on the one
+  axis this spec was burned by.
   Blocked by: T1, **and the pool spec landing `KVCachePoolBinding` as a Go type**
   Owns: `pkg/worker/controllers/worker/model_deployment_binding.go` + its test
   Gate: the `KVCachePoolBinding` type compiles
@@ -1513,7 +1545,8 @@ truthful); after T13 (the headline claim is measured and recorded).
   Verify: `make lint docs`
 
 - [ ] **T12 · e2e: the functional cases**
-  Blocked by: T2, T5, T7, T9, T10
+  Blocked by: T2, T5, T7, T9, T10, **T14** — case-45's inference path and case-48's whole premise
+  need a connector that is actually rendered
   Owns: `.claude/skills/gpustack-operator-e2e/cases/case-45.sh`,
   `.claude/skills/gpustack-operator-e2e/cases/case-47.sh`,
   `.claude/skills/gpustack-operator-e2e/cases/case-48.sh`,
@@ -1545,6 +1578,29 @@ truthful); after T13 (the headline claim is measured and recorded).
   — are written into this spec's Test Plan, not left in a run log. A run that cannot record a number
   is not a pass.
   Verify: `bash cases/case-46.sh`, PASS, and the figures land in the Test Plan's measurement table
+
+- [ ] **T14 · Wire the synthesized connector into the replicas**
+  ⛔ **A task this list did not have, and its absence was load-bearing.** T6 delivers connector
+  synthesis as a pure function; T3 delivers the Binding resolution. **Nothing owned the hop between
+  them**, so the renderer is called with no connector at all: no engine argument, no config-path
+  variable, no ConfigMap. Every replica therefore runs with the cache unattached, which makes
+  `CacheAttached` unable to be `True` on a cluster however correct T9's predicate is, and makes
+  case-45, case-46 and case-48 unable to pass. It is numbered last rather than inserted at T7 so that
+  no existing task is renumbered; a task list is a DAG and this one's edges say where it belongs.
+  Blocked by: T3, T5, T6, **and the transport question in the Notes** — `protocol` has no namespaced
+  source, and that decision changes what this task reads.
+  Owns: `pkg/worker/controllers/worker/model_deployment_config.go` + its test; the render input's
+  `Connector`/`ClientConfigName` fill in `model_deployment.go`
+  Gate: the transport source decided
+  Acceptance: one ConfigMap per deployment, owned by it, carrying the selected engine's client JSON,
+  mounted read-only into every replica of every role, and the synthesized argument and config-path
+  variable reach the container through T5's merge. A role that took over the command line gets
+  **none** of it. Changing the pool endpoint or the domain re-renders the ConfigMap and the replicas
+  are recreated to pick it up, which is F10's recreate policy and is asserted by the spec-hash moving.
+  A deployment whose Binding cannot be resolved renders **no** connector rather than a partial one:
+  a client pointed at an address that does not answer is a worse failure than one that was never
+  configured, because the first looks like a cache miss.
+  Verify: `go test ./pkg/worker/controllers/worker/ -run 'ModelDeploymentConfig|ModelDeploymentRender'`
 
 ### Test Plan
 
