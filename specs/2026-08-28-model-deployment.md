@@ -1178,11 +1178,30 @@ Acceptance:
   `gpustack/runner:cann9.1-a3-vllm0.25.1`, exercising the one mapping that is not a lowercasing.
 - A role naming `template.image` explicitly renders that image, whatever the detail says.
 - A role on a `cambricon` pool, or an Ascend `910`/`310B` family, with no `template.image` is
-  **rejected by the validating webhook** naming the manufacturer or family, rather than rendering a
-  Pod with an empty image.
+  **refused at render time**, with a message naming the manufacturer or the family, rather than
+  rendering a Pod with an empty image.
+
+  **An earlier draft of this line said the validating webhook refuses it, and that would have been
+  a defect.** Admission reads the `InstanceType`'s *observed* detail, which is exactly the field
+  that has not converged when the type was just created — so a webhook refusing on it would reject
+  a perfectly valid deployment for losing a race with the InstanceType reconciler. The render path
+  has no such problem: it runs again on the next pass, so an unconverged detail is a wait rather
+  than a verdict. **The information a gate needs has to exist at the moment the gate runs**, and
+  here it does not.
+  ⇒ An admission-time check remains possible for the half that never converges (a manufacturer with
+  no backend), gated on the detail being populated at all. It is not built, because it duplicates a
+  refusal that already happens and its value is only in the error arriving sooner.
 - An `InstanceType` whose detail carries no `runtimeVersion` yet — a flavor not synced, a generic
   collapsed pool — renders no image and the role reports the reason; it does not render a tag with a
-  hole in it.
+  hole in it. The message distinguishes this from the manufacturer being unmapped, because **only
+  one of the two resolves on its own**.
+- **The pool's version disagreement produces a Warning Event on the `ModelDeployment`**, naming the
+  version used and the ones skipped, for a role whose image was synthesized and not for one that
+  stated its own.
+- **A change to the observed detail re-renders the replicas.** The controller watches
+  `InstanceType`, without a generation predicate, because what moves is the status: a driver rollout
+  changes the image every replica should be running, and the spec-hash comparison would otherwise go
+  on matching Pods built from a version the pool no longer reports.
 
 ### Verification
 
@@ -2036,12 +2055,29 @@ truthful); after T13 (the headline claim is measured and recorded).
     the same value in two packages.
   Verify: `go test ./pkg/worker/controllers/worker/ -run 'ModelDeploymentConfig|ModelDeploymentRender'`
 
-- [ ] **T15 · Aggregate the observed runtime version, then synthesize the image from it**
-  Blocked by: T5 — the three-tier merge is where a synthesized image has to lose to a stated one
+- [x] **T15 · Aggregate the observed runtime version, then synthesize the image from it**
+  Delivered in three commits: the `InstanceType` field and its aggregation; the full version list
+  that a Warning Event needs; and the synthesis itself with the event and the watch.
+  `pkg/worker/controllers/worker/model_deployment_image.go` holds both translation tables and the
+  formula; `instance_type.go` holds the aggregation; the event and the `InstanceType` watch are in
+  `model_deployment_events.go` and `model_deployment.go`.
+  **Two things this task's plan had wrong, both found by doing it:**
+  1. **Its stated dependency was on T5 alone, and it is also on T16** — the formula consumes
+     `spec.engineVersion`, which T16 adds. The execution order was T15's first commit, then T16,
+     then the rest of T15. **The edge is corrected here rather than only in what was executed**: a
+     DAG with a wrong edge sends the next person who schedules from it into the same wall, and they
+     will not know it has already been hit.
+  2. **Publishing only the minimum could not support the Warning Event it was paired with.** The
+     event has to name what was skipped, and a single value cannot. The full list was added, and
+     with it the invariant that the single value is the list's first element — held by construction
+     (one sorted list, one assignment) rather than by a rule someone has to remember.
+  Blocked by: T5 — the three-tier merge is where a synthesized image has to lose to a stated one —
+  **and T16**, for `spec.engineVersion`
   Owns: `api/worker/v1alpha1/instance_type.go` (one new observed field),
   `pkg/worker/controllers/worker/instance_type.go` (the aggregation),
   `pkg/worker/controllers/worker/model_deployment_image.go` + its test,
-  and one event reason in `pkg/worker/controllers/worker/model_deployment_events.go`
+  one event reason in `pkg/worker/controllers/worker/model_deployment_events.go`, and the
+  `InstanceType` watch plus its mapper in `pkg/worker/controllers/worker/model_deployment.go`
   Gate: none — both sources already exist (`Devices.Groups[].RuntimeVersion`, and the manufacturer
   and family already on `InstanceTypeDetail`)
   **Two commits, and the split is a requirement rather than tidiness:** the `InstanceType` field is a
@@ -2055,7 +2091,8 @@ truthful); after T13 (the headline claim is measured and recorded).
   that reads like a version of `""`. A role whose `InstanceType` has no `runtimeVersion` renders no
   image and says why; a role naming `template.image` gets it verbatim and synthesis does not run; a
   role on a manufacturer with no runner backend (`cambricon`) or an Ascend family with no published
-  variant (`910`, `310B`) is refused by the validating webhook naming the manufacturer or the family.
+  variant (`910`, `310B`) is refused **at render time** naming the manufacturer or the family — not
+  by the webhook, which cannot read a status that has not converged yet (F11 states why).
   The mapping tables are data, not a `strings.ToLower` call — `910C` maps to `a3`, and **a test that
   passes with a lowercasing implementation is not testing the table**, so each row is pinned as a
   literal. `cambricon` and the unmapped Ascend families are **refused**, not rendered with an empty
@@ -2069,7 +2106,15 @@ truthful); after T13 (the headline claim is measured and recorded).
   Verify: `go test ./pkg/worker/controllers/worker/ -run 'ModelDeploymentImage|InstanceTypeDetail'`,
   plus a case asserting the event fires on a mixed pool and **does not** fire on a uniform one
 
-- [ ] **T16 · Narrow the engine enum onto the dimension the connector actually varies with**
+- [x] **T16 · Narrow the engine enum onto the dimension the connector actually varies with**
+  Delivered: `spec.engine` is `{vllm, sglang}`, `spec.engineVersion` is added, and connector
+  selection takes `(engine, manufacturer)`.
+  **The ownership table became the evidence for the whole change.** One entry now covers the vLLM
+  family on every backend — and when it had two, their values were *identical*, because owned keys
+  follow the engine while only the connector name follows the backend. The invariant test that
+  reads the renderer's real output runs over all three `(engine, backend)` pairs, so a key the
+  Ascend backend renders that is missing from vLLM's entry fails there. **The table no longer has to
+  be remembered; it reddens on its own.**
   Blocked by: T15's first commit only, to keep two API-plus-generate changes off each other
   Owns: `api/worker/v1alpha1/model_deployment.go` (the enum and the new `engineVersion`),
   `pkg/worker/webhooks/worker/model_deployment.go`,
