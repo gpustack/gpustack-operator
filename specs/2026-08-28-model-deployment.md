@@ -418,16 +418,39 @@ environment variable is `MOONCAKE_DEVICE`. This spec renders the engines' JSON, 
 is the spelling that matters here; the other two are recorded because the same fact under three
 names is how a reader concludes one of them is a typo.
 
-⚠️ **`vllm` alone has a `mode` key with a cross-field rule**: `embedded` requires
-`global_segment_size > 0` and `standalone-store` requires it to be exactly `0`. Since the operator
-does not choose segment sizes (below), it does not choose `mode` either — it renders neither, and
-lets that reader's defaults agree with each other.
+⛔ **These two keys DECLARE A ROLE, and this spec had it backwards.** It said they merely size a
+replica's contribution, that a wrong operator-chosen value would be a silent capacity error, and
+that the operator therefore renders neither — nor `mode`, whose cross-field rule couples to them.
+Measured in vLLM v0.25.1's own config class
+(`.../mooncake/store/worker.py`: `DEFAULT_GLOBAL_SEGMENT_SIZE` and `DEFAULT_LOCAL_BUFFER_SIZE` are
+both **4 GiB**, `mode` defaults to **`embedded`**, and `__post_init__` requires a positive global
+segment in embedded mode):
 
-**What the operator does not choose.** `global_segment_size` and `local_buffer_size` size a
-replica's own contribution to the pool. The operator leaves them at the client's defaults and does
-not invent values for them: a wrong operator-chosen value is a silent capacity error, and the append
-tier exists exactly so a user can set a fast-moving client knob without a spec change. They are
-therefore **not** owned keys (F5).
+| `global_segment_size` | role the engine rank takes |
+|---|---|
+| `> 0` (the default) | an **in-process store member** contributing that much memory |
+| `0` (requires `mode: standalone-store` on `vllm`) | a **pure client**, which is what this design wants — S3 runs the members |
+
+⇒ **Rendering nothing is not "leaving it to the client's defaults"; it is choosing the wrong role.**
+Every engine Pod becomes a 4 GiB store member. And the two omissions fail in opposite directions,
+which is why the mistake survives: `global_segment_size: 0` with no `mode` **raises** and is caught
+immediately, while omitting both **does not raise** and is silent.
+
+⭐ The old reasoning was right about the coupling and wrong about the conclusion: a cross-field pair
+is dangerous **when split**, which argues for rendering the whole coherent group rather than none of
+it. The group is per engine, because the readers differ: `vllm` needs the triple
+(`mode: standalone-store`, `global_segment_size: 0`, `local_buffer_size > 0`); `vllm-ascend` has no
+`mode` field, so it needs the pair; `sglang` has no `mode` either and additionally divides the global
+segment by its TP factor (`.../mooncake_store/mooncake_store.py:295`), so a value is not portable
+across the three.
+
+The fix lands with the connector-wiring task, in the shared `pkg/worker/kvcache/inject` package that
+owns this rendering across specs — not here, and not twice. Until then the renderer's own test pins
+the omission and **names it a defect** rather than a decision, so the fix is noticed as a change.
+
+⚠️ One link is deliberately still open: whether Mooncake's C++ `setup()` accepts
+`global_segment_size == 0` at all. All three engines only pass the value down, so acceptance is
+decided one layer below them, and the package that owns the rendering is where that gets measured.
 
 **The per-vendor client is an image concern, not a pool concern.** Per-vendor client wheels exist and
 are versioned in lockstep (all at 0.3.13 when measured): `mooncake-transfer-engine` (base, a CUDA 12
@@ -1490,13 +1513,17 @@ truthful); after T13 (the headline claim is measured and recorded).
   carries exactly the keys the selected engine's own reader reads and no others** — the three key
   sets differ, and rendering a key an engine ignores documents a wiring that is not happening. The
   device list is the JSON's `device_name`, not `setup()`'s `rdma_devices` nor Mooncake's
-  `MOONCAKE_DEVICE`. It sets **neither** `global_segment_size` **nor** `local_buffer_size` — a test
-  asserts their absence, because the operator inventing them is a silent capacity error — and for
-  `vllm` therefore no `mode` either, so that reader's own defaults stay consistent. It sets
-  **no `local_hostname`** (every engine derives it per process) and **no `tenant_id`** (unreachable
-  on all three, F4), each absence asserted by a test that carries its reason. `MC_TE_METRIC=1` is
-  set as a **defaulted** key. The JSON is rendered into one deployment-owned ConfigMap mounted
-  read-only into every replica.
+  `MOONCAKE_DEVICE`. It sets **no `local_hostname`** (every engine derives it per process) and
+  **no `tenant_id`** (unreachable on all three, F4), each absence asserted by a test that carries its
+  reason. `MC_TE_METRIC=1` is set as a **defaulted** key. The JSON is rendered into one
+  deployment-owned ConfigMap mounted read-only into every replica.
+  ⛔ **This acceptance also said it sets neither `global_segment_size` nor `local_buffer_size` nor
+  `mode`, "because the operator inventing them is a silent capacity error". That reason is
+  backwards** — the group declares a ROLE, and omitting it makes every engine Pod a 4 GiB in-process
+  store member instead of a pure client (F4 carries the measurement). The delivered renderer has the
+  defect; its test now pins the omission and **names it a defect** rather than a decision, so the fix
+  is noticed as a change rather than slipping in. The fix itself lands with the connector-wiring task,
+  in the shared package that owns this rendering across specs.
   Verify: `go test ./pkg/worker/controllers/worker/ -run ModelDeploymentConnector`
 
 - [x] **T7 · One Service, one endpoint**
@@ -1647,11 +1674,11 @@ truthful); after T13 (the headline claim is measured and recorded).
   `CacheAttached` unable to be `True` on a cluster however correct T9's predicate is, and makes
   case-45, case-46 and case-48 unable to pass. It is numbered last rather than inserted at T7 so that
   no existing task is renumbered; a task list is a DAG and this one's edges say where it belongs.
-  Blocked by: T3, T5, T6, **and the transport question in the Notes** — `protocol` has no namespaced
-  source, and that decision changes what this task reads.
+  Blocked by: T3, T5, T6, **and `pkg/worker/kvcache/inject` existing** — see the ownership rule
+  below.
   Owns: `pkg/worker/controllers/worker/model_deployment_config.go` + its test; the render input's
   `Connector`/`ClientConfigName` fill in `model_deployment.go`
-  Gate: the transport source decided
+  Gate: the shared rendering package exists
   Acceptance: one ConfigMap per deployment, owned by it, carrying the selected engine's client JSON,
   mounted read-only into every replica of every role, and the synthesized argument and config-path
   variable reach the container through T5's merge. A role that took over the command line gets
@@ -1660,6 +1687,30 @@ truthful); after T13 (the headline claim is measured and recorded).
   A deployment whose Binding cannot be resolved renders **no** connector rather than a partial one:
   a client pointed at an address that does not answer is a worse failure than one that was never
   configured, because the first looks like a cache miss.
+
+  ⛔ **The client JSON is rendered by `pkg/worker/kvcache/inject`, which is its sole owner across
+  specs, and this task DELETES the copy in `model_deployment_connector.go`.** Two specs were about to
+  render the same configuration — an injection webhook and this CR — and the alternative on the table
+  was an equivalence test between them. A test *distinguishes* divergence; one implementation
+  *eliminates* it, and the risk here is two client behaviours on one pool, which is not something to
+  guard with a test. The gap has the same shape as the one this task exists for: nothing owned the
+  hop between synthesis and the renderer here, and nothing owned *the rendering itself* across specs.
+  ⇒ If the package is not there when this task starts, coordinate rather than writing a second copy
+  "to merge later".
+
+  Three things the shared renderer has to get right, each measured rather than assumed:
+  - **The pure-client group**, per engine, as F4 records it. A `local_buffer_size` of **128 MiB** is
+    the documented client staging size (the store's own `setup` example spells
+    `128*1024*1024 # local_buffer_size (128MB)`, described as short-lived client-side staging), not a
+    number picked for looking small.
+  - **`protocol` comes from `mooncake.MemberProtocol(kvcb)`**, never from reading
+    `spec.transport.protocol` here. That function already falls back to `Auto` for an empty value
+    (`member_workload.go:142-152`, because the artifact looks the protocol up in a transport map and
+    an empty string finds nothing) — so a second parser would not merely risk drifting, it would
+    start out missing that fallback.
+  - **`metadata_server` has exactly one definition.** It is the literal `P2PHANDSHAKE`, which this
+    scope's metadata plane takes unconditionally; after the merge there must not be two constants of
+    the same value in two packages.
   Verify: `go test ./pkg/worker/controllers/worker/ -run 'ModelDeploymentConfig|ModelDeploymentRender'`
 
 ### Test Plan
@@ -1740,8 +1791,9 @@ accepted bad spec is worse than a refusal.
 | `device_json_key` | any engine | the device list is the JSON's `device_name`, never `rdma_devices` or `MOONCAKE_DEVICE` — the two spellings the other surfaces use |
 | `no_local_hostname` | any engine | `local_hostname` is **absent**; the engine derives it per process and one file cannot hold a per-replica value |
 | `no_tenant_id` | any engine | `tenant_id` is **absent**, because no supported engine passes it to `setup()`; the test states the reason so its deletion is deliberate |
-| `no_segment_sizes` | any engine | `global_segment_size` and `local_buffer_size` are **absent** |
-| `no_mode_for_vllm` | engine `vllm` | `mode` is **absent**, so its cross-field rule against the segment size cannot be violated by an operator-chosen half |
+| `no_segment_sizes` | any engine | ⛔ **pins a defect, not a decision**: both keys are absent today, which makes the rank a 4 GiB store member. The case carries `KNOWN DEFECT` in its reason and is deleted by the connector-wiring task |
+| `no_mode_for_vllm` | engine `vllm` | ⛔ **pins the same defect**: `mode` is absent, which leaves vLLM's default of `embedded` — the half that makes the omission silent instead of raising |
+| `pure_client_group_after_the_fix` | each engine | the coherent group is rendered per engine: `vllm` gets `mode: standalone-store` + `global_segment_size: 0` + a positive `local_buffer_size`; `vllm-ascend` the pair without `mode`; `sglang` the pair, with its TP division noted |
 | `config_path_env_per_engine` | each engine | `vllm`/`vllm-ascend` get `MOONCAKE_CONFIG_PATH`, `sglang` gets `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` |
 | `mc_te_metric_default` | user set nothing | `MC_TE_METRIC=1` present |
 | `mc_te_metric_user_off` | user set `MC_TE_METRIC=0` | the user's value, no duplicate entry |
