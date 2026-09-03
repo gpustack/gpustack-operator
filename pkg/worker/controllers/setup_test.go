@@ -14,3 +14,13 @@ import (
 func TestSetupsCarryTheKVCachePoolReconciler(t *testing.T) {
 	assert.NotNil(t, Get[*worker.KVCachePoolReconciler]())
 }
+
+// TestSetup_ModelDeploymentIsRegistered guards the wiring rather than the behavior.
+//
+// A reconciler that is written but never added to this list compiles, passes every one of its own
+// unit tests, and does nothing at all on a cluster — the ModelDeployment objects a user creates
+// would simply sit there. Nothing else in the build catches that, so it is asserted here, against
+// the registry itself rather than against a copy of it.
+func TestSetup_ModelDeploymentIsRegistered(t *testing.T) {
+	assert.NotNil(t, Get[*worker.ModelDeploymentReconciler]())
+}

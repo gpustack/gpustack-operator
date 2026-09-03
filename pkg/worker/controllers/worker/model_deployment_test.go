@@ -1,0 +1,342 @@
+package worker
+
+import (
+	"context"
+	"slices"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	core "k8s.io/api/core/v1"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/systemmeta"
+)
+
+func newModelDeploymentClient(objs ...ctrlcli.Object) ctrlcli.Client {
+	return ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithStatusSubresource(&workercore.ModelDeployment{}).
+		WithObjects(objs...).
+		Build()
+}
+
+// modelDeploymentWrites counts every write a reconcile pass issues, so "issues no writes" can be
+// asserted as the absence of a call rather than inferred from state that happens to look unchanged.
+// A fake client renumbers a recreated object from one, so resource versions cannot tell a pass that
+// wrote nothing from one that deleted and rebuilt everything.
+type modelDeploymentWrites struct {
+	creates, updates, deletes int
+}
+
+func newCountingModelDeploymentClient(w *modelDeploymentWrites, objs ...ctrlcli.Object) ctrlcli.Client {
+	return ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithStatusSubresource(&workercore.ModelDeployment{}).
+		WithObjects(objs...).
+		WithInterceptorFuncs(ctrlinterceptor.Funcs{
+			Create: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.CreateOption) error {
+				w.creates++
+				return c.Create(ctx, obj, opts...)
+			},
+			Update: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.UpdateOption) error {
+				w.updates++
+				return c.Update(ctx, obj, opts...)
+			},
+			Delete: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.DeleteOption) error {
+				w.deletes++
+				return c.Delete(ctx, obj, opts...)
+			},
+		}).
+		Build()
+}
+
+func reconcileModelDeployment(t *testing.T, cli ctrlcli.Client) (ctrl.Result, error) {
+	t.Helper()
+
+	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+
+	return r.Reconcile(context.Background(), ctrlreconcile.Request{
+		NamespacedName: ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"},
+	})
+}
+
+// replicaNames lists the replicas the deployment owns, sorted, so a case can state the whole set it
+// expects rather than probing for the names it happens to think of.
+func replicaNames(t *testing.T, cli ctrlcli.Client) []string {
+	t.Helper()
+
+	podList := new(core.PodList)
+	require.NoError(t, cli.List(context.Background(), podList, ctrlcli.InNamespace("team-a")))
+
+	names := make([]string, 0, len(podList.Items))
+	for i := range podList.Items {
+		names = append(names, podList.Items[i].Name)
+	}
+	slices.Sort(names)
+
+	return names
+}
+
+// replicaHashes reads back the fingerprint each running replica was built from, which is what a
+// rollout actually moves.
+func replicaHashes(t *testing.T, cli ctrlcli.Client) map[string]string {
+	t.Helper()
+
+	podList := new(core.PodList)
+	require.NoError(t, cli.List(context.Background(), podList, ctrlcli.InNamespace("team-a")))
+
+	hashes := make(map[string]string, len(podList.Items))
+	for i := range podList.Items {
+		hashes[podList.Items[i].Name] = podList.Items[i].Annotations[modelDeploymentPodSpecHashAnnotation]
+	}
+
+	return hashes
+}
+
+func getModelDeployment(t *testing.T, cli ctrlcli.Client) *workercore.ModelDeployment {
+	t.Helper()
+
+	md := new(workercore.ModelDeployment)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}, md))
+
+	return md
+}
+
+// TestModelDeploymentReconciler_RendersOnePodPerReplica is the shape of the whole feature: N
+// replicas of one role, each an ordinary Pod the existing admission chain already knows how to
+// handle, and no Instance anywhere.
+func TestModelDeploymentReconciler_RendersOnePodPerReplica(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 4
+	})
+	cli := newModelDeploymentClient(md, newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.Equal(t,
+		[]string{"qwen-server-0", "qwen-server-1", "qwen-server-2", "qwen-server-3"},
+		replicaNames(t, cli))
+
+	instList := new(workercore.InstanceList)
+	require.NoError(t, cli.List(context.Background(), instList))
+	assert.Empty(t, instList.Items, "a ModelDeployment renders Pods directly and creates no Instance")
+}
+
+// TestModelDeploymentReconciler_SecondPassWritesNothing is what makes a level-based controller safe
+// to run on every Pod event. A pass that rewrote its own output would restart every replica each
+// time any of them changed.
+func TestModelDeploymentReconciler_SecondPassWritesNothing(t *testing.T) {
+	writes := new(modelDeploymentWrites)
+	cli := newCountingModelDeploymentClient(writes, newRenderDeployment(), newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaNames(t, cli), 2)
+	require.Equal(t, 2, writes.creates, "the first pass creates the replicas")
+	require.Equal(t, 1, writes.updates, "and adds the finalizer")
+
+	*writes = modelDeploymentWrites{}
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.Equal(t, modelDeploymentWrites{}, *writes,
+		"an unchanged spec must issue no create, no update and no delete at all")
+}
+
+// TestModelDeploymentReconciler_RecreatesADeletedReplica states the difference between converging
+// and executing a workflow: the desired state is re-derived from the spec on every pass, so a
+// replica removed by anything at all comes back under the name it had.
+func TestModelDeploymentReconciler_RecreatesADeletedReplica(t *testing.T) {
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	gone := &core.Pod{ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen-server-1"}}
+	require.NoError(t, cli.Delete(context.Background(), gone))
+	require.Equal(t, []string{"qwen-server-0"}, replicaNames(t, cli))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"qwen-server-0", "qwen-server-1"}, replicaNames(t, cli))
+}
+
+// TestModelDeploymentReconciler_ScaleDownRemovesTheHighestOrdinals pins why the ordinal is in the
+// name. Which replicas to remove is decidable from the spec alone, so a scale down does not have to
+// choose between Pods that look alike.
+func TestModelDeploymentReconciler_ScaleDownRemovesTheHighestOrdinals(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 4 })
+	cli := newModelDeploymentClient(md, newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaNames(t, cli), 4)
+
+	scaled := getModelDeployment(t, cli)
+	scaled.Spec.Roles[0].Replicas = 2
+	require.NoError(t, cli.Update(context.Background(), scaled))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"qwen-server-0", "qwen-server-1"}, replicaNames(t, cli))
+}
+
+// TestModelDeploymentReconciler_RecreatesOnASpecChange covers the rollout policy: recreate, no
+// surge. The replica is deleted on the pass that notices the difference and rebuilt by the pass that
+// notices its absence, so the fingerprint on the new one is the current spec's.
+func TestModelDeploymentReconciler_RecreatesOnASpecChange(t *testing.T) {
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	before := replicaHashes(t, cli)
+	require.Len(t, before, 2)
+
+	changed := getModelDeployment(t, cli)
+	changed.Spec.Roles[0].Template.Image = "vllm/vllm-openai:v0.26.0"
+	require.NoError(t, cli.Update(context.Background(), changed))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Empty(t, replicaNames(t, cli), "an outdated replica is deleted rather than patched in place")
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Len(t, replicaNames(t, cli), 2)
+
+	after := replicaHashes(t, cli)
+	for name := range before {
+		assert.NotEqual(t, before[name], after[name],
+			"%s must be built from the new spec, not carry the old fingerprint", name)
+	}
+
+	podList := new(core.PodList)
+	require.NoError(t, cli.List(context.Background(), podList, ctrlcli.InNamespace("team-a")))
+	for i := range podList.Items {
+		assert.Equal(t, "vllm/vllm-openai:v0.26.0", podList.Items[i].Spec.Containers[0].Image)
+	}
+}
+
+// TestModelDeploymentReconciler_LocksBeforeRendering pins the ordering the teardown depends on. The
+// finalizer has to be on the object before the first replica exists, or a deployment deleted
+// moments after creation would leave replicas holding accelerators nothing accounts for.
+func TestModelDeploymentReconciler_LocksBeforeRendering(t *testing.T) {
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.True(t, systemmeta.IsLocked(getModelDeployment(t, cli)))
+}
+
+// TestModelDeploymentReconciler_TeardownHoldsTheFinalizerUntilTheReplicasAreGone is the whole reason
+// the finalizer exists. Releasing it as soon as the deletes are issued would let the object vanish
+// while its replicas still run.
+func TestModelDeploymentReconciler_TeardownHoldsTheFinalizerUntilTheReplicasAreGone(t *testing.T) {
+	md := newRenderDeployment()
+	md.Finalizers = []string{systemmeta.LockedResourceFinalizer}
+	now := meta.Now()
+	md.DeletionTimestamp = &now
+
+	pod := &core.Pod{ObjectMeta: meta.ObjectMeta{
+		Namespace: "team-a",
+		Name:      "qwen-server-0",
+		Labels: map[string]string{
+			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
+			modelDeploymentLabelKeyInstance: "qwen",
+		},
+		OwnerReferences: []meta.OwnerReference{{
+			APIVersion: workercore.SchemeGroupVersion.String(),
+			Kind:       "ModelDeployment",
+			Name:       "qwen",
+			UID:        md.UID,
+			Controller: boolPtr(true),
+		}},
+		Finalizers: []string{"test.gpustack.ai/hold"},
+	}}
+	systemmeta.NoteResource(pod, ModelDeploymentResourceType, nil)
+
+	cli := newModelDeploymentClient(md, pod, newRenderInstanceType())
+
+	res, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Positive(t, res.RequeueAfter, "a teardown with replicas still present must come back")
+	assert.True(t, systemmeta.IsLocked(getModelDeployment(t, cli)),
+		"the finalizer is held while a replica is still terminating")
+
+	held := new(core.Pod)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen-server-0"}, held))
+	assert.NotNil(t, held.DeletionTimestamp, "and the replica has been asked to go")
+
+	held.Finalizers = nil
+	require.NoError(t, cli.Update(context.Background(), held))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	remaining := new(workercore.ModelDeployment)
+	err = cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}, remaining)
+	assert.True(t, err != nil || !systemmeta.IsLocked(remaining),
+		"once the replicas are gone the finalizer is released")
+}
+
+// TestModelDeploymentReconciler_IgnoresAPodItDoesNotOwn is the guard against adopting the replicas
+// of a deployment that carried the same name and has since been recreated. Their controller
+// reference names a UID this object does not have, so they are neither counted nor deleted.
+func TestModelDeploymentReconciler_IgnoresAPodItDoesNotOwn(t *testing.T) {
+	stray := &core.Pod{ObjectMeta: meta.ObjectMeta{
+		Namespace: "team-a",
+		Name:      "qwen-server-0",
+		Labels: map[string]string{
+			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
+			modelDeploymentLabelKeyInstance: "qwen",
+		},
+		OwnerReferences: []meta.OwnerReference{{
+			APIVersion: workercore.SchemeGroupVersion.String(),
+			Kind:       "ModelDeployment",
+			Name:       "qwen",
+			UID:        "a-previous-incarnation",
+			Controller: boolPtr(true),
+		}},
+	}}
+
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(), stray)
+
+	// The name it occupies is one this deployment wants, so the create collides and the pass asks to
+	// come back rather than adopting it or reporting success.
+	res, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Positive(t, res.RequeueAfter)
+
+	kept := new(core.Pod)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen-server-0"}, kept))
+	assert.Equal(t, "a-previous-incarnation", string(kept.OwnerReferences[0].UID),
+		"a Pod this deployment does not own is left exactly as it was")
+}
+
+// TestModelDeploymentReconciler_MissingInstanceTypeIsRetried states that an unresolvable type is an
+// error rather than a Pod rendered without one. The type supplies the accelerator spelling and the
+// per-card resources the host request is derived from, so a replica rendered without it would ask
+// for something other than what the role declared.
+func TestModelDeploymentReconciler_MissingInstanceTypeIsRetried(t *testing.T) {
+	cli := newModelDeploymentClient(newRenderDeployment())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "instance type")
+	assert.Empty(t, replicaNames(t, cli), "and nothing is rendered in the meantime")
+}
+
+func boolPtr(b bool) *bool { return &b }
