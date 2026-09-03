@@ -25,7 +25,7 @@ The engine command line is the fastest-moving thing in the design, so it has a t
 hatch — append, overlay, take over — guarded by two webhook rules that refuse a silent merge on a
 key the operator owns and keep the scheduling scalars out of the template. And because a flag being
 accepted proves nothing about it being in effect, `CacheAttached` is judged on each replica's own
-engine reporting its connector initialized — never on the operator having rendered the flag, and
+engine accounting for its store operations — never on the operator having rendered the flag, and
 never on a figure a whole shared tenant contributes to.
 
 This spec delivers the **single-role** form. `roles` exists as a list and is validated as length 1;
@@ -685,33 +685,75 @@ bound. In the same project, a different undeclared build switch fails *loudly* �
 failure mode from another's**, so `CacheAttached` is judged on what is observed downstream of the
 engine, never on "we rendered the flag" and never on a log line echoing it back.
 
-The predicate is **the client having come up**, not cache traffic. A client that initialized answers
-for itself from connector init, before any request; cache traffic appears only under load. Judging on
-traffic would report a correctly attached but **idle** deployment as detached, which is a false alarm
-on the most common steady state there is.
+⛔ **The predicate this section originally named does not exist on any of the three engines, and
+that was measured.** It was "the client having come up", answering from connector init before any
+request. What the shipped artifacts actually publish:
 
+| engine | what it publishes about its KV connector | readable without traffic? |
+|---|---|---|
+| `vllm` `v0.25.1` | five `vllm:mooncake_store_operation_*` families (`.../mooncake/store/metrics.py:116,138,143,148,153`), **all labelled**; `.labels()` is reached only from `_get_metrics`, which is reached only from `observe()`, which returns at `metrics.py:177` on empty data | **no** |
+| `vllm-ascend` | **nothing** — the repository declares zero Prometheus metrics of its own | **no** |
+| `sglang` | `StorageMetricsCollector`'s counters, labelled and `.labels()`-ed only on the traffic path; `sglang:hicache_host_*` do appear at startup but prove only that the **host tier** is on, not that a remote store attached | **no** |
+
+A childless labelled counter *does* still emit `# HELP` and `# TYPE` on a direct registry
+(`prometheus_client` 0.26.0, measured with a control: one `.labels().inc()` is what adds a series),
+and the presence of that header would have been an init-time, per-replica, effect-not-echo signal.
+⛔ But vLLM exposes through `MultiProcessCollector` (`vllm/v1/metrics/prometheus.py:21-26` sets
+`PROMETHEUS_MULTIPROC_DIR` when unset, line 49 registers the collector), and that collector
+reconstructs metrics from the per-process `.db` files' samples: a metric with no samples writes no
+file, so the exposition is **empty** — measured, again with the control.
+
+⭐ **This section had already stated the rule that condemns its own signal.** It rejects the
+corroborating `blocks: 0` because "an observed `blocks: 0` is byte-identical to a detached one's" —
+and then chose a primary signal with exactly that shape. A discriminating requirement a spec sets
+for one of its signals applies to **all** of them, and the rule was in this same document before the
+signal was chosen. The constructive half matters as much: the answer is not to give up reporting,
+but to go and find a signal that *does* discriminate.
+
+So the reading is what the artifacts afford: **three values, and the third is not a negative.**
 Level-based, evaluated every reconcile:
 
 | State | Reason | When |
 |---|---|---|
 | `Unknown` | `Unmanaged` | the role took over the command line (F5) |
 | `Unknown` | `NoReplicaReady` | no replica has become Ready yet |
-| `Unknown` | `NoObservationAvailable` | neither signal below can be read at all |
-| `True` | `CacheActive` | a signal was observed |
-| `False` | `NoCacheActivity` | every replica has been Ready longer than the observation window and neither signal appeared |
+| `Unknown` | `NoObservationAvailable` | no replica gave an account, and the domain's figures are absent or an observed zero |
+| `True` | `CacheActive` | a replica reports **succeeding** store operations — or, weaker, the domain holds data |
+| `False` | `CacheOperationsFailing` | a replica reports store operations of which **none** succeeded |
+
+⛔ **`NoObservationAvailable` is `Unknown` because the state it would report has a nearer observer,
+not merely because the signal is missing.** A connector that cannot come up takes its replica with
+it — `vllm` raises without `MOONCAKE_CONFIG_PATH` — so that failure already appears as a replica
+that never becomes Ready, which `status.roles[].ready` reports. What is left under this reason is a
+deployment that is attached and idle, and reporting that as detached is the false alarm the whole
+section exists to avoid. Written the other way round — "we cannot measure it, so we say nothing" —
+it would be a defect; written this way it is a division of labour.
+
+⭐ **`CacheOperationsFailing` is the one state with no other observer at all**, which is why it
+survives as a `False` while the old `NoCacheActivity` does not. The engine is Ready, it is serving,
+and every store operation it attempts fails: `roles[].ready` says Ready, `QuotaReserved` says
+reserved, `DomainRegistered` says registered — the Binding is fine, the store is not. It is
+observable because the metric families carry a `status` label whose values are hardcoded as `"ok"`,
+`"error"` and `"partial_failure"` (six sites in `.../mooncake/store/worker.py`: 599, 688, 728, 906,
+928, 1507), so a replica that tried and failed publishes series nothing else publishes.
+
+There is therefore **no observation window**: the old `False` row needed one to tell a slow start
+from a permanent failure, and neither of the two rows that replaced it does. An absence is `Unknown`
+however long it lasts, and an observed failure is a fact on the pass that observes it.
 
 Two signals, in order:
 
-1. **Primary — the engine's own metrics endpoint, on a replica of this deployment, reports its KV
-   connector initialized.** It is scraped per replica at the Pod's own address. It has the three
-   properties the condition needs, and it is the only reachable signal that has all three:
+1. **Primary — the engine's own metrics endpoint, on a replica of this deployment, accounts for its
+   store operations.** It is scraped per replica at the Pod's own address, and it has two of the
+   three properties the condition wants:
    - **Attributable.** It is *this* replica answering about its own connector, so a sibling
      deployment sharing the same reuse domain cannot answer for it.
-   - **Available at init, without traffic.** Connector initialization happens when the engine comes
-     up, so an attached but idle deployment is not reported detached.
    - **An effect, not an echo.** A connector that failed to import its per-vendor wheel, or failed
-     to reach the master, does not report itself initialized — so the report is downstream of the
+     to reach the master, publishes no succeeding operation — so the report is downstream of the
      thing being judged, unlike a rendered flag or a log line repeating one back.
+   - ⛔ **NOT available without traffic.** No engine publishes anything before the first store
+     operation (measured above), so this signal can say "it worked" and "it failed", and cannot say
+     "it is up and nothing has happened yet". That third state is `Unknown`.
 
    It is the engine's own account of itself, which is a real limitation, but it is the account of
    the component that either did or did not attach.
@@ -754,16 +796,21 @@ Acceptance:
 
 - Breaking the config on purpose drives `CacheAttached` away from `True` — asserted by a test that
   breaks it, not by asserting the happy path only. Two vehicles:
-  - **Unit, deterministic:** a fake scraper reporting the connector uninitialized on every replica,
-    over a deployment whose replicas have been Ready past the window and whose Binding reports no
-    held data, yields `False` / `NoCacheActivity`.
+  - **Unit, deterministic:** a fake scraper reporting, on every replica, store operations of which
+    none succeeded, over a deployment whose Binding reports no held data, yields `False` /
+    `CacheOperationsFailing`. And the same deployment with **no** account anywhere yields `Unknown`
+    / `NoObservationAvailable`, which is the pair that keeps absence and failure apart.
   - **End to end:** an engine image without the matching per-vendor `mooncake-transfer-engine`
     wheel, and separately a Binding pointing at an unreachable pool. The engine's failure policy on
     a broken connector is not something this spec can predict — it may abort at init or serve on
     without the cache — so the assertion is the falsifiable one: **`CacheAttached` is never `True`**,
     and the case records which shape the engine took.
-- The happy path yields `True` / `CacheActive` with no traffic having been sent, proving the
-  client-came-up predicate rather than a traffic one.
+- ⛔ **The fake scraper must not be able to express a reading no engine publishes.** A stand-in that
+  could report "initialized, no traffic yet" would make the `Unknown` path unreachable in tests
+  while it is the commonest state in production, and every case over it would be a case about a
+  signal that does not exist.
+- The happy path yields `True` / `CacheActive` from a replica's own account of a **succeeding**
+  operation, not from a rendered flag and not from the shared domain's figures.
 - **Two deployments on one Binding, one healthy and one broken, report differently** — the case the
   per-replica predicate exists for. Judging on the shared domain's `usage`/`blocks` would report
   both as attached, so this is the assertion that would catch a regression back to the domain-level
@@ -1068,9 +1115,12 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
   Binding's, validated and immutable there), so this spec makes the attached domain visible on the
   workload object. The mitigation is visibility, and the spec says so rather than implying it
   prevents the failure.
-- **An idle deployment is reported as detached** → the `CacheAttached` predicate is the engine
-  reporting its connector initialized, which happens at startup, not cache traffic, which appears
-  only under load.
+- **An idle deployment is reported as detached** → ⛔ **the mitigation this bullet originally named
+  turned out not to exist**, and the replacement is weaker but honest. No engine publishes anything
+  before its first store operation (F8), so an idle attached deployment and an unread one are
+  indistinguishable. The mitigation is therefore that such a deployment reports `Unknown` rather than
+  `False`: `CacheAttached` never carries a `False` an absence could produce, only one an observed
+  failure produces.
 - **A broken deployment reads as attached because a sibling sharing its tenant is healthy** → the
   predicate is scraped per replica at the Pod's own address, so a sibling cannot answer for it. The
   domain-level figures, which cannot attribute, are corroboration only and never the sole basis for
@@ -1480,27 +1530,37 @@ truthful); after T13 (the headline claim is measured and recorded).
   its `False` reason names the ClusterQueue.
   Verify: `go test ./pkg/worker/controllers/worker/ -run 'ComputeModelDeployment|ObserveModelDeployment|SyncModelDeployment'`
 
-- [ ] **T9 · `CacheAttached`, judged on an observation**
+- [x] **T9 · `CacheAttached`, judged on an observation**
+  Delivered: `pkg/worker/controllers/worker/model_deployment_cache_attached.go` and its test; the
+  reading folds into `model_deployment_status.go`'s one compute function.
+  ⛔ **The per-engine measurement this task was asked for came back negative, and F8 was rewritten
+  from it:** no supported engine publishes anything about its KV connector before the first store
+  operation, so the predicate this acceptance named ("reports its KV connector initialized",
+  traffic-free) does not exist. The measurement, the one link that could have rescued it
+  (`# HELP`/`# TYPE` for a childless labelled counter) and why `MultiProcessCollector` breaks that
+  link are all recorded in F8. The consequence is that `NoCacheActivity` splits into
+  `NoObservationAvailable` (`Unknown`, because the state it would report has a nearer observer) and
+  `CacheOperationsFailing` (`False`, the one state with no other observer), and that there is **no
+  observation window** — neither replacement row needs one.
+  The reading type therefore cannot express a traffic-free "initialized" value at all, which is what
+  keeps the fake scraper from being more capable than what it stands in for.
   Blocked by: T3, T5, T8
   Owns: `pkg/worker/controllers/worker/model_deployment_cache_attached.go` + its test
   Gate: review
-  Acceptance: the condition follows F8's table exactly. The predicate is **the engine's own metrics
-  endpoint, scraped per replica at the Pod's address, reporting its KV connector initialized** — not
-  cache traffic. A test with the connector reported initialized and **zero** traffic yields `True`,
-  which is the case that proves an idle deployment is not reported detached. Where the engine cannot
-  be scraped, the Binding's `usage`/`blocks` corroborate; where neither can be read the condition is
-  `Unknown` / `NoObservationAvailable`. **An absent (nil) `usage`/`blocks` is `Unknown`, never
-  `False`** — absent is not an observed zero. It is **never** `True` because a flag was rendered or a
-  log line echoed it. A role marked `unmanaged` yields `Unknown` / `Unmanaged` whatever is observed.
-  The scraper is an **interface the reconciler takes**, not a dial it makes, because every case that
-  matters here is a failure and a real dial cannot be made to fail on demand.
-  Two deterministic negative tests live here: a fake scraper reporting the connector uninitialized on
-  every replica of a deployment Ready past the window, whose Binding holds nothing, yields `False` /
-  `NoCacheActivity`; and the same deployment sharing its tenant with a healthy sibling that *is*
-  filling the domain still yields `False`, which is the assertion that pins the predicate to a
-  per-replica signal. This task also records, per engine, whether the connector report appears at
-  startup or only once traffic has been scheduled — the second shape leaves an idle deployment at
-  `Unknown`, which is correct but worth knowing once.
+  Acceptance: the condition follows F8's table exactly. The signal is **the engine's own metrics
+  endpoint, scraped per replica at the Pod's address, accounting for its store operations**. Where no
+  replica gives an account, the Binding's `usage`/`blocks` corroborate; where neither can be read the
+  condition is `Unknown` / `NoObservationAvailable`. **An absent (nil) `usage`/`blocks` is `Unknown`,
+  never `False`** — and so is an observed zero, because an attached idle domain holds nothing either.
+  It is **never** `True` because a flag was rendered or a log line echoed it. A role marked
+  `unmanaged` yields `Unknown` / `Unmanaged` whatever is observed. The scraper is an **interface the
+  reconciler takes**, not a dial it makes, because every case that matters here is a failure and a
+  real dial cannot be made to fail on demand.
+  Two deterministic negative tests live here: a fake scraper reporting, on every replica, store
+  operations of which none succeeded, over a deployment whose Binding holds nothing, yields `False` /
+  `CacheOperationsFailing`; and the same deployment sharing its tenant with a healthy sibling that
+  *is* filling the domain still yields `False`, which is the assertion that pins the reading to a
+  per-replica signal.
   Verify: `go test ./pkg/worker/controllers/worker/ -run ModelDeploymentCacheAttached`
 
 - [x] **T10 · Losing a replica: the event and the lease window**
@@ -1692,17 +1752,20 @@ condition exists.
 
 | Case | Condition | Expected |
 |---|---|---|
-| `initialized_no_traffic` | the engine reports its connector initialized, zero cache traffic | `True` / `CacheActive` — an idle deployment is attached |
-| `ready_uninitialized_past_window` | Ready past the window, connector uninitialized on every replica, Binding reports nothing held | `False` / `NoCacheActivity` |
-| `ready_uninitialized_within_window` | Ready, still inside the window | `Unknown` / `NoReplicaReady` → not yet `False` |
+| `replica_reports_success` | a replica accounts for succeeding store operations | `True` / `CacheActive` |
+| `one_succeeds_one_fails` | one replica succeeding, one failing | `True` / `CacheActive` — the cache IS in effect; the failing replica is a per-replica fault |
+| `every_replica_failing` | every ready replica accounts for operations of which **none** succeeded | `False` / `CacheOperationsFailing` — the one state with no other observer |
+| `no_account_anywhere` | no replica gives an account, Binding reports nothing held | `Unknown` / `NoObservationAvailable` — an attached idle deployment looks exactly like this |
+| `endpoints_do_not_answer` | every scrape errors | `Unknown` / `NoObservationAvailable` |
+| `no_scraper_wired` | the reconciler has no scraper at all — today's shipped state | `Unknown` / `NoObservationAvailable`, **not** `False` |
 | `no_replica_ready` | no replica Ready | `Unknown` / `NoReplicaReady` |
-| `engine_unscrapeable_binding_holds_data` | the engine cannot be scraped; Binding's `usage`/`blocks` observed above zero | `True` / `CacheActive` via the corroborating signal |
-| `neither_signal_readable` | engine unscrapeable and the Binding's figures **absent** | `Unknown` / `NoObservationAvailable` — never `True` |
-| `binding_figures_absent_is_not_zero` | `usage`/`blocks` are nil pointers | `Unknown`, **not** `False` — absent is not an observed zero |
-| `sibling_holds_the_shared_tenant` | two deployments sharing a tenant; this one's connector uninitialized, the other's writes fill the domain | `False` — the domain-level figures must not attribute the sibling's data to this deployment |
-| `flag_rendered_only` | the argument is present, nothing else observed | **never** `True` — the case the condition exists for |
-| `log_line_echo_only` | the engine logged the flag back | **never** `True` |
-| `unmanaged_role_initialized` | take-over, and the engine does report the connector initialized | `Unknown` / `Unmanaged` — the operator claims nothing it did not render |
+| `only_ready_replicas_asked` | one Ready, one not Ready, one Ready-and-terminating | only the first is scraped |
+| `engine_unscrapeable_binding_holds_data` | no account; Binding's `usage`/`blocks` observed above zero | `True` / `CacheActive` via the corroborating signal |
+| `binding_figures_absent_is_not_zero` | `usage`/`blocks` are nil pointers | `Unknown`, **not** `False` — absent means the scrape did not carry this domain |
+| `binding_figures_observed_zero` | `blocks` observed as `0` | `Unknown`, **not** `False` — an attached idle domain holds zero too |
+| `sibling_holds_the_shared_tenant` | two deployments sharing a tenant; this one's replicas all failing, the sibling's writes fill the domain | `False` — the domain-level figures must not attribute the sibling's data to this deployment |
+| `flag_rendered_only` | everything configured, Binding registered, replicas Ready, nothing observed | `Unknown`, **never** `True` — the case the condition exists for |
+| `unmanaged_role` | take-over, and the domain does hold data | `Unknown` / `Unmanaged` — the operator claims nothing it did not render |
 
 **Status and binding cases** (`pkg/worker/controllers/worker`).
 
@@ -1894,11 +1957,13 @@ comparison with one side missing is an assertion about nothing.
   adds only per-domain `Blocks` and `HitRate`. A registered-client count would in any case have read
   an **action** ("a client connected"), and this design judges **effects**.
 
-  The replacement is **the engine's own metrics endpoint reporting its KV connector initialized,
-  scraped per replica** (F8) — attributable, available without traffic, and downstream of the thing
-  being judged. The domain-level `Usage`/`Blocks` corroborate it and cannot replace it: they are
-  shared by every deployment on one domain, so they cannot attribute, and they only move under load,
-  so an idle attached deployment is indistinguishable from a detached one.
+  The replacement is **the engine's own metrics endpoint accounting for its store operations,
+  scraped per replica** (F8) — attributable and downstream of the thing being judged. ⛔ **It is
+  not available without traffic**, which the sentence here originally claimed: that property was
+  measured and is absent on all three engines, so this signal shares the second of the two
+  limitations named just below rather than escaping both. The domain-level `Usage`/`Blocks` still
+  cannot replace it, because they cannot **attribute**: they are shared by every deployment on one
+  domain.
 
   ⛔ **The better replacement was tried and is unreachable.** The Mooncake store client can serve its
   own `/health` on port 9300 — per client, bound at init, one layer closer to the truth than the
