@@ -629,11 +629,29 @@ The rule needs a precise notion of "owned", because the operator sets more keys 
   | Engine | Owned arguments | Owned environment |
   |---|---|---|
   | `vllm` | `--kv-transfer-config` | `MOONCAKE_CONFIG_PATH` |
-  | `vllm-ascend` | `--kv-transfer-config` | `MOONCAKE_CONFIG_PATH` |
-  | `sglang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config` | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` |
+  | `sglang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config` | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME` |
 
   Adding an engine adds rows; the webhook reads the table rather than a hard-coded list, so the rule
   and the renderer can never disagree about what is owned.
+
+  **One `vllm` row covers both backends, and an earlier draft of this table had two.** It listed
+  `vllm-ascend` separately with a value IDENTICAL to `vllm`'s, which is the evidence the catalogue was
+  hung on the wrong dimension: the owned keys follow the engine, while only the connector name
+  follows the accelerator backend. T16 removed the engine value; this table follows it.
+
+  **Two of SGLang's seven environment names are owned for what a user entry would DESTROY rather
+  than duplicate**, and the operator sets neither of them. That engine picks its configuration source
+  in the order extra-config argument, then config-path file, then environment; leaving the first two
+  unset is what selects the environment loader, and each of the first two loads through a function
+  whose per-key fallbacks are compile-time literals. So setting either does not override a value, it
+  replaces the whole configuration with a 4 GiB segment and a `localhost` identity.
+
+  The remaining five are the variables the engine actually reads, `MOONCAKE_LOCAL_HOSTNAME` among
+  them — which is why this engine gets no config file: that key is the replica's own Pod IP, and only
+  an environment variable can carry a `fieldRef` kubelet evaluates as the container starts.
+
+  Note that `MOONCAKE_CONFIG_PATH` is owned on `vllm` and **not** on `sglang`, while six other
+  `MOONCAKE_*` names are owned on `sglang` alone. The table is the authority; a name prefix is not.
 
   The config-path variable is the load-bearing one, and it is owned for a reason worth stating: it
   is the **only** pointer to the file the operator wrote. A user who re-points it silently swaps the
@@ -647,8 +665,9 @@ The rule needs a precise notion of "owned", because the operator sets more keys 
 - **Defaulted** — the operator supplies a value only where the user supplied none, because
   duplication is harmless and last-wins is well defined. `MC_TE_METRIC` is the case that matters
   (F10): the operator sets it, and a user may turn it off. It is read by the transfer engine itself
-  rather than by any engine's config class, which is why it is reachable at all where
-  `MOONCAKE_TENANT_ID` is not.
+  rather than by any engine's config class, which is why it is reachable at all where a tenant is
+  not. There is deliberately no variable named here for the tenant: the client reads none, so naming
+  one would invent a knob that does not exist.
 
 **Rule 2 — the scheduling scalars must not be inferrable from the template.** `replicas`,
 `instanceType`, `resources` and (in the next spec) `parallelism` are inputs to admission and
@@ -1938,7 +1957,7 @@ truthful); after T13 (the headline claim is measured and recorded).
   pool. The value lives on the backend, which T3 resolves; naming a number this operator did not
   read would be worse than naming the default and saying so.
 
-- [ ] **T11 · Documentation**
+- [x] **T11 · Documentation**
   Blocked by: T2, T5, T7, T9
   Owns: `docs/reference/model-deployment.md`, `docs/README.md`, `docs/architecture.md`
   Gate: review
@@ -1954,6 +1973,20 @@ truthful); after T13 (the headline claim is measured and recorded).
   `docs/architecture.md`'s life-of-a-request table gains the row for a Pod a `ModelDeployment`
   renders. Routed through the `gpustack-operator-docs` skill.
   Verify: `make lint docs`
+
+  Landed as `docs/reference/model-deployment.md`, 338 lines, with the index row and one clause plus
+  one link on `docs/architecture.md`'s Submit row — the overview is the front door and stays capped,
+  so the mechanism lives on the deep page.
+
+  **Writing it found three stale rows in F5's own table above**, which T16 should have carried and
+  did not: a `vllm-ascend` row for an engine value T16 deleted, an SGLang environment column listing
+  one name where the code owns seven, and a `MOONCAKE_TENANT_ID` that no client reads. All three are
+  corrected there. A normative table that contradicts the code is worse than no table, because it is
+  the thing a reader trusts.
+
+  The page's two example image tags are checked against the runner project's 338 published records
+  rather than composed. One of them was wrong: `cann8.2-910b-sglang0.5.18` is not published and
+  `cann9.0-910b-sglang0.5.18` is.
 
 - [ ] **T12 · e2e: the functional cases**
   Blocked by: T2, T5, T7, T9, T10, **T14** — case-45's inference path and case-48's whole premise
