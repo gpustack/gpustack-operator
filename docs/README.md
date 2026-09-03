@@ -31,7 +31,8 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 
 **I change the code** — read the overview first; it is the map for everything else.
 
-1. [Architecture](architecture.md) → [Device Discovery](architecture/device-discovery.md) → [Scheduling
+1. [Architecture](architecture.md) → [Device Discovery](architecture/device-discovery.md) → [Network
+   Topology](architecture/network-topology.md) → [Scheduling
    Chain](architecture/scheduling-chain.md) → [Admission](architecture/admission.md).
 2. [Internals](architecture/internals.md) — the invariants that break quietly if you miss them.
 3. [Development](development.md) — build, lint, test, code generation, vendored dependencies.
@@ -42,7 +43,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 
 1. The `gpustack-operator-overview` skill (directory layout, naming conventions).
 2. [Architecture](architecture.md) — one page, with the vocabulary table and the request trace.
-3. The one deep page the question maps to, from the table below. Do not load all five.
+3. The one deep page the question maps to, from the table below. Do not load all six.
 
 ## All pages
 
@@ -50,6 +51,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 |---|---|---|---|
 | [Architecture](architecture.md) | What the operator builds, the four stages, the life of one sliced-GPU request, the vocabulary | everyone | ~4 min |
 | [Device Discovery](architecture/device-discovery.md) | How NFD and the Device Manager turn hardware into labels and a per-accelerator ledger; what the allocator injects | contributors | ~20 min |
+| [Network Topology](architecture/network-topology.md) | The node's network interface inventory, how an RDMA link is verified, and which of those facts can reach a scheduling decision | contributors, operators | ~7 min |
 | [Scheduling Chain](architecture/scheduling-chain.md) | How capacity labels become ResourceFlavors, ClusterQueues, LocalQueues and InstanceTypes | contributors | ~9 min |
 | [Admission](architecture/admission.md) | The five gates, the four-view status, which field answers "what can I still get" | contributors, operators | ~8 min |
 | [Installation Modes](architecture/installation-modes.md) | Chart mode vs image mode; which objects the worker must apply itself | operators, contributors | ~3 min |

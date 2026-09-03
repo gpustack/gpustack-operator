@@ -476,16 +476,48 @@ the figure is the evidence, and a cap near the card's own size could be read as 
 
 ## Reading the result
 
-One YAML document goes to stdout, with a group per manufacturer asked about. Each group carries the
-time it was read, the detection answer, and a row per accelerator per capability — each row carrying
+One YAML document goes to stdout, with **two sections**:
+
+```yaml
+accelerators:            # one group per manufacturer asked about
+  - manufacturer: nvidia
+    detection: {...}
+    checks: [...]
+network:                 # the node's RDMA links — belongs to no manufacturer
+  timestamp: ...
+  checks: [...]
+```
+
+Each `accelerators` group carries the time it was read, the detection answer, and a row per
+accelerator per capability — each row carrying
 [the state and the depth](../architecture/device-discovery.md#preflight-the-preconditions-read-before-a-workload-does)
 it reached, the driver's or the container's own words, and the container command where one was
 involved.
 
-**The exit code is non-zero only for an `unavailable` answer.** A capability this generation does not
-declare, a manufacturer nothing is checked for, a node carrying none of its hardware, an answer that
-went no deeper and a step that was emitted are all answers, and a run that reports them has done its
-job.
+The `network` section carries one row per RDMA-capable interface — and per RDMA-capable virtual
+function, named `<interface>/<vf bus id>`, since on an SR-IOV node those are every RDMA device there
+is. Each row gives the name, the RDMA device and the
+[link verdict](../architecture/network-topology.md#the-rdma-link-is-checked-because-a-bound-device-is-not-a-working-link).
+
+The rows come from the same pass that produces the node's published record. That makes the two agree
+on **how** a link is judged, not on what it says: this is a fresh read taken when you invoke it, so
+a link that changed since the last detect pass shows here first.
+
+An entry with no RDMA device **and no link verdict** gets no row: `rdma: false` on its own settles
+the question, while a verdict without a device is the unreadable-tree case this section exists to
+surface. A section with no rows carries a `note` saying which of the two reasons applies: the
+enumeration failed, or the node has no RDMA hardware.
+
+**The exit code is non-zero only for an `unavailable` accelerator answer.** A capability this
+generation does not declare, a manufacturer nothing is checked for, a node carrying none of its
+hardware, an answer that went no deeper and a step that was emitted are all answers, and a run that
+reports them has done its job.
+
+**A broken RDMA link does not fail the run.** It withholds a node label, which changes what a
+flavor selects rather than what an allocator can hand out.
+
+> **Why** — this exit code answers whether the node can serve the allocation modes its allocators
+> offer, and a down link stops none of them. The reasoning is recorded in the feature's spec.
 
 The document is written whether or not the node passed, so a failing run is still readable rather
 than leaving the exit code as the only thing to debug from.

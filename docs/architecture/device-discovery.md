@@ -270,6 +270,13 @@ asserts a node-management decision it does not own.
 > any other. Neither setting ends the process — a node that never answers keeps detecting, it does not
 > restart.
 
+### The network interface inventory
+
+`Devices.spec.interfaces` records every network interface on the node, and the RDMA link state that
+decides whether the node carries `rdma.capable`. It is its own subsystem — a NIC belongs to the
+machine rather than to a manufacturer's accelerators — and it has its own page:
+[Network Topology](network-topology.md).
+
 ### Ascend: two DCMI API generations
 
 **Ascend drivers serve one of two mutually exclusive DCMI APIs, and `binding/dcmi` absorbs the

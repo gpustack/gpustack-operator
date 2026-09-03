@@ -114,6 +114,16 @@ Operations](../operation/nvidia-mig.md) shows the disjoint populations on a reco
 including a **mixed** one advertising both families;
 [T-Head](../operation/thead-mig.md) covers the same procedure.
 
+### RDMA feature labels
+
+A node with a usable RDMA link additionally carries `feature.gpustack.ai/rdma.capable=true`, and
+conditionally two informational keys. Only `rdma.capable` can enter a flavor's `nodeLabels`, and
+withholding it is how a node with no usable link stops being selected.
+
+See [Network Topology](network-topology.md#the-three-node-labels-and-what-a-label-can-carry) for
+which link states count as usable, when each informational key is present, and why the accelerator
+interconnect gets no label at all.
+
 ## The unit spec is not derived from node capacity
 
 The **unit spec** (unitCPU / unitRAM / localStorage) is **not derived from node capacity at all**. The

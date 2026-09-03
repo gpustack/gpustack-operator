@@ -43,6 +43,16 @@ one-driver-stack-per-node guard.
 **Never** — how those labels become Kueue objects (that is `scheduling-chain.md`), or whether a request
 is *allowed* (that is `admission.md`).
 
+## `docs/architecture/network-topology.md` (the NIC side of stage 2)
+
+**Owns** — the `Devices.spec.interfaces` inventory and why enumeration starts at the interface rather
+than the bus, the sysfs read discipline, `pciRootId` (the outermost bridge) against `pciSwitches`, the
+three RDMA link states and why an unreadable file is never `failed`, the existential aggregation into
+`rdma.capable`, the withhold-by-removal mechanism, and the distance vocabulary's unreachable levels.
+
+**Never** — the accelerator side of the ledger (`device-discovery.md`), or how a node label reaches a
+flavor selector (`scheduling-chain.md`). Cross-link both.
+
 ## `docs/architecture/scheduling-chain.md` (stages 3–4)
 
 **Owns** — `NodeFeatureReconciler` / `NodeCapacityReconciler`, the `.sliced.*` and `.partitioned.*`
