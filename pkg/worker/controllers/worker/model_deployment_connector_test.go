@@ -99,6 +99,10 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 // TestSynthesizeModelDeploymentConnector_KeysNeverRendered states, per key, WHY the operator leaves
 // it out. Exact map equality above already fails if any of them appears; these cases exist so that
 // whoever deletes one has to read the reason first.
+//
+// ⛔ TWO OF THE FIVE REASONS ARE DECISIONS AND THREE PIN A DEFECT, and the difference is marked
+// inline. A green case here is not by itself an endorsement of the behavior it asserts — which is
+// exactly why each one has to carry its reason instead of just its key.
 func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
 	testCases := []struct {
 		name string
@@ -118,22 +122,38 @@ func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
 			why: "every engine derives it from its own process, and one deployment-wide file " +
 				"cannot hold a value that differs per replica",
 		},
+		// ⛔ THE NEXT THREE PIN A KNOWN DEFECT, NOT A DECISION. They are kept so that the fix is
+		// noticed as a change rather than slipping in, and they must be DELETED by the task that
+		// wires the connector into the replicas.
+		//
+		// The reason recorded here originally was that these keys size a replica's contribution and
+		// the operator must not invent a capacity. Measured on vLLM v0.25.1
+		// (.../mooncake/store/worker.py's config class), that is backwards: the pair DECLARES A
+		// ROLE. `mode` defaults to "embedded", `global_segment_size` defaults to 4 GiB, and
+		// __post_init__ requires a positive global segment in embedded mode — so omitting all three
+		// makes the engine rank an in-process store MEMBER contributing 4 GiB, when it should be a
+		// pure client. A pure client on vLLM is the coherent triple
+		// mode=standalone-store + global_segment_size=0 + local_buffer_size>0; on vllm-ascend and
+		// sglang there is no `mode` field, so it is the pair — and sglang additionally divides the
+		// global segment by its TP factor, so the value is not portable either.
+		//
+		// The old reason was right about the COUPLING and wrong about the conclusion: a cross-field
+		// pair is dangerous when split, which is an argument for rendering the whole triple, not for
+		// rendering none of it.
 		{
 			name: "no_segment_sizes_global",
 			key:  "global_segment_size",
-			why:  "it sizes a replica's own contribution to the pool, so a wrong operator-chosen value is a silent capacity error",
+			why:  "KNOWN DEFECT: omitting it selects the embedded role, contributing 4 GiB",
 		},
 		{
 			name: "no_segment_sizes_local",
 			key:  "local_buffer_size",
-			why:  "same as the global segment size: not the operator's to invent",
+			why:  "KNOWN DEFECT: omitting it takes the 4 GiB default rather than a client staging buffer",
 		},
 		{
 			name: "no_mode",
 			key:  "mode",
-			why: "vLLM's mode carries a cross-field rule against global_segment_size, so choosing " +
-				"one half of a pair whose other half is not ours to choose is how an engine " +
-				"refuses its own configuration",
+			why:  "KNOWN DEFECT: omitting it leaves vLLM's default, which is embedded",
 		},
 	}
 
