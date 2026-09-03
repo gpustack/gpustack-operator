@@ -15,7 +15,7 @@ replicas nor the one-replica-many-Pods shape the next spec needs.
 
 The workload does **not** declare its reuse domain; it inherits the Binding's. Two `ModelDeployment`s
 referencing the same Binding share KV, and name matching between workloads disappears along with a
-whole class of typo. ⛔ **The domain is not yet enforced at the storage layer, and this spec ships
+whole class of typo. **The domain is not yet enforced at the storage layer, and this spec ships
 saying so**: `tenant_id` is a parameter past the positional cut every supported engine stops at, so
 every deployment reaches the cache as the tenant named `default` (F4). The API property that matters
 survives — a workload still cannot name a domain, so it cannot mint tenants to escape a quota
@@ -56,7 +56,7 @@ matters of taste:
   exceeds what a single replica achieves on the same request stream. This is the claim the whole
   spec exists to make demonstrable; the numbers are recorded (F10, Test Plan).
 - **G2** The reuse domain is an **admin-controlled** property a workload inherits, never one it
-  names — so the namespace quota ceiling cannot be escaped by minting tenants (F3). ⛔ This is met at
+  names — so the namespace quota ceiling cannot be escaped by minting tenants (F3). This is met at
   the **API** layer, which is where the escape it prevents would have happened. It is **not** met
   downstream: `tenant_id` reaches no supported engine, so the domain a deployment inherits does not
   yet reach the cache (F4). The spec reports that rather than implying otherwise, and closing it is
@@ -301,7 +301,7 @@ Acceptance:
 - `status.kvCache.domain` echoes the Binding's `name`, `blockSize` and `dtype`, so an operator reads
   the attached domain off this object alone (G6).
 - Two deployments on one Binding share KV — asserted end to end (Test Plan).
-- ⛔ Two on **two** Bindings not sharing is **not** asserted, because no supported engine passes
+- Two on **two** Bindings not sharing is **not** asserted, because no supported engine passes
   `tenant_id` to the cache client, so every deployment lands in the tenant named `default` (F4). The
   semantics above are the API's and the design's; the enforcement is upstream's and is not there
   yet. The gap is stated here, in `status`, in the reference page and in case-47 rather than being
@@ -343,7 +343,7 @@ So, under `auto`, per engine, the operator renders:
 | `vllm-ascend` | `--kv-transfer-config` selecting `AscendStoreConnector` | a mounted JSON + `MOONCAKE_CONFIG_PATH` |
 | `sglang` | `--hicache-storage-backend mooncake` + `--hicache-storage-backend-extra-config` | a mounted JSON + `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` |
 
-⚠️ **`vllm-ascend` selects `AscendStoreConnector`, not `MultiConnector`**, and the difference is
+**`vllm-ascend` selects `AscendStoreConnector`, not `MultiConnector`**, and the difference is
 not cosmetic. `vllm-ascend` re-registers `MultiConnector` to its own `AscendMultiConnector`, which
 is a **composite** for running several connectors at once — a P2P connector beside a store
 connector, say. The connector that reaches the Mooncake store is `AscendStoreConnector` (also
@@ -364,7 +364,7 @@ deployment-wide, because **none of them reads `local_hostname` from the file at 
 it per process (see below). The key set rendered is the union the selected engine reads, and no
 more: a key an engine's reader ignores is a key that documents a wiring that is not happening.
 
-⛔ **The reuse domain does not reach the storage layer on any of the three engines, and this spec
+**The reuse domain does not reach the storage layer on any of the three engines, and this spec
 ships saying so rather than implying otherwise.** `tenant_id` is the **11th** parameter of
 `MooncakeDistributedStore.setup()`. All three engines call `setup()` **positionally**, stopping at
 the 7th or 8th argument:
@@ -380,7 +380,7 @@ And there is **no fallback that could rescue it**: in `mooncake-integration/stor
 engines' config classes carries a `tenant_id` key at all** — `tenant` does not appear anywhere under
 `vllm/distributed/kv_transfer/` or `python/sglang/`.
 
-⚠️ The vendor's own `docs/source/deployment/multi-tenancy.md` has a *SGLang* section and a *vLLM*
+The vendor's own `docs/source/deployment/multi-tenancy.md` has a *SGLang* section and a *vLLM*
 section describing exactly this wiring. **The shipped engine integrations do not implement it.** This
 is the same failure this spec's F8 was written for, one level up: the documentation is not the
 artifact, and a documented key is worth no more than a rendered flag.
@@ -405,20 +405,20 @@ The route to enforcement is upstream: `tenant_id` reaching `setup()` in each eng
 the operator adds one key to the rendered JSON and case-47's second half flips from deferred to
 asserted — **nothing lands here that would have to be un-landed.**
 
-⚠️ **`local_hostname` needs nothing from the operator, and this is why the earlier plan to render it
+**`local_hostname` needs nothing from the operator, and this is why the earlier plan to render it
 was wrong.** Each engine derives it per process: `vllm` from
 `get_requester_local_hostname(get_ip())`, overridable by `MOONCAKE_REQUESTER_LOCAL_HOSTNAME`;
 `vllm-ascend` from `get_ip()`; `sglang` from `MOONCAKE_LOCAL_HOSTNAME`, falling back to
 `LOCAL_HOSTNAME` and then to its own default. **The operator sets none of them**, because a
 per-replica value the engine already computes correctly is one the operator can only get wrong.
 
-⚠️ **Three surfaces spell the RDMA device list three different ways** — `setup()`'s positional
+**Three surfaces spell the RDMA device list three different ways** — `setup()`'s positional
 parameter is `rdma_devices`, the JSON key every engine uses is `device_name`, and Mooncake's own
 environment variable is `MOONCAKE_DEVICE`. This spec renders the engines' JSON, so **`device_name`**
 is the spelling that matters here; the other two are recorded because the same fact under three
 names is how a reader concludes one of them is a typo.
 
-⛔ **These two keys DECLARE A ROLE, and this spec had it backwards.** It said they merely size a
+**These two keys DECLARE A ROLE, and this spec had it backwards.** It said they merely size a
 replica's contribution, that a wrong operator-chosen value would be a silent capacity error, and
 that the operator therefore renders neither — nor `mode`, whose cross-field rule couples to them.
 Measured in vLLM v0.25.1's own config class
@@ -436,7 +436,7 @@ Every engine Pod becomes a 4 GiB store member. And the two omissions fail in opp
 which is why the mistake survives: `global_segment_size: 0` with no `mode` **raises** and is caught
 immediately, while omitting both **does not raise** and is silent.
 
-⭐ The old reasoning was right about the coupling and wrong about the conclusion: a cross-field pair
+The old reasoning was right about the coupling and wrong about the conclusion: a cross-field pair
 is dangerous **when split**, which argues for rendering the whole coherent group rather than none of
 it. The group is per engine, because the readers differ: `vllm` needs the triple
 (`mode: standalone-store`, `global_segment_size: 0`, `local_buffer_size > 0`); `vllm-ascend` has no
@@ -448,7 +448,7 @@ The fix lands with the connector-wiring task, in the shared `pkg/worker/kvcache/
 owns this rendering across specs — not here, and not twice. Until then the renderer's own test pins
 the omission and **names it a defect** rather than a decision, so the fix is noticed as a change.
 
-⚠️ One link is deliberately still open: whether Mooncake's C++ `setup()` accepts
+One link is deliberately still open: whether Mooncake's C++ `setup()` accepts
 `global_segment_size == 0` at all. All three engines only pass the value down, so acceptance is
 decided one layer below them, and the package that owns the rendering is where that gets measured.
 
@@ -518,7 +518,7 @@ The rule needs a precise notion of "owned", because the operator sets more keys 
   says, and every symptom appears one layer away from the cause. The refusal names the tier that
   owns it.
 
-  ⚠️ **Ownership is per engine and the table is what says so.** `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`
+  **Ownership is per engine and the table is what says so.** `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`
   is meaningless to `vllm` and is an ordinary user variable there. This is exactly the case the
   `extra_args_owned_key_wrong_engine` test pins.
 - **Defaulted** — the operator supplies a value only where the user supplied none, because
@@ -535,7 +535,7 @@ resource request; a template carrying `resources` is rejected, naming `roles[].r
 the accelerator request lives. Otherwise **the admission feasibility check reads a ledger that does
 not match reality**.
 
-⛔ **`roles[].resources` exists because `instanceType` cannot supply the request, and the earlier
+**`roles[].resources` exists because `instanceType` cannot supply the request, and the earlier
 draft of this rule was wrong about that.** It said the resource decision "lives on
 `roles[].instanceType`". Verified against the code, it does not:
 
@@ -570,7 +570,7 @@ which would grant the profile and discard the percentages with nothing said.
 **Arguments fold into `Command`; there is no `Args`.** `InstanceTemplate` has `Command []string` and
 no `Args`, and this spec does not add one.
 
-⛔ **That has a consequence the earlier draft left implicit: the operator builds the WHOLE argv, not
+**That has a consequence the earlier draft left implicit: the operator builds the WHOLE argv, not
 just the arguments.** With no `Args` field there is nowhere to put arguments beside an image's own
 entrypoint, so the append tier cannot mean "add to whatever the image runs". Either the operator
 renders base command + synthesized connector arguments + `extraArgs` into `Command`, or the user
@@ -584,7 +584,7 @@ their sources rather than assumed:
 | `vllm-ascend` | `vllm serve <model>` | a vLLM plugin, sharing its entry point |
 | `sglang` | `python3 -m sglang.launch_server --model-path <model>` | `--model-path` is required; `--model` is its alias |
 
-⚠️ It follows that `roles[].template.image` is effectively **required** for a role to render at all —
+It follows that `roles[].template.image` is effectively **required** for a role to render at all —
 the engine argv is the operator's, but the image carrying that engine is the user's, and there is no
 default image this spec could pick. The renderer refuses a role with no image rather than creating a
 Pod the API server would reject; making that a webhook rule is a client-free check worth adding when
@@ -605,7 +605,7 @@ the field carries the schema default `/workspace`, so it is set on any template 
 **its presence carries no user intent to read**. A role that needs a path mounted names it in
 `AdditionalVolumes`, where the mount path is the user's own.
 
-⚠️ **A replica always exposes a port**, defaulting to `8000` named `http` when the template names
+**A replica always exposes a port**, defaulting to `8000` named `http` when the template names
 none, because a replica nothing can reach serves nothing and the Service fronting the deployment
 (F9) needs a target. `8000` is the port every supported engine's OpenAI-compatible server listens
 on by default.
@@ -678,19 +678,19 @@ Acceptance:
 
 **Two facts `QuotaReserved` rests on, both verified rather than assumed.**
 
-⛔ **It must read each Workload's own conditions, and cannot be derived from the admission gate.**
+**It must read each Workload's own conditions, and cannot be derived from the admission gate.**
 Gate 3 stops evaluating a Workload once it is admitted (Notes), so a `QuotaReserved` derived from
 the gate would answer for the moment of admission and never again — a Workload preempted since
 would still read as reserved. The Workload's own `QuotaReserved` condition is the only reading that
 stays true over time.
 
-⭐ **The ClusterQueue a refusal names is read off the spec, with no lookup.** The ClusterQueue is
+**The ClusterQueue a refusal names is read off the spec, with no lookup.** The ClusterQueue is
 named after the InstanceType — `instance.go` renders the entrance label as
 `nodefeature.FormatLocalQueueName(inst.Spec.Type)` and states that the LocalQueue is "named by the
 hash of the ClusterQueue(InstanceType) name". So `roles[].instanceType` **is** the queue's name, and
 the message can point at something the user wrote rather than at a hash they cannot map back.
 
-⚠️ **The Workload belonging to a replica is found through its controller reference, not by
+**The Workload belonging to a replica is found through its controller reference, not by
 recomputing its name.** Kueue's `jobframework` calls `SetControllerReference(pod, wl, …)`, so the
 reference is exact. Deriving the name instead means calling
 `kueue/pkg/controller/jobs/pod.GetWorkloadNameForPod` — measured, that import pulls
@@ -708,7 +708,7 @@ bound. In the same project, a different undeclared build switch fails *loudly* �
 failure mode from another's**, so `CacheAttached` is judged on what is observed downstream of the
 engine, never on "we rendered the flag" and never on a log line echoing it back.
 
-⛔ **The predicate this section originally named does not exist on any of the three engines, and
+**The predicate this section originally named does not exist on any of the three engines, and
 that was measured.** It was "the client having come up", answering from connector init before any
 request. What the shipped artifacts actually publish:
 
@@ -721,12 +721,12 @@ request. What the shipped artifacts actually publish:
 A childless labelled counter *does* still emit `# HELP` and `# TYPE` on a direct registry
 (`prometheus_client` 0.26.0, measured with a control: one `.labels().inc()` is what adds a series),
 and the presence of that header would have been an init-time, per-replica, effect-not-echo signal.
-⛔ But vLLM exposes through `MultiProcessCollector` (`vllm/v1/metrics/prometheus.py:21-26` sets
+But vLLM exposes through `MultiProcessCollector` (`vllm/v1/metrics/prometheus.py:21-26` sets
 `PROMETHEUS_MULTIPROC_DIR` when unset, line 49 registers the collector), and that collector
 reconstructs metrics from the per-process `.db` files' samples: a metric with no samples writes no
 file, so the exposition is **empty** — measured, again with the control.
 
-⭐ **This section had already stated the rule that condemns its own signal.** It rejects the
+**This section had already stated the rule that condemns its own signal.** It rejects the
 corroborating `blocks: 0` because "an observed `blocks: 0` is byte-identical to a detached one's" —
 and then chose a primary signal with exactly that shape. A discriminating requirement a spec sets
 for one of its signals applies to **all** of them, and the rule was in this same document before the
@@ -744,7 +744,7 @@ Level-based, evaluated every reconcile:
 | `True` | `CacheActive` | a replica reports **succeeding** store operations — or, weaker, the domain holds data |
 | `False` | `CacheOperationsFailing` | a replica reports store operations of which **none** succeeded |
 
-⛔ **`NoObservationAvailable` is `Unknown` because the state it would report has a nearer observer,
+**`NoObservationAvailable` is `Unknown` because the state it would report has a nearer observer,
 not merely because the signal is missing.** A connector that cannot come up takes its replica with
 it — `vllm` raises without `MOONCAKE_CONFIG_PATH` — so that failure already appears as a replica
 that never becomes Ready, which `status.roles[].ready` reports. What is left under this reason is a
@@ -752,7 +752,7 @@ deployment that is attached and idle, and reporting that as detached is the fals
 section exists to avoid. Written the other way round — "we cannot measure it, so we say nothing" —
 it would be a defect; written this way it is a division of labour.
 
-⭐ **`CacheOperationsFailing` is the one state with no other observer at all**, which is why it
+**`CacheOperationsFailing` is the one state with no other observer at all**, which is why it
 survives as a `False` while the old `NoCacheActivity` does not. The engine is Ready, it is serving,
 and every store operation it attempts fails: `roles[].ready` says Ready, `QuotaReserved` says
 reserved, `DomainRegistered` says registered — the Binding is fine, the store is not. It is
@@ -774,14 +774,14 @@ Two signals, in order:
    - **An effect, not an echo.** A connector that failed to import its per-vendor wheel, or failed
      to reach the master, publishes no succeeding operation — so the report is downstream of the
      thing being judged, unlike a rendered flag or a log line repeating one back.
-   - ⛔ **NOT available without traffic.** No engine publishes anything before the first store
+   - **NOT available without traffic.** No engine publishes anything before the first store
      operation (measured above), so this signal can say "it worked" and "it failed", and cannot say
      "it is up and nothing has happened yet". That third state is `Unknown`.
 
    It is the engine's own account of itself, which is a real limitation, but it is the account of
    the component that either did or did not attach.
 
-   ⛔ **Why not the cache client's own health server, which would have been better.** The Mooncake
+   **Why not the cache client's own health server, which would have been better.** The Mooncake
    store client can serve `GET /health`, `/metrics` and `/metrics/summary` on port 9300 —
    per-client, bound at init, one layer closer to the thing being judged than the engine's own
    report. **It is unreachable on all three supported engines.** `enable_client_http_server` is the
@@ -810,7 +810,7 @@ So the corroborating signal is used only when the primary cannot be read, and wh
 `True` it produces is recorded as the weaker attribution it is. If neither can be read, the
 condition stays `Unknown` with `NoObservationAvailable`. **It is never `True` by assumption.**
 
-⚠️ `usage` and `blocks` are **pointers with `omitempty` on the Binding**, and absent is not zero: an
+`usage` and `blocks` are **pointers with `omitempty` on the Binding**, and absent is not zero: an
 absent figure means the scrape did not carry this domain, which is `NoObservationAvailable`, while an
 observed zero is a domain holding nothing. Treating absent as zero would turn every unscraped pool
 into a positive detachment report.
@@ -828,7 +828,7 @@ Acceptance:
     a broken connector is not something this spec can predict — it may abort at init or serve on
     without the cache — so the assertion is the falsifiable one: **`CacheAttached` is never `True`**,
     and the case records which shape the engine took.
-- ⛔ **The fake scraper must not be able to express a reading no engine publishes.** A stand-in that
+- **The fake scraper must not be able to express a reading no engine publishes.** A stand-in that
   could report "initialized, no traffic yet" would make the `Unknown` path unreachable in tests
   while it is the commonest state in production, and every case over it would be a case about a
   signal that does not exist.
@@ -912,7 +912,7 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
 
 ### Notes / Constraints / Caveats
 
-- ⛔ **This spec must write `KVCachePoolBinding.status.usedBy`, and the KV-cache-pool spec's
+- **This spec must write `KVCachePoolBinding.status.usedBy`, and the KV-cache-pool spec's
   finalizer is an empty shell until it does.** The pool side only ever READS that list — this
   operator has no way to enumerate workloads, so **the workload controller is the only writer there
   will ever be**. This spec's controller must append `{kind: ModelDeployment, namespace: "",
@@ -980,7 +980,7 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
   Mooncake's own environment variable is `MOONCAKE_DEVICE` — one fact under three spellings, which is
   worth writing down once so a reader does not conclude two of them are typos.
 
-  ⛔ **Read this signature by argument POSITION, because that is what decides what is reachable.**
+  **Read this signature by argument POSITION, because that is what decides what is reachable.**
   `tenant_id` is 11th and `enable_client_http_server` is 12th, and every supported engine calls
   `setup()` positionally with 7 or 8 arguments (F4). So the two parameters this design would most
   like to use — the one that carries the reuse domain, and the one that binds the client's own
@@ -999,7 +999,7 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
   - Mooncake Store design — <https://kvcache-ai.github.io/Mooncake/design/mooncake-store.html>
   - Mooncake multi-tenancy deployment —
     <https://kvcache-ai.github.io/Mooncake/deployment/multi-tenancy.html>
-    ⚠️ Its *vLLM* and *SGLang* sections describe a `tenant_id` wiring that the shipped engine
+    Its *vLLM* and *SGLang* sections describe a `tenant_id` wiring that the shipped engine
     integrations of those two projects **do not implement** (F4). Cited for the master-side quota
     API, which is accurate, and **not** as authority for how an engine reaches a tenant.
   - vLLM KV transfer / connector configuration — <https://docs.vllm.ai/>
@@ -1042,7 +1042,7 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
   either would be emitting a key nothing reads, which is the same mistake as rendering a tenant no
   engine passes on.
 
-  ⛔ **They stop being inert the moment the P/D spec introduces the group, and that spec inherits
+  **They stop being inert the moment the P/D spec introduces the group, and that spec inherits
   two rules:** `pod-group-serving` becomes **mandatory** — without it a group's Pods are
   `isReclaimable()`, so Kueue applies batch semantics to a resident inference workload and shrinks
   the Workload as Pods terminate — and `pod-group-fast-admission` must stay **unset**, because it
@@ -1051,7 +1051,7 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
   accounting the whole P/D design rests on. Its cost is not free either: without it Kueue refuses to
   compose the Workload until the observed Pods reach the group total, which is the partial-creation
   hang this spec's Alternatives already cites.
-- ⛔ **Judging a Binding usable means reading a `Ready` that includes `QuotaGranted`, not the
+- **Judging a Binding usable means reading a `Ready` that includes `QuotaGranted`, not the
   Binding merely existing and not `Phase: Ready` alone.** The KV-cache-pool spec found and fixed a
   state-machine defect whose only consumer is this spec: the Binding's earlier readiness read two
   axes, and one of them reported `True` both when the master granted an **effective quota of zero**
@@ -1061,7 +1061,7 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
   third axis, `QuotaGranted`, whose `False` reasons distinguish `ZeroGranted` from `NoLedgerEntry`
   from `GrantNotExported`: **nil and zero are separate answers**, because "not exported" is not
   "granted nothing".
-- ⚠️ **A store leader restart makes every Binding briefly not-Ready, and that is an ordinary
+- **A store leader restart makes every Binding briefly not-Ready, and that is an ordinary
   operation rather than a fault.** The window was measured at 3.5–32 seconds, and it exists because
   the leader's readiness probe reads its segment list rather than its quota ledger, so the Pod is
   Ready while the ledger still answers zero. **The deployment must not do anything irreversible in
@@ -1069,7 +1069,7 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
   replicas. `DomainRegistered` goes `False` with the Binding's reason, the Pods keep serving (F2),
   and the next reconcile converges. Waiting is the correct behaviour; punishing a Binding for a
   routine upgrade is not.
-- ⛔ **The connector needs the members' transport, and no namespaced object republishes it.** Three of
+- **The connector needs the members' transport, and no namespaced object republishes it.** Three of
   the four client keys have a source a `ModelDeployment` can read: `master_server_address` is the
   pool's `status.clientEndpoint`, `metadata_server` is the literal `P2PHANDSHAKE` the metadata plane
   takes unconditionally in this scope, and `device_name` has **no source at all** — the pool and the
@@ -1138,7 +1138,7 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
   Binding's, validated and immutable there), so this spec makes the attached domain visible on the
   workload object. The mitigation is visibility, and the spec says so rather than implying it
   prevents the failure.
-- **An idle deployment is reported as detached** → ⛔ **the mitigation this bullet originally named
+- **An idle deployment is reported as detached** → **the mitigation this bullet originally named
   turned out not to exist**, and the replacement is weaker but honest. No engine publishes anything
   before its first store operation (F8), so an idle attached deployment and an unread one are
   indistinguishable. The mitigation is therefore that such a deployment reports `Unknown` rather than
@@ -1147,7 +1147,7 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
 - **A broken deployment reads as attached because a sibling sharing its tenant is healthy** → the
   predicate is scraped per replica at the Pod's own address, so a sibling cannot answer for it. The
   domain-level figures, which cannot attribute, are corroboration only and never the sole basis for
-  `True` while the engine's report is readable. ⚠️ With `tenant_id` unreachable (F4) the shared
+  `True` while the engine's report is readable. With `tenant_id` unreachable (F4) the shared
   tenant is `default` and therefore **cluster-wide**, so the corroborating signal cannot even
   distinguish namespaces — which makes the per-replica predicate load-bearing rather than merely
   preferable.
@@ -1517,7 +1517,7 @@ truthful); after T13 (the headline claim is measured and recorded).
   **no `tenant_id`** (unreachable on all three, F4), each absence asserted by a test that carries its
   reason. `MC_TE_METRIC=1` is set as a **defaulted** key. The JSON is rendered into one
   deployment-owned ConfigMap mounted read-only into every replica.
-  ⛔ **This acceptance also said it sets neither `global_segment_size` nor `local_buffer_size` nor
+  **This acceptance also said it sets neither `global_segment_size` nor `local_buffer_size` nor
   `mode`, "because the operator inventing them is a silent capacity error". That reason is
   backwards** — the group declares a ROLE, and omitting it makes every engine Pod a 4 GiB in-process
   store member instead of a pure client (F4 carries the measurement). The delivered renderer has the
@@ -1560,7 +1560,7 @@ truthful); after T13 (the headline claim is measured and recorded).
 - [x] **T9 · `CacheAttached`, judged on an observation**
   Delivered: `pkg/worker/controllers/worker/model_deployment_cache_attached.go` and its test; the
   reading folds into `model_deployment_status.go`'s one compute function.
-  ⛔ **The per-engine measurement this task was asked for came back negative, and F8 was rewritten
+  **The per-engine measurement this task was asked for came back negative, and F8 was rewritten
   from it:** no supported engine publishes anything about its KV connector before the first store
   operation, so the predicate this acceptance named ("reports its KV connector initialized",
   traffic-free) does not exist. The measurement, the one link that could have rescued it
@@ -1603,14 +1603,14 @@ truthful); after T13 (the headline claim is measured and recorded).
   event.
   Verify: `go test ./pkg/worker/controllers/worker/ -run ModelDeploymentEvents`
 
-  ⛔ **Two consequences of reading departures from observed state, both found by implementing it.**
+  **Two consequences of reading departures from observed state, both found by implementing it.**
   A departing replica has to still be there to be read, so the reconciler deletes replicas with
   their own grace period and **never** with `ctrlclix.Terminated` — which `instance.go` uses, and
   which is the obvious thing to copy. And a name still held by a terminating replica must not end
   the pass early: it did, which meant that during exactly the window a departure event is for,
   neither the event nor the status was written. The pass now carries the requeue to the end.
 
-  ⚠️ The `30s` in the message is stated as `kv_lease_duration`'s **default**, not read from the
+  The `30s` in the message is stated as `kv_lease_duration`'s **default**, not read from the
   pool. The value lives on the backend, which T3 resolves; naming a number this operator did not
   read would be worse than naming the default and saying so.
 
@@ -1667,7 +1667,7 @@ truthful); after T13 (the headline claim is measured and recorded).
   Verify: `bash cases/case-46.sh`, PASS, and the figures land in the Test Plan's measurement table
 
 - [ ] **T14 · Wire the synthesized connector into the replicas**
-  ⛔ **A task this list did not have, and its absence was load-bearing.** T6 delivers connector
+  **A task this list did not have, and its absence was load-bearing.** T6 delivers connector
   synthesis as a pure function; T3 delivers the Binding resolution. **Nothing owned the hop between
   them**, so the renderer is called with no connector at all: no engine argument, no config-path
   variable, no ConfigMap. Every replica therefore runs with the cache unattached, which makes
@@ -1688,7 +1688,7 @@ truthful); after T13 (the headline claim is measured and recorded).
   a client pointed at an address that does not answer is a worse failure than one that was never
   configured, because the first looks like a cache miss.
 
-  ⛔ **The client JSON is rendered by `pkg/worker/kvcache/inject`, which is its sole owner across
+  **The client JSON is rendered by `pkg/worker/kvcache/inject`, which is its sole owner across
   specs, and this task DELETES the copy in `model_deployment_connector.go`.** Two specs were about to
   render the same configuration — an injection webhook and this CR — and the alternative on the table
   was an equivalence test between them. A test *distinguishes* divergence; one implementation
@@ -1791,8 +1791,8 @@ accepted bad spec is worse than a refusal.
 | `device_json_key` | any engine | the device list is the JSON's `device_name`, never `rdma_devices` or `MOONCAKE_DEVICE` — the two spellings the other surfaces use |
 | `no_local_hostname` | any engine | `local_hostname` is **absent**; the engine derives it per process and one file cannot hold a per-replica value |
 | `no_tenant_id` | any engine | `tenant_id` is **absent**, because no supported engine passes it to `setup()`; the test states the reason so its deletion is deliberate |
-| `no_segment_sizes` | any engine | ⛔ **pins a defect, not a decision**: both keys are absent today, which makes the rank a 4 GiB store member. The case carries `KNOWN DEFECT` in its reason and is deleted by the connector-wiring task |
-| `no_mode_for_vllm` | engine `vllm` | ⛔ **pins the same defect**: `mode` is absent, which leaves vLLM's default of `embedded` — the half that makes the omission silent instead of raising |
+| `no_segment_sizes` | any engine | **pins a defect, not a decision**: both keys are absent today, which makes the rank a 4 GiB store member. The case carries `KNOWN DEFECT` in its reason and is deleted by the connector-wiring task |
+| `no_mode_for_vllm` | engine `vllm` | **pins the same defect**: `mode` is absent, which leaves vLLM's default of `embedded` — the half that makes the omission silent instead of raising |
 | `pure_client_group_after_the_fix` | each engine | the coherent group is rendered per engine: `vllm` gets `mode: standalone-store` + `global_segment_size: 0` + a positive `local_buffer_size`; `vllm-ascend` the pair without `mode`; `sglang` the pair, with its TP division noted |
 | `config_path_env_per_engine` | each engine | `vllm`/`vllm-ascend` get `MOONCAKE_CONFIG_PATH`, `sglang` gets `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` |
 | `mc_te_metric_default` | user set nothing | `MC_TE_METRIC=1` present |
@@ -1836,7 +1836,7 @@ condition exists.
 
 #### Integration tests
 
-⛔ **These are fake-client tests, not envtest.** An earlier draft of this spec said envtest; the
+**These are fake-client tests, not envtest.** An earlier draft of this spec said envtest; the
 repository has no envtest harness anywhere — every controller test in `pkg/worker/controllers/`
 drives the reconciler directly against `sigs.k8s.io/controller-runtime/pkg/client/fake`, with
 `interceptor.Funcs` where a call has to be counted rather than inferred. Introducing a second
@@ -2010,14 +2010,14 @@ comparison with one side missing is an assertion about nothing.
   an **action** ("a client connected"), and this design judges **effects**.
 
   The replacement is **the engine's own metrics endpoint accounting for its store operations,
-  scraped per replica** (F8) — attributable and downstream of the thing being judged. ⛔ **It is
+  scraped per replica** (F8) — attributable and downstream of the thing being judged. **It is
   not available without traffic**, which the sentence here originally claimed: that property was
   measured and is absent on all three engines, so this signal shares the second of the two
   limitations named just below rather than escaping both. The domain-level `Usage`/`Blocks` still
   cannot replace it, because they cannot **attribute**: they are shared by every deployment on one
   domain.
 
-  ⛔ **The better replacement was tried and is unreachable.** The Mooncake store client can serve its
+  **The better replacement was tried and is unreachable.** The Mooncake store client can serve its
   own `/health` on port 9300 — per client, bound at init, one layer closer to the truth than the
   engine's own report. But `enable_client_http_server` is `setup()`'s 12th parameter and every
   supported engine passes 7 or 8 positionally, with no environment fallback in the C++ and no
