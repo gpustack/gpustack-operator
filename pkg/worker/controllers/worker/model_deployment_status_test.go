@@ -149,7 +149,7 @@ func TestComputeModelDeploymentStatus_Unmanaged(t *testing.T) {
 
 // TestObserveModelDeploymentQuota reads each Workload's OWN conditions.
 //
-// ⛔ That is not an implementation detail. The admission gate stops evaluating a Workload once it is
+// That is not an implementation detail. The admission gate stops evaluating a Workload once it is
 // admitted, so anything derived from the gate would answer for the moment of admission and never
 // again — a Workload preempted since would still read as reserved.
 func TestObserveModelDeploymentQuota(t *testing.T) {

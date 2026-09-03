@@ -30,7 +30,7 @@ const (
 
 // ModelDeploymentCacheReading is one replica's own account of its KV cache client.
 //
-// ⛔ THREE VALUES, AND THE THIRD IS NOT A NEGATIVE. What the three supported engines actually expose
+// THREE VALUES, AND THE THIRD IS NOT A NEGATIVE. What the three supported engines actually expose
 // was measured, and none of them publishes anything that says "the connector initialized" before any
 // traffic: vLLM's five `vllm:mooncake_store_operation_*` families are all labeled and only reach
 // `.labels()` from an observation path that returns early on empty data; vllm-ascend declares no
@@ -109,7 +109,7 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentCache(
 				active, len(ready)))
 
 	case failing > 0:
-		// ⛔ NOT an absence, and this is the one state with no nearer observer. A connector that
+		// NOT an absence, and this is the one state with no nearer observer. A connector that
 		// cannot come up takes its replica with it — vLLM raises without its config path — so that
 		// failure is already reported as a replica that never becomes Ready. This one is different:
 		// the engine is Ready and serving, and every store operation it attempts fails. Nothing else
@@ -129,7 +129,7 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentCache(
 				"every deployment on its binding", domain.KVCache.Domain.Name))
 
 	default:
-		// ⛔ Unknown because THE STATE IT WOULD REPORT HAS A NEARER OBSERVER, not merely because the
+		// Unknown because THE STATE IT WOULD REPORT HAS A NEARER OBSERVER, not merely because the
 		// signal is missing. A connector that failed to come up killed its replica, and a replica
 		// that is not Ready is already reported by status.roles[].ready. What is left here is a
 		// deployment that is attached and simply idle, which is indistinguishable from an unread
@@ -207,7 +207,7 @@ func modelDeploymentReadyReplicas(pods []core.Pod) []*core.Pod {
 // modelDeploymentDomainHoldsData reports whether the master's account of the reuse domain shows
 // anything held.
 //
-// ⛔ nil is not zero on either figure. Both are pointers with omitempty on the Binding, so absent
+// nil is not zero on either figure. Both are pointers with omitempty on the Binding, so absent
 // means the scrape did not carry this domain; treating that as zero would turn every unscraped pool
 // into a positive detachment report.
 func modelDeploymentDomainHoldsData(domain *modelDeploymentDomain) bool {

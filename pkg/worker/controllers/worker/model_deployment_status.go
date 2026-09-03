@@ -133,7 +133,7 @@ func modelDeploymentPodRole(pod *core.Pod) string {
 
 // observeModelDeploymentQuota reports whether every replica has quota reserved.
 //
-// ⛔ It reads each Workload's OWN conditions rather than asking the admission gate. The gate stops
+// It reads each Workload's OWN conditions rather than asking the admission gate. The gate stops
 // evaluating a Workload once it is admitted, so anything derived from the gate would answer for the
 // moment of admission and never again — and a Workload that has been preempted since would still
 // read as reserved.

@@ -43,7 +43,7 @@ type modelDeploymentReplicaDeparture struct {
 
 // modelDeploymentReplicaDepartures reads, from the observed Pods alone, which replicas have left.
 //
-// ⛔ It is derived from OBSERVED STATE rather than from a deletion hook, and that is the whole
+// It is derived from OBSERVED STATE rather than from a deletion hook, and that is the whole
 // design. A hook fires once, on an event that can be missed — a restarted manager, a dropped watch —
 // and a correlation that exists only in an event nobody received is not written down at all. Reading
 // the Pods answers the same question on every pass, so a missed event costs a delay and not the

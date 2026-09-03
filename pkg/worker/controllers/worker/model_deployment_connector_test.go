@@ -100,7 +100,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 // it out. Exact map equality above already fails if any of them appears; these cases exist so that
 // whoever deletes one has to read the reason first.
 //
-// ⛔ TWO OF THE FIVE REASONS ARE DECISIONS AND THREE PIN A DEFECT, and the difference is marked
+// TWO OF THE FIVE REASONS ARE DECISIONS AND THREE PIN A DEFECT, and the difference is marked
 // inline. A green case here is not by itself an endorsement of the behavior it asserts — which is
 // exactly why each one has to carry its reason instead of just its key.
 func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
@@ -122,7 +122,7 @@ func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
 			why: "every engine derives it from its own process, and one deployment-wide file " +
 				"cannot hold a value that differs per replica",
 		},
-		// ⛔ THE NEXT THREE PIN A KNOWN DEFECT, NOT A DECISION. They are kept so that the fix is
+		// THE NEXT THREE PIN A KNOWN DEFECT, NOT A DECISION. They are kept so that the fix is
 		// noticed as a change rather than slipping in, and they must be DELETED by the task that
 		// wires the connector into the replicas.
 		//

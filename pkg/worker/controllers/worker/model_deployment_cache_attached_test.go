@@ -16,7 +16,7 @@ import (
 
 // fakeModelDeploymentCacheScraper answers per replica name.
 //
-// ⛔ It can express exactly the three readings the shipped engines afford and NOT ONE MORE. In
+// It can express exactly the three readings the shipped engines afford and NOT ONE MORE. In
 // particular it cannot report "the connector initialized" without traffic, because none of the three
 // engines publishes that: a stand-in more capable than the thing it stands in for would make the
 // Unknown path unreachable in tests while it is the common case in production.
@@ -122,7 +122,7 @@ func TestModelDeploymentCacheAttached_Table(t *testing.T) {
 			wantReason: modelDeploymentReasonCacheActive,
 		},
 		{
-			// ⛔ The one state with no nearer observer: the engine is Ready and serving, and every
+			// The one state with no nearer observer: the engine is Ready and serving, and every
 			// store operation it attempts fails. Nothing else in the status says so.
 			name:   "every store operation on every replica failed",
 			pods:   func(md *workercore.ModelDeployment) []core.Pod { return readyPods(md, 2) },
@@ -183,7 +183,7 @@ func TestModelDeploymentCacheAttached_Table(t *testing.T) {
 			wantReason: modelDeploymentReasonCacheActive,
 		},
 		{
-			// ⛔ An OBSERVED zero is not evidence of detachment: an attached idle domain holds zero
+			// An OBSERVED zero is not evidence of detachment: an attached idle domain holds zero
 			// too. This is the case F8 rejected `blocks: 0` for, asserted rather than described.
 			name:   "no account, and the domain reports an observed zero",
 			pods:   func(md *workercore.ModelDeployment) []core.Pod { return readyPods(md, 2) },
