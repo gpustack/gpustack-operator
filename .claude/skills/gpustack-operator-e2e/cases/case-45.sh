@@ -51,6 +51,10 @@
 #              that the deployment serves. Those rows report SKIP so the verdict table says so out
 #              loud rather than by omission.
 #
+#              A third row is deferred for a different and more interesting reason: it is not that
+#              the behaviour is missing, but that asserting it would not DISCRIMINATE. See the row
+#              about what the unregistered domain costs, near the end.
+#
 set -o pipefail
 
 NS="${1:-}"
@@ -198,21 +202,42 @@ else
     "wanted DomainRegistered=False/BindingNotFound, got: ${conds:-<no conditions>}"
 fi
 
-# It must also not have built anything while the Binding is missing.
+# The replicas ARE built while the Binding is missing, and the spec requires exactly that:
+# convergence is never gated on `DomainRegistered`, because a Binding created a second after the
+# deployment is indistinguishable from one that is never coming. Gating would also turn a store
+# leader restart — an ordinary operation, measured at 3.5-32 seconds — into an outage of every
+# deployment on the pool.
 #
 # BOTH HALVES OF THIS QUERY WERE WRONG IN THE FIRST VERSION, and it passed anyway. It asked for
 # `deployments.apps` carrying `gpustack.ai/model-deployment=<name>`: this kind renders Pods DIRECTLY,
 # so no Deployment ever exists, and that label does not exist either. A query for the wrong kind
-# filtered by an invented label returns 0 forever, which is exactly the answer this row wants — so
-# the check could never fail. Both were settled by rendering one deployment on a live cluster and
-# reading the object back: the Pod is `<md>-<role>-<ordinal>` and carries
-# app.kubernetes.io/name=model-deployment plus app.kubernetes.io/instance=<md>. Measured side by
-# side, the invented selector counted 0 and this one counted 1 against the same running Pod.
+# filtered by an invented label returns 0 forever, which was exactly the answer the row wanted back
+# when it asserted that nothing gets built — so the check could never fail. Both halves were settled
+# by rendering one deployment on a live cluster and reading the object back: the Pod is
+# `<md>-<role>-<ordinal>` and carries app.kubernetes.io/name=model-deployment plus
+# app.kubernetes.io/instance=<md>. Measured side by side, the invented selector counted 0 and this
+# one counted 1 against the same running Pod.
 wl="$(kubectl -n "$NS" get pods \
   -l app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=case45-nobind \
   -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | wc -w | tr -d ' ')"
-record SKIP "what gets built while the domain is unregistered" \
-  "observed: ${wl:-0} replica Pod(s) with DomainRegistered=False/BindingNotFound. The spec does not say whether rendering is gated on the domain, so this row records rather than judges"
+if [ "${wl:-0}" -eq 1 ]; then
+  record PASS "the replicas are rendered even though the domain is unregistered" \
+    "1 replica Pod alongside DomainRegistered=False/BindingNotFound — convergence is not gated on the domain"
+else
+  record FAIL "the replicas are rendered even though the domain is unregistered" \
+    "wanted the 1 declared replica to be rendered anyway, got ${wl:-0} Pod(s)"
+fi
+
+# The other half of that rule — the unregistered domain costs the replicas their connector and
+# NOTHING else — cannot be asserted yet, and the reason is worth writing down rather than leaving as
+# a bare `deferred`. Measured side by side on a live cluster: a deployment whose Binding is READY
+# renders a Pod with 0 env vars, 0 volumes and argv `[vllm serve <model>]` — byte-identical to the
+# Pod this case just counted. The connector is not wired into any replica until T14, so "carries no
+# connector" is true of every deployment on the cluster and discriminates nothing. Asserting it here
+# would pass for a reason that has nothing to do with the domain, which is the failure this whole
+# case is built to avoid.
+record SKIP "the unregistered domain costs the replicas their connector and nothing else" \
+  "deferred: needs T14. Until a connector is wired into any replica at all, a Ready Binding renders the same Pod, so this would hold for the wrong reason"
 
 kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai case45-nobind \
   --wait=true --timeout=60s >/dev/null 2>&1
