@@ -91,8 +91,36 @@
 #              that order and idempotently, on pass AND fail. It changes no shared baseline - every
 #              object it touches is one it created.
 #
-# NOT YET EXERCISED AS A CASE. No run of this file exists, on any cluster. It was written from source
-# read at vllm v0.25.1 (752a3a50) and vllm-ascend v0.19.1rc1 (da421afa).
+# EXERCISED 2026-09-04, first run ever, single-node docker-desktop (arm64, no accelerator):
+#   vllm row        PASS - LOADED MooncakeStoreConnector. That row had never been executed either;
+#                   until this run it rested on source read at v0.25.1 (752a3a50).
+#   vllm-ascend row FAIL at step 1, and NOT about the name: FACTORY_IMPORT_RAISED RuntimeError,
+#                   "Failed to load the backend extension: torch_npu".
+#
+# ⛔ WHY THAT ROW CANNOT PASS HERE, measured rather than guessed - and it is this webhook's own subject
+# matter. The vllm-ascend image prepares its environment in the image ENTRYPOINT, which sources three
+# Ascend set_env.sh scripts before exec'ing anything. TWO things bypass it: a Pod that sets `command`
+# discards the ENTRYPOINT entirely (the exact Kubernetes rule this webhook refuses over), and
+# `kubectl exec` starts a process that never runs it. So torch's device-backend autoload fails before
+# any vLLM module is imported.
+#   Measured three ways on the same image: through the ENTRYPOINT (`docker run <img> python3 -`) the
+#   import SUCCEEDS; bypassing it (`--entrypoint python3`) it fails exactly as it does here; and
+#   TORCH_DEVICE_BACKEND_AUTOLOAD=0 does NOT fix it - the failure only moves to
+#   `ImportError: libascend_hal.so`, because vLLM activates the ascend PLATFORM plugin, which imports
+#   torch_npu regardless of the connector registry this case is about.
+# ⇒ The fix is to give the probe the environment the ENTRYPOINT builds, not to disable a backend. Left
+#   undone deliberately: a fixture that runs the probe as the Pod's `args` would keep the ENTRYPOINT,
+#   but the name this case asserts has to be read off the mutated Pod BEFORE the probe runs, and
+#   passing it at create time is the hard-coding this case exists to avoid. That tension is real and
+#   is a design decision, not an edit to make during a run.
+#
+# ⭐ What this run does NOT leave unverified: the registry contents themselves. Measured the same day
+# by `docker run --rm quay.io/ascend/vllm-ascend:v0.19.1rc1` (ENTRYPOINT honored, no accelerator):
+# after load_general_plugins() the factory holds 19 names, AscendStoreConnector among them and
+# MooncakeStoreConnector absent. That is this row's subject; what is missing is only its delivery
+# through the webhook and kubectl exec.
+#
+# It was written from source read at vllm v0.25.1 (752a3a50) and vllm-ascend v0.19.1rc1 (da421afa).
 #
 # What HAS been executed, 2026-09-04, outside this file - one `docker run --rm` on a host with no
 # accelerator of any kind, against quay.io/ascend/vllm-ascend:v0.19.1rc1 (linux/arm64):
