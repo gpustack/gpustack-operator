@@ -23,7 +23,7 @@ func connectorInput(engine, manufacturer string) ModelDeploymentConnectorInput {
 		Manufacturer:        manufacturer,
 		Domain:              "team-a-shared",
 		MasterServerAddress: "shared-kv-master.gpustack-system.svc:50051",
-		Protocol:            "TCP",
+		Protocol:            "tcp",
 	}
 }
 
@@ -377,30 +377,6 @@ func TestSynthesizeModelDeploymentConnector_DeviceSpellingIsNotConfigurable(t *t
 func TestSynthesizeModelDeploymentConnector_UnsupportedEngine(t *testing.T) {
 	_, err := SynthesizeModelDeploymentConnector(connectorInput("tensorrt-llm", nodefeature.ManufacturerNVIDIA))
 	require.Error(t, err)
-}
-
-func TestModelDeploymentClientProtocol(t *testing.T) {
-	testCases := []struct {
-		name  string
-		given string
-		want  string
-	}{
-		{name: "auto_resolves_to_tcp", given: "Auto", want: "tcp"},
-		{name: "empty_resolves_to_tcp", given: "", want: "tcp"},
-		{name: "tcp_lowercased", given: "TCP", want: "tcp"},
-		{name: "rdma_lowercased", given: "RDMA", want: "rdma"},
-		{name: "hip_lowercased", given: "HIP", want: "hip"},
-		{name: "ascend_lowercased", given: "Ascend", want: "ascend"},
-		// The client warns and carries on for a name it does not know, so refusing here would
-		// refuse a transport the client would have accepted.
-		{name: "unknown_passes_through_lowercased", given: "Efa", want: "efa"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, modelDeploymentClientProtocol(tc.given))
-		})
-	}
 }
 
 func TestModelDeploymentArgName(t *testing.T) {

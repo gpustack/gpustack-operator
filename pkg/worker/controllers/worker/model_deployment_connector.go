@@ -58,10 +58,15 @@ type ModelDeploymentConnectorInput struct {
 	// MasterServerAddress is the address of the store master, observed from the pool.
 	MasterServerAddress string
 
-	// Protocol is the backend's transport as the backend spells it — Auto, TCP, RDMA, HIP or
-	// Ascend. Synthesis lowercases it and resolves Auto, because the client matches protocol names
-	// case-sensitively in lowercase while this project's enum is capitalized. The mapping stays here
-	// because `inject.Connection.Protocol` is documented as arriving already mapped.
+	// Protocol is the transport in the artifact's own spelling, ALREADY MAPPED from the backend's
+	// enum by `mooncake.MemberProtocol`. `inject.Connection.Protocol` documents itself as arriving
+	// mapped, and that function is what maps it: it belongs to the package that owns the backend,
+	// it resolves Auto, and it falls back to Auto for an empty value.
+	//
+	// A mapping used to live in this file and was deleted rather than kept. It agreed with
+	// mooncake's table on all five enum values -- so feeding one into the other was harmless and
+	// also pointless, and a third implementation of one table is a place for the next transport to
+	// be added in two of three.
 	Protocol string
 }
 
@@ -238,7 +243,7 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		Domain: in.Domain,
 		Connection: inject.Connection{
 			MasterAddress: in.MasterServerAddress,
-			Protocol:      modelDeploymentClientProtocol(in.Protocol),
+			Protocol:      in.Protocol,
 		},
 	})
 	if err != nil {
@@ -333,17 +338,10 @@ func ModelDeploymentEngineCommand(engine, model string) ([]string, error) {
 // exactly kv_both. vLLM refuses a kv_connector with no kv_role, and kv_both is the one value that is
 // both a valid producer and a valid consumer, which is what replicas sharing one store need.
 
-// modelDeploymentClientProtocol maps the backend's transport onto the spelling the client matches.
-//
-// The client compares protocol names case-sensitively in lowercase while this project's enum is
-// capitalized, so the mapping is not cosmetic. Auto resolves to TCP, which is what the backend's own
-// contract says Auto means. An unrecognized value is lowercased and passed through: the client warns
-// and carries on rather than refusing, so turning it into an error here would refuse a transport the
-// client would have accepted.
-func modelDeploymentClientProtocol(protocol string) string {
-	if protocol == "" || strings.EqualFold(protocol, "Auto") {
-		return "tcp"
-	}
-
-	return strings.ToLower(protocol)
-}
+// The protocol mapping this file used to hold is `mooncake.MemberProtocol`'s, which belongs to the
+// package that owns the backend. The two agreed on all five enum values, so the deletion changes no
+// rendered document -- with one difference worth stating: this one lowercased an UNRECOGNIZED value
+// and passed it through, reasoning that the client warns and carries on. The surviving one returns
+// empty for a value outside the enum, and `inject.Render` refuses an empty protocol. An object that
+// reached this code with a protocol the schema does not allow never went through admission, and a
+// refusal naming that is better than a lowercased guess.

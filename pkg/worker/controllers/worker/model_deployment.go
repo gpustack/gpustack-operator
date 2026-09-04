@@ -178,7 +178,16 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		return ctrl.Result{}, err
 	}
 
-	desired, err := r.renderModelDeploymentPods(ctx, md)
+	// Resolved once per pass, not per role: the endpoint and the transport belong to the pool and its
+	// backend. A nil result means there is nothing to connect to yet, and the replicas are rendered
+	// without a connector rather than with a partial one.
+	connection, err := r.resolveModelDeploymentConnection(ctx, domain)
+	if err != nil {
+		logger.Error(err, "resolve kv cache connection")
+		return ctrl.Result{}, err
+	}
+
+	desired, err := r.renderModelDeploymentPods(ctx, md, connection)
 	if err != nil {
 		// A render failure is the InstanceType not being ready, or a role the renderer cannot build
 		// a container from. Both are visible to the reader through the controller's own retry, and
@@ -358,6 +367,7 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentService(
 // renderModelDeploymentPods renders every replica of every role, keyed by Pod name.
 func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 	ctx context.Context, md *workercore.ModelDeployment,
+	connection *ModelDeploymentConnectorInput,
 ) (map[string]*core.Pod, error) {
 	// The overcommit setting is the Instance path's, deliberately: it decides how a declared
 	// resource becomes a request, and this renderer derives the same values the Instance webhook
@@ -384,13 +394,26 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 			InstanceType:               instType,
 			RuntimeClassName:           r.getModelDeploymentRuntimeClassName(ctx, instType),
 			GeneralResourcesOvercommit: overcommit,
-			// The connector and its ConfigMap are still absent, and resolving the Binding did not
-			// bring them: synthesis additionally needs the members' transport, which no namespaced
-			// object republishes — the pool publishes its client endpoint and nothing about the data
-			// plane. Rendering a guessed protocol would configure the client for a fabric the members
-			// are not on, which fails as a transfer error one layer away from its cause. So a replica
-			// is rendered with no connector at all, which is also what a deployment whose Binding
-			// cannot be read gets.
+		}
+
+		// The connector is synthesized PER ROLE even though its connection is per deployment,
+		// because the accelerator is the role's: it selects the store connector the engine
+		// registers, and only the role's InstanceType knows it.
+		//
+		// A nil connection renders replicas with NO connector, which is what a deployment whose
+		// Binding has not resolved gets. A take-over role also gets none, but that decision is the
+		// renderer's rather than this loop's -- it holds the template. Synthesizing here for a role
+		// that will discard it costs a pure function call and keeps one rule in one place.
+		if connection != nil {
+			roleConnection := *connection
+			roleConnection.Engine = md.Spec.Engine
+			roleConnection.Manufacturer = instType.Status.Detail.Manufacturer
+
+			connector, err := SynthesizeModelDeploymentConnector(roleConnection)
+			if err != nil {
+				return nil, fmt.Errorf("role %q cannot be given a cache client: %w", role.Name, err)
+			}
+			in.Connector = connector
 		}
 
 		for ordinal := range role.Replicas {

@@ -12,6 +12,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 )
 
 // ModelDeploymentKind is how a ModelDeployment names itself in a KVCachePoolBinding's usedBy.
@@ -266,4 +267,69 @@ func (r *ModelDeploymentReconciler) getModelDeploymentBinding(
 	}
 
 	return kvcpb, nil
+}
+
+// resolveModelDeploymentConnection reads what the pool and its backend published: the half of the
+// synthesis input that is the same for every role of one deployment.
+//
+// It returns nil when there is nothing to connect to, and the caller then renders replicas with NO
+// connector at all rather than a partial one. That is the spec's rule and it is not caution: a
+// client configured to reach an address that does not answer looks like a cache MISS from outside
+// the Pod, while a replica that was never configured says so in its own spec.
+//
+// EVERY MISSING PIECE TAKES THAT SAME EXIT, deliberately. An absent pool, an unpublished endpoint,
+// an absent backend -- each is a state the cluster converges out of on its own, and each is already
+// reported by DomainRegistered or by the pool's own conditions. A second opinion here would add a
+// message without adding an observation.
+//
+// The other half of the input, the engine and the accelerator, is per role: the accelerator comes
+// from the role's InstanceType, so the synthesis itself cannot be hoisted out of that loop.
+func (r *ModelDeploymentReconciler) resolveModelDeploymentConnection(
+	ctx context.Context, domain *modelDeploymentDomain,
+) (*ModelDeploymentConnectorInput, error) {
+	if domain == nil || !domain.Ready || domain.KVCache == nil {
+		return nil, nil
+	}
+
+	pool := &workercore.KVCachePool{}
+	if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: domain.KVCache.Pool}, pool); err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf("getting kv cache pool %q: %w", domain.KVCache.Pool, err)
+	}
+
+	// The client endpoint is the address an inference engine connects to, echoed onto the pool from
+	// its backend. Empty means the backend has published none yet, never that there is none.
+	if pool.Status.ClientEndpoint == "" {
+		return nil, nil
+	}
+
+	// EXACTLY ONE BACKEND IS ADMITTED, and that rule belongs to the pool's WEBHOOK rather than to
+	// its schema, so the refusal can explain that quota lands on a single master's ledger. That
+	// makes the guarantee weaker than a schema one, which is why this check exists: an object
+	// written before the webhook existed, or while it was down, can carry none -- and indexing an
+	// empty slice would panic the reconcile of every deployment on the pool.
+	if len(pool.Spec.Backends) == 0 {
+		return nil, nil
+	}
+
+	kvcb := &workercore.KVCacheBackend{}
+	if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: pool.Spec.Backends[0]}, kvcb); err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf("getting kv cache backend %q: %w", pool.Spec.Backends[0], err)
+	}
+
+	return &ModelDeploymentConnectorInput{
+		Domain:              domain.KVCache.Domain.Name,
+		MasterServerAddress: pool.Status.ClientEndpoint,
+		// Through the one function that owns this mapping, never by reading Spec.Transport.Protocol
+		// here. It resolves Auto and falls back to Auto for an empty value, and a second reader
+		// would start out missing that fallback.
+		Protocol: mooncake.MemberProtocol(kvcb),
+	}, nil
 }

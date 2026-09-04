@@ -408,3 +408,118 @@ func TestObserveModelDeploymentDomain_NilLeavesEverythingAlone(t *testing.T) {
 	assert.Equal(t, modelDeploymentReasonBindingNotFound,
 		ModelDeploymentConditionDomainRegistered.GetReason(holder))
 }
+
+// TestResolveModelDeploymentConnection covers what the pool and its backend must have published
+// before a replica can be given a cache client, plus the one shape that would crash.
+//
+// EVERY NEGATIVE CASE EXPECTS nil AND NOT AN ERROR, and that is the contract being pinned: each of
+// these is a state the cluster converges out of on its own, already reported by DomainRegistered or
+// by the pool's own conditions. Returning an error would retry forever over a condition another
+// controller owns, and would do it while the replicas serve perfectly well without a cache.
+func TestResolveModelDeploymentConnection(t *testing.T) {
+	readyKVCache := func() *workercore.ModelDeploymentKVCacheStatus {
+		return &workercore.ModelDeploymentKVCacheStatus{
+			Pool:   "shared",
+			Domain: workercore.ModelDeploymentKVCacheDomain{Name: "team-a"},
+		}
+	}
+	pool := func(mutate func(*workercore.KVCachePool)) *workercore.KVCachePool {
+		p := &workercore.KVCachePool{
+			ObjectMeta: meta.ObjectMeta{Name: "shared"},
+			Spec:       workercore.KVCachePoolSpec{Backends: []string{"kvcb"}},
+			Status:     workercore.KVCachePoolStatus{ClientEndpoint: "master:50051"},
+		}
+		if mutate != nil {
+			mutate(p)
+		}
+
+		return p
+	}
+	backend := &workercore.KVCacheBackend{
+		ObjectMeta: meta.ObjectMeta{Name: "kvcb"},
+		Spec: workercore.KVCacheBackendSpec{
+			Transport: workercore.KVCacheBackendTransport{Protocol: "RDMA"},
+		},
+	}
+
+	testCases := []struct {
+		name     string
+		domain   *modelDeploymentDomain
+		objs     []ctrlcli.Object
+		wantNil  bool
+		wantProt string
+	}{
+		{
+			name: "no reading of the binding at all", domain: nil, wantNil: true,
+		},
+		{
+			// A Binding that is not usable yet is not a Binding to configure a client against: the
+			// pool may have no quota granted, or its master may be restarting.
+			name:    "binding is not usable",
+			domain:  &modelDeploymentDomain{KVCache: readyKVCache()},
+			objs:    []ctrlcli.Object{pool(nil), backend},
+			wantNil: true,
+		},
+		{
+			name:    "pool does not exist",
+			domain:  &modelDeploymentDomain{Ready: true, KVCache: readyKVCache()},
+			wantNil: true,
+		},
+		{
+			// Empty means the backend has published none YET, never that there is none.
+			name:   "pool published no client endpoint",
+			domain: &modelDeploymentDomain{Ready: true, KVCache: readyKVCache()},
+			objs: []ctrlcli.Object{
+				pool(func(p *workercore.KVCachePool) { p.Status.ClientEndpoint = "" }), backend,
+			},
+			wantNil: true,
+		},
+		{
+			// THE ONE THAT WOULD PANIC. "Exactly one backend" is the pool webhook's rule rather than
+			// its schema's, so the guarantee is weaker than a schema one and an object can carry
+			// none -- from before that webhook existed, or from while it was down. Indexing an empty
+			// slice would crash the reconcile of every deployment on the pool.
+			name:   "pool names no backend",
+			domain: &modelDeploymentDomain{Ready: true, KVCache: readyKVCache()},
+			objs: []ctrlcli.Object{
+				pool(func(p *workercore.KVCachePool) { p.Spec.Backends = nil }), backend,
+			},
+			wantNil: true,
+		},
+		{
+			name:    "backend does not exist",
+			domain:  &modelDeploymentDomain{Ready: true, KVCache: readyKVCache()},
+			objs:    []ctrlcli.Object{pool(nil)},
+			wantNil: true,
+		},
+		{
+			name:     "everything published",
+			domain:   &modelDeploymentDomain{Ready: true, KVCache: readyKVCache()},
+			objs:     []ctrlcli.Object{pool(nil), backend},
+			wantProt: "rdma",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(tc.objs...)}
+
+			got, err := r.resolveModelDeploymentConnection(context.Background(), tc.domain)
+			require.NoError(t, err)
+
+			if tc.wantNil {
+				assert.Nil(t, got)
+
+				return
+			}
+
+			require.NotNil(t, got)
+			assert.Equal(t, "master:50051", got.MasterServerAddress)
+			assert.Equal(t, "team-a", got.Domain)
+			// Already in the artifact's own spelling, lowercased and Auto-resolved by the package
+			// that owns the backend. This field is documented as arriving mapped, and nothing here
+			// maps it a second time.
+			assert.Equal(t, tc.wantProt, got.Protocol)
+		})
+	}
+}
