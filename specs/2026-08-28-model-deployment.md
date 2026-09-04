@@ -1404,9 +1404,17 @@ the four-replica deployment. **The numbers are recorded in the Test Plan when th
   the leader's readiness probe reads its segment list rather than its quota ledger, so the Pod is
   Ready while the ledger still answers zero. **The deployment must not do anything irreversible in
   that window** — not drop its `usedBy` entry, not report a permanent error, not tear down
-  replicas. `DomainRegistered` goes `False` with the Binding's reason, the Pods keep serving (F2),
-  and the next reconcile converges. Waiting is the correct behaviour; punishing a Binding for a
-  routine upgrade is not.
+  replicas. `DomainRegistered` goes `False` with the Binding's reason, the Pods keep serving, and
+  the next reconcile converges. Waiting is the correct behaviour; punishing a Binding for a routine
+  upgrade is not.
+
+  **Convergence is therefore never gated on `DomainRegistered`, and that covers a Binding that was
+  never created at all — not only one that is briefly unready.** The two reach the renderer by the
+  same path on purpose: a controller that told them apart would have to decide how long "not yet"
+  lasts, and it cannot, because a Binding created a second after the deployment is indistinguishable
+  from one that is never coming. What bounds the cost is T14's rule — a deployment whose Binding
+  cannot be resolved renders **no** connector rather than a partial one — so an unregistered domain
+  costs the replicas their cache and nothing else.
 - **The connector needs the members' transport, and no namespaced object republishes it.** Three of
   the four client keys have a source a `ModelDeployment` can read: `master_server_address` is the
   pool's `status.clientEndpoint`, `metadata_server` is the literal `P2PHANDSHAKE` the metadata plane
