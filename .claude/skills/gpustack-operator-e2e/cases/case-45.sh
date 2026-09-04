@@ -32,8 +32,27 @@
 #              seven manifests, and seven refusals read exactly like seven working guards.
 #
 # Environment: Any cluster with a materialized scheduling chain (run case-1 first) and an operator
-#              image carrying the ModelDeployment CRD. No GPU is needed: nothing here schedules a
-#              replica, and NO KVCachePoolBinding has to exist. That last part is not a shortcut but
+#              image carrying the ModelDeployment CRD. No GPU is needed, and NO KVCachePoolBinding
+#              has to exist.
+#
+#              ONE ROW PAYS FOR THE "NO GPU" PART EXPLICITLY, and it did not always. The
+#              replica-rendering row gives its role a `template.image`, because a role naming no
+#              image has one SYNTHESIZED from the accelerator backend its InstanceType observed —
+#              and a CPU-only InstanceType has observed none. Measured on a single-node CPU-only
+#              cluster: without the explicit image that row polls out at 0 Pods, and the operator
+#              log says "the instance type has not observed its hardware yet". That is a correct
+#              refusal (an empty image would surface later as an ImagePullBackOff naming a tag
+#              nobody typed) and it has its own coverage in the unit tier, so the row drops the
+#              dependency rather than the assertion: it still requires EXACTLY 1 Pod, so a
+#              convergence wrongly gated on the domain still fails it.
+#
+#              The lesson is in the header rather than at the row: this line read "No GPU is needed:
+#              nothing here schedules a replica" while a row that needed one was added below it, and
+#              the sentence never stopped being true OF THE CASE IT DESCRIBED. An added assertion
+#              can raise a case's environment requirement without contradicting anything already
+#              written down.
+#
+#              That the Binding may be absent is not a shortcut but
 #              a property worth stating: admission never reads cluster state, so a poolRef naming a
 #              Binding that was never created is ACCEPTED by both the schema and the webhook. The
 #              missing Binding surfaces later, as a controller condition, which is exactly the row
@@ -219,7 +238,14 @@ for _ in $(seq 1 20); do
   sleep 3
 done
 
-manifest "" "" | sed "s/case45-probe/case45-nobind/" | kubectl apply -f - >/dev/null 2>&1
+# The role names an image EXPLICITLY here, unlike every row above, and the header says why. A role
+# without one gets an image synthesized from the accelerator backend its InstanceType observed, and
+# a CPU-only InstanceType has observed none. That refusal is correct and is asserted in the unit
+# tier -- model_deployment_image_test.go and model_deployment_render_test.go both pin its message --
+# so this row drops the dependency rather than the assertion. It still demands EXACTLY 1 Pod.
+manifest "    template:
+      image: docker.io/library/busybox:1.36" "" \
+  | sed "s/case45-probe/case45-nobind/" | kubectl apply -f - >/dev/null 2>&1
 conds=""
 for _ in $(seq 1 20); do
   conds="$(kubectl -n "$NS" get modeldeployments.worker.gpustack.ai case45-nobind \
