@@ -719,3 +719,48 @@ func TestModelDeploymentPodSpecHash_MovesWithEveryRenderedInput(t *testing.T) {
 		})
 	}
 }
+
+// TestRenderModelDeploymentPod_ConfigChangeMovesTheSpecHash is the rollout property T14 exists for,
+// and the one a ConfigMap carrier could not have delivered.
+//
+// A ConfigMap reaches a Pod as a NAME, so re-rendering its contents leaves core.PodSpec
+// byte-identical while the hash's subject is {Labels, Annotations, PodSpec}. The hash would not
+// move, no recreate would follow, the replicas would keep a stale client configuration -- and a
+// check asserting the hash moved would have gone GREEN over exactly that. The annotation carrier
+// puts the document itself inside the hash's subject, so this test is the difference between the
+// two designs rather than a restatement of either.
+func TestRenderModelDeploymentPod_ConfigChangeMovesTheSpecHash(t *testing.T) {
+	md := newRenderDeployment()
+
+	render := func(endpoint string) *core.Pod {
+		cin := connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA)
+		cin.MasterServerAddress = endpoint
+		conn, err := SynthesizeModelDeploymentConnector(cin)
+		require.NoError(t, err)
+
+		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			Deployment:   md,
+			Role:         &md.Spec.Roles[0],
+			InstanceType: newRenderInstanceType(),
+			Connector:    conn,
+		})
+		require.NoError(t, err)
+
+		return pod
+	}
+
+	before := render("master-a.gpustack-system.svc:50051")
+	after := render("master-b.gpustack-system.svc:50051")
+
+	assert.NotEqual(t,
+		before.Annotations[modelDeploymentPodSpecHashAnnotation],
+		after.Annotations[modelDeploymentPodSpecHashAnnotation],
+		"a pool endpoint change has to move the hash, or the replicas keep a stale client config")
+
+	// AND THE POD SPEC IS IDENTICAL ACROSS THE TWO, which is what makes the assertion above mean
+	// something. The volume names an annotation rather than carrying the document, so the spec
+	// cannot see this change at all: had the hash's subject been the spec alone, these two renders
+	// would be indistinguishable and no recreate would ever follow a configuration change.
+	assert.Equal(t, before.Spec, after.Spec,
+		"the projection names an annotation, so the spec is blind to the content change")
+}
