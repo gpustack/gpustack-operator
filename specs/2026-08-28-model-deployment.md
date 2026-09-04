@@ -2271,7 +2271,7 @@ accepted bad spec is worse than a refusal.
 | `extra_args_unowned_key` | `--max-model-len=32768` | accept |
 | `env_owned_key` | `MOONCAKE_CONFIG_PATH` in `env` | reject |
 | `env_owned_key_in_template` | the same key in `template.env` | reject; the message names **`roles[].template.env`**, not `roles[].env` |
-| `env_owned_key_in_template_take_over` | the same, with `template.command` set | reject — the renderer drops owned keys unconditionally, so admission refuses unconditionally |
+| `env_owned_key_in_template_take_over` | the same, with `template.command` set | reject — the renderer drops owned keys unconditionally, so admission refuses unconditionally. Whether it *should* is a separate question, asked in https://github.com/gpustack/gpustack-operator/issues/173: on this one branch the operator renders no configuration for the key to endanger, so the reason the key is owned does not apply. The case pins today's behaviour either way, because the two sets agreeing is what keeps the refusal from being silent |
 | `env_unowned_key_in_template` | `HF_HOME` in `template.env` | accept |
 | `env_defaulted_key` | `MC_TE_METRIC=0` | accept; the user's value wins |
 | `template_resources` | `template.resources` set | reject; names `roles[].resources` |
@@ -2421,11 +2421,18 @@ a commit message is not a durable channel for a gap that outlives the change. Th
 the case-45 row for the overlay refusal, which was added without a cluster to run it on — its rule
 is covered by mutation-checked unit cases, but the row's own message-matching has not been observed.
 
-**This paragraph is the basis of record for both gaps.** A pull request body may restate them for
-reviewers, and that copy is a summary of this one: where the two disagree, this is the one that is
-right, because it is the copy that travels with the code. Naming the basis is what makes the
-duplication safe — two descriptions of one fact drift, and without a designated winner the reader
-has to guess which is newer.
+**This paragraph is the basis of record for both gaps.** Two kinds of summary of it exist, for
+audiences this document does not reach: a pull request body, for reviewers reading the change, and
+one tracking issue per gap, for whoever picks it up after the change is merged —
+https://github.com/gpustack/gpustack-operator/issues/174 for the Service watch,
+https://github.com/gpustack/gpustack-operator/issues/175 for the unrun case-45 row. Where any of
+them disagrees with this paragraph, this one is right, because it is the copy that travels with the
+code. Naming the basis is what makes the duplication safe — three descriptions of one fact drift,
+and without a designated winner the reader has to guess which is newer.
+
+Each summary also carries its gap's **what does not close this** clause, and that duplication is
+deliberate: the clause is worthless where the gap is not being read, and the moment someone is about
+to fill a gap is the moment they are reading the tracking issue, not this spec.
 
 **Measurement record (filled by T13).**
 
