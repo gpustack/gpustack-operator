@@ -2089,15 +2089,20 @@ truthful); after T13 (the headline claim is measured and recorded).
   `status.endpoint` serves inference; the rejections all fire (two roles with the message naming the
   spec, an owned key in `extraArgs`, `template.resources`, a missing Binding, a cross-namespace
   `poolRef`, a self-declared domain). **case-47** — two deployments on the **same** Binding share
-  blocks. **The isolation half is deferred PER ENGINE and no longer on `tenant_id` being
-  unreachable, because that reason has gone false on one of them:** the answer is
-  `inject.SupportsTenant`, which carries the version and source line each verdict was measured at,
-  and at the versions this project ships the vLLM family forwards no tenant while SGLang does. So
-  the vLLM half defers with that table as its reason and asserts the gap's own signature, failing
-  when the entry flips; the SGLang half cannot be deferred on the mechanism at all — it exists —
-  and defers instead on needing an engine that serves, which is the same accelerator requirement
-  case-45's serving rows carry. A deferral naming a mechanism that is present would send a reader
-  to build something already built. **case-48** — the deliberate break:
+  blocks. **BOTH HALVES ARE ASSERTED, AND THE CASE USES SGLANG BECAUSE THE ENGINE CHOICE DECIDES
+  WHETHER EITHER HALF DISCRIMINATES.** On the vLLM family no tenant travels, so two deployments'
+  rendered configurations are byte-identical and both land in the tenant named `default` — "they
+  share" would then pass with the Binding doing nothing at all, which is the failure this whole
+  test plan refuses. SGLang forwards the domain as `MOONCAKE_TENANT_ID`, so same Binding means same
+  tenant and different Bindings mean different tenants, and the two halves become two different
+  observations instead of one tautology.
+  ⇒ The write is driven by the store's own python client against the tenant the operator RENDERED
+  onto the replica, not by an engine: same tenant round-trips a payload, a second tenant does not
+  see it. That needs no accelerator. **The gap this leaves is named rather than left implicit** —
+  the replicas run an engine rather than this probe, so "the engine reads the variable and forwards
+  it" is a separate claim, and it is case-59's, already measured there. A case that drove the probe
+  and claimed the engine's behaviour would be asserting something it never looked at.
+  **case-48** — the deliberate break:
   an image without the matching per-vendor wheel, and separately a Binding pointing at an unreachable
   pool; the assertion is `CacheAttached != True` in both, and the case **records which shape the
   engine took**. Each case reports its verdict the way the suite already does, which is a convention
@@ -2737,10 +2742,14 @@ comparison with one side missing is an assertion about nothing.
   to fail when its reason expires only does so once the case carrying it is written; until then the
   guarantee is a sentence. That is how three other deferrals in this spec's cases outlived their
   reasons at the same time.
-  The remaining open part is narrower and per engine: whether the store ENFORCES a tenant it
-  receives. `inject` records the injection as an ACTION and never as isolation, `case-59` measures
-  that the variable is read and the value forwarded, and nothing yet measures partitioning at the
-  store — which needs a serving engine, so it sits with the parked items rather than here.
+  The remaining open part is narrower and is NOT parked: whether the store ENFORCES a tenant it
+  receives. `inject` records the injection as an ACTION and never as isolation, and `case-59`
+  measures that the engine reads the variable and forwards the value — but neither looks at
+  partitioning. **That is measurable here**, with the store's own python client against two tenants,
+  and case-47 does it. **An earlier revision of this paragraph said it needed a serving engine; that
+  was the case-level answer to a claim-level question.** The claim is about the store, the engine is
+  only one possible caller, and asking "can this environment run the engine" instead of "can it
+  reach the store" parked something that was never blocked.
 - **Rolling update semantics beyond recreate.** Surge and unavailable knobs are deferred to a later
   spec, informed by T13's numbers. The open part is what the right default trade is: a replica's
   cached blocks are lost when it goes away, so a fast rollout has a measurable cache cost that this
