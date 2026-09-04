@@ -16,8 +16,9 @@ replicas nor the one-replica-many-Pods shape the next spec needs.
 The workload does **not** declare its reuse domain; it inherits the Binding's. Two `ModelDeployment`s
 referencing the same Binding share KV, and name matching between workloads disappears along with a
 whole class of typo. **The domain is not yet enforced at the storage layer, and this spec ships
-saying so**: `tenant_id` is a parameter past the positional cut every supported engine stops at, so
-every deployment reaches the cache as the tenant named `default` (F4). The API property that matters
+saying so**: whether the domain reaches the store is per engine and `inject.SupportsTenant` is the
+answer, carried beside the version it was measured at — the vLLM family forwards none, SGLang does,
+and an injected tenant is not a measured isolation either way (F4). The API property that matters
 survives — a workload still cannot name a domain, so it cannot mint tenants to escape a quota
 ceiling — and the missing half is enforcement downstream of the API, which is upstream's to land.
 
@@ -64,8 +65,8 @@ matters of taste:
 - **G2** The reuse domain is an **admin-controlled** property a workload inherits, never one it
   names — so the namespace quota ceiling cannot be escaped by minting tenants (F3). This is met at
   the **API** layer, which is where the escape it prevents would have happened. It is **not** met
-  downstream: `tenant_id` reaches no supported engine, so the domain a deployment inherits does not
-  yet reach the cache (F4). The spec reports that rather than implying otherwise, and closing it is
+  downstream on every engine: whether `tenant_id` travels is per engine (F4), and where it does, the
+  store's enforcement of it is unmeasured. The spec reports that rather than implying otherwise, and closing it is
   upstream's to land.
 - **G3** A `ModelDeployment` enters the existing five-gate admission chain **as Pods**, with no new
   gate, no new controller in the chain, and no change to the four-view status (F1).
@@ -328,8 +329,9 @@ Acceptance:
 - `status.kvCache.domain` echoes the Binding's `name`, `blockSize` and `dtype`, so an operator reads
   the attached domain off this object alone (G6).
 - Two deployments on one Binding share KV — asserted end to end (Test Plan).
-- Two on **two** Bindings not sharing is **not** asserted, because no supported engine passes
-  `tenant_id` to the cache client, so every deployment lands in the tenant named `default` (F4). The
+- Two on **two** Bindings not sharing is **not** asserted. On an engine that forwards no tenant both
+  land in the tenant named `default`; on one that does, the tenant arrives but nothing measures
+  whether the store partitions on it, so neither engine supports the claim today (F4). The
   semantics above are the API's and the design's; the enforcement is upstream's and is not there
   yet. The gap is stated here, in `status`, in the reference page and in case-47 rather than being
   left for a reader to infer from a passing test suite.
@@ -414,31 +416,36 @@ engines that take a file, not of all three**; `sglang` does read it from the fil
 does not get one (see below). The key set rendered is what the selected engine reads, and no more: a
 key an engine's reader ignores is a key that documents a wiring that is not happening.
 
-**The reuse domain does not reach the storage layer on any of the three engines, and this spec
-ships saying so rather than implying otherwise.** `tenant_id` is the **11th** parameter of
-`MooncakeDistributedStore.setup()`. All three engines call `setup()` **positionally**, stopping at
-the 7th or 8th argument:
+**Whether the reuse domain reaches the storage layer is PER ENGINE, and this spec states no engine's
+answer of its own.** `inject.SupportsTenant` is that answer, and it carries the version and the
+source line each verdict was read at — a spec restating it would be a second implementation of one
+fact, agreeing today and diverging on whichever engine release lands next. At the versions this
+project ships: the vLLM family forwards none, and SGLang forwards one through `MOONCAKE_TENANT_ID`.
 
-- `vllm` `.../store/worker.py:1040` — 7 positional arguments, through `master_server_address`.
-- `vllm-ascend` `.../mooncake_backend.py:42` — 8, adding the transfer engine.
-- `sglang` `.../mooncake_store.py:372` — 8, likewise.
+**THIS SECTION SAID THE OPPOSITE, AS A UNIVERSAL, AND THE WAY IT WAS WRONG IS THE PART WORTH
+KEEPING.** It argued that the domain reaches no engine because `tenant_id` is the **11th** parameter
+of `MooncakeDistributedStore.setup()` while all three engines call `setup()` **positionally**,
+stopping at the 7th or 8th argument — and that no fallback could rescue it, since the C++ client
+reads no `MOONCAKE_TENANT_ID` and no engine config class carries the key.
 
-And there is **no fallback that could rescue it**: in `mooncake-integration/store/store_py.cpp:2234`
-`tenant_id` is a pybind argument defaulting to the literal `"default"`; the C++ client reads no
-`MOONCAKE_TENANT_ID` anywhere; and the only reader of that variable is Mooncake's own
-`mooncake_config.py` / `mooncake_store_service.py`, which no engine uses. **None of the three
-engines' config classes carries a `tenant_id` key at all** — `tenant` does not appear anywhere under
-`vllm/distributed/kv_transfer/` or `python/sglang/`.
+⇒ **The measurement was accurate and the conclusion was false, because the measurement point sat
+downstream of the path that carries the value.** SGLang's Python layer reads that variable and
+passes it as a KEYWORD argument, so the positional cut it was measured against never applied. "The
+client reads no environment variable" stayed true while "no tenant reaches the client" went false,
+and nothing in between failed. The positional counts above were also read at unrecorded versions,
+which is the second half of the same lesson: a bare file:line is not a version-independent address.
 
 The vendor's own `docs/source/deployment/multi-tenancy.md` has a *SGLang* section and a *vLLM*
-section describing exactly this wiring. **The shipped engine integrations do not implement it.** This
-is the same failure this spec's F8 was written for, one level up: the documentation is not the
-artifact, and a documented key is worth no more than a rendered flag.
+section describing this wiring. **One of the two shipped integrations now implements it**, which is
+a weaker version of this spec's F8 rather than a refutation of it: the documentation was still not
+the artifact, and reading it would have given the right answer for the wrong reason.
 
 Consequences, stated plainly so that nobody reads this CR as delivering more than it does:
 
-- Every deployment on these engine versions writes into the tenant named `default`, whatever domain
-  its Binding declares.
+- A deployment on an engine that forwards no tenant writes into the tenant named `default`, whatever
+  domain its Binding declares. On one that forwards, the domain arrives — and **"a tenant was
+  injected" is not "the workload is isolated"**: whether the store partitions on it is not measured
+  anywhere yet, and the operator records the injection as an action rather than an outcome.
 - **F3's API property still holds and is the durable half**: a workload cannot name its own domain,
   so the escape-hatch-to-unlimited-tenants attack the design exists to prevent is still
   unrepresentable. What is missing is enforcement *downstream* of the API, not in it.
@@ -611,10 +618,14 @@ Acceptance:
   avoided.
 - **`--hicache-storage-backend-extra-config` is not passed**, and a test asserts its absence for
   `sglang`, with the precedence order as the recorded reason.
-- **No `tenant_id` key is rendered either, and a test asserts that absence too** — rendering a key
-  no reader reads would document a wiring that is not happening, which is the failure mode this
-  spec's whole `CacheAttached` design exists to refuse. The test carries the reason, so that whoever
-  deletes it when upstream lands `tenant_id` knows what they are changing.
+- **A `tenant_id` key is rendered for the engines that read one and withheld from those that do
+  not, and a test asserts each direction.** Rendering a key no reader reads would document a wiring
+  that is not happening, which is the failure this spec's whole `CacheAttached` design refuses;
+  withholding one a reader does read throws away the only identity the store could partition on.
+  **This bullet used to say no engine gets one and a test asserts that absence** — the absence test
+  now names the two engines it covers rather than claiming every engine, because the day it
+  described as future ("whoever deletes it when upstream lands `tenant_id`") has already arrived on
+  SGLang.
 - Changing the Binding's pool endpoint re-renders the ConfigMap; the replicas restart to pick it up
   under F10's recreate policy rather than silently.
 
@@ -1357,12 +1368,15 @@ be **accepted**.
   Mooncake's own environment variable is `MOONCAKE_DEVICE` — one fact under three spellings, which is
   worth writing down once so a reader does not conclude two of them are typos.
 
-  **Read this signature by argument POSITION, because that is what decides what is reachable.**
-  `tenant_id` is 11th and `enable_client_http_server` is 12th, and every supported engine calls
-  `setup()` positionally with 7 or 8 arguments (F4). So the two parameters this design would most
-  like to use — the one that carries the reuse domain, and the one that binds the client's own
-  `/health` and `/metrics` on port 9300 — are both **past the cut and unreachable**, with no
-  environment fallback in the C++ client and no in-process gflags path. A signature is not an
+  **Read this signature by argument POSITION, and then check whether the caller uses positions at
+  all.** `tenant_id` is 11th and `enable_client_http_server` is 12th. The vLLM family calls `setup()`
+  positionally with 7 or 8 arguments, putting both past the cut. **THAT WAS TAKEN AS THE ANSWER FOR
+  ALL THREE ENGINES AND IT WAS NOT:** SGLang adds `tenant_id` as a KEYWORD argument, so the
+  positional cut never applied to it and the reuse domain does arrive (F4).
+  ⇒ `enable_client_http_server` — the one that binds the client's own `/health` and `/metrics` on
+  port 9300 — remains unreached on every engine, with no environment fallback in the C++ client and
+  no in-process gflags path. The two parameters shared a sentence and only one of the two conclusions
+  moved; that is why they are now stated separately. A signature is not an
   interface until a caller passes the argument.
 - **Go names stay snake_case per file** (`model_deployment.go`, `model_deployment_render.go`), never
   flat-concatenated. The API group is `worker.gpustack.ai/v1alpha1`; types live in
@@ -1532,10 +1546,11 @@ be **accepted**.
 - **A broken deployment reads as attached because a sibling sharing its tenant is healthy** → the
   predicate is scraped per replica at the Pod's own address, so a sibling cannot answer for it. The
   domain-level figures, which cannot attribute, are corroboration only and never the sole basis for
-  `True` while the engine's report is readable. With `tenant_id` unreachable (F4) the shared
+  `True` while the engine's report is readable. On an engine forwarding no tenant (F4) the shared
   tenant is `default` and therefore **cluster-wide**, so the corroborating signal cannot even
   distinguish namespaces — which makes the per-replica predicate load-bearing rather than merely
-  preferable.
+  preferable. On one that does forward, the domain narrows that signal but does not fix it: the
+  operator cannot know the store honoured the tenant, so the per-replica predicate stays the basis.
 - **The engine's metrics report the connector only once traffic has been scheduled** → then the
   init-time attributable signal does not exist on that engine version, and an idle deployment sits
   at `Unknown` / `NoObservationAvailable`. That is the designed behaviour rather than a gap: the rule
@@ -1906,8 +1921,9 @@ truthful); after T13 (the headline claim is measured and recorded).
   carries exactly the keys the selected engine's own reader reads and no others** — the three key
   sets differ, and rendering a key an engine ignores documents a wiring that is not happening. The
   device list is the JSON's `device_name`, not `setup()`'s `rdma_devices` nor Mooncake's
-  `MOONCAKE_DEVICE`. It sets **no `local_hostname`** and **no `tenant_id`** (unreachable on all
-  three, F4), each absence asserted by a test that carries its reason. `MC_TE_METRIC=1` is set as a
+  `MOONCAKE_DEVICE`. It sets **no `local_hostname`**, and it sets `tenant_id` only for an engine
+  whose reader takes one — the vLLM family's does not (F4), and each absence is asserted by a test
+  naming the engines it covers rather than claiming all three. `MC_TE_METRIC=1` is set as a
   **defaulted** key. The JSON is rendered into one deployment-owned ConfigMap mounted read-only into
   every replica.
   **Two defects were found after this task was ticked, and both are now fixed in place rather than
@@ -2043,7 +2059,7 @@ truthful); after T13 (the headline claim is measured and recorded).
 
   **Writing it found three stale rows in F5's own table above**, which T16 should have carried and
   did not: a `vllm-ascend` row for an engine value T16 deleted, an SGLang environment column listing
-  one name where the code owns seven, and a `MOONCAKE_TENANT_ID` that no client reads. All three are
+  one name where the code owns seven, and a `MOONCAKE_TENANT_ID` recorded as read by no client. All three are
   corrected there. A normative table that contradicts the code is worse than no table, because it is
   the thing a reader trusts.
 
@@ -2440,7 +2456,7 @@ accepted bad spec is worse than a refusal.
 | `local_hostname_is_a_fieldref` | `sglang` | `MOONCAKE_LOCAL_HOSTNAME` is **present** and valued from `fieldRef: status.podIP`. **A literal fails the case** — including a correct-looking one, because the defect being avoided is a literal that happens to parse |
 | `no_configmap_for_sglang` | `sglang` | **no** ConfigMap is created for the deployment at all; an unused one would claim a wiring that is not happening |
 | `no_extra_config_argument` | `sglang` | `--hicache-storage-backend-extra-config` is **absent**. Its loader is key-for-key identical to the file loader and sits at *higher* precedence, so passing it would make the environment carrier unreachable |
-| `no_tenant_id` | any engine | `tenant_id` is **absent**, because no supported engine passes it to `setup()`; the test states the reason so its deletion is deliberate |
+| `no_tenant_id` | `vllm`, `vllm-ascend` | `tenant_id` is **absent**. **NOT "any engine", which this row said until the fact was re-measured**: SGLang does receive one, so a row claiming every engine would have been a false statement about a test that only ever covered two. Which engines receive a tenant is `inject.SupportsTenant`'s answer, carried beside the version it was read at; this row names the engines it covers and states no reason of its own, because a copied reason is what went stale here |
 | `pure_client_group` | each engine | the coherent group, **asserted positively per key** because the failure mode is a MISSING key and an absence assertion cannot catch one going missing. The three differ: `vllm` gets `mode: standalone-store` + `global_segment_size: 0` + `local_buffer_size` 128 MiB; `vllm-ascend` the same without `mode`; `sglang` gets `MOONCAKE_GLOBAL_SEGMENT_SIZE=0` on its own carrier **and no `local_buffer_size` at all** — it passes a hardcoded 16 MiB to `setup()`, so that key would be one no reader reads |
 | `sizes_are_json_numbers` | `vllm`, `vllm-ascend` | the two size keys render as numbers, not strings. Both work today, so this pins the choice rather than a behaviour: the shared package models them as `int64`, and a mismatch would let consolidation change the document inside what reads as a deletion |
 | `config_path_env_per_engine` | each engine | `vllm`/`vllm-ascend` get `MOONCAKE_CONFIG_PATH`, `sglang` gets `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` |
@@ -2519,11 +2535,17 @@ Run against a local two-node cluster with two consumer GPUs on one node. No RDMA
   **Recorded** in the table below.
 - **case-47 — the isolation claim, one half asserted and one half deferred.** Two deployments on the
   same Binding share blocks: asserted. Two on **different** Bindings not seeing each other's:
-  **deferred, and the case says why** — `tenant_id` reaches no supported engine (F4), so both land
-  in the tenant named `default` and there is no isolation mechanism to test. The case asserts the
-  sharing half, and for the isolation half asserts the *observable consequence of the gap* — that
-  both deployments' blocks appear under one domain — so that the day an engine starts passing
-  `tenant_id`, this case **fails** and tells whoever is looking that the deferral is over. A deferral
+  **deferred per engine, and the case says why for each** — on the vLLM family no tenant travels
+  (F4) so both land in `default` and there is no mechanism to test; on SGLang the tenant does
+  travel, so the deferral there is about the STORE's enforcement of it being unmeasured, which needs
+  a serving engine. The case asserts the sharing half, and for the vLLM half asserts the *observable
+  consequence of the gap* — both deployments' blocks under one domain — so that the day that entry
+  flips, this case **fails**.
+  ⇒ **THAT MECHANISM DID NOT FIRE, and the reason is worth more than the correction.** The day came:
+  SGLang forwards a tenant at the version this project ships. Nothing failed, because case-47 does
+  not exist yet — a deferral that is supposed to expire on its own can only do so once the case
+  carrying the assertion is written. Until then the guarantee is a sentence, and this spec had three
+  more deferrals in exactly that state at the same moment. A deferral
   that cannot detect its own end is a deletion. The isolation half remains the one that matters —
   a shared cache that leaks across reuse boundaries is worse than no shared cache — which is exactly
   why the gap is written into the case, the status and the reference page instead of being left for
@@ -2668,16 +2690,27 @@ comparison with one side missing is an assertion about nothing.
   decided by what the operator renders, so the operator's own choice selects which measurement
   applies — and measuring before making that choice reads whichever path the measurer happened to
   look at.
-- **When does `tenant_id` become reachable, and through which engine first?** Enforcement of the
-  reuse domain waits on an engine passing `setup()`'s 11th argument (F4). The two vehicles that would
-  not wait — a `sitecustomize` shim that wraps `MooncakeDistributedStore.setup`, and a patch carried
-  in this project's own per-vendor engine images — were both weighed and left unused here: each
-  reaches inside an engine internal that moves faster than this operator releases, which is the kind
-  of coupling this CR's whole thinness argument exists to avoid. The open part is which engine lands
-  it first, because that decides whether the operator's first enforcement path is a JSON key
-  (`sglang`, whose reader already merges three sources) or a `--kv-transfer-config` field. Until
-  then, case-47's isolation half stays deferred and asserts the gap's signature so the deferral
-  cannot outlive the gap.
+- ~~**When does `tenant_id` become reachable, and through which engine first?**~~ **Settled:
+  SGLang, at `v0.5.18`, and through a vehicle this question did not list.** Its loader reads
+  `MOONCAKE_TENANT_ID` and the store call adds the value as a KEYWORD argument, so the 11th
+  positional parameter was never the only way in. This question offered two futures — a JSON key or
+  a `--kv-transfer-config` field — and the answer is neither.
+  ⇒ **An open question that enumerates its options narrows the search to them.** Both listed
+  vehicles were paths the operator would have had to render; the one that landed needed nothing
+  rendered differently at all, which is why watching for the two named shapes would not have caught
+  it. The two rejected vehicles (a `sitecustomize` shim wrapping `MooncakeDistributedStore.setup`,
+  and a patch in this project's own engine images) stay rejected for their original reason: each
+  reaches inside an engine internal that moves faster than this operator releases.
+  ⇒ ⇒ **And the mechanism this question relied on never ran.** It said case-47's isolation half
+  "asserts the gap's signature so the deferral cannot outlive the gap" — but case-47 does not exist
+  yet, so there was nothing to fail when the gap closed on one engine. A deferral that is supposed
+  to fail when its reason expires only does so once the case carrying it is written; until then the
+  guarantee is a sentence. That is how three other deferrals in this spec's cases outlived their
+  reasons at the same time.
+  The remaining open part is narrower and per engine: whether the store ENFORCES a tenant it
+  receives. `inject` records the injection as an ACTION and never as isolation, `case-59` measures
+  that the variable is read and the value forwarded, and nothing yet measures partitioning at the
+  store — which needs a serving engine, so it sits with the parked items rather than here.
 - **Rolling update semantics beyond recreate.** Surge and unavailable knobs are deferred to a later
   spec, informed by T13's numbers. The open part is what the right default trade is: a replica's
   cached blocks are lost when it goes away, so a fast rollout has a measurable cache cost that this
