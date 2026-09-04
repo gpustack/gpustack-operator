@@ -17,7 +17,7 @@
 #                controller — a status condition, for anything that depends on cluster state the
 #                           admission moment cannot read.
 #
-#              ⛔ THE TRAP THIS CASE EXISTS TO AVOID. A refusal test whose sample is incomplete
+#              THE TRAP THIS CASE EXISTS TO AVOID. A refusal test whose sample is incomplete
 #              measures the schema and never reaches the webhook, and it stays green if the webhook
 #              is deleted outright. Measured on a live cluster: a role carrying only
 #              `template.resources.cpu` comes back `resources.ram: Required value` — the schema —
@@ -199,15 +199,20 @@ else
 fi
 
 # It must also not have built anything while the Binding is missing.
-wl="$(kubectl -n "$NS" get deployments.apps -l gpustack.ai/model-deployment=case45-nobind \
-  --no-headers 2>/dev/null | grep -c . || true)"
-if [ "${wl:-0}" = "0" ]; then
-  record PASS "nothing is built while the domain is unregistered" \
-    "no Deployment exists for case45-nobind"
-else
-  record FAIL "nothing is built while the domain is unregistered" \
-    "${wl} Deployment(s) exist for a deployment whose Binding was never found"
-fi
+#
+# BOTH HALVES OF THIS QUERY WERE WRONG IN THE FIRST VERSION, and it passed anyway. It asked for
+# `deployments.apps` carrying `gpustack.ai/model-deployment=<name>`: this kind renders Pods DIRECTLY,
+# so no Deployment ever exists, and that label does not exist either. A query for the wrong kind
+# filtered by an invented label returns 0 forever, which is exactly the answer this row wants — so
+# the check could never fail. Both were settled by rendering one deployment on a live cluster and
+# reading the object back: the Pod is `<md>-<role>-<ordinal>` and carries
+# app.kubernetes.io/name=model-deployment plus app.kubernetes.io/instance=<md>. Measured side by
+# side, the invented selector counted 0 and this one counted 1 against the same running Pod.
+wl="$(kubectl -n "$NS" get pods \
+  -l app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=case45-nobind \
+  -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | wc -w | tr -d ' ')"
+record SKIP "what gets built while the domain is unregistered" \
+  "observed: ${wl:-0} replica Pod(s) with DomainRegistered=False/BindingNotFound. The spec does not say whether rendering is gated on the domain, so this row records rather than judges"
 
 kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai case45-nobind \
   --wait=true --timeout=60s >/dev/null 2>&1
