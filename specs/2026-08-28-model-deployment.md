@@ -1885,7 +1885,13 @@ truthful); after T13 (the headline claim is measured and recorded).
   table is exported so the webhook (T2) reads the same data the renderer does, and a test asserts
   they cannot disagree: every key the renderer emits is either owned or defaulted, and no key is
   both.
-  Verify: `go test ./pkg/worker/controllers/worker/ -run ModelDeploymentRender`
+  Verify: `go test ./pkg/worker/controllers/worker/ -run RenderModelDeploymentPod`
+  (it read `-run ModelDeploymentRender`, which matched **nothing**: the tests are named
+  `TestRenderModelDeploymentPod_*`, so the words are in the other order. `go test -run` exits **0**
+  when its pattern selects no test, so that command reported success without running an assertion,
+  for as long as it stood. The task's substance was verified — its acceptance names
+  `TestModelDeploymentOwnedAndDefaultedCannotDisagree`, which exists and fails when the ownership
+  table and the renderer disagree — but the command written here could not have shown it.)
 
 - [x] **T6 · Connector synthesis for the three engines**
   Delivered: `pkg/worker/controllers/worker/model_deployment_connector.go` and its test — the
@@ -2119,7 +2125,7 @@ truthful); after T13 (the headline claim is measured and recorded).
   only that the number got smaller hands the criterion to whoever later wants the case to pass.
   Verify: `bash cases/case-46.sh`, PASS, and the figures land in the Test Plan's measurement table
 
-- [ ] **T14 · Wire the synthesized connector into the replicas**
+- [x] **T14 · Wire the synthesized connector into the replicas**
   **A task this list did not have, and its absence was load-bearing.** T6 delivers connector
   synthesis as a pure function; T3 delivers the Binding resolution. **Nothing owned the hop between
   them**, so the renderer is called with no connector at all: no engine argument, no config-path
@@ -2129,8 +2135,8 @@ truthful); after T13 (the headline claim is measured and recorded).
   no existing task is renumbered; a task list is a DAG and this one's edges say where it belongs.
   Blocked by: T3, T5, T6, **and `pkg/worker/kvcache/inject` existing** — see the ownership rule
   below.
-  Owns: the connector fill in `model_deployment_connector.go` and the render input's `Connector`
-  fill in `model_deployment.go`
+  Owns: the adapter in `model_deployment_connector.go`, `resolveModelDeploymentConnection` in
+  `model_deployment_binding.go`, and the per-role fill in `model_deployment.go`
   Gate: the shared rendering package exists
   Acceptance: every replica of every role carries the selected engine's client configuration, and
   the synthesized argument and config-path variable reach the container through T5's merge. A role
@@ -2215,7 +2221,18 @@ truthful); after T13 (the headline claim is measured and recorded).
   - **`metadata_server` has exactly one definition.** It is the literal `P2PHANDSHAKE`, which this
     scope's metadata plane takes unconditionally; after the merge there must not be two constants of
     the same value in two packages.
-  Verify: `go test ./pkg/worker/controllers/worker/ -run 'ModelDeploymentConfig|ModelDeploymentRender'`
+  Verify: `go test ./pkg/worker/controllers/worker/ -run 'Connector|RenderModelDeploymentPod|ResolveModelDeploymentConnection'`
+  (44 tests. The command written here first was `-run 'ModelDeploymentConfig|ModelDeploymentRender'`
+  and it selected **zero** — one name for a file this task no longer creates, one with its words in
+  the wrong order. Since `go test -run` exits 0 on an empty selection, a Verify line is worth only
+  as much as the count it was checked against; this one was checked.)
+
+  Three of the acceptance clauses need a cluster and are the three SKIP rows in case-45. What is
+  provable without one is: the client configuration reaches every replica, a take-over role receives
+  none of it (including the annotation, which is not part of the PodSpec and so passes every
+  spec-level assertion while landing), the annotation and the projection that reads it arrive
+  together, and a pool endpoint change moves the spec hash while leaving `core.PodSpec` identical —
+  the property the annotation carrier was chosen for.
 
 - [x] **T15 · Aggregate the observed runtime version, then synthesize the image from it**
   Delivered in three commits: the `InstanceType` field and its aggregation; the full version list
