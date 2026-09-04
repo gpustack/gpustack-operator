@@ -33,7 +33,12 @@
 #
 # Environment: Any cluster with a materialized scheduling chain (run case-1 first) and an operator
 #              image carrying the ModelDeployment CRD. No GPU is needed: nothing here schedules a
-#              replica. Needs one KVCachePoolBinding that is Ready, named by E2E_MD_BINDING.
+#              replica, and NO KVCachePoolBinding has to exist. That last part is not a shortcut but
+#              a property worth stating: admission never reads cluster state, so a poolRef naming a
+#              Binding that was never created is ACCEPTED by both the schema and the webhook. The
+#              missing Binding surfaces later, as a controller condition, which is exactly the row
+#              near the end of this case. Every manifest here therefore names one deliberately
+#              absent Binding, and the case leaves no KVCache object behind because it creates none.
 #
 # Inputs:      All real, nothing mocked. Server-side dry-run (`--dry-run=server`) runs the schema
 #              and the webhook and persists nothing; the one row that needs a controller verdict
@@ -54,7 +59,9 @@ if [ -z "$NS" ]; then
   exit 2
 fi
 
-BINDING="${E2E_MD_BINDING:-t13-bind}"
+# Deliberately absent: see the Environment note. Admission does not resolve it, and the controller
+# row at the end asserts that the controller does.
+BINDING="case45-no-such-binding"
 IT="${E2E_MD_INSTANCE_TYPE:-}"
 
 FAILS=0
@@ -114,7 +121,7 @@ refuses() {
 base_out="$(manifest "" "" | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
 if [ -z "${base_out##*created*}" ]; then
   record PASS "a well-formed deployment is accepted" \
-    "baseline passes schema and webhook, so a refusal below is about the thing being tested"
+    "baseline passes schema and webhook even with an absent Binding, so a refusal below is about the thing being tested"
 else
   record FAIL "a well-formed deployment is accepted" \
     "baseline was refused, so no refusal below proves anything: $(echo "$base_out" | cut -c1-160)"
@@ -175,8 +182,7 @@ fi
 
 # --- controller row: needs cluster state, so it is a condition rather than a refusal ---
 
-manifest "" "" | sed "s/name: ${BINDING}/name: case45-no-such-binding/; s/case45-probe/case45-nobind/" \
-  | kubectl apply -f - >/dev/null 2>&1
+manifest "" "" | sed "s/case45-probe/case45-nobind/" | kubectl apply -f - >/dev/null 2>&1
 conds=""
 for _ in $(seq 1 20); do
   conds="$(kubectl -n "$NS" get modeldeployments.worker.gpustack.ai case45-nobind \
