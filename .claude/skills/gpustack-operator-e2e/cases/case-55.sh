@@ -43,10 +43,12 @@
 #              its quota, and forcing it earlier is how a run leaves a namespace Terminating forever.
 #              It changes no shared baseline - every object it touches is one it created.
 #
-# EXERCISED 2026-09-04 on a three-node k3s cluster: 7 checks, all passing. NOT RE-RUN since the
-# webhook began rendering AscendStoreConnector for vllm-ascend. That change does not move any
-# expectation in this case - the stamp it reads is tenantInjected, and that engine still forwards no
-# tenant - which is exactly why it must be re-run rather than reasoned about.
+# EXERCISED 2026-09-04 on a three-node k3s cluster: 7 checks, all passing. RE-RUN the same day
+# EXERCISED 2026-09-04 (second host) on a single-node docker-desktop cluster, arm64, k8s v1.36.1,
+# against an operator built from this branch, with the webhook rendering AscendStoreConnector for
+# vllm-ascend: 7 checks, all passing again. That rendering change moves no expectation here - the
+# stamp this case reads is tenantInjected, and that engine still forwards no tenant - and the re-run
+# is what turns that sentence from a prediction into a measurement.
 #
 # The table has caught an engine moving sides TWICE, in opposite directions, which is the whole
 # point of it carrying both answers: an engine that changes sides turns this red rather than sliding

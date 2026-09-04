@@ -36,16 +36,19 @@
 #              last check creates deliberately - multi-tenancy turned OFF on a live backend - is the
 #              state that makes the pool and the backend
 #              undeletable, and it ABORTS the deletion if that restore does not converge - the objects
-#              are repairable only while they are not being deleted. NOT YET EXERCISED: that restore
-#              was written after a run had already wedged two objects, and the cluster went to another
-#              window before it could be run. A review round then found the first version of it
-#              deleting anyway when the restore failed, which is worth recording: an unexercised path
-#              was already wrong before it ever ran once.
+#              are repairable only while they are not being deleted. EXERCISED 2026-09-04: the restore
+#              ran and converged ("multi-tenancy restored after ~30s; the pool is deletable again").
+#              Before that it sat unexercised because it was written after a run had already wedged two
+#              objects, and the cluster went to another window before it could be run - and a review
+#              round found the first version of it deleting anyway when the restore failed. Worth
+#              keeping: an unexercised path was already wrong before it ever ran once.
 #              It changes no shared baseline - every object it touches is one it created.
 #
-# NOT RE-RUN since the restore marker moved ahead of the destructive patch. The change is invisible on
-# a run that completes - it only shows on one that is interrupted between those two lines, which is
-# precisely the window no passing run exercises.
+# EXERCISED 2026-09-04 (second host) on a single-node docker-desktop cluster, arm64, k8s v1.36.1,
+# against an operator built from this branch: 15 checks, all passing, and the
+# restore converged. Still NOT exercised: the marker moving ahead of the destructive patch. That is
+# invisible on a run which completes - it shows only on one interrupted between those two lines, and
+# every run so far has completed.
 #
 # EXERCISED 2026-09-04 on a three-node k3s cluster: 15 checks, all passing. Two were added after the
 # first run and one after that:
