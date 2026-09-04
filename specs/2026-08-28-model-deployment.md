@@ -2013,8 +2013,14 @@ truthful); after T13 (the headline claim is measured and recorded).
   deliberate break:
   an image without the matching per-vendor wheel, and separately a Binding pointing at an unreachable
   pool; the assertion is `CacheAttached != True` in both, and the case **records which shape the
-  engine took**. Each case reports its verdict through the suite's `lib.sh` rather than deciding for
-  itself. The chart guard rides here: after `helm install`, the `modeldeployments` CRD is present —
+  engine took**. Each case reports its verdict the way the suite already does, which is a convention
+  rather than a library: a `record` helper appending `STATUS|CHECK|OBJECT` rows to a local array, a
+  `STATUS | CHECK | OBJECT` table at the end split on that delimiter rather than on whitespace, and
+  `exit 1` when any row failed. There is no `lib.sh` to import; the cases carry those few lines
+  themselves. Every refusal row must also assert a fragment of the operator's own
+  message, because the schema refuses an incomplete sample before the webhook ever sees it, and a
+  row that only checks for rejection would keep passing with the webhook deleted. The chart guard
+  rides here: after `helm install`, the `modeldeployments` CRD is present —
   no chart manifest was added, the worker installs it.
   Verify: `bash cases/case-45.sh; bash cases/case-47.sh; bash cases/case-48.sh`, each PASS
 
