@@ -2063,9 +2063,15 @@ truthful); after T13 (the headline claim is measured and recorded).
   `status.endpoint` serves inference; the rejections all fire (two roles with the message naming the
   spec, an owned key in `extraArgs`, `template.resources`, a missing Binding, a cross-namespace
   `poolRef`, a self-declared domain). **case-47** — two deployments on the **same** Binding share
-  blocks; the isolation half is deferred with `tenant_id`'s unreachability as the stated reason, and
-  asserts the gap's own signature so that the case fails when the gap closes. **case-48** — the
-  deliberate break:
+  blocks. **The isolation half is deferred PER ENGINE and no longer on `tenant_id` being
+  unreachable, because that reason has gone false on one of them:** the answer is
+  `inject.SupportsTenant`, which carries the version and source line each verdict was measured at,
+  and at the versions this project ships the vLLM family forwards no tenant while SGLang does. So
+  the vLLM half defers with that table as its reason and asserts the gap's own signature, failing
+  when the entry flips; the SGLang half cannot be deferred on the mechanism at all — it exists —
+  and defers instead on needing an engine that serves, which is the same accelerator requirement
+  case-45's serving rows carry. A deferral naming a mechanism that is present would send a reader
+  to build something already built. **case-48** — the deliberate break:
   an image without the matching per-vendor wheel, and separately a Binding pointing at an unreachable
   pool; the assertion is `CacheAttached != True` in both, and the case **records which shape the
   engine took**. Each case reports its verdict the way the suite already does, which is a convention
@@ -2124,6 +2130,30 @@ truthful); after T13 (the headline claim is measured and recorded).
   signal. This sentence is the acceptance criterion for the change that made the figure two: reading
   only that the number got smaller hands the criterion to whoever later wants the case to pass.
   Verify: `bash cases/case-46.sh`, PASS, and the figures land in the Test Plan's measurement table
+
+  **PARKED, AND THE ENVIRONMENT IS THE REASON RATHER THAN THE EFFORT.** This acceptance needs two
+  real engine replicas answering a real request stream, and the Gate above names the two-GPU node
+  outright. The cluster this branch has been verified on is single-node and has no accelerator, so
+  the question cannot be *asked* here, let alone answered. Before solving feasibility for a
+  verification item, ask what it can answer in the environment at hand: a feasibility question keeps
+  producing a sense of progress and can be asked dozens of times, while the information question is
+  asked once and can cancel the whole batch.
+
+  ⇒ **WHAT DOES NOT FILL THIS GAP**, because each of these closes it while leaving the claim
+  unmeasured:
+
+  - **Running it on a machine that cannot produce the effect and recording SKIP.** That is not a
+    partial result, it is the absence of one, and it costs the gap its visibility: a SKIP with a
+    plausible reason reads as handled. This is a different escape from softening the assertion, and
+    the sentence above only guards that one — one changes the criterion, this one changes the
+    environment and then reports having tried.
+  - **Softening `exceeds`.** Guarded above, kept here so the two escapes sit together.
+  - **Borrowing another backend's figures for the Ascend row.** Guarded above, same reason.
+  - **Completing the first step and ticking the task.** Re-running F8's observation table needs no
+    cluster and no accelerator — an engine image, `docker run`, and a listing of what the connector
+    registry actually holds after `load_general_plugins()`. That step is real work and it is a
+    genuine product; it is also not this acceptance, and the version table it refreshes is an INPUT
+    to choosing a measurement point rather than a substitute for taking one.
 
 - [x] **T14 · Wire the synthesized connector into the replicas**
   **A task this list did not have, and its absence was load-bearing.** T6 delivers connector
