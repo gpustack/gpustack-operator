@@ -28,18 +28,20 @@ const (
 		"a second container until it is turned off"
 )
 
-// NewPreflighter returns the container-share preflighter, which reads the one driver flag every
-// Ascend allocation that puts a second container on an accelerator depends on.
+// NewPreflighter returns the Ascend preflighter, which reads the two preconditions an allocation
+// here depends on: the driver flag every allocation that puts a second container on an accelerator
+// needs, and -- on A5 -- the vendor runtime version that turns the injected env into device nodes.
 //
 // It drives the same seam the allocator's servers do, so what it reports is what an allocation
 // would find, taken with no workload on the node.
 func NewPreflighter(opts device.PreflighterOptions) device.AcceleratorPreflighter {
 	logger := opts.Logger.WithName(Manufacturer)
 	return &preflighter{
-		logger: logger,
-		share:  newShareDriver(logger),
-		topo:   newHcclTopoResolver(newTopoDriver(logger)),
-		dryRun: opts.DryRun,
+		logger:      logger,
+		share:       newShareDriver(logger),
+		topo:        newHcclTopoResolver(newTopoDriver(logger)),
+		installInfo: dockerRuntimeInstallInfo,
+		dryRun:      opts.DryRun,
 	}
 }
 
@@ -48,8 +50,11 @@ type preflighter struct {
 	share  shareDriver
 	// topo is the real resolver, not a recording stand-in: naming the topology file is a read, so a
 	// simulated allocation can take it as it is without writing anything to the host.
-	topo   *hcclTopoResolver
-	dryRun bool
+	topo *hcclTopoResolver
+	// installInfo is where the vendor runtime recorded its version. It is a field rather than the
+	// constant read directly, so the A5 row can be established against a file a test wrote.
+	installInfo string
+	dryRun      bool
 }
 
 func (p *preflighter) PreflightAccelerator(groups device.DevicesGroupList) device.PreflightGroup {
@@ -57,10 +62,28 @@ func (p *preflighter) PreflightAccelerator(groups device.DevicesGroupList) devic
 		Manufacturer: Manufacturer,
 		Timestamp:    time.Now(),
 	}
+
 	for i := range groups {
+		// The vendor runtime's version is a precondition for A5 and for nothing else, so a node
+		// carrying none never reads the file. It is one node-level fact, read here rather than
+		// beside each accelerator so that a group of eight reads it once.
+		var runtime device.PreflightCheck
+		serves950 := groups[i].Family == family950
+		if serves950 {
+			runtime = checkDockerRuntime(p.installInfo)
+		}
+
 		accels := groups[i].Accelerators
 		for j := range accels {
 			grp.Checks = append(grp.Checks, p.check(&accels[j]))
+
+			// Filed on each accelerator rather than once on the group, for the reason the preflight
+			// runner's own node-wide rows are: that is what Checks is, and a reader filtering the
+			// report by accelerator would never find a node-wide row.
+			if serves950 {
+				runtime.Accelerator = accels[j].ID
+				grp.Checks = append(grp.Checks, runtime)
+			}
 		}
 	}
 	return grp

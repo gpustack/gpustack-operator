@@ -190,6 +190,34 @@ no device node, so that runtime is what turns an allocation into `/dev` entries.
 Register the runtime under the handler name `ascend`, which is the RuntimeClass this chart creates for
 this manufacturer, or set `deviceManager.createRuntimeClasses=false` and attach your own.
 
+**Atlas A5 (the 950 series) needs MindCluster 26.0.0 or newer.** A5 support landed in that release,
+whose notes carry the line *"Ascend Docker Runtime supports the Atlas 350 PCIe card"* — this
+generation's PCIe card. 910B and earlier are unaffected: their line ends at 7.3.x, and the vendor's
+releases run 5.x, 6.x, 7.x then 26.x with nothing in between.
+
+**An older runtime refuses the allocation, and blames the wrong thing.** It maps the `Ascend950` chip
+name to no device type it knows, so it falls back to the manager-device list every earlier generation
+used — and that list carries `/dev/devmm_svm`, which an A5 host does not have. Adding a device node
+that is not there is fatal, so container creation fails, naming that device rather than the version
+behind it.
+
+The cards are not the gap: `/dev/davinci<N>` is built from the requested index with no chip name
+involved, so an older runtime would have injected them. It never gets that far.
+
+`ascend-docker-runtime --version` does not answer this. It is a `runc` wrapper that hands every
+unrecognized argument to the host's own `runc`, so `--version` prints `runc`'s banner and says nothing
+about the vendor release. Read the version the installer recorded instead:
+
+```bash
+grep '^version=' /usr/local/Ascend/Ascend-Docker-Runtime/ascend_docker_runtime_install.info
+# version=v7.3.0    <- predates A5 support
+# version=v26.1.0   <- serves A5
+```
+
+`gpustack-operator device-manager preflight` reads the same file and reports it as the
+`ascend-docker-runtime` check on each A5 accelerator, so a node too old to serve them is named before
+a workload lands on it.
+
 
 ### Cambricon
 
