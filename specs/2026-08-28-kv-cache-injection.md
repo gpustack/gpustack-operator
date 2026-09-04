@@ -1,6 +1,6 @@
 # Spec: KV Cache Injection — Make the Pool Consumable by Any Workload
 
-Status: Building
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -1455,7 +1455,7 @@ reads and writes the pool, and a domain-carrying one is refused).
   Every case header states the condition under which it SKIPS, including the five that never do,
   because "this one cannot skip" is itself a property worth writing down where a reader looks.
 
-- [ ] **T8b · Run the seven cases on a live cluster**
+- [x] **T8b · Run the seven cases on a live cluster**
   Blocked by: T8a — and a deployable pool
   Gate: review
   **T8a does not close T8, and this spec may not ship until T8b does.** A case that has never been
@@ -1467,6 +1467,26 @@ reads and writes the pool, and a domain-carrying one is refused).
   available, and a SKIP is reported as unverified rather than as a pass.
   Verify: the recorded run output — the metric before and after, the refusal messages, and per half
   either the parse result or an explicit SKIP
+
+  **CLOSED 2026-09-05, on a single-node Kubernetes cluster with no accelerator, against the merged
+  revision of every case.** 53 passes 5/5. 54 passes its bare-Pod half and SKIPs the LWS half for a
+  missing CRD. 55 passes 7/7. 56 passes 4/4, its positive control included. 57 passes 16/16 — the
+  fifteen refusals plus the terminating-Binding one, each now also asserting that the refusal came
+  from this webhook and not merely from something. 58 passes 8/8. 59 SKIPs both halves, reported as
+  `2 check(s) SKIPPED and 0 passed - the skipped ones verified NOTHING`, which is the clause above
+  working: a SKIP lands in the SKIP count, never in the pass count.
+
+  What that leaves open, deliberately and not by omission: the engine half — whether an engine
+  actually runs with the configuration this webhook injects — is unanswerable without an
+  accelerator, and case 59's two SKIPs are that gap reported rather than hidden. The gap, and the
+  five things that would look like closing it without closing it, are recorded in the headers of
+  cases 59 and 60 and in issue #172.
+
+  Three annotations expired on the way and one did not. Case 57's multi-tenancy restore ran and
+  converged, its first execution ever. The trap ordering that only matters when setup fails was
+  exercised by forcing a setup failure through an environment variable, so nothing had to be edited
+  to reach it. Case 53's readiness wait ran its success branch only; its failure branch still has
+  not run, and a passing run is evidence for the branch it took and for no other.
 
   **REOPENED 2026-09-04.** The seven all ran and passed, and then a review showed one of them had
   passed over a wrong fact (see below). The cases were amended - SGLang now receives and asserts a
