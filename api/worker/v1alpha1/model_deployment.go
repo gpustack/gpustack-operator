@@ -102,8 +102,8 @@ type ModelDeploymentSpec struct {
 // There is deliberately no "vllm-ascend" value. `vllm_ascend` is a Python package the runner
 // installs when the accelerator backend is CANN, not an engine a user picks: the runner's own
 // release matrix spells the service `vllm` for every Ascend image. Naming it here made the
-// connector look like a property of the engine, which it is not - it varies with the backend, and
-// the two vLLM-family variants own exactly the same argument and environment keys.
+// connector look like a property of the engine, which it is not - it varies with the accelerator
+// backend, so the engine alone never settles what the operator injects.
 const (
 	ModelDeploymentEngineVLLM   = "vllm"
 	ModelDeploymentEngineSGLang = "sglang"

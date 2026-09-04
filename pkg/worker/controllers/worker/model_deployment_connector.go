@@ -231,7 +231,9 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		// ONE BOOLEAN DECIDES BOTH DIFFERENCES IN THIS BRANCH, and both are properties of the
 		// backend rather than of the engine. That is why "vllm-ascend" is not an engine value: on
 		// CANN the runner installs the vllm_ascend package, which ships a different store connector
-		// and no `mode` field, while owning exactly the same argument and environment keys.
+		// and no `mode` field. What this function renders is keyed the same either way, and only the
+		// connector name and the presence of `mode` differ. That is a property of the output below,
+		// not a claim about which keys either package is able to read.
 		ascend := in.Manufacturer == nodefeature.ManufacturerAscend
 
 		// AscendStoreConnector, also registered as MooncakeConnectorStoreV1, and NOT
