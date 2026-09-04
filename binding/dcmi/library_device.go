@@ -536,6 +536,44 @@ func (l Device) GetTopoInfo(device2 Device) (int32, Return) {
 	return topoInfo, ret
 }
 
+// GetSuperPodInfo retrieves the device's placement in its super pod: which pod and server it sits
+// in, and that pod's product type.
+//
+// The product type is what the A5 generation names its HCCL fabric topology file from, which is why
+// this is read; the rest of the struct comes along because the driver fills it whole.
+//
+// Both generations serve this through the generic device-info entry point, so deviceInfo takes the
+// branch. The struct carries no Go pointer, so handing its address to the driver is safe under the
+// runtime's pointer check.
+func (l Device) GetSuperPodInfo() (SpodInfo, Return) {
+	var info SpodInfo
+	size := uint32(unsafe.Sizeof(info))
+	if ret := l.deviceInfo(MAIN_CMD_CHIP_INF, CINF_SUB_CMD_GET_SPOD_INFO, unsafe.Pointer(&info), &size); !ret.IsSuccess() {
+		return SpodInfo{}, ret
+	}
+
+	return info, SUCCESS
+}
+
+// GetMainboardId retrieves the id of the mainboard the device is mounted on, which on the A5
+// generation tells the carrier boards of one chip apart -- a 1P inference card from a 4P one from a
+// training baseboard.
+//
+// V1 declares no such query. This passes through to the V2 entry point regardless, which on a V1
+// driver is a symbol the wrapper could not resolve and therefore refuses; no caller asks an older
+// generation for a number only A5 defines.
+func (l Device) GetMainboardId() (uint32, Return) {
+	devId, ret := l.devID()
+	if !ret.IsSuccess() {
+		return 0, ret
+	}
+
+	var mainboardId uint32
+	ret = Return(dcmiv2GetMainboardId(devId, &mainboardId))
+
+	return mainboardId, ret
+}
+
 func (ipAddr IpAddr) String() string {
 	if ipAddr.Ip_type == IPADDR_TYPE_V4 {
 		return fmt.Sprintf("%d.%d.%d.%d", ipAddr.U_addr[0], ipAddr.U_addr[1], ipAddr.U_addr[2], ipAddr.U_addr[3])

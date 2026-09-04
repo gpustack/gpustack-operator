@@ -38,6 +38,7 @@ func NewPreflighter(opts device.PreflighterOptions) device.AcceleratorPreflighte
 	return &preflighter{
 		logger: logger,
 		share:  newShareDriver(logger),
+		topo:   newHcclTopoResolver(newTopoDriver(logger)),
 		dryRun: opts.DryRun,
 	}
 }
@@ -45,6 +46,9 @@ func NewPreflighter(opts device.PreflighterOptions) device.AcceleratorPreflighte
 type preflighter struct {
 	logger klog.Logger
 	share  shareDriver
+	// topo is the real resolver, not a recording stand-in: naming the topology file is a read, so a
+	// simulated allocation can take it as it is without writing anything to the host.
+	topo   *hcclTopoResolver
 	dryRun bool
 }
 
@@ -82,7 +86,7 @@ func (p *preflighter) PreflightResponder(
 		return nil, nil, err
 	}
 
-	srv := newServer(p.logger, mode, &recordingShareDriver{read: p.share})
+	srv := newServer(p.logger, mode, &recordingShareDriver{read: p.share}, p.topo)
 
 	responder, ok := srv.(deviceplugin.ContainerAllocateResponder)
 	if !ok {

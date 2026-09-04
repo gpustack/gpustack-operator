@@ -59,7 +59,29 @@ func TestDieTypes_AreDistinct(t *testing.T) {
 	assert.NotEqualValues(t, VDIE, NDIE, "VDIE and NDIE")
 }
 
-// Every exported signature this package had before the V2 adaptation, pinned at compile time.
+// The chip-info command pair the super-pod read is issued with, pinned at the vendor's own values.
+//
+// Neither is in the vendored header -- its dcmi_main_cmd enum has no entry for 12 -- so both are
+// declared by hand and nothing but this pins them. They select which question the generic
+// device-info entry point answers, and a driver asked the wrong pair fills the caller's buffer from
+// a different struct: the answer comes back successful and means something else.
+//
+// MAIN_CMD_CHIP_INF must also stay clear of the command groups the header does enumerate, or the
+// same call would reach a group the driver already serves.
+func TestChipInfoCommands_MatchTheVendor(t *testing.T) {
+	assert.EqualValues(t, 12, MAIN_CMD_CHIP_INF, "MainCmdChipInf, per the vendor's own constant")
+	assert.EqualValues(t, 1, CINF_SUB_CMD_GET_SPOD_INFO, "CinfSubCmdGetSPodInfo, per the vendor's own constant")
+
+	for _, declared := range []int{
+		MAIN_CMD_DVPP, MAIN_CMD_ISP, MAIN_CMD_TS_GROUP_NUM, MAIN_CMD_CAN, MAIN_CMD_UART,
+		MAIN_CMD_UPGRADE, MAIN_CMD_HCCS, MAIN_CMD_TEMP, MAIN_CMD_SVM, MAIN_CMD_VDEV_MNG,
+		MAIN_CMD_SIO, MAIN_CMD_DEVICE_SHARE,
+	} {
+		assert.NotEqual(t, declared, MAIN_CMD_CHIP_INF, "a command group the header already enumerates")
+	}
+}
+
+// Every exported signature of this package, pinned at compile time.
 //
 // `go build ./...` already catches a changed signature that some package in this repo calls. This
 // block covers the rest: a binding is meant to be a stable surface, and several of these methods
@@ -88,6 +110,8 @@ var (
 	_ func(Device, DeviceType) (EccInfo, Return)                  = Device.GetEccInfo
 	_ func(Device) (string, Return)                               = Device.GetAffinityCPUInfo
 	_ func(Device, Device) (int32, Return)                        = Device.GetTopoInfo
+	_ func(Device) (SpodInfo, Return)                             = Device.GetSuperPodInfo
+	_ func(Device) (uint32, Return)                               = Device.GetMainboardId
 	_ func(Device, PortType, int32) (IpAddr, IpAddr, Return)      = Device.GetIp
 	_ func(Device, PortType, int32) (IpAddr, Return)              = Device.GetGateway
 	_ func(Device) (VDeviceInfo, Return)                          = Device.GetVDeviceInfo

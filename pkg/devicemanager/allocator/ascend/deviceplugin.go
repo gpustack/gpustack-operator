@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -31,18 +32,21 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	// container-share seam, so it is built once and shared by them. Exclusive gets nil: it owns
 	// whole accelerators and must not touch the flag.
 	share := newShareDriver(logger)
+	// The A5 topology file is a node-level fact every mode injects alike, so one resolver is shared
+	// by all of them and the node is read once rather than once per server.
+	topo := newHcclTopoResolver(newTopoDriver(logger))
 
 	servers := []deviceplugin.Server{
-		newServer(logger, workercore.DeviceAllocationModeExclusive, nil),
+		newServer(logger, workercore.DeviceAllocationModeExclusive, nil, topo),
 	}
 	if !opts.NoShared {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeShared, share),
+			newServer(logger, workercore.DeviceAllocationModeShared, share, topo),
 		)
 	}
 	if !opts.NoSliced {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeSliced, share),
+			newServer(logger, workercore.DeviceAllocationModeSliced, share, topo),
 		)
 	}
 	// The visibility server co-allocates a container to the same physical NPU(s) its owner
@@ -51,7 +55,7 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	// wildcard — which is exactly what a device-cgroup grant needs (no vcann-rt
 	// logical-slicing artifacts).
 	servers = append(servers,
-		newServer(logger, workercore.DeviceAllocationModeVisibility, share),
+		newServer(logger, workercore.DeviceAllocationModeVisibility, share, topo),
 	)
 
 	return &aggregated{
@@ -103,12 +107,17 @@ type server struct {
 	// share is the dcmi container-share seam the responder turns on for the accelerators it hands
 	// out. It is nil for exclusive alone, which owns whole accelerators and must not touch the flag.
 	share shareDriver
+
+	// topo names the A5 fabric topology file this node's accelerators describe themselves with.
+	// Every mode carries it, so unlike share it is never nil.
+	topo *hcclTopoResolver
 }
 
 func newServer(
 	logger klog.Logger,
 	mode workercore.DeviceAllocationMode,
 	share shareDriver,
+	topo *hcclTopoResolver,
 ) deviceplugin.Server {
 	logger = logger.WithName(strings.ToLower(mode.String()))
 
@@ -120,6 +129,7 @@ func newServer(
 			Reconciler:     controllers.Get[*deviceplugin.DevicesReconciler](),
 		},
 		share: share,
+		topo:  topo,
 	}
 	s.Responder = s
 
@@ -134,9 +144,67 @@ func (s *server) GetContainerAllocateResponse(
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
 	// The allocated accelerators, ordered the way the container numbers them.
-	// TODO: mount HCCL topo file for 950.
 	accelerators := deviceplugin.AllocatedAccelerators(devs, allocated)
 
+	resp, err := s.getContainerAllocateResponse(pod, ctr, accelerators)
+	if err != nil {
+		return nil, err
+	}
+	// Applied to whichever response the mode produced, because the topology file is a property of
+	// the node rather than of the injection: a sliced container on an A5 reads the same fabric a
+	// whole-accelerator one does.
+	s.setHcclTopoFilePath(resp, accelerators)
+
+	return resp, nil
+}
+
+// setHcclTopoFilePath names the file HCCL reads this node's fabric topology from, on the one
+// generation that has one.
+//
+// A topology hint that cannot be read is logged and left out rather than failing the allocation.
+// That is the vendor's own behavior -- its device plugin returns early on every error path of this
+// same computation -- and it is the right trade: a container that starts without the hint fails at
+// its own HCCL init with its own diagnosis, while an allocation refused here takes down workloads
+// that never touch the fabric.
+func (s *server) setHcclTopoFilePath(resp *deviceplugin.ContainerAllocateResponse, accels []deviceplugin.AllocatedAccelerator) {
+	i := slices.IndexFunc(accels, func(a deviceplugin.AllocatedAccelerator) bool {
+		return a.Group.Family == family950
+	})
+	if i < 0 {
+		return
+	}
+	// The Ascend detector records dcmi's own addressing in PhysicalIndexes as
+	// {physical id, card id, device id in card}.
+	accel := accels[i].Accel
+	if len(accel.PhysicalIndexes) < 3 {
+		s.Logger.Info("skipping the hccl topology file, the accelerator carries no dcmi card/device index",
+			"accelerator", accel.ID)
+		return
+	}
+	cardID, deviceID := int32(accel.PhysicalIndexes[1]), int32(accel.PhysicalIndexes[2])
+
+	path, productType, err := s.topo.Resolve(cardID, deviceID)
+	switch {
+	case err != nil:
+		s.Logger.Error(err, "skipping the hccl topology file", "accelerator", accel.ID)
+		return
+	case path == "":
+		s.Logger.Info("skipping the hccl topology file, this product has none",
+			"accelerator", accel.ID, "productType", productType)
+		return
+	}
+
+	if resp.Envs == nil {
+		resp.Envs = make(map[string]string, 1)
+	}
+	resp.Envs[hcclTopoFilePathEnv] = path
+}
+
+func (s *server) getContainerAllocateResponse(
+	pod *core.Pod,
+	ctr *core.Container,
+	accelerators []deviceplugin.AllocatedAccelerator,
+) (*deviceplugin.ContainerAllocateResponse, error) {
 	// Sliced containers get real logical-slicing isolation (vcann-rt preload + quota); every
 	// other mode returns the plain device-visibility response below, with only the
 	// container-share preflight in between.
