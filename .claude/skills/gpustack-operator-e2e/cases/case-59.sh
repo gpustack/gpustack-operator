@@ -33,6 +33,31 @@
 #              half AUTO-SKIPS INDEPENDENTLY when its image is unset, and says which schema is left
 #              unverified - one image present must not let the other half report green by omission.
 #
+#
+#              ⛔ PARKED 2026-09-04, AND WHAT DOES NOT COUNT AS FILLING IT. The engine half of this
+#              suite is not being pursued on a machine with no accelerator, because the two questions
+#              it asks separate cleanly and only one of them is answerable here:
+#                - "is the name we render in that engine's registry" - ANSWERED, and answered more
+#                  cleanly without a cluster: one `docker run --rm` per image, listing the whole
+#                  registry rather than probing for one name. Re-running it through a Pod adds no
+#                  information.
+#                - "does the engine actually run with the configuration we inject" - NOT ANSWERABLE
+#                  HERE, structurally. Measured: vllm-ascend aborts on `torch_npu` before any vLLM
+#                  module loads, and this case's own message for that outcome says it reports NOTHING
+#                  about the name we render, in either direction.
+#              ⇒ So the remaining gap is the SECOND question only, and these do NOT close it:
+#                - a green run on a machine with no accelerator - it shows a name resolves, not that
+#                  an engine runs;
+#                - `docker run` finding the name in the registry - that is the half already done;
+#                - the Pod reaching Running - `sleep 3600` reaches Running too, which is exactly the
+#                  fixture this file uses;
+#                - setting an environment variable so some backend stops loading - measured on
+#                  2026-09-04: TORCH_DEVICE_BACKEND_AUTOLOAD=0 only moves the error to
+#                  `ImportError: libascend_hal.so`. A change that replaces one error message with
+#                  another reads like a fix because the first error really is gone.
+#              ⇒ WHAT WOULD: a real accelerator, the engine starting AND serving requests with the
+#              injected configuration, and the KV traffic demonstrably going through mooncake.
+#              Tracked with the rest of that family in issue #172.
 #              DISK, AND WHY THIS IS A STEP COUNT RATHER THAN A PARAMETER. Measured 2026-09-04 from
 #              the arm64 manifests, scaled by a ratio measured on a third image (6.0GB of layers ->
 #              22.7GB resident, 3.8x): vLLM 13.6GB of layers / ~52GB resident, SGLang 18.1GB / ~69GB,

@@ -37,6 +37,31 @@
 #                E2E_VLLM_IMAGE=gpustack/runner:cuda12.9-vllm0.25.1
 #                E2E_VLLM_ASCEND_IMAGE=quay.io/ascend/vllm-ascend:v0.19.1rc1
 #
+#
+#              ⛔ PARKED 2026-09-04, AND WHAT DOES NOT COUNT AS FILLING IT. The engine half of this
+#              suite is not being pursued on a machine with no accelerator, because the two questions
+#              it asks separate cleanly and only one of them is answerable here:
+#                - "is the name we render in that engine's registry" - ANSWERED, and answered more
+#                  cleanly without a cluster: one `docker run --rm` per image, listing the whole
+#                  registry rather than probing for one name. Re-running it through a Pod adds no
+#                  information.
+#                - "does the engine actually run with the configuration we inject" - NOT ANSWERABLE
+#                  HERE, structurally. Measured: vllm-ascend aborts on `torch_npu` before any vLLM
+#                  module loads, and this case's own message for that outcome says it reports NOTHING
+#                  about the name we render, in either direction.
+#              ⇒ So the remaining gap is the SECOND question only, and these do NOT close it:
+#                - a green run on a machine with no accelerator - it shows a name resolves, not that
+#                  an engine runs;
+#                - `docker run` finding the name in the registry - that is the half already done;
+#                - the Pod reaching Running - `sleep 3600` reaches Running too, which is exactly the
+#                  fixture this file uses;
+#                - setting an environment variable so some backend stops loading - measured on
+#                  2026-09-04: TORCH_DEVICE_BACKEND_AUTOLOAD=0 only moves the error to
+#                  `ImportError: libascend_hal.so`. A change that replaces one error message with
+#                  another reads like a fix because the first error really is gone.
+#              ⇒ WHAT WOULD: a real accelerator, the engine starting AND serving requests with the
+#              injected configuration, and the KV traffic demonstrably going through mooncake.
+#              Tracked with the rest of that family in issue #172.
 #              DISK, AND WHY THIS IS A STEP COUNT RATHER THAN A PARAMETER. Measured 2026-09-04 from
 #              the arm64 manifests, scaled by a ratio measured on a third image (6.0GB of layers ->
 #              22.7GB resident, 3.8x): vLLM 13.6GB of layers / ~52GB resident, SGLang 18.1GB / ~69GB,
@@ -91,8 +116,36 @@
 #              that order and idempotently, on pass AND fail. It changes no shared baseline - every
 #              object it touches is one it created.
 #
-# NOT YET EXERCISED AS A CASE. No run of this file exists, on any cluster. It was written from source
-# read at vllm v0.25.1 (752a3a50) and vllm-ascend v0.19.1rc1 (da421afa).
+# EXERCISED 2026-09-04, first run ever, single-node docker-desktop (arm64, no accelerator):
+#   vllm row        PASS - LOADED MooncakeStoreConnector. That row had never been executed either;
+#                   until this run it rested on source read at v0.25.1 (752a3a50).
+#   vllm-ascend row FAIL at step 1, and NOT about the name: FACTORY_IMPORT_RAISED RuntimeError,
+#                   "Failed to load the backend extension: torch_npu".
+#
+# ⛔ WHY THAT ROW CANNOT PASS HERE, measured rather than guessed - and it is this webhook's own subject
+# matter. The vllm-ascend image prepares its environment in the image ENTRYPOINT, which sources three
+# Ascend set_env.sh scripts before exec'ing anything. TWO things bypass it: a Pod that sets `command`
+# discards the ENTRYPOINT entirely (the exact Kubernetes rule this webhook refuses over), and
+# `kubectl exec` starts a process that never runs it. So torch's device-backend autoload fails before
+# any vLLM module is imported.
+#   Measured three ways on the same image: through the ENTRYPOINT (`docker run <img> python3 -`) the
+#   import SUCCEEDS; bypassing it (`--entrypoint python3`) it fails exactly as it does here; and
+#   TORCH_DEVICE_BACKEND_AUTOLOAD=0 does NOT fix it - the failure only moves to
+#   `ImportError: libascend_hal.so`, because vLLM activates the ascend PLATFORM plugin, which imports
+#   torch_npu regardless of the connector registry this case is about.
+# ⇒ The fix is to give the probe the environment the ENTRYPOINT builds, not to disable a backend. Left
+#   undone deliberately: a fixture that runs the probe as the Pod's `args` would keep the ENTRYPOINT,
+#   but the name this case asserts has to be read off the mutated Pod BEFORE the probe runs, and
+#   passing it at create time is the hard-coding this case exists to avoid. That tension is real and
+#   is a design decision, not an edit to make during a run.
+#
+# ⭐ What this run does NOT leave unverified: the registry contents themselves. Measured the same day
+# by `docker run --rm quay.io/ascend/vllm-ascend:v0.19.1rc1` (ENTRYPOINT honored, no accelerator):
+# after load_general_plugins() the factory holds 19 names, AscendStoreConnector among them and
+# MooncakeStoreConnector absent. That is this row's subject; what is missing is only its delivery
+# through the webhook and kubectl exec.
+#
+# It was written from source read at vllm v0.25.1 (752a3a50) and vllm-ascend v0.19.1rc1 (da421afa).
 #
 # What HAS been executed, 2026-09-04, outside this file - one `docker run --rm` on a host with no
 # accelerator of any kind, against quay.io/ascend/vllm-ascend:v0.19.1rc1 (linux/arm64):

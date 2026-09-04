@@ -39,9 +39,12 @@
 #              its quota, and forcing it earlier is how a run leaves a namespace Terminating forever.
 #              It changes no shared baseline - every object it touches is one it created.
 #
-# NOT RE-RUN since the readiness wait stopped being discarded. That run reached the probe, so it says
-# nothing about the new failure path - a Pod that never becomes Ready now FAILS here instead of
-# reaching the probe and reporting an empty log as an injection defect.
+# EXERCISED 2026-09-04 (second host) on a single-node docker-desktop cluster, arm64, k8s v1.36.1,
+# against an operator built from this branch: 5 checks, all passing.
+# That run exercised the readiness wait's SUCCESS branch, which is the change that stopped discarding
+# it. It still says nothing about the new FAILURE path - a Pod that never becomes Ready - because no
+# run so far has produced one. That half stays unexercised, and saying so is the point: a passing run
+# is evidence for the branch it took and for no other.
 #
 # EXERCISED 2026-09-04 on a three-node k3s cluster: all five checks passed. Two amendments have landed
 # since that run, so it is evidence for the shape but not for the current assertions: the usage check
