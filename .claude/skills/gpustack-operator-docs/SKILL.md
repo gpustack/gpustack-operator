@@ -34,6 +34,7 @@ one, not to widen the overview.
 | Startup ordering, the gateway mirror, the device-plugin registration loop, per-manufacturer packages, CGO bindings, the 63-char rule | `docs/architecture/internals.md` |
 | A `KVCacheBackend`'s workloads, its admin surface, its phase or capacity | `docs/kv-cache/backend.md` |
 | A `KVCachePool` or `KVCachePoolBinding`: the grant, the reuse domain, a quota ceiling or grant, what a full quota does | `docs/kv-cache/pool.md` |
+| How a **Pod** consumes a pool: the inject label and annotations, the injected keys per engine, a refusal, the isolation record | `docs/reference/kv-cache-injection.md` |
 | A resource key, a request rule, a request example | `docs/accelerator-requests.md` |
 | A `Setting` or a `GPUSTACK_*` variable | `docs/settings.md` |
 | A make target, a subchart patch, code generation, a vendored dependency | `docs/development.md` |

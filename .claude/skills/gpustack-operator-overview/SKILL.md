@@ -34,6 +34,7 @@ pkg/
     extensionapis/                aggregated extension-API handlers (Instance, Devices, InstanceType, …)
     webhooks/worker/              admission webhooks (generated + hand-written)
     kvcache/                      renders a Mooncake store (leader/member workloads) and reads it back
+    kvcache/inject/               renders one engine's client config; pure, no cluster (see the Pod webhook)
     kuberess/                     installs the bundled operator chart (image mode) + the two CRs
   workergateway/                  worker-gateway subcommand (upstream aggregation)
   devicemanager/                  device-manager subcommand (per-node DaemonSet)

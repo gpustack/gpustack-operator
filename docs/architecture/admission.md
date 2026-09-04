@@ -12,6 +12,7 @@
 - [Four-view status](#four-view-status)
 - [Capability versus availability](#capability-versus-availability)
 - [The InstanceType and Instance webhooks](#the-instancetype-and-instance-webhooks)
+- [The KV cache injection webhook is not a gate](#the-kv-cache-injection-webhook-is-not-a-gate)
 - [Running-instance stop](#running-instance-stop)
 - [Known behavior: the deployed Kueue Configuration](#known-behavior-the-deployed-kueue-configuration)
 
@@ -210,6 +211,21 @@ edit touches only the InstanceType, never a Node or the ClusterQueue notes.
   `spec.cpu` (generic) or `spec.accelerator.cpu` (accelerated).
 - **Instance validating** — enforces the unit spec on **Create and Update**: a submission's RAM must not
   exceed `unitRAM × count`, its local storage not the InstanceType's `LocalStorage`.
+
+## The KV cache injection webhook is not a gate
+
+A second mutating webhook on Pods writes the client configuration an inference engine needs to use a
+[KV cache pool](../reference/kv-cache-injection.md). It sits **outside** the five gates:
+
+- It admits or refuses on its own inputs, consumes no `.sliced.*` or `.partitioned.*` value, produces
+  none, and never touches `resources`.
+- It cannot be a branch of gate 1, because the two select on independent criteria: gate 1 fires on
+  `kueue.x-k8s.io/queue-name`, this one on `kvcache.gpustack.ai/inject`, and a `LabelSelector` cannot
+  express the union. Independent, not disjoint — a Pod may carry both labels and be served by both
+  entries, which is exactly what the next point is about.
+- Both entries live in the single `gpustack-worker-mutation` configuration, whose name sorts before
+  Kueue's on purpose. Their order within it is immaterial, which a test asserts by running both over
+  one Pod in both orders.
 
 ## Running-instance stop
 
