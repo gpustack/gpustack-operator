@@ -379,15 +379,22 @@ if [ "$nobind_ready" = yes ]; then
 fi
 
 # The other half of that rule — the unregistered domain costs the replicas their connector and
-# NOTHING else — cannot be asserted yet, and the reason is worth writing down rather than leaving as
-# a bare `deferred`. Measured side by side on a live cluster: a deployment whose Binding is READY
-# renders a Pod with 0 env vars, 0 volumes and argv `[vllm serve <model>]` — byte-identical to the
-# Pod this case just counted. The connector is not wired into any replica until T14, so "carries no
-# connector" is true of every deployment on the cluster and discriminates nothing. Asserting it here
-# would pass for a reason that has nothing to do with the domain, which is the failure this whole
-# case is built to avoid.
+# NOTHING else — still cannot be asserted here, but THE REASON CHANGED and the old one is no longer
+# true. It used to be that no replica got a connector at all, so a Ready Binding rendered a
+# byte-identical Pod and "carries no connector" discriminated nothing; that was measured side by
+# side on a live cluster and it is why this row was deferred to T14.
+#
+# T14 has landed. A deployment whose Binding is Ready now renders a client-config annotation, a
+# downwardAPI projection of it, a mount and the engine's config-path variable, so "carries no
+# connector" HAS become a discriminating claim. What is missing is the other side of the comparison:
+# this case deliberately names a Binding that does not exist, so every deployment in it is
+# unregistered and the assertion would still pass without ever seeing a registered one. A Ready
+# Binding needs a live Mooncake backend, which is case-46's environment and not this one's.
+#
+# The distinction is worth keeping: this row was blocked by a MECHANISM that did not exist, and is
+# now blocked by a CONTROL that this case cannot host. Only the second kind moves to another case.
 record SKIP "the unregistered domain costs the replicas their connector and nothing else" \
-  "deferred: needs T14. Until a connector is wired into any replica at all, a Ready Binding renders the same Pod, so this would hold for the wrong reason"
+  "deferred: needs a READY Binding as the control, which needs a live Mooncake backend. T14 has landed, so the claim now discriminates — but not inside a case whose every deployment is unregistered"
 
 kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai case45-nobind \
   --wait=true --timeout=60s >/dev/null 2>&1
@@ -404,10 +411,15 @@ fi
 
 # --- deferred: the serving half ---
 
+# BOTH REASONS WERE STALE AND SAID "needs the connector wired into the replicas". T14 wired it, and
+# neither row became runnable, because neither was actually waiting on that: a replica reaching Ready
+# needs a container that serves, and this case runs on a CPU-only cluster against busybox. Naming the
+# real blocker matters more than the deferral itself — a stale reason sends the next reader to look
+# for work that is already done.
 record SKIP "replicas: 2 reaches status.roles[0].ready == 2" \
-  "deferred: needs the synthesized connector wired into the replicas"
+  "deferred: needs an engine image that actually serves, which needs an accelerator; this case is CPU-only by design"
 record SKIP "status.endpoint serves inference" \
-  "deferred: needs the synthesized connector wired into the replicas"
+  "deferred: needs a serving replica behind the Service, so it carries the same requirement as the row above"
 
 # Results.
 echo
