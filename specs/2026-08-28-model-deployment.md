@@ -23,12 +23,13 @@ ceiling — and the missing half is enforcement downstream of the API, which is 
 
 The engine command line is the fastest-moving thing in the design, so it has a three-tier escape
 hatch — append, overlay, take over — guarded by two webhook rules that refuse a silent merge on a
-key the operator owns and keep the scheduling scalars out of the template. **Those tiers are not yet
-independent of the image, although the rest of this document reads as though they were:** all three
-are supplied under `template`, whose `image` the generated CRD marks required, so reaching for any
-one of them today means giving up the synthesized image. That is two advertised capabilities
-excluding each other at the API layer rather than one missing marker, and it is tracked in
-https://github.com/gpustack/gpustack-operator/issues/176. And because a flag being
+key the operator owns and keep the scheduling scalars out of the template. **The tiers are
+independent of the image, and that independence costs a type of its own:** `template` is a
+`ModelDeploymentTemplate`, not the `InstanceTemplate` an Instance carries, because that type's
+`image` is required while every tier here is supplied under `template` — so sharing it made
+reaching for any tier cost the synthesized image, two of this spec's own capabilities excluding
+each other for no reason but a shared struct
+(https://github.com/gpustack/gpustack-operator/issues/176). And because a flag being
 accepted proves nothing about it being in effect, `CacheAttached` is judged on each replica's own
 engine accounting for its store operations — never on the operator having rendered the flag, and
 never on a figure a whole shared tenant contributes to.
@@ -157,7 +158,7 @@ spec:
       accelerator: 1                       # from the InstanceType's per-unit resources
     extraArgs: []                          # tier 1, see F5
     env: []                                # tier 1
-    template: { ... }                      # an InstanceTemplate overlay, tier 2/3
+    template: { ... }                      # a ModelDeploymentTemplate overlay, tier 2/3
 status:
   phase: Ready
   phaseMessage: ""
@@ -251,17 +252,28 @@ Acceptance:
 
 **The cost, and its mitigation.** Rendering Pods directly means this spec does not inherit what
 `instance.go` already does — volume wiring, port and service exposure, SSH key handling, status
-aggregation, allocation reporting. The mitigation is to **reuse `InstanceTemplate` as the per-role
-template type** rather than invent a parallel one: it already carries `Image`, `ImagePullPolicy`,
+aggregation, allocation reporting. The mitigation is to **keep `InstanceTemplate`'s shape as the
+per-role template** rather than invent a parallel vocabulary: the same `Image`, `ImagePullPolicy`,
 `Command`, `Privileged`, `Ports`, `Env`, `Resources` (including `Accelerator`,
 `AcceleratorSlicedMemoryPercentage`, `AcceleratorSlicedCoresPercentage`,
-`AcceleratorPartitionedProfile`), `VolumeMount`, `ImagePullSecret` and `AdditionalVolumes`. One
-shape for users, one validation surface for us.
+`AcceleratorPartitionedProfile`), `ImagePullSecret` and `AdditionalVolumes` names. One shape for
+users, one validation surface for us.
 
-**The template type is shared; its immutability is not.** `InstanceSpec` marks the inline
-`InstanceTemplate` `Immutable after creation`, but that is a rule the `Instance` webhook enforces on
-`InstanceSpec` — not a property of the template type. `ModelDeployment` reuses the type and does
-**not** inherit the rule: its template is mutable, which is what makes a rollout possible at all.
+**The shape is shared; the type is not, and that distinction was learned by getting it wrong.** The
+first cut reused `InstanceTemplate` itself, whose `Image` is `+required` — and because all three
+override tiers are supplied under `template`, requiring it made *every* tier cost the synthesized
+image. Two capabilities this spec offers, excluding each other for no reason but a shared struct.
+⇒ So the type is `ModelDeploymentTemplate`: the same fields with `Image` optional, minus
+`VolumeMount`, which nothing here reads and whose absence strict decoding turns into a clear refusal
+rather than a value silently ignored (https://github.com/gpustack/gpustack-operator/issues/176).
+Relaxing the marker on `InstanceTemplate` was rejected — it would move a guarantee the `Instance`
+schema holds today down into a webhook, and do that to a published API for the convenience of an
+unpublished one.
+
+**Immutability is not inherited either.** `InstanceSpec` marks its inline `InstanceTemplate`
+`Immutable after creation`, but that is a rule the `Instance` webhook enforces on `InstanceSpec` —
+not a property of any template type. `ModelDeployment` simply does not carry it: a mutable template
+is what makes a rollout possible at all.
 
 #### F2 — `poolRef` is a namespaced Binding: never a pool, never a URL, never cross-namespace
 
@@ -618,7 +630,7 @@ operator whose enums were too narrow. The repo already has the precedent: `Insta
 | Tier | Field | Semantics | Status |
 |---|---|---|---|
 | append | `roles[].extraArgs`, `roles[].env` | appended **after** the operator-synthesized arguments; keys the operator owns (`--kv-transfer-config`, the pool endpoint, role identity) stay the operator's | normal |
-| overlay | `roles[].template` (an `InstanceTemplate` overlay) | the operator renders first, then merges the user's overlay on top | normal |
+| overlay | `roles[].template` (a `ModelDeploymentTemplate` overlay) | the operator renders first, then merges the user's overlay on top | normal |
 | take over | `roles[].template.command` as a full replacement | the user owns the command line; the operator synthesizes **no** engine arguments at all | the role is marked `Unmanaged` and `CacheAttached` goes to `Unknown` |
 
 **Rule 1 — an owned key in the append tier is rejected, never merged.** A silent merge produces "two
@@ -714,8 +726,8 @@ failure is the dangerous kind: a request naming both a partition profile and a s
 refused, since one accelerator cannot serve both and the renderer resolves the pair by precedence —
 which would grant the profile and discard the percentages with nothing said.
 
-**Arguments fold into `Command`; there is no `Args`.** `InstanceTemplate` has `Command []string` and
-no `Args`, and this spec does not add one.
+**Arguments fold into `Command`; there is no `Args`.** `InstanceTemplate` set that precedent —
+`Command []string` and no `Args` — and `ModelDeploymentTemplate` keeps it rather than adding one.
 
 **That has a consequence the earlier draft left implicit: the operator builds the WHOLE argv, not
 just the arguments.** With no `Args` field there is nowhere to put arguments beside an image's own
@@ -1735,9 +1747,11 @@ type ModelDeploymentRole struct {
 	// Arguments fold into Command; there is deliberately no Args, because a second append tier
 	// beside ExtraArgs would have no defined precedence.
 	//
-	// Unlike the Instance that shares this type, the template is MUTABLE — that immutability is a
-	// rule the Instance webhook enforces on InstanceSpec, not a property of InstanceTemplate.
-	Template *InstanceTemplate `json:"template,omitempty" protobuf:"bytes,7,opt,name=template"`
+	// The template is MUTABLE, unlike an Instance's — immutability there is a rule the Instance
+	// webhook enforces on InstanceSpec, not a property of any template type. And the type is this
+	// CR's own rather than InstanceTemplate, whose Image is required: every tier arrives under
+	// template, so requiring an image would make each of them cost the synthesized one.
+	Template *ModelDeploymentTemplate `json:"template,omitempty" protobuf:"bytes,7,opt,name=template"`
 }
 ```
 
@@ -2322,7 +2336,7 @@ accepted bad spec is worse than a refusal.
 | `resources_partition_profile_only` | a card count plus a profile | accept |
 | `resources_partition_and_slice_together` | a profile plus a slice percentage | reject; one accelerator cannot serve both |
 | `resources_absent` | no resources block | accept — a CPU-only replica is legitimate |
-| `template_command` | `template.command` non-empty, **and no `template.image`** | accept; take-over. **THIS EXPECTATION FAILS TODAY, AND IT HAS NEVER BEEN EXECUTED** — case-45's twelve passing rows do not include it, and an expectation that never runs cannot go red when it becomes false, which is how it stayed wrong. `InstanceTemplate.Image` carries `+required`, so the generated CRD requires `roles[].template.image` and the schema refuses this manifest before the webhook sees it. Tracked in https://github.com/gpustack/gpustack-operator/issues/176, which must be fixed **before this spec's pull request merges**, while the API is still unreleased and the field numbers can be renumbered without reserving any. What does NOT close it: a take-over manifest that *does* name an image — it is accepted both before and after the fix, so it discriminates nothing |
+| `template_command` | `template.command` non-empty, **and no `template.image`** | accept; take-over. The **absence** of the image is the whole assertion — the tier must not cost the synthesized image. What does NOT pin it: a take-over manifest that *does* name an image, which is accepted whether or not the field is required and therefore discriminates nothing. This row was for a long time an expectation nobody ran, and it was wrong for exactly that reason: an expectation that never executes cannot go red when it stops being true (https://github.com/gpustack/gpustack-operator/issues/176) |
 | `pool_ref_missing` | names no existing Binding | reject; the message names namespace + Binding |
 | `pool_ref_name_empty` | `poolRef: {name: ""}` | reject — **from the webhook**, because the field's type is upstream's `core.LocalObjectReference` and a `minLength` marker cannot be attached to a struct this API does not own. Every other required string gets its lower bound from the schema |
 | `pool_ref_cross_namespace` | a namespace supplied as an unknown field | rejected or pruned; assert the observed behaviour |
@@ -2496,8 +2510,8 @@ comparison with one side missing is an assertion about nothing.
   `Instance.Spec` is immutable after creation so a rolling update degenerates into
   recreate-everything; and Kueue pod-group membership is expressed as labels on Pods, which through
   `Instance` would need a passthrough field existing only to be passed through. The cost — not
-  inheriting `instance.go`'s volume, port, SSH and status work — is mitigated by sharing
-  `InstanceTemplate` as the per-role template type.
+  inheriting `instance.go`'s volume, port, SSH and status work — is mitigated by keeping
+  `InstanceTemplate`'s **shape** in the per-role template, though not the type itself.
 - **A `ModelDeployment → InstanceGroup → Instance → Pod` chain.** Rejected, and not for complexity:
   the layering does not solve the two things that matter and adds a correctness risk.
   - `Instance` is **exactly one Pod, hard**, so an `InstanceGroup` of `Instance`s can never express
