@@ -1122,11 +1122,19 @@ distinguish those, so it does not default to a version it never saw.
 | `hygon` | `dtk` | | `thead` | `hggc` |
 | `cambricon` | **none** | | | |
 
-`hggc` is `thead`'s: this repository's own `csrc/thead/ppu-slicing-shim/hggc/` carries the same name,
-which is what settles it — the runner data itself only ever spells the backend, never the vendor.
-`cambricon` is in `pkg/nodefeature/knowns.go`'s manufacturer list and has **no** runner backend, so a
-role on a cambricon pool cannot have an image synthesized and must name one. That is a validation
-rule, not a silent empty string.
+The runner data itself only ever spells the backend, never the vendor — its records carry no vendor
+field at all — so the pairing is not derived here. It comes from `gpustack_runtime`'s
+`_MANUFACTURER_BACKEND_MAPPING` (module `gpustack_runtime/detector/__types__.py`), whose own doc
+comment states its names are meant to be the runner's backend names. Two rows do not follow from the
+vendor name and would be got wrong by guessing: `hygon` is `dtk` and `thead` is `hggc` — the latter
+independently carried by this repository's own `csrc/thead/ppu-slicing-shim/hggc/`. That map grew
+`thead` between releases, absent at `0.1.39.post2` and present at `0.2.4.post3`, so it has to be read
+at a current version.
+
+`cambricon` is in `pkg/nodefeature/knowns.go`'s manufacturer list, and it is where this table stops
+short of that upstream map: upstream pairs it with `neuware`, but no runner record carries a
+`neuware` image, so a role on a cambricon pool cannot have an image synthesized and must name one.
+That is a validation rule, not a silent empty string.
 
 **`backend_variant` is non-empty for `cann` alone.** Across all 338 records the variant is populated
 for `cann` (`310p` 26, `910b` 54, `a3` 46, `950` 2) and empty for the other seven backends. So the
