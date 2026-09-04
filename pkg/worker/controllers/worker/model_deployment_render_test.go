@@ -30,7 +30,7 @@ func newRenderDeployment(mutate ...func(*workercore.ModelDeployment)) *workercor
 				Name:         "server",
 				Replicas:     2,
 				InstanceType: "h20-8x",
-				Template:     &workercore.InstanceTemplate{Image: "vllm/vllm-openai:v0.25.1"},
+				Template:     &workercore.ModelDeploymentTemplate{Image: "vllm/vllm-openai:v0.25.1"},
 			}},
 		},
 	}

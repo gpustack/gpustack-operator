@@ -1440,6 +1440,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentTemplate"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentTemplateApplyConfiguration{}
 
 	}
 	return nil

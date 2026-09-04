@@ -133,7 +133,11 @@ YAML
 refuses() {
   local check="$1" want="$2" role_extra="$3" kv_extra="$4" out
   out="$(manifest "$role_extra" "$kv_extra" | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
-  if [ -z "${out##*$want*}" ]; then
+  # AN EMPTY $out MUST NOT PASS. `${out##*$want*}` deletes the longest matching prefix, and deleting
+  # anything from "" leaves "" -- so `-z` is TRUE when the command produced nothing at all, and the
+  # row would report a refusal it never saw. A check that passes when nothing happened is measuring
+  # nothing, and this one would do it for every row at once.
+  if [ -n "$out" ] && [ -z "${out##*$want*}" ]; then
     record PASS "$check" "refused, quoting: ${want}"
   else
     record FAIL "$check" "wanted a refusal quoting '${want}', got: $(echo "$out" | cut -c1-160)"
@@ -142,7 +146,10 @@ refuses() {
 
 # Row 0. Without this every row below is meaningless.
 base_out="$(manifest "" "" | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
-if [ -z "${base_out##*created*}" ]; then
+# The same empty-output trap as in `refuses`, and it matters most here: this row is what licenses
+# every refusal below, so if it can pass on no output at all, the case's whole discriminating power
+# rests on something that was never observed.
+if [ -n "$base_out" ] && [ -z "${base_out##*created*}" ]; then
   record PASS "a well-formed deployment is accepted" \
     "baseline passes schema and webhook even with an absent Binding, so a refusal below is about the thing being tested"
 else
@@ -195,6 +202,26 @@ refuses "a resource-bearing template is refused, pointing at the two fields that
         cpu: \"1\"
         ram: \"1Gi\"
         localStorage: \"1Gi\"" ""
+
+# The take-over tier, with NO image. This row asserts an ACCEPTANCE, and it is the one that pins the
+# fix for the defect where `roles[].template` inherited a required `image`: every override tier lives
+# under `template`, so requiring an image there forced anyone using an overlay to give up the
+# synthesized image -- two advertised capabilities excluding each other.
+#
+# WHAT DOES NOT PIN IT: the same manifest WITH an image. That one is accepted before and after the
+# fix, so it discriminates nothing. The absence of `image` is the entire assertion.
+takeover_out="$(manifest "    template:
+      command:
+      - /bin/sh
+      - -c
+      - sleep 3600" "" | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
+if [ -n "$takeover_out" ] && [ -z "${takeover_out##*created*}" ]; then
+  record PASS "a take-over template without an image is accepted" \
+    "template.command with no template.image passes schema and webhook — the overlay tiers do not cost the synthesized image"
+else
+  record FAIL "a take-over template without an image is accepted" \
+    "wanted acceptance, got: $(echo "$takeover_out" | cut -c1-160)"
+fi
 
 # --- schema rows: these never reach the webhook, and that is the design ---
 

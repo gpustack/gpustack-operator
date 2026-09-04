@@ -49,14 +49,14 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// because a second append tier beside ExtraArgs would have no defined precedence and would make
 	// the take-over tier ambiguous — args alone would be neither take-over nor append.
 	//
-	// Unlike the Instance that shares this type, the template is MUTABLE. That immutability is a
-	// rule the Instance webhook enforces on InstanceSpec, not a property of InstanceTemplate, and
-	// dropping it is what makes a rollout possible at all.
+	// The template is MUTABLE, unlike the one an Instance carries. Immutability there is a rule the
+	// Instance webhook enforces on InstanceSpec rather than a property of any template type, and not
+	// carrying it here is what makes a rollout possible at all.
 	//
 	// Its Resources are refused at admission. The accelerator request belongs in the role's own
 	// Resources and the rest is derived from the InstanceType, so a template able to shadow either
 	// would make the admission feasibility check read a ledger that does not match reality.
-	Template *InstanceTemplateApplyConfiguration `json:"template,omitempty"`
+	Template *ModelDeploymentTemplateApplyConfiguration `json:"template,omitempty"`
 }
 
 // ModelDeploymentRoleApplyConfiguration constructs a declarative configuration of the ModelDeploymentRole type for use with
@@ -123,7 +123,7 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithEnv(values ...*InstanceEnvVa
 // WithTemplate sets the Template field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Template field is set to the value of the last call.
-func (b *ModelDeploymentRoleApplyConfiguration) WithTemplate(value *InstanceTemplateApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
+func (b *ModelDeploymentRoleApplyConfiguration) WithTemplate(value *ModelDeploymentTemplateApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
 	b.Template = value
 	return b
 }

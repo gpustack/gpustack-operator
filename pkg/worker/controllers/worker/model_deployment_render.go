@@ -122,7 +122,7 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 	if tmpl == nil {
 		// A role may name no template at all and still render, because the image can be
 		// synthesized. Every other template field then takes its zero value.
-		tmpl = new(workercore.InstanceTemplate)
+		tmpl = new(workercore.ModelDeploymentTemplate)
 	}
 
 	// A STATED IMAGE ALWAYS WINS, and synthesis is the fallback rather than the rule: it is how a
@@ -258,7 +258,7 @@ func modelDeploymentPodLabels(
 // A role that names none still gets one, because a replica nothing can reach serves nothing and the
 // Service fronting the deployment needs a target. Every supported engine's OpenAI-compatible server
 // listens on 8000 by default.
-func modelDeploymentContainerPorts(tmpl *workercore.InstanceTemplate) []core.ContainerPort {
+func modelDeploymentContainerPorts(tmpl *workercore.ModelDeploymentTemplate) []core.ContainerPort {
 	if len(tmpl.Ports) == 0 {
 		return []core.ContainerPort{{
 			Name:          modelDeploymentDefaultPortName,

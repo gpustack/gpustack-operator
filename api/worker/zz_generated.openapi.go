@@ -140,6 +140,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref),
 		v1alpha1.ModelDeploymentSpec{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref),
 		v1alpha1.ModelDeploymentStatus{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref),
+		v1alpha1.ModelDeploymentTemplate{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentTemplate(ref),
 		corev1.AWSElasticBlockStoreVolumeSource{}.OpenAPIModelName():         schema_k8sio_api_core_v1_AWSElasticBlockStoreVolumeSource(ref),
 		corev1.Affinity{}.OpenAPIModelName():                                 schema_k8sio_api_core_v1_Affinity(ref),
 		corev1.AppArmorProfile{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_AppArmorProfile(ref),
@@ -6800,8 +6801,8 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 					},
 					"template": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Template overlays the rendered container. The operator renders first and merges this on top. A non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator synthesizes no engine arguments and no client environment, the role is marked unmanaged and CacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args, because a second append tier beside ExtraArgs would have no defined precedence and would make the take-over tier ambiguous — args alone would be neither take-over nor append.\n\nUnlike the Instance that shares this type, the template is MUTABLE. That immutability is a rule the Instance webhook enforces on InstanceSpec, not a property of InstanceTemplate, and dropping it is what makes a rollout possible at all.\n\nIts Resources are refused at admission. The accelerator request belongs in the role's own Resources and the rest is derived from the InstanceType, so a template able to shadow either would make the admission feasibility check read a ledger that does not match reality.",
-							Ref:         ref(v1alpha1.InstanceTemplate{}.OpenAPIModelName()),
+							Description: "Template overlays the rendered container. The operator renders first and merges this on top. A non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator synthesizes no engine arguments and no client environment, the role is marked unmanaged and CacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args, because a second append tier beside ExtraArgs would have no defined precedence and would make the take-over tier ambiguous — args alone would be neither take-over nor append.\n\nThe template is MUTABLE, unlike the one an Instance carries. Immutability there is a rule the Instance webhook enforces on InstanceSpec rather than a property of any template type, and not carrying it here is what makes a rollout possible at all.\n\nIts Resources are refused at admission. The accelerator request belongs in the role's own Resources and the rest is derived from the InstanceType, so a template able to shadow either would make the admission feasibility check read a ledger that does not match reality.",
+							Ref:         ref(v1alpha1.ModelDeploymentTemplate{}.OpenAPIModelName()),
 						},
 					},
 				},
@@ -6809,7 +6810,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.InstanceTemplate{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName()},
+			v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName(), v1alpha1.ModelDeploymentTemplate{}.OpenAPIModelName()},
 	}
 }
 
@@ -7062,6 +7063,139 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 		},
 		Dependencies: []string{
 			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentTemplate(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentTemplate overlays the container the operator renders for one replica.\n\nIT EXISTS BECAUSE InstanceTemplate'S Image IS REQUIRED AND THIS ONE'S CANNOT BE. A role that names no image has one synthesized from the accelerator backend its InstanceType observed, so requiring the field would force every user of the overlay to give up synthesis — two capabilities this API offers, excluding each other for no reason other than a shared struct. Relaxing the marker on InstanceTemplate was rejected: it would move a guarantee the Instance's schema holds today down into a webhook, which is later, more expensive and easier to bypass, and it would do that to a published API for the convenience of an unpublished one.\n\nThe fields are InstanceTemplate's, minus VolumeMount, which nothing here reads — an unused field in a schema is a promise, and strict decoding turns leaving it out into a clear refusal rather than a value silently ignored. Numbering restarts at 1 and runs contiguously because this type is new in an unreleased API; there is nothing on the wire to reserve around.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"image": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Image is the container image to run. Leaving it empty is the ordinary case: the operator then synthesizes one from the pool's accelerator backend, the observed runtime version and the requested engine.",
+							MaxLength:   ptr.To[int64](512),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"imagePullPolicy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagePullPolicy is the pull policy for Image.\n\n\nPossible enum values:\n - `\"Always\"` means that kubelet always attempts to pull the latest image. Container will fail If the pull fails.\n - `\"IfNotPresent\"` means that kubelet pulls if the image isn't present on disk. Container will fail if the image isn't present and the pull fails.\n - `\"Never\"` means that kubelet never pulls an image, but only uses a local image. Container will fail if the image isn't present",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Always", "IfNotPresent", "Never"},
+						},
+					},
+					"command": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Command replaces the whole argv, which is the TAKE-OVER tier described on the role's Template field. The operator contributes no engine argument and no client environment.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+					"privileged": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Privileged runs the container privileged.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"ports": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"port",
+									"protocol",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "port",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Ports are the container ports to expose in addition to the engine's own.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstancePort{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"env": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "name",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Env are environment entries merged on top of the role's own. A name the operator owns is refused here just as it is in the role's Env: the renderer drops owned names from both tiers, so admission has to refuse both, or one path becomes a silent drop.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstanceEnvVar{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"resources": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Resources is present ONLY so that supplying it can be refused with a message that says where the request belongs. Dropping the field would let strict decoding refuse it earlier and more cheaply, but an unknown-field error says \"not here\" while the webhook's says \"it goes in the role's own Resources\" — and mistaking the template for the place resources live is the whole reason anyone writes this field.",
+							Ref:         ref(v1alpha1.InstanceResources{}.OpenAPIModelName()),
+						},
+					},
+					"imagePullSecret": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagePullSecret is the secret used to pull Image.",
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
+					"additionalVolumes": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "AdditionalVolumes are volumes mounted into the container alongside the operator's own.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstanceAdditionalVolume{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.InstanceAdditionalVolume{}.OpenAPIModelName(), v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.InstancePort{}.OpenAPIModelName(), v1alpha1.InstanceResources{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
 	}
 }
 

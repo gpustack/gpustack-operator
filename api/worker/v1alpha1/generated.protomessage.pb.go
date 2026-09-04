@@ -181,3 +181,5 @@ func (*ModelDeploymentRoleStatus) ProtoMessage() {}
 func (*ModelDeploymentSpec) ProtoMessage() {}
 
 func (*ModelDeploymentStatus) ProtoMessage() {}
+
+func (*ModelDeploymentTemplate) ProtoMessage() {}

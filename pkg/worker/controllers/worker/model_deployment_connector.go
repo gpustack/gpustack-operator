@@ -325,7 +325,7 @@ func modelDeploymentSGLangClientEnv(in ModelDeploymentConnectorInput, protocol s
 // ModelDeploymentEngineCommand renders the argv that starts one engine on one model.
 //
 // The OPERATOR OWNS THE WHOLE ARGV, and that follows from the template type rather than from
-// preference: InstanceTemplate carries Command and deliberately no Args, so there is nowhere to put
+// preference: the template carries Command and deliberately no Args, so there is nowhere to put
 // arguments beside an image's own entrypoint. Either the operator builds the command line — base
 // command, then the synthesized connector arguments, then the role's ExtraArgs — or the user
 // replaces all of it through the take-over tier. There is no middle where the operator contributes

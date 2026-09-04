@@ -3743,14 +3743,11 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Nullable: true,
 														},
 														"template": {
-															Description: "Template overlays the rendered container. The operator renders first and merges this on top.\nA non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator\nsynthesizes no engine arguments and no client environment, the role is marked unmanaged and\nCacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args,\nbecause a second append tier beside ExtraArgs would have no defined precedence and would make\nthe take-over tier ambiguous — args alone would be neither take-over nor append.\nUnlike the Instance that shares this type, the template is MUTABLE. That immutability is a\nrule the Instance webhook enforces on InstanceSpec, not a property of InstanceTemplate, and\ndropping it is what makes a rollout possible at all.\nIts Resources are refused at admission. The accelerator request belongs in the role's own\nResources and the rest is derived from the InstanceType, so a template able to shadow either\nwould make the admission feasibility check read a ledger that does not match reality.",
+															Description: "Template overlays the rendered container. The operator renders first and merges this on top.\nA non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator\nsynthesizes no engine arguments and no client environment, the role is marked unmanaged and\nCacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args,\nbecause a second append tier beside ExtraArgs would have no defined precedence and would make\nthe take-over tier ambiguous — args alone would be neither take-over nor append.\nThe template is MUTABLE, unlike the one an Instance carries. Immutability there is a rule the\nInstance webhook enforces on InstanceSpec rather than a property of any template type, and not\ncarrying it here is what makes a rollout possible at all.\nIts Resources are refused at admission. The accelerator request belongs in the role's own\nResources and the rest is derived from the InstanceType, so a template able to shadow either\nwould make the admission feasibility check read a ledger that does not match reality.",
 															Type:        "object",
-															Required: []string{
-																"image",
-															},
 															Properties: map[string]v1.JSONSchemaProps{
 																"additionalVolumes": {
-																	Description: "AdditionalVolumes is the list of volumes to mount in the Instance besides its workspace,\neach at a path of its own. They are mounted into the Instance's main container only, which\nthe SSH server also observes.\nImmutable unless the Instance is stopped.",
+																	Description: "AdditionalVolumes are volumes mounted into the container alongside the operator's own.",
 																	Type:        "array",
 																	Items: &v1.JSONSchemaPropsOrArray{
 																		Schema: &v1.JSONSchemaProps{
@@ -3842,18 +3839,17 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																	XListType: ptr.To[string]("atomic"),
 																},
 																"command": {
-																	Description: "Command is the command to run in the Instance,\nwhich should overwrite the default command in the container image CMD.",
+																	Description: "Command replaces the whole argv, which is the TAKE-OVER tier described on the role's Template\nfield. The operator contributes no engine argument and no client environment.",
 																	Type:        "array",
 																	Items: &v1.JSONSchemaPropsOrArray{
 																		Schema: &v1.JSONSchemaProps{
 																			Type: "string",
 																		},
 																	},
-																	Nullable:  true,
-																	XListType: ptr.To[string]("atomic"),
+																	Nullable: true,
 																},
 																"env": {
-																	Description: "Env is the list of environment variables to set in the Instance.",
+																	Description: "Env are environment entries merged on top of the role's own. A name the operator owns is\nrefused here just as it is in the role's Env: the renderer drops owned names from both tiers,\nso admission has to refuse both, or one path becomes a silent drop.",
 																	Type:        "array",
 																	Items: &v1.JSONSchemaPropsOrArray{
 																		Schema: &v1.JSONSchemaProps{
@@ -3881,29 +3877,16 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																	XListType: ptr.To[string]("map"),
 																},
 																"image": {
-																	Description: "Image is the container image to run.",
+																	Description: "Image is the container image to run. Leaving it empty is the ordinary case: the operator then\nsynthesizes one from the pool's accelerator backend, the observed runtime version and the\nrequested engine.",
 																	Type:        "string",
+																	MaxLength:   ptr.To[int64](512),
 																},
 																"imagePullPolicy": {
-																	Description: "ImagePullPolicy is the image pull policy to use.",
+																	Description: "ImagePullPolicy is the pull policy for Image.",
 																	Type:        "string",
-																	Default: &v1.JSON{
-																		Raw: []byte(`"IfNotPresent"`),
-																	},
-																	Enum: []v1.JSON{
-																		{
-																			Raw: []byte(`"Always"`),
-																		},
-																		{
-																			Raw: []byte(`"IfNotPresent"`),
-																		},
-																		{
-																			Raw: []byte(`"Never"`),
-																		},
-																	},
 																},
 																"imagePullSecret": {
-																	Description: "ImagePullSecret is the reference to the InstanceImagePullSecret that contains the credentials to pull the container image.",
+																	Description: "ImagePullSecret is the secret used to pull Image.",
 																	Type:        "object",
 																	Properties: map[string]v1.JSONSchemaProps{
 																		"name": {
@@ -3917,7 +3900,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																	Nullable: true,
 																},
 																"ports": {
-																	Description: "Ports is the list of ports to expose from the Instance.",
+																	Description: "Ports are the container ports to expose in addition to the engine's own.",
 																	Type:        "array",
 																	Items: &v1.JSONSchemaPropsOrArray{
 																		Schema: &v1.JSONSchemaProps{
@@ -3965,14 +3948,11 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																	XListType: ptr.To[string]("map"),
 																},
 																"privileged": {
-																	Description: "Privileged indicates whether the container should run in privileged mode.",
+																	Description: "Privileged runs the container privileged.",
 																	Type:        "boolean",
-																	Default: &v1.JSON{
-																		Raw: []byte(`false`),
-																	},
 																},
 																"resources": {
-																	Description: "Resources is the resource requirements for the Instance.",
+																	Description: "Resources is present ONLY so that supplying it can be refused with a message that says where\nthe request belongs. Dropping the field would let strict decoding refuse it earlier and more\ncheaply, but an unknown-field error says \"not here\" while the webhook's says \"it goes in the\nrole's own Resources\" — and mistaking the template for the place resources live is the whole\nreason anyone writes this field.",
 																	Type:        "object",
 																	Required: []string{
 																		"cpu",
@@ -4049,15 +4029,6 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																		},
 																	},
 																	Nullable: true,
-																},
-																"volumeMount": {
-																	Description: "VolumeMount is a path to mount the volume in the Instance.",
-																	Type:        "string",
-																	Default: &v1.JSON{
-																		Raw: []byte(`"/workspace"`),
-																	},
-																	MaxLength: ptr.To[int64](1024),
-																	Pattern:   `^(/[^/]+)+$`,
 																},
 															},
 															Nullable: true,

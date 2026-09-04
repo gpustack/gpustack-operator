@@ -434,3 +434,8 @@ func (in ModelDeploymentSpec) OpenAPIModelName() string {
 func (in ModelDeploymentStatus) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentStatus"
 }
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentTemplate) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentTemplate"
+}

@@ -56,8 +56,9 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 ) (ctrladmission.Warnings, error) {
 	md := newObj.(*workercore.ModelDeployment)
 
-	// There is nothing immutable to check. Unlike the Instance that shares InstanceTemplate, this
-	// CR's template is mutable by design: dropping that rule is what makes a rollout possible.
+	// There is nothing immutable to check. An Instance's template is frozen after creation, but that
+	// is a rule the Instance webhook enforces on InstanceSpec rather than a property of any template
+	// type, so this CR simply does not carry it: a mutable template is what makes a rollout possible.
 	if errs := validateModelDeployment(md); len(errs) > 0 {
 		return nil, kerrors.NewInvalid(md.GroupVersionKind().GroupKind(), md.Name, errs)
 	}

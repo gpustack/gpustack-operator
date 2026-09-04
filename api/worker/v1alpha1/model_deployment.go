@@ -224,14 +224,95 @@ type ModelDeploymentRole struct {
 	// because a second append tier beside ExtraArgs would have no defined precedence and would make
 	// the take-over tier ambiguous — args alone would be neither take-over nor append.
 	//
-	// Unlike the Instance that shares this type, the template is MUTABLE. That immutability is a
-	// rule the Instance webhook enforces on InstanceSpec, not a property of InstanceTemplate, and
-	// dropping it is what makes a rollout possible at all.
+	// The template is MUTABLE, unlike the one an Instance carries. Immutability there is a rule the
+	// Instance webhook enforces on InstanceSpec rather than a property of any template type, and not
+	// carrying it here is what makes a rollout possible at all.
 	//
 	// Its Resources are refused at admission. The accelerator request belongs in the role's own
 	// Resources and the rest is derived from the InstanceType, so a template able to shadow either
 	// would make the admission feasibility check read a ledger that does not match reality.
-	Template *InstanceTemplate `json:"template,omitempty" protobuf:"bytes,7,opt,name=template"`
+	Template *ModelDeploymentTemplate `json:"template,omitempty" protobuf:"bytes,7,opt,name=template"`
+}
+
+// ModelDeploymentTemplate overlays the container the operator renders for one replica.
+//
+// IT EXISTS BECAUSE InstanceTemplate'S Image IS REQUIRED AND THIS ONE'S CANNOT BE. A role that
+// names no image has one synthesized from the accelerator backend its InstanceType observed, so
+// requiring the field would force every user of the overlay to give up synthesis — two capabilities
+// this API offers, excluding each other for no reason other than a shared struct. Relaxing the
+// marker on InstanceTemplate was rejected: it would move a guarantee the Instance's schema holds
+// today down into a webhook, which is later, more expensive and easier to bypass, and it would do
+// that to a published API for the convenience of an unpublished one.
+//
+// The fields are InstanceTemplate's, minus VolumeMount, which nothing here reads — an unused field
+// in a schema is a promise, and strict decoding turns leaving it out into a clear refusal rather
+// than a value silently ignored. Numbering restarts at 1 and runs contiguously because this type is
+// new in an unreleased API; there is nothing on the wire to reserve around.
+type ModelDeploymentTemplate struct {
+	// Image is the container image to run. Leaving it empty is the ordinary case: the operator then
+	// synthesizes one from the pool's accelerator backend, the observed runtime version and the
+	// requested engine.
+	//
+	// +optional
+	// +k8s:validation:maxLength=512
+	Image string `json:"image,omitempty" protobuf:"bytes,1,opt,name=image"`
+
+	// ImagePullPolicy is the pull policy for Image.
+	//
+	// +optional
+	ImagePullPolicy core.PullPolicy `json:"imagePullPolicy,omitempty" protobuf:"bytes,2,opt,name=imagePullPolicy"`
+
+	// Command replaces the whole argv, which is the TAKE-OVER tier described on the role's Template
+	// field. The operator contributes no engine argument and no client environment.
+	//
+	// +optional
+	Command []string `json:"command,omitempty" protobuf:"bytes,3,rep,name=command"`
+
+	// Privileged runs the container privileged.
+	//
+	// +optional
+	Privileged bool `json:"privileged,omitempty" protobuf:"varint,4,opt,name=privileged"`
+
+	// Ports are the container ports to expose in addition to the engine's own.
+	//
+	// +optional
+	// +patchMergeKey=port
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=port
+	// +listMapKey=protocol
+	Ports []InstancePort `json:"ports,omitempty" patchStrategy:"merge" patchMergeKey:"port" protobuf:"bytes,5,rep,name=ports"` // nolint: lll
+
+	// Env are environment entries merged on top of the role's own. A name the operator owns is
+	// refused here just as it is in the role's Env: the renderer drops owned names from both tiers,
+	// so admission has to refuse both, or one path becomes a silent drop.
+	//
+	// +optional
+	// +patchMergeKey=name
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=name
+	Env []InstanceEnvVar `json:"env,omitempty" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,6,rep,name=env"`
+
+	// Resources is present ONLY so that supplying it can be refused with a message that says where
+	// the request belongs. Dropping the field would let strict decoding refuse it earlier and more
+	// cheaply, but an unknown-field error says "not here" while the webhook's says "it goes in the
+	// role's own Resources" — and mistaking the template for the place resources live is the whole
+	// reason anyone writes this field.
+	//
+	// +optional
+	Resources *InstanceResources `json:"resources,omitempty" protobuf:"bytes,7,opt,name=resources"`
+
+	// ImagePullSecret is the secret used to pull Image.
+	//
+	// +optional
+	ImagePullSecret *core.LocalObjectReference `json:"imagePullSecret,omitempty" protobuf:"bytes,8,opt,name=imagePullSecret"`
+
+	// AdditionalVolumes are volumes mounted into the container alongside the operator's own.
+	//
+	// +optional
+	// +listType=atomic
+	AdditionalVolumes []InstanceAdditionalVolume `json:"additionalVolumes,omitempty" protobuf:"bytes,9,rep,name=additionalVolumes"` // nolint: lll
 }
 
 // ModelDeploymentRoleResources is what one replica of a role asks of an accelerator.

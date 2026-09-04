@@ -125,7 +125,7 @@ func TestValidateModelDeployment(t *testing.T) {
 			// has to fail for the one reason it exists.
 			name: "env_owned_key_in_template",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
-				r.Template = &workercore.InstanceTemplate{
+				r.Template = &workercore.ModelDeploymentTemplate{
 					Image: "vllm/vllm-openai:latest",
 					Env:   []workercore.InstanceEnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/tmp/mine.json"}},
 				}
@@ -138,7 +138,7 @@ func TestValidateModelDeployment(t *testing.T) {
 			// way they disagree, the result is a value the user wrote and nothing reads.
 			name: "env_owned_key_in_template_take_over",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
-				r.Template = &workercore.InstanceTemplate{
+				r.Template = &workercore.ModelDeploymentTemplate{
 					Image:   "vllm/vllm-openai:latest",
 					Command: []string{"python", "-m", "vllm.entrypoints.openai.api_server"},
 					Env:     []workercore.InstanceEnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/tmp/mine.json"}},
@@ -149,7 +149,7 @@ func TestValidateModelDeployment(t *testing.T) {
 		{
 			name: "env_unowned_key_in_template",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
-				r.Template = &workercore.InstanceTemplate{
+				r.Template = &workercore.ModelDeploymentTemplate{
 					Image: "vllm/vllm-openai:latest",
 					Env:   []workercore.InstanceEnvVar{{Name: "HF_HOME", Value: "/weights"}},
 				}
@@ -173,7 +173,7 @@ func TestValidateModelDeployment(t *testing.T) {
 			// instanceType would send a user to a field that cannot express a card count.
 			name: "template_resources",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
-				r.Template = &workercore.InstanceTemplate{
+				r.Template = &workercore.ModelDeploymentTemplate{
 					Image:     "vllm/vllm-openai:latest",
 					Resources: &workercore.InstanceResources{},
 				}
@@ -242,7 +242,7 @@ func TestValidateModelDeployment(t *testing.T) {
 		{
 			name: "template_command",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
-				r.Template = &workercore.InstanceTemplate{
+				r.Template = &workercore.ModelDeploymentTemplate{
 					Image:   "vllm/vllm-openai:latest",
 					Command: []string{"vllm", "serve", "/models/qwen"},
 				}
@@ -253,7 +253,7 @@ func TestValidateModelDeployment(t *testing.T) {
 			// resources rule reading a nil pointer as a set one.
 			name: "template_without_resources",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
-				r.Template = &workercore.InstanceTemplate{Image: "vllm/vllm-openai:latest"}
+				r.Template = &workercore.ModelDeploymentTemplate{Image: "vllm/vllm-openai:latest"}
 			})),
 		},
 	}
