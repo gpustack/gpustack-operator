@@ -1246,7 +1246,7 @@ The verification ladder, cheapest first:
 
 The headline measurement (G1) is the one that cannot be faked at a lower level: it needs two real
 engine replicas, one real pool, and one request stream replayed against both a single replica and
-the four-replica deployment. **The numbers are recorded in the Test Plan when the case runs.**
+the two-replica deployment. **The numbers are recorded in the Test Plan when the case runs.**
 
 **One failure mode recurs across the levels of that ladder and is named here because it produced a
 green result twice while building this spec: a test that agrees with the code by construction.** It
@@ -2034,7 +2034,7 @@ truthful); after T13 (the headline claim is measured and recorded).
   `.claude/skills/gpustack-operator-e2e/cases/case-48.sh`,
   `.claude/skills/gpustack-operator-e2e/SKILL.md`
   Gate: a two-node cluster with two consumer GPUs on one node
-  Acceptance: **case-45** — `replicas: 4`, one role, reaches `status.roles[0].ready == 4` and
+  Acceptance: **case-45** — `replicas: 2`, one role, reaches `status.roles[0].ready == 2` and
   `status.endpoint` serves inference; the rejections all fire (two roles with the message naming the
   spec, an owned key in `extraArgs`, `template.resources`, a missing Binding, a cross-namespace
   `poolRef`, a self-declared domain). **case-47** — two deployments on the **same** Binding share
@@ -2069,12 +2069,35 @@ truthful); after T13 (the headline claim is measured and recorded).
   vLLM's figures to stand in for it — a number carried over from another backend is not a missing
   measurement, it is a wrong one.
   Acceptance: one request stream, replayed twice — once against a `replicas: 1` deployment and once
-  against a `replicas: 4` deployment on the same Binding, same model, same stream, same order. The
+  against a `replicas: 2` deployment on the same Binding, same model, same stream, same order. The
   case asserts, and **records**: the pool shows **one** domain with blocks contributed by **more than
-  one** replica; the four-replica hit rate **exceeds** the single-replica hit rate on that same
+  one** replica; the two-replica hit rate **exceeds** the single-replica hit rate on that same
   stream. The recorded figures — hit rate each way, block count per contributing replica, domain name
   — are written into this spec's Test Plan, not left in a run log. A run that cannot record a number
   is not a pass.
+  **The two runs are sequential, and the pool is cleared between them.** Both halves are forced by
+  one mechanism: blocks leaking across the runs let the control group be contaminated by the
+  experiment. Running the two deployments at once leaks in space — the single-replica side's hit rate
+  is lifted by blocks the two-replica side wrote. Reusing a dirty pool leaks in time — the second run
+  inherits the first run's blocks. Both leaks push the result in **the direction the claim wants**,
+  and A MEASUREMENT WHOSE CONTAMINATION POINTS WHERE ITS CONCLUSION POINTS IS NO LONGER A
+  MEASUREMENT: its green is evidence about the leak, in a form indistinguishable from evidence about
+  the effect.
+  ⇒ Clearing the pool therefore needs an acceptance of its own, or it is a sentence nobody verifies:
+  **the first run's hit rate must be observably near zero.** If it is not, the clear did not take —
+  and that failure would otherwise be read, silently, as sharing being effective.
+  **Two replicas rather than four, because nothing argued for four.** Every normative statement of
+  this claim asks for *more than one* and nothing beyond it: G1 says "several", the assertion above
+  says "more than one replica", and Verification says "two real engine replicas". The larger figure
+  sat in this criterion with no argument behind it — and a bound written as "at least N" raises no
+  objection to a larger actual value, so the surplus was never a rejected option, only an unexamined
+  one. **A contradiction gets found; a surplus does not.**
+  ⇒ **If two replicas produce an effect that falls inside the noise, the remedy is more replicas and
+  another run — NEVER a weaker assertion.** The cheapest way to close that failure is to soften
+  `exceeds` into `does not fall below`, which trades a red result for a permanent green one. A
+  measurement that fails leaves a signal behind; an assertion that loses its teeth removes the
+  signal. This sentence is the acceptance criterion for the change that made the figure two: reading
+  only that the number got smaller hands the criterion to whoever later wants the case to pass.
   Verify: `bash cases/case-46.sh`, PASS, and the figures land in the Test Plan's measurement table
 
 - [ ] **T14 · Wire the synthesized connector into the replicas**
@@ -2250,6 +2273,20 @@ make this code solid enough prior to committing the changes necessary to impleme
 - The e2e suite needs a request-stream replayer with a fixed prefix distribution, so case-46's two
   runs are the same stream in the same order — otherwise the hit-rate comparison measures the stream,
   not the cache.
+  ⇒ **That reasoning has a second direction, and the sentence above covers only one of them.** A
+  stream that varies between the runs makes the comparison measure the variation; a stream whose
+  prefixes barely repeat makes it measure nothing, because the effect under comparison is flattened
+  out of range. Both are the stream's properties drowning the cache's, and the risk was named once
+  and then applied to the more visible half alone.
+  ⇒ So **the repetition rate is a design parameter of this case, not a property of the world.** The
+  replayer is something this suite builds; the share of requests that reuse a prefix is ours to set.
+  When the effect is too small to resolve, raise the repetition — do not add replicas, which buys
+  the same discriminating power with hardware.
+  ⇒ **And because the figure is designed, it is not a production number.** G1 is an existence claim —
+  sharing beats not sharing on the same stream — and it names no magnitude, so a stream built for
+  discriminating power satisfies it exactly. The recorded hit rate must therefore never be quoted as
+  the gain a real workload would see: that is a different claim, and it would need a representative
+  stream this case deliberately does not use.
 
 #### Unit tests
 
@@ -2380,8 +2417,8 @@ harness for one CRD would be a project-wide decision this spec has no reason to 
 
 Run against a local two-node cluster with two consumer GPUs on one node. No RDMA, no cloud.
 
-- **case-45 — replicas reach ready, and every rejection fires.** `replicas: 4`, one role,
-  `status.roles[0].ready == 4`, `status.endpoint` serves inference. Then, in one pass: two roles
+- **case-45 — replicas reach ready, and every rejection fires.** `replicas: 2`, one role,
+  `status.roles[0].ready == 2`, `status.endpoint` serves inference. Then, in one pass: two roles
   rejected with a message naming a spec; an owned key in `extraArgs` rejected; an owned variable
   rejected in **both** tiers that carry one — `env` and `template.env`, the second naming its own
   tier; `template.resources` rejected; a missing Binding rejected; a cross-namespace `poolRef`
@@ -2389,9 +2426,10 @@ Run against a local two-node cluster with two consumer GPUs on one node. No RDMA
   `modeldeployments` CRD is present, having been installed by the worker rather than by a chart
   manifest.
 - **case-46 — the headline.** One request stream with a fixed prefix distribution, replayed against
-  a `replicas: 1` deployment and a `replicas: 4` deployment on the same Binding. Asserted: the pool
-  shows one domain with blocks contributed by more than one replica, and the four-replica hit rate
-  exceeds the single-replica hit rate. **Recorded** in the table below.
+  a `replicas: 1` deployment and a `replicas: 2` deployment on the same Binding, **sequentially,
+  with the pool cleared between them**. Asserted: the pool shows one domain with blocks contributed
+  by more than one replica, and the two-replica hit rate exceeds the single-replica hit rate.
+  **Recorded** in the table below.
 - **case-47 — the isolation claim, one half asserted and one half deferred.** Two deployments on the
   same Binding share blocks: asserted. Two on **different** Bindings not seeing each other's:
   **deferred, and the case says why** — `tenant_id` reaches no supported engine (F4), so both land
