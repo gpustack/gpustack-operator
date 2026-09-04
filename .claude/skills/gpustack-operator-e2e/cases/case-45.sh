@@ -257,6 +257,7 @@ fi
 # and the race by no longer being able to see either.
 kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai case45-nobind \
   --ignore-not-found --wait=true --timeout=60s >/dev/null 2>&1
+left=""
 for _ in $(seq 1 20); do
   left="$(kubectl -n "$NS" get pods \
     -l app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=case45-nobind \
@@ -265,27 +266,67 @@ for _ in $(seq 1 20); do
   sleep 3
 done
 
+# A DRAIN THAT DID NOT FINISH MUST STOP THE ROWS BELOW RATHER THAN FEED THEM. Falling through leaves
+# the replica row counting a Pod from an earlier pass and reporting "got 2 Pod(s)" -- a message about
+# the rule, produced by a leftover.
+#
+# And it must not be recorded as a FAIL either: FAIL claims the rule was violated, while what
+# actually happened is that the row's precondition was never established. Those are different
+# findings and only one of them is about this operator.
+nobind_ready=yes
+if [ "${left:-0}" -ne 0 ]; then
+  nobind_ready=no
+  record SKIP "the controller-level rows for case45-nobind" \
+    "$left leftover Pod(s) from an earlier pass survived a 60s drain; every row below would have counted them"
+fi
+
 # The role names an image EXPLICITLY here, unlike every row above, and the header says why. A role
 # without one gets an image synthesized from the accelerator backend its InstanceType observed, and
 # a CPU-only InstanceType has observed none. That refusal is correct and is asserted in the unit
 # tier -- model_deployment_image_test.go and model_deployment_render_test.go both pin its message --
 # so this row drops the dependency rather than the assertion. It still demands EXACTLY 1 Pod.
-manifest "    template:
+#
+# THE APPLY IS READ, NOT DISCARDED. `>/dev/null 2>&1` here made a rejected manifest look like a
+# controller that never reconciled: both rows below would go red naming a missing condition and a
+# Pod count of 0, while the object had never been created at all. That is the same substitution the
+# whole case is built to refuse, one layer lower -- and it is the shape a stale CRD schema produces,
+# which is precisely the environment this row is most often run in.
+if [ "$nobind_ready" = yes ]; then
+  apply_out="$(manifest "    template:
       image: docker.io/library/busybox:1.36" "" \
-  | sed "s/case45-probe/case45-nobind/" | kubectl apply -f - >/dev/null 2>&1
-conds=""
-for _ in $(seq 1 20); do
-  conds="$(kubectl -n "$NS" get modeldeployments.worker.gpustack.ai case45-nobind \
-    -o jsonpath='{range .status.conditions[*]}{.type}={.status}/{.reason};{end}' 2>/dev/null)"
-  [ -z "${conds##*DomainRegistered=*}" ] && break
-  sleep 3
-done
-if [ -z "${conds##*DomainRegistered=False/BindingNotFound*}" ]; then
-  record PASS "a poolRef naming no Binding is refused by the controller, not by admission" \
-    "DomainRegistered=False/BindingNotFound — admission cannot read cluster state, so this is a condition"
-else
-  record FAIL "a poolRef naming no Binding is refused by the controller, not by admission" \
-    "wanted DomainRegistered=False/BindingNotFound, got: ${conds:-<no conditions>}"
+    | sed "s/case45-probe/case45-nobind/" | kubectl apply -f - 2>&1 | tr '\n' ' ')"
+  if [ -z "$apply_out" ] || [ -n "${apply_out##*created*}" ]; then
+    nobind_ready=no
+    record SKIP "the controller-level rows for case45-nobind" \
+      "the manifest was never created, so nothing below has a subject: ${apply_out:-<no output at all>}"
+  fi
+fi
+
+if [ "$nobind_ready" = yes ]; then
+  # BOTH TESTS ON $conds GUARD FOR EMPTY FIRST, and each was wrong in a different way without it.
+  # `${conds##*pat*}` deletes the longest matching prefix, and deleting anything from "" leaves "",
+  # so `-z` is TRUE for an empty $conds -- the value a cluster with no ModelDeployment controller
+  # produces. Measured on exactly that cluster: the loop broke on its FIRST iteration, so the 60s
+  # window never elapsed, and the row then reported PASS naming a condition that was never read.
+  # A poll whose exit test passes on nothing polls once, and a row whose assertion passes on nothing
+  # asserts nothing -- one missing guard bought both.
+  #
+  # Three other tests in this file already carry this guard, added when a reviewer pointed at one of
+  # them. These two were not pointed at, and that is the whole lesson: the named site was a sample.
+  conds=""
+  for _ in $(seq 1 20); do
+    conds="$(kubectl -n "$NS" get modeldeployments.worker.gpustack.ai case45-nobind \
+      -o jsonpath='{range .status.conditions[*]}{.type}={.status}/{.reason};{end}' 2>/dev/null)"
+    [ -n "$conds" ] && [ -z "${conds##*DomainRegistered=*}" ] && break
+    sleep 3
+  done
+  if [ -n "$conds" ] && [ -z "${conds##*DomainRegistered=False/BindingNotFound*}" ]; then
+    record PASS "a poolRef naming no Binding is refused by the controller, not by admission" \
+      "DomainRegistered=False/BindingNotFound — admission cannot read cluster state, so this is a condition"
+  else
+    record FAIL "a poolRef naming no Binding is refused by the controller, not by admission" \
+      "wanted DomainRegistered=False/BindingNotFound, got: ${conds:-<no conditions at all within 60s>}"
+  fi
 fi
 
 # The replicas ARE built while the Binding is missing, and the spec requires exactly that:
@@ -310,20 +351,31 @@ fi
 #
 # The wait is for EXACTLY 1, and the row still fails on any other number, so the poll buys tolerance
 # for the race without buying tolerance for a wrong count.
-wl=0
-for _ in $(seq 1 20); do
-  wl="$(kubectl -n "$NS" get pods \
-    -l app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=case45-nobind \
-    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | wc -w | tr -d ' ')"
-  [ "${wl:-0}" -eq 1 ] && break
-  sleep 3
-done
-if [ "${wl:-0}" -eq 1 ]; then
-  record PASS "the replicas are rendered even though the domain is unregistered" \
-    "1 replica Pod alongside DomainRegistered=False/BindingNotFound — convergence is not gated on the domain"
-else
-  record FAIL "the replicas are rendered even though the domain is unregistered" \
-    "wanted the 1 declared replica to be rendered anyway, got ${wl:-0} Pod(s)"
+#
+# THE TWO WAYS THIS ROW CAN GO RED ARE REPORTED DIFFERENTLY, because they were indistinguishable and
+# one of them is not about this operator: a window too short for a loaded cluster produced the very
+# same "got 0 Pod(s)" as a render that never happens. Zero now says the window ran out and says that
+# the two readings are not separated; any other number says the count is wrong. The window is 120s
+# rather than 60s for the same reason -- image pull and scheduling are on this path.
+if [ "$nobind_ready" = yes ]; then
+  wl=0
+  for _ in $(seq 1 40); do
+    wl="$(kubectl -n "$NS" get pods \
+      -l app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=case45-nobind \
+      -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | wc -w | tr -d ' ')"
+    [ "${wl:-0}" -eq 1 ] && break
+    sleep 3
+  done
+  if [ "${wl:-0}" -eq 1 ]; then
+    record PASS "the replicas are rendered even though the domain is unregistered" \
+      "1 replica Pod alongside DomainRegistered=False/BindingNotFound — convergence is not gated on the domain"
+  elif [ "${wl:-0}" -eq 0 ]; then
+    record FAIL "the replicas are rendered even though the domain is unregistered" \
+      "no replica Pod within 120s — a render that never happens and a render slower than this window look identical here, and this row does not separate them"
+  else
+    record FAIL "the replicas are rendered even though the domain is unregistered" \
+      "wanted exactly the 1 declared replica, got $wl Pod(s)"
+  fi
 fi
 
 # The other half of that rule — the unregistered domain costs the replicas their connector and
