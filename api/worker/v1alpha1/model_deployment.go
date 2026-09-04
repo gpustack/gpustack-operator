@@ -71,7 +71,12 @@ type ModelDeploymentSpec struct {
 	// measured rather than assumed - though not across ALL of them, so a per-role override is a
 	// thing the P/D spec may need and this one does not.
 	//
+	// The lower bound is not decoration: `required` makes the key present, not the value non-empty,
+	// and an empty version assembles a malformed tag whose ImagePullBackOff names a tag the user
+	// never typed.
+	//
 	// +required
+	// +k8s:validation:minLength=1
 	// +k8s:validation:maxLength=64
 	EngineVersion string `json:"engineVersion" protobuf:"bytes,5,name=engineVersion"`
 
@@ -118,6 +123,7 @@ type ModelDeploymentModel struct {
 	// Name is the identifier the engine serves, e.g. "Qwen/Qwen2.5-72B-Instruct".
 	//
 	// +required
+	// +k8s:validation:minLength=1
 	// +k8s:validation:maxLength=253
 	Name string `json:"name" protobuf:"bytes,1,name=name"`
 }
@@ -161,6 +167,7 @@ type ModelDeploymentRole struct {
 	// the spec that introduces P/D disaggregation gives the name meaning.
 	//
 	// +required
+	// +k8s:validation:minLength=1
 	// +k8s:validation:maxLength=63
 	Name string `json:"name" protobuf:"bytes,1,name=name"`
 
@@ -176,6 +183,7 @@ type ModelDeploymentRole struct {
 	// It is what the queue-name entrance label is derived from.
 	//
 	// +required
+	// +k8s:validation:minLength=1
 	// +k8s:validation:maxLength=253
 	InstanceType string `json:"instanceType" protobuf:"bytes,3,name=instanceType"`
 

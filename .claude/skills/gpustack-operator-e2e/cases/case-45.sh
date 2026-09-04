@@ -150,6 +150,22 @@ refuses "an owned variable in env is refused" \
     - name: MOONCAKE_CONFIG_PATH
       value: /tmp/x.json" ""
 
+# The overlay tier is a SECOND path to the same key, and it was the one the rule missed: the
+# renderer merges template.env together with env, so an owned key here passed admission and was
+# dropped silently at render time.
+#
+# The wanted fragment is `template.env` rather than the variable name, because the append-tier
+# refusal above already quotes the variable -- a case that asserted only the name would pass with
+# the overlay rule deleted. It is also not the fully indexed path, so it does not depend on how the
+# API server renders a field index.
+refuses "an owned variable in the template overlay is refused, naming that tier" \
+  "template.env" \
+  "    template:
+      image: docker.io/library/busybox:1.36
+      env:
+      - name: MOONCAKE_CONFIG_PATH
+        value: /tmp/x.json" ""
+
 # The complete template is the point: see the trap in the header. cpu/ram/localStorage and image are
 # all required by the schema, so a shorter sample never reaches this webhook.
 refuses "a resource-bearing template is refused, pointing at the two fields that do own it" \

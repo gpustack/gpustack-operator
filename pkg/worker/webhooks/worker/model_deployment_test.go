@@ -115,6 +115,60 @@ func TestValidateModelDeployment(t *testing.T) {
 			})),
 		},
 		{
+			// The overlay tier is the path the rule originally missed: the renderer merges
+			// template.env together with env, so an owned key here used to pass admission and be
+			// dropped silently at render time.
+			//
+			// wantMessage asserts the PATH, not just the variable name. Asserting only
+			// "MOONCAKE_CONFIG_PATH" would also pass if the append-tier rule fired on a
+			// differently-placed value, and would pass with the overlay rule deleted -- the case
+			// has to fail for the one reason it exists.
+			name: "env_owned_key_in_template",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+				r.Template = &workercore.InstanceTemplate{
+					Image: "vllm/vllm-openai:latest",
+					Env:   []workercore.InstanceEnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/tmp/mine.json"}},
+				}
+			})),
+			wantMessage: "roles[0].template.env[0]",
+		},
+		{
+			// A role that took over the command line is refused too, because the renderer drops
+			// owned keys unconditionally. Admission and rendering must agree on the set: whichever
+			// way they disagree, the result is a value the user wrote and nothing reads.
+			name: "env_owned_key_in_template_take_over",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+				r.Template = &workercore.InstanceTemplate{
+					Image:   "vllm/vllm-openai:latest",
+					Command: []string{"python", "-m", "vllm.entrypoints.openai.api_server"},
+					Env:     []workercore.InstanceEnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/tmp/mine.json"}},
+				}
+			})),
+			wantMessage: "roles[0].template.env[0]",
+		},
+		{
+			name: "env_unowned_key_in_template",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+				r.Template = &workercore.InstanceTemplate{
+					Image: "vllm/vllm-openai:latest",
+					Env:   []workercore.InstanceEnvVar{{Name: "HF_HOME", Value: "/weights"}},
+				}
+			})),
+		},
+		{
+			// `required` makes the key present, not the value non-empty, and this field's type is
+			// upstream's LocalObjectReference -- so a minLength marker cannot reach it and the
+			// schema accepts `poolRef: {name: ""}` in full.
+			name: "pool_ref_name_empty",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+				md.Spec.KVCache.PoolRef.Name = ""
+
+				return md
+			}(),
+			wantMessage: "spec.kvCache.poolRef.name",
+		},
+		{
 			// The refusal must name the structured field that DOES decide the request. Naming only
 			// instanceType would send a user to a field that cannot express a card count.
 			name: "template_resources",

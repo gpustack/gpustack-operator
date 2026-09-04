@@ -6700,6 +6700,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentModel(ref common.Referen
 						SchemaProps: spec.SchemaProps{
 							Description: "Name is the identifier the engine serves, e.g. \"Qwen/Qwen2.5-72B-Instruct\".",
 							Default:     "",
+							MinLength:   ptr.To[int64](1),
 							MaxLength:   ptr.To[int64](253),
 							Type:        []string{"string"},
 							Format:      "",
@@ -6723,6 +6724,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 						SchemaProps: spec.SchemaProps{
 							Description: "Name identifies the role. In this version there is exactly one role and its name is free-form; the spec that introduces P/D disaggregation gives the name meaning.",
 							Default:     "",
+							MinLength:   ptr.To[int64](1),
 							MaxLength:   ptr.To[int64](63),
 							Type:        []string{"string"},
 							Format:      "",
@@ -6740,6 +6742,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 						SchemaProps: spec.SchemaProps{
 							Description: "InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against. It is what the queue-name entrance label is derived from.",
 							Default:     "",
+							MinLength:   ptr.To[int64](1),
 							MaxLength:   ptr.To[int64](253),
 							Type:        []string{"string"},
 							Format:      "",
@@ -6926,8 +6929,9 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref common.Referenc
 					},
 					"engineVersion": {
 						SchemaProps: spec.SchemaProps{
-							Description: "EngineVersion is the engine's own version, e.g. \"0.25.1\" for vllm or \"0.5.18\" for sglang.\n\nIt is free-form and UNVALIDATED, by decision. Together with each role's observed hardware it assembles that role's runner image; the operator checks neither that the combination was ever published nor that the version supports the installed driver. The user guarantees version alignment. A gate would need the runner's release matrix compiled into the operator, and the failure it would prevent is already legible without one, as an ImagePullBackOff on a tag that does not exist.\n\nIt is per deployment rather than per role, which is what lets one engine and one version assemble a DIFFERENT image for each role: the backend half of the tag comes from the role's own InstanceType. A prefill role on NVIDIA and a decode role on Ascend therefore need no extra field. That works because the published version sets overlap across backends, which is measured rather than assumed - though not across ALL of them, so a per-role override is a thing the P/D spec may need and this one does not.",
+							Description: "EngineVersion is the engine's own version, e.g. \"0.25.1\" for vllm or \"0.5.18\" for sglang.\n\nIt is free-form and UNVALIDATED, by decision. Together with each role's observed hardware it assembles that role's runner image; the operator checks neither that the combination was ever published nor that the version supports the installed driver. The user guarantees version alignment. A gate would need the runner's release matrix compiled into the operator, and the failure it would prevent is already legible without one, as an ImagePullBackOff on a tag that does not exist.\n\nIt is per deployment rather than per role, which is what lets one engine and one version assemble a DIFFERENT image for each role: the backend half of the tag comes from the role's own InstanceType. A prefill role on NVIDIA and a decode role on Ascend therefore need no extra field. That works because the published version sets overlap across backends, which is measured rather than assumed - though not across ALL of them, so a per-role override is a thing the P/D spec may need and this one does not.\n\nThe lower bound is not decoration: `required` makes the key present, not the value non-empty, and an empty version assembles a malformed tag whose ImagePullBackOff names a tag the user never typed.",
 							Default:     "",
+							MinLength:   ptr.To[int64](1),
 							MaxLength:   ptr.To[int64](64),
 							Type:        []string{"string"},
 							Format:      "",

@@ -81,9 +81,31 @@ func (r *ModelDeploymentWebhook) ValidateDelete(
 // error, which is what keeps that seam real rather than intended.
 func validateModelDeployment(md *workercore.ModelDeployment) field.ErrorList {
 	errs := validateModelDeploymentRoles(md)
+	errs = append(errs, validateModelDeploymentKVCache(md)...)
 	errs = append(errs, validateModelDeploymentSingleRole(md)...)
 
 	return errs
+}
+
+// validateModelDeploymentKVCache refuses a Binding reference with an empty name.
+//
+// THIS RULE IS HERE ONLY BECAUSE THE SCHEMA CANNOT HOLD IT. Every other required string in the spec
+// gets its lower bound from a minLength marker, which is earlier, cheaper and applies to every
+// client; this field's type is upstream's core.LocalObjectReference, and a marker cannot be attached
+// to a struct this API does not own. So the exception is forced by the type, not chosen.
+//
+// The bound itself is needed because `required` makes the KEY present, not the VALUE non-empty: an
+// object carrying `poolRef: {name: ""}` satisfies the schema completely.
+func validateModelDeploymentKVCache(md *workercore.ModelDeployment) field.ErrorList {
+	if md.Spec.KVCache.PoolRef.Name != "" {
+		return nil
+	}
+
+	return field.ErrorList{field.Required(
+		field.NewPath("spec", "kvCache", "poolRef", "name"),
+		"the Binding name must not be empty: the Binding is the authorization point for reaching "+
+			"the pool, and an empty reference names none",
+	)}
 }
 
 // validateModelDeploymentSingleRole is the whole of this version's one-role restriction.
@@ -155,14 +177,40 @@ func validateModelDeploymentRoleExtraArgs(
 // variable is the only pointer to the file the operator wrote, so re-pointing it swaps the entire
 // client configuration for another file's and moves every symptom one layer away from its cause.
 // Keys the operator merely defaults are not owned, so a user's value wins there with no refusal.
+// BOTH TIERS ARE CHECKED BECAUSE THE RENDERER READS BOTH. mergeModelDeploymentEnv appends
+// role.Env and role.Template.Env into one list and then skips every owned name in it. Validating
+// only the append tier let an owned key arrive through the overlay, pass admission, and be dropped
+// at render time with no refusal and no event -- which is exactly the silent outcome this rule
+// exists to prevent, reached by the one path the rule did not cover.
+//
+// The set refused here must equal the set the renderer drops. The renderer drops unconditionally,
+// including when a role takes over the command line, so this refuses unconditionally too: a
+// disagreement between the two sets is what produces a silent drop, whichever way it leans.
 func validateModelDeploymentRoleEnv(
 	engine string, role *workercore.ModelDeploymentRole, rolePath *field.Path,
 ) field.ErrorList {
+	errs := validateModelDeploymentOwnedEnv(engine, role.Env, rolePath, rolePath.Child("env"))
+	if role.Template != nil {
+		errs = append(errs, validateModelDeploymentOwnedEnv(
+			engine, role.Template.Env, rolePath, rolePath.Child("template", "env"),
+		)...)
+	}
+
+	return errs
+}
+
+// validateModelDeploymentOwnedEnv refuses every owned name in one tier of environment entries.
+//
+// envPath is passed rather than derived so that the refusal names the tier the user actually wrote
+// in: a message pointing at roles[i].env for a value supplied under roles[i].template.env sends the
+// reader to a field they never touched.
+func validateModelDeploymentOwnedEnv(
+	engine string, env []workercore.InstanceEnvVar, rolePath, envPath *field.Path,
+) field.ErrorList {
 	var errs field.ErrorList
 
-	envPath := rolePath.Child("env")
-	for i := range role.Env {
-		name := role.Env[i].Name
+	for i := range env {
+		name := env[i].Name
 		if !workerctrl.ModelDeploymentOwnsEnv(engine, name) {
 			continue
 		}

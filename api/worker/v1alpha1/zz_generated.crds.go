@@ -3576,9 +3576,10 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											},
 										},
 										"engineVersion": {
-											Description: "EngineVersion is the engine's own version, e.g. \"0.25.1\" for vllm or \"0.5.18\" for sglang.\nIt is free-form and UNVALIDATED, by decision. Together with each role's observed hardware it\nassembles that role's runner image; the operator checks neither that the combination was ever\npublished nor that the version supports the installed driver. The user guarantees version\nalignment. A gate would need the runner's release matrix compiled into the operator, and the\nfailure it would prevent is already legible without one, as an ImagePullBackOff on a tag that\ndoes not exist.\nIt is per deployment rather than per role, which is what lets one engine and one version\nassemble a DIFFERENT image for each role: the backend half of the tag comes from the role's\nown InstanceType. A prefill role on NVIDIA and a decode role on Ascend therefore need no extra\nfield. That works because the published version sets overlap across backends, which is\nmeasured rather than assumed - though not across ALL of them, so a per-role override is a\nthing the P/D spec may need and this one does not.",
+											Description: "EngineVersion is the engine's own version, e.g. \"0.25.1\" for vllm or \"0.5.18\" for sglang.\nIt is free-form and UNVALIDATED, by decision. Together with each role's observed hardware it\nassembles that role's runner image; the operator checks neither that the combination was ever\npublished nor that the version supports the installed driver. The user guarantees version\nalignment. A gate would need the runner's release matrix compiled into the operator, and the\nfailure it would prevent is already legible without one, as an ImagePullBackOff on a tag that\ndoes not exist.\nIt is per deployment rather than per role, which is what lets one engine and one version\nassemble a DIFFERENT image for each role: the backend half of the tag comes from the role's\nown InstanceType. A prefill role on NVIDIA and a decode role on Ascend therefore need no extra\nfield. That works because the published version sets overlap across backends, which is\nmeasured rather than assumed - though not across ALL of them, so a per-role override is a\nthing the P/D spec may need and this one does not.\nThe lower bound is not decoration: `required` makes the key present, not the value non-empty,\nand an empty version assembles a malformed tag whose ImagePullBackOff names a tag the user\nnever typed.",
 											Type:        "string",
 											MaxLength:   ptr.To[int64](64),
+											MinLength:   ptr.To[int64](1),
 										},
 										"kvCache": {
 											Description: "KVCache attaches the deployment to a KV cache pool.",
@@ -3625,6 +3626,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													Description: "Name is the identifier the engine serves, e.g. \"Qwen/Qwen2.5-72B-Instruct\".",
 													Type:        "string",
 													MaxLength:   ptr.To[int64](253),
+													MinLength:   ptr.To[int64](1),
 												},
 											},
 										},
@@ -3683,11 +3685,13 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Description: "InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.\nIt is what the queue-name entrance label is derived from.",
 															Type:        "string",
 															MaxLength:   ptr.To[int64](253),
+															MinLength:   ptr.To[int64](1),
 														},
 														"name": {
 															Description: "Name identifies the role. In this version there is exactly one role and its name is free-form;\nthe spec that introduces P/D disaggregation gives the name meaning.",
 															Type:        "string",
 															MaxLength:   ptr.To[int64](63),
+															MinLength:   ptr.To[int64](1),
 														},
 														"replicas": {
 															Description: "Replicas is how many Pods this role runs. Each is an independent Kueue Workload: this version\ncreates no pod group, which is correct for one role whose replicas are independently useful\nand is what the P/D spec replaces with cross-role atomic admission.",

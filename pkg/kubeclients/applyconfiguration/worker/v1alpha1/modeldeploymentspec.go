@@ -32,6 +32,10 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	// field. That works because the published version sets overlap across backends, which is
 	// measured rather than assumed - though not across ALL of them, so a per-role override is a
 	// thing the P/D spec may need and this one does not.
+	//
+	// The lower bound is not decoration: `required` makes the key present, not the value non-empty,
+	// and an empty version assembles a malformed tag whose ImagePullBackOff names a tag the user
+	// never typed.
 	EngineVersion *string `json:"engineVersion,omitempty"`
 	// KVCache attaches the deployment to a KV cache pool.
 	KVCache *ModelDeploymentKVCacheApplyConfiguration `json:"kvCache,omitempty"`
