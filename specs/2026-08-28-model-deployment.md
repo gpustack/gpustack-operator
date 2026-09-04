@@ -1248,6 +1248,28 @@ The headline measurement (G1) is the one that cannot be faked at a lower level: 
 engine replicas, one real pool, and one request stream replayed against both a single replica and
 the four-replica deployment. **The numbers are recorded in the Test Plan when the case runs.**
 
+**One failure mode recurs across the levels of that ladder and is named here because it produced a
+green result twice while building this spec: a test that agrees with the code by construction.** It
+does not look like a weak test. It looks like a passing one.
+
+- **Asserting the current behaviour on a point nobody has ruled on.** A case-45 row observed that a
+  deployment naming an absent Binding still gets its replicas. Asserting either direction would
+  have written an unreviewed rule into the suite, and asserting the *observed* direction is the
+  worse of the two, because it guarantees only that the behaviour will not change — and what does
+  not change may be the defect. The row recorded rather than judged until the rule was found (it
+  existed; see the note on cross-references in Risks) and only then became an assertion.
+- **Resting an acceptance on a signal that cannot fire.** T14's acceptance said a re-rendered
+  ConfigMap is caught by the Pod spec hash moving. It cannot move, for a reason that is invisible
+  from the sentence: a ConfigMap enters a Pod by name only. A test written against that wording
+  passes because nothing was recreated, and reads as if it had proved nothing needs to be.
+
+⇒ The discipline both cases point at: **a check whose expected output equals the output it would
+produce if the mechanism were absent proves nothing.** Before writing an assertion, name what would
+make it fail; if nothing would, the row belongs in the verdict table as a SKIP that says why, not as
+a PASS. This is also why every refusal row in case-45 quotes a fragment of the operator's own
+wording instead of the bare fact of a rejection, and why that case opens with a baseline that must
+be **accepted**.
+
 ### Notes / Constraints / Caveats
 
 - **This spec must write `KVCachePoolBinding.status.usedBy`, and the KV-cache-pool spec's
@@ -2062,7 +2084,19 @@ truthful); after T13 (the headline claim is measured and recorded).
   mounted read-only into every replica of every role, and the synthesized argument and config-path
   variable reach the container through T5's merge. A role that took over the command line gets
   **none** of it. Changing the pool endpoint or the domain re-renders the ConfigMap and the replicas
-  are recreated to pick it up, which is F10's recreate policy and is asserted by the spec-hash moving.
+  are recreated to pick it up under F10's recreate policy — **but the Pod spec hash does not move on
+  its own, so an acceptance resting on it cannot be tested.** A ConfigMap reaches a Pod as a *name*
+  (a `ConfigMapVolumeSource` over a `LocalObjectReference`), so re-rendering its contents leaves
+  `core.PodSpec` byte-identical, and the hash's subject is `{Labels, Annotations, PodSpec}`. This is
+  written out rather than deleted because the wording is the kind that gets reinvented: an e2e
+  asserting it would go **green** while the replicas kept the stale config, and would read as if it
+  had established that no recreate is needed.
+  ⇒ So this task also writes a digest of the rendered client JSON into a **Pod annotation**, which is
+  in the hash's subject and therefore does move it. Putting the digest in the ConfigMap's *name* was
+  rejected: it turns every content change into a new object and hands this controller a
+  garbage-collection duty it does not otherwise have. Should that route ever be taken, the only safe
+  predicate for deleting an old ConfigMap is **"no Pod still references it"** — never "older than the
+  current version", which deletes an object a terminating replica is still mounting.
   A deployment whose Binding cannot be resolved renders **no** connector rather than a partial one:
   a client pointed at an address that does not answer is a worse failure than one that was never
   configured, because the first looks like a cache miss.
