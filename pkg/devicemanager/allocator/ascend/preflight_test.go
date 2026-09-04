@@ -306,7 +306,7 @@ func TestPreflightResponder_RecordsTheWriteItWithheld(t *testing.T) {
 
 	rec := &recordingShareDriver{read: &fakeShareDriver{enabled: map[[2]int32]bool{}}}
 	srv, ok := newServer(klog.Background(), workercore.DeviceAllocationModeShared, rec,
-		newHcclTopoResolver(&fakeTopoDriver{})).(*server)
+		newFakeProductResolver()).(*server)
 	require.True(t, ok)
 
 	pod, ctr := slicedPod("recorded", "train", 10, 25)
@@ -346,7 +346,7 @@ func TestPreflightResponder_MatchesTheProductionResponder(t *testing.T) {
 			// constant is what leaves the comparison about the injection.
 			p := &preflighter{
 				logger: klog.Background(), share: &fakeShareDriver{enabled: enabled},
-				topo: newHcclTopoResolver(&fakeTopoDriver{}),
+				product: newFakeProductResolver(),
 			}
 			preSrv, restore, err := p.PreflightResponder(mode)
 			require.NoError(t, err)
@@ -354,7 +354,7 @@ func TestPreflightResponder_MatchesTheProductionResponder(t *testing.T) {
 
 			// Production: the server an allocation is served by, over a driver that answers.
 			prodSrv, ok := newServer(klog.Background(), mode, &fakeShareDriver{enabled: enabled},
-				newHcclTopoResolver(&fakeTopoDriver{})).(deviceplugin.ContainerAllocateResponder)
+				newFakeProductResolver()).(deviceplugin.ContainerAllocateResponder)
 			require.True(t, ok)
 			prodPod, prodCtr := slicedPod("drift", "train", 10, 25)
 			want, err := prodSrv.GetContainerAllocateResponse(context.Background(), prodPod, prodCtr,

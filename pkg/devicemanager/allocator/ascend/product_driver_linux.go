@@ -7,24 +7,25 @@ import (
 
 	"gpustack.ai/gpustack/binding"
 	"gpustack.ai/gpustack/binding/dcmi"
+	"gpustack.ai/gpustack/pkg/devicemanager/ascendproduct"
 )
 
-// newTopoDriver returns the real dcmi-backed topology reader. It is linux-only for the reason
+// newProductDriver returns the real dcmi-backed product reader. It is linux-only for the reason
 // newShareDriver is: the device-manager runs only on linux, and linking the cgo binding/dcmi into a
 // darwin test binary aborts at dyld load on the unresolved DCMI symbols, so the darwin build uses
-// the stub in topo_driver_other.go instead.
+// the stub in product_driver_other.go instead.
 //
 // It holds its own dcmi handle rather than borrowing the container-share driver's. The wrapper never
 // unloads a library it already holds, so a second initializer cannot blank the first one's function
 // pointers; keeping the two seams apart is what lets each be faked on its own.
-func newTopoDriver(logger klog.Logger) topoDriver {
-	return &dcmiTopoDriver{lib: dcmi.New(binding.WithLogger(logger)), logger: logger}
+func newProductDriver(logger klog.Logger) ascendproduct.Driver {
+	return &dcmiProductDriver{lib: dcmi.New(binding.WithLogger(logger)), logger: logger}
 }
 
-// dcmiTopoDriver is the real topoDriver, addressing a device by the (card, device-in-card) pair
-// dcmi names it by. Its behavior against a real driver is proven by the e2e run: a darwin test
-// binary cannot link binding/dcmi at all.
-type dcmiTopoDriver struct {
+// dcmiProductDriver is the real ascendproduct.Driver, addressing a device by the (card,
+// device-in-card) pair dcmi names it by. Its behavior against a real driver is proven by the e2e
+// run: a darwin test binary cannot link binding/dcmi at all.
+type dcmiProductDriver struct {
 	lib    *dcmi.DCMI
 	logger klog.Logger
 }
@@ -36,7 +37,7 @@ type dcmiTopoDriver struct {
 // remembered and never asks again. Re-running the vendor init is cheap for a library the wrapper
 // already holds -- it re-runs the init alone, never the load -- so at most a couple of these ever
 // happen on a node.
-func (d *dcmiTopoDriver) device(cardID, deviceID int32) (dcmi.Device, error) {
+func (d *dcmiProductDriver) device(cardID, deviceID int32) (dcmi.Device, error) {
 	if ret := d.lib.Init(d.logger); !ret.IsSuccess() {
 		return dcmi.Device{}, fmt.Errorf("dcmi init failed: %w", ret)
 	}
@@ -44,7 +45,7 @@ func (d *dcmiTopoDriver) device(cardID, deviceID int32) (dcmi.Device, error) {
 	return d.lib.GetDeviceHandleByCardAndIndex(cardID, deviceID), nil
 }
 
-func (d *dcmiTopoDriver) MainboardID(cardID, deviceID int32) (uint32, error) {
+func (d *dcmiProductDriver) MainboardID(cardID, deviceID int32) (uint32, error) {
 	dev, err := d.device(cardID, deviceID)
 	if err != nil {
 		return 0, err
@@ -57,7 +58,7 @@ func (d *dcmiTopoDriver) MainboardID(cardID, deviceID int32) (uint32, error) {
 	return mainboardID, nil
 }
 
-func (d *dcmiTopoDriver) SuperPodType(cardID, deviceID int32) (uint32, error) {
+func (d *dcmiProductDriver) SuperPodType(cardID, deviceID int32) (uint32, error) {
 	dev, err := d.device(cardID, deviceID)
 	if err != nil {
 		return 0, err

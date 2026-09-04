@@ -9,6 +9,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
+	"gpustack.ai/gpustack/pkg/devicemanager/ascendproduct"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 )
 
@@ -39,7 +40,7 @@ func NewPreflighter(opts device.PreflighterOptions) device.AcceleratorPreflighte
 	return &preflighter{
 		logger:      logger,
 		share:       newShareDriver(logger),
-		topo:        newHcclTopoResolver(newTopoDriver(logger)),
+		product:     ascendproduct.NewResolver(newProductDriver(logger)),
 		installInfo: dockerRuntimeInstallInfo,
 		dryRun:      opts.DryRun,
 	}
@@ -48,9 +49,9 @@ func NewPreflighter(opts device.PreflighterOptions) device.AcceleratorPreflighte
 type preflighter struct {
 	logger klog.Logger
 	share  shareDriver
-	// topo is the real resolver, not a recording stand-in: naming the topology file is a read, so a
-	// simulated allocation can take it as it is without writing anything to the host.
-	topo *hcclTopoResolver
+	// product is the real resolver, not a recording stand-in: naming the topology file is a read,
+	// so a simulated allocation can take it as it is without writing anything to the host.
+	product *ascendproduct.Resolver
 	// installInfo is where the vendor runtime recorded its version. It is a field rather than the
 	// constant read directly, so the A5 row can be established against a file a test wrote.
 	installInfo string
@@ -109,7 +110,7 @@ func (p *preflighter) PreflightResponder(
 		return nil, nil, err
 	}
 
-	srv := newServer(p.logger, mode, &recordingShareDriver{read: p.share}, p.topo)
+	srv := newServer(p.logger, mode, &recordingShareDriver{read: p.share}, p.product)
 
 	responder, ok := srv.(deviceplugin.ContainerAllocateResponder)
 	if !ok {

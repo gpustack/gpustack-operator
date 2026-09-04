@@ -13,113 +13,63 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/devicemanager/ascendproduct"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 )
 
-// fakeTopoDriver answers the two node-level reads the topology resolver makes, and counts them, so
-// a test can establish both what was resolved and how often the node was asked.
-type fakeTopoDriver struct {
+// fakeProductDriver answers the two node-level reads ascendproduct.Resolver makes. The rule it
+// applies to them is that package's and is tested there; what this file establishes is what the
+// allocator does with the answer.
+type fakeProductDriver struct {
 	mainboardID  uint32
 	superPodType uint32
 	mainboardErr error
 	superPodErr  error
-
-	mainboardCalls int
-	superPodCalls  int
 }
 
-func (d *fakeTopoDriver) MainboardID(_, _ int32) (uint32, error) {
-	d.mainboardCalls++
+func (d *fakeProductDriver) MainboardID(_, _ int32) (uint32, error) {
 	if d.mainboardErr != nil {
 		return 0, d.mainboardErr
 	}
 	return d.mainboardID, nil
 }
 
-func (d *fakeTopoDriver) SuperPodType(_, _ int32) (uint32, error) {
-	d.superPodCalls++
+func (d *fakeProductDriver) SuperPodType(_, _ int32) (uint32, error) {
 	if d.superPodErr != nil {
 		return 0, d.superPodErr
 	}
 	return d.superPodType, nil
 }
 
-// The vendor's own product-type-to-file table, restated: a super pod names its own shape, except on
-// the two inference cards, which are recognized by the mainboard the chip is mounted on and never
-// reach the super-pod query at all.
-func TestHcclTopoResolver_Resolve(t *testing.T) {
+// newFakeProductResolver builds the resolver a server fixture needs. Its default answers a product
+// with a topology file, so a test that is not about the topology env is unaffected by it.
+func newFakeProductResolver() *ascendproduct.Resolver {
+	return ascendproduct.NewResolver(&fakeProductDriver{})
+}
+
+// The vendor's own product-to-file table, restated: every shape this allocator knows names exactly
+// one of the seven files the driver package ships, and no two shapes name the same one.
+func TestHcclTopoFilePaths(t *testing.T) {
 	const topoDir = "/usr/local/Ascend/driver/topo/950/"
 
 	cases := []struct {
-		name         string
-		mainboardID  uint32
-		superPodType uint32
-		want         string
-		// wantSuperPodRead separates the two ways a product type is established: a card recognized
-		// by its mainboard must not also be asked what super pod it is in.
-		wantSuperPodRead bool
+		product ascendproduct.Type
+		want    string
 	}{
-		{name: "8p server", superPodType: 0, want: topoDir + "atlas_850_1.json", wantSuperPodRead: true},
-		{name: "1d pod", superPodType: 1, want: topoDir + "atlas_950_1.json", wantSuperPodRead: true},
-		{name: "2d pod", superPodType: 2, want: topoDir + "atlas_950_2.json", wantSuperPodRead: true},
-		{name: "16p server", superPodType: 3, want: topoDir + "atlas_850_2.json", wantSuperPodRead: true},
-		{name: "32p server", superPodType: 4, want: topoDir + "atlas_850_3.json", wantSuperPodRead: true},
-		{name: "1p card", mainboardID: 0x68, want: topoDir + "atlas_350_1.json"},
-		{name: "4p card", mainboardID: 0x6c, want: topoDir + "atlas_350_3.json"},
-		// A product type the vendor ships no file for is an answer, not a failure: there is nothing
-		// to inject and nothing left to retry.
-		{name: "unknown product type", superPodType: 99, want: "", wantSuperPodRead: true},
-		// A training baseboard is not one of the two card mainboards, so it falls through to the
-		// super pod like every other product.
-		{
-			name: "training baseboard falls through", mainboardID: 0x44, superPodType: 1,
-			want: topoDir + "atlas_950_1.json", wantSuperPodRead: true,
-		},
+		{product: ascendproduct.TypeServer8P, want: topoDir + "atlas_850_1.json"},
+		{product: ascendproduct.TypePod1D, want: topoDir + "atlas_950_1.json"},
+		{product: ascendproduct.TypePod2D, want: topoDir + "atlas_950_2.json"},
+		{product: ascendproduct.TypeServer16P, want: topoDir + "atlas_850_2.json"},
+		{product: ascendproduct.TypeServer32P, want: topoDir + "atlas_850_3.json"},
+		{product: ascendproduct.TypeCard1P, want: topoDir + "atlas_350_1.json"},
+		{product: ascendproduct.TypeCard4P, want: topoDir + "atlas_350_3.json"},
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			d := &fakeTopoDriver{mainboardID: c.mainboardID, superPodType: c.superPodType}
-			r := newHcclTopoResolver(d)
-
-			path, productType, err := r.Resolve(3, 0)
-			require.NoError(t, err)
-			assert.Equal(t, c.want, path)
-			assert.Equal(t, c.wantSuperPodRead, d.superPodCalls == 1, "the super pod was consulted")
-
-			// The node cannot change shape while the device-manager runs, so a second allocation
-			// reads nothing and answers the same.
-			path2, productType2, err := r.Resolve(3, 0)
-			require.NoError(t, err)
-			assert.Equal(t, path, path2)
-			assert.Equal(t, productType, productType2)
-			assert.Equal(t, 1, d.mainboardCalls, "the node is read once")
-			assert.LessOrEqual(t, d.superPodCalls, 1, "and so is the super pod")
+		t.Run(string(c.product), func(t *testing.T) {
+			assert.Equal(t, c.want, hcclTopoFilePaths[c.product])
 		})
 	}
-}
-
-// A read that failed says nothing about the node, so it is not remembered: the next allocation asks
-// again rather than carrying the failure for the lifetime of the process.
-func TestHcclTopoResolver_FailedReadIsNotRemembered(t *testing.T) {
-	cases := []struct {
-		name   string
-		driver *fakeTopoDriver
-	}{
-		{name: "mainboard unreadable", driver: &fakeTopoDriver{mainboardErr: errors.New("dcmi refused")}},
-		{name: "super pod unreadable", driver: &fakeTopoDriver{superPodErr: errors.New("dcmi refused")}},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			r := newHcclTopoResolver(c.driver)
-
-			_, _, err := r.Resolve(3, 0)
-			require.Error(t, err)
-
-			_, _, err = r.Resolve(3, 0)
-			require.Error(t, err)
-			assert.Equal(t, 2, c.driver.mainboardCalls, "a failed read is asked again")
-		})
-	}
+	assert.Len(t, hcclTopoFilePaths, len(cases), "every shape in the table is pinned above")
 }
 
 // The env only exists on A5, and only when the node answered. Every other outcome leaves the
@@ -128,30 +78,35 @@ func TestGetContainerAllocateResponse_HcclTopoFilePath(t *testing.T) {
 	cases := []struct {
 		name   string
 		family string
-		driver *fakeTopoDriver
+		driver *fakeProductDriver
 		want   string // "" == the response must carry no topology env at all
 	}{
 		{
 			name:   "950 carries the file its super pod names",
-			family: "950",
-			driver: &fakeTopoDriver{superPodType: 2},
+			family: family950,
+			driver: &fakeProductDriver{superPodType: 2},
 			want:   "/usr/local/Ascend/driver/topo/950/atlas_950_2.json",
 		},
 		{
 			name:   "950 carries the file its mainboard names",
-			family: "950",
-			driver: &fakeTopoDriver{mainboardID: 0x6c},
+			family: family950,
+			driver: &fakeProductDriver{mainboardID: 0x6c},
 			want:   "/usr/local/Ascend/driver/topo/950/atlas_350_3.json",
 		},
 		{
 			name:   "910B carries none",
 			family: "910B",
-			driver: &fakeTopoDriver{superPodType: 2},
+			driver: &fakeProductDriver{superPodType: 2},
+		},
+		{
+			name:   "a product with no file still allocates",
+			family: family950,
+			driver: &fakeProductDriver{superPodType: 99},
 		},
 		{
 			name:   "an unreadable super pod type still allocates",
-			family: "950",
-			driver: &fakeTopoDriver{superPodErr: errors.New("dcmi refused")},
+			family: family950,
+			driver: &fakeProductDriver{superPodErr: errors.New("dcmi refused")},
 		},
 	}
 	for _, c := range cases {
@@ -162,7 +117,7 @@ func TestGetContainerAllocateResponse_HcclTopoFilePath(t *testing.T) {
 					Manufacturer:   Manufacturer,
 					AllocationMode: workercore.DeviceAllocationModeExclusive,
 				},
-				topo: newHcclTopoResolver(c.driver),
+				product: ascendproduct.NewResolver(c.driver),
 			}
 			devs := ascendDevicesFixture()
 			devs.Spec.Groups[0].Family = c.family
@@ -187,17 +142,17 @@ func TestGetContainerAllocateResponse_HcclTopoFilePath(t *testing.T) {
 // The node is addressed by the dcmi card and device the detector recorded, not by the accelerator's
 // physical id: reading the wrong slots would query another device on a host where they differ.
 func TestGetContainerAllocateResponse_HcclTopoAddressesTheDcmiDevice(t *testing.T) {
-	d := &addressRecordingTopoDriver{fakeTopoDriver: fakeTopoDriver{superPodType: 1}}
+	d := &addressRecordingProductDriver{fakeProductDriver: fakeProductDriver{superPodType: 1}}
 	s := &server{
 		ResourceServer: deviceplugin.ResourceServer{
 			Logger:         logr.Discard(),
 			Manufacturer:   Manufacturer,
 			AllocationMode: workercore.DeviceAllocationModeExclusive,
 		},
-		topo: newHcclTopoResolver(d),
+		product: ascendproduct.NewResolver(d),
 	}
 	devs := ascendDevicesFixture()
-	devs.Spec.Groups[0].Family = "950"
+	devs.Spec.Groups[0].Family = family950
 	devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = []uint32{7, 3, 0}
 
 	pod := &core.Pod{ObjectMeta: meta.ObjectMeta{UID: types.UID("uid-topo-address")}}
@@ -211,18 +166,18 @@ func TestGetContainerAllocateResponse_HcclTopoAddressesTheDcmiDevice(t *testing.
 	}
 }
 
-// addressRecordingTopoDriver records the (card, device) pair each read was addressed to.
-type addressRecordingTopoDriver struct {
-	fakeTopoDriver
+// addressRecordingProductDriver records the (card, device) pair each read was addressed to.
+type addressRecordingProductDriver struct {
+	fakeProductDriver
 	addresses [][2]int32
 }
 
-func (d *addressRecordingTopoDriver) MainboardID(cardID, deviceID int32) (uint32, error) {
+func (d *addressRecordingProductDriver) MainboardID(cardID, deviceID int32) (uint32, error) {
 	d.addresses = append(d.addresses, [2]int32{cardID, deviceID})
-	return d.fakeTopoDriver.MainboardID(cardID, deviceID)
+	return d.fakeProductDriver.MainboardID(cardID, deviceID)
 }
 
-func (d *addressRecordingTopoDriver) SuperPodType(cardID, deviceID int32) (uint32, error) {
+func (d *addressRecordingProductDriver) SuperPodType(cardID, deviceID int32) (uint32, error) {
 	d.addresses = append(d.addresses, [2]int32{cardID, deviceID})
-	return d.fakeTopoDriver.SuperPodType(cardID, deviceID)
+	return d.fakeProductDriver.SuperPodType(cardID, deviceID)
 }
