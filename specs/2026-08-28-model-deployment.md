@@ -2259,7 +2259,10 @@ accepted bad spec is worse than a refusal.
 | `extra_args_owned_key_sglang` | `--hicache-storage-backend-extra-config` on `sglang` | reject |
 | `extra_args_owned_key_wrong_engine` | a vLLM-owned key on a `sglang` deployment | accept — ownership is per (engine, key) |
 | `extra_args_unowned_key` | `--max-model-len=32768` | accept |
-| `env_owned_key` | `MOONCAKE_CONFIG_PATH` | reject |
+| `env_owned_key` | `MOONCAKE_CONFIG_PATH` in `env` | reject |
+| `env_owned_key_in_template` | the same key in `template.env` | reject; the message names **`roles[].template.env`**, not `roles[].env` |
+| `env_owned_key_in_template_take_over` | the same, with `template.command` set | reject — the renderer drops owned keys unconditionally, so admission refuses unconditionally |
+| `env_unowned_key_in_template` | `HF_HOME` in `template.env` | accept |
 | `env_defaulted_key` | `MC_TE_METRIC=0` | accept; the user's value wins |
 | `template_resources` | `template.resources` set | reject; names `roles[].resources` |
 | `resources_accelerator_only` | a card count alone | accept |
@@ -2269,6 +2272,7 @@ accepted bad spec is worse than a refusal.
 | `resources_absent` | no resources block | accept — a CPU-only replica is legitimate |
 | `template_command` | `template.command` non-empty | accept; take-over |
 | `pool_ref_missing` | names no existing Binding | reject; the message names namespace + Binding |
+| `pool_ref_name_empty` | `poolRef: {name: ""}` | reject — **from the webhook**, because the field's type is upstream's `core.LocalObjectReference` and a `minLength` marker cannot be attached to a struct this API does not own. Every other required string gets its lower bound from the schema |
 | `pool_ref_cross_namespace` | a namespace supplied as an unknown field | rejected or pruned; assert the observed behaviour |
 | `domain_declared` | a `domain` block supplied as an unknown field | rejected or pruned; assert the observed behaviour |
 | `replicas_zero` | `replicas: 0` | rejected by the schema (`minimum=1`) |
@@ -2368,10 +2372,12 @@ Run against a local two-node cluster with two consumer GPUs on one node. No RDMA
 
 - **case-45 — replicas reach ready, and every rejection fires.** `replicas: 4`, one role,
   `status.roles[0].ready == 4`, `status.endpoint` serves inference. Then, in one pass: two roles
-  rejected with a message naming a spec; an owned key in `extraArgs` rejected; `template.resources`
-  rejected; a missing Binding rejected; a cross-namespace `poolRef` refused; a self-declared domain
-  refused. Plus the chart guard: after `helm install` the `modeldeployments` CRD is present, having
-  been installed by the worker rather than by a chart manifest.
+  rejected with a message naming a spec; an owned key in `extraArgs` rejected; an owned variable
+  rejected in **both** tiers that carry one — `env` and `template.env`, the second naming its own
+  tier; `template.resources` rejected; a missing Binding rejected; a cross-namespace `poolRef`
+  refused; a self-declared domain refused. Plus the chart guard: after `helm install` the
+  `modeldeployments` CRD is present, having been installed by the worker rather than by a chart
+  manifest.
 - **case-46 — the headline.** One request stream with a fixed prefix distribution, replayed against
   a `replicas: 1` deployment and a `replicas: 4` deployment on the same Binding. Asserted: the pool
   shows one domain with blocks contributed by more than one replica, and the four-replica hit rate
@@ -2392,6 +2398,18 @@ Run against a local two-node cluster with two consumer GPUs on one node. No RDMA
   pool. The assertion in both is `CacheAttached != True`; the case records which shape the engine
   took — aborting at init, or serving on without the cache — because that is not predictable from
   the sources and is worth knowing once.
+
+**Not covered by any of the above, and it needs a case of its own.** The controller reconciles the
+Service and now watches it, but **nothing asserts the watch**. It cannot be asserted at the unit
+level: `SetupController` has no observable output, so a test that builds the controller and checks
+nothing would pass with the watch removed — which is worse than no test, by the predicate in
+Verification. The honest vehicle is an e2e that **deletes the Service by hand and waits for it to
+come back**, and nothing else in this plan exercises that path.
+
+⇒ It is recorded here rather than left to a commit message on purpose: this branch squash-merges, so
+a commit message is not a durable channel for a gap that outlives the change. The same applies to
+the case-45 row for the overlay refusal, which was added without a cluster to run it on — its rule
+is covered by mutation-checked unit cases, but the row's own message-matching has not been observed.
 
 **Measurement record (filled by T13).**
 
