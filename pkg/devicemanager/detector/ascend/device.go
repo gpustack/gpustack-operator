@@ -184,6 +184,20 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 				logger.Error(ret, "failed to get device physical ID")
 				continue
 			}
+			// dcmi's own addressing for this accelerator, in the slot order every consumer reads
+			// it by:
+			//
+			//   0 -- the physical id, which vcann-rt keys its quota config by and which a vendor
+			//        runtime resolves on every generation but A5;
+			//   1 -- the dcmi card id, which on the V2 API is also the device (logic) id: that
+			//        generation has no card level and enumerates devices flat, so
+			//        cardId == devId == logicId (see binding/dcmi GetCardList). The allocator
+			//        names ASCEND_VISIBLE_DEVICES by this slot on A5 (family "950");
+			//   2 -- the device's index within the card, always 0 on V2.
+			//
+			// The allocator's container-share seam addresses a device by slots 1 and 2 together.
+			// All three are distinct numbers on real hardware, so a consumer reading the wrong
+			// slot names another accelerator rather than failing.
 			physicalIndexes := []uint32{phyId, uint32(card), uint32(i)}
 
 			grpIndex := slices.IndexFunc(grpList, func(grp device.DevicesGroup) bool {

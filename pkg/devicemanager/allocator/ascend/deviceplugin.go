@@ -182,32 +182,60 @@ func (s *server) GetContainerAllocateResponse(
 	return ctrResp, nil
 }
 
-// driverIndex returns the number the driver knows an accelerator by, which for Ascend is the dcmi
-// physical id the detector recorded in PhysicalIndexes.
+// family950 is the family the detector gives every A5 soc: their names are an open set
+// (Ascend950PR, Ascend950DT) that it collapses onto one family by prefix. A5 is the generation
+// serving the dcmi V2 API, and the only one whose visibility env is numbered differently.
+const family950 = "950"
+
+// physicalIndex returns the dcmi physical id the detector recorded in an accelerator's
+// PhysicalIndexes, which is the number vcann-rt keys its quota config by, as the vendored dsmi patch
+// under pack/ records from hardware.
 //
-// It is that number, not the operator's own logical index, that a vendor runtime resolves:
-// ascend-docker-runtime reads each visible device as a physical id and converts it to a logic id
-// itself before naming the /dev/davinci node the container gets, and vcann-rt keys its quota config
-// by the physical id too, as the vendored dsmi patch under pack/ records from hardware. The two
-// coincide only while every accelerator on the host was detected, the logical index counting the
-// ones that were, so an accelerator failing a probe leaves every later logical index below its
-// physical id.
+// It is that number, not the operator's own logical index. The two coincide only while every
+// accelerator on the host was detected, the logical index counting the ones that were, so an
+// accelerator failing a probe leaves every later logical index below its physical id.
 //
 // A record carrying no dcmi addressing is malformed rather than degraded, so it is rejected instead
 // of being allocated against a guessed number that would name another accelerator.
-func driverIndex(accel *workercore.Accelerator) (uint32, error) {
+func physicalIndex(accel *workercore.Accelerator) (uint32, error) {
 	if len(accel.PhysicalIndexes) == 0 {
 		return 0, fmt.Errorf("accelerator %q carries no dcmi physical index", accel.ID)
 	}
 	return accel.PhysicalIndexes[0], nil
 }
 
-// visibleDevices renders the ASCEND_VISIBLE_DEVICES value: every allocated accelerator's driver
-// index, comma-joined in the order the container numbers them.
+// visibleIndex returns the number a vendor runtime resolves one entry of ASCEND_VISIBLE_DEVICES by.
+//
+// Which of dcmi's two numbers that is depends on the generation, and they are different numbers:
+//
+//   - Everywhere but A5 it is the physical id. ascend-docker-runtime reads each visible device as a
+//     physical id and converts it to a logic id itself before naming the /dev/davinci node.
+//   - On A5 it is the dcmi device (logic) id, which the detector recorded in slot 1 — that
+//     generation has no card level, so cardId == devId == logicId. The vendor's own device plugin
+//     converts to it before emitting the env, and both of the runtime's injection paths (the legacy
+//     spec walk and the CDI one) then build /dev/davinci<N> from that value verbatim, with no
+//     conversion of their own. Sending the physical id there names another accelerator wherever the
+//     driver numbers the two differently.
+//
+// An A5 record carrying only its physical id is refused for the same reason a record carrying no
+// addressing at all is: there is no number here the runtime could resolve, and the physical id is
+// not one under another name.
+func visibleIndex(group *workercore.DevicesGroup, accel *workercore.Accelerator) (uint32, error) {
+	if group.Family != family950 {
+		return physicalIndex(accel)
+	}
+	if len(accel.PhysicalIndexes) < 2 {
+		return 0, fmt.Errorf("accelerator %q carries no dcmi device index", accel.ID)
+	}
+	return accel.PhysicalIndexes[1], nil
+}
+
+// visibleDevices renders the ASCEND_VISIBLE_DEVICES value: the number a vendor runtime resolves
+// each allocated accelerator by, comma-joined in the order the container numbers them.
 func visibleDevices(accels []deviceplugin.AllocatedAccelerator) (string, error) {
 	indexes := make([]string, 0, len(accels))
 	for i := range accels {
-		index, err := driverIndex(accels[i].Accel)
+		index, err := visibleIndex(accels[i].Group, accels[i].Accel)
 		if err != nil {
 			return "", err
 		}
@@ -252,8 +280,17 @@ func (s *server) getSlicedContainerAllocateResponse(
 	}
 
 	// vcann-rt is single-NPU; configure the first allocated accelerator.
+	//
+	// The two numbers below are read apart because they are not interchangeable: the runtime
+	// resolves the visibility env, while vcann-rt keys npu_info.config by the physical id. On A5
+	// they differ — see visibleIndex. Keeping the config on the physical id there is unverified on
+	// 950 hardware; the vendor ships no vcann-rt for that generation to read the answer off.
 	group, accel := accels[0].Group, accels[0].Accel
-	npuID, err := driverIndex(accel)
+	npuID, err := physicalIndex(accel)
+	if err != nil {
+		return nil, err
+	}
+	visible, err := visibleIndex(group, accel)
 	if err != nil {
 		return nil, err
 	}
@@ -296,9 +333,9 @@ func (s *server) getSlicedContainerAllocateResponse(
 		{ContainerPath: ctrDevShmPath, HostPath: ctrDevShmPath, ReadOnly: false},
 	}
 
-	// Single-NPU, so the visibility env names this one accelerator by its driver index.
+	// Single-NPU, so the visibility env names this one accelerator.
 	envs := map[string]string{
-		"ASCEND_VISIBLE_DEVICES": strconvx.FormatUint(npuID, 10),
+		"ASCEND_VISIBLE_DEVICES": strconvx.FormatUint(visible, 10),
 	}
 
 	// Quiet vcann-rt's per-call interception logging by default: its ENPU_LOG_LEVEL
