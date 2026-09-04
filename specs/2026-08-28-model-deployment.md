@@ -2067,14 +2067,24 @@ truthful); after T13 (the headline claim is measured and recorded).
   rather than composed. One of them was wrong: `cann8.2-910b-sglang0.5.18` is not published and
   `cann9.0-910b-sglang0.5.18` is.
 
-- [ ] **T12 · e2e: the functional cases**
-  Blocked by: T2, T5, T7, T9, T10, **T14** — case-45's inference path and case-48's whole premise
-  need a connector that is actually rendered
-  Owns: `.claude/skills/gpustack-operator-e2e/cases/case-45.sh`,
-  `.claude/skills/gpustack-operator-e2e/cases/case-47.sh`,
+- [ ] **T12a · e2e: the functional cases that need no accelerator**
+  **SPLIT FROM T12, WHOSE CHECKBOX HAD THE WRONG GRAIN.** Its Gate named a two-GPU node, which is
+  what case-45's serving rows need and what case-47 and case-48 never needed: the first proves
+  block sharing through the store's own client, the second asserts a FAILURE (`CacheAttached` not
+  `True`) and so needs no engine that succeeds. A single checkbox over two different blockers can
+  only mislead — ticked, it marks an accelerator dependency as satisfied; unticked, it says nothing
+  was done while two of the three cases exist, sending the next reader to write files that are
+  already written. That is the same shape as a deferral naming work already finished.
+  ⇒ **A precondition written for one part, hung on the whole task, is never re-asked per part.**
+  Suffixes rather than new numbers, so no existing task is renumbered.
+  Blocked by: T2, T5, T7, T9, T10, **T14** — case-48's whole premise needs a connector that is
+  actually rendered
+  Owns: `.claude/skills/gpustack-operator-e2e/cases/case-47.sh`,
   `.claude/skills/gpustack-operator-e2e/cases/case-48.sh`,
   `.claude/skills/gpustack-operator-e2e/SKILL.md`
-  Gate: a two-node cluster with two consumer GPUs on one node
+  Gate: a single-node cluster with no accelerator and a live Mooncake store — the shared fixture in
+  `_kvcache-inject-lib.sh` brings up backend, pool and a Ready Binding, and cases 53-58 have been
+  exercised on exactly that shape
   Acceptance: **case-45** — `replicas: 2`, one role, reaches `status.roles[0].ready == 2` and
   `status.endpoint` serves inference; the rejections all fire (two roles with the message naming the
   spec, an owned key in `extraArgs`, `template.resources`, a missing Binding, a cross-namespace
@@ -2099,7 +2109,23 @@ truthful); after T13 (the headline claim is measured and recorded).
   row that only checks for rejection would keep passing with the webhook deleted. The chart guard
   rides here: after `helm install`, the `modeldeployments` CRD is present —
   no chart manifest was added, the worker installs it.
-  Verify: `bash cases/case-45.sh; bash cases/case-47.sh; bash cases/case-48.sh`, each PASS
+  Verify: `bash cases/case-47.sh; bash cases/case-48.sh`, each PASS
+
+- [ ] **T12b · e2e: case-45's serving rows**
+  Split from T12. The refusal surface, the controller-level condition, the replica-rendering row and
+  the chart guard are all green on a single-node cluster with no accelerator — measured, 13 PASS /
+  0 FAIL / 3 SKIP. What is left is the half that needs a container which actually serves.
+  Owns: the three SKIP rows in `.claude/skills/gpustack-operator-e2e/cases/case-45.sh`
+  Gate: **PARKED ON ACCELERATOR HARDWARE — a cluster with a real accelerator and an engine image
+  that serves on it.**
+  Acceptance: `replicas: 2` on one role reaches `status.roles[0].ready == 2`; `status.endpoint`
+  serves inference; and the unregistered-domain row gets its control — a deployment on a READY
+  Binding, so that "carries no connector" is compared against something rather than asserted into a
+  case where every deployment is unregistered.
+  ⇒ **What does not fill this:** running the rows on a machine that cannot serve and recording SKIP.
+  That is the absence of a result rather than a partial one, and it costs the gap its visibility,
+  because a SKIP with a plausible reason reads as handled.
+  Verify: `bash cases/case-45.sh` with 0 SKIP rows remaining
 
 - [ ] **T13 · The headline measurement: several replicas beat one, and the numbers are recorded**
   Blocked by: T12
@@ -2147,13 +2173,17 @@ truthful); after T13 (the headline claim is measured and recorded).
   only that the number got smaller hands the criterion to whoever later wants the case to pass.
   Verify: `bash cases/case-46.sh`, PASS, and the figures land in the Test Plan's measurement table
 
-  **PARKED, AND THE ENVIRONMENT IS THE REASON RATHER THAN THE EFFORT.** This acceptance needs two
-  real engine replicas answering a real request stream, and the Gate above names the two-GPU node
-  outright. The cluster this branch has been verified on is single-node and has no accelerator, so
-  the question cannot be *asked* here, let alone answered. Before solving feasibility for a
-  verification item, ask what it can answer in the environment at hand: a feasibility question keeps
-  producing a sense of progress and can be asked dozens of times, while the information question is
-  asked once and can cancel the whole batch.
+  **PARKED ON ACCELERATOR HARDWARE — a cluster with a real accelerator and an engine image that
+  serves on it.** The phrasing is deliberately identical to T12b's, and that is a mechanism rather
+  than a style: three items in this project are parked on the same hardware — **T12b**, this task,
+  and the engine half tracked in `https://github.com/gpustack/gpustack-operator/issues/172` — and
+  three differently-worded requirements would become three separate decisions to rent a machine
+  instead of one window that closes all three.
+  ⇒ The reason is the environment and not the effort. This acceptance needs two real engine replicas
+  answering a real request stream. Before solving feasibility for a verification item, ask what it
+  can answer in the environment at hand: a feasibility question keeps producing a sense of progress
+  and can be asked dozens of times, while the information question is asked once and can cancel the
+  whole batch.
 
   ⇒ **WHAT DOES NOT FILL THIS GAP**, because each of these closes it while leaving the claim
   unmeasured:
