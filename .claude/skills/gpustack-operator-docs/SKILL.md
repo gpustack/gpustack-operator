@@ -27,6 +27,7 @@ one, not to widen the overview.
 |---|---|
 | NFD labels, the `gpustack-cpu-info` rule, the manufacturer map | `docs/architecture/device-discovery.md` |
 | Device Manager detection, the `Devices` ledger, allocator injection, cross-mode exclusion, placement | `docs/architecture/device-discovery.md` |
+| The NIC/RDMA interface inventory, `pciRootId`/`pciSwitches`, the three link states, the `rdma.*` node labels | `docs/architecture/network-topology.md` |
 | Capacity labels, flavor/queue/InstanceType naming and grouping, the five reconcilers | `docs/architecture/scheduling-chain.md` |
 | Any admission gate, the four-view status, InstanceType/Instance/Pod webhook rules, drain-stop | `docs/architecture/admission.md` |
 | Chart mode vs image mode, `disableApplications`, what the worker applies itself | `docs/architecture/installation-modes.md` |

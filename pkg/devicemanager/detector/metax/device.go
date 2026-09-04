@@ -138,7 +138,7 @@ func (in *metax) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 
 		physicalIndexes := getPhysicalIndexes(pciBusId)
 
-		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)
+		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class, pciDev.Switches)
 
 		var status device.AcceleratorStatus
 		{

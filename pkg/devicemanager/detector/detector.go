@@ -13,6 +13,7 @@ import (
 	"time"
 
 	core "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -51,6 +52,21 @@ type Detector struct {
 	// FAILS can report what was last detected instead of nothing. Only the detect loop reads or
 	// writes it, so it carries no lock of its own.
 	lastDetected map[string]device.DevicesGroupList
+
+	// reportedInterfaces is what the last successful report enumerated, so the monitor loop can
+	// tell whether the machine's interfaces have moved since. The comparison strips first-seen
+	// times from both sides itself, so this field may hold a merged record or an unmerged one.
+	//
+	// Only the detect loop and its monitor closure touch it, and they run in the same goroutine
+	// one after the other, so it carries no lock of its own for the same reason lastDetected does
+	// not.
+	reportedInterfaces []workercore.DeviceInterface
+
+	// reportedInterfacesKnown says whether reportedInterfaces is a baseline, which the slice itself
+	// cannot express: a host that enumerated nothing gate-relevant and a host that has never
+	// enumerated at all both hold the empty list. Only the second must take another detect round,
+	// and it stays in that state after a first pass whose enumeration failed.
+	reportedInterfacesKnown bool
 
 	// podLister and procResolver are the two node-local reads the slice section needs: which Pods
 	// this node runs, and which of them a host process belongs to. They are fields rather than
@@ -333,11 +349,53 @@ func (d *Detector) Start(ctx context.Context) error {
 				logger.Info("changed, going to detect again")
 				return waitx.ErrCanceled
 			}
+
+			// The interface record is compared here too, on the MONITOR cadence, because
+			// _DeviceKey carries nothing about the network. A link going down changes no
+			// accelerator key, so this loop would keep spinning on unchanged keys while the
+			// recorded inventory went stale — and the label gate that withholds `rdma.capable` on
+			// a broken link could then only ever fire when an accelerator happened to change at
+			// the same moment. A gate that needs an unrelated event to fire is not a gate.
+			//
+			// What is compared is the subset that can affect that gate, not the whole record: see
+			// interfacesChanged. Taking the round on any change at all made every Pod start rerun
+			// the driver detection below, because a Pod brings a `veth` with it.
+			detected, detectedErr := DetectInterfaces()
+			if interfacesChanged(d.reportedInterfaces, d.reportedInterfacesKnown, detected, detectedErr) {
+				logger.Info("network interfaces changed, going to detect again")
+				return waitx.ErrCanceled
+			}
 			return nil
 		})
 
 		return nil
 	})
+}
+
+// nodeWideDeviceGroups returns the accelerators of the WHOLE NODE: the ones this pass detected, plus
+// the ones the stored record holds for manufacturers this pass does not own.
+//
+// mine is this detect pass's manufacturer set, and it is what decides which stored groups to take:
+// a stored group for a manufacturer this pass DOES own is this pass's own business and its fresh
+// reading wins, while a group for any other manufacturer belongs to a different DaemonSet and is the
+// only account of it available here. Taking a stored group for an owned manufacturer would resurrect
+// hardware this pass just found to be gone.
+//
+// The result is a fresh slice whenever it differs from own, so the extra entries cannot be written
+// into own's spare capacity — the caller publishes own as this node's detected inventory.
+func nodeWideDeviceGroups(
+	own, stored device.DevicesGroupList, mine sets.Set[string],
+) device.DevicesGroupList {
+	var others device.DevicesGroupList
+	for i := range stored {
+		if !mine.Has(stored[i].Manufacturer) {
+			others = append(others, stored[i])
+		}
+	}
+	if len(others) == 0 {
+		return own
+	}
+	return append(cloneDeviceGroups(own), others...)
 }
 
 // cloneDeviceGroups returns groups that share nothing with the ones given. The held result of a
@@ -405,6 +463,66 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		return errors.New("skip deleted node")
 	}
 
+	// The network interfaces are read here rather than inside the per-manufacturer loop, because a
+	// NIC belongs to the machine and not to a manufacturer's accelerators. It happens before the
+	// NodeFeature below because the RDMA feature labels are derived from it.
+	//
+	// A failure to enumerate is NOT an empty inventory. It is reported here and then leaves both
+	// the previously recorded list and the previously published labels alone, because an empty
+	// list reads as "this worker has no interfaces" — a claim a failed read cannot support. On a
+	// first pass there is nothing to preserve, so the object is created without interfaces and
+	// this log line is the only account of why; it is logged at Error precisely because that is
+	// the one level no verbosity setting can hide.
+	eInterfaces, eInterfacesErr := DetectInterfaces()
+	if eInterfacesErr != nil {
+		logger.Error(eInterfacesErr, "could not enumerate network interfaces",
+			"node", ndName,
+			"consequence", "keeping whatever inventory and labels were recorded before this pass")
+	}
+	// Kept for the monitor loop to compare against. The comparison strips first-seen times itself,
+	// so taking the snapshot before the merge below is not what makes it correct — but only a pass
+	// that actually enumerated may replace it: overwriting on a failed read would hand the monitor
+	// loop an empty baseline and make the next successful pass look like a change.
+	if eInterfacesErr == nil {
+		d.reportedInterfaces = cloneInterfaces(eInterfaces)
+		d.reportedInterfacesKnown = true
+	}
+
+	// One instant for the whole pass, and stamped here as well as in the align function because
+	// the two write paths need it separately: an object created by a first pass would otherwise
+	// store a link failure with no first-seen time, and every later pass would carry that absence
+	// forward rather than fill it in.
+	now := meta.Now()
+	carryLinkFirstSeen(nil, eInterfaces, now)
+
+	// The distance label is a claim about the WHOLE NODE, so it is reduced over every accelerator the
+	// node has rather than over this pass's alone.
+	//
+	// There is one device-manager DaemonSet per manufacturer and one NodeFeature per node, so a
+	// mixed-vendor node has several writers pointing at the same object. Computing the distance from
+	// this pass's groups only made the key last-writer-wins between values that are each correct for
+	// their own writer and neither of which is the closest distance the node has — and since the
+	// stale-key removal below deletes an RDMA key this pass did not report, the two writers also
+	// overwrote each other on every pass, forever. The other manufacturers' groups are taken from the
+	// Devices object all of them already share.
+	//
+	// A read that fails degrades to this pass's own groups instead of failing the pass, because the
+	// reduction is a MINIMUM: over a subset it can only come out equal or FURTHER, so the published
+	// value stays conservative and the next pass converges. Underclaiming proximity is the safe
+	// direction, the same asymmetry device.BusDistance is built on — an overclaim is what nothing
+	// downstream can catch.
+	devsCli := lpCli.WorkerV1alpha1().Devices()
+	nodeGroups := eGroups
+	if aDevs, derr := devsCli.Get(ctx, ndName, meta.GetOptions{ResourceVersion: "0"}); derr != nil {
+		if !kerrors.IsNotFound(derr) {
+			logger.V(1).Info("could not read the node's Devices for the node-wide distance",
+				"node", ndName, "error", derr.Error(),
+				"consequence", "the distance is reduced over this pass's accelerators only")
+		}
+	} else {
+		nodeGroups = nodeWideDeviceGroups(eGroups, aDevs.Spec.Groups, d.manufacturers)
+	}
+
 	// NodeFeature.
 
 	nfCli := lpCli.NfdV1alpha1().NodeFeatures(kuberess.SystemNamespaceName)
@@ -420,49 +538,33 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		Spec: func() nfd.NodeFeatureSpec {
 			nfs := nfd.NewNodeFeatureSpec()
 			nfs.Labels = nodefeature.ConstructAcceleratableNodeLabels(eGroups)
+			// Only when this pass enumerated. A failed read must leave whatever was published
+			// before it standing: emitting nothing here, combined with the stale-key removal
+			// below, would withhold the RDMA labels on the strength of a read that never
+			// happened — and withholding one of them stops a flavor selecting this node.
+			if eInterfacesErr == nil {
+				for k, v := range nodefeature.ConstructRDMANodeLabels(nodeGroups, eInterfaces) {
+					nfs.Labels[k] = v
+				}
+			}
 			return *nfs
 		}(),
 	}
 	kubemeta.ControlOnWithoutBlock(eNf, nd, core.SchemeGroupVersion.WithKind("Node"))
-	nfAlignFn := func(aNf *nfd.NodeFeature) (_ *nfd.NodeFeature, skip bool, err error) {
-		skip = true
-		if aNf.Labels == nil {
-			aNf.Labels = make(map[string]string)
-		}
-		if aNf.Spec.Labels == nil {
-			aNf.Spec.Labels = make(map[string]string)
-		}
-		// Update labels if not contained.
-		for k, v := range eNf.Labels {
-			if aNf.Labels[k] != v {
-				aNf.Labels[k] = v
-				skip = false
-			}
-		}
-		// Update spec labels if not contained.
-		for k, v := range eNf.Spec.Labels {
-			if aNf.Spec.Labels[k] != v {
-				aNf.Spec.Labels[k] = v
-				skip = false
-			}
-		}
-		// Update owner reference.
-		if !kubemeta.IsControlledBy(aNf, nd) {
-			controlOnNodeWithoutBlock(aNf, nd)
-			skip = false
-		}
-		return aNf, skip, err
+	nfAlignment := nodeFeatureAlignment{
+		expected:       eNf,
+		node:           nd,
+		syncInterfaces: eInterfacesErr == nil,
 	}
 
 	aNf, err := kubeclientset.Create(ctx, nfCli, eNf,
-		kubeclientset.WithUpdateIfExisted(nfAlignFn))
+		kubeclientset.WithUpdateIfExisted(nfAlignment.apply))
 	if err != nil {
 		return fmt.Errorf("failed to sync NodeFeature object for node %s: %w", ndName, err)
 	}
 
 	// Devices.
 
-	devsCli := lpCli.WorkerV1alpha1().Devices()
 	// Stamp the accelerator flavors' selector labels (os/arch + feature key) so the worker
 	// locates this node's Devices by one List. Take the feature labels from the NodeFeature
 	// just applied, not read back off the node, which NFD merges only later — leaving a
@@ -475,7 +577,8 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 			Labels: devsLabels,
 		},
 		Spec: workercore.DevicesSpec{
-			Groups: eGroups,
+			Groups:     eGroups,
+			Interfaces: eInterfaces,
 		},
 	}
 	// Owned by the Node, not by the NodeFeature above: Devices is cluster-scoped, and the garbage
@@ -484,36 +587,17 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	// sweep and the object is never collected, so a Devices outlives the node it describes and
 	// keeps reporting that node's accelerators to every consumer that lists them.
 	kubemeta.ControlOnWithoutBlock(eDevs, nd, core.SchemeGroupVersion.WithKind("Node"))
-	devsAlginFn := func(aDevs *workercore.Devices) (_ *workercore.Devices, skip bool, err error) {
-		skip = true
-		// Update groups.
-		if !kubemeta.DeepEqual(aDevs.Spec.Groups, eDevs.Spec.Groups) {
-			groups, groupsChanged := alignDeviceGroups(aDevs.Spec.Groups, eGroups, d.manufacturers)
-			if groupsChanged {
-				skip = false
-			}
-			aDevs.Spec.Groups = groups
-		}
-		// Update selector labels (they appear once NFD has applied the feature labels).
-		if len(devsLabels) > 0 && aDevs.Labels == nil {
-			aDevs.Labels = make(map[string]string)
-		}
-		for k, v := range devsLabels {
-			if aDevs.Labels[k] != v {
-				aDevs.Labels[k] = v
-				skip = false
-			}
-		}
-		// Update owner reference.
-		if !kubemeta.IsControlledBy(aDevs, nd) {
-			controlOnNodeWithoutBlock(aDevs, nd)
-			skip = false
-		}
-		return aDevs, skip, err
+	devsAlignment := devicesAlignment{
+		expected:       eDevs,
+		node:           nd,
+		labels:         devsLabels,
+		manufacturers:  d.manufacturers,
+		syncInterfaces: eInterfacesErr == nil,
+		now:            now,
 	}
 
 	_, err = kubeclientset.Create(ctx, devsCli, eDevs,
-		kubeclientset.WithUpdateIfExisted(devsAlginFn))
+		kubeclientset.WithUpdateIfExisted(devsAlignment.apply))
 	if err != nil {
 		return fmt.Errorf("failed to sync Devices object for node %s: %w", ndName, err)
 	}
@@ -532,6 +616,151 @@ func controlOnNodeWithoutBlock(obj kubemeta.MetaObject, nd *core.Node) {
 		kubemeta.ControlOff(obj, nil, schema.FromAPIVersionAndKind(ctrlRef.APIVersion, ctrlRef.Kind))
 	}
 	kubemeta.ControlOnWithoutBlock(obj, nd, core.SchemeGroupVersion.WithKind("Node"))
+}
+
+// nodeFeatureAlignment reconciles an existing NodeFeature towards what this detect pass produced.
+//
+// It is a type with a method rather than the closure it replaced for the same reason
+// devicesAlignment is: the stale-key removal below is what makes a withheld label take effect, so
+// it is an acceptance criterion, and a criterion needs a seam to be checked at.
+type nodeFeatureAlignment struct {
+	// expected is the object this pass would have created had none existed.
+	expected *nfd.NodeFeature
+	// node owns the object.
+	node *core.Node
+	// syncInterfaces is false when this pass could not enumerate the network interfaces. The
+	// previously published RDMA labels are then left untouched — neither refreshed nor removed —
+	// because withholding one of them stops a flavor selecting this node, and a read that did not
+	// happen cannot support that.
+	syncInterfaces bool
+}
+
+func (a nodeFeatureAlignment) apply(aNf *nfd.NodeFeature) (_ *nfd.NodeFeature, skip bool, err error) {
+	skip = true
+	if aNf.Labels == nil {
+		aNf.Labels = make(map[string]string)
+	}
+	if aNf.Spec.Labels == nil {
+		aNf.Spec.Labels = make(map[string]string)
+	}
+	// Update labels if not contained.
+	for k, v := range a.expected.Labels {
+		if aNf.Labels[k] != v {
+			aNf.Labels[k] = v
+			skip = false
+		}
+	}
+	// Update spec labels if not contained.
+	for k, v := range a.expected.Spec.Labels {
+		if aNf.Spec.Labels[k] != v {
+			aNf.Spec.Labels[k] = v
+			skip = false
+		}
+	}
+	// Remove the RDMA keys this pass did NOT report, and only those.
+	//
+	// Everything above adds and overwrites; nothing deletes. For the RDMA set that is not a
+	// tolerable gap but the difference between having a gate and not: withholding the capable key
+	// is HOW an unusable link stops a flavor selecting this node, and a key that is never removed
+	// is never withheld. The label would stay true for as long as the object lives, with the
+	// object's own inventory reporting the link as broken the whole time.
+	//
+	// Scoped to one prefix so it cannot touch a key this pass does not own — the accelerator keys
+	// beside it are left to their existing add-only behavior, which is not this change to fix.
+	if a.syncInterfaces {
+		for k := range aNf.Spec.Labels {
+			if strings.HasPrefix(k, nodefeature.RDMAFeatureLabelPrefix) {
+				if _, reported := a.expected.Spec.Labels[k]; !reported {
+					delete(aNf.Spec.Labels, k)
+					skip = false
+				}
+			}
+		}
+	}
+	// Update owner reference.
+	if !kubemeta.IsControlledBy(aNf, a.node) {
+		controlOnNodeWithoutBlock(aNf, a.node)
+		skip = false
+	}
+	return aNf, skip, err
+}
+
+// devicesAlignment reconciles an existing Devices object towards what this detect pass produced,
+// reporting whether anything actually changed so an unchanged pass issues no API write.
+//
+// It is a type with a method rather than the closure it replaced so that a test can drive the
+// decision directly. That is not a stylistic preference: the branch comparing the interface
+// inventory is the single most likely way this feature ships broken while looking healthy —
+// without it the field is computed on every pass and written never, and nothing about the stored
+// object looks wrong — so it is an acceptance criterion, and a criterion needs a seam to be
+// checked at.
+type devicesAlignment struct {
+	// expected is the object this pass would have created had none existed.
+	expected *workercore.Devices
+	// node owns the object. A cluster-scoped dependent of a cluster-scoped owner; see where
+	// expected is built for why it cannot be the NodeFeature.
+	node *core.Node
+	// labels are the accelerator flavors' selector labels to stamp.
+	labels map[string]string
+	// manufacturers bounds which device groups this pass is allowed to speak for.
+	manufacturers sets.Set[string]
+	// syncInterfaces is false when this pass could not enumerate the network interfaces at all.
+	// The previously recorded inventory is then left untouched rather than replaced with an empty
+	// one: an empty list reads as "this worker has no interfaces", which a failed read cannot
+	// claim. A pass that enumerated successfully and found none is a different case, and does
+	// write the empty list.
+	syncInterfaces bool
+	// now is the instant this detect pass observed, used as the first-seen time of a link failure
+	// this pass is the first to see. It is one value for the whole pass rather than a clock read
+	// per interface, so two interfaces that failed together record the same instant.
+	now meta.Time
+}
+
+func (a devicesAlignment) apply(actual *workercore.Devices) (*workercore.Devices, bool, error) {
+	skip := true
+
+	// Update groups.
+	if !kubemeta.DeepEqual(actual.Spec.Groups, a.expected.Spec.Groups) {
+		groups, groupsChanged := alignDeviceGroups(actual.Spec.Groups, a.expected.Spec.Groups, a.manufacturers)
+		if groupsChanged {
+			skip = false
+		}
+		actual.Spec.Groups = groups
+	}
+
+	// Update network interfaces, compared independently of the groups above. The two inventories
+	// change for unrelated reasons, so folding this into the groups branch would write a changed
+	// interface list only when an accelerator happened to change too.
+	if a.syncInterfaces {
+		// Merge the failing links' first-seen times from the stored inventory BEFORE comparing.
+		// This pass observed the failures but not when they started, and taking the current
+		// instant here would make the comparison below never match — an API write on every pass,
+		// forever, with correct data in the object throughout.
+		carryLinkFirstSeen(actual.Spec.Interfaces, a.expected.Spec.Interfaces, a.now)
+		if !kubemeta.DeepEqual(actual.Spec.Interfaces, a.expected.Spec.Interfaces) {
+			actual.Spec.Interfaces = a.expected.Spec.Interfaces
+			skip = false
+		}
+	}
+
+	// Update selector labels (they appear once NFD has applied the feature labels).
+	if len(a.labels) > 0 && actual.Labels == nil {
+		actual.Labels = make(map[string]string)
+	}
+	for k, v := range a.labels {
+		if actual.Labels[k] != v {
+			actual.Labels[k] = v
+			skip = false
+		}
+	}
+
+	// Update owner reference.
+	if !kubemeta.IsControlledBy(actual, a.node) {
+		controlOnNodeWithoutBlock(actual, a.node)
+		skip = false
+	}
+
+	return actual, skip, nil
 }
 
 // alignDeviceGroups reconciles the existing device groups (aGroups) against the freshly detected

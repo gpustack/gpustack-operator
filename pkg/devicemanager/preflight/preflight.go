@@ -504,15 +504,34 @@ func detection(groups device.DevicesGroupList, unmeasured bool) device.Preflight
 	return d
 }
 
-// Report writes grpList to w as one YAML document and then reports whether the node failed.
+// preflightResult is the whole document: the per-manufacturer answers, and the node-level facts
+// that belong to no manufacturer.
+//
+// Its top level is a map where earlier releases wrote a bare list. That is a visible change to the
+// document's shape, and it was chosen over the alternative of appending a second YAML document to
+// the same stream: a reader taking only the first document of a multi-document stream would keep
+// working while silently seeing none of the new section, and a silent truncation is worse than a
+// shape a reader fails loudly on.
+type preflightResult struct {
+	Accelerators device.PreflightGroupList `json:"accelerators" yaml:"accelerators"`
+	Network      NetworkReport             `json:"network" yaml:"network"`
+}
+
+// Report writes the result to w as one YAML document and then reports whether the node failed.
 //
 // The document is written first and unconditionally. A caller that asked what this node can serve
 // is entitled to the answer whether or not it passed, and withholding it on failure would leave
 // the exit code as the only thing to debug from.
-func Report(w io.Writer, grpList device.PreflightGroupList) error {
+//
+// The network section is reported and does NOT contribute to the failure. What this error answers
+// is whether the node can serve the allocation modes its allocators offer, and a down RDMA link
+// stops none of them: it withholds a node label, which changes what a flavor selects rather than
+// what an allocator can hand out. A link row that failed the pass would make every script gating
+// an install on this command start refusing nodes that allocate perfectly well.
+func Report(w io.Writer, grpList device.PreflightGroupList, network NetworkReport) error {
 	enc := yaml.NewEncoder(w)
 	enc.SetIndent(4)
-	if err := enc.Encode(grpList); err != nil {
+	if err := enc.Encode(preflightResult{Accelerators: grpList, Network: network}); err != nil {
 		return fmt.Errorf("encode result: %w", err)
 	}
 

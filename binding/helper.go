@@ -295,8 +295,15 @@ type (
 		Device string
 		// Path is the sysfs path to the PCI device (e.g., "/sys/bus/pci/devices/0000:00:1f.2").
 		Path string
-		// Root is the root complex ID of the PCI device,
-		// which can be used to determine if two devices are on the same PCI root complex.
+		// Root is the address of the OUTERMOST PCI BRIDGE above the device, or the device's own
+		// address when no bridge sits above it. Two devices sharing a value sit under the same
+		// outermost bridge, which is what ComparePCIDevices asks of it.
+		//
+		// It is NOT the root complex's identifier, despite the name. sysfs does carry that name
+		// (e.g. "pci0000:00") and this field never holds it — see ResolvePCITopology, which
+		// derives the value. Note also that for a device attached directly to the root complex
+		// the value is the device itself, so equality there is an identity check rather than a
+		// same-root-complex claim.
 		Root string
 		// Config is the raw PCI configuration space of the device,
 		// read from the "config" file in sysfs.
@@ -320,6 +327,46 @@ type (
 // GetPCIDevices returns a list of PCI devices that match the specified criteria.
 func GetPCIDevices(vendors, classPrefixes []string) PCIDevices {
 	return getPCIDevices(vendors, classPrefixes)
+}
+
+// ResolvePCITopology derives the outermost PCI bridge above a device and the bridge chain in
+// between, from the device's RESOLVED sysfs path — symlinks already followed, e.g.
+// "/sys/devices/pci0000:00/0000:00:01.0/0000:01:00.0". The chain is innermost first.
+//
+// What root holds is worth stating precisely, because the name suggests otherwise:
+//
+//   - a device behind one or more bridges reports the OUTERMOST BRIDGE's address;
+//   - a device attached directly to the root complex reports ITS OWN address.
+//
+// Neither is the root complex's name. The device's own address is not returned, because the two
+// callers disagree on where it comes from: one takes it from the sysfs entry name it enumerated,
+// the other from the resolved path.
+//
+// It is exported because a second caller outside this package derives the same coordinates for
+// network interfaces, and those values are compared against these. Sharing one function is what
+// makes the two derivations identical BY CONSTRUCTION. A reimplementation would be free to drift,
+// and a drift would make every comparison answer "unrelated" — on every node, with no wrong value
+// anywhere to notice it by. It takes a path rather than reading sysfs so a caller can point it at
+// a fixture.
+func ResolvePCITopology(resolvedDevPath string) (root string, switches []string) {
+	current := resolvedDevPath
+	for {
+		// A bridge's directory is named by its own BDF, carrying two colons. That is the only
+		// thing distinguishing it from the root complex's directory above it, whose name carries
+		// one ("pci0000:00") — which is where the walk stops.
+		//
+		// The walk cannot run away, and needs no separate guard to say so: any absolute path
+		// walked upwards reaches "/", whose base name has no colon at all.
+		parent := filepath.Dir(current)
+		name := filepath.Base(parent)
+		if strings.Count(name, ":") != 2 {
+			break
+		}
+		switches = append(switches, name)
+		current = parent
+	}
+
+	return filepath.Base(current), switches
 }
 
 // ComparePCIDevices compares two PCI devices and returns an integer indicating their relationship.

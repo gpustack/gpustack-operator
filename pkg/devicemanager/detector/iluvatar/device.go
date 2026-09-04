@@ -168,7 +168,7 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 				"card", uuid, "reason", ret.Error())
 		}
 
-		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)
+		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class, pciDev.Switches)
 
 		var status device.AcceleratorStatus
 		{

@@ -1308,6 +1308,12 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.AcceleratorStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("DeviceEthernet"):
 		return &applyconfigurationworkerv1alpha1.DeviceEthernetApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("DeviceInterface"):
+		return &applyconfigurationworkerv1alpha1.DeviceInterfaceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("DeviceInterfaceLink"):
+		return &applyconfigurationworkerv1alpha1.DeviceInterfaceLinkApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("DeviceInterfaceVirtualFunction"):
+		return &applyconfigurationworkerv1alpha1.DeviceInterfaceVirtualFunctionApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("Devices"):
 		return &applyconfigurationworkerv1alpha1.DevicesApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("DevicesAllocationGroup"):
