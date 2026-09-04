@@ -20,13 +20,17 @@ const modelDeploymentRunnerRepository = "gpustack/runner"
 //
 // The two vocabularies are independent: the runner names the software stack (cuda, cann, rocm) while
 // this project names the vendor (nvidia, ascend, amd), and the matrix never spells the vendor at
-// all. So this is a translation table, and the one entry that could not be read off the matrix is
-// hggc -- it is T-Head's, which this repository's own csrc/thead/ppu-slicing-shim/hggc/ is what
-// settles.
+// all. Nor does the pairing follow from the vendor name everywhere -- hygon's token is dtk and
+// t-head's is hggc -- so none of it is derived here. Every pair below is the one
+// gpustack_runtime's _MANUFACTURER_BACKEND_MAPPING gives, a map whose doc comment states its names
+// are meant to be the runner's own backend names; hggc has a second witness in this repository's
+// csrc/thead/ppu-slicing-shim/hggc/. And every token is one the release matrix publishes.
 //
-// CAMBRICON IS ABSENT ON PURPOSE. The runner publishes no cambricon backend, so a role on such a
-// pool has no image to synthesize and must name one. That is a refusal, not an empty string: an
-// empty image fails as an ImagePullBackOff, whose symptom is nowhere near its cause.
+// CAMBRICON IS ABSENT ON PURPOSE, and it is where this table stops short of that upstream map:
+// upstream pairs cambricon with neuware, but the matrix carries no neuware image at all. A role on
+// such a pool therefore has no image to synthesize and must name one. That is a refusal, not an
+// empty string: an empty image fails as an ImagePullBackOff, whose symptom is nowhere near its
+// cause.
 var modelDeploymentBackends = map[string]string{
 	nodefeature.ManufacturerNVIDIA:   "cuda",
 	nodefeature.ManufacturerAscend:   "cann",
