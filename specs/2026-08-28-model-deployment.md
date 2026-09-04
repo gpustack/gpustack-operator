@@ -2411,6 +2411,12 @@ a commit message is not a durable channel for a gap that outlives the change. Th
 the case-45 row for the overlay refusal, which was added without a cluster to run it on — its rule
 is covered by mutation-checked unit cases, but the row's own message-matching has not been observed.
 
+**This paragraph is the basis of record for both gaps.** A pull request body may restate them for
+reviewers, and that copy is a summary of this one: where the two disagree, this is the one that is
+right, because it is the copy that travels with the code. Naming the basis is what makes the
+duplication safe — two descriptions of one fact drift, and without a designated winner the reader
+has to guess which is newer.
+
 **Measurement record (filled by T13).**
 
 | Run | Replicas | Requests | Hit rate | Blocks by replica | Domain |
