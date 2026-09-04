@@ -337,6 +337,82 @@ fi
 # A CREATE-TIME INVARIANT DOES NOT PROTECT AGAINST A LATER EDIT, and F4b is the last link of that
 # degradation chain rather than a duplicate of the pool's own check.
 #
+# ── A Binding that exists but is being DELETED ────────────────────────────────────────────────────
+# The refusal this covers is the one that needs no mistake: deleting a Binding is routine operations,
+# and a plain Pod is not in status.usedBy, so the finalizer protecting declared consumers cannot see
+# it. Injected against a Binding whose domain is leaving the ledger, the Pod starts, is stamped, and
+# fails every write with TENANT_NOT_REGISTERED. Waiting does not heal it.
+#
+# THE WINDOW IS HELD, NOT RACED. A test finalizer keeps the object in Deleting for exactly as long as
+# this check needs. Deleting and hoping to submit inside the operator's own window would be a bet: a
+# pass would be luck and a failure would be indistinguishable from a flake.
+# ⛔ Rejected alternative: scaling the Mooncake leader to zero so the operator's finalizer cannot
+# converge. The leader is a Deployment this operator reconciles, so it comes straight back - the hold
+# would be fighting the controller rather than holding anything.
+#
+# WHAT THIS PROVES AND WHAT IT DOES NOT. It proves the webhook refuses when Get returns a Binding
+# whose deletionTimestamp is set, on a real API server - which is the production condition. It does
+# NOT measure how long the operator's own finalizer holds one; that is a property of the pool
+# reconciler (releaseKVCachePoolBinding deletes the master entry BEFORE dropping the finalizer, which
+# is why the window exists at all) and not of this webhook.
+#
+# Its OWN Binding, not the shared one. A check that consumes the fixture its neighbours read would
+# make them depend on running first.
+TERM_BINDING="bind-term"
+TERM_HOLD="e2e.gpustack.ai/kvc-terminating-hold"
+kubectl apply -f - >/dev/null 2>&1 <<YAML
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: KVCachePoolBinding
+metadata:
+  name: ${TERM_BINDING}
+  namespace: ${TEST_NS}
+spec:
+  poolRef:
+    name: ${POOL}
+  domain:
+    name: ${DOMAIN}-term
+    blockSize: 16
+    dtype: bfloat16
+  quotaCeiling: 64Mi
+YAML
+if ! kvi_wait_for kvcachepoolbindings.worker.gpustack.ai "$TERM_BINDING" '{.status.phase}' Ready 180 "$TEST_NS" >/dev/null; then
+  record FAIL "a Binding that is being deleted is refused" \
+    "the second Binding never reached Ready in 180s, so the terminating state was never entered and \
+this check did not run - it says nothing about the refusal in either direction"
+else
+  # Append rather than replace: the operator's own finalizer must stay, or removing ours would let the
+  # object vanish while the reconciler still believes it owns an entry on the master.
+  kubectl -n "$TEST_NS" patch kvcachepoolbindings.worker.gpustack.ai "$TERM_BINDING" --type=json \
+    -p "[{\"op\":\"add\",\"path\":\"/metadata/finalizers/-\",\"value\":\"${TERM_HOLD}\"}]" \
+    >/dev/null 2>&1
+  kubectl -n "$TEST_NS" delete kvcachepoolbindings.worker.gpustack.ai "$TERM_BINDING" \
+    --wait=false >/dev/null 2>&1
+  TERM_TS="$(kubectl -n "$TEST_NS" get kvcachepoolbindings.worker.gpustack.ai "$TERM_BINDING" \
+    -o 'jsonpath={.metadata.deletionTimestamp}' 2>/dev/null)"
+  if [ -z "$TERM_TS" ]; then
+    record FAIL "a Binding that is being deleted is refused" \
+      "the Binding carries no deletionTimestamp after the delete, so the state this check needs was \
+never reached; the hold finalizer did not take"
+  else
+    kvi_refused "a Binding that is being deleted is refused" "which is being deleted" \
+      "$(KVI_BINDING="$TERM_BINDING" kvi_pod_manifest term-probe vllm)"
+  fi
+  # Release it whatever happened above, and before the teardown runs: a held Binding blocks the
+  # namespace, and this one is held by a finalizer only this file knows about.
+  kubectl -n "$TEST_NS" get kvcachepoolbindings.worker.gpustack.ai "$TERM_BINDING" -o json 2>/dev/null \
+    | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(0)
+f=[x for x in d['metadata'].get('finalizers',[]) if x != '${TERM_HOLD}']
+print(json.dumps({'metadata':{'finalizers':f}}))" > /tmp/kvc-term-release-${SFX}.json 2>/dev/null
+  if [ -s "/tmp/kvc-term-release-${SFX}.json" ]; then
+    kubectl -n "$TEST_NS" patch kvcachepoolbindings.worker.gpustack.ai "$TERM_BINDING" \
+      --type=merge -p "$(cat "/tmp/kvc-term-release-${SFX}.json")" >/dev/null 2>&1 || true
+  fi
+  rm -f "/tmp/kvc-term-release-${SFX}.json"
+fi
+
 # Two cheaper routes were rejected first: a pool pointing at a nonexistent backend cannot be created
 # at all (its reference is validated at admission), and holding a pool with a finalizer risks leaving
 # one wedged on a shared cluster.

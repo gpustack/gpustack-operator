@@ -47,6 +47,10 @@ E2E_SHIM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../_e2e-lib/scripts/kubect
 MOONCAKE_IMAGE="${E2E_MOONCAKE_IMAGE:-docker.io/kvcacheai/mooncake:0.3.13}"
 CLIENT_IMAGE="${E2E_CLIENT_IMAGE:-$MOONCAKE_IMAGE}"
 
+# The webhook every refusal in this family must come from. Asserting it turns "something refused" into
+# "OUR webhook refused", which is a different claim once more than one plugin can sit on Pod CREATE.
+KVI_WEBHOOK_NAME="mutate.gpustack-worker-kvcache.core.v1.pod"
+
 # The pipefail the callers set makes `cmd | head -c 5 || echo $$` do something other than it reads:
 # head closes after five bytes, tr dies on SIGPIPE, the pipeline reports failure, and the fallback
 # APPENDS to whatever tr already produced. Measured under `set -o pipefail`: [333986], [bg33986],
@@ -259,6 +263,10 @@ would start and then fail every write with TENANT_NOT_REGISTERED"
 kvi_pod_manifest() {
   local name="$1" engine="$2"
   local image="${KVI_IMAGE:-$CLIENT_IMAGE}"
+  # KVI_BINDING overrides which Binding the Pod names, for the one check that needs a Binding other
+  # than the shared fixture. Passing it as an extra annotation instead would emit the key TWICE and
+  # kubectl rejects a duplicate mapping key, so the override has to happen here.
+  local binding="${KVI_BINDING:-$BINDING}"
   shift 2
   cat <<YAML
 apiVersion: v1
@@ -269,7 +277,7 @@ metadata:
   labels:
     kvcache.gpustack.ai/inject: "true"
   annotations:
-    kvcache.gpustack.ai/binding: ${BINDING}
+    kvcache.gpustack.ai/binding: ${binding}
     kvcache.gpustack.ai/engine: ${engine}
 $(for a in "$@"; do echo "    $a"; done)
 spec:
@@ -309,8 +317,19 @@ kvi_refused() {
     echo "$manifest" | kubectl delete -f - --ignore-not-found --wait=false >/dev/null 2>&1 || true
     return 1
   fi
+  # WHICH webhook refused, not merely that something did. Measured 2026-09-04 against a live API
+  # server: the envelope is `admission webhook "<name>" denied the request: <message>` and carries no
+  # other object - not even the Pod's own name. That narrowness is what makes the short `want` strings
+  # below (a bare "vllm", "args", or the namespace) satisfiable by SOMEONE ELSE's message the day a
+  # second admission plugin sits on this path. Today only one webhook here refuses; that is a property
+  # of the environment, not an assertion, so it is asserted.
+  if ! echo "$out" | grep -qF "$KVI_WEBHOOK_NAME"; then
+    record FAIL "$check" "refused, but not by ${KVI_WEBHOOK_NAME}, so the message below belongs to \
+something else and the reason it names is not ours: $(echo "$out" | tr '\n' ' ' | cut -c1-160)"
+    return 0
+  fi
   if echo "$out" | grep -qF "$want"; then
-    record PASS "$check" "refused, and the message names '${want}'"
+    record PASS "$check" "refused by ${KVI_WEBHOOK_NAME}, and the message names '${want}'"
   else
     record FAIL "$check" "refused, but the message does not name '${want}': $(echo "$out" | tr '\n' ' ' | cut -c1-160)"
   fi
