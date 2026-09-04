@@ -31,6 +31,40 @@ When performing a code review, use the `gpustack-operator-code-review` skill in
 `.claude/skills/gpustack-operator-code-review/SKILL.md`, and apply the rules below. Keep feedback
 specific and actionable; cite the file and line.
 
+## Review conventions — where a low-severity finding goes
+
+A `low` severity finding is **not** posted as an inline review comment. Either omit it, or put it in
+the review body's suppressed block. Everything `medium` and above stays inline, unchanged.
+
+The reason is reviewer attention, not correctness: on a large PR the inline list is the surface a
+human reads line by line, and filling it with advisory notes buries the findings that must be acted
+on before merge. Moving them keeps them available without spending that surface.
+
+> **This rule is safe only while the suppressed block is read every round, and it fails closed
+> nowhere.** Severity does not predict whether a finding is real — on this repository a `high` has
+> been wrong six times running while a round of `low`s was entirely right, and findings that first
+> appeared suppressed have later been confirmed as real defects. So this routes noise out of one
+> list; it does not decide anything about truth. The moment the suppressed block stops being read,
+> the rule stops reducing noise and starts hiding true positives, and nothing in the output
+> distinguishes those two states. Whoever drops that reading step owns removing this section too.
+
+### Named noise — do not report these at any severity
+
+Severity is a poor filter because it does not predict truth. These are the findings this repository
+has *measured* as wrong, so they are filtered by what they claim instead:
+
+- **`kubectl -o jsonpath` renders a `[]string` with Go's `%v`, space-separated.** It does not:
+  the jsonpath printer JSON-encodes a slice, so `pciSwitches` prints `["0000:01:00.0","0000:00:01.0"]`
+  and splitting on commas is correct. Measured on kubectl v1.36.3 and on real multi-bridge hardware.
+  Reported six times, wrong six times, and acting on it introduces the very mis-parse it warns about.
+- **"Add a comment explaining this" on code that already carries the rule.** `CLAUDE.md` requires
+  source comments to stay plain and short and to state logic rather than history; a request for more
+  prose, for restating what the spec owns, or for keeping a revision narrative in a hot path
+  contradicts it. Review against that convention, not toward more text.
+
+A finding in either class should be omitted. If it seems to apply anyway, say which measurement it
+contradicts — that is the only form of it worth a reviewer's attention.
+
 ## Out of scope — do not review
 
 - `binding/` (generated CGO bindings), `staging/` (patched k8s modules).
