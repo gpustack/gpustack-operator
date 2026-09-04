@@ -2129,26 +2129,47 @@ truthful); after T13 (the headline claim is measured and recorded).
   no existing task is renumbered; a task list is a DAG and this one's edges say where it belongs.
   Blocked by: T3, T5, T6, **and `pkg/worker/kvcache/inject` existing** — see the ownership rule
   below.
-  Owns: `pkg/worker/controllers/worker/model_deployment_config.go` + its test; the render input's
-  `Connector`/`ClientConfigName` fill in `model_deployment.go`
+  Owns: the connector fill in `model_deployment_connector.go` and the render input's `Connector`
+  fill in `model_deployment.go`
   Gate: the shared rendering package exists
-  Acceptance: one ConfigMap per deployment, owned by it, carrying the selected engine's client JSON,
-  mounted read-only into every replica of every role, and the synthesized argument and config-path
-  variable reach the container through T5's merge. A role that took over the command line gets
-  **none** of it. Changing the pool endpoint or the domain re-renders the ConfigMap and the replicas
-  are recreated to pick it up under F10's recreate policy — **but the Pod spec hash does not move on
-  its own, so an acceptance resting on it cannot be tested.** A ConfigMap reaches a Pod as a *name*
-  (a `ConfigMapVolumeSource` over a `LocalObjectReference`), so re-rendering its contents leaves
-  `core.PodSpec` byte-identical, and the hash's subject is `{Labels, Annotations, PodSpec}`. This is
-  written out rather than deleted because the wording is the kind that gets reinvented: an e2e
-  asserting it would go **green** while the replicas kept the stale config, and would read as if it
-  had established that no recreate is needed.
-  ⇒ So this task also writes a digest of the rendered client JSON into a **Pod annotation**, which is
-  in the hash's subject and therefore does move it. Putting the digest in the ConfigMap's *name* was
-  rejected: it turns every content change into a new object and hands this controller a
-  garbage-collection duty it does not otherwise have. Should that route ever be taken, the only safe
-  predicate for deleting an old ConfigMap is **"no Pod still references it"** — never "older than the
-  current version", which deletes an object a terminating replica is still mounting.
+  Acceptance: every replica of every role carries the selected engine's client configuration, and
+  the synthesized argument and config-path variable reach the container through T5's merge. A role
+  that took over the command line gets **none** of it. Changing the pool endpoint or the domain
+  re-renders the configuration and the replicas are recreated to pick it up under F10's recreate
+  policy.
+
+  **The carrier is a Pod annotation projected into the container by `downwardAPI`, not a ConfigMap,
+  and that is the shared package's choice rather than this task's.** `pkg/worker/kvcache/inject`
+  returns the client JSON in `Result.PodAnnotations` together with a `DownwardAPIVolumeSource` whose
+  item is a `fieldRef` to `metadata.annotations['<key>']`; the two are halves of one thing, since
+  applying the volume without the annotation mounts an empty file. This task takes that carrier
+  because the package is the client JSON's sole owner across specs — a second carrier here would be
+  the second implementation the ownership rule below exists to prevent — and it verifies the pair
+  arrives together rather than assuming it.
+
+  ⇒ Two things this task was going to have to do are consequently **not** in it, and both are
+  recorded because their reasoning is the kind that gets reinvented:
+
+  - **No digest field.** A ConfigMap reaches a Pod as a *name* (a `ConfigMapVolumeSource` over a
+    `LocalObjectReference`), so re-rendering its contents would leave `core.PodSpec` byte-identical
+    while the hash's subject is `{Labels, Annotations, PodSpec}` — the hash would not move, an e2e
+    asserting that it did would go **green** while the replicas kept the stale config, and it would
+    read as having established that no recreate is needed. That defect belongs to the ConfigMap
+    carrier and does not survive into this one: the annotation holds the configuration *itself*, and
+    an annotation is in the hash's subject, so a content change moves the hash with no second field
+    to keep in step. **This is a counterfactual — there is no digest to look for in the code.**
+  - **No garbage collection.** Putting a digest in a ConfigMap's *name* would turn every content
+    change into a new object and hand this controller a collection duty it does not otherwise have.
+    There is no second object here at all. **Also a counterfactual**, kept only because the safe
+    predicate is worth stating should any later task revive the route: the only one is **"no Pod
+    still references it"**, never "older than the current version", which deletes an object a
+    terminating replica is still mounting.
+
+  One property the carrier adds that a ConfigMap would not have: the annotation travels on the Pod,
+  and this scope's other writer of that same annotation is an admission webhook selecting on
+  `kvcache.gpustack.ai/inject In [true]`. The replicas this controller renders do **not** carry that
+  label, so they are not injected a second time — that is a fact about a selector in another spec's
+  generated webhook configuration, so this task asserts it rather than reasoning about it.
   A deployment whose Binding cannot be resolved renders **no** connector rather than a partial one:
   a client pointed at an address that does not answer is a worse failure than one that was never
   configured, because the first looks like a cache miss.
