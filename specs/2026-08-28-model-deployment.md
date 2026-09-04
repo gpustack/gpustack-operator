@@ -2058,6 +2058,16 @@ truthful); after T13 (the headline claim is measured and recorded).
   Blocked by: T12
   Owns: `.claude/skills/gpustack-operator-e2e/cases/case-46.sh`, this spec's Test Plan
   Gate: case-45 green on the two-GPU node
+  **First step, before a measurement point is chosen: re-run F8's observation table.** What each
+  engine publishes about its KV connector was measured on specific artifacts, `vllm v0.25.1` among
+  them, and a measurement point is only as valid as the version it was chosen against — the problem
+  a measurement has, applied to a design. A point picked against a table that has since moved reads
+  as though it had been thought through, which is worse than having no point yet.
+  ⇒ The Ascend row needs its own care. Its recorded observation is **publishes nothing**, and that is
+  not the same finding as **did not come up at all**: both yield zero metrics, and only the first is
+  a property of the engine. So that row reports SKIP with which of the two it was, and never borrows
+  vLLM's figures to stand in for it — a number carried over from another backend is not a missing
+  measurement, it is a wrong one.
   Acceptance: one request stream, replayed twice — once against a `replicas: 1` deployment and once
   against a `replicas: 4` deployment on the same Binding, same model, same stream, same order. The
   case asserts, and **records**: the pool shows **one** domain with blocks contributed by **more than
