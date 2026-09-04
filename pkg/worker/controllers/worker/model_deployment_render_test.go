@@ -15,6 +15,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
 // newRenderDeployment builds a deployment whose single role every case then varies.
@@ -209,10 +210,14 @@ func TestRenderModelDeploymentPod_TakeOver(t *testing.T) {
 		Role:         &md.Spec.Roles[0],
 		InstanceType: newRenderInstanceType(),
 		Connector: ModelDeploymentConnectorRender{
-			Args: []string{`--kv-transfer-config={}`},
-			Env:  []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: ModelDeploymentClientConfigPath}},
+			Args:         []string{`--kv-transfer-config={}`},
+			Env:          []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: inject.ConfigFilePath}},
+			Volumes:      []core.Volume{{Name: inject.ConfigVolumeName}},
+			VolumeMounts: []core.VolumeMount{{Name: inject.ConfigVolumeName, MountPath: inject.ConfigMountPath}},
+			PodAnnotations: map[string]string{
+				inject.ClientConfigAnnotationKey: `{"master_server_address":"master:50051"}`,
+			},
 		},
-		ClientConfigName: "qwen-kvcache",
 	})
 	require.NoError(t, err)
 
@@ -223,6 +228,14 @@ func TestRenderModelDeploymentPod_TakeOver(t *testing.T) {
 	assert.False(t, ok, "the operator's client environment points at a file this argv never reads")
 
 	assert.Empty(t, pod.Spec.Volumes, "and the file itself is not mounted either")
+	assert.Empty(t, pod.Spec.Containers[0].VolumeMounts, "nor is it mounted into the container")
+
+	// THE ANNOTATION IS WITHHELD TOO, and it is the piece most likely to be forgotten: it is not
+	// part of the PodSpec, so every assertion above passes while it lands. On a take-over role it
+	// would put the pool's address and the whole client document on a Pod the operator did not
+	// configure -- a record of a wiring that is not there.
+	assert.NotContains(t, pod.Annotations, inject.ClientConfigAnnotationKey,
+		"a take-over role gets no part of the connector, including the annotation carrying it")
 }
 
 // TestRenderModelDeploymentPod_Env covers the merge across tiers: what the operator owns is
@@ -230,7 +243,7 @@ func TestRenderModelDeploymentPod_TakeOver(t *testing.T) {
 // template overlay wins over the role's own append tier.
 func TestRenderModelDeploymentPod_Env(t *testing.T) {
 	connector := ModelDeploymentConnectorRender{
-		Env:          []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: ModelDeploymentClientConfigPath}},
+		Env:          []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: inject.ConfigFilePath}},
 		DefaultedEnv: []core.EnvVar{{Name: "MC_TE_METRIC", Value: "1"}},
 	}
 
@@ -243,7 +256,7 @@ func TestRenderModelDeploymentPod_Env(t *testing.T) {
 	}{
 		{
 			name:    "nothing supplied — owned and defaulted both render",
-			wantEnv: map[string]string{"MOONCAKE_CONFIG_PATH": ModelDeploymentClientConfigPath, "MC_TE_METRIC": "1"},
+			wantEnv: map[string]string{"MOONCAKE_CONFIG_PATH": inject.ConfigFilePath, "MC_TE_METRIC": "1"},
 		},
 		{
 			name:    "a defaulted key yields to the user's value",
@@ -253,7 +266,7 @@ func TestRenderModelDeploymentPod_Env(t *testing.T) {
 		{
 			name:    "an owned key supplied anyway never displaces the operator's",
 			roleEnv: []workercore.InstanceEnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/tmp/mine.json"}},
-			wantEnv: map[string]string{"MOONCAKE_CONFIG_PATH": ModelDeploymentClientConfigPath},
+			wantEnv: map[string]string{"MOONCAKE_CONFIG_PATH": inject.ConfigFilePath},
 		},
 		{
 			name:    "the template overlay replaces the role's append tier by name",
@@ -544,23 +557,41 @@ func TestRenderModelDeploymentPod_SynthesizesTheImage(t *testing.T) {
 // TestRenderModelDeploymentPod_ClientConfigMount pins where the rendered client configuration is
 // mounted, because the owned MOONCAKE_CONFIG_PATH variable is the only pointer to it: a mount path
 // that drifted from the constant the connector renders would leave the engine reading nothing.
+//
+// THE CONNECTOR COMES FROM SYNTHESIS RATHER THAN A LITERAL, and that is the point of this test now.
+// What it pins is that the three pieces ARRIVE TOGETHER: the annotation holding the document, the
+// projection whose fieldRef reads that annotation, and the mount. A literal here would satisfy every
+// assertion below while synthesis produced a projection naming an annotation nobody sets -- which
+// mounts an EMPTY FILE and starts an engine that uses no cache, with every symptom inside the
+// container.
 func TestRenderModelDeploymentPod_ClientConfigMount(t *testing.T) {
 	md := newRenderDeployment()
+	conn, err := SynthesizeModelDeploymentConnector(
+		connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA))
+	require.NoError(t, err)
+
 	pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
-		Deployment:       md,
-		Role:             &md.Spec.Roles[0],
-		InstanceType:     newRenderInstanceType(),
-		ClientConfigName: "qwen-kvcache",
+		Deployment:   md,
+		Role:         &md.Spec.Roles[0],
+		InstanceType: newRenderInstanceType(),
+		Connector:    conn,
 	})
 	require.NoError(t, err)
 
 	require.Len(t, pod.Spec.Volumes, 1)
-	require.NotNil(t, pod.Spec.Volumes[0].ConfigMap)
-	assert.Equal(t, "qwen-kvcache", pod.Spec.Volumes[0].ConfigMap.Name)
+	require.NotNil(t, pod.Spec.Volumes[0].DownwardAPI,
+		"the file is a projection of an annotation, not a ConfigMap: there is no second object")
+	require.Len(t, pod.Spec.Volumes[0].DownwardAPI.Items, 1)
+
+	ref := pod.Spec.Volumes[0].DownwardAPI.Items[0].FieldRef
+	require.NotNil(t, ref)
+	assert.Contains(t, ref.FieldPath, inject.ClientConfigAnnotationKey)
+	assert.NotEmpty(t, pod.Annotations[inject.ClientConfigAnnotationKey],
+		"the projection reads this annotation, so an absent or empty one mounts an empty file")
 
 	mounts := pod.Spec.Containers[0].VolumeMounts
 	require.Len(t, mounts, 1)
-	assert.Equal(t, ModelDeploymentClientConfigMountPath, mounts[0].MountPath)
+	assert.Equal(t, inject.ConfigMountPath, mounts[0].MountPath)
 	assert.True(t, mounts[0].ReadOnly)
 }
 

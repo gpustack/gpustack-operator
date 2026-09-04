@@ -52,10 +52,6 @@ const (
 	modelDeploymentDefaultPort int32 = 8000
 	// modelDeploymentDefaultPortName names that port on the container and on the Service fronting it.
 	modelDeploymentDefaultPortName = "http"
-
-	// modelDeploymentClientConfigVolumeName names the volume the rendered client configuration is
-	// mounted through.
-	modelDeploymentClientConfigVolumeName = "kvcache-client-config"
 )
 
 // ModelDeploymentRenderInput is everything one replica's Pod is rendered from.
@@ -77,9 +73,10 @@ type ModelDeploymentRenderInput struct {
 	// Connector is what the engine needs to reach the pool. Its zero value renders a replica with
 	// no connector at all, which is what a deployment whose Binding has not been resolved yet gets.
 	Connector ModelDeploymentConnectorRender
-	// ClientConfigName is the ConfigMap holding Connector.ClientConfig. It is empty exactly when
-	// there is no client configuration to mount.
-	ClientConfigName string
+	// There is NO ConfigMap name here, and there is no object to name: the client configuration
+	// travels in Connector.PodAnnotations and reaches the container as a downwardAPI projection of
+	// it. The field this struct used to carry was never filled by anything, so the mount it guarded
+	// was dead code -- see T14 in the spec for why the carrier is the annotation.
 	// RuntimeClassName is the runtime class an accelerated replica needs. The reconciler resolves it,
 	// because deciding it requires reading whether the class exists on the cluster.
 	RuntimeClassName string
@@ -159,21 +156,17 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 		command = append(command, role.ExtraArgs...)
 	}
 
+	// The connector's volume and mount arrive already built, and they are taken as a unit with the
+	// annotations applied below: the volume is a downwardAPI projection of one of them, so applying
+	// it without the annotation mounts an empty file. Both are empty for an engine configured
+	// through the environment, which is why neither is conditional on the engine here.
+	//
+	// A take-over role gets NEITHER, along with no synthesized argument and no client environment.
+	// The operator did not build that command line and cannot claim the container uses the cache.
 	vols, mounts := convertAdditionalVolumes(tmpl.AdditionalVolumes)
-	if !takeOver && in.ClientConfigName != "" {
-		vols = append(vols, core.Volume{
-			Name: modelDeploymentClientConfigVolumeName,
-			VolumeSource: core.VolumeSource{
-				ConfigMap: &core.ConfigMapVolumeSource{
-					LocalObjectReference: core.LocalObjectReference{Name: in.ClientConfigName},
-				},
-			},
-		})
-		mounts = append(mounts, core.VolumeMount{
-			Name:      modelDeploymentClientConfigVolumeName,
-			MountPath: ModelDeploymentClientConfigMountPath,
-			ReadOnly:  true,
-		})
+	if !takeOver {
+		vols = append(vols, in.Connector.Volumes...)
+		mounts = append(mounts, in.Connector.VolumeMounts...)
 	}
 
 	mainC := core.Container{
@@ -223,6 +216,24 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 		ModelDeploymentResourceNoteRole: role.Name,
 	})
 	kubemeta.ControlOnWithoutBlock(pod, md, workercore.SchemeGroupVersionKind("ModelDeployment"))
+
+	// THE CONNECTOR'S ANNOTATIONS GO ON BEFORE THE FINGERPRINT, and the order is the whole reason
+	// this carrier works. The client configuration lives in one of these annotations rather than in
+	// a ConfigMap, and the fingerprint below covers {Labels, Annotations, PodSpec} -- so changing
+	// the pool endpoint or the domain moves the hash and the replicas are recreated to pick it up.
+	// Moving this after the fingerprint would leave the hash blind to the configuration and every
+	// replica holding a stale one, with nothing failing.
+	//
+	// Gated on the same take-over check as the volume that projects them: a role that replaced the
+	// command line gets no part of the connector, and half of it would be worse than none.
+	if !takeOver && len(in.Connector.PodAnnotations) > 0 {
+		if pod.Annotations == nil {
+			pod.Annotations = make(map[string]string, len(in.Connector.PodAnnotations)+1)
+		}
+		for k, v := range in.Connector.PodAnnotations {
+			pod.Annotations[k] = v
+		}
+	}
 
 	// The fingerprint is written last so that it covers everything above it, and it is read back on
 	// every pass to decide whether a running replica was built from the current spec.

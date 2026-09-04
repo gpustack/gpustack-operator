@@ -1,7 +1,6 @@
 package worker
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -11,19 +10,13 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
-const (
-	// ModelDeploymentClientConfigMountPath is where the rendered client JSON is mounted. It sits
-	// under /etc rather than under the template's workspace, which a user's own volume may occupy.
-	ModelDeploymentClientConfigMountPath = "/etc/gpustack/kvcache"
-
-	// ModelDeploymentClientConfigFileName is the file every engine's config path points at.
-	ModelDeploymentClientConfigFileName = "mooncake.json"
-
-	// ModelDeploymentClientConfigPath is the full in-container path of the rendered client JSON.
-	ModelDeploymentClientConfigPath = ModelDeploymentClientConfigMountPath + "/" + ModelDeploymentClientConfigFileName
-)
+// The mount path, the file name and their join are `inject`'s, not redeclared here. That package
+// renders the file and this one only reports where it landed, so a second pair of constants with the
+// same values would be two definitions of one fact -- and the one that drifted would be this one,
+// since the renderer is what a reader checks.
 
 // ModelDeploymentConnectorInput is everything connector synthesis needs, as plain values.
 //
@@ -43,36 +36,47 @@ type ModelDeploymentConnectorInput struct {
 	// has not converged.
 	Manufacturer string
 
-	// Domain is the reuse identity the Binding declares.
+	// Domain is the reuse identity the Binding declares. It is passed through to the shared renderer,
+	// which decides per engine whether to emit it -- `inject.SupportsTenant` reads a table carrying
+	// the version and source line each answer was measured at.
 	//
-	// IT IS DELIBERATELY NOT RENDERED, and it is carried here anyway so that the test proving it is
-	// not rendered has a domain to not render. No supported engine passes a tenant to the cache
-	// client: tenant_id is the 11th parameter of the client's setup(), every engine calls setup()
-	// positionally with seven or eight arguments, the client reads no environment variable for it,
-	// and no engine's own config class carries the key. Emitting it would document a wiring that is
-	// not happening. When an engine starts passing it, this is the field to start rendering.
+	// NOTHING HERE RESTATES THAT ANSWER, and the reason is the shape of how the previous comment went
+	// wrong rather than a preference for brevity. It said the field was DELIBERATELY NOT RENDERED
+	// because no supported engine could receive a tenant: tenant_id is the 11th parameter of the
+	// client's setup() and every engine calls setup() positionally with seven or eight arguments.
+	// That is a counterfactual now. It measured the C++ client and the positional overload, while
+	// SGLang reaches the same parameter from another direction -- its Python layer reads
+	// MOONCAKE_TENANT_ID and forwards the value as a keyword argument. "The client reads no
+	// environment variable" stayed true while "no tenant reaches the client" went false, because the
+	// measurement point sat downstream of the path that carries it.
+	//
+	// A copy of that answer is a second implementation of it, agreeing with the table today and
+	// diverging on whichever engine release lands next, with nothing failing in between. The test
+	// for this field asserts what the renderer was HANDED, not what any engine does with it.
 	Domain string
 
 	// MasterServerAddress is the address of the store master, observed from the pool.
 	MasterServerAddress string
 
-	// MetadataServer is the transfer engine's metadata source, observed from the pool.
-	MetadataServer string
-
 	// Protocol is the backend's transport as the backend spells it — Auto, TCP, RDMA, HIP or
 	// Ascend. Synthesis lowercases it and resolves Auto, because the client matches protocol names
-	// case-sensitively in lowercase while this project's enum is capitalized.
+	// case-sensitively in lowercase while this project's enum is capitalized. The mapping stays here
+	// because `inject.Connection.Protocol` is documented as arriving already mapped.
 	Protocol string
-
-	// DeviceName is the RDMA device list. Empty means the client auto-discovers, which is the right
-	// default on every transport that does not use one.
-	//
-	// The same fact has three spellings across three surfaces: setup()'s positional parameter is
-	// rdma_devices, the JSON key every engine reads is device_name, and Mooncake's own environment
-	// variable is MOONCAKE_DEVICE. This renders the engines' JSON, so device_name is the spelling
-	// that applies.
-	DeviceName string
 }
+
+// TWO FIELDS THIS STRUCT USED TO CARRY ARE GONE, and neither is a capability that was lost.
+//
+// `MetadataServer` was an input whose only value was ever the literal P2PHANDSHAKE, which the
+// metadata plane in this scope takes unconditionally. It is `inject.MetadataServer` now, defined
+// once.
+//
+// `DeviceName` was the RDMA device filter, and REMOVING IT IS A FIX. It accepted a specific device
+// -- a test passed `mlx5_0` -- and a specific device is wrong for a pool by construction: devices
+// are named per host, `mlx5_0` on one and `erdma_0` on the next, so no single name is right for
+// every host one pool spans. `inject.DeviceName` is empty on every path including RDMA, meaning
+// "use every device found", which is the only value correct everywhere. The field did not offer
+// tuning; it offered a way to configure a filter that matches nothing on some hosts.
 
 // ModelDeploymentConnectorRender is what synthesis produces for one role.
 type ModelDeploymentConnectorRender struct {
@@ -88,51 +92,36 @@ type ModelDeploymentConnectorRender struct {
 	// no rejection follows.
 	DefaultedEnv []core.EnvVar
 
-	// ClientConfig is the client JSON, rendered into one ConfigMap per deployment and mounted
-	// read-only into every replica of the role.
+	// Volumes and VolumeMounts carry the client configuration into the container. Both are empty for
+	// an engine whose vehicle is the environment, because mounting a file that engine never reads
+	// would claim a wiring that is not happening.
 	//
-	// The values are typed rather than all strings, because two of the keys are integers in every
-	// engine's own config class. All three engines happen to run their size keys through a parser
-	// that would accept "0", but a JSON number matches what the dataclass declares and does not
-	// depend on that parser continuing to exist.
+	// THEY ARE HALF OF A PAIR WITH PodAnnotations BELOW. The volume is a downwardAPI projection of
+	// that annotation, so applying the volume without the annotation mounts an EMPTY FILE -- a
+	// container that starts, looks configured and uses no cache. The renderer returns the three
+	// together and this struct keeps them together for that reason; nothing may apply a subset.
+	Volumes      []core.Volume
+	VolumeMounts []core.VolumeMount
+
+	// PodAnnotations must land on the same Pod whose spec receives the fields above.
 	//
-	// IT IS NIL FOR AN ENGINE CONFIGURED THROUGH THE ENVIRONMENT, and nil means no ConfigMap:
-	// mounting one an engine never reads would claim a wiring that is not happening.
-	//
-	// Where it is used, one ConfigMap serves all replicas rather than one each, because every key
-	// in it is deployment-wide. That holds for vLLM and vLLM-Ascend because of what is ABSENT as
-	// much as what is present: neither reads local_hostname from the file, each deriving it from
-	// its own process, so the one value that would have differed per replica never enters the file.
-	// It does NOT hold for SGLang, which is why SGLang does not get a file.
-	ClientConfig map[string]any
+	// It holds the client configuration ITSELF rather than a digest of it, and that is what makes a
+	// content change move the Pod spec hash without any extra field: the hash's subject is
+	// {Labels, Annotations, PodSpec}. A ConfigMap would have reached the Pod as a NAME, leaving
+	// PodSpec byte-identical while the contents changed -- the replicas would keep a stale
+	// configuration and a check on the hash would go green over it.
+	PodAnnotations map[string]string
 }
 
-const (
-	// modelDeploymentGlobalSegmentSize is the segment this client contributes to the pool: none.
-	//
-	// It has to be written, and written as exactly zero. The key DECLARES A ROLE rather than sizing
-	// a contribution: every engine's config class defaults it to 4 GiB, so an absent key makes each
-	// replica an in-process store member. The pool's own members provide the storage. The store
-	// accepts zero for exactly this purpose -- its setup_internal skips mounting a segment and its
-	// validator requires the value to be zero or at least MIN_SEGMENT_SIZE, so a small non-zero
-	// value is what would be rejected.
-	modelDeploymentGlobalSegmentSize = 0
-
-	// modelDeploymentLocalBufferSize is the client-side staging buffer, 128 MiB.
-	//
-	// It is the size the store's own setup example uses, spelled `128*1024*1024` and described as
-	// short-lived client-side staging. It must be positive: vLLM's config class rejects a
-	// non-positive value outright. This is a vLLM-family key -- SGLang has none, passing a
-	// hardcoded 16 MiB to setup() instead.
-	modelDeploymentLocalBufferSize = 128 * 1024 * 1024
-
-	// modelDeploymentModeStandaloneStore is the topology a pure client declares, on vLLM only.
-	//
-	// It is half of a cross-field rule and cannot be split from the other half: vLLM's
-	// __post_init__ rejects embedded mode with a zero segment AND standalone-store with a non-zero
-	// one. vLLM-Ascend and SGLang have no such field, so for them the segment size stands alone.
-	modelDeploymentModeStandaloneStore = "standalone-store"
-)
+// THE SIZE AND TOPOLOGY CONSTANTS ARE `inject`'S, not redeclared here: `GlobalSegmentSize`,
+// `LocalBufferSize` and `ModeStandaloneStore`. Their values were compared one by one against the
+// ones this file used to declare and all three match, so the removal changes no rendered document.
+//
+// Each carries the reasoning that made it that value, on the side that renders it: the segment size
+// declares a ROLE rather than a size (an absent key makes every replica an in-process store member
+// on a 4 GiB default), the buffer is the store's own documented staging size and must be positive,
+// and the topology is half of a cross-field rule vLLM validates in both directions -- so it and the
+// segment size are always written as a pair.
 
 // modelDeploymentOwnedKeys is the (engine, key) catalog of what the operator owns.
 //
@@ -157,6 +146,20 @@ var modelDeploymentOwnedKeys = map[string]struct {
 	// first two is loaded by a function whose per-key fallbacks are compile-time literals. So a
 	// user setting either one does not merely override a value, it silently replaces the whole
 	// configuration with defaults — a 4 GiB segment and a "localhost" identity.
+	//
+	// MOONCAKE_TENANT_ID IS OWNED AND MUST NEVER BE DEFAULTED, and this is the one entry here that
+	// is a security property rather than a correctness one. The tenant IS the reuse domain, and
+	// every distinct domain is a tenant with its own quota ledger -- so a workload that could set
+	// this variable could mint tenants in its namespace and escape the namespace ceiling. The API
+	// already refuses a self-declared domain, which is the durable half of that guarantee; this is
+	// the other half, because the variable is a second path to the same value and an unowned key
+	// would leave it open. Defaulted is exactly the wrong class: that class lets a user's value
+	// win.
+	//
+	// It appears in this table because the renderer emits it for THIS engine, at the version this
+	// project ships. Nothing here decides that -- the shared renderer reads a measured table -- so
+	// if an engine starts or stops forwarding a tenant, the invariant test that pairs this table
+	// with the renderer is what says so.
 	workercore.ModelDeploymentEngineSGLang: {
 		Args: []string{"--hicache-storage-backend", "--hicache-storage-backend-extra-config"},
 		Env: []string{
@@ -167,6 +170,7 @@ var modelDeploymentOwnedKeys = map[string]struct {
 			"MOONCAKE_DEVICE",
 			"MOONCAKE_GLOBAL_SEGMENT_SIZE",
 			"MOONCAKE_LOCAL_HOSTNAME",
+			"MOONCAKE_TENANT_ID",
 		},
 	},
 }
@@ -175,7 +179,8 @@ var modelDeploymentOwnedKeys = map[string]struct {
 //
 // MC_TE_METRIC turns on the transfer engine's own metrics, without which the hit rate this whole
 // design rests on cannot be measured at all. It is read by the transfer engine rather than by any
-// engine's config class, which is why it is reachable where a tenant is not. A user may turn it off.
+// engine's config class, so it does not depend on which keys that class accepts. A user may turn
+// it off.
 var modelDeploymentDefaultedEnvNames = []string{"MC_TE_METRIC"}
 
 // ModelDeploymentOwnsArg reports whether the named argument belongs to the operator on this engine.
@@ -218,109 +223,77 @@ func ModelDeploymentArgName(arg string) string {
 // It is PURE: same input, same output, no client and no clock. Everything it needs about the pool
 // and the domain arrives as values.
 func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (ModelDeploymentConnectorRender, error) {
-	protocol := modelDeploymentClientProtocol(in.Protocol)
-
-	render := ModelDeploymentConnectorRender{
-		DefaultedEnv: []core.EnvVar{
-			{Name: "MC_TE_METRIC", Value: "1"},
-		},
+	engine, err := modelDeploymentInjectEngine(in.Engine, in.Manufacturer)
+	if err != nil {
+		return ModelDeploymentConnectorRender{}, err
 	}
 
-	switch in.Engine {
+	// Role is always RoleNone, because this version admits exactly one role and so has no
+	// prefill/decode split to describe. That is what makes the rendered kv_role `kv_both` -- the
+	// value this function used to hardcode. Same output, now read from the table the disaggregated
+	// case will read too, rather than from a constant that would have to be found and changed.
+	res, err := inject.Render(inject.Input{
+		Engine: engine,
+		Role:   inject.RoleNone,
+		Domain: in.Domain,
+		Connection: inject.Connection{
+			MasterAddress: in.MasterServerAddress,
+			Protocol:      modelDeploymentClientProtocol(in.Protocol),
+		},
+	})
+	if err != nil {
+		return ModelDeploymentConnectorRender{}, err
+	}
+
+	return ModelDeploymentConnectorRender{
+		Args: res.Args,
+		Env:  res.Env,
+		// MC_TE_METRIC has no counterpart in the shared renderer and should not have one: that
+		// package renders what an engine needs to REACH the pool, while this variable is what this
+		// design needs to MEASURE it. It stays defaulted rather than owned, so a user's own value
+		// wins with no refusal.
+		DefaultedEnv:   []core.EnvVar{{Name: "MC_TE_METRIC", Value: "1"}},
+		Volumes:        res.Volumes,
+		VolumeMounts:   res.VolumeMounts,
+		PodAnnotations: res.PodAnnotations,
+	}, nil
+}
+
+// modelDeploymentInjectEngine maps this API's engine value onto the shared renderer's.
+//
+// THE TWO ENUMS ARE DELIBERATELY DIFFERENT SHAPES. This API has a single `vllm` value because on
+// CANN the runner installs the vllm_ascend package for that same declared engine, so the
+// accelerator decides which package runs and the user does not name it. The renderer has two,
+// because the two packages register different connector names.
+//
+// A WRONG MAPPING HERE IS INVISIBLE IN THE TENANT OUTPUT: both vLLM entries in the renderer's facts
+// table forward no tenant, so swapping them changes nothing a tenant assertion could observe. What
+// it does change is the connector name, which is why that is what the test for this pins.
+func modelDeploymentInjectEngine(engine, manufacturer string) (inject.Engine, error) {
+	switch engine {
 	case workercore.ModelDeploymentEngineVLLM:
-		// ONE BOOLEAN DECIDES BOTH DIFFERENCES IN THIS BRANCH, and both are properties of the
-		// backend rather than of the engine. That is why "vllm-ascend" is not an engine value: on
-		// CANN the runner installs the vllm_ascend package, which ships a different store connector
-		// and no `mode` field. What this function renders is keyed the same either way, and only the
-		// connector name and the presence of `mode` differ. That is a property of the output below,
-		// not a claim about which keys either package is able to read.
-		ascend := in.Manufacturer == nodefeature.ManufacturerAscend
-
-		// AscendStoreConnector, also registered as MooncakeConnectorStoreV1, and NOT
-		// MultiConnector: that project re-registers MultiConnector to its own composite, which
-		// exists to run several connectors at once, and a single-role deployment has nothing to
-		// compose. Its store backend already defaults to mooncake, so that key is not rendered.
-		connector := "MooncakeStoreConnector"
-		if ascend {
-			connector = "AscendStoreConnector"
+		if manufacturer == nodefeature.ManufacturerAscend {
+			return inject.EngineVLLMAscend, nil
 		}
 
-		args, err := modelDeploymentKVTransferConfigArg(connector)
-		if err != nil {
-			return ModelDeploymentConnectorRender{}, err
-		}
-		render.Args = args
-		render.Env = []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: ModelDeploymentClientConfigPath}}
-		render.ClientConfig = modelDeploymentFileClientConfig(in, protocol)
-
-		// `mode` is the partner of the zero segment size on vLLM proper, which rejects a zero
-		// segment in embedded mode and a non-zero one here. The Ascend package has no such field,
-		// so rendering it there would be a key its reader ignores.
-		if !ascend {
-			render.ClientConfig["mode"] = modelDeploymentModeStandaloneStore
-		}
-
+		return inject.EngineVLLM, nil
 	case workercore.ModelDeploymentEngineSGLang:
-		render.Args = []string{"--hicache-storage-backend", "mooncake"}
-		render.Env = modelDeploymentSGLangClientEnv(in, protocol)
-
+		return inject.EngineSGLang, nil
 	default:
-		return ModelDeploymentConnectorRender{}, fmt.Errorf("unsupported engine %q", in.Engine)
-	}
-
-	return render, nil
-}
-
-// modelDeploymentFileClientConfig renders the client JSON the vLLM-family readers load from a file.
-//
-// Neither of them has an environment fallback for the values themselves: their loader uses the
-// environment only to locate the path, so a file is the only carrier that reaches them.
-//
-// It renders the size pair but NOT vLLM's mode, which only that engine has: the caller adds it.
-// Keeping the cross-field partner at the one call site that needs it is what stops the pair from
-// being split, and splitting it is the failure both halves guard against.
-func modelDeploymentFileClientConfig(in ModelDeploymentConnectorInput, protocol string) map[string]any {
-	return map[string]any{
-		"master_server_address": in.MasterServerAddress,
-		"metadata_server":       in.MetadataServer,
-		"protocol":              protocol,
-		"device_name":           in.DeviceName,
-		"global_segment_size":   modelDeploymentGlobalSegmentSize,
-		"local_buffer_size":     modelDeploymentLocalBufferSize,
+		return "", fmt.Errorf("unsupported engine %q", engine)
 	}
 }
 
-// modelDeploymentSGLangClientEnv renders the environment SGLang's own loader reads.
+// THE PER-ENGINE RENDERERS THAT USED TO LIVE HERE ARE GONE, one for the vLLM-family file and one
+// for SGLang's environment, and `pkg/worker/kvcache/inject` renders both now. The reasoning they
+// carried was not dropped with them -- it is in that package, on the renderer it belongs to,
+// including why SGLang's vehicle is the environment (its config path is fixed at admission, before
+// a Pod has an IP, so only a fieldRef evaluated by kubelet can carry local_hostname) and why
+// leaving SGLANG_HICACHE_MOONCAKE_CONFIG_PATH unset is what SELECTS that path.
 //
-// SGLANG IS CONFIGURED THROUGH THE ENVIRONMENT AND NOT A FILE, and the reason is evaluation time
-// rather than expressiveness. This engine needs local_hostname, which is the replica's Pod IP; a
-// file and an extra-config argument are both fixed when the object is admitted, when no Pod IP
-// exists yet. Only an environment variable can carry a fieldRef that kubelet evaluates as the
-// container starts. Its other two loaders would each fall back to a compile-time literal for that
-// key — "localhost" for every replica — and to a 4 GiB segment, which is the wrong role.
-//
-// Leaving SGLANG_HICACHE_MOONCAKE_CONFIG_PATH unset is what SELECTS this loader: the engine tries
-// the extra-config argument, then that variable, then the environment. So the config path is unset
-// deliberately and the extra-config argument is deliberately not passed, both of them owned keys so
-// that a user cannot reintroduce the diversion.
-//
-// global_segment_size is written as an explicit zero because this client contributes no storage
-// segment; the pool's own members do. The store accepts zero for exactly this purpose.
-func modelDeploymentSGLangClientEnv(in ModelDeploymentConnectorInput, protocol string) []core.EnvVar {
-	return []core.EnvVar{
-		{Name: "MOONCAKE_MASTER", Value: in.MasterServerAddress},
-		{Name: "MOONCAKE_TE_META_DATA_SERVER", Value: in.MetadataServer},
-		{Name: "MOONCAKE_PROTOCOL", Value: protocol},
-		{Name: "MOONCAKE_DEVICE", Value: in.DeviceName},
-		{Name: "MOONCAKE_GLOBAL_SEGMENT_SIZE", Value: "0"},
-		{
-			Name: "MOONCAKE_LOCAL_HOSTNAME",
-			ValueFrom: &core.EnvVarSource{
-				FieldRef: &core.ObjectFieldSelector{FieldPath: "status.podIP"},
-			},
-		},
-	}
-}
+// What stays here is the half that is this API's rather than the renderer's: the owned-key table
+// below still refuses a user's attempt to set that config path or the extra-config argument, since
+// either one would divert the engine to a loader that resolves local_hostname to a literal.
 
 // ModelDeploymentEngineCommand renders the argv that starts one engine on one model.
 //
@@ -354,22 +327,11 @@ func ModelDeploymentEngineCommand(engine, model string) ([]string, error) {
 	}
 }
 
-// modelDeploymentKVTransferConfigArg renders vLLM's --kv-transfer-config for one connector.
-//
-// kv_role is not optional: vLLM refuses a kv_connector with no kv_role. kv_both is the one value
-// that is simultaneously a valid producer and a valid consumer, which is what replicas sharing a
-// store-backed cache need — each fills the cache and reads from it.
-func modelDeploymentKVTransferConfigArg(connector string) ([]string, error) {
-	value, err := json.Marshal(map[string]string{
-		"kv_connector": connector,
-		"kv_role":      "kv_both",
-	})
-	if err != nil {
-		return nil, fmt.Errorf("marshaling kv transfer config: %w", err)
-	}
-
-	return []string{"--kv-transfer-config", string(value)}, nil
-}
+// The --kv-transfer-config document is `inject`'s too. It renders the same two keys from a struct
+// rather than a map, which turns an unreadable key into a compile error, and it derives kv_role from
+// the role instead of hardcoding kv_both -- RoleNone, which is all this version admits, yields
+// exactly kv_both. vLLM refuses a kv_connector with no kv_role, and kv_both is the one value that is
+// both a valid producer and a valid consumer, which is what replicas sharing one store need.
 
 // modelDeploymentClientProtocol maps the backend's transport onto the spelling the client matches.
 //

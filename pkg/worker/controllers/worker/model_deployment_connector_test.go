@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,47 +10,65 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
 // connectorInput is one pool-and-domain fixture every case renders from.
 //
-// It carries a NON-EMPTY Domain on purpose: the cases asserting that no tenant key is rendered are
-// only worth anything if a domain was available to render.
+// It carries a NON-EMPTY Domain on purpose: a case asserting which engines receive a tenant is only
+// worth anything if a domain was available to render.
 func connectorInput(engine, manufacturer string) ModelDeploymentConnectorInput {
 	return ModelDeploymentConnectorInput{
 		Engine:              engine,
 		Manufacturer:        manufacturer,
 		Domain:              "team-a-shared",
 		MasterServerAddress: "shared-kv-master.gpustack-system.svc:50051",
-		MetadataServer:      "P2PHANDSHAKE",
 		Protocol:            "TCP",
-		DeviceName:          "",
 	}
+}
+
+// clientConfigOf decodes the client JSON out of the annotation that carries it.
+//
+// The configuration is no longer a map on the render: it is a JSON document in a Pod annotation,
+// projected into the container by downwardAPI. Decoding rather than matching the string is what the
+// renderer asks for -- JSON defines no key order, so comparing text would pin something that is not
+// part of the contract.
+//
+// Requiring the annotation to be there first is deliberate. Every assertion built on this value
+// would pass vacuously against a nil map, so a render that produced no file at all would read as a
+// render whose file lacks whichever key the case names.
+func clientConfigOf(t *testing.T, got ModelDeploymentConnectorRender) map[string]any {
+	t.Helper()
+
+	raw, ok := got.PodAnnotations[inject.ClientConfigAnnotationKey]
+	require.True(t, ok, "the render carries no client-config annotation, so there is no file to read")
+
+	var cfg map[string]any
+	require.NoError(t, json.Unmarshal([]byte(raw), &cfg))
+
+	return cfg
 }
 
 func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 	// The two vLLM-family readers load configuration from a file, because their loader uses the
-	// environment only to locate the path. Their key sets differ by exactly one key: `mode` exists
-	// on vLLM alone. Both are written out in full rather than derived from each other, so that the
-	// one difference is visible instead of being a line of test logic.
+	// environment only to locate the path. BOTH NOW GET THE SAME SEVEN KEYS, including `mode`, which
+	// only vLLM's reader has -- and rendering it for vLLM-Ascend is safe for a reason worth stating
+	// rather than assuming: vLLM does not pass `mode` to store.setup() either, it only validates the
+	// pair against global_segment_size and logs it. The value that drives both engines is the size,
+	// and both read that. A key one reader ignores is harmless exactly when the reader that HAS it
+	// does not act on it.
 	//
-	// The size values are JSON numbers, matching the int the config classes declare.
-	wantVLLMConfig := map[string]any{
+	// The size values are float64 because that is what decoding a JSON number into `any` yields, not
+	// because anything renders a float. The contract these assertions hold is "a JSON number, never
+	// a string" -- and they still hold it: a rendered `"0"` would decode to a string and fail here.
+	wantFileConfig := map[string]any{
 		"master_server_address": "shared-kv-master.gpustack-system.svc:50051",
 		"metadata_server":       "P2PHANDSHAKE",
 		"protocol":              "tcp",
 		"device_name":           "",
-		"global_segment_size":   0,
-		"local_buffer_size":     134217728,
+		"global_segment_size":   float64(0),
+		"local_buffer_size":     float64(134217728),
 		"mode":                  "standalone-store",
-	}
-	wantAscendConfig := map[string]any{
-		"master_server_address": "shared-kv-master.gpustack-system.svc:50051",
-		"metadata_server":       "P2PHANDSHAKE",
-		"protocol":              "tcp",
-		"device_name":           "",
-		"global_segment_size":   0,
-		"local_buffer_size":     134217728,
 	}
 
 	testCases := []struct {
@@ -73,7 +92,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 				{Name: "MOONCAKE_CONFIG_PATH", Value: "/etc/gpustack/kvcache/mooncake.json"},
 			},
 			wantDefaultedEnv: []core.EnvVar{{Name: "MC_TE_METRIC", Value: "1"}},
-			wantConfig:       wantVLLMConfig,
+			wantConfig:       wantFileConfig,
 		},
 		{
 			// SAME ENGINE VALUE AS THE CASE ABOVE, different hardware. That is the whole point of
@@ -89,15 +108,23 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 				{Name: "MOONCAKE_CONFIG_PATH", Value: "/etc/gpustack/kvcache/mooncake.json"},
 			},
 			wantDefaultedEnv: []core.EnvVar{{Name: "MC_TE_METRIC", Value: "1"}},
-			wantConfig:       wantAscendConfig,
+			wantConfig:       wantFileConfig,
 		},
 		{
 			// SGLang takes the environment, and every part of this case is load-bearing: no
 			// extra-config argument and no config-path variable, because either one diverts the
 			// engine onto a loader whose per-key fallbacks are compile-time literals; and no
-			// ClientConfig, because a mounted file nothing reads claims a wiring that is not
-			// happening. The one value that cannot be known at admission time arrives as a
-			// fieldRef, which is the whole reason this engine does not get a file.
+			// file, because a mounted file nothing reads claims a wiring that is not happening.
+			// The one value that cannot be known at admission time arrives as a fieldRef, which is
+			// the whole reason this engine does not get a file.
+			//
+			// MOONCAKE_TENANT_ID IS NEW HERE, and it is a fix rather than an addition. This engine
+			// DOES forward a tenant at the version this project ships: its loader reads that
+			// variable and passes the value on as a keyword argument, so the domain reaches the
+			// store. The renderer decides this per engine from a table carrying the version and
+			// source line each answer was measured at -- the two vLLM entries forward none and get
+			// none. Nothing in this file restates that answer; the fixture supplies a domain and
+			// this case pins what came back for THIS engine.
 			name:         "sglang_golden",
 			engine:       workercore.ModelDeploymentEngineSGLang,
 			manufacturer: nodefeature.ManufacturerNVIDIA,
@@ -105,6 +132,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 				"--hicache-storage-backend", "mooncake",
 			},
 			wantEnv: []core.EnvVar{
+				{Name: "MOONCAKE_TENANT_ID", Value: "team-a-shared"},
 				{Name: "MOONCAKE_MASTER", Value: "shared-kv-master.gpustack-system.svc:50051"},
 				{Name: "MOONCAKE_TE_META_DATA_SERVER", Value: "P2PHANDSHAKE"},
 				{Name: "MOONCAKE_PROTOCOL", Value: "tcp"},
@@ -130,9 +158,25 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 			assert.Equal(t, tc.wantArgs, got.Args)
 			assert.Equal(t, tc.wantEnv, got.Env)
 			assert.Equal(t, tc.wantDefaultedEnv, got.DefaultedEnv)
+
+			// An engine on the environment carrier renders no file, and the three pieces that
+			// deliver one go together: the annotation holding the document, the projection reading
+			// that annotation, and the mount. Asserting all three empty is what distinguishes "no
+			// file, by design" from "the file went missing".
+			if tc.wantConfig == nil {
+				assert.Empty(t, got.Volumes, "the environment carrier mounts nothing")
+				assert.Empty(t, got.VolumeMounts, "the environment carrier mounts nothing")
+				assert.NotContains(t, got.PodAnnotations, inject.ClientConfigAnnotationKey,
+					"an annotation holding a document nothing projects would be dead weight on every replica")
+
+				return
+			}
+
 			// Exact equality, not containment: "exactly the keys this engine's reader reads" is a
 			// claim about what is absent as much as about what is present.
-			assert.Equal(t, tc.wantConfig, got.ClientConfig)
+			assert.Equal(t, tc.wantConfig, clientConfigOf(t, got))
+			assert.NotEmpty(t, got.Volumes, "the file carrier needs the projection that reads the annotation")
+			assert.NotEmpty(t, got.VolumeMounts, "a projected volume nothing mounts reaches no container")
 		})
 	}
 }
@@ -179,8 +223,13 @@ func TestSynthesizeModelDeploymentConnector_SGLangEnvironmentCarrier(t *testing.
 	// segment and its validator requires zero or at least MIN_SEGMENT_SIZE.
 	assert.Contains(t, got.Env, core.EnvVar{Name: "MOONCAKE_GLOBAL_SEGMENT_SIZE", Value: "0"})
 
-	// No file is rendered, so no ConfigMap is created for this engine.
-	assert.Nil(t, got.ClientConfig)
+	// NO FILE IS RENDERED FOR THIS ENGINE, and all three carriers of one are asserted absent rather
+	// than just the document: an annotation with no projection is dead weight on every replica, and
+	// a projection with no annotation mounts an empty file. Checking one of the three would leave
+	// the other two free to appear.
+	assert.NotContains(t, got.PodAnnotations, inject.ClientConfigAnnotationKey)
+	assert.Empty(t, got.Volumes)
+	assert.Empty(t, got.VolumeMounts)
 }
 
 // TestSynthesizeModelDeploymentConnector_KeysNeverRendered states, per key, WHY the operator leaves
@@ -238,8 +287,8 @@ func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
 				// A nil map would make every assertion below vacuous, so the carrier itself is
 				// checked first: this test only means anything where a file is rendered.
 				require.NoError(t, err)
-				require.NotEmpty(t, got.ClientConfig, "%s on %s renders a file carrier", c.engine, c.manufacturer)
-				assert.NotContains(t, got.ClientConfig, tc.key, "%s on %s: %s", c.engine, c.manufacturer, tc.why)
+				require.NotEmpty(t, clientConfigOf(t, got), "%s on %s renders a file carrier", c.engine, c.manufacturer)
+				assert.NotContains(t, clientConfigOf(t, got), tc.key, "%s on %s: %s", c.engine, c.manufacturer, tc.why)
 			}
 		})
 	}
@@ -257,27 +306,25 @@ func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
 // would also accept "0", but the type the config classes declare is int, and matching the
 // declaration means the rendering does not depend on that parser staying where it is.
 func TestSynthesizeModelDeploymentConnector_FileCarrierDeclaresPureClient(t *testing.T) {
+	// BOTH ROWS NOW EXPECT THE SAME FILE, and the pair is kept rather than collapsed because "the
+	// same engine on two accelerators renders one document" is the property worth pinning. A single
+	// row would assert it for whichever hardware it named.
+	//
+	// The previous second row expected NO `mode` on Ascend, whose reader has no such field. It is
+	// rendered for both now: vLLM does not pass `mode` to store.setup() either, only validating it
+	// against global_segment_size and logging it, so the key drives nothing on the reader that HAS
+	// it -- which is the condition under which a key the other reader ignores is harmless.
 	testCases := []struct {
 		name         string
 		manufacturer string
-		wantMode     bool
 	}{
 		{
-			// vLLM proper has `mode`, and it is one half of a cross-field rule its own
-			// __post_init__ enforces in both directions: embedded rejects a zero segment,
-			// standalone-store rejects a non-zero one. Rendering the segment without the mode
-			// raises at startup.
 			name:         "vllm_on_nvidia_declares_standalone_store",
 			manufacturer: nodefeature.ManufacturerNVIDIA,
-			wantMode:     true,
 		},
 		{
-			// The Ascend package has no `mode` field at all, so the segment size stands alone.
-			// Rendering a mode there would be a key its reader ignores -- and note this row and
-			// the one above share an ENGINE and differ only in hardware.
-			name:         "vllm_on_ascend_has_no_mode_to_declare",
+			name:         "vllm_on_ascend_declares_the_same_store",
 			manufacturer: nodefeature.ManufacturerAscend,
-			wantMode:     false,
 		},
 	}
 
@@ -287,37 +334,44 @@ func TestSynthesizeModelDeploymentConnector_FileCarrierDeclaresPureClient(t *tes
 				connectorInput(workercore.ModelDeploymentEngineVLLM, tc.manufacturer))
 			require.NoError(t, err)
 
-			assert.Equal(t, 0, got.ClientConfig["global_segment_size"],
+			cfg := clientConfigOf(t, got)
+
+			// float64 is what decoding a JSON number into `any` yields; the contract held here is
+			// "a number, never a string", and a rendered "0" would decode to a string and fail.
+			assert.Equal(t, float64(0), cfg["global_segment_size"],
 				"a positive value, including the 4 GiB default, makes this replica a store member")
-			assert.Equal(t, 128*1024*1024, got.ClientConfig["local_buffer_size"],
+			assert.Equal(t, float64(128*1024*1024), cfg["local_buffer_size"],
 				"the documented client staging size; a non-positive value is rejected outright")
 
-			if tc.wantMode {
-				assert.Equal(t, "standalone-store", got.ClientConfig["mode"])
-			} else {
-				assert.NotContains(t, got.ClientConfig, "mode",
-					"this engine has no such field, so the key would document nothing")
-			}
+			// The mode is one half of a cross-field rule vLLM's own __post_init__ enforces in both
+			// directions: embedded rejects a zero segment, standalone-store rejects a non-zero one.
+			// Rendering the segment without the mode raises at startup, which is why the two are
+			// asserted together and never one at a time.
+			assert.Equal(t, "standalone-store", cfg["mode"])
 		})
 	}
 }
 
-func TestSynthesizeModelDeploymentConnector_DeviceSpelling(t *testing.T) {
-	// The same fact has three spellings across three surfaces. Only the JSON one applies here, and
-	// asserting the other two are absent is what keeps a future edit from picking the wrong one.
-	got, err := SynthesizeModelDeploymentConnector(ModelDeploymentConnectorInput{
-		Engine:              workercore.ModelDeploymentEngineVLLM,
-		Domain:              "team-a-shared",
-		MasterServerAddress: "master:50051",
-		MetadataServer:      "P2PHANDSHAKE",
-		Protocol:            "RDMA",
-		DeviceName:          "mlx5_0",
-	})
+// TestSynthesizeModelDeploymentConnector_DeviceSpellingIsNotConfigurable replaces a case that
+// asserted a caller-supplied RDMA device reached the file under the JSON spelling.
+//
+// THE CAPABILITY IT COVERED WAS THE DEFECT. A device is named per host -- mlx5_0 on one, erdma_0 on
+// the next -- so no single name is correct for every host one pool spans, and the deleted case
+// passed `mlx5_0` as though it were. The filter is empty on every path including RDMA, meaning "use
+// every device found", and it is a constant in the renderer rather than an input here.
+//
+// The spelling half is still worth pinning: the same fact has three names across three surfaces, and
+// only the file's applies to a rendered document.
+func TestSynthesizeModelDeploymentConnector_DeviceSpellingIsNotConfigurable(t *testing.T) {
+	got, err := SynthesizeModelDeploymentConnector(
+		connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA))
 	require.NoError(t, err)
 
-	assert.Equal(t, "mlx5_0", got.ClientConfig["device_name"])
-	assert.NotContains(t, got.ClientConfig, "rdma_devices", "that is setup()'s positional spelling, not the file's")
-	assert.NotContains(t, got.ClientConfig, "MOONCAKE_DEVICE", "that is Mooncake's own environment spelling, not the file's")
+	cfg := clientConfigOf(t, got)
+	assert.Equal(t, "", cfg["device_name"],
+		"empty is the only value correct for every host in one pool")
+	assert.NotContains(t, cfg, "rdma_devices", "that is setup()'s positional spelling, not the file's")
+	assert.NotContains(t, cfg, "MOONCAKE_DEVICE", "that is Mooncake's own environment spelling, not the file's")
 }
 
 func TestSynthesizeModelDeploymentConnector_UnsupportedEngine(t *testing.T) {
