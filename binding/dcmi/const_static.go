@@ -23,3 +23,16 @@ const ERROR_LIST_TRUNCATED Return = -9001
 //
 // Only the V2 die query is asked for it. A V1 driver is never sent this type.
 const DDIE DieType = 2
+
+// MAIN_CMD_CHIP_INF is the chip-information command group of the generic device-info entry point,
+// and CINF_SUB_CMD_GET_SPOD_INFO the super-pod query within it.
+//
+// Both are declared here rather than coming from the generated const.go because the vendored header
+// does not enumerate them: its dcmi_main_cmd enum goes from DCMI_MAIN_CMD_SIO = 56 straight to
+// DCMI_MAIN_CMD_DEVICE_SHARE = 0x8001 and carries no entry for 12. The values are the vendor's own —
+// ascend-common declares `MainCmdChipInf MainCmd = 12` and `CinfSubCmdGetSPodInfo = 1`, and passes
+// that pair to the generic device-info call on both generations alike.
+const (
+	MAIN_CMD_CHIP_INF          = 12
+	CINF_SUB_CMD_GET_SPOD_INFO = 1
+)
