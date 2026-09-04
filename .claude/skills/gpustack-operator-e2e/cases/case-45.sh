@@ -44,7 +44,7 @@
 #              and the webhook and persists nothing; the one row that needs a controller verdict
 #              creates a ModelDeployment naming a Binding that does not exist and deletes it again.
 #
-# Deferred:    The serving half of this case — `replicas: 4` reaching `status.roles[0].ready == 4`
+# Deferred:    The serving half of this case — `replicas: 2` reaching `status.roles[0].ready == 2`
 #              and `status.endpoint` answering an inference request — is NOT here. It needs the
 #              synthesized connector to actually be wired into the replicas, which is a separate
 #              task; until then a passing run of this file means the admission surface holds, not
@@ -202,6 +202,23 @@ fi
 
 # --- controller row: needs cluster state, so it is a condition rather than a refusal ---
 
+# Clear a leftover from an interrupted run FIRST. The replica row below asserts an exact count, and
+# a Pod left behind by an earlier pass carries the same instance label, so it would be counted and
+# the row would fail about the leak rather than about the rule.
+#
+# The alternative -- relaxing that row to `>= 1` -- was rejected: it would also pass on 2, which is
+# exactly what the leak produces. A row that tolerates any positive number survives both the leak
+# and the race by no longer being able to see either.
+kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai case45-nobind \
+  --ignore-not-found --wait=true --timeout=60s >/dev/null 2>&1
+for _ in $(seq 1 20); do
+  left="$(kubectl -n "$NS" get pods \
+    -l app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=case45-nobind \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | wc -w | tr -d ' ')"
+  [ "${left:-0}" -eq 0 ] && break
+  sleep 3
+done
+
 manifest "" "" | sed "s/case45-probe/case45-nobind/" | kubectl apply -f - >/dev/null 2>&1
 conds=""
 for _ in $(seq 1 20); do
@@ -233,9 +250,21 @@ fi
 # `<md>-<role>-<ordinal>` and carries app.kubernetes.io/name=model-deployment plus
 # app.kubernetes.io/instance=<md>. Measured side by side, the invented selector counted 0 and this
 # one counted 1 against the same running Pod.
-wl="$(kubectl -n "$NS" get pods \
-  -l app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=case45-nobind \
-  -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | wc -w | tr -d ' ')"
+# POLLED, NOT SAMPLED ONCE. The loop above exits on the CONDITION, and the condition and the Pod are
+# two separate writes; whichever order the reconcile makes them in, a single read taken the instant
+# the condition appears can land before the Pod exists and report a FAIL about timing rather than
+# about the rule.
+#
+# The wait is for EXACTLY 1, and the row still fails on any other number, so the poll buys tolerance
+# for the race without buying tolerance for a wrong count.
+wl=0
+for _ in $(seq 1 20); do
+  wl="$(kubectl -n "$NS" get pods \
+    -l app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=case45-nobind \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | wc -w | tr -d ' ')"
+  [ "${wl:-0}" -eq 1 ] && break
+  sleep 3
+done
 if [ "${wl:-0}" -eq 1 ]; then
   record PASS "the replicas are rendered even though the domain is unregistered" \
     "1 replica Pod alongside DomainRegistered=False/BindingNotFound — convergence is not gated on the domain"
@@ -270,7 +299,7 @@ fi
 
 # --- deferred: the serving half ---
 
-record SKIP "replicas: 4 reaches status.roles[0].ready == 4" \
+record SKIP "replicas: 2 reaches status.roles[0].ready == 2" \
   "deferred: needs the synthesized connector wired into the replicas"
 record SKIP "status.endpoint serves inference" \
   "deferred: needs the synthesized connector wired into the replicas"
