@@ -155,11 +155,12 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentQuota(
 		return err
 	}
 
-	var reserved, pending, missing int
+	var reserved, pending, missing, live int
 	for i := range pods {
 		if pods[i].DeletionTimestamp != nil {
 			continue
 		}
+		live++
 		wl, found := wls[pods[i].UID]
 		switch {
 		case !found:
@@ -169,6 +170,20 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentQuota(
 		default:
 			pending++
 		}
+	}
+
+	// EVERY REPLICA TERMINATING IS NOT "ALL RESERVED". The early return above guards an empty LIST;
+	// this guards an empty RESULT, and they are different emptinesses. A recreate rollout or a
+	// scale-down hands this function a non-empty slice whose every member is skipped, all three
+	// counters then read zero, and the default branch below reported True with "all 0 replicas have
+	// quota reserved" -- a condition claiming a guarantee over a set it just finished emptying.
+	//
+	// Unknown rather than False: no replica holds quota, but none is being refused any either.
+	if live == 0 {
+		ModelDeploymentConditionQuotaReserved.Unknown(holder, "AllReplicasTerminating", fmt.Sprintf(
+			"all %d replicas are terminating, so none holds quota to report on", len(pods)))
+
+		return nil
 	}
 
 	// The ClusterQueue is named after the InstanceType, so the queue a refusal points at is read

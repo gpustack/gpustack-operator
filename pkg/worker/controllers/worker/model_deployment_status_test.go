@@ -9,6 +9,7 @@ import (
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
@@ -242,6 +243,33 @@ func TestObserveModelDeploymentQuota_NoReplicas(t *testing.T) {
 	require.NoError(t, r.observeModelDeploymentQuota(context.Background(), md, nil, holder))
 	assert.True(t, ModelDeploymentConditionQuotaReserved.IsUnknown(holder))
 	assert.Equal(t, "NoReplicas", ModelDeploymentConditionQuotaReserved.GetReason(holder))
+}
+
+// TestObserveModelDeploymentQuota_AllReplicasTerminating separates the two emptinesses this
+// function can be handed. The test above covers an empty LIST; this one covers a non-empty list
+// whose every member is filtered out, which is what a recreate rollout or a scale-down produces.
+// The counters read zero either way, and the difference was invisible: the True branch reported
+// "all 0 replicas have quota reserved" — a guarantee over a set it had just finished emptying.
+func TestObserveModelDeploymentQuota_AllReplicasTerminating(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 2
+	})
+
+	pods := make([]core.Pod, 0, 2)
+	for i := int32(0); i < 2; i++ {
+		pod := readyReplica(md, i, true)
+		pod.DeletionTimestamp = ptr.To(meta.Now())
+		pods = append(pods, *pod)
+	}
+
+	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+	holder := new(workercore.ModelDeployment)
+	require.NoError(t, r.observeModelDeploymentQuota(context.Background(), md, pods, holder))
+
+	assert.True(t, ModelDeploymentConditionQuotaReserved.IsUnknown(holder))
+	assert.Equal(t, "AllReplicasTerminating",
+		ModelDeploymentConditionQuotaReserved.GetReason(holder))
+	assert.Contains(t, ModelDeploymentConditionQuotaReserved.GetMessage(holder), "all 2 replicas")
 }
 
 // TestSyncModelDeploymentStatus_RebuiltWholesale is F7's last acceptance, and the reason every
