@@ -527,6 +527,22 @@ func (r *ModelDeploymentReconciler) SetupController(_ context.Context, opts cont
 				}),
 			),
 		).
+		Owns(
+			// The Service is reconciled by this controller, so it has to be watched by it. Without
+			// this, an externally deleted or edited Service is corrected only when something else
+			// happens to wake the deployment, or at the next resync hours away: the endpoint stays
+			// broken while reconcile code that would realign it never runs.
+			//
+			// A watch is what makes the convergence level-based rather than a one-shot at creation.
+			// The gap does not show up in manual testing, because nobody deletes the Service by
+			// hand -- it shows up when something else in the cluster does.
+			&core.Service{},
+			ctrlbuilder.WithPredicates(
+				ctrlpredicate.NewPredicateFuncs(func(obj ctrlcli.Object) bool {
+					return systemmeta.MatchResource(obj, ModelDeploymentResourceType)
+				}),
+			),
+		).
 		Watches(
 			// A Binding's readiness is observed rather than declared, so the deployment has to be
 			// woken when it moves. Without this the transition would only be noticed at the next
