@@ -23,7 +23,12 @@ ceiling — and the missing half is enforcement downstream of the API, which is 
 
 The engine command line is the fastest-moving thing in the design, so it has a three-tier escape
 hatch — append, overlay, take over — guarded by two webhook rules that refuse a silent merge on a
-key the operator owns and keep the scheduling scalars out of the template. And because a flag being
+key the operator owns and keep the scheduling scalars out of the template. **Those tiers are not yet
+independent of the image, although the rest of this document reads as though they were:** all three
+are supplied under `template`, whose `image` the generated CRD marks required, so reaching for any
+one of them today means giving up the synthesized image. That is two advertised capabilities
+excluding each other at the API layer rather than one missing marker, and it is tracked in
+https://github.com/gpustack/gpustack-operator/issues/176. And because a flag being
 accepted proves nothing about it being in effect, `CacheAttached` is judged on each replica's own
 engine accounting for its store operations — never on the operator having rendered the flag, and
 never on a figure a whole shared tenant contributes to.
@@ -2317,7 +2322,7 @@ accepted bad spec is worse than a refusal.
 | `resources_partition_profile_only` | a card count plus a profile | accept |
 | `resources_partition_and_slice_together` | a profile plus a slice percentage | reject; one accelerator cannot serve both |
 | `resources_absent` | no resources block | accept — a CPU-only replica is legitimate |
-| `template_command` | `template.command` non-empty | accept; take-over |
+| `template_command` | `template.command` non-empty, **and no `template.image`** | accept; take-over. **THIS EXPECTATION FAILS TODAY, AND IT HAS NEVER BEEN EXECUTED** — case-45's twelve passing rows do not include it, and an expectation that never runs cannot go red when it becomes false, which is how it stayed wrong. `InstanceTemplate.Image` carries `+required`, so the generated CRD requires `roles[].template.image` and the schema refuses this manifest before the webhook sees it. Tracked in https://github.com/gpustack/gpustack-operator/issues/176, which must be fixed **before this spec's pull request merges**, while the API is still unreleased and the field numbers can be renumbered without reserving any. What does NOT close it: a take-over manifest that *does* name an image — it is accepted both before and after the fix, so it discriminates nothing |
 | `pool_ref_missing` | names no existing Binding | reject; the message names namespace + Binding |
 | `pool_ref_name_empty` | `poolRef: {name: ""}` | reject — **from the webhook**, because the field's type is upstream's `core.LocalObjectReference` and a `minLength` marker cannot be attached to a struct this API does not own. Every other required string gets its lower bound from the schema |
 | `pool_ref_cross_namespace` | a namespace supplied as an unknown field | rejected or pruned; assert the observed behaviour |
