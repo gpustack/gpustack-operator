@@ -242,6 +242,14 @@ func (s *server) getContainerAllocateResponse(
 	// Delegate to container runtime for device injection,
 	// use the driver indexes as ASCEND_VISIBLE_DEVICES value,
 	// do not support Atlas200I for now.
+	//
+	// ASCEND_RUNTIME_OPTIONS is deliberately left out, though the vendor's own plugin always writes
+	// it beside the visibility env. Its only two values are NODRV and VIRTUAL, and every read is a
+	// strings.Contains over a lookup that answers "" for an absent key -- so omitting it and setting
+	// the empty string the vendor sets for every non-vNPU allocation are the same input. Neither
+	// value applies here anyway: NODRV suppresses the driver mounts this injection depends on, and
+	// VIRTUAL selects the vendor's vNPU split, which this allocator does not use -- it slices
+	// through vcann-rt -- and which A5 does not support at all.
 	ctrResp := &deviceplugin.ContainerAllocateResponse{
 		Envs: map[string]string{
 			"ASCEND_VISIBLE_DEVICES": visible,
