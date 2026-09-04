@@ -88,20 +88,34 @@ The resulting semantics:
 reads the attached domain off this object alone. A wrong `blockSize` or `dtype` is silent cache
 pollution: writes succeed, reads succeed, and the tensors are wrong.
 
-**The domain is not enforced at the storage layer on any supported engine.** No supported engine
-passes a tenant to the cache client, so every deployment lands in the tenant named `default` whatever
-domain its Binding declares.
+**Whether the domain reaches the storage layer depends on the engine, and the answer is measured per
+engine version rather than stated here.** `SupportsTenant` and `TenantSupportSource` in
+`pkg/worker/kvcache/inject` carry it beside the version and source line it was read at.
 
-So two deployments on **two** Bindings do share one cache today. The semantics above are this API's;
-the enforcement is the engines', and it is not there yet. Treat a second Binding as a statement of
-intent and not as an isolation boundary — the same caveat
+At the versions this project ships, the vLLM family forwards no tenant — those deployments land in
+the tenant named `default` whatever their Binding declares — and SGLang forwards one, through
+`MOONCAKE_TENANT_ID`. That variable is operator-owned: supplying it is refused, because it is a
+second path to a value [the API already refuses](#the-reuse-domain-is-inherited).
+
+**"A tenant was injected" is not "the workload is isolated."** The operator records what it
+rendered, never what the container did with it: whether the build inside the image reads the value
+is not knowable at render time.
+
+So on an engine that forwards, treat a second Binding as a boundary the operator asked for, not one
+it verified. On one that does not, two deployments on **two** Bindings share one cache today. Either
+way the semantics are this API's and the enforcement is the engine's — the same caveat
 [KV Cache Pool](../kv-cache/pool.md#what-a-binding-does-not-do) states for capacity.
 
-> **Why it cannot be fixed here** — `tenant_id` is the 11th positional parameter of the store
-> client's `setup()`, and every supported engine calls `setup()` positionally with seven or eight
-> arguments. There is no environment fallback in the client and no engine config class carries the
-> key, so the parameter is past the cut and unreachable. A signature is not an interface until a
-> caller passes the argument.
+> **Why this page names no engine's answer** — an answer copied to a second place is a second
+> implementation of it: the copy and the table agree today and diverge on whichever release lands
+> next, with nothing failing in between. This page previously said no supported engine could receive
+> a tenant, reasoning that `tenant_id` is the 11th positional parameter of the store client's
+> `setup()` while every engine calls it positionally with seven or eight arguments. **That reasoning
+> is a counterfactual now.** It measured the C++ client and the positional overload, and SGLang
+> reaches the same parameter from a different direction — its Python layer reads
+> `MOONCAKE_TENANT_ID` and passes the value as a keyword argument. "The client reads no environment
+> variable" stayed true while "no tenant reaches the client" became false, because the measurement
+> point sat downstream of the path that actually carries it.
 
 ## The three override tiers
 
@@ -147,7 +161,7 @@ way to own it instead.
 **Defaulted** is the other case, and `MC_TE_METRIC` is the one that matters: the operator sets it to
 `1`, and a user's own value wins with no refusal. It turns on the transfer engine's metrics, without
 which the hit rate this design rests on cannot be measured at all. It is read by the transfer engine
-rather than by an engine's config class, which is why it is reachable where a tenant is not.
+rather than by an engine's config class, so it does not depend on which keys that class accepts.
 
 Two of SGLang's owned keys are owned for what a user entry would **destroy** rather than duplicate,
 and the operator does not set either of them:
