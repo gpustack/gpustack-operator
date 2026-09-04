@@ -15,6 +15,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
+	"gpustack.ai/gpustack/pkg/devicemanager/ascendproduct"
 	"gpustack.ai/gpustack/pkg/devicemanager/controllers"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -32,21 +33,21 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	// container-share seam, so it is built once and shared by them. Exclusive gets nil: it owns
 	// whole accelerators and must not touch the flag.
 	share := newShareDriver(logger)
-	// The A5 topology file is a node-level fact every mode injects alike, so one resolver is shared
-	// by all of them and the node is read once rather than once per server.
-	topo := newHcclTopoResolver(newTopoDriver(logger))
+	// The A5 product is a node-level fact every mode injects a topology file from alike, so one
+	// resolver is shared by all of them and the node is read once rather than once per server.
+	product := ascendproduct.NewResolver(newProductDriver(logger))
 
 	servers := []deviceplugin.Server{
-		newServer(logger, workercore.DeviceAllocationModeExclusive, nil, topo),
+		newServer(logger, workercore.DeviceAllocationModeExclusive, nil, product),
 	}
 	if !opts.NoShared {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeShared, share, topo),
+			newServer(logger, workercore.DeviceAllocationModeShared, share, product),
 		)
 	}
 	if !opts.NoSliced {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeSliced, share, topo),
+			newServer(logger, workercore.DeviceAllocationModeSliced, share, product),
 		)
 	}
 	// The visibility server co-allocates a container to the same physical NPU(s) its owner
@@ -55,7 +56,7 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	// wildcard — which is exactly what a device-cgroup grant needs (no vcann-rt
 	// logical-slicing artifacts).
 	servers = append(servers,
-		newServer(logger, workercore.DeviceAllocationModeVisibility, share, topo),
+		newServer(logger, workercore.DeviceAllocationModeVisibility, share, product),
 	)
 
 	return &aggregated{
@@ -108,16 +109,16 @@ type server struct {
 	// out. It is nil for exclusive alone, which owns whole accelerators and must not touch the flag.
 	share shareDriver
 
-	// topo names the A5 fabric topology file this node's accelerators describe themselves with.
-	// Every mode carries it, so unlike share it is never nil.
-	topo *hcclTopoResolver
+	// product is the A5 shape this node is, which names the fabric topology file its accelerators
+	// describe themselves with. Every mode carries it, so unlike share it is never nil.
+	product *ascendproduct.Resolver
 }
 
 func newServer(
 	logger klog.Logger,
 	mode workercore.DeviceAllocationMode,
 	share shareDriver,
-	topo *hcclTopoResolver,
+	product *ascendproduct.Resolver,
 ) deviceplugin.Server {
 	logger = logger.WithName(strings.ToLower(mode.String()))
 
@@ -128,8 +129,8 @@ func newServer(
 			AllocationMode: mode,
 			Reconciler:     controllers.Get[*deviceplugin.DevicesReconciler](),
 		},
-		share: share,
-		topo:  topo,
+		share:   share,
+		product: product,
 	}
 	s.Responder = s
 
@@ -183,14 +184,18 @@ func (s *server) setHcclTopoFilePath(resp *deviceplugin.ContainerAllocateRespons
 	}
 	cardID, deviceID := int32(accel.PhysicalIndexes[1]), int32(accel.PhysicalIndexes[2])
 
-	path, productType, err := s.topo.Resolve(cardID, deviceID)
-	switch {
-	case err != nil:
+	product, err := s.product.Resolve(cardID, deviceID)
+	if err != nil {
 		s.Logger.Error(err, "skipping the hccl topology file", "accelerator", accel.ID)
 		return
-	case path == "":
+	}
+	// A product the vendor ships no file for is an answer rather than a failure, so the code is
+	// logged: an empty shape leaves a reader nothing to look up, and the number is what the driver
+	// actually said.
+	path := hcclTopoFilePaths[product.Type]
+	if path == "" {
 		s.Logger.Info("skipping the hccl topology file, this product has none",
-			"accelerator", accel.ID, "productType", productType)
+			"accelerator", accel.ID, "productType", product.Type, "productCode", product.Code)
 		return
 	}
 

@@ -100,8 +100,8 @@ func newSlicedServerWithShare(share shareDriver) *server {
 			Manufacturer:   Manufacturer,
 			AllocationMode: workercore.DeviceAllocationModeSliced,
 		},
-		share: share,
-		topo:  newHcclTopoResolver(&fakeTopoDriver{}),
+		share:   share,
+		product: newFakeProductResolver(),
 	}
 }
 
@@ -352,8 +352,8 @@ func TestGetContainerAllocateResponse_VisibleDevicesPerFamily(t *testing.T) {
 						Manufacturer:   Manufacturer,
 						AllocationMode: mode,
 					},
-					share: &fakeShareDriver{enabled: map[[2]int32]bool{{3, 0}: true}},
-					topo:  newHcclTopoResolver(&fakeTopoDriver{}),
+					share:   &fakeShareDriver{enabled: map[[2]int32]bool{{3, 0}: true}},
+					product: newFakeProductResolver(),
 				}
 				devs := ascendDevicesFixture()
 				devs.Spec.Groups[0].Family = c.family
