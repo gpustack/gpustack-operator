@@ -630,6 +630,29 @@ func TestRenderModelDeploymentPod_SynthesizesTheImage(t *testing.T) {
 		assert.Contains(t, err.Error(), "has no runner backend",
 			"this one never resolves, so the message must name the manufacturer")
 	})
+
+	// THE FALLBACK IS WHAT MAKES THIS AN ERROR PATH RATHER THAN A DEFAULT. A Pod carrying no
+	// queue-name label is not queued by Kueue at all -- the kubelet runs it directly, charging no
+	// quota and passing none of the gates the chain applies. So an InstanceType that has not
+	// published its entrance yet has to stop the render, exactly as an uncomputed accelerator detail
+	// does, rather than yield a Pod that would run.
+	t.Run("an instance type with no published entrance refuses", func(t *testing.T) {
+		md := newRenderDeployment()
+		it := newRenderInstanceType(func(it *worker.InstanceType) {
+			it.Status.Entrance = ""
+		})
+
+		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			Deployment:   md,
+			Role:         &md.Spec.Roles[0],
+			InstanceType: it,
+		})
+		require.Error(t, err)
+		assert.Nil(t, pod, "no Pod may be returned, or a caller could create one with no queue")
+		assert.Contains(t, err.Error(), "publishes no queue entrance yet")
+		assert.Contains(t, err.Error(), "h20-8x",
+			"the message must name the instance type, since the field is two objects away")
+	})
 }
 
 // TestRenderModelDeploymentPod_ClientConfigMount pins where the rendered client configuration is
