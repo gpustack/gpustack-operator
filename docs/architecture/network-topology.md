@@ -219,8 +219,14 @@ where `fabric.domain` is present: a manufacturer that names a domain without siz
 in one domain reporting different sizes, publishes the domain alone rather than a count that depends
 on which card was read first.
 
-Unlike `rdma.capable`, these are add-only — a domain that disappears is not removed from the node, so
-a consumer that must not act on a stale domain reads `Devices`.
+Like `rdma.capable`, a key that stops being reported is **removed**, so a node taken out of its super
+pod loses the label rather than keeping a domain it has left.
+
+That removal is what forces the reduction over the **whole node** rather than one detect pass. A
+mixed-vendor node has one device-manager DaemonSet per manufacturer writing this one object, so a
+per-pass answer would claim the GPU is in the NPU's super pod, and the two passes would delete each
+other's key forever. A pass that cannot read the node's other manufacturers withholds nothing and
+leaves the labels as published.
 
 ## Reading it yourself
 
