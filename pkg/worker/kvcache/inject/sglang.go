@@ -63,14 +63,19 @@ const (
 //
 // It writes neither `mode` nor `local_buffer_size` in any spelling, and both omissions are measured
 // rather than overlooked: SGLang's reader has no key for either, and it hardcodes its own 16 MiB
-// buffer at each `setup()` call site, commented "Zero copy interface does not need local buffer"
-// (`mooncake_store.py:22,336,376`). Emitting either would write something nothing reads.
+// `DEFAULT_LOCAL_BUFFER_SIZE` on both of its store-setup paths - `setup_dummy` and `setup`, not two
+// calls to the same function - each commented "Zero copy interface does not need local buffer"
+// (v0.5.18 `mooncake_store.py:28,464,514`). Emitting either would write something nothing reads.
 //
-// `global_segment_size` IS written, because SGLang defaults it to "4gb" when absent
-// (`environ.py:298`) - the same trap vLLM has, so the same explicit zero. Note that SGLang divides the
-// configured value across tensor-parallel ranks before passing it on
-// (`mooncake_store.py:293-295,374`); zero divides to zero, but anyone rendering a non-zero value here
-// must account for the multiplication.
+// `global_segment_size` IS written, because SGLang defaults it to "4gb" when absent (v0.5.18
+// `environ.py:704`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`) - the same trap vLLM has, so the same explicit
+// zero. Note that SGLang divides the configured value across tensor-parallel ranks before passing it
+// on (v0.5.18 `mooncake_store.py:413,415-416`, `tp_scale_factor`); zero divides to zero, but anyone
+// rendering a non-zero value here must account for the multiplication.
+//
+// Each reference above carries its version and its symbol because the bare line numbers this comment
+// used to cite had every one of them drifted - that upstream file has since grown past 1300 lines -
+// and a stale line number survives review precisely because it looks checked.
 func renderSGLang(in Input) (*Result, error) {
 	if in.Role != RoleNone {
 		return nil, newRefusal(ReasonRoleUnsupported,
