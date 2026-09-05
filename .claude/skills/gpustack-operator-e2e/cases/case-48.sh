@@ -177,13 +177,18 @@ spec:
   quotaCeiling: 256Mi
 YAML
 )"
-# The empty guard is not decoration: `${x##*created*}` deletes the longest matching prefix, and
-# deleting anything from "" leaves "", so the -n test is FALSE on no output at all -- the value an
-# apply produces when kubectl itself could not run.
-if [ -z "$dead_out" ] || [ -n "${dead_out##*created*}" ]; then
+# THE CHECK COUNTS, IT DOES NOT MATCH A SUBSTRING, and over a multi-document manifest that is the
+# difference between a guard and a decoration. `kubectl apply` reports the three objects in ONE
+# stream, so a run where the backend was created and the pool was REFUSED still contains the word
+# "created" -- and every row below would then read a missing condition on an object nobody made,
+# which is the exact substitution the comment above says this guard prevents. Three objects, three
+# `created` lines, or nothing here has a subject.
+#   A count also carries the empty case for free: no output at all counts zero.
+dead_created="$(printf '%s\n' "$dead_out" | grep -c ' created$' || true)"
+if [ "${dead_created:-0}" -ne 3 ]; then
   record SKIP "the unreachable pool is admitted" \
-    "the three objects were not created, so nothing below has a broken subject to observe: \
-$(echo "${dead_out:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
+    "${dead_created:-0} of 3 objects were created, so nothing below has a broken subject to \
+observe: $(echo "${dead_out:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
   kvi_results "$CASE_ID"
   exit $?
 fi
