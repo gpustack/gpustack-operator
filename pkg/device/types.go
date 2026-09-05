@@ -22,6 +22,9 @@ type (
 	// Ethernet represents the Ethernet information of a device,
 	// including its name and PCI information.
 	Ethernet = workercore.DeviceEthernet
+	// Fabric represents the scale-up interconnect domain a device belongs to, including the
+	// domain's identity and this device's own addresses on it.
+	Fabric = workercore.DeviceFabric
 	// AcceleratorPhysicalSlicedProfile represents one hardware partition profile of a
 	// device model, such as an NVIDIA MIG profile.
 	AcceleratorPhysicalSlicedProfile = workercore.AcceleratorPhysicalSlicedProfile

@@ -1,9 +1,10 @@
 # Network Topology
 
-> **Purpose** — what the Device Manager records about the node's network interfaces, how an RDMA
-> link is verified, and which of those facts can reach a scheduling decision.
+> **Purpose** — what the Device Manager records about the node's network interfaces and its
+> accelerators' scale-up fabric, how an RDMA link is verified, and which of those facts can reach a
+> scheduling decision.
 > **Audience** contributors touching `pkg/devicemanager/detector`, operators debugging a missing
-> `rdma.capable` · **Prerequisites** [Device Discovery](device-discovery.md) · **Read time** ~7 min
+> `rdma.capable` · **Prerequisites** [Device Discovery](device-discovery.md) · **Read time** ~10 min
 
 ## Contents
 
@@ -11,6 +12,7 @@
 - [`pciRootId` is the outermost bridge; `pciSwitches` is the tighter fact](#pcirootid-is-the-outermost-bridge-pciswitches-is-the-tighter-fact)
 - [The RDMA link is checked, because a bound device is not a working link](#the-rdma-link-is-checked-because-a-bound-device-is-not-a-working-link)
 - [The three node labels, and what a label can carry](#the-three-node-labels-and-what-a-label-can-carry)
+- [The scale-up fabric is a second network, and a different shape](#the-scale-up-fabric-is-a-second-network-and-a-different-shape)
 - [Reading it yourself](#reading-it-yourself)
 
 ## The interface inventory
@@ -153,9 +155,82 @@ The `rdma.numa` set is joined with an **underscore**, not a comma: a comma is no
 character and it does not fail validation — the sanitizer every label value passes through drops it
 silently, so `{0,1}` would publish as `01` and read as node 01.
 
+## The scale-up fabric is a second network, and a different shape
+
+Everything above is the node's *Ethernet* view: interfaces the kernel enumerates, and RDMA over them.
+Beside it, several accelerator generations carry a **scale-up fabric** of their own — an interconnect
+over which accelerators address one another's memory directly, and which on the newest generations
+**spans machines**. That fabric is invisible to the interface inventory: it has no kernel interface,
+no PCI function of its own, and no IP.
+
+It is recorded per accelerator, in `spec.groups[].accelerators[].topology.fabric`:
+
+| Field | What it is |
+|---|---|
+| `kind` | the interconnect — `ub`, `nvlink` or `xgmi`. Part of every comparison: two ids from different interconnects share no namespace |
+| `id` | the domain's identity, **comparable across nodes** — which is the only reason publishing it is worth anything |
+| `type` | the domain's shape as a word (`pod-1d`, `server-8p`, `card-4p`) |
+| `cliqueId` | the subset that can actually address one another, where the domain is partitioned |
+| `memberCount` | how many members the domain reports |
+| `nodeIndex`, `rackId` | where this machine sits inside the domain, as the domain numbers them |
+| `endpoints` | this accelerator's own addresses on the fabric |
+
+> **Why per accelerator, when a domain plainly spans machines** — because it also **cross-cuts** a
+> machine. NVIDIA reports a clique per GPU and one node can hold several; AMD's hive id is likewise
+> read per GPU. A node- or group-level field would flatten that. The domain itself is a **derived
+> aggregation** — the accelerators sharing `kind` and `id` — which is the same rule the interface
+> inventory follows: publish comparable coordinates, never a stored cross-reference.
+
+**What each manufacturer publishes differs, and absence is not uniform.**
+
+| Manufacturer | Concept | What it reports | Recorded today |
+|---|---|---|---|
+| Ascend A5 (950) | super pod, over the UB fabric | domain id, shape, member count, server index, rack, per-accelerator endpoints | Yes |
+| NVIDIA | NVLink / MNNVL domain | fabric cluster uuid, clique id | No — the record is designed for it, the detector does not fill it |
+| AMD | XGMI hive | hive id | No — same |
+| Cambricon | MLU-Link | **no domain identity at all**, only per-link remote information | No — it describes an *edge list*, which this record cannot hold |
+
+**RoCE is unreadable on Ascend A5, by construction.** `topology.roce` is always absent there, and that
+is not a gap to fill: the dcmi V2 API that generation serves declares no device-IP and no
+device-gateway entry point, so the question cannot be asked. Its cross-machine addressing lives in
+the `endpoints` above instead.
+
+> **Why `endpoints` are published unparsed** — each is a UB endpoint identifier as 32 lowercase hex
+> characters, and every derived field a consumer wants (the function entity, the die, the port,
+> whether the endpoint carries device-to-device traffic) is a bit field *inside* those bytes. Parsing
+> them here would mean tracking a vendor bit layout that only the vendor may change, in an API that
+> cannot change with it. A consumer assembling a communication plan derives what it needs; this
+> record's job is to make sure it has the bytes to derive it from.
+
+**Two node labels**, alongside the three above:
+
+| Label | Value | For |
+|---|---|---|
+| `feature.gpustack.ai/fabric.domain` | `<kind>-<id>`, e.g. `ub-7` | a selector pinning "same domain" |
+| `feature.gpustack.ai/fabric.members` | the member count | informational |
+
+The kind is inside the **value**, not just the key, because a bare `7` could name an Ascend super pod
+and an AMD hive alike. `fabric.domain` is withheld unless **every** accelerator on the node reports
+the same domain: a node whose accelerators sit in different domains has no single answer, and
+publishing one of them would advertise co-location the hardware does not offer.
+
+`fabric.members` needs that and a nonzero count as well, so it can be absent where `fabric.domain` is
+present: a manufacturer that names a domain without sizing it publishes the domain alone rather than
+a membership of zero.
+
+Unlike `rdma.capable`, these are add-only — a domain that disappears is not removed from the node, so
+a consumer that must not act on a stale domain reads `Devices`.
+
 ## Reading it yourself
 
 ```bash
+# the fabric domain of every accelerator on one node
+kubectl get devices <node> -o json |
+  jq '[.spec.groups[].accelerators[] | {id, fabric: .topology.fabric}]'
+
+# which nodes are in one Ascend super pod
+kubectl get nodes -l feature.gpustack.ai/fabric.domain=ub-7
+
 # the inventory and every link verdict, for one node
 kubectl get devices <node> -o jsonpath='{.spec.interfaces}' | jq
 

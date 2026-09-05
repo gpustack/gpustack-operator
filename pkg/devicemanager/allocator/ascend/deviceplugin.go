@@ -263,10 +263,10 @@ func (s *server) getContainerAllocateResponse(
 	return ctrResp, nil
 }
 
-// family950 is the family the detector gives every A5 soc: their names are an open set
-// (Ascend950PR, Ascend950DT) that it collapses onto one family by prefix. A5 is the generation
-// serving the dcmi V2 API, and the only one whose visibility env is numbered differently.
-const family950 = "950"
+// family950 is the A5 family, which is the generation serving the dcmi V2 API and the only one
+// whose visibility env is numbered differently. It is the shared package's constant, aliased here
+// because this file reads it on nearly every line.
+const family950 = ascendproduct.Family
 
 // physicalIndex returns the dcmi physical id the detector recorded in an accelerator's
 // PhysicalIndexes, which is the number vcann-rt keys its quota config by, as the vendored dsmi patch

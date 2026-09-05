@@ -538,6 +538,13 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		Spec: func() nfd.NodeFeatureSpec {
 			nfs := nfd.NewNodeFeatureSpec()
 			nfs.Labels = nodefeature.ConstructAcceleratableNodeLabels(eGroups)
+			// Taken from this pass's own accelerators rather than the node-wide set the RDMA
+			// distance uses: a fabric domain is a property of the accelerators that reported it,
+			// and folding in another manufacturer's would make one node's domain depend on which
+			// pass ran last.
+			for k, v := range nodefeature.ConstructFabricNodeLabels(eGroups) {
+				nfs.Labels[k] = v
+			}
 			// Only when this pass enumerated. A failed read must leave whatever was published
 			// before it standing: emitting nothing here, combined with the stale-key removal
 			// below, would withhold the RDMA labels on the strength of a read that never

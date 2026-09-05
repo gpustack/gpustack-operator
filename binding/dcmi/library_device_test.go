@@ -112,6 +112,8 @@ var (
 	_ func(Device, Device) (int32, Return)                        = Device.GetTopoInfo
 	_ func(Device) (SpodInfo, Return)                             = Device.GetSuperPodInfo
 	_ func(Device) (uint32, Return)                               = Device.GetMainboardId
+	_ func(Device) (uint32, Return)                               = Device.GetUrmaDeviceCount
+	_ func(Device, uint32) ([]UrmaEidInfo, Return)                = Device.GetEidList
 	_ func(Device, PortType, int32) (IpAddr, IpAddr, Return)      = Device.GetIp
 	_ func(Device, PortType, int32) (IpAddr, Return)              = Device.GetGateway
 	_ func(Device) (VDeviceInfo, Return)                          = Device.GetVDeviceInfo

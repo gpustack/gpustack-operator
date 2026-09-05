@@ -574,6 +574,60 @@ func (l Device) GetMainboardId() (uint32, Return) {
 	return mainboardId, ret
 }
 
+// eidNumMax caps the endpoint identifiers one urma device can report, and is the buffer
+// GetEidList hands the driver. It is the vendor's own limit for the same call.
+const eidNumMax = 32
+
+// GetUrmaDeviceCount retrieves how many urma devices -- the UB fabric's function entities -- this
+// device exposes. It is the count GetEidList's index runs over.
+//
+// V2-only, like GetMainboardId: the UB fabric is an A5 construct and no older generation declares
+// the query.
+func (l Device) GetUrmaDeviceCount() (uint32, Return) {
+	devId, ret := l.devID()
+	if !ret.IsSuccess() {
+		return 0, ret
+	}
+
+	var count uint32
+	ret = Return(dcmiv2GetUrmaDeviceCnt(devId, &count))
+
+	return count, ret
+}
+
+// GetEidList retrieves the endpoint identifiers one urma device answers to, addressed by an index
+// below GetUrmaDeviceCount.
+//
+// An EID is this accelerator's address on the UB fabric, and its 16 bytes are the whole of it: the
+// function entity, the die, the port and whether the endpoint serves device-to-device traffic are
+// all bit fields inside them. So the bytes travel out unparsed -- a caller that needs any of those
+// derives it, rather than this binding tracking a vendor bit layout.
+//
+// The driver's count parameter is IN-OUT: it is handed the buffer's capacity and writes back how
+// many entries it filled. A count exceeding what was offered is refused rather than trusted, since
+// following it would read past the buffer.
+//
+// V2-only, like GetUrmaDeviceCount.
+func (l Device) GetEidList(devIndex uint32) ([]UrmaEidInfo, Return) {
+	devId, ret := l.devID()
+	if !ret.IsSuccess() {
+		return nil, ret
+	}
+
+	// UrmaEidInfo carries no Go pointer, so handing the array's address to the driver is safe under
+	// the runtime's pointer check.
+	var list [eidNumMax]UrmaEidInfo
+	count := uint32(len(list))
+	if ret := Return(dcmiv2GetEidListByUrmaDevIndex(devId, devIndex, &list[0], &count)); !ret.IsSuccess() {
+		return nil, ret
+	}
+	if count > uint32(len(list)) {
+		return nil, ERROR_INVALID_PARAMETER
+	}
+
+	return list[:count:count], SUCCESS
+}
+
 func (ipAddr IpAddr) String() string {
 	if ipAddr.Ip_type == IPADDR_TYPE_V4 {
 		return fmt.Sprintf("%d.%d.%d.%d", ipAddr.U_addr[0], ipAddr.U_addr[1], ipAddr.U_addr[2], ipAddr.U_addr[3])
