@@ -38,6 +38,22 @@ const (
 	// modelDeploymentEventRuntimeVersionSkew reports a pool whose nodes do not agree on an
 	// accelerator runtime version, which is what a driver rollout looks like while it runs.
 	modelDeploymentEventRuntimeVersionSkew = "RuntimeVersionSkew"
+
+	// modelDeploymentEventRenderFailed reports a pass that could not build a replica at all.
+	//
+	// It exists because that failure has no other reader-visible home. Rendering aborts the pass
+	// before any status is written, so the object keeps whatever it said last -- Phase=Starting with
+	// "no replica has been created yet" -- and none of the conditions names the cause. Some of these
+	// are permanent: a manufacturer with no runner backend, or an engine family with no published
+	// variant, never resolves however long the controller retries, and the deployment would sit in a
+	// state that reads like a slow start forever.
+	//
+	// Admission cannot take this one instead. The check needs the InstanceType's OBSERVED detail,
+	// and the ModelDeployment webhook holds no client by design.
+	//
+	// Repeats aggregate into one Event with a count rather than a stream, which is what keeps a
+	// per-pass emission readable.
+	modelDeploymentEventRenderFailed = "RenderFailed"
 )
 
 // modelDeploymentReplicaDeparture is one replica that has stopped serving from the cache it shared,

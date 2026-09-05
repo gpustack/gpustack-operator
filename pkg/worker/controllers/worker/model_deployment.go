@@ -191,9 +191,12 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	desired, err := r.renderModelDeploymentPods(ctx, md, connection)
 	if err != nil {
 		// A render failure is the InstanceType not being ready, or a role the renderer cannot build
-		// a container from. Both are visible to the reader through the controller's own retry, and
-		// the second cannot be reached at all without bypassing admission.
+		// a container from. The pass aborts before any status is written, so an Event is the only
+		// place the cause reaches a reader: the conditions still say "no replica has been created
+		// yet", which describes a slow start and a permanent failure identically.
+		r.Recorder.Event(md, core.EventTypeWarning, modelDeploymentEventRenderFailed, err.Error())
 		logger.Error(err, "render replicas")
+
 		return ctrl.Result{}, err
 	}
 

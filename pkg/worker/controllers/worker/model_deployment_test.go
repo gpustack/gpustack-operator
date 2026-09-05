@@ -387,6 +387,40 @@ func TestModelDeploymentReconciler_MissingInstanceTypeIsRetried(t *testing.T) {
 	assert.Empty(t, replicaNames(t, cli), "and nothing is rendered in the meantime")
 }
 
+// TestModelDeploymentReconciler_RenderFailureIsEventedNotOnlyLogged covers the one reader-visible
+// home a render failure has.
+//
+// Rendering aborts the pass before any status is written, so the object keeps saying what it said
+// last -- Phase=Starting, "no replica has been created yet" -- and none of its conditions names the
+// cause. That description fits a slow start and a PERMANENT failure identically, and some of these
+// are permanent: a manufacturer with no runner backend never resolves however long the controller
+// retries. Without the Event the cause exists only in the controller's own logs.
+func TestModelDeploymentReconciler_RenderFailureIsEventedNotOnlyLogged(t *testing.T) {
+	// A role naming no image, against an InstanceType whose detail cannot synthesize one.
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Template.Image = ""
+	})
+	// The PERMANENT shape deliberately, not the transient one: a manufacturer with no runner backend
+	// never resolves, so this is the case a retry cannot fix and a reader has to be told about.
+	it := newRenderInstanceType(func(it *worker.InstanceType) {
+		it.Status.Detail.Manufacturer = "cambricon" // no runner backend, and never will resolve
+	})
+	recorder := ctrlrecord.NewFakeRecorder(64)
+
+	_, err := reconcileModelDeploymentWith(t, &ModelDeploymentReconciler{
+		Client:    newModelDeploymentClient(md, it),
+		APIReader: newModelDeploymentClient(md, it),
+		Recorder:  recorder,
+	})
+	require.Error(t, err)
+
+	events := drainEvents(recorder)
+	require.Len(t, events, 1, "exactly one Event, so repeats aggregate rather than stream")
+	assert.Contains(t, events[0], "Warning "+modelDeploymentEventRenderFailed)
+	assert.Contains(t, events[0], "has no runner backend",
+		"the Event carries the renderer's own message: a reason without the cause sends nobody anywhere")
+}
+
 func boolPtr(b bool) *bool { return &b }
 
 // TestMapModelDeploymentInstanceType covers the watch that keeps a synthesized image current.
