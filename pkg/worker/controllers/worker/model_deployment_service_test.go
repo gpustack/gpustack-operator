@@ -171,6 +171,18 @@ func TestAlignModelDeploymentService(t *testing.T) {
 			wantChanged: true,
 		},
 		{
+			// REACHABLE ONLY SINCE THIS CONTROLLER WATCHES THE SERVICE: before that, an edit to the
+			// type sat until something else woke the deployment. Now the edit wakes it, and a pass
+			// that corrected the selector and the ports while leaving the type would be a wake-up
+			// that observed the drift and fixed everything except it.
+			name: "the type was edited by hand",
+			mutate: func(svc *core.Service) {
+				svc.Spec.Type = core.ServiceTypeNodePort
+				svc.Spec.Ports[0].NodePort = 31234
+			},
+			wantChanged: true,
+		},
+		{
 			// The API server fills these in and this operator never renders them, so noticing them
 			// would rewrite the Service forever.
 			name: "the fields the API server owns",
@@ -198,6 +210,10 @@ func TestAlignModelDeploymentService(t *testing.T) {
 			if tc.wantChanged {
 				assert.Equal(t, expected.Spec.Ports, actual.Spec.Ports)
 				assert.Equal(t, expected.Spec.Selector, actual.Spec.Selector)
+				// Asserted with the rest: a corrected type that kept the assigned nodePort is a
+				// Service the API server refuses, so the two have to move together.
+				assert.Equal(t, expected.Spec.Type, actual.Spec.Type)
+				assert.Zero(t, actual.Spec.Ports[0].NodePort)
 			}
 		})
 	}

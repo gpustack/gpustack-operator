@@ -101,6 +101,21 @@ func alignModelDeploymentService(actual, expected *core.Service) (changed bool) 
 		changed = true
 	}
 
+	// THE TYPE IS CONVERGED TOO, and it became reachable when this controller began watching the
+	// Service: an out-of-band edit to NodePort or LoadBalancer now wakes this reconciler, and
+	// leaving the type alone would mean the wake-up observed the drift and corrected everything
+	// except it. A deployment's front door is a ClusterIP by design -- exposing every replica set on
+	// a node port is a decision this operator does not make on a user's behalf.
+	//
+	// The ports are replaced along with it rather than compared: moving away from NodePort has to
+	// drop the `nodePort` the API server assigned, and the port comparison above deliberately
+	// ignores that field, so it would not notice.
+	if actual.Spec.Type != expected.Spec.Type {
+		actual.Spec.Type = expected.Spec.Type
+		actual.Spec.Ports = expected.Spec.Ports
+		changed = true
+	}
+
 	return changed
 }
 
