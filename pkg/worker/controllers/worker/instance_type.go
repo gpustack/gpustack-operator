@@ -552,6 +552,14 @@ func poolAcceleratorRuntimeVersions(devices []workercore.Devices, acceleratorKey
 			if !acceleratorGroupMatches(g.Manufacturer, g.ID, acceleratorKey) || g.RuntimeVersion == "" {
 				continue
 			}
+			// A string that is not a version is dropped on the same grounds as an empty one: a
+			// non-version is not a version present. Nothing upstream guarantees the shape --
+			// device.NormalizeVersion passes a segment it cannot parse through unchanged -- so a
+			// node reporting "N/A" would otherwise fold to 0.0 and become this pool's published
+			// minimum, silently choosing the image for every replica on it.
+			if _, _, ok := splitRuntimeVersion(g.RuntimeVersion); !ok {
+				continue
+			}
 			versions = append(versions, g.RuntimeVersion)
 		}
 	}
@@ -569,11 +577,12 @@ func poolAcceleratorRuntimeVersions(devices []workercore.Devices, acceleratorKey
 // Any pool spanning a single-digit and a double-digit major would pick the wrong minimum.
 //
 // The detectors normalize every version through device.NormalizeVersion, whose output is
-// "major.minor" - or the original string when it has no minor part. A segment that does not parse
-// counts as zero, which is the correct reading of "9" and the only defined one for anything else.
+// "major.minor" - or the original string when it has no minor part. A missing MINOR counts as zero,
+// which is the correct reading of "9". A major that does not parse is not given a reading here: it
+// never reaches this comparator, because the collection above drops it.
 func compareRuntimeVersions(a, b string) int {
-	aMajor, aMinor := splitRuntimeVersion(a)
-	bMajor, bMinor := splitRuntimeVersion(b)
+	aMajor, aMinor, _ := splitRuntimeVersion(a)
+	bMajor, bMinor, _ := splitRuntimeVersion(b)
 	if c := cmp.Compare(aMajor, bMajor); c != 0 {
 		return c
 	}
@@ -582,12 +591,26 @@ func compareRuntimeVersions(a, b string) int {
 }
 
 // splitRuntimeVersion splits a "major.minor" runtime version into its two numeric parts.
-func splitRuntimeVersion(v string) (int, int) {
-	majorStr, minorStr, _ := strings.Cut(v, ".")
-	major, _ := strconvx.Atoi[int](majorStr)
-	minor, _ := strconvx.Atoi[int](minorStr)
+// ok is false when a segment that is PRESENT does not parse, and an ABSENT minor is not that case.
+// "9" is version 9.0 and belongs in the list; "N/A" and "12.x" are not versions at all, and folding
+// either to a number would sort it against real versions, publish it as the pool-wide minimum this
+// type reports, and let de-duplication return a list of length one -- garbage wearing the shape of
+// agreement. Only the non-versions are excluded, and they are excluded where versions are collected.
+func splitRuntimeVersion(v string) (major, minor int, ok bool) {
+	majorStr, minorStr, hasMinor := strings.Cut(v, ".")
+	major, err := strconvx.Atoi[int](majorStr)
+	if err != nil {
+		return 0, 0, false
+	}
+	if !hasMinor {
+		return major, 0, true
+	}
+	minor, err = strconvx.Atoi[int](minorStr)
+	if err != nil {
+		return 0, 0, false
+	}
 
-	return major, minor
+	return major, minor, true
 }
 
 // instanceTypeScheduleLabels builds the schedule discriminator labels stamped on the backing

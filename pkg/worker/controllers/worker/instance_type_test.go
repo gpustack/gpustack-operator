@@ -1749,6 +1749,31 @@ func TestPoolAcceleratorRuntimeVersions(t *testing.T) {
 			why:  "the empty accumulator doubles as the sentinel, so this claim is order-sensitive",
 		},
 		{
+			// A NON-VERSION IS NOT A VERSION PRESENT, and this is the case that separates the two
+			// readings folded into "a segment that does not parse counts as zero". A missing MINOR
+			// really is zero -- "9" is 9.0. A major that does not parse is not a low version, and
+			// treating it as 0.0 would sort it first, publish it as the pool-wide minimum, and let
+			// de-duplication return a single entry: garbage wearing the shape of agreement.
+			name: "a version that does not parse is dropped, not read as zero",
+			devices: []workercore.Devices{
+				nodeDevicesRuntime("a", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "N/A")),
+				nodeDevicesRuntime("b", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "12.9")),
+			},
+			want: []string{"12.9"},
+			why:  "nothing upstream guarantees the shape: NormalizeVersion passes it through unchanged",
+		},
+		{
+			// The reversed order, for the reason the blank pair above gives: with the good version
+			// first, a dropped filter is what overwrites a real answer with a non-answer.
+			name: "a version that does not parse arriving last does not become the minimum",
+			devices: []workercore.Devices{
+				nodeDevicesRuntime("a", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "12.9")),
+				nodeDevicesRuntime("b", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "12.x")),
+			},
+			want: []string{"12.9"},
+			why:  "a partly-numeric string is the dangerous shape: it looks like a version",
+		},
+		{
 			name: "no matching group observes nothing",
 			devices: []workercore.Devices{
 				nodeDevicesRuntime("a", runtimeGroup(nodefeature.ManufacturerNVIDIA, "l4", "12.9")),
