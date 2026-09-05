@@ -280,6 +280,65 @@ if [ "${FILL:-0}" -lt 1 ] && [ "$REQ" -gt 0 ] && [ "$QUOTA" -gt 0 ]; then
   FILL=0
 fi
 
+# THE WINDOW IS THE EXPERIMENT: one role must fit in what is left and two must not, or the headline
+# rows below pass with atomicity doing nothing at all. That window is NOT asserted, because it cannot
+# fail -- with FILL = floor(QUOTA/REQ) - 1, REMAIN is QUOTA - FILL*REQ = REQ + (QUOTA mod REQ), which
+# is in [REQ, 2*REQ) whenever FILL >= 1 by construction. Asserting it would be checking this script's
+# arithmetic while presenting itself as a discriminator.
+#
+# Two things CAN break the experiment, and both are about whether occupying `nominalQuota` really
+# makes the pool short:
+#
+#   Borrowing. A queue in a cohort draws on another queue's unused quota, so the filler holding this
+#   one's nominal amount leaves the subject admissible anyway.
+#
+#   A second flavor. Quota is scoped PER FLAVOR and each PodSet picks its own, so on a multi-flavor
+#   pool the filler can saturate one flavor while the subject is admitted from another. REMAIN then
+#   describes one flavor rather than the pool.
+#
+# Either one makes the headline rows below FAIL against a correct implementation, for a cause this
+# case never looked at. THEY ARE CHECKED BEFORE THE FILLER IS APPLIED: finding out afterwards means
+# occupying the pool for an experiment that is then abandoned, and recording a PASS for a filler
+# whose purpose has already evaporated.
+if [ "$FILL" -ge 1 ]; then
+  # BOTH COHORT SPELLINGS ARE READ. The bundled CRD serves v1beta1 and v1beta2, and the field is
+  # `spec.cohort` in the first and `spec.cohortName` in the second. `kubectl get` returns whichever
+  # version is served, so asking for one spelling alone yields "" on the other -- indistinguishable
+  # from a queue that genuinely has no cohort, which would record PASS exactly when borrowing IS
+  # possible. Only one of the two can be set, so concatenating them is the value.
+  #
+  # The apiVersion is read beside them so the pair is falsifiable: a third spelling in some later
+  # version would otherwise read as "no cohort" here forever, which is the same silent failure one
+  # layer up.
+  PRE_RAW="$(kubectl get clusterqueue "$CQ" \
+    -o jsonpath='{.apiVersion}|{.spec.cohort}{.spec.cohortName}|{range .spec.resourceGroups[*].flavors[*]}{.name}{" "}{end}' 2>/dev/null)"
+  PRE_VER="${PRE_RAW%%|*}"
+  PRE_REST="${PRE_RAW#*|}"
+  PRE_COHORT="${PRE_REST%%|*}"
+  PRE_FLAVORS="$(printf '%s' "${PRE_REST#*|}" | wc -w | tr -d ' ')"
+
+  if [ -z "$PRE_RAW" ]; then
+    record SKIP "the shortage cannot be relieved by borrowing or by another flavor" \
+      "could not read cluster queue '${CQ}'"
+    FILL=0
+  elif [ "$PRE_VER" != "kueue.x-k8s.io/v1beta1" ] && [ "$PRE_VER" != "kueue.x-k8s.io/v1beta2" ]; then
+    record SKIP "the shortage cannot be relieved by borrowing or by another flavor" \
+      "cluster queue '${CQ}' is served as '${PRE_VER}', whose cohort field this case does not know how to read"
+    FILL=0
+  elif [ -n "$PRE_COHORT" ]; then
+    record SKIP "the shortage cannot be relieved by borrowing or by another flavor" \
+      "cluster queue '${CQ}' is in cohort '${PRE_COHORT}', so occupying its nominalQuota does not make the pool short"
+    FILL=0
+  elif [ "$PRE_FLAVORS" != 1 ]; then
+    record SKIP "the shortage cannot be relieved by borrowing or by another flavor" \
+      "cluster queue '${CQ}' offers ${PRE_FLAVORS} flavors and quota is per flavor, so a filler on one leaves the other free"
+    FILL=0
+  else
+    record PASS "the shortage cannot be relieved by borrowing or by another flavor" \
+      "cluster queue '${CQ}' (${PRE_VER}) is in no cohort and offers one flavor, so ${REMAIN}m against a ${REQ}m role is the whole story"
+  fi
+fi
+
 if [ "$FILL" -ge 1 ]; then
   apply_md case50-filler "$(role_block bulk '' "$FILL")"
 
@@ -291,34 +350,6 @@ if [ "$FILL" -ge 1 ]; then
   else
     record PASS "the filler occupies the pool" \
       "${FILL} replica(s) of ${REQ}m hold ${QUOTA}m minus ${REMAIN}m"
-  fi
-fi
-
-# THE WINDOW IS THE EXPERIMENT: one role must fit in what is left and two must not, or the headline
-# row below passes with atomicity doing nothing at all. That window is NOT asserted here, because it
-# cannot fail -- with FILL = floor(QUOTA/REQ) - 1, REMAIN is QUOTA - FILL*REQ = REQ + (QUOTA mod REQ),
-# which is in [REQ, 2*REQ) whenever FILL >= 1 by construction. A row checking it would be checking
-# this script's arithmetic while presenting itself as a discriminator, and the filler row above
-# already reports the numbers.
-#
-# What CAN break the experiment is borrowing. The filler occupies this queue's nominalQuota, but a
-# queue in a cohort can borrow another's unused quota, so the pool is not actually short and the
-# headline rows below would FAIL for a reason this case never detected. That is the real
-# precondition, and it is the one asserted.
-if [ "$FILL" -ge 1 ]; then
-  COHORT_RAW="$(kubectl get clusterqueue "$CQ" \
-    -o jsonpath='{.metadata.name}={.spec.cohortName}' 2>/dev/null)"
-  if [ -z "$COHORT_RAW" ]; then
-    record SKIP "the shortage cannot be relieved by borrowing" \
-      "could not read cluster queue '${CQ}' to check for a cohort"
-    FILL=0
-  elif [ "${COHORT_RAW#*=}" != "" ]; then
-    record SKIP "the shortage cannot be relieved by borrowing" \
-      "cluster queue '${CQ}' is in cohort '${COHORT_RAW#*=}', so occupying its nominalQuota does not make the pool short"
-    FILL=0
-  else
-    record PASS "the shortage cannot be relieved by borrowing" \
-      "cluster queue '${CQ}' is in no cohort, so ${REMAIN}m against a ${REQ}m role is the whole story"
   fi
 fi
 
@@ -386,6 +417,39 @@ $(role_block decode decode 1)"
     record FAIL "the role that would have fit is gated too" \
       "ungated replicas by role: ${UNGATED}- this is the per-role admission the group exists to prevent"
   fi
+
+  # THE OPERATOR'S OWN ACCOUNT OF THE SHORTAGE, which is a different subject from the two rows above.
+  # Those read Kueue's Workload and the kubelet's gates -- state Kueue owns. This reads what
+  # observeModelDeploymentQuota wrote onto the ModelDeployment, and a regression that stopped
+  # reporting the wait entirely would leave both rows above green.
+  #
+  # Polled rather than sampled, because the condition is written by a reconcile that follows the
+  # admission decision rather than accompanying it.
+  QR=""
+  for _ in $(seq 1 10); do
+    QR="$(kubectl -n "$NS" get modeldeployments.worker.gpustack.ai case50-subject \
+      -o jsonpath='{range .status.conditions[?(@.type=="QuotaReserved")]}{.status}|{.reason}|{.message}{end}' 2>/dev/null)"
+    case "$QR" in False\|Pending\|*) break ;; esac
+    sleep 3
+  done
+  case "$QR" in
+    False\|Pending\|*"$CQ"*)
+      record PASS "the deployment reports the wait, naming the queue" \
+        "QuotaReserved=False reason=Pending naming ${CQ}"
+      ;;
+    False\|Pending\|*)
+      record FAIL "the deployment reports the wait, naming the queue" \
+        "QuotaReserved=False reason=Pending but the message does not name ${CQ}: ${QR}"
+      ;;
+    "")
+      record FAIL "the deployment reports the wait, naming the queue" \
+        "no QuotaReserved condition was written at all while the group sat unadmitted"
+      ;;
+    *)
+      record FAIL "the deployment reports the wait, naming the queue" \
+        "expected False/Pending while the pool is short, got: ${QR}"
+      ;;
+  esac
 
   # --- releasing the pool admits the WHOLE group ---
 

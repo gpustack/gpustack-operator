@@ -82,10 +82,31 @@ fi
 # Delete a wedged group by hand. Deleting the Workload is what releases Kueue's finalizer on the
 # replicas, so this is the escape a teardown that fails the deletion row below leaves behind.
 force_release() {
-  local md="$1" wl
-  wl="$(group_workload "$md")"
-  [ -n "$wl" ] && kubectl -n "$NS" delete workloads.kueue.x-k8s.io "$wl" \
-    --ignore-not-found --wait=false >/dev/null 2>&1
+  # EVERY owned Workload, not the first one found. group_workload returns one because the property
+  # under test is that Kueue composes exactly one -- so reusing it here would make the cleanup assume
+  # the very thing this case exists to check. On the regression where four replicas each get their
+  # own Workload, deleting one leaves three holding Kueue finalizers on their Pods, and the leak
+  # contaminates every case that runs after this one.
+  local md="$1" row wl uids u
+  uids="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${md}" \
+    -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}' 2>/dev/null)"
+  [ -n "$uids" ] || return 0
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    wl="${row%%=*}"
+    for u in $uids; do
+      case " ${row#*=} " in
+        *" $u "*)
+          kubectl -n "$NS" delete workloads.kueue.x-k8s.io "$wl" \
+            --ignore-not-found --wait=false >/dev/null 2>&1
+          break
+          ;;
+      esac
+    done
+  done <<EOF
+$(kubectl -n "$NS" get workloads.kueue.x-k8s.io \
+  -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.ownerReferences[*].uid}{"\n"}{end}' 2>/dev/null)
+EOF
 
   return 0
 }

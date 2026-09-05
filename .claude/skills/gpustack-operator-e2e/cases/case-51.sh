@@ -178,19 +178,22 @@ refuses "two roles sharing a name are refused BY THE SCHEMA" \
     instanceType: ${IT}
     replicas: 1"
 
-if [ -n "$IT2" ]; then
-  refuses "two instanceTypes are refused, pointing at acceleratorKey" \
-    "acceleratorKey" \
-    "  - name: prefill
+# NO SECOND InstanceType HAS TO EXIST. This rule is answered from the submitted object alone --
+# validateModelDeploymentRoleInstanceTypes only compares the strings in spec.roles -- and validate()
+# runs it BEFORE any rule that reads the cluster, returning early when it speaks. So a name that
+# resolves to nothing still exercises exactly this refusal, and gating the row on a second real
+# InstanceType left it untested on the single-type cluster this PR was developed against.
+#
+# The second name is used when the cluster has one, because a row that refuses a real pair is the
+# stronger evidence; the synthetic name is the fallback rather than the default.
+refuses "two instanceTypes are refused, pointing at acceleratorKey" \
+  "acceleratorKey" \
+  "  - name: prefill
     instanceType: ${IT}
     replicas: 1
   - name: decode
-    instanceType: ${IT2}
+    instanceType: ${IT2:-case51-no-such-instance-type}
     replicas: 1"
-else
-  record SKIP "two instanceTypes are refused, pointing at acceleratorKey" \
-    "this cluster materialized one InstanceType, and a second name that resolves to nothing would be refused by the controller rather than by the rule under test"
-fi
 
 refuses "kind: server beside another kind is refused" \
   "cannot be combined with another kind" \
