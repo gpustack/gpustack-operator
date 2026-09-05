@@ -996,3 +996,100 @@ func TestInstanceReconciler_RebuildsAdmissionRejectedPod(t *testing.T) {
 		assert.Nil(t, pod.DeletionTimestamp, "a non-admission failure must not trigger a rebuild")
 	})
 }
+
+// TestPartitionProfileMemoryPercent pins the boundaries of the VRAM-anchored percentage, which two
+// callers now share: the Instance webhook, which defaults the values onto the object, and the
+// ModelDeployment renderer, which derives them at render time.
+//
+// THE TRUNCATION IS PINNED RATHER THAN FIXED, and the distinction is the reason this test exists.
+// The division is integer, so a profile holding 49.9% of a card sizes its host resources as 49% --
+// a bounded under-size of up to one percentage point. That behavior predates this package: the
+// same expression shipped in the Instance webhook, and this PR moved it into one helper so a second
+// caller could not drift from it. Changing the arithmetic here would silently resize every existing
+// Instance, so it is recorded as behavior and left to a change that owns that consequence.
+//
+// The floor and the ceiling are not decoration either: a profile smaller than 1% of a card must
+// still get a positive share, and a profile the detail reports as larger than the card must not
+// produce a request above the whole of it.
+func TestPartitionProfileMemoryPercent(t *testing.T) {
+	testCases := []struct {
+		name         string
+		cardMemory   string
+		profileMib   int64
+		profile      string
+		wantPct      int64
+		wantSizeable bool
+		why          string
+	}{
+		{
+			name: "not a partition request at all", cardMemory: "80Gi", profile: "",
+			wantPct: 0, wantSizeable: true,
+			why: "an empty profile is a whole-card request, which this helper does not size",
+		},
+		{
+			name: "an exact half", cardMemory: "80Gi", profile: "3g.40gb", profileMib: 40 << 10,
+			wantPct: 50, wantSizeable: true,
+		},
+		{
+			name:       "a share that does not divide evenly truncates DOWN",
+			cardMemory: "80Gi", profile: "odd", profileMib: 40911,
+			wantPct: 49, wantSizeable: true,
+			why: "40911/81920 is 49.94%, and integer division floors it to 49 rather than rounding",
+		},
+		{
+			name:       "a share below one percent is floored to one, not to zero",
+			cardMemory: "80Gi", profile: "tiny", profileMib: 100,
+			wantPct: 1, wantSizeable: true,
+			why: "0.12% would truncate to 0, and a replica asking for 0% of the host is unschedulable",
+		},
+		{
+			name:       "a profile larger than its card is capped at the whole card",
+			cardMemory: "40Gi", profile: "impossible", profileMib: 80 << 10,
+			wantPct: 100, wantSizeable: true,
+			why: "a detail that reports more per instance than per card must not size above the card",
+		},
+		{
+			name:       "a profile the detail cannot size yet is not sizeable",
+			cardMemory: "80Gi", profile: "3g.40gb", profileMib: 0,
+			wantPct: 0, wantSizeable: false,
+			why: "transient during detection; the caller must retry rather than fall back to a card",
+		},
+		{
+			name:       "a card with no observed memory is not sizeable",
+			cardMemory: "", profile: "3g.40gb", profileMib: 40 << 10,
+			wantPct: 0, wantSizeable: false,
+		},
+		{
+			name:       "a profile the type does not offer sizes as no partition",
+			cardMemory: "80Gi", profile: "not-offered", profileMib: 40 << 10,
+			wantPct: 0, wantSizeable: true,
+			why: "permanent rather than transient, and each caller rejects it with its own message",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			it := &workercore.InstanceType{
+				ObjectMeta: meta.ObjectMeta{Name: "h20-8x"},
+				Status: workercore.InstanceTypeStatus{
+					Detail: workercore.InstanceTypeDetail{
+						Manufacturer: nodefeature.ManufacturerNVIDIA,
+						InstanceTypeAcceleratorDetail: workercore.InstanceTypeAcceleratorDetail{
+							Memory: tc.cardMemory,
+						},
+					},
+				},
+			}
+			it.Status.Detail.SlicedDetail.Physical.Profiles = []workercore.AcceleratorSlicedPhysicalDetailProfile{
+				{Name: "3g.40gb", MemoryMib: tc.profileMib, Count: 2},
+				{Name: "odd", MemoryMib: tc.profileMib, Count: 2},
+				{Name: "tiny", MemoryMib: tc.profileMib, Count: 2},
+				{Name: "impossible", MemoryMib: tc.profileMib, Count: 2},
+			}
+
+			pct, sizeable := PartitionProfileMemoryPercent(it, tc.profile)
+			assert.Equal(t, tc.wantSizeable, sizeable, tc.why)
+			assert.Equal(t, tc.wantPct, pct, tc.why)
+		})
+	}
+}
