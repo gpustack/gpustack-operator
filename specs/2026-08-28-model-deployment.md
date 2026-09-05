@@ -555,7 +555,7 @@ it. **The group is per engine, and no single key set is right for two of them:**
 |---|---|---|---|
 | `vllm` | **required** as `standalone-store`, or `0` raises | `0` | `> 0` — **128 MiB**, the documented client staging size |
 | `vllm-ascend` | no such field | `0` | `> 0` |
-| `sglang` | no such field | `0`, then divided by the TP factor (`mooncake_store.py:295`) | **no such key** — `DEFAULT_LOCAL_BUFFER_SIZE` (16 MiB) is passed to `setup()` as a literal, commented "Zero copy interface does not need local buffer" (`mooncake_store.py:22`, `:336`, `:376`) |
+| `sglang` `0.5.18` | no such field | `0`, then divided by the TP factor (`mooncake_store.py:413-416`) | **no such key** — `DEFAULT_LOCAL_BUFFER_SIZE` (16 MiB, `mooncake_store.py:28`) is passed to `setup()` as a literal at both call sites, each commented "Zero copy interface does not need local buffer" (`mooncake_store.py:464`, `:514`) |
 
 So the **128 MiB is a vLLM-family constant, not a shared one.** Writing it for `sglang` would render
 a key no reader reads, which is the exact failure this section is otherwise arguing against.
@@ -884,9 +884,44 @@ request. What the shipped artifacts actually publish:
 
 | engine | what it publishes about its KV connector | readable without traffic? |
 |---|---|---|
-| `vllm` `v0.25.1` | five `vllm:mooncake_store_operation_*` families (`.../mooncake/store/metrics.py:116,138,143,148,153`), **all labelled**; `.labels()` is reached only from `_get_metrics`, which is reached only from `observe()`, which returns at `metrics.py:177` on empty data | **no** |
-| `vllm-ascend` | **nothing** — the repository declares zero Prometheus metrics of its own | **no** |
-| `sglang` | `StorageMetricsCollector`'s counters, labelled and `.labels()`-ed only on the traffic path; `sglang:hicache_host_*` do appear at startup but prove only that the **host tier** is on, not that a remote store attached | **no** |
+| `vllm` `v0.27.1` | five `vllm:mooncake_store_operation_*` families (`.../mooncake/store/metrics.py:116,138,143,148,153`), **all labelled**; `.labels()` is reached only from `_get_metrics` (`:158`), which is reached only from `observe()` (`:176`), which returns at `metrics.py:177-178` on empty data | **no** |
+| `vllm-ascend` `v0.23.0` | **nothing** — the repository declares zero Prometheus metrics of its own: zero `prometheus_client` imports and zero metric constructions across all 1008 `.py` files | **no** |
+| `sglang` `0.5.18` | `StorageMetricsCollector` (`srt/observability/metrics_collector.py:1849`) builds its counters with `labelnames=labels.keys()`, so they are labelled and `.labels()`-ed only on the traffic path; `sglang:hicache_host_*` do appear at startup but prove only that the **host tier** is on, not that a remote store attached | **no** |
+
+**Every row above was re-measured against the newest artifact the runner project publishes** — the
+first step T13 asks for, done. What that refresh moved and what it did not:
+
+| row | measured at | published now | verdict |
+|---|---|---|---|
+| `vllm` | `v0.25.1` | **`0.27.1`** (PyPI has `0.28.0`; the runner does not publish it) | **every claim holds.** `metrics.py`, `factory.py` and `v1/metrics/prometheus.py` are **byte-identical** across the two tags; `worker.py` grew 1734 → 1987 lines without changing the contract — the config **file** reader still takes exactly the same eight keys through `from_file`, and `MOONCAKE_CONFIG_PATH` still raises when unset (`:156,159`) |
+| `vllm-ascend` | unversioned | **`v0.23.0`** | **holds, and now has a version.** |
+| `sglang` | unversioned | **`0.5.18`** (PyPI has `0.5.19`; the runner does not publish it) | **holds**, at the same version case-59 measured. The collector **moved** to `srt/observability/metrics_collector.py`; the claim did not |
+
+⇒ **Two facts moved, and neither is the measurement point.** The `status`-label sites this section
+leans on went from **six to nine** and were all renumbered (`"error"` at 623, 654, 776, 916, 1118,
+1745 and `"partial_failure"` at 670, 876, 1096 in `v0.27.1`); and `kv_connector_extra_config` — a
+different carrier from the config file, reached through the `--kv-transfer-config` argument — gained
+an `enable_lookup` key. The label VALUES are unchanged, so the property this condition rests on is
+intact: a replica that tried and failed publishes series nothing else publishes.
+
+⇒ **The Ascend row is answered by reading the source, and that is not a shortcut — it is the only
+vehicle that can answer it.** This section asks that row to distinguish "publishes nothing" from "did
+not come up at all", and **running the engine cannot**: both produce zero metrics, which is the whole
+reason the distinction was flagged. Reading the artifact separates them, because the absence is
+visible in the package rather than inferred from a silent process.
+
+**What the connector registry holds**, the other half of that first step. vLLM's `factory.py`
+registers **16** connectors statically and is byte-identical at both tags; `MooncakeStoreConnector` —
+the name this operator renders for the vLLM family — is among them, and there is no Ascend entry.
+vllm-ascend supplies that one out of tree: its `setup.py` declares the entry point
+`vllm.general_plugins` → `ascend_kv_connector = vllm_ascend:register_connector`, which is what
+`load_general_plugins()` invokes, and that function registers `AscendStoreConnector` under exactly
+that name (twice, also as `MooncakeConnectorStoreV1`) and **pops `MultiConnector` to replace it with
+its own**. Both names this operator can render are therefore confirmed against the artifacts.
+⇒ **What this does NOT measure**: the registry of a REAL image at runtime. Everything above is what
+the two packages declare, so anything an image adds beyond them — a vendor patch, a third plugin
+package installed alongside — is unobserved. Closing that needs one `docker run` on a machine that
+can execute the image, which this refresh did not have.
 
 A childless labelled counter *does* still emit `# HELP` and `# TYPE` on a direct registry
 (`prometheus_client` 0.26.0, measured with a control: one `.labels().inc()` is what adds a series),
@@ -927,8 +962,11 @@ survives as a `False` while the old `NoCacheActivity` does not. The engine is Re
 and every store operation it attempts fails: `roles[].ready` says Ready, `QuotaReserved` says
 reserved, `DomainRegistered` says registered — the Binding is fine, the store is not. It is
 observable because the metric families carry a `status` label whose values are hardcoded as `"ok"`,
-`"error"` and `"partial_failure"` (six sites in `.../mooncake/store/worker.py`: 599, 688, 728, 906,
-928, 1507), so a replica that tried and failed publishes series nothing else publishes.
+`"error"` and `"partial_failure"` — **nine sites** in `.../mooncake/store/worker.py` at `v0.27.1`
+(`"error"` at 623, 654, 776, 916, 1118, 1745; `"partial_failure"` at 670, 876, 1096), where `v0.25.1`
+had six — so a replica that tried and failed publishes series nothing else publishes. **The count
+grew and the values did not**, which is the half this condition depends on: a new failing site adds
+another way to observe the same fact, while a renamed value would have removed the observation.
 
 There is therefore **no observation window**: the old `False` row needed one to tell a slow start
 from a permanent failure, and neither of the two rows that replaced it does. An absence is `Unknown`
@@ -2187,6 +2225,23 @@ truthful); after T13 (the headline claim is measured and recorded).
   a property of the engine. So that row reports SKIP with which of the two it was, and never borrows
   vLLM's figures to stand in for it — a number carried over from another backend is not a missing
   measurement, it is a wrong one.
+  ⇒ **THIS FIRST STEP IS DONE, AND THE TASK STAYS UNTICKED.** The refresh is recorded in F8: every
+  row re-measured against the newest artifact the runner project publishes, versions now attached to
+  all three, and the two things that moved named. **The table had moved** — vLLM went `0.25.1` to
+  `0.27.1` — and the measurement point survives it. SGLang had NOT moved: the runner still publishes
+  `0.5.18`, the version case-59 measured, so re-measuring that row would have measured the same
+  artifact, and knowing THAT is itself the answer for that row rather than a reason to skip it.
+  ⇒ **The Ascend row came out better than its own warning allowed for.** Reading the artifact
+  distinguishes "publishes nothing" from "did not come up at all"; the `docker run` this step
+  proposed **cannot**, because both give zero metrics. So the vehicle that was going to force a SKIP
+  is the one that produced an answer, and the caution above applies to the run rather than to the
+  row. One half does still need a run: what a REAL image's connector registry holds at runtime, over
+  and above what the two packages declare.
+  ⇒ Two stale citations were found by doing it, and they are the reason it was worth doing.
+  F4's `sglang` row pointed at `mooncake_store.py:22`, `:336`, `:376` for content that lives at `:28`,
+  `:464` and `:514` at the shipped version, and at `:295` for a division that is at `:413-416`. Both
+  are corrected there. **A wrong line number is worse than none**: it survives review because it
+  looks checked.
   Acceptance: one request stream, replayed twice — once against a `replicas: 1` deployment and once
   against a `replicas: 2` deployment on the same Binding, same model, same stream, same order. The
   case asserts, and **records**: the pool shows **one** domain with blocks contributed by **more than
