@@ -148,7 +148,7 @@ Ownership is per **(engine, key)**: a key one engine owns is an ordinary user ar
 | Engine | Owned arguments | Owned environment |
 |---|---|---|
 | `vllm` | `--kv-transfer-config` | `MOONCAKE_CONFIG_PATH` |
-| `sglang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config` | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME` |
+| `sglang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config` | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME`, **`MOONCAKE_TENANT_ID`** |
 
 One `vllm` row covers **both backends**. The owned keys follow the engine while only the connector
 name follows the accelerator backend, so an Ascend pool and an NVIDIA pool running `vllm` own exactly
@@ -177,14 +177,25 @@ SGLang needs `local_hostname`, which is the replica's own Pod IP. A file and an 
 fixed when the object is admitted, when no Pod IP exists yet, so only an environment variable with a
 `fieldRef` on `status.podIP` can carry it — which is why this engine gets no config file at all.
 
-Note that `MOONCAKE_CONFIG_PATH` is owned on `vllm` and **not** on `sglang`, while six other
+Note that `MOONCAKE_CONFIG_PATH` is owned on `vllm` and **not** on `sglang`, while seven other
 `MOONCAKE_*` names are owned on `sglang` alone. The table is the authority; a name prefix is not.
 
+`MOONCAKE_TENANT_ID` is the one in that list whose ownership is a **security** property rather than a
+consistency one: it carries the reuse domain, and a workload able to set it could write into another
+Binding's domain. It is a second path to a value [the API already refuses](#the-reuse-domain-is-inherited).
+
 On the vLLM family the operator mounts the rendered client JSON at
-`/etc/gpustack/kvcache/mooncake.json`, read-only, from one ConfigMap shared by every replica. It sits
-under `/etc` rather than in the image's workspace so that a template's own volumes are unlikely to
-collide — but an overlay that mounts over that path replaces the configuration silently, and the
-owned `MOONCAKE_CONFIG_PATH` cannot protect against it. SGLang gets no file and no ConfigMap.
+`/etc/gpustack/kvcache/mooncake.json`, read-only. **There is no ConfigMap**: the file is a downwardAPI
+projection of the Pod's own `kvcache.gpustack.ai/client-config` annotation.
+
+Nothing is created beside the Pod, no RBAC for one is needed, and the configuration's lifetime is
+exactly the replica's. It is also part of the Pod's spec hash, which is what moves the replicas when
+the pool's published endpoint changes.
+
+It sits under `/etc` rather than in the image's workspace so that a template's own volumes are
+unlikely to collide — but an overlay that mounts over that path replaces the configuration silently,
+and the owned `MOONCAKE_CONFIG_PATH` cannot protect against it. SGLang gets no file at all; its
+configuration travels entirely in the environment.
 
 ## The runner image is a formula
 
