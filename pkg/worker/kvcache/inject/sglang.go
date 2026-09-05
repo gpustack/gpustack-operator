@@ -77,7 +77,11 @@ const (
 // used to cite had every one of them drifted - that upstream file has since grown past 1300 lines -
 // and a stale line number survives review precisely because it looks checked.
 func renderSGLang(in Input) (*Result, error) {
-	if in.Role != RoleNone {
+	// Gated on the role table, not on this file knowing its own engine, for the same reason the
+	// tenant emission below is: the admission webhook asks that table before anything is rendered, so
+	// a renderer restating the answer is a second implementation of it that would drift from the one
+	// a user's refusal was decided by.
+	if !SupportsRole(in.Engine, in.Role) {
 		return nil, newRefusal(ReasonRoleUnsupported,
 			"engine %q has no known prefill/decode equivalent for role %q; accepting the role and "+
 				"ignoring it would leave the container looking configured and behaving otherwise",
