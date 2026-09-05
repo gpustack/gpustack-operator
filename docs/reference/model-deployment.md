@@ -71,10 +71,9 @@ The reuse domain — `name`, `blockSize`, `dtype` — is a required, immutable b
 `KVCachePoolBinding`. `ModelDeploymentSpec` has **no domain field**, and that is a security property
 rather than tidiness.
 
-> **Why** — the storage layer's tenant *is* the reuse domain, so every distinct domain is a tenant
-> with its own quota ledger. A workload free to name arbitrary domains could mint unlimited tenants in
-> its namespace and escape the namespace quota ceiling entirely, each new domain drawing its own quota
-> entry instead of drawing down a shared one.
+> **Why** — a workload free to name its own domain could mint tenants and escape its namespace's
+> quota ceiling. The mechanism is stated once, under
+> [One Binding, one reuse domain](../kv-cache/pool.md#one-binding-one-reuse-domain).
 
 The resulting semantics:
 
@@ -92,9 +91,10 @@ pollution: writes succeed, reads succeed, and the tensors are wrong.
 engine version rather than stated here.** `SupportsTenant` and `TenantSupportSource` in
 `pkg/worker/kvcache/inject` carry it beside the version and source line it was read at.
 
-At the versions this project ships, the vLLM family forwards no tenant — those deployments land in
-the tenant named `default` whatever their Binding declares — and SGLang forwards one, through
-`MOONCAKE_TENANT_ID`. That variable is operator-owned: supplying it is refused, because it is a
+Read that table before relying on the domain reaching the store; this page states no answer of its
+own, because an answer written here goes stale silently while the table carries the version it was
+measured at. What IS this page's own: the variable an engine reads the domain from is
+operator-owned wherever one exists, so supplying it in `env` or `extraArgs` is refused — it is a
 second path to a value [the API already refuses](#the-reuse-domain-is-inherited).
 
 **"A tenant was injected" is not "the workload is isolated."** The operator records what it
