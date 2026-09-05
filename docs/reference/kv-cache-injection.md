@@ -383,7 +383,8 @@ The result is node memory pressure and kubelet eviction, on a node whose bookkee
 within budget.
 
 SGLang is not given one: the injection writes no `local_buffer_size` in any spelling, and that engine
-hardcodes 16 MiB (`mooncake_store.py:22`, used at `:336` and `:376`). Budget those 16 MiB the same
+hardcodes 16 MiB (v0.5.18 `mooncake_store.py:28`, `DEFAULT_LOCAL_BUFFER_SIZE`, used at `:464` and
+`:514`). Budget those 16 MiB the same
 way — in the request as well as the limit.
 
 > **Why** that number, and why it is written at all — it is the value the store's own reference uses,

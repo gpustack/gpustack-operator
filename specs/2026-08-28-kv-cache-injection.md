@@ -777,7 +777,8 @@ cannot be rendered at admission time.
   Every engine defaults `global_segment_size` to something non-zero when it is absent, which is why
   it is written explicitly on all three and for the same reason. The defaults themselves differ and
   the difference is not load-bearing, only the non-zero part is: vLLM 4 GiB (`worker.py:74`),
-  vLLM-Ascend **1 GiB** (`mooncake_backend.py:18`), SGLang `"4gb"` (`environ.py:298`).
+  vLLM-Ascend **1 GiB** (`mooncake_backend.py:18`), SGLang `"4gb"` (v0.5.18 `environ.py:704`,
+  `MOONCAKE_GLOBAL_SEGMENT_SIZE`).
 - **`global_segment_size` is `0`, and `mode` is `standalone-store` with it, on the vLLM family.** An
   engine Pod is a *client*; the pool's capacity comes from the backend's declared members. Contributing
   host memory from an engine Pod would change that Pod's real memory footprint without appearing
@@ -785,9 +786,10 @@ cannot be rendered at admission time.
   pair above. SGLang has no `mode` key at all, so the zero segment stands alone there.
 - **SGLang divides the segment size across tensor-parallel ranks before passing it on.** The value that
   reaches `setup()` is `per_tp_global_segment_size`, computed from the configured value and
-  `storage_config.tp_size` (`mooncake_store.py:293-295,374`). Writing `0` is unaffected — zero divides to
-  zero — but anyone who later renders a non-zero segment here must account for it: the host memory the
-  Pod actually contributes is the per-rank value times the TP degree, not the number written.
+  `storage_config.tp_size` (v0.5.18 `mooncake_store.py:413,415-416`, `tp_scale_factor`). Writing `0` is
+  unaffected — zero divides to zero — but anyone who later renders a non-zero segment here must account
+  for it: the host memory the Pod actually contributes is the per-rank value times the TP degree, not
+  the number written.
 - **`local_buffer_size` is a vLLM-family key, written explicitly as a constant `128 MiB`, and reads from
   no API field.**
   What it is, in the store's own words
@@ -814,10 +816,11 @@ cannot be rendered at admission time.
   answered by adding a field now — no consumer has asked for one, and it is a staging buffer rather
   than a resource grant.
   **SGLang is not given a value here and does not need one.** It has no such key, and hardcodes
-  `DEFAULT_LOCAL_BUFFER_SIZE = 16 MiB` at both of its `setup()` call sites, with the reason in its own
+  `DEFAULT_LOCAL_BUFFER_SIZE = 16 MiB` on both of its store-setup paths — `setup_dummy` and `setup`,
+  which are two different functions rather than two calls to one — with the reason in its own
   comment: "Zero copy interface does not need local buffer"
-  (`mooncake_store.py:22,336,376`). Rendering the constant for SGLang would write something nothing
-  reads.
+  (v0.5.18 `mooncake_store.py:28,464,514`). Rendering the constant for SGLang would write something
+  nothing reads.
 - `device_name` — the RDMA filter — is written **empty on every path**, RDMA included. See F3: empty
   means "use every device found", which is the only value correct for every host in a pool, and the
   string `auto-discovery` is not special-cased anywhere in the client. It is written rather than omitted
