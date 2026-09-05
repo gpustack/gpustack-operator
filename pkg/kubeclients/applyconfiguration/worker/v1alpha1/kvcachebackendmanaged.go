@@ -12,12 +12,24 @@ type KVCacheBackendManagedApplyConfiguration struct {
 	// API's, not the artifact's: the rendered flags and environment variables keep the vendor's
 	// own "master" spelling, and the mapping lives in the renderer.
 	Leader *KVCacheBackendLeaderApplyConfiguration `json:"leader,omitempty"`
-	// Members are the groups of store members. Each entry selects nodes and names the medium
-	// those nodes contribute, so a hot DRAM tier and a cold filesystem tier are expressible in
-	// the shape. This scope reconciles exactly one group and the webhook refuses a second,
-	// naming the tiering follow-on: a two-group manifest is schema-valid and admission-refused
-	// rather than half-reconciled.
+	// Members are the groups of store members. Each entry selects nodes, names the medium those
+	// nodes contribute, and may add a local disk tier on the same nodes.
+	//
+	// A group's POSITION in this list is its identity: the rendered DaemonSet's name and its
+	// immutable selector labels are derived from it, and so is the port that group's members serve
+	// their HTTP API on. Reordering entries, or removing one ahead of others, therefore redefines
+	// every position after it — the members there are rebuilt against a different group's spec, and
+	// their cache goes with them.
+	//
+	// The cap of 32 is a SAFETY BOUND, not a statement about how many groups are useful. The port
+	// derivation would stay valid to 57455; what makes 32 the right place to stop is that the shapes
+	// this list is for — a hot and a cold tier, or one group per kind of hardware — are a handful,
+	// while an unbounded list can render a port outside the valid range with nothing reporting it.
 	Members []KVCacheBackendMemberApplyConfiguration `json:"members,omitempty"`
+	// ScaleIn is what a member does on its way out. Left unset, a member is stopped the way any
+	// Pod is: it gets SIGTERM and the time its own shutdown needs, and nothing waits for the
+	// readers of what it held.
+	ScaleIn *KVCacheBackendScaleInApplyConfiguration `json:"scaleIn,omitempty"`
 }
 
 // KVCacheBackendManagedApplyConfiguration constructs a declarative configuration of the KVCacheBackendManaged type for use with
@@ -44,5 +56,13 @@ func (b *KVCacheBackendManagedApplyConfiguration) WithMembers(values ...*KVCache
 		}
 		b.Members = append(b.Members, *values[i])
 	}
+	return b
+}
+
+// WithScaleIn sets the ScaleIn field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ScaleIn field is set to the value of the last call.
+func (b *KVCacheBackendManagedApplyConfiguration) WithScaleIn(value *KVCacheBackendScaleInApplyConfiguration) *KVCacheBackendManagedApplyConfiguration {
+	b.ScaleIn = value
 	return b
 }

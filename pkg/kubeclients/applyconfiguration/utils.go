@@ -1382,12 +1382,18 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendExternalApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendLeader"):
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendLeaderApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendLeaderOffload"):
+		return &applyconfigurationworkerv1alpha1.KVCacheBackendLeaderOffloadApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendManaged"):
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendManagedApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendMember"):
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendMemberApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendMemberLocalDisk"):
+		return &applyconfigurationworkerv1alpha1.KVCacheBackendMemberLocalDiskApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendMemberStatus"):
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendMemberStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendScaleIn"):
+		return &applyconfigurationworkerv1alpha1.KVCacheBackendScaleInApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendSpec"):
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendStatus"):

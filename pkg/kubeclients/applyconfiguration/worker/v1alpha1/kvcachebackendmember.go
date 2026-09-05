@@ -16,14 +16,19 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// node; widening the selector adds members and the leader admits their segments into
 	// subsequent allocation immediately, with no leader or member restart.
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
-	// Medium is what this member group physically contributes. DFS covers NFS and 3FS, which
-	// are media rather than backend implementations.
+	// Medium is what the SEGMENT this member group mounts is made of. One value: host memory.
 	//
-	// The enum carries all five because all five are media the store itself supports, and the
-	// shape a tiered backend will need must not change later. Only "DRAM" is RECONCILED here:
-	// the other four additionally need the leader's file or DAX flags and a mount on the member,
-	// and nothing renders those yet, so admission refuses them rather than starting a member that
-	// would quietly hold its segment in memory under a name that says otherwise.
+	// It is an identity rather than a choice, which is why the field survives with a single value
+	// exactly as spec.type does: the object states what the group contributes, so a second medium
+	// widens this enum instead of being inferred from a field that is not there.
+	//
+	// An earlier shape offered five values, and four of them named things that are not member
+	// groups at all. A local disk is not a group of its own — the leader routes an offload task to
+	// the client holding the key's memory replica, so a group with no memory segment never
+	// receives one — and it is declared in the localDisk field below, on the group that does hold
+	// the memory. NVMe-oF is a target coordinate registered once, with no node affinity and no
+	// Pod. A DAX device and a distributed filesystem are configured on the leader's own process,
+	// not on any member. Each is reachable, and none of them through this field.
 	Medium *string `json:"medium,omitempty"`
 	// CapacityPerMember sizes ONE member, not one node: a node can eventually run several
 	// members, one per NUMA domain. It becomes the member's global segment size and is counted
@@ -47,6 +52,27 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// runtime it links. The transport itself is backend-wide, so this is not a per-group transport;
 	// it is the per-group runtime that one transport needs on differing hardware.
 	Image *string `json:"image,omitempty"`
+	// LocalDisk declares a directory on the nodes this group already selects and points the store
+	// client's offload keys at it. Left unset, the group is memory only.
+	//
+	// WHAT IS AND IS NOT ESTABLISHED. Setting this is observed to make the leader accept a local
+	// disk segment from the member, publish the declared capacity, and run eviction — and THIS
+	// PROJECT HAS NOT OBSERVED DATA ACTUALLY REACHING THE TIER in any environment. Filling a
+	// member's memory segment under a low watermark, the leader reported objects "deferred for disk
+	// offload" while the tier stayed empty, in both configurations this API can render. The cause is
+	// not established and this is not a claim about the store in general.
+	//
+	// So before relying on the tier, check the one figure that answers the question: the leader's
+	// own master_allocated_file_size_bytes is bytes actually written, and reads 0 for a tier that
+	// holds nothing while every other signal looks healthy. status.capacity reports the declared
+	// CAPACITY and will not show this.
+	//
+	// It is a LAYER on this group rather than a group of its own, and that is the store's shape
+	// rather than a simplification here: the leader routes an offload task to the client that owns
+	// the key's memory replica, so a member holding no memory segment is never chosen. Such a
+	// member would still report its disk capacity to the leader, so the backend would show a cold
+	// tier of several terabytes that never takes a byte.
+	LocalDisk *KVCacheBackendMemberLocalDiskApplyConfiguration `json:"localDisk,omitempty"`
 }
 
 // KVCacheBackendMemberApplyConfiguration constructs a declarative configuration of the KVCacheBackendMember type for use with
@@ -112,5 +138,13 @@ func (b *KVCacheBackendMemberApplyConfiguration) WithExtraArgs(entries map[strin
 // If called multiple times, the Image field is set to the value of the last call.
 func (b *KVCacheBackendMemberApplyConfiguration) WithImage(value string) *KVCacheBackendMemberApplyConfiguration {
 	b.Image = &value
+	return b
+}
+
+// WithLocalDisk sets the LocalDisk field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the LocalDisk field is set to the value of the last call.
+func (b *KVCacheBackendMemberApplyConfiguration) WithLocalDisk(value *KVCacheBackendMemberLocalDiskApplyConfiguration) *KVCacheBackendMemberApplyConfiguration {
+	b.LocalDisk = value
 	return b
 }

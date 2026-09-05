@@ -136,16 +136,71 @@ type KVCacheBackendManaged struct {
 	// +required
 	Leader KVCacheBackendLeader `json:"leader" protobuf:"bytes,1,name=leader"`
 
-	// Members are the groups of store members. Each entry selects nodes and names the medium
-	// those nodes contribute, so a hot DRAM tier and a cold filesystem tier are expressible in
-	// the shape. This scope reconciles exactly one group and the webhook refuses a second,
-	// naming the tiering follow-on: a two-group manifest is schema-valid and admission-refused
-	// rather than half-reconciled.
+	// Members are the groups of store members. Each entry selects nodes, names the medium those
+	// nodes contribute, and may add a local disk tier on the same nodes.
+	//
+	// A group's POSITION in this list is its identity: the rendered DaemonSet's name and its
+	// immutable selector labels are derived from it, and so is the port that group's members serve
+	// their HTTP API on. Reordering entries, or removing one ahead of others, therefore redefines
+	// every position after it — the members there are rebuilt against a different group's spec, and
+	// their cache goes with them.
+	//
+	// The cap of 32 is a SAFETY BOUND, not a statement about how many groups are useful. The port
+	// derivation would stay valid to 57455; what makes 32 the right place to stop is that the shapes
+	// this list is for — a hot and a cold tier, or one group per kind of hardware — are a handful,
+	// while an unbounded list can render a port outside the valid range with nothing reporting it.
 	//
 	// +required
 	// +k8s:validation:minItems=1
+	// +k8s:validation:maxItems=32
 	// +listType=atomic
 	Members []KVCacheBackendMember `json:"members" protobuf:"bytes,2,rep,name=members"`
+
+	// ScaleIn is what a member does on its way out. Left unset, a member is stopped the way any
+	// Pod is: it gets SIGTERM and the time its own shutdown needs, and nothing waits for the
+	// readers of what it held.
+	ScaleIn *KVCacheBackendScaleIn `json:"scaleIn,omitempty" protobuf:"bytes,3,opt,name=scaleIn"`
+}
+
+// KVCacheBackendScaleIn is what a member does on its way out.
+//
+// It carries a duration and NOT a policy enum. The other policy a draft of this API carried —
+// migrating a member's data before it leaves — needs the store's drain job API, which is stateful
+// orchestration this scope does not enter and which silently covers only two of the store's five
+// replica types. So a policy field would ship with one value, which is a knob nobody can turn. It
+// arrives when there are two; widening an enum is not a breaking change.
+type KVCacheBackendScaleIn struct {
+	// GracePeriodSeconds is how long a departing member holds its local disk tier open after
+	// deregistering it with the leader, so offload reads already in flight finish there rather
+	// than failing.
+	//
+	// It reaches ONLY the disk tier. The memory segment is still dropped rather than drained, and
+	// not for want of a verb: the member's own API takes a graceful unmount with a grace period,
+	// but it requires the segment ids, no route returns a client its own ids, and the name is not
+	// derivable because the leader appends a fresh port on every start.
+	//
+	// The Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so
+	// the kubelet cannot kill the container in the middle of the wait this configures.
+	//
+	// A plain int32 and not a pointer: unset and zero mean the same thing here. Zero still
+	// deregisters the tier, it just does not wait afterwards, which is what a member with no grace
+	// configured should do.
+	//
+	// The upper bound is the entrypoint's own. It refuses a larger value with HTTP 400, so a
+	// manifest above it would render a shutdown hook that fails every time it runs.
+	//
+	// SETTING THIS DOES NOT PROTECT THE SAME EDIT THAT SHRINKS THE GROUP. The value is rendered into
+	// the member's Pod, and a Pod runs the template it was CREATED from — so a departing member
+	// leaves with whatever grace it started with, and only its replacements carry the new one. An
+	// apply that raises the grace and narrows nodeSelector at once therefore drains nothing.
+	//
+	// To make a grace apply to a shrink, do it in two steps: change only this field and wait for the
+	// members to be recreated with it (their pod-spec-hash annotation moves), then narrow the
+	// selector or remove the group.
+	//
+	// +k8s:validation:minimum=0
+	// +k8s:validation:maximum=3600
+	GracePeriodSeconds int32 `json:"gracePeriodSeconds,omitempty" protobuf:"varint,1,opt,name=gracePeriodSeconds"`
 }
 
 // KVCacheBackendExternal is a backend this operator does not run.
@@ -244,6 +299,35 @@ type KVCacheBackendLeader struct {
 	// the derived ones. A key that collides with a flag rendered from a field above is refused
 	// at admission, because two sources for one flag make the rendered command ambiguous.
 	ExtraArgs map[string]string `json:"extraArgs,omitempty" protobuf:"bytes,3,rep,name=extraArgs"`
+
+	// Offload turns on writing evicted keys to the members' local disk tier. It is the leader's
+	// half of a pair: the other half is members[].localDisk, which says where on each node those
+	// bytes go, and admission refuses either half alone because the store degrades on both
+	// mismatches without reporting either.
+	Offload *KVCacheBackendLeaderOffload `json:"offload,omitempty" protobuf:"bytes,5,opt,name=offload"`
+}
+
+// KVCacheBackendLeaderOffload turns the local disk tier on, leader side.
+//
+// Both settings are the leader's, and Enabled gates the feature outright: the store ANDs its
+// eviction-time and promotion behavior with it, and every offload entry point returns early
+// without it. A tier configured on the member alone is inert, which is why admission requires the
+// two halves together rather than letting one render on its own.
+type KVCacheBackendLeaderOffload struct {
+	// Enabled turns on offloading to the members' local disks.
+	//
+	// A plain bool, not a pointer, because unset and false mean the same thing: no offloading.
+	// Unset renders NO flag rather than an explicit false, so a backend that never asked for this
+	// runs the command line it ran before the field existed.
+	Enabled bool `json:"enabled,omitempty" protobuf:"varint,1,opt,name=enabled"`
+
+	// OnEvict defers the write to disk from the moment a key is stored to the moment it is
+	// evicted, so a key that is never evicted is never written to disk.
+	//
+	// It REQUIRES Enabled. The store ANDs the two, so setting this alone is accepted, echoed back
+	// in the leader's own startup log, and then does nothing — which is why admission refuses it
+	// rather than rendering a flag that reads as taken.
+	OnEvict bool `json:"onEvict,omitempty" protobuf:"varint,2,opt,name=onEvict"`
 }
 
 // KVCacheBackendTransport is the data plane the members use.
@@ -289,17 +373,22 @@ type KVCacheBackendMember struct {
 	// +required
 	NodeSelector map[string]string `json:"nodeSelector" protobuf:"bytes,1,rep,name=nodeSelector"`
 
-	// Medium is what this member group physically contributes. DFS covers NFS and 3FS, which
-	// are media rather than backend implementations.
+	// Medium is what the SEGMENT this member group mounts is made of. One value: host memory.
 	//
-	// The enum carries all five because all five are media the store itself supports, and the
-	// shape a tiered backend will need must not change later. Only "DRAM" is RECONCILED here:
-	// the other four additionally need the leader's file or DAX flags and a mount on the member,
-	// and nothing renders those yet, so admission refuses them rather than starting a member that
-	// would quietly hold its segment in memory under a name that says otherwise.
+	// It is an identity rather than a choice, which is why the field survives with a single value
+	// exactly as spec.type does: the object states what the group contributes, so a second medium
+	// widens this enum instead of being inferred from a field that is not there.
+	//
+	// An earlier shape offered five values, and four of them named things that are not member
+	// groups at all. A local disk is not a group of its own — the leader routes an offload task to
+	// the client holding the key's memory replica, so a group with no memory segment never
+	// receives one — and it is declared in the localDisk field below, on the group that does hold
+	// the memory. NVMe-oF is a target coordinate registered once, with no node affinity and no
+	// Pod. A DAX device and a distributed filesystem are configured on the leader's own process,
+	// not on any member. Each is reachable, and none of them through this field.
 	//
 	// +required
-	// +k8s:validation:enum=["DRAM","LocalDisk","NoF","CXL","DFS"]
+	// +k8s:validation:enum=["DRAM"]
 	Medium string `json:"medium" protobuf:"bytes,2,name=medium"`
 
 	// CapacityPerMember sizes ONE member, not one node: a node can eventually run several
@@ -331,6 +420,57 @@ type KVCacheBackendMember struct {
 	//
 	// +k8s:validation:maxLength=512
 	Image string `json:"image,omitempty" protobuf:"bytes,6,opt,name=image"`
+
+	// LocalDisk declares a directory on the nodes this group already selects and points the store
+	// client's offload keys at it. Left unset, the group is memory only.
+	//
+	// WHAT IS AND IS NOT ESTABLISHED. Setting this is observed to make the leader accept a local
+	// disk segment from the member, publish the declared capacity, and run eviction — and THIS
+	// PROJECT HAS NOT OBSERVED DATA ACTUALLY REACHING THE TIER in any environment. Filling a
+	// member's memory segment under a low watermark, the leader reported objects "deferred for disk
+	// offload" while the tier stayed empty, in both configurations this API can render. The cause is
+	// not established and this is not a claim about the store in general.
+	//
+	// So before relying on the tier, check the one figure that answers the question: the leader's
+	// own master_allocated_file_size_bytes is bytes actually written, and reads 0 for a tier that
+	// holds nothing while every other signal looks healthy. status.capacity reports the declared
+	// CAPACITY and will not show this.
+	//
+	// It is a LAYER on this group rather than a group of its own, and that is the store's shape
+	// rather than a simplification here: the leader routes an offload task to the client that owns
+	// the key's memory replica, so a member holding no memory segment is never chosen. Such a
+	// member would still report its disk capacity to the leader, so the backend would show a cold
+	// tier of several terabytes that never takes a byte.
+	LocalDisk *KVCacheBackendMemberLocalDisk `json:"localDisk,omitempty" protobuf:"bytes,7,opt,name=localDisk"`
+}
+
+// KVCacheBackendMemberLocalDisk is the local SSD tier this member group's nodes contribute.
+//
+// It is the member's half of a pair; the leader's half is leader.offload, and admission refuses
+// either half alone. Set on its own, the leader never enqueues an offload task and the disk stays
+// empty while the member reports its capacity, which is a tier that reads as present and is not.
+type KVCacheBackendMemberLocalDisk struct {
+	// Path is the directory on each selected node that holds this tier. It is mounted into the
+	// member container from the host at the same location.
+	//
+	// It is REQUIRED and has no default. The store defaults it to a path of its own, and choosing
+	// a host directory on somebody else's nodes is not a default this operator may pick: the wrong
+	// one fills a filesystem that nothing in Kubernetes accounts for.
+	//
+	// +required
+	// +k8s:validation:maxLength=4096
+	Path string `json:"path" protobuf:"bytes,1,name=path"`
+
+	// Capacity caps what this tier stores. Left unset, the store's own ceiling applies and nothing
+	// is rendered, so a ceiling that moves upstream is a change to investigate rather than one
+	// this API silently restated.
+	//
+	// It is NOT counted into the Pod's resource requests, unlike CapacityPerMember. The tier is a
+	// host directory, which is outside the kubelet's ephemeral-storage accounting entirely — a
+	// request against it would reserve a figure nothing polices and would then keep the member off
+	// the very node that has the disk. Watching that filesystem is the operator's, and the
+	// documentation says so.
+	Capacity resource.Quantity `json:"capacity,omitempty" protobuf:"bytes,2,opt,name=capacity"`
 }
 
 // KVCacheBackendStatus defines the observed state of KVCacheBackend.
