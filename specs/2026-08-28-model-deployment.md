@@ -1,6 +1,11 @@
 # Spec: ModelDeployment — One Role, Many Replicas, One Shared KV Cache
 
 Status: Building
+Blocked on: hardware. 15 of 17 tasks are done and merged; T12b and T13's headline measurement are
+the two that are not, and both wait on the same thing — a cluster with a real accelerator and an
+engine image that serves on it. Nothing here is in progress. This moves to Completed when those two
+tick, and to Abandoned if the hardware decision goes the other way. It does not move on its own: no
+code change can lift it.
 Type: Feature
 
 ## Summary
