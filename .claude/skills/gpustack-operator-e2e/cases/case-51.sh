@@ -251,16 +251,22 @@ cleanup() {
   kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai "$REBUILD_MD" \
     --ignore-not-found --wait=false >/dev/null 2>&1
   sleep 5
-  for wl in $(kubectl -n "$NS" get workloads.kueue.x-k8s.io \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
-    case "$(kubectl -n "$NS" get workloads.kueue.x-k8s.io "$wl" \
-      -o jsonpath='{range .metadata.ownerReferences[*]}{.name}{"\n"}{end}' 2>/dev/null)" in
+  # One list call: this trap runs on every exit, pass or fail, so a get per Workload adds latency to
+  # every invocation of the case on a busy namespace.
+  local row
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    wl="${row%%=*}"
+    case "${row#*=}" in
       *"${REBUILD_MD}-"*)
         kubectl -n "$NS" delete workloads.kueue.x-k8s.io "$wl" \
           --ignore-not-found --wait=false >/dev/null 2>&1
         ;;
     esac
-  done
+  done <<EOF
+$(kubectl -n "$NS" get workloads.kueue.x-k8s.io \
+  -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.ownerReferences[*].name}{"\n"}{end}' 2>/dev/null)
+EOF
 }
 trap cleanup EXIT
 

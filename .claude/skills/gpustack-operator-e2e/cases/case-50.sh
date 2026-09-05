@@ -108,25 +108,30 @@ millis() {
   esac
 }
 
+# One list call, for the same reason group_workload takes one: this runs from the EXIT trap on every
+# invocation of the case, pass or fail.
 force_release() {
-  local md="$1" wl uids owners u
+  local md="$1" row wl uids owners u
   uids="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${md}" \
     -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}' 2>/dev/null)"
   [ -n "$uids" ] || return 0
-  for wl in $(kubectl -n "$NS" get workloads.kueue.x-k8s.io \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
-    owners="$(kubectl -n "$NS" get workloads.kueue.x-k8s.io "$wl" \
-      -o jsonpath='{range .metadata.ownerReferences[*]}{.uid}{"\n"}{end}' 2>/dev/null)"
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    wl="${row%%=*}"
+    owners="${row#*=}"
     for u in $uids; do
-      case "$owners" in
-        *"$u"*)
+      case " $owners " in
+        *" $u "*)
           kubectl -n "$NS" delete workloads.kueue.x-k8s.io "$wl" \
             --ignore-not-found --wait=false >/dev/null 2>&1
           break
           ;;
       esac
     done
-  done
+  done <<EOF
+$(kubectl -n "$NS" get workloads.kueue.x-k8s.io \
+  -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.ownerReferences[*].uid}{"\n"}{end}' 2>/dev/null)
+EOF
 
   return 0
 }
@@ -175,19 +180,29 @@ YAML
 
 # The Workload owning any of this deployment's Pods. A group Workload carries plain owner references
 # and no controller reference, so ownership is what identifies it.
+# TWO API CALLS PER INVOCATION, NOT ONE PER WORKLOAD, and here that is correctness rather than
+# tidiness. This is the hot path: assigned_sets calls it, wait_admitted calls assigned_sets in a 3s
+# poll loop for up to 120s, and it runs twice per iteration. At one get per Workload, a namespace
+# holding many of them spends the poll budget on round-trips and the case reports "the baseline did
+# not admit" -- a FAIL naming the operator for what is this script's own latency. Names and owner
+# uids come back together and the match happens locally.
 group_workload() {
-  local md="$1" uids wl owners u
+  local md="$1" uids row wl owners u
   uids="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${md}" \
     -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}' 2>/dev/null)"
   [ -n "$uids" ] || return 0
-  for wl in $(kubectl -n "$NS" get workloads.kueue.x-k8s.io \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
-    owners="$(kubectl -n "$NS" get workloads.kueue.x-k8s.io "$wl" \
-      -o jsonpath='{range .metadata.ownerReferences[*]}{.uid}{"\n"}{end}' 2>/dev/null)"
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    wl="${row%%=*}"
+    owners="${row#*=}"
     for u in $uids; do
-      case "$owners" in *"$u"*) echo "$wl"; return 0 ;; esac
+      # Padded on both sides so a uid cannot match a longer one it is a prefix of.
+      case " $owners " in *" $u "*) echo "$wl"; return 0 ;; esac
     done
-  done
+  done <<EOF
+$(kubectl -n "$NS" get workloads.kueue.x-k8s.io \
+  -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.ownerReferences[*].uid}{"\n"}{end}' 2>/dev/null)
+EOF
 }
 
 # The PodSets this deployment's Workload has been assigned a flavor for, "" when it holds no
@@ -256,7 +271,10 @@ else
   REMAIN=$((QUOTA - FILL * REQ))
 fi
 
-if [ "${FILL:-0}" -lt 1 ]; then
+# GUARDED ON THE NUMBERS BEING READABLE, or this reports the same skip twice. The branch above
+# already sets FILL=0 when it could not read them, and this message would then state "the pool holds
+# 0m against a 0m replica" -- a second row for one cause, whose text is false.
+if [ "${FILL:-0}" -lt 1 ] && [ "$REQ" -gt 0 ] && [ "$QUOTA" -gt 0 ]; then
   record SKIP "a shortage one role wide could be created" \
     "the pool holds ${QUOTA}m against a ${REQ}m replica, which leaves no room to occupy"
   FILL=0
@@ -276,16 +294,31 @@ if [ "$FILL" -ge 1 ]; then
   fi
 fi
 
-# THE WINDOW IS THE EXPERIMENT. One role must fit in what is left and two must not; outside that the
-# headline row below passes with atomicity doing nothing at all.
+# THE WINDOW IS THE EXPERIMENT: one role must fit in what is left and two must not, or the headline
+# row below passes with atomicity doing nothing at all. That window is NOT asserted here, because it
+# cannot fail -- with FILL = floor(QUOTA/REQ) - 1, REMAIN is QUOTA - FILL*REQ = REQ + (QUOTA mod REQ),
+# which is in [REQ, 2*REQ) whenever FILL >= 1 by construction. A row checking it would be checking
+# this script's arithmetic while presenting itself as a discriminator, and the filler row above
+# already reports the numbers.
+#
+# What CAN break the experiment is borrowing. The filler occupies this queue's nominalQuota, but a
+# queue in a cohort can borrow another's unused quota, so the pool is not actually short and the
+# headline rows below would FAIL for a reason this case never detected. That is the real
+# precondition, and it is the one asserted.
 if [ "$FILL" -ge 1 ]; then
-  if [ "$REMAIN" -ge "$REQ" ] && [ "$REMAIN" -lt "$((2 * REQ))" ]; then
-    record PASS "one role alone would have fit in what is left" \
-      "${REMAIN}m remaining against a ${REQ}m role: enough for one, short for two"
-  else
-    record SKIP "one role alone would have fit in what is left" \
-      "${REMAIN}m remaining against a ${REQ}m role is outside the window, so the rows below cannot discriminate"
+  COHORT_RAW="$(kubectl get clusterqueue "$CQ" \
+    -o jsonpath='{.metadata.name}={.spec.cohortName}' 2>/dev/null)"
+  if [ -z "$COHORT_RAW" ]; then
+    record SKIP "the shortage cannot be relieved by borrowing" \
+      "could not read cluster queue '${CQ}' to check for a cohort"
     FILL=0
+  elif [ "${COHORT_RAW#*=}" != "" ]; then
+    record SKIP "the shortage cannot be relieved by borrowing" \
+      "cluster queue '${CQ}' is in cohort '${COHORT_RAW#*=}', so occupying its nominalQuota does not make the pool short"
+    FILL=0
+  else
+    record PASS "the shortage cannot be relieved by borrowing" \
+      "cluster queue '${CQ}' is in no cohort, so ${REMAIN}m against a ${REQ}m role is the whole story"
   fi
 fi
 

@@ -200,13 +200,11 @@ else
   # ONE, not "at least one": four replicas each becoming their own Workload is exactly the pre-group
   # behaviour this design replaces, and it would satisfy an "a Workload exists" check. Counted over
   # the deployment's OWN Pods rather than over the namespace, which may hold a neighbour's.
-  n=0
-  for w in $(kubectl -n "$NS" get workloads.kueue.x-k8s.io \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
-    owners="$(kubectl -n "$NS" get workloads.kueue.x-k8s.io "$w" \
-      -o jsonpath='{range .metadata.ownerReferences[*]}{.name}{"\n"}{end}' 2>/dev/null)"
-    case "$owners" in *case49-pd-*) n=$((n + 1)) ;; esac
-  done
+  # Counted from ONE list call, the same shape orphan_workloads below uses, so this file has a single
+  # way of finding a deployment's Workloads rather than two that could disagree.
+  n="$(kubectl -n "$NS" get workloads.kueue.x-k8s.io \
+    -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.ownerReferences[*].name}{"\n"}{end}' \
+    2>/dev/null | grep -c '=.*case49-pd-' || true)"
   if [ "$n" = 1 ]; then
     record PASS "Kueue composes ONE Workload for the group" \
       "${WL}, owning the replicas with no controller reference"
@@ -236,7 +234,7 @@ kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai case49-pd \
 # prefix, since by then there are no Pods left to trace ownership from.
 # ONE query per call, not one per Workload. This runs on every iteration of the delete-wait loop,
 # against an API server that is busy tearing the group down; names and owner names come back together
-# and the match happens here, which is the shape case-50's group_workload already uses.
+# and the match happens here.
 orphan_workloads() {
   kubectl -n "$NS" get workloads.kueue.x-k8s.io \
     -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.ownerReferences[*].name}{"\n"}{end}' \
