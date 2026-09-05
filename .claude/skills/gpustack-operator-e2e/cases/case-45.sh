@@ -291,6 +291,12 @@ fi
 # Pod count of 0, while the object had never been created at all. That is the same substitution the
 # whole case is built to refuse, one layer lower -- and it is the shape a stale CRD schema produces,
 # which is precisely the environment this row is most often run in.
+# ARMED BEFORE THE APPLY, not after it. Interrupted between the apply and the delete at the end of
+# this file, the case leaks a ModelDeployment whose finalizer holds it, and the next run either
+# collides on the name or counts the leftover replica into the row below.
+trap 'kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai case45-nobind \
+  --ignore-not-found --wait=false >/dev/null 2>&1' EXIT
+
 if [ "$nobind_ready" = yes ]; then
   apply_out="$(manifest "    template:
       image: docker.io/library/busybox:1.36" "" \

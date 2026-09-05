@@ -21,9 +21,9 @@
 # acceptance is met by asserting more than it asks, not less.
 #
 # THE ENGINE IS VLLM, and that is the other half of the pair case-47 began. vLLM's connector travels
-# on FOUR separate carriers -- a Pod annotation, a downwardAPI volume and its mount, a
+# on FIVE separate carriers -- a Pod annotation, a downwardAPI volume, its volumeMount, a
 # MOONCAKE_CONFIG_PATH variable, and a --kv-transfer-config argument -- where SGLang's is environment
-# only. "No connector was rendered" is therefore four independent absences here rather than one, and
+# only. "No connector was rendered" is therefore five independent absences here rather than one, and
 # that is what makes a PARTIAL render visible: a client pointed at an address that does not answer
 # looks like a cache miss from outside the Pod, while a replica that was never configured says so in
 # its own spec, and refusing the first is the whole reason resolveModelDeploymentConnection returns
@@ -305,9 +305,14 @@ pod_of() {
   echo "$pod"
 }
 
-# markers echoes `<count>:<names>` over vLLM's four carriers. Counting them separately is the point:
+# markers echoes `<count>:<names>` over vLLM's five carriers. Counting them separately is the point:
 # a renderer that emitted the argument and dropped the annotation would leave the volume projecting
 # an empty file, and one number that says "some connector" would hide exactly that.
+#
+# THE MOUNT IS COUNTED APART FROM THE VOLUME, and they are not one carrier. A render that emits the
+# volume and drops the volumeMount produces a Pod where the configuration exists and no process can
+# read it -- a partial render, which is the thing this case exists to catch, scoring full marks if
+# the pair were counted as one.
 markers() {
   local pod="$1" n=0 names="" v cmd
   v="$(kubectl -n "$TEST_NS" get pod "$pod" \
@@ -322,6 +327,9 @@ markers() {
   v="$(kubectl -n "$TEST_NS" get pod "$pod" \
     -o 'jsonpath={.spec.volumes[?(@.name=="gpustack-kvcache-config")].name}' 2>/dev/null)"
   [ -n "$v" ] && { n=$((n + 1)); names="${names}volume,"; }
+  v="$(kubectl -n "$TEST_NS" get pod "$pod" \
+    -o 'jsonpath={.spec.containers[?(@.name=="main")].volumeMounts[?(@.name=="gpustack-kvcache-config")].mountPath}' 2>/dev/null)"
+  [ -n "$v" ] && { n=$((n + 1)); names="${names}mount,"; }
   names="${names%,}"
   echo "${n}:${names:-none}"
 }
@@ -335,14 +343,14 @@ if [ -z "$POD_U" ] || [ -z "$POD_R" ]; then
 else
   MU="$(markers "$POD_U")"
   MR="$(markers "$POD_R")"
-  if [ -z "${MR%%4:*}" ] && [ -z "${MU%%0:*}" ]; then
+  if [ -z "${MR%%5:*}" ] && [ -z "${MU%%0:*}" ]; then
     record PASS "a deployment on an unreachable pool renders no connector at all" \
-      "case48-registered carries all four carriers (${MR#*:}) and case48-unreachable carries none — \
+      "case48-registered carries all five carriers (${MR#*:}) and case48-unreachable carries none — \
 not a partial one, which is the outcome that would look like a cache miss from outside the Pod \
 instead of like a replica that was never configured"
-  elif [ -n "${MR%%4:*}" ]; then
+  elif [ -n "${MR%%5:*}" ]; then
     record FAIL "a deployment on an unreachable pool renders no connector at all" \
-      "the READY-Binding side rendered ${MR} instead of all four carriers, so the absence on the \
+      "the READY-Binding side rendered ${MR} instead of all five carriers, so the absence on the \
 other side is not evidence: a renderer that emits nothing anywhere produces it too"
   else
     record FAIL "a deployment on an unreachable pool renders no connector at all" \

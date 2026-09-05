@@ -153,8 +153,11 @@ fi
 
 # --- three deployments: two on one Binding, one on the other ---
 
+# The output is READ, not discarded. A refused manifest -- a bad InstanceType name, a validation
+# error, a typo -- is otherwise discovered 120 seconds later as an empty tenant, three times over,
+# and the FAIL that follows guesses among three causes that have nothing to do with the real one.
 deploy() {
-  kubectl apply -f - <<YAML >/dev/null 2>&1
+  kubectl apply -f - <<YAML 2>&1
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata:
@@ -177,9 +180,15 @@ spec:
 YAML
 }
 
-deploy case47-a "$BINDING"
-deploy case47-b "$BINDING"
-deploy case47-c "$OTHER_BINDING"
+deploy_out="$(deploy case47-a "$BINDING"; deploy case47-b "$BINDING"; deploy case47-c "$OTHER_BINDING")"
+deploy_created="$(printf '%s\n' "$deploy_out" | grep -c ' created$' || true)"
+if [ "${deploy_created:-0}" -ne 3 ]; then
+  record SKIP "the three deployments are admitted" \
+    "${deploy_created:-0} of 3 were created, so every row below would report an absence produced by \
+the manifest rather than by the operator: $(echo "$deploy_out" | tr '\n' ' ' | cut -c1-220)"
+  kvi_results "$CASE_ID"
+  exit $?
+fi
 
 # The value is read off the Pod SPEC, which the operator writes at render time -- not off a running
 # container. A Pod that never starts still carries everything this case asserts.
@@ -232,6 +241,19 @@ fi
 
 # --- the store side: does the tenant the operator rendered actually partition anything ---
 
+# GUARDED ON THE VALUES IT IS ABOUT TO USE. With an empty TA or TC the probe below would call setup()
+# with an empty tenant id, and the client either errors -- reported as "nothing was measured" -- or
+# succeeds under the store's own default and produces a FAIL row about ISOLATION that is really the
+# render failure above wearing a different name. Two failures conflated into one row is worse than
+# one row that says it did not run.
+if [ -z "$TA" ] || [ -z "$TC" ]; then
+  record SKIP "the rendered tenant partitions the store" \
+    "no tenant was rendered (case47-a='${TA}', case47-c='${TC}'), so the store side has nothing to \
+partition on — this is the row above failing, not an isolation result"
+  kvi_results "$CASE_ID"
+  exit $?
+fi
+
 kubectl apply -f - <<YAML >/dev/null
 apiVersion: v1
 kind: Pod
@@ -272,12 +294,22 @@ print('OTHER len=%d' % len(c.get('${PAYLOAD}') or b''))
 # shared teardown force a finalizer on every run of this case. Retried on -706 (the write's lease has
 # not expired) rather than slept through, because that TTL is a master startup parameter; -704 is
 # already-absent and is done, not a failure.
+# Every exit from this loop says which one it was. A silent break makes a connection error, an
+# unexpected error code and a successful drain look identical -- and the one that matters is
+# invisible: the object stays, the shared teardown goes back to forcing a finalizer on every run,
+# and nothing in the log says why.
 import time
 deadline = time.time() + 60
 while True:
     rc = a.remove('${PAYLOAD}')
-    print('REMOVE rc=%d' % rc)
-    if rc != -706 or time.time() > deadline:
+    if rc == 0 or rc == -704:
+        print('DRAIN ok rc=%d' % rc)
+        break
+    if rc != -706:
+        print('DRAIN unexpected rc=%d' % rc)
+        break
+    if time.time() > deadline:
+        print('DRAIN gave-up rc=-706 after 60s; the write lease had not expired')
         break
     time.sleep(3)
 " >"$LOG" 2>&1
