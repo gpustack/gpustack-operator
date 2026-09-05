@@ -744,6 +744,18 @@ func (r *KVCacheBackendReconciler) observeMembers(
 		logger.Error(joinErr, "list kv cache backend member pods")
 	}
 
+	// Keys that several ready Pods answer to AND that a segment actually arrived on. Both halves
+	// matter. A segment on such a key cannot be traced to a Pod, so it is published without a node
+	// or a medium rather than with a guessed one, and the condition below reports the ambiguity
+	// instead of a number derived from it.
+	//
+	// ⛔ Collected inside this loop rather than over the whole index, because a shared key that no
+	// segment uses is not a problem: two TCP groups on one node share that node's name, and the
+	// leader reports each of their segments by its own distinct pod IP, so every segment resolves.
+	// Judging the index instead of the listing would move that healthy backend to Degraded and tell
+	// the operator to split two groups that never collided.
+	ambiguous := map[string][]string{}
+
 	members := make([]workercore.KVCacheBackendMemberStatus, 0, len(segments))
 	accounted := make(map[string]struct{}, len(segments))
 	for _, segment := range segments {
@@ -752,10 +764,21 @@ func (r *KVCacheBackendReconciler) observeMembers(
 			Protocol:    segment.Protocol,
 			State:       mooncake.SegmentState(segment.State),
 		}
-		if pod, ok := pods[hostOf(segment.TEEndpoint)]; ok {
-			member.NodeName = pod.nodeName
-			member.Medium = pod.medium
-			accounted[pod.podName] = struct{}{}
+		host := hostOf(segment.TEEndpoint)
+		switch candidates := readyMemberPods(pods[host]); {
+		case len(candidates) > 1:
+			ambiguous[host] = memberPodNames(candidates)
+		case len(candidates) == 1:
+			member.NodeName = candidates[0].nodeName
+			member.Medium = candidates[0].medium
+			accounted[candidates[0].podName] = struct{}{}
+		case len(pods[host]) == 1:
+			// Nothing ready answers to this key, and exactly one Pod does. A member on its way up or
+			// down still supplies the two fields the listing cannot, which is worth more than a blank
+			// row. It is NOT accounted for: the shortfall holds ready Pods to the listing, and this
+			// one is not one of them.
+			member.NodeName = pods[host][0].nodeName
+			member.Medium = pods[host][0].medium
 		}
 		members = append(members, member)
 	}
@@ -809,6 +832,20 @@ func (r *KVCacheBackendReconciler) observeMembers(
 			}
 		}
 		KVCacheBackendConditionMembersMounted.False(holder, reason, message)
+	case len(ambiguous) > 0:
+		// Before the shortfall, because the shortfall cannot be computed: the Pods behind an
+		// ambiguous key are unaccounted for by construction, so they would all be reported missing
+		// and the number would describe this index rather than the cluster.
+		//
+		// The message names the key and the Pods, because the operator's next step is to make them
+		// stop sharing it — a nodeSelector that keeps the two groups off one node — and that step
+		// is only obvious if the message says which groups and which node.
+		KVCacheBackendConditionMembersMounted.False(holder, "AmbiguousMemberIdentity",
+			fmt.Sprintf("the leader lists %d segment(s), and %s, so no segment can be traced to a "+
+				"member: the leader reports a segment by address and both of its fields carry a "+
+				"transfer port bound at random, which no pod carries. Give the groups node "+
+				"selectors that keep them on different nodes to make each member addressable",
+				len(members), describeAmbiguousKeys(ambiguous)))
 	case len(short) > 0:
 		KVCacheBackendConditionMembersMounted.False(holder, "SegmentsShort",
 			fmt.Sprintf("the leader lists %d segment(s), and %d of %d ready member pod(s) match "+
@@ -936,10 +973,31 @@ func memberPodStuck(pod *core.Pod) (memberPodFault, bool) {
 // The name is not published anywhere. It is the identity the shortfall check accounts against, and
 // it has to be the Pod's rather than either index key, because one Pod is reachable under two of
 // those and would otherwise be accounted for twice.
+// Several Pods can answer to ONE key, which is why the index holds a slice of these rather than one:
+// two member groups can select one node, and then both of their Pods answer to that node's name; on
+// the RDMA path both also hold the host's network namespace, so both answer to its address too.
+//
+// ⛔ When more than one READY Pod answers to the key a segment arrived on, the identity cannot be
+// recovered, and that is a property of the data rather than of this code: the leader reports a
+// segment as "<host>:<transfer port>", and BOTH of the fields it offers — segment_name and
+// te_endpoint — are that shape. The transfer port is bound at random and is not a fact any Pod
+// carries (four observed values, none configured: 15002, 15995, 16566, 16655), so the join must
+// strip it. Two Pods behind one host are therefore indistinguishable in every observable field.
+//
+// So no assignment is attempted there. Three earlier versions of this tried — credit the surviving
+// Pod, credit the whole set, credit by multiplicity — and each had a defect the next review found,
+// because each was producing an approximation for a problem whose input does not determine its
+// output. What is reported instead is that the identity is ambiguous.
 type memberPodFacts struct {
 	podName  string
 	nodeName string
 	medium   string
+	// ready is carried here rather than looked up beside the join, because readiness is what decides
+	// whether a Pod is a candidate for a segment at all. Kept out of it, a key shared by one ready
+	// and one unready Pod resolves to whichever was filed last: the segment takes the unready Pod's
+	// node and medium, and the ready member — the only one that could have produced it — is reported
+	// missing.
+	ready bool
 }
 
 // listMemberPods indexes this backend's member Pods by every name the leader could report one under,
@@ -964,8 +1022,8 @@ type memberPodFacts struct {
 // and that is the question the shortfall has to answer.
 func (r *KVCacheBackendReconciler) listMemberPods(
 	ctx context.Context, kvcb *workercore.KVCacheBackend,
-) (map[string]memberPodFacts, []string, error) {
-	facts := map[string]memberPodFacts{}
+) (map[string][]memberPodFacts, []string, error) {
+	facts := map[string][]memberPodFacts{}
 	var ready []string
 
 	managed := kvcb.Spec.Connection.Managed
@@ -994,35 +1052,124 @@ func (r *KVCacheBackendReconciler) listMemberPods(
 				continue
 			}
 
-			fact := memberPodFacts{
-				podName:  pod.Name,
-				nodeName: pod.Spec.NodeName,
-				medium:   managed.Members[group].Medium,
-			}
-			// Indexed under BOTH, and a Pod carrying neither has mounted nothing so nothing can
-			// match it. The pod IP is what a member this operator renders advertises, and the node
-			// name is what one rendered before that did — an external backend, or a member still
-			// running from an older template, is still joined rather than silently left blank.
-			if pod.Spec.NodeName != "" {
-				facts[pod.Spec.NodeName] = fact
-			}
-			if pod.Status.PodIP != "" {
-				facts[pod.Status.PodIP] = fact
-			}
-
 			// Indexed whatever its state, but ACCOUNTED FOR only when ready. The index answers
 			// "which Pod produced this segment", which a Pod answers as soon as it has a node —
 			// and the accounting answers "which Pods should the leader be listing", which only a
 			// ready member can be held to. Holding a Pod that is pulling, pending or crash-looping
 			// to it would invent a shortfall and move a healthy backend to Degraded for the
 			// duration of a rollout.
-			if podIsReady(pod) {
+			fact := memberPodFacts{
+				podName:  pod.Name,
+				nodeName: pod.Spec.NodeName,
+				medium:   managed.Members[group].Medium,
+				ready:    podIsReady(pod),
+			}
+			if fact.ready {
 				ready = append(ready, pod.Name)
+			}
+
+			// Indexed under BOTH, and a Pod carrying neither has mounted nothing so nothing can
+			// match it. The pod IP is what a member this operator renders advertises, and the node
+			// name is what one rendered before that did — an external backend, or a member still
+			// running from an older template, is still joined rather than silently left blank.
+			//
+			// Written through indexMemberPod rather than assigned, because both keys can already be
+			// held by another group's Pod, and both can be the same string for this one.
+			if pod.Spec.NodeName != "" {
+				indexMemberPod(facts, pod.Spec.NodeName, fact)
+			}
+			if pod.Status.PodIP != "" {
+				indexMemberPod(facts, pod.Status.PodIP, fact)
 			}
 		}
 	}
 
+	// Sorted so a message built from a key's Pods is byte-identical across reconciles: the API
+	// server's list order is not promised, and a condition message that reorders rewrites the object
+	// on every pass.
+	for key := range facts {
+		slices.SortFunc(facts[key], func(a, b memberPodFacts) int {
+			return strings.Compare(a.podName, b.podName)
+		})
+	}
+
 	return facts, ready, nil
+}
+
+// readyMemberPods keeps the Pods behind one index key that could actually be holding a segment.
+//
+// Readiness is what decides an ambiguity, because only a ready member is held to the leader's
+// listing: two Pods sharing a key while one is still pulling its image is a rollout, not an
+// operator error, and the ready one is then the only candidate rather than one of two.
+//
+// The names are sorted by listMemberPods, so a message built from this is byte-identical across
+// reconciles and does not churn the object.
+func readyMemberPods(facts []memberPodFacts) []memberPodFacts {
+	ready := make([]memberPodFacts, 0, len(facts))
+	for _, fact := range facts {
+		if fact.ready {
+			ready = append(ready, fact)
+		}
+	}
+
+	return ready
+}
+
+// memberPodNames is the names of a key's Pods, which is what a condition message can carry — the
+// facts themselves say nothing an operator can act on.
+func memberPodNames(facts []memberPodFacts) []string {
+	names := make([]string, 0, len(facts))
+	for _, fact := range facts {
+		names = append(names, fact.podName)
+	}
+
+	return names
+}
+
+// describeAmbiguousKeys renders the sharing as one clause, sorted so the condition message is
+// byte-identical across reconciles and does not churn the object.
+// ⛔ BOUNDED, on both axes, and the reason is that this message can be the largest thing this
+// controller writes. One ambiguous key per node is what a two-group RDMA backend produces, so the
+// number of clauses answers to the cluster's size rather than to anything here — a thousand nodes
+// renders past `Condition.message`'s 32 KiB schema limit, every status write is then rejected, and the
+// reconcile retries forever WITHOUT ever publishing the ambiguity it was trying to report. A fault
+// report that grows with the fault is the one shape that fails exactly when it is needed.
+func describeAmbiguousKeys(ambiguous map[string][]string) string {
+	clauses := make([]string, 0, len(ambiguous))
+	for key, sharing := range ambiguous {
+		clauses = append(clauses, fmt.Sprintf("%d ready member pod(s) answer to %q (%s)",
+			len(sharing), key, listBoundedNames(sharing)))
+	}
+	slices.Sort(clauses)
+
+	if len(clauses) > kvCacheBackendMaxNames {
+		return fmt.Sprintf("%s; and %d more shared key(s)",
+			strings.Join(clauses[:kvCacheBackendMaxNames], "; "),
+			len(clauses)-kvCacheBackendMaxNames)
+	}
+
+	return strings.Join(clauses, "; ")
+}
+
+// indexMemberPod files one Pod under one key, KEEPING the Pods already there.
+//
+// A plain map assignment is what this replaces, and it dropped a Pod every time two groups met on a
+// node: the dropped one was ready, unlisted, and reported as a shortfall forever. Holding every Pod
+// per key is what lets the join ask "how many could have produced this segment" instead of reading
+// whichever one a map happened to keep.
+//
+// A Pod filed under the SAME key twice is not two Pods. Both of its keys are the same string when
+// the node is named by its address, which is legal and happens with --hostname-override and on some
+// managed platforms. Appending it again would make one member read as two and manufacture an
+// ambiguity out of a single Pod; returning early rather than overwriting also keeps a genuine
+// collision recorded by an earlier call, which an overwrite would erase.
+func indexMemberPod(facts map[string][]memberPodFacts, key string, fact memberPodFacts) {
+	for _, filed := range facts[key] {
+		if filed.podName == fact.podName {
+			return
+		}
+	}
+	facts[key] = append(facts[key], fact)
 }
 
 // hostOf strips the port from an address the leader reports. The listing carries host:port and the
@@ -1045,15 +1192,22 @@ func hostOf(address string) string {
 
 // selectKVCacheBackendCapacity picks the gauges this backend's capacity is reported from.
 //
-// The leader keeps two independent pairs — one for segments it holds in memory, one for segments
-// backed by a file — and it serializes BOTH unconditionally, so the pool a backend does not use is
+// The leader keeps two independent pairs — one for segments it holds in memory, one for the disk a
+// member offloads to — and it serializes BOTH unconditionally, so a pool a backend does not use is
 // present in the exposition reading zero rather than being absent from it.
 //
-// A managed backend names its medium, so one pair is read and the other ignored: status.members[]
-// publishes that medium, and a figure taken from the other tier would contradict it. An external
-// backend names no medium — this API says how to REACH it, not what it is made of — so there is no
-// tier to pick and the two pools are added instead. A backend using only one of them reads the same
-// either way, because the one it does not use contributes its zero.
+// The question is therefore what the backend is MADE of, and there are two answers:
+//
+//   - No disk tier: the memory pair alone. The file pair would be a zero, and while adding it would
+//     give the same figure today, it would start meaning something the object does not have on the
+//     day this operator renders a second file-backed thing.
+//   - A disk tier, or an EXTERNAL backend: both pairs, added. A backend with a tier is genuinely
+//     made of both, and an external one names nothing this operator can ask — it says how to REACH
+//     a backend, not what it is built from — so summing is the only honest reading there too.
+//
+// This used to select by the group's MEDIUM, which stopped being the question when a disk tier
+// became a layer on a group rather than a medium of its own: one group now contributes to both
+// pairs at once, and no single medium name can say that.
 func selectKVCacheBackendCapacity(
 	kvcb *workercore.KVCacheBackend, capacity mooncake.LeaderCapacity,
 ) (total, used *int64) {
@@ -1067,10 +1221,25 @@ func selectKVCacheBackendCapacity(
 		return nil, nil
 	}
 
-	if mooncake.MemberMediumIsFileBacked(managed.Members[0].Medium) {
-		return capacity.TotalFileBytes, capacity.AllocatedFileBytes
+	if kvCacheBackendHasDiskTier(managed) {
+		return sumCapacityGauges(capacity.TotalBytes, capacity.TotalFileBytes),
+			sumCapacityGauges(capacity.AllocatedBytes, capacity.AllocatedFileBytes)
 	}
 	return capacity.TotalBytes, capacity.AllocatedBytes
+}
+
+// kvCacheBackendHasDiskTier reports whether any member group offloads to a local disk.
+//
+// Admission allows at most one group to carry a tier, and that bound exists for this function's
+// sake: the leader reports every tier through one pair of gauges, so a second one would land in the
+// same figure with no way to tell the two apart.
+func kvCacheBackendHasDiskTier(managed *workercore.KVCacheBackendManaged) bool {
+	for i := range managed.Members {
+		if managed.Members[i].LocalDisk != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // sumCapacityGauges adds two gauges each of which may be missing from the exposition, and stays
@@ -1086,9 +1255,13 @@ func sumCapacityGauges(memory, file *int64) *int64 {
 
 	// Saturated rather than wrapped. Each gauge is separately bounded to a non-negative int64 by
 	// the decoder, but their sum need not fit one — and a wrapped sum is NEGATIVE, which reads as a
-	// capacity and is published as one. Only an external backend reaches this, and an external
-	// backend's /metrics is whatever address an administrator wrote, so the pair is not this
-	// operator's to assume anything about.
+	// capacity and is published as one.
+	//
+	// This used to say only an external backend reaches it, which stopped being true when a managed
+	// backend with a disk tier began summing both pairs as well. The saturation is still right for
+	// both, and for the same reason in each: an external backend's /metrics is whatever address an
+	// administrator wrote, and a managed backend's file gauge is whatever ceiling its members
+	// declared — neither pair is this operator's to assume anything about.
 	if *file > math.MaxInt64-*memory {
 		sum := int64(math.MaxInt64)
 		return &sum
@@ -1359,6 +1532,15 @@ func alignRenderedContainer(actual *core.Container, expected core.Container) (ch
 		actual.SecurityContext = expected.SecurityContext
 		changed = true
 	}
+	// The shutdown hook carries the scale-in grace INSIDE its argv, and that grace is editable. Left
+	// out of this comparison the hook is written once and never again: the pod fingerprint moves
+	// with it, so the members are deleted and recreated — from a template whose hook still holds the
+	// old grace. The result is worse than not converging, because everything else says the change
+	// took effect.
+	if !kubemeta.DeepEqual(actual.Lifecycle, expected.Lifecycle) {
+		actual.Lifecycle = expected.Lifecycle
+		changed = true
+	}
 	return changed
 }
 
@@ -1389,8 +1571,73 @@ func (r *KVCacheBackendReconciler) syncMemberWorkloads(
 		}
 	}
 
+	if err := r.pruneRemovedMemberWorkloads(ctx, kvcb); err != nil {
+		logger.Error(err, "prune removed kv cache backend member workloads")
+		return err
+	}
+
 	logger.V(2).Info("synced kv cache backend member workloads",
 		"groups", len(kvcb.Spec.Connection.Managed.Members))
+	return nil
+}
+
+// pruneRemovedMemberWorkloads deletes the DaemonSets of member groups the spec no longer has.
+//
+// The loop above walks the CURRENT groups, so on its own it can only ever create and update: a
+// group dropped from the list leaves a DaemonSet nothing addresses, and its members keep serving
+// segments the backend no longer declares. That was unreachable while exactly one group was
+// allowed — dropping the only group means deleting the object, which is teardown's path — and
+// became reachable the moment several groups did.
+//
+// It runs AFTER the sync rather than before it, so a spec that both adds and removes a group is
+// never momentarily short of members.
+//
+// Ownership is proven the way teardown proves it: list on the resource-type label, then keep only
+// what carries this backend's own note. The per-group names are DERIVED from the backend's name, so
+// an unrelated object can already hold one, and deleting on a name alone would delete somebody
+// else's.
+func (r *KVCacheBackendReconciler) pruneRemovedMemberWorkloads(
+	ctx context.Context, kvcb *workercore.KVCacheBackend,
+) error {
+	logger := ctrllog.FromContext(ctx)
+
+	expected := make(map[string]struct{}, len(kvcb.Spec.Connection.Managed.Members))
+	for group := range kvcb.Spec.Connection.Managed.Members {
+		expected[mooncake.MemberObjectName(kvcb, group)] = struct{}{}
+	}
+
+	dss := new(apps.DaemonSetList)
+	err := r.Client.List(ctx, dss,
+		ctrlcli.InNamespace(kuberess.SystemNamespaceName),
+		ctrlcli.MatchingLabels(
+			systemmeta.GetResourcesLabelSetOfType[map[string]string](kvcache.ResourceType)))
+	if err != nil {
+		return err
+	}
+
+	for i := range dss.Items {
+		ds := &dss.Items[i]
+		if !renderedForKVCacheBackend(ds, kvcb) {
+			continue
+		}
+		if _, ok := expected[ds.Name]; ok {
+			continue
+		}
+		if ds.DeletionTimestamp != nil {
+			continue
+		}
+		// Foreground, so the Pods are gone before the DaemonSet is: they hold the node memory the
+		// departing group claimed, and releasing the object first would leave them running with
+		// nothing accounting for them.
+		if err = r.Client.Delete(ctx, ds,
+			ctrlcli.PropagationPolicy(meta.DeletePropagationForeground)); err != nil &&
+			!kerrors.IsNotFound(err) {
+			return err
+		}
+		logger.V(1).Info("deleted the daemonset of a member group the spec no longer declares",
+			"daemonset", ds.Name)
+	}
+
 	return nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net"
 	"net/url"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -375,16 +376,6 @@ func validateKVCacheBackendManaged(
 				"which the leader high-availability subject owns"))
 	}
 
-	// field.TooMany would say "must have at most 1 item" and nothing else. The shape accepts a
-	// second group on purpose — a hot tier and a cold tier are expressible — so the refusal has to
-	// say that what is missing is the tiering, not the shape.
-	if len(managed.Members) > 1 {
-		errs = append(errs, field.Forbidden(fldPath.Child("members"), fmt.Sprintf(
-			"only 1 member group is reconciled in this scope, and %d were given: a second group is a "+
-				"second medium tier, and placing or migrating data across tiers is what the tiering "+
-				"subject owns", len(managed.Members))))
-	}
-
 	errs = append(errs, validateExtraArgs(managed.Leader.ExtraArgs,
 		mooncake.LeaderExtraArgsRules, fldPath.Child("leader", "extraArgs"))...)
 
@@ -393,7 +384,113 @@ func validateKVCacheBackendManaged(
 			fldPath.Child("members").Index(i))...)
 	}
 
+	errs = append(errs, validateKVCacheBackendOffload(managed, fldPath)...)
+	errs = append(errs, validateKVCacheBackendScaleIn(managed, fldPath.Child("scaleIn"))...)
+
 	return errs
+}
+
+// validateKVCacheBackendOffload enforces that the disk tier is declared on both sides, and that
+// only one group carries it.
+//
+// Every rule here refuses a combination the store ACCEPTS and then quietly does not honor, which
+// is the bar for putting a rule in a webhook rather than in the schema: a schema can say a value is
+// wrong, only a webhook can say a pair is.
+func validateKVCacheBackendOffload(
+	managed *workercore.KVCacheBackendManaged, fldPath *field.Path,
+) field.ErrorList {
+	var errs field.ErrorList
+
+	var withDisk []int
+	for i := range managed.Members {
+		if managed.Members[i].LocalDisk != nil {
+			withDisk = append(withDisk, i)
+		}
+	}
+
+	offloadPath := fldPath.Child("leader", "offload")
+	offload := managed.Leader.Offload
+	enabled := offload != nil && offload.Enabled
+
+	switch {
+	case len(withDisk) > 0 && !enabled:
+		// The member would report its disk capacity to the leader and the leader would never send
+		// it anything, so the backend reads as having a cold tier that never takes a byte.
+		errs = append(errs, field.Required(offloadPath.Child("enabled"), fmt.Sprintf(
+			"must be true when a member group declares localDisk (group %d does): the leader is "+
+				"what decides a key goes to disk, so without it the tier is never written to while "+
+				"still reporting its capacity", withDisk[0])))
+	case len(withDisk) == 0 && enabled:
+		// The mirror image: the leader queues offload work for clients that registered no local
+		// disk segment, and its own guard drops it without anything on this object saying so.
+		errs = append(errs, field.Required(fldPath.Child("members"), fmt.Sprintf(
+			"a member group must declare localDisk when %s is true: no group does, so the leader "+
+				"would queue offload work for members that have nowhere to put it",
+			offloadPath.Child("enabled"))))
+	}
+
+	if offload != nil && offload.OnEvict && !offload.Enabled {
+		errs = append(errs, field.Forbidden(offloadPath.Child("onEvict"), fmt.Sprintf(
+			"requires %s: the store ands the two together, so this alone is accepted, echoed back "+
+				"in the leader's own startup log, and then does nothing",
+			offloadPath.Child("enabled"))))
+	}
+
+	// One disk tier per backend, and the reason is the capacity contract rather than the
+	// rendering: status.capacity is a single pair of figures for the whole backend, and it reports
+	// the disk tier by ADDING the leader's file family to its memory one. Two tiers would land in
+	// that one family with no way to tell them apart, so the object would describe neither.
+	//
+	// It ALSO happens to be the only thing refusing two groups that name the same host directory,
+	// which would run two stores over one tier wherever their selectors meet. That is not this
+	// rule's reason, so relaxing it for a capacity reason would let the other case through
+	// silently — the case pinning it is named for the collision rather than for the attribution.
+	if len(withDisk) > 1 {
+		errs = append(errs, field.Forbidden(
+			fldPath.Child("members").Index(withDisk[1]).Child("localDisk"),
+			fmt.Sprintf("only one member group may declare localDisk, and groups %v declare one: "+
+				"the leader reports every disk tier through one pair of gauges, so status.capacity "+
+				"could not say which figure belonged to which group", withDisk)))
+	}
+
+	return errs
+}
+
+// validateKVCacheBackendScaleIn bounds the grace a departing member waits for.
+//
+// Both bounds refuse a value that would make the shutdown hook fail rather than wait, and a failing
+// preStop is recorded as an event and otherwise ignored — so the hook would look configured while
+// draining nothing.
+func validateKVCacheBackendScaleIn(
+	managed *workercore.KVCacheBackendManaged, fldPath *field.Path,
+) field.ErrorList {
+	scaleIn := managed.ScaleIn
+	if scaleIn == nil {
+		return nil
+	}
+
+	gracePath := fldPath.Child("gracePeriodSeconds")
+
+	// The schema bounds this too, and the duplication is on purpose: the schema's message names a
+	// number, this one names the reason. A reader who hits the schema's bound first has still been
+	// stopped from shipping a hook that fails on every shutdown.
+	if scaleIn.GracePeriodSeconds > mooncake.MemberMaxGracePeriodSeconds {
+		return field.ErrorList{field.Invalid(gracePath, scaleIn.GracePeriodSeconds, fmt.Sprintf(
+			"must not exceed %d: the member's own endpoint refuses a larger grace with a 400, so "+
+				"this would render a shutdown hook that fails every time it runs",
+			mooncake.MemberMaxGracePeriodSeconds))}
+	}
+	if scaleIn.GracePeriodSeconds < 0 {
+		return field.ErrorList{field.Invalid(gracePath, scaleIn.GracePeriodSeconds,
+			"must not be negative")}
+	}
+
+	// A grace on a backend with no disk tier is not refused. It is inert — there is nothing to
+	// deregister and no hook is rendered — but refusing it would make declaring a scale-in policy
+	// depend on the order in which two independent fields are edited, and an operator adding the
+	// tier next would have to remove and re-add the grace around it.
+
+	return nil
 }
 
 const quantityTooLarge = "must not exceed 9223372036854775807 (2^63-1) bytes: the renderer reads " +
@@ -406,13 +503,11 @@ func validateKVCacheBackendMember(
 ) field.ErrorList {
 	var errs field.ErrorList
 
-	if !mooncake.MemberMediumIsReconciled(member.Medium) {
-		errs = append(errs, field.Forbidden(fldPath.Child("medium"), fmt.Sprintf(
-			"only %q is reconciled in this scope, and %q was given: the store supports this medium, "+
-				"but running it needs the leader's file or DAX flags and a mount on the member, and "+
-				"rendering those per medium is what the tiering subject owns",
-			mooncake.MemberMediumDRAM, member.Medium)))
-	}
+	// There is no per-medium rule here any more, and its absence is deliberate: the schema now
+	// enumerates the one value, so a medium this API does not render is refused before this handler
+	// runs and a rule for it would be code no request can reach.
+
+	errs = append(errs, validateKVCacheBackendLocalDisk(member.LocalDisk, fldPath.Child("localDisk"))...)
 
 	// A resource.Quantity is a STRING in the schema, so no numeric bound in a marker can reach it —
 	// these two are the only place either can be refused. Zero is refused rather than defaulted,
@@ -466,6 +561,114 @@ func validateKVCacheBackendMember(
 		mooncake.MemberExtraArgsRules, fldPath.Child("extraArgs"))...)
 
 	return errs
+}
+
+// validateKVCacheBackendLocalDisk refuses a disk tier the node could not carry.
+//
+// The path becomes a hostPath mount, which is why it is checked here at all: the API server takes
+// any string, and the kubelet's refusal of a bad one arrives inside a reconcile, where the only
+// trace is a line in this operator's log while the group simply never comes up.
+//
+// It refuses "/" and NOT other sensitive host paths, and that asymmetry is deliberate rather than an
+// unfinished blocklist. An administrator who writes /etc or /var is REQUESTING that directory, and
+// this project does not infer privilege on an operator's behalf or refuse it on their behalf either
+// — the same rule that keeps transport.protocol: Auto from promoting itself to RDMA. "/" is refused
+// because it is the one value that cannot be a request: it mounts the node's entire filesystem into
+// a third-party container, and no tier is served by it. A blocklist of "dangerous" paths would also
+// be unclosable — every entry invites a reader to trust that what is missing from it is safe.
+func validateKVCacheBackendLocalDisk(
+	disk *workercore.KVCacheBackendMemberLocalDisk, fldPath *field.Path,
+) field.ErrorList {
+	if disk == nil {
+		return nil
+	}
+
+	var errs field.ErrorList
+
+	pathPath := fldPath.Child("path")
+	switch path := strings.TrimSpace(disk.Path); {
+	case path == "":
+		errs = append(errs, field.Required(pathPath,
+			"a directory on the node is required: it is mounted from the host, and this operator "+
+				"picks no default because the wrong host directory fills a filesystem nothing in "+
+				"Kubernetes accounts for"))
+	case path != disk.Path:
+		// Refused rather than trimmed: a validating webhook returns a verdict and cannot write, so
+		// normalising here would admit the untrimmed value and mount it as written.
+		//
+		// The message says "whitespace" rather than "a space" because TrimSpace also removes tabs
+		// and newlines, and a message narrower than the rule sends someone looking for a space that
+		// is not there.
+		errs = append(errs, field.Invalid(pathPath, disk.Path,
+			"must not begin or end with whitespace: the path is mounted exactly as written here"))
+	case !filepath.IsAbs(path):
+		errs = append(errs, field.Invalid(pathPath, disk.Path,
+			"must be an absolute path: it names a directory on the node, and a relative one is "+
+				"refused by the kubelet inside a reconcile rather than here"))
+	case hasParentDirComponent(path):
+		// The store refuses these itself, statically, before it looks at the filesystem — so a
+		// path admitted here would produce a member that never becomes ready, with the reason only
+		// in a container log. Checked on the RAW components rather than after Clean, because Clean
+		// resolves ".." away and would hide exactly what the store is looking for.
+		errs = append(errs, field.Invalid(pathPath, disk.Path,
+			`must not contain a ".." component: the store refuses a path with one as traversal, `+
+				"before it checks whether the directory exists, so the member would start and "+
+				"never mount its tier"))
+	case filepath.Clean(path) == "/":
+		errs = append(errs, field.Invalid(pathPath, disk.Path,
+			"must not be the root directory: it would mount the node's whole filesystem into a "+
+				"third-party container"))
+	case pathOverlaps(filepath.Clean(path), mooncake.RDMADevicePath):
+		// The two mounts land in ONE container, so a collision is resolved by the kubelet rather
+		// than reported here — one mount shadows the other, and which one wins is not something
+		// this object records. Refused whatever the transport is today, because the transport is
+		// editable: a tier that merely does not collide yet would start colliding the moment
+		// someone switched the backend to RDMA.
+		errs = append(errs, field.Invalid(pathPath, disk.Path, fmt.Sprintf(
+			"must not overlap %s, which the RDMA transport mounts into the same container: one "+
+				"mount would shadow the other, and the transport can be switched to RDMA after "+
+				"this path is set", mooncake.RDMADevicePath)))
+	}
+
+	// The capacity is a resource.Quantity, so it is a string in the schema and no marker can bound
+	// it. Zero is legitimate and means "no ceiling of ours" — the store's own applies — which is
+	// the same thing leaving the field out means.
+	if disk.Capacity.CmpInt64(0) < 0 {
+		errs = append(errs, field.Invalid(fldPath.Child("capacity"), disk.Capacity.String(),
+			"must not be negative: it caps what this tier stores"))
+	} else if quantityx.OverflowsInt64(disk.Capacity) {
+		errs = append(errs, field.Invalid(fldPath.Child("capacity"), disk.Capacity.String(),
+			quantityTooLarge))
+	}
+
+	return errs
+}
+
+// pathOverlaps reports whether two cleaned absolute paths would mount over one another — equal, or
+// either containing the other.
+//
+// Containment counts in both directions, which a plain prefix test on strings would get wrong twice:
+// it would miss "the tier is the parent of the device tree", and it would falsely match a sibling
+// whose name merely starts with the same letters ("/dev/infiniband-x" is not inside
+// "/dev/infiniband").
+func pathOverlaps(a, b string) bool {
+	if a == b {
+		return true
+	}
+	return strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+}
+
+// hasParentDirComponent reports whether any path component is "..".
+//
+// It walks the components rather than searching for the substring, so a directory legitimately
+// named "..data" — which is what a projected volume mounts — is not mistaken for traversal.
+func hasParentDirComponent(path string) bool {
+	for component := range strings.SplitSeq(filepath.ToSlash(path), "/") {
+		if component == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 // validateExtraArgs enforces one side's escape-hatch rules. Each refusal says which KIND of problem
@@ -551,11 +754,63 @@ func validateKVCacheBackendImmutable(oldKvcb, newKvcb *workercore.KVCacheBackend
 		if i >= len(oldMembers) {
 			break
 		}
+		// Unreachable while the enum carries one value, and kept for the day it carries two: on
+		// that day a medium becomes mutable by default, under segments already mounted from it,
+		// and nothing would fail until someone did it. A rule that is only correct after a later
+		// change is cheaper to keep than to remember to add.
 		if oldMembers[i].Medium != newMembers[i].Medium {
 			errs = append(errs, field.Forbidden(membersPath.Index(i).Child("medium"),
 				"medium is immutable"))
 		}
+		errs = append(errs, validateKVCacheBackendLocalDiskImmutable(
+			oldMembers[i].LocalDisk, newMembers[i].LocalDisk,
+			membersPath.Index(i).Child("localDisk"))...)
 	}
 
 	return errs
+}
+
+// validateKVCacheBackendLocalDiskImmutable freezes whether a group has a disk tier and where it
+// lives, while leaving what it may hold editable.
+//
+// The split follows what the change costs. Turning the tier on or off, or moving it to another
+// directory, strands whatever the members already wrote at the old configuration — the data stays
+// on the node with nothing addressing it. Raising or lowering the ceiling re-renders one
+// environment variable, which the pod fingerprint restarts the group for by the mechanism that
+// already exists, and the tier's contents survive that restart.
+//
+// It compares BY POSITION, and that is not an approximation of some better pairing: the position is
+// what identifies a group everywhere else too. MemberObjectName derives the DaemonSet's name from
+// it, and the Pod ownership checks read it back. So reordering the list, or removing a group ahead
+// of others, genuinely redefines every position after it — the members at those positions are
+// rebuilt against a different group's spec, and their caches go with them. Refusing the immutable
+// fields there is reporting that, not mistaking it. The messages below say "at this position" so an
+// operator who reordered can tell which of the two happened.
+func validateKVCacheBackendLocalDiskImmutable(
+	oldDisk, newDisk *workercore.KVCacheBackendMemberLocalDisk, fldPath *field.Path,
+) field.ErrorList {
+	switch {
+	case oldDisk == nil && newDisk == nil:
+		return nil
+	case oldDisk == nil:
+		return field.ErrorList{field.Forbidden(fldPath,
+			"a local disk tier cannot be added to the group at this position: its members would "+
+				"have to restart to mount the host directory, and the leader would begin "+
+				"offloading to a tier that no existing key is on. If you reordered members or "+
+				"removed an earlier group, note that the position identifies a group here — the "+
+				"members at this position now belong to a different group's spec")}
+	case newDisk == nil:
+		return field.ErrorList{field.Forbidden(fldPath,
+			"a local disk tier cannot be removed from the group at this position: whatever its "+
+				"members have already written stays on their nodes with nothing addressing it. "+
+				"Reordering members or removing an earlier group reaches this rule too, because "+
+				"the position is what identifies a group")}
+	case oldDisk.Path != newDisk.Path:
+		return field.ErrorList{field.Forbidden(fldPath.Child("path"),
+			"the path is immutable: what the members at this position have already written stays "+
+				"at the old one. Reordering members reaches this rule as well, since the position "+
+				"is what identifies a group")}
+	}
+
+	return nil
 }

@@ -44,6 +44,38 @@ func newKVCacheBackend() *workercore.KVCacheBackend {
 	}
 }
 
+// withDiskTier declares a complete local disk tier: the member's half and the leader's.
+//
+// It is one helper rather than two because a tier declared on one side only is a REFUSAL, so a
+// fixture that set one half would make every case built on it fail for that reason instead of its
+// own. Cases that want a half-declared tier remove one explicitly, which reads as the mutation it
+// is.
+func withDiskTier() func(*workercore.KVCacheBackend) {
+	return func(k *workercore.KVCacheBackend) {
+		k.Spec.Connection.Managed.Members[0].LocalDisk = &workercore.KVCacheBackendMemberLocalDisk{
+			Path:     "/var/lib/kvcache",
+			Capacity: resource.MustParse("4Ti"),
+		}
+		k.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+	}
+}
+
+// withDiskPath is a complete tier whose path is the thing under test.
+func withDiskPath(path string) func(*workercore.KVCacheBackend) {
+	return func(k *workercore.KVCacheBackend) {
+		withDiskTier()(k)
+		k.Spec.Connection.Managed.Members[0].LocalDisk.Path = path
+	}
+}
+
+// withGrace sets a scale-in grace on a backend that has a tier for it to reach.
+func withGrace(seconds int32) func(*workercore.KVCacheBackend) {
+	return func(k *workercore.KVCacheBackend) {
+		withDiskTier()(k)
+		k.Spec.Connection.Managed.ScaleIn = &workercore.KVCacheBackendScaleIn{GracePeriodSeconds: seconds}
+	}
+}
+
 // newExternalKVCacheBackendSpec is an external backend naming both endpoint roles.
 func newExternalKVCacheBackendSpec() workercore.KVCacheBackendSpec {
 	return workercore.KVCacheBackendSpec{
@@ -121,8 +153,9 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 		{"replicas 3 names the follow-on subject", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
 		}, "leader high-availability subject"},
-		// The second group is DRAM so this case trips the group limit and nothing else. Giving it a
-		// medium would trip the medium rule too, and the case would stop saying which rule it pins.
+		// A second group is admitted. It used to be refused as "a second medium tier", which the
+		// tiering work has now answered — a tier is a layer on a group rather than a group of its
+		// own, so a second group is just more nodes and nothing here has to arbitrate between them.
 		{"two member groups", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Members = append(k.Spec.Connection.Managed.Members,
 				workercore.KVCacheBackendMember{
@@ -130,22 +163,166 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 					Medium:            "DRAM",
 					CapacityPerMember: resource.MustParse("10Ti"),
 				})
-		}, "a second group is a second medium tier"},
+		}, ""},
 
-		// A medium the schema accepts because the store supports it, and admission refuses because
-		// nothing here renders it. All four are listed: the rule is per medium, not "not DRAM".
-		{"a LocalDisk group", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Members[0].Medium = "LocalDisk"
-		}, `only "DRAM" is reconciled`},
-		{"a NoF group", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Members[0].Medium = "NoF"
-		}, `only "DRAM" is reconciled`},
-		{"a CXL group", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Members[0].Medium = "CXL"
-		}, `only "DRAM" is reconciled`},
-		{"a DFS group says what would have to render it", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Members[0].Medium = "DFS"
-		}, "the leader's file or DAX flags and a mount on the member"},
+		// There is deliberately NO case here for a medium outside the enum. The schema carries one
+		// value, so LocalDisk, NoF, CXL and DFS are refused in rest.BeforeCreate and never reach
+		// this handler — the four cases that used to live here asserted a rule that no request can
+		// reach any more, and a test for one would pass against a webhook that had stopped running.
+
+		// The disk tier's two halves. Each of these refuses a combination the store ACCEPTS and
+		// then quietly does not honor, which is why they are here rather than in the schema. Both
+		// directions are covered, because each half alone fails in its own way and an operator who
+		// set the other one needs to hear which is missing.
+		{"a disk tier with its leader half", withDiskTier(), ""},
+		{"a disk tier without the leader half", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Leader.Offload = nil
+		}, "the leader is what decides a key goes to disk"},
+		{"the leader half with no disk tier anywhere", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+		}, "would queue offload work for members that have nowhere to put it"},
+		{"onEvict without enabled", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{OnEvict: true}
+		}, "the store ands the two together"},
+		{"onEvict with enabled", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true, OnEvict: true}
+		}, ""},
+
+		// The path becomes a hostPath, so what the kubelet would refuse inside a reconcile is
+		// refused here instead, where the message reaches the person who wrote it.
+		{"a relative disk path", withDiskPath("var/lib/kvcache"), "must be an absolute path"},
+		{
+			"a disk path that is the root directory", withDiskPath("/"),
+			"must not be the root directory",
+		},
+		{
+			// Spelled with a trailing "/." rather than with "..", because a path containing ".."
+			// is refused one rule earlier and would no longer reach this one.
+			"a disk path that is the root directory by another spelling", withDiskPath("/."),
+			"must not be the root directory",
+		},
+		{
+			"a disk path with surrounding space", withDiskPath("/var/lib/kvcache "),
+			"must not begin or end with whitespace",
+		},
+		{
+			// A tab, not a space: the rule is TrimSpace and the message says whitespace, so the
+			// case that pins them together must use something a reader would not call a space.
+			"a disk path with a leading tab", withDiskPath("\t/var/lib/kvcache"),
+			"must not begin or end with whitespace",
+		},
+		// The store refuses a path with a ".." component statically, before it looks at the
+		// filesystem at all — so one admitted here produces a member that starts, never mounts its
+		// tier, and says why only in a container log.
+		{
+			"a disk path with a parent-directory component", withDiskPath("/var/lib/../tier"),
+			`must not contain a ".." component`,
+		},
+		{
+			// Climbing all the way out is the same rule, not the root-directory one: the check runs
+			// on the raw components, before Clean would resolve this to "/".
+			"a disk path that climbs to the root", withDiskPath("/var/lib/../../"),
+			`must not contain a ".." component`,
+		},
+		{
+			// A directory whose NAME merely starts with dots is not traversal. Projected volumes
+			// mount exactly this, so a substring check for ".." would refuse a legitimate path.
+			"a disk path with a dot-prefixed directory name", withDiskPath("/var/lib/..data"),
+			"",
+		},
+
+		// The tier and the RDMA device tree are mounted into ONE container, so an overlap is
+		// resolved by the kubelet — one shadows the other — rather than reported on this object.
+		// Refused whatever the transport is today, because the transport is editable.
+		{
+			"a disk path that is the RDMA device tree", withDiskPath("/dev/infiniband"),
+			"must not overlap /dev/infiniband",
+		},
+		{
+			"a disk path inside the RDMA device tree", withDiskPath("/dev/infiniband/tier"),
+			"must not overlap /dev/infiniband",
+		},
+		{
+			"a disk path that CONTAINS the RDMA device tree", withDiskPath("/dev"),
+			"must not overlap /dev/infiniband",
+		},
+		{
+			// A sibling whose name merely starts with the same letters is not an overlap. A plain
+			// string-prefix test would refuse this one.
+			"a disk path that is a sibling of the RDMA device tree",
+			withDiskPath("/dev/infiniband-cache"), "",
+		},
+		{
+			// Pins the ORDER of two rules that both match. A traversal that happens to point at the
+			// device tree must be refused as traversal, because that is the arm the store's own
+			// check corresponds to — and because the overlap arm runs on the CLEANED path, so a
+			// reader could otherwise conclude that `..` reaches the store whenever it also
+			// collides. Swap the two arms and this case reports the wrong reason while staying
+			// green on "an error happened".
+			"a traversal that points at the RDMA device tree is refused as traversal",
+			withDiskPath("/dev/infiniband/../foo"), `must not contain a ".." component`,
+		},
+		{"an empty disk path", withDiskPath(""), "a directory on the node is required"},
+		{"a negative disk capacity", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("-1Gi")
+		}, "must not be negative"},
+		{"a disk capacity of zero, which is the store's own ceiling", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("0")
+		}, ""},
+
+		// One disk tier per backend, and the bound is the capacity contract rather than the
+		// rendering. Two groups where only ONE carries a tier is admitted, which is the case that
+		// keeps this rule from being read as "two groups are refused again".
+		{"two groups, one disk tier", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Members = append(k.Spec.Connection.Managed.Members,
+				workercore.KVCacheBackendMember{
+					NodeSelector:      map[string]string{"kvcache-plain": "true"},
+					Medium:            "DRAM",
+					CapacityPerMember: resource.MustParse("10Ti"),
+				})
+		}, ""},
+		{"two groups, two disk tiers", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			second := k.Spec.Connection.Managed.Members[0].DeepCopy()
+			second.NodeSelector = map[string]string{"kvcache-cold": "true"}
+			second.LocalDisk.Path = "/var/lib/kvcache-cold"
+			k.Spec.Connection.Managed.Members = append(k.Spec.Connection.Managed.Members, *second)
+		}, "could not say which figure belonged to which group"},
+		// The same rule, reached by the OTHER configuration it happens to protect against. This case
+		// is not about capacity attribution: both groups name the SAME host directory, so two
+		// members meeting on one node would run two stores over one tier. Nothing refuses that on
+		// its own — the capacity rule catches it first, for a reason that has nothing to do with it.
+		//
+		// It is a separate case, with a name that says the other reason, so that relaxing the
+		// capacity rule — the day status.capacity can attribute per group — turns THIS one red and
+		// tells whoever is relaxing it what else was riding on it.
+		{"two groups pointing at the same host directory", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			second := k.Spec.Connection.Managed.Members[0].DeepCopy()
+			second.NodeSelector = map[string]string{"kvcache-cold": "true"}
+			k.Spec.Connection.Managed.Members = append(k.Spec.Connection.Managed.Members, *second)
+		}, "only one member group may declare localDisk"},
+
+		// The grace the departing member waits for. The upper bound is the member endpoint's own:
+		// above it the call is answered with a 400, so the hook would fail every time it ran.
+		{"a grace period within the endpoint's ceiling", withGrace(30), ""},
+		{"a grace period of zero, which deregisters without waiting", withGrace(0), ""},
+		{
+			"a grace period above the endpoint's ceiling", withGrace(3601),
+			"would render a shutdown hook that fails every time it runs",
+		},
+		{"a negative grace period", withGrace(-1), "must not be negative"},
+		// Inert rather than refused: nothing is rendered for it, and refusing it would make
+		// declaring a policy depend on the order two independent fields are edited in.
+		{"a grace period on a backend with no disk tier", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.ScaleIn = &workercore.KVCacheBackendScaleIn{GracePeriodSeconds: 30}
+		}, ""},
 
 		// Two quantities the schema carries as strings, so no marker can bound them and this is the
 		// only place either can be refused.
@@ -200,9 +377,18 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 		}, "must not be blank"},
 
 		// The escape hatch: a knob this API does not name goes through, one it derives does not.
+		// The example is an offload TUNING knob on purpose — the tier's switch itself became a
+		// field, and the knobs around it deliberately did not, so this is the distinction the
+		// hatch now has to carry.
 		{"leader extraArgs of an undeclared flag", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"enable_offload": "true"}
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"offload_cap_ratio": "0.7"}
 		}, ""},
+		{"leader extraArgs reaching for the tier's own switch", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"enable_offload": "true"}
+		}, "derived from a field of this spec"},
+		{"leader extraArgs reaching for the tier's eviction-time switch", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"offload_on_evict": "true"}
+		}, "derived from a field of this spec"},
 		{"leader extraArgs colliding with a derived flag", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"allocation_strategy": "random"}
 		}, "derived from a field of this spec"},
@@ -227,8 +413,12 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 		{"leader extraArgs with only rpc_interface", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"rpc_interface": "eth0"}
 		}, ""},
-		{"member extraArgs of a tiering knob", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Members[0].ExtraArgs = map[string]string{"enable_ssd_offload": "true"}
+		// A key deliberately left reachable, and the one with the strongest reason: the renderer
+		// leaves MOONCAKE_DEVICE unset because one DaemonSet covers every node its group selects
+		// and an RDMA device is named per host, so no single name could be rendered for the group.
+		// The hatch is how an operator on heterogeneous hardware gets in.
+		{"member extraArgs of a key left reachable on purpose", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].ExtraArgs = map[string]string{"device_name": "mlx5_0"}
 		}, ""},
 		{"member extraArgs colliding with a derived config key", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Members[0].ExtraArgs = map[string]string{"global_segment_size": "1Gi"}
@@ -382,6 +572,35 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"enable_multi_tenants": "true"}
 		}, "this key is derived from a field of this spec"},
 
+		// The disk tier's MEMBER half, which is the side an override actually wins on: a member's
+		// extraArgs renders as the entrypoint's own -D, applied after the environment. Left
+		// reachable, ssd_offload_path takes a host path that never went through any of the rules
+		// above — absolute, not root, no "..", clear of the RDMA device tree — and
+		// enable_ssd_offload switches the tier off while the leader keeps queueing offload work.
+		// The leader's two halves are covered further up; these are here because a fix on one side
+		// of a pair is not a fix.
+		{"member extraArgs redirecting the tier's host path", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Members[0].ExtraArgs = map[string]string{
+				"ssd_offload_path": "/etc",
+			}
+		}, "derived from a field of this spec"},
+		{"member extraArgs switching the tier off", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Members[0].ExtraArgs = map[string]string{
+				"enable_ssd_offload": "false",
+			}
+		}, "derived from a field of this spec"},
+		// The tier's third rendered key is NOT derived, and this pins the difference: it has no
+		// field on the client's config object, so a -D of that name sets a key nothing reads and
+		// the tier's ceiling is untouched. Refusing it would be refusing a no-op.
+		{"member extraArgs naming the tier's size limit", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Members[0].ExtraArgs = map[string]string{
+				"offload_total_size_limit_bytes": "1",
+			}
+		}, ""},
+
 		// The external branch needs both roles, because two readers want different addresses.
 		{"external naming both roles", func(k *workercore.KVCacheBackend) {
 			k.Spec = newExternalKVCacheBackendSpec()
@@ -415,9 +634,24 @@ func TestKVCacheBackendWebhook_ValidateUpdate(t *testing.T) {
 		{"branch switched to external", func(k *workercore.KVCacheBackend) {
 			k.Spec = newExternalKVCacheBackendSpec()
 		}, "connection branch is immutable"},
+		// The schema enumerates one medium, so this rule cannot fire against any object an API
+		// server would accept today, and the value below is deliberately not a medium name that
+		// ever existed — a real-looking one would read as though the enum still carried it. The
+		// rule and this case are both kept for the day the enum widens, when a medium would
+		// otherwise become quietly mutable under segments already mounted from it.
 		{"member medium changed", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Members[0].Medium = "LocalDisk"
+			k.Spec.Connection.Managed.Members[0].Medium = "SomeFutureMedium"
 		}, "medium is immutable"},
+
+		// The disk tier is frozen in whether it exists and where it lives, because both strand
+		// what the members already wrote. What it may HOLD is editable: that re-renders one
+		// environment variable and the tier's contents survive the restart.
+		// Only the "added" direction fits this table, whose old object never has a tier. The other
+		// three each need an old object that already carries one, and live in their own test.
+		{
+			"disk tier added to a running group", withDiskTier(),
+			"cannot be added to the group at this position",
+		},
 
 		// Editable.
 		{"image changed", func(k *workercore.KVCacheBackend) {
@@ -433,7 +667,7 @@ func TestKVCacheBackendWebhook_ValidateUpdate(t *testing.T) {
 			k.Spec.Connection.Managed.Members[0].CapacityPerMember = resource.MustParse("1Ti")
 		}, ""},
 		{"extraArgs added", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"enable_offload": "true"}
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"offload_cap_ratio": "0.7"}
 		}, ""},
 		{"transport protocol changed", func(k *workercore.KVCacheBackend) {
 			k.Spec.Transport.Protocol = "RDMA"
@@ -442,6 +676,151 @@ func TestKVCacheBackendWebhook_ValidateUpdate(t *testing.T) {
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
 		return err
 	})
+}
+
+// TestKVCacheBackendWebhook_DiskTierIsFrozenExceptItsCapacity pins the three edits a group that
+// ALREADY has a disk tier can and cannot make.
+//
+// It needs its own old object, which is why it is not in the table above: that table's old object
+// never carries a tier, so every case built on it exercises the "added" rule and nothing else. A
+// capacity case run there would have passed for the wrong reason — refused as an addition while
+// claiming to prove the capacity is frozen.
+func TestKVCacheBackendWebhook_DiskTierIsFrozenExceptItsCapacity(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(*workercore.KVCacheBackend)
+		wantMsg string
+	}{
+		{"capacity raised", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("8Ti")
+		}, ""},
+		// Both directions, because the rule is "the ceiling is not part of the identity" and not
+		// "the ceiling may grow". Testing only the raise leaves a lowering free to be refused by a
+		// later edit with nothing going red, and the documentation says either way is allowed.
+		{"capacity lowered", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("1Ti")
+		}, ""},
+		{"path moved", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].LocalDisk.Path = "/var/lib/elsewhere"
+		}, "the path is immutable"},
+		{"tier removed", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].LocalDisk = nil
+			k.Spec.Connection.Managed.Leader.Offload = nil
+		}, "cannot be removed from the group at this position"},
+		{"nothing changed", func(*workercore.KVCacheBackend) {}, ""},
+	}
+
+	wh := &KVCacheBackendWebhook{}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+			withDiskTier()(oldKvcb)
+			withDiskTier()(newKvcb)
+			c.mutate(newKvcb)
+
+			_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+			if c.wantMsg == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), c.wantMsg)
+		})
+	}
+}
+
+// TestKVCacheBackendWebhook_ADiskTierLeavesOnlyWithTheLastGroup pins the one way a declared tier can
+// be taken off, because the documentation now tells operators which position they need to be in.
+//
+// The immutability rules pair groups BY POSITION and stop at the end of the new list, so dropping the
+// LAST group takes its tier with it, while dropping an earlier one compares every position after it
+// against a different group's spec and is refused. A backend whose only group carries a tier has no
+// exit at all: `members` requires an entry, so the group cannot go, and replacing it in place is the
+// forbidden edit.
+//
+// Without these cases the exits are an accident of a loop bound rather than a contract, and the page
+// that describes them would drift the first time someone iterates the old list instead of the new.
+func TestKVCacheBackendWebhook_ADiskTierLeavesOnlyWithTheLastGroup(t *testing.T) {
+	plain := workercore.KVCacheBackendMember{
+		NodeSelector:      map[string]string{"kvcache-plain": "true"},
+		Medium:            "DRAM",
+		CapacityPerMember: resource.MustParse("10Ti"),
+	}
+	// A two-group backend whose tier is on the SECOND group, which is the position the exit needs.
+	tierOnTheLastGroup := func(k *workercore.KVCacheBackend) {
+		k.Spec.Connection.Managed.Members = []workercore.KVCacheBackendMember{
+			plain, k.Spec.Connection.Managed.Members[0],
+		}
+		k.Spec.Connection.Managed.Members[1].LocalDisk = &workercore.KVCacheBackendMemberLocalDisk{
+			Path: "/var/lib/kvcache", Capacity: resource.MustParse("4Ti"),
+		}
+		k.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+	}
+
+	cases := []struct {
+		name    string
+		old     func(*workercore.KVCacheBackend)
+		new     func(*workercore.KVCacheBackend)
+		wantMsg string
+	}{
+		{
+			"the last group carries the tier and is dropped with the leader's offload",
+			tierOnTheLastGroup,
+			func(k *workercore.KVCacheBackend) {
+				k.Spec.Connection.Managed.Members = []workercore.KVCacheBackendMember{plain}
+				k.Spec.Connection.Managed.Leader.Offload = nil
+			},
+			"",
+		},
+		{
+			// The trap on the way to the case above, and the reason the exit is ONE edit rather
+			// than two: the pair rule holds across the whole object, so an update that drops the
+			// only tier while leaving the leader offloading is refused for the other half.
+			"the last group is dropped but the leader keeps offloading",
+			tierOnTheLastGroup,
+			func(k *workercore.KVCacheBackend) {
+				k.Spec.Connection.Managed.Members = []workercore.KVCacheBackendMember{plain}
+			},
+			"the leader would queue offload work for members that have nowhere to put it",
+		},
+		{
+			"the first group carries the tier and is dropped",
+			func(k *workercore.KVCacheBackend) {
+				withDiskTier()(k)
+				k.Spec.Connection.Managed.Members = append(k.Spec.Connection.Managed.Members, plain)
+			},
+			func(k *workercore.KVCacheBackend) {
+				k.Spec.Connection.Managed.Members = []workercore.KVCacheBackendMember{plain}
+			},
+			"cannot be removed from the group at this position",
+		},
+		{
+			"the only group carries the tier and is replaced in place",
+			withDiskTier(),
+			func(k *workercore.KVCacheBackend) {
+				k.Spec.Connection.Managed.Members = []workercore.KVCacheBackendMember{plain}
+			},
+			"cannot be removed from the group at this position",
+		},
+	}
+
+	wh := &KVCacheBackendWebhook{}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+			c.old(oldKvcb)
+			c.old(newKvcb)
+			c.new(newKvcb)
+
+			_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+			if c.wantMsg == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), c.wantMsg)
+		})
+	}
 }
 
 // TestKVCacheBackendWebhook_ValidateImageFallback pins the one rule that needs a cross-object read:

@@ -83,6 +83,20 @@ func RenderLeaderFlags(leader workercore.KVCacheBackendLeader) []string {
 			"-tenant_quota_connector_uri="+QuotaPolicyFilePath)
 	}
 
+	// The disk tier's leader half. Rendered only when asked for, like every other flag here: the
+	// artifact's own default is false, so an explicit -enable_offload=false would restate a default
+	// and move the command line of every backend that never wanted the tier.
+	//
+	// -offload_on_evict is rendered only WITH the switch, and never apart from it. The artifact ands
+	// the two, so alone it is accepted, echoed back in the startup log, and does nothing — admission
+	// refuses that pairing, and this renderer would have no way to report it if one slipped through.
+	if offload := leader.Offload; offload != nil && offload.Enabled {
+		flags = append(flags, "-enable_offload=true")
+		if offload.OnEvict {
+			flags = append(flags, "-offload_on_evict=true")
+		}
+	}
+
 	flags = append(flags,
 		fmt.Sprintf("-pod_name=$(%s)", LeaderPodNameEnv),
 		fmt.Sprintf("-pod_namespace=$(%s)", LeaderPodNamespaceEnv))

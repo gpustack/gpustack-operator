@@ -30,11 +30,24 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
+	"gpustack.ai/gpustack/pkg/worker/kvcache"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 )
 
 // newKVCacheBackendObject builds a managed backend with the given consumers already recorded in
 // status, which is the only input this task's status derivation reads.
+// withReconcilerDiskTier declares a complete local disk tier, both halves.
+//
+// One helper rather than two, because a tier declared on one side only is refused at admission — a
+// fixture that set one half would put the reconciler a question the API never puts to it.
+func withReconcilerDiskTier(kvcb *workercore.KVCacheBackend) {
+	kvcb.Spec.Connection.Managed.Members[0].LocalDisk = &workercore.KVCacheBackendMemberLocalDisk{
+		Path:     "/var/lib/kvcache",
+		Capacity: resource.MustParse("4Ti"),
+	}
+	kvcb.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+}
+
 func newKVCacheBackendObject(usedBy ...workercore.KVCacheObjectReference) *workercore.KVCacheBackend {
 	kvcb := &workercore.KVCacheBackend{
 		ObjectMeta: meta.ObjectMeta{Name: "mooncake-dram"},
@@ -1167,34 +1180,92 @@ func TestKVCacheBackendCapacity_DistinguishesEveryFailure(t *testing.T) {
 	}
 }
 
-// TestKVCacheBackendCapacity_ReadsTheMediumsOwnFamilies pins that the medium selects the pair of
-// gauges. The leader keeps two independent pairs, and a group read from the wrong one reports
-// another group's figures or a zero.
-func TestKVCacheBackendCapacity_ReadsTheMediumsOwnFamilies(t *testing.T) {
+// TestKVCacheBackendCapacity_DiskTierIsStillAbsentNotZero re-runs the two absence rules against a
+// backend that HAS a disk tier.
+//
+// Both rules were already covered, but only on the path that reads the memory pair alone. A disk
+// tier goes through a different branch — the one that ADDS two gauges — and adding is exactly where
+// an absence rule is easiest to lose: a nil plus a nil is a very natural zero, and a published zero
+// reads as an empty cache rather than as one nobody has looked at.
+func TestKVCacheBackendCapacity_DiskTierIsStillAbsentNotZero(t *testing.T) {
+	t.Run("a scrape that fails leaves capacity absent", func(t *testing.T) {
+		kvcb := newKVCacheBackendObject()
+		withReconcilerDiskTier(kvcb)
+
+		got := reconcileWithAdmin(t, kvcb, map[string]adminResponse{
+			"/health":  {body: healthServing},
+			"/metrics": {err: errors.New("connect: connection refused")},
+		})
+
+		assert.Nil(t, got.Status.Capacity, "absent, never a zero and never the previous value")
+		assert.True(t, KVCacheBackendConditionCapacityObserved.IsFalse(got))
+	})
+
+	t.Run("a clean all-zero exposition while not serving stays absent", func(t *testing.T) {
+		kvcb := newKVCacheBackendObject()
+		withReconcilerDiskTier(kvcb)
+
+		got := reconcileWithAdmin(t, kvcb, map[string]adminResponse{
+			"/health":  {body: healthNotServing},
+			"/metrics": {body: metricsZeroed},
+		})
+
+		assert.Nil(t, got.Status.Capacity,
+			"the scrape SUCCEEDED and both gauges read zero; the gate is service_ready, not the scrape")
+		assert.True(t, KVCacheBackendConditionCapacityObserved.IsFalse(got))
+	})
+}
+
+// TestKVCacheBackendCapacity_DescribesWhatTheBackendIsMadeOf pins which pair of gauges a backend is
+// read from, which is decided by whether it has a disk tier rather than by any medium name.
+//
+// It replaces a case that ran the same exposition through five media and asserted the file pair for
+// three of them. That case agreed with a classification which put NoF in the file family — the
+// leader keeps a THIRD pair for NoF (master_total_nof_capacity_bytes) that nothing here reads — so
+// it was green against a rule that was wrong. Both the classification and that case are gone: the
+// wrong rule left with the enum values it keyed on, and deleting the defect without its instrument
+// would have left a test passing against a medium that no longer exists.
+//
+// ONE exposition is used for both cases on purpose. The rule under test is a property of the SPEC,
+// so giving each case its own body would let a wrong rule pass on the strength of a differently
+// shaped input.
+func TestKVCacheBackendCapacity_DescribesWhatTheBackendIsMadeOf(t *testing.T) {
 	cases := []struct {
-		medium    string
-		exposed   string
+		name      string
+		mutate    func(*workercore.KVCacheBackend)
 		wantTotal int64
 	}{
-		{medium: "DRAM", exposed: metricsPopulated + metricsFile, wantTotal: 1082331758592},
-		{medium: "CXL", exposed: metricsPopulated + metricsFile, wantTotal: 1082331758592},
-		{medium: "DFS", exposed: metricsPopulated + metricsFile, wantTotal: 2164663517184},
-		{medium: "LocalDisk", exposed: metricsPopulated + metricsFile, wantTotal: 2164663517184},
-		{medium: "NoF", exposed: metricsPopulated + metricsFile, wantTotal: 2164663517184},
+		{
+			// The file pair is present in the exposition and reads non-zero, so this case fails if
+			// the sum is taken unconditionally.
+			name:      "no disk tier reads the memory pair alone",
+			wantTotal: 1082331758592,
+		},
+		{
+			// The figure is the SUM and is deliberately not either pair on its own: the memory pair
+			// alone is 1082331758592 and the file pair alone is 2164663517184, so an expectation
+			// equal to one of them could not tell "both pairs" from "the file pair", which is the
+			// distinction under test.
+			name:      "a disk tier is both pairs, because the backend is made of both",
+			mutate:    withReconcilerDiskTier,
+			wantTotal: 1082331758592 + 2164663517184,
+		},
 	}
 
 	for _, c := range cases {
-		t.Run(c.medium, func(t *testing.T) {
+		t.Run(c.name, func(t *testing.T) {
 			kvcb := newKVCacheBackendObject()
-			kvcb.Spec.Connection.Managed.Members[0].Medium = c.medium
+			if c.mutate != nil {
+				c.mutate(kvcb)
+			}
 
 			got := reconcileWithAdmin(t, kvcb, map[string]adminResponse{
 				"/health":  {body: healthServing},
-				"/metrics": {body: c.exposed},
+				"/metrics": {body: metricsPopulated + metricsFile},
 			})
 
 			require.NotNil(t, got.Status.Capacity.Total,
-				"the exposition carries both pairs; this medium must find its own")
+				"the exposition carries both pairs; this backend must read the right ones")
 			assert.Equal(t, c.wantTotal, got.Status.Capacity.Total.Value())
 		})
 	}
@@ -1381,6 +1452,163 @@ func TestKVCacheBackendScale_LeavesCurrentMembersAlone(t *testing.T) {
 		"reconciling again is not a restart")
 }
 
+// TestKVCacheBackendScale_ADiskTierCapacityChangeRestartsThatGroupOnly pins the one edit the disk
+// tier deliberately leaves open.
+//
+// Admission freezes whether a group has a tier and where it lives, because both strand what the
+// members already wrote. The ceiling is editable instead, and this is what that costs: the members
+// of that group restart, since the ceiling is an environment variable and nothing short of a
+// restart re-reads one. The tier's CONTENTS survive that restart, which is the whole reason it is a
+// hostPath.
+//
+// The leader is asserted untouched by resourceVersion, because a member-side edit that rewrote the
+// leader Deployment would restart the metadata service the entire backend depends on to raise one
+// member's disk ceiling.
+func TestKVCacheBackendScale_ADiskTierCapacityChangeRestartsThatGroupOnly(t *testing.T) {
+	ctx := context.Background()
+
+	kvcb := newKVCacheBackendObject()
+	withReconcilerDiskTier(kvcb)
+	current := currentMemberFingerprint(t, kvcb)
+
+	cli := newKVCacheBackendClient(kvcb,
+		memberPodOn(t, kvcb, "n7", current),
+		memberPodOn(t, kvcb, "n8", current))
+
+	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+	assert.ElementsMatch(t, []string{"member-n7", "member-n8"}, livingMemberPods(t, cli),
+		"a settled group is not restarted by a pass that changes nothing")
+
+	before := new(apps.Deployment)
+	require.NoError(t, cli.Get(ctx, leaderObjectKey(kvcb), before))
+
+	// Raise the ceiling, which admission permits and the fingerprint therefore has to notice.
+	live := new(workercore.KVCacheBackend)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, live))
+	live.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("8Ti")
+	require.NoError(t, cli.Update(ctx, live))
+
+	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+
+	assert.Empty(t, livingMemberPods(t, cli),
+		"every member of that group is deleted, so the DaemonSet recreates it reading the new ceiling")
+
+	after := new(apps.Deployment)
+	require.NoError(t, cli.Get(ctx, leaderObjectKey(kvcb), after))
+	assert.Equal(t, before.ResourceVersion, after.ResourceVersion,
+		"and the leader is untouched: a member's disk ceiling is not the metadata service's business")
+}
+
+// TestKVCacheBackendScale_ARemovedGroupIsTornDown covers the lifecycle that allowing several member
+// groups opened up.
+//
+// The sync loop walks the CURRENT groups, so on its own it can only create and update: a group
+// dropped from the spec left a DaemonSet nothing addresses, with members still holding node memory
+// the backend no longer declares. It was unreachable while exactly one group was allowed — dropping
+// the only group means deleting the object — and became reachable the moment several were.
+func TestKVCacheBackendScale_ARemovedGroupIsTornDown(t *testing.T) {
+	ctx := context.Background()
+
+	kvcb := newKVCacheBackendObject()
+	kvcb.Spec.Connection.Managed.Members = append(kvcb.Spec.Connection.Managed.Members,
+		workercore.KVCacheBackendMember{
+			NodeSelector:      map[string]string{"kvcache-cold": "true"},
+			Medium:            "DRAM",
+			CapacityPerMember: resource.MustParse("10Ti"),
+		})
+
+	cli := newKVCacheBackendClient(kvcb)
+	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+
+	for _, group := range []int{0, 1} {
+		require.NoError(t, cli.Get(ctx, memberObjectKey(kvcb, group), new(apps.DaemonSet)),
+			"both groups render a DaemonSet before the removal")
+	}
+
+	// Drop the second group.
+	live := new(workercore.KVCacheBackend)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, live))
+	live.Spec.Connection.Managed.Members = live.Spec.Connection.Managed.Members[:1]
+	require.NoError(t, cli.Update(ctx, live))
+
+	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+
+	require.NoError(t, cli.Get(ctx, memberObjectKey(kvcb, 0), new(apps.DaemonSet)),
+		"the surviving group is untouched")
+	err := cli.Get(ctx, memberObjectKey(kvcb, 1), new(apps.DaemonSet))
+	assert.True(t, kerrors.IsNotFound(err),
+		"the removed group's DaemonSet is deleted; left standing, its members go on serving "+
+			"segments the backend no longer declares, got err=%v", err)
+}
+
+// TestKVCacheBackendScale_PruningProvesOwnership pins that the sweep deletes on this backend's own
+// note rather than on a derived name.
+//
+// The per-group names are built from the backend's name, so an unrelated object can already carry
+// one. Deleting by name alone would delete somebody else's workload the first time a group is
+// dropped.
+func TestKVCacheBackendScale_PruningProvesOwnership(t *testing.T) {
+	ctx := context.Background()
+
+	kvcb := newKVCacheBackendObject()
+
+	// A DaemonSet wearing the resource-type label and the name group 1 WOULD have, but carrying no
+	// note of this backend. The spec declares one group, so the sweep sees it as surplus by name.
+	stranger := &apps.DaemonSet{
+		ObjectMeta: meta.ObjectMeta{
+			Name:      mooncake.MemberObjectName(kvcb, 1),
+			Namespace: kuberess.SystemNamespaceName,
+			Labels: systemmeta.GetResourcesLabelSetOfType[map[string]string](
+				kvcache.ResourceType),
+		},
+	}
+
+	cli := newKVCacheBackendClient(kvcb, stranger)
+	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+
+	assert.NoError(t, cli.Get(ctx, ctrlcli.ObjectKeyFromObject(stranger), new(apps.DaemonSet)),
+		"a workload this backend never rendered must survive the sweep, however its name reads")
+}
+
+// TestKVCacheBackendScale_AGraceChangeReachesTheHook covers the convergence half of an editable
+// grace.
+//
+// The grace lives INSIDE the hook's argv. The fingerprint moves with it, so the members are deleted
+// and recreated — but from the DaemonSet's template, so if the aligner does not carry Lifecycle
+// across, they come back with the new hash and the old hook, permanently. That is worse than not
+// converging: the restart makes it look like the change took.
+func TestKVCacheBackendScale_AGraceChangeReachesTheHook(t *testing.T) {
+	ctx := context.Background()
+
+	kvcb := newKVCacheBackendObject()
+	withReconcilerDiskTier(kvcb)
+	kvcb.Spec.Connection.Managed.ScaleIn = &workercore.KVCacheBackendScaleIn{GracePeriodSeconds: 30}
+
+	cli := newKVCacheBackendClient(kvcb)
+	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+
+	ds := new(apps.DaemonSet)
+	require.NoError(t, cli.Get(ctx, memberObjectKey(kvcb, 0), ds))
+	require.NotNil(t, ds.Spec.Template.Spec.Containers[0].Lifecycle)
+	assert.Contains(t, ds.Spec.Template.Spec.Containers[0].Lifecycle.PreStop.Exec.Command[2],
+		`"grace_period_seconds":30`)
+
+	live := new(workercore.KVCacheBackend)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, live))
+	live.Spec.Connection.Managed.ScaleIn.GracePeriodSeconds = 45
+	require.NoError(t, cli.Update(ctx, live))
+
+	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+
+	require.NoError(t, cli.Get(ctx, memberObjectKey(kvcb, 0), ds))
+	command := ds.Spec.Template.Spec.Containers[0].Lifecycle.PreStop.Exec.Command[2]
+	assert.Contains(t, command, `"grace_period_seconds":45`,
+		"the hook carries the new grace, not the one it was first written with")
+	assert.NotContains(t, command, `"grace_period_seconds":30`)
+	assert.Equal(t, int64(105), *ds.Spec.Template.Spec.TerminationGracePeriodSeconds,
+		"and the window moved with it")
+}
+
 // TestKVCacheBackendScale_IgnoresForeignPods pins that the label selector bounds the blast radius. A
 // Pod in the same namespace that this backend does not own must survive.
 func TestKVCacheBackendScale_IgnoresForeignPods(t *testing.T) {
@@ -1457,7 +1685,60 @@ const (
 	// where the rendered default would have put a node name. Both have to join.
 	segmentsByAddress = `{"total_segments":1,"segments":[
 		{"segment_name":"overridden","te_endpoint":"10.42.0.11:15002","protocol":"tcp","status":"OK"}]}`
+	// What two member groups that both selected ONE node produce on the RDMA path: each Pod holds
+	// the host's network namespace, so both segments carry the node's own address and differ only
+	// in the transfer port — which is exactly the part the join strips before looking a Pod up.
+	segmentsSharedHost = `{"total_segments":2,"segments":[
+		{"segment_name":"10.42.0.11:13720","te_endpoint":"10.42.0.11:15002","protocol":"rdma","status":"OK"},
+		{"segment_name":"10.42.0.11:14071","te_endpoint":"10.42.0.11:16566","protocol":"rdma","status":"OK"}]}`
+	// The same shared address with ONE segment on it: two members are ready and only one of them
+	// mounted. This is the case that separates counting from flagging.
+	segmentsSharedHostOne = `{"total_segments":1,"segments":[
+		{"segment_name":"10.42.0.11:13720","te_endpoint":"10.42.0.11:15002","protocol":"rdma","status":"OK"}]}`
+	// What two TCP groups on ONE node produce: each member has its own pod IP and advertises it, so
+	// the two segments carry different addresses even though both Pods answer to the node's name.
+	// The shared key exists and no segment uses it.
+	segmentsTwoAddressesOneNode = `{"total_segments":2,"segments":[
+		{"segment_name":"10.42.0.11:13720","te_endpoint":"10.42.0.11:15002","protocol":"tcp","status":"OK"},
+		{"segment_name":"10.42.0.12:14071","te_endpoint":"10.42.0.12:16566","protocol":"tcp","status":"OK"}]}`
 )
+
+// memberPodOfGroup is runningMemberPod for a backend with several groups: labels, owner and name all
+// come from the group, so two Pods on one node are distinct OBJECTS even when every key the status
+// join uses — node name and address — is identical between them.
+func memberPodOfGroup(
+	t *testing.T, kvcb *workercore.KVCacheBackend, group int, node, ip string,
+) *core.Pod {
+	t.Helper()
+
+	ds := mooncake.RenderMemberDaemonSet(kvcb, group, "example.com/mooncake:v0")
+	labels := make(map[string]string, len(ds.Spec.Selector.MatchLabels))
+	for k, v := range ds.Spec.Selector.MatchLabels {
+		labels[k] = v
+	}
+
+	return &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Name:      fmt.Sprintf("member-%d-%s", group, node),
+			Namespace: kuberess.SystemNamespaceName,
+			Labels:    labels,
+			Annotations: map[string]string{
+				mooncake.MemberPodSpecHashAnnotation: mooncake.MemberPodSpecHash(ds.Spec.Template),
+			},
+			OwnerReferences: []meta.OwnerReference{{
+				APIVersion: "apps/v1",
+				Kind:       "DaemonSet",
+				Name:       ds.Name,
+				Controller: ptr.To(true),
+			}},
+		},
+		Spec: core.PodSpec{NodeName: node},
+		Status: core.PodStatus{
+			PodIP:      ip,
+			Conditions: []core.PodCondition{{Type: core.PodReady, Status: core.ConditionTrue}},
+		},
+	}
+}
 
 // runningMemberPod is a member Pod as the DaemonSet would have left it: on a node, with an address,
 // and READY.
@@ -1777,6 +2058,232 @@ func TestKVCacheBackendStatus_AStaleSegmentDoesNotStandInForAMissingMember(t *te
 	assert.Contains(t, KVCacheBackendConditionMembersMounted.GetMessage(got),
 		"1 of 1 ready member pod(s) match none of them")
 	assert.Equal(t, KVCacheBackendPhaseDegraded, got.Status.Phase)
+}
+
+// twoGroupsOnOneNode is a backend whose two groups both landed on n7, holding the host's network
+// namespace and therefore one address. Every key the status join indexes by — node name and pod IP —
+// is shared between them.
+func twoGroupsOnOneNode(t *testing.T, segments string) *workercore.KVCacheBackend {
+	t.Helper()
+
+	kvcb := twoGroupBackend(t)
+
+	return reconcileTwoGroups(t, kvcb, segments,
+		memberPodOfGroup(t, kvcb, 0, "n7", "10.42.0.11"),
+		memberPodOfGroup(t, kvcb, 1, "n7", "10.42.0.11"))
+}
+
+// twoGroupBackend is the two-group spec on its own, for the cases that turn on what the member Pods
+// look like rather than on the listing and therefore build their own.
+func twoGroupBackend(t *testing.T) *workercore.KVCacheBackend {
+	t.Helper()
+
+	kvcb := newKVCacheBackendObject()
+	second := *kvcb.Spec.Connection.Managed.Members[0].DeepCopy()
+	second.NodeSelector = map[string]string{"kvcache-dram-cold": "true"}
+	kvcb.Spec.Connection.Managed.Members = append(kvcb.Spec.Connection.Managed.Members, second)
+
+	return kvcb
+}
+
+// reconcileTwoGroups runs one reconcile against a serving leader with the given listing and Pods.
+func reconcileTwoGroups(
+	t *testing.T, kvcb *workercore.KVCacheBackend, segments string, pods ...ctrlcli.Object,
+) *workercore.KVCacheBackend {
+	t.Helper()
+
+	return reconcileWithAdminAndPods(t, kvcb, map[string]adminResponse{
+		"/health":              {body: healthServing},
+		"/metrics":             {body: metricsPopulated},
+		"/get_segments_detail": {body: segments},
+	}, pods...)
+}
+
+// TestKVCacheBackendStatus_SharedIdentityIsReportedNotGuessed pins what the status does when two
+// ready member Pods answer to one key — and what it must NOT do.
+//
+// The identity is unrecoverable, and that is a property of the data: the leader reports a segment by
+// address, both of the fields it offers carry a transfer port bound at random, and no Pod carries
+// that port. Two Pods behind one host are indistinguishable in every observable field.
+//
+// Three earlier versions of this code assigned anyway — credit the surviving Pod, credit the whole
+// set, credit by multiplicity — and each had a defect the next review found. The assertions below
+// are written against the ABSENCE of an assignment rather than against the condition being False,
+// so that restoring any of those three (or adding a "credit at least one" fallback to make the
+// status look better) turns this red rather than passing on a nicer-looking guess.
+func TestKVCacheBackendStatus_SharedIdentityIsReportedNotGuessed(t *testing.T) {
+	got := twoGroupsOnOneNode(t, segmentsSharedHost)
+
+	assert.Equal(t, "AmbiguousMemberIdentity",
+		KVCacheBackendConditionMembersMounted.GetReason(got))
+
+	message := KVCacheBackendConditionMembersMounted.GetMessage(got)
+	assert.Contains(t, message, `answer to "10.42.0.11"`,
+		"the message names the key, because the operator's next step is to stop the groups sharing it")
+	assert.Contains(t, message, "member-0-n7, member-1-n7",
+		"and names the pods, so which groups collided is not left to be worked out")
+	assert.Contains(t, message, "node selectors",
+		"an operator reading this needs the action, not only the diagnosis")
+
+	// The heart of it: nothing was guessed. A segment on an ambiguous key is published as read, with
+	// no node and no medium attached, rather than attributed to whichever Pod a map happened to keep.
+	require.Len(t, got.Status.Members, 2)
+	for _, member := range got.Status.Members {
+		assert.Empty(t, member.NodeName,
+			"segment %s must carry no node: which pod produced it cannot be known", member.SegmentName)
+		assert.Empty(t, member.Medium,
+			"segment %s must carry no medium, for the same reason", member.SegmentName)
+	}
+
+	assert.NotContains(t, message, "match none of them",
+		"and it is not reported as a shortfall: the pods are unaccounted for by construction here, "+
+			"so a count of them would describe this index rather than the cluster")
+}
+
+// TestKVCacheBackendStatus_SharedIdentityIsNotReportedHealthy is the other direction, and it is the
+// one that matters more.
+//
+// A permanent false shortfall is noisy; a missing member reported as healthy is silent. Two ready
+// members with ONE segment between them is exactly that case: an implementation that credited the
+// whole collision set on a single match would read fully mounted here.
+func TestKVCacheBackendStatus_SharedIdentityIsNotReportedHealthy(t *testing.T) {
+	got := twoGroupsOnOneNode(t, segmentsSharedHostOne)
+
+	assert.False(t, KVCacheBackendConditionMembersMounted.IsTrue(got),
+		"one segment behind a shared key says nothing about the second member, and 'nothing known' "+
+			"must never render as Mounted")
+	assert.Equal(t, "AmbiguousMemberIdentity",
+		KVCacheBackendConditionMembersMounted.GetReason(got))
+	assert.Equal(t, KVCacheBackendPhaseDegraded, got.Status.Phase)
+}
+
+// TestKVCacheBackendStatus_ASharedKeyNoSegmentUsesIsNotAmbiguous is the noisy direction of the
+// ambiguity rule, and it is the common configuration rather than an edge case.
+//
+// Two TCP groups on one node share that node's NAME, because both Pods are scheduled there — but a
+// TCP member advertises its own pod IP, so the leader reports each segment under a distinct key and
+// every one of them resolves. The shared key is real and no segment ever arrives on it.
+//
+// Judging the index instead of the listing marks this healthy backend Degraded and tells the operator
+// to split two groups that never collided. Since `Auto` resolves to TCP, this is what most backends
+// with two groups on a node look like.
+func TestKVCacheBackendStatus_ASharedKeyNoSegmentUsesIsNotAmbiguous(t *testing.T) {
+	kvcb := twoGroupBackend(t)
+	got := reconcileTwoGroups(t, kvcb, segmentsTwoAddressesOneNode,
+		memberPodOfGroup(t, kvcb, 0, "n7", "10.42.0.11"),
+		memberPodOfGroup(t, kvcb, 1, "n7", "10.42.0.12"))
+
+	assert.True(t, KVCacheBackendConditionMembersMounted.IsTrue(got),
+		"both segments resolve by address, so nothing about this backend is ambiguous: %s",
+		KVCacheBackendConditionMembersMounted.GetMessage(got))
+	assert.Equal(t, KVCacheBackendPhaseReady, got.Status.Phase)
+
+	require.Len(t, got.Status.Members, 2)
+	for _, member := range got.Status.Members {
+		assert.Equal(t, "n7", member.NodeName,
+			"segment %s resolves to exactly one ready pod and must carry its node", member.SegmentName)
+	}
+}
+
+// TestKVCacheBackendStatus_APodIndexedTwiceDoesNotEraseACollision covers a cluster whose nodes are
+// named by their addresses, which is legal and is what --hostname-override and several managed
+// platforms produce.
+//
+// Such a Pod is filed under one key TWICE, since its node name and its address are the same string.
+// The second filing must not displace what the first left there: with two groups on that node, the
+// entry it would overwrite is the one recording that they collide, and erasing it turns a reported
+// ambiguity back into a silent guess.
+//
+// The count in the message is the assertion that matters — three filings for two Pods must still
+// describe two.
+func TestKVCacheBackendStatus_APodIndexedTwiceDoesNotEraseACollision(t *testing.T) {
+	kvcb := twoGroupBackend(t)
+	got := reconcileTwoGroups(t, kvcb, segmentsSharedHost,
+		memberPodOfGroup(t, kvcb, 0, "10.42.0.11", "10.42.0.11"),
+		memberPodOfGroup(t, kvcb, 1, "10.42.0.11", "10.42.0.11"))
+
+	assert.Equal(t, "AmbiguousMemberIdentity",
+		KVCacheBackendConditionMembersMounted.GetReason(got),
+		"two ready pods answer to this key; a pod filed under it twice is still one pod")
+
+	message := KVCacheBackendConditionMembersMounted.GetMessage(got)
+	assert.Contains(t, message, "2 ready member pod(s)",
+		"three filings for two pods must not read as three members")
+	assert.Contains(t, message, "member-0-10.42.0.11, member-1-10.42.0.11")
+}
+
+// TestKVCacheBackendStatus_AnUnreadyPodDoesNotTakeAReadyOnesSegment pins which Pod a segment resolves
+// to when a key is shared by one ready member and one that is not.
+//
+// This is not an ambiguity: only a ready member can hold a segment, so the ready one is the only
+// candidate. Reading whichever Pod was filed last instead credits the unready one, and the ready
+// member — the only one that could have produced the segment — is then reported as a shortfall on a
+// backend that is fully mounted. The Pods are ordered so the unready one is filed LAST, which is the
+// arrangement that makes the difference observable.
+func TestKVCacheBackendStatus_AnUnreadyPodDoesNotTakeAReadyOnesSegment(t *testing.T) {
+	kvcb := twoGroupBackend(t)
+	starting := memberPodOfGroup(t, kvcb, 1, "n7", "10.42.0.11")
+	starting.Status.Conditions = []core.PodCondition{
+		{Type: core.PodReady, Status: core.ConditionFalse, Reason: "ContainersNotReady"},
+	}
+
+	got := reconcileTwoGroups(t, kvcb, segmentsSharedHostOne,
+		memberPodOfGroup(t, kvcb, 0, "n7", "10.42.0.11"),
+		starting)
+
+	assert.True(t, KVCacheBackendConditionMembersMounted.IsTrue(got),
+		"the one ready member holds the one segment, so nothing is short: %s",
+		KVCacheBackendConditionMembersMounted.GetMessage(got))
+
+	require.Len(t, got.Status.Members, 1)
+	assert.Equal(t, "n7", got.Status.Members[0].NodeName)
+}
+
+// TestKVCacheBackendStatus_TheAmbiguityMessageIsBounded pins the one property that decides whether
+// this condition can be published at all.
+//
+// A two-group RDMA backend produces one ambiguous key PER NODE, so the size of this message answers to
+// the cluster rather than to anything in this package. `Condition.message` is capped at 32768
+// characters by the schema, and past it every status write is rejected: the reconcile then retries
+// forever without ever publishing the ambiguity it was reporting. A fault report that grows with the
+// fault fails exactly when it is needed.
+//
+// Both axes are asserted, because bounding one and not the other still grows without limit.
+func TestKVCacheBackendStatus_TheAmbiguityMessageIsBounded(t *testing.T) {
+	// The schema's own limit on meta.Condition.message. Named here rather than compared to a
+	// constant in this package, because the bound this test defends is the API's, not ours.
+	const conditionMessageMax = 32768
+
+	t.Run("many shared keys", func(t *testing.T) {
+		ambiguous := map[string][]string{}
+		for i := range 1000 {
+			key := fmt.Sprintf("10.42.%d.%d", i/256, i%256)
+			ambiguous[key] = []string{
+				fmt.Sprintf("member-0-node-%d", i), fmt.Sprintf("member-1-node-%d", i),
+			}
+		}
+
+		message := describeAmbiguousKeys(ambiguous)
+		assert.Less(t, len(message), conditionMessageMax,
+			"a thousand-node backend must still render a message the api server accepts")
+		assert.Contains(t, message, "and 980 more shared key(s)",
+			"the count of what was left out is the actionable half; a truncated list without it "+
+				"reads like the whole answer")
+	})
+
+	t.Run("many pods on one key", func(t *testing.T) {
+		sharing := make([]string, 0, 500)
+		for i := range 500 {
+			sharing = append(sharing, fmt.Sprintf("member-%d-n7", i))
+		}
+
+		message := describeAmbiguousKeys(map[string][]string{"10.42.0.11": sharing})
+		assert.Less(t, len(message), conditionMessageMax)
+		assert.Contains(t, message, "and 480 more",
+			"the names within one key are bounded by the same helper the shortfall uses")
+		assert.Contains(t, message, "500 ready member pod(s)",
+			"and the COUNT is not truncated with the list: it is what says how bad this is")
+	})
 }
 
 // crashingMemberPod is a member whose image lacks a library its binary links against: it started,
