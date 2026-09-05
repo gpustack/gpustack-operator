@@ -194,7 +194,12 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// a container from. The pass aborts before any status is written, so an Event is the only
 		// place the cause reaches a reader: the conditions still say "no replica has been created
 		// yet", which describes a slow start and a permanent failure identically.
-		r.Recorder.Event(md, core.EventTypeWarning, modelDeploymentEventRenderFailed, err.Error())
+		// Guarded like both other emission paths in this file: Recorder is populated only by
+		// SetupController, so a reconciler built directly -- which every test here does -- may
+		// legitimately carry none.
+		if r.Recorder != nil {
+			r.Recorder.Event(md, core.EventTypeWarning, modelDeploymentEventRenderFailed, err.Error())
+		}
 		logger.Error(err, "render replicas")
 
 		return ctrl.Result{}, err

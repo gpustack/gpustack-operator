@@ -11,9 +11,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 )
@@ -347,4 +349,75 @@ func TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved(t *testing.T) {
 	assert.True(t, ModelDeploymentConditionQuotaReserved.IsUnknown(holder))
 	assert.True(t, ModelDeploymentConditionCacheAttached.IsUnknown(holder))
 	assert.Nil(t, status.KVCache, "and it invents no domain to report")
+}
+
+// TestListModelDeploymentWorkloads_TakesTheControllerReference is the regression the owner-ref fix
+// needed and did not ship with.
+//
+// An object may carry many owner references and at most one controller. Matching the first
+// Pod-kinded reference attributes the Workload to whichever owner happens to be listed first, and a
+// mis-attributed Workload reports ANOTHER replica's admission state as this one's — a wrong answer
+// rather than a missing one, which is the failure that reads as correct.
+//
+// The API version is asserted for its own reason: "Pod" is not a reserved word, so a resource of
+// that kind in another group matches on the kind alone.
+func TestListModelDeploymentWorkloads_TakesTheControllerReference(t *testing.T) {
+	pod := &core.Pod{ObjectMeta: meta.ObjectMeta{
+		Namespace: "team-a", Name: "qwen-server-0", UID: types.UID("uid-server-0"),
+	}}
+	other := types.UID("uid-someone-else")
+
+	testCases := []struct {
+		name  string
+		refs  []meta.OwnerReference
+		wantK types.UID
+		why   string
+	}{
+		{
+			name: "the controller reference, listed second",
+			refs: []meta.OwnerReference{
+				{APIVersion: "v1", Kind: "Pod", Name: "decoy", UID: other},
+				{APIVersion: "v1", Kind: "Pod", Name: pod.Name, UID: pod.UID, Controller: boolPtr(true)},
+			},
+			wantK: pod.UID,
+			why:   "a non-controller reference listed first must not win",
+		},
+		{
+			name: "a Pod kind from another group is not a Pod",
+			refs: []meta.OwnerReference{
+				{APIVersion: "acme.io/v1", Kind: "Pod", Name: "x", UID: other, Controller: boolPtr(true)},
+			},
+			why: "the kind alone does not identify the resource",
+		},
+		{
+			name: "no controller at all",
+			refs: []meta.OwnerReference{
+				{APIVersion: "v1", Kind: "Pod", Name: pod.Name, UID: pod.UID},
+			},
+			why: "an owner that is not the controller does not say the Workload represents that Pod",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			wl := &kueue.Workload{}
+			wl.Name, wl.Namespace = "pod-qwen-server-0-abcde", "team-a"
+			wl.OwnerReferences = tc.refs
+
+			r := &ModelDeploymentReconciler{
+				Client: ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(wl).Build(),
+			}
+			got, err := r.listModelDeploymentWorkloads(context.Background(),
+				&workercore.ModelDeployment{ObjectMeta: meta.ObjectMeta{Namespace: "team-a"}})
+			require.NoError(t, err)
+
+			if tc.wantK == "" {
+				assert.Empty(t, got, tc.why)
+
+				return
+			}
+			require.Len(t, got, 1, tc.why)
+			assert.NotNil(t, got[tc.wantK], tc.why)
+		})
+	}
 }

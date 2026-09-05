@@ -180,6 +180,13 @@ spec:
 YAML
 }
 
+# WHY `created` ONLY HERE, WHERE case-45 ACCEPTS `configured` AND `unchanged` TOO. The difference is
+# the namespace, not an oversight. case-45 applies into a caller-supplied $NS that outlives the run,
+# so an object can survive a delete that timed out and a re-apply legitimately reports the one it
+# found. Everything here lives in TEST_NS="kvc-i-${SFX}", created and destroyed per run with a random
+# suffix, and the cluster-scoped objects carry that suffix in their names -- so an object under one of
+# these names can only be one this run made. `created` is therefore the exact assertion, and widening
+# it would accept a collision that should never happen.
 deploy_out="$(deploy case47-a "$BINDING"; deploy case47-b "$BINDING"; deploy case47-c "$OTHER_BINDING")"
 deploy_created="$(printf '%s\n' "$deploy_out" | grep -c ' created$' || true)"
 if [ "${deploy_created:-0}" -ne 3 ]; then

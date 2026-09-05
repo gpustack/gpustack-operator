@@ -104,8 +104,14 @@ case48_force_delete() {
   # three objects here are CLUSTER-SCOPED and nothing else will ever collect them, so a patch that
   # did not take leaves them Terminating forever -- and a teardown that says nothing reads as one
   # that worked. This does not retry: if the patch failed, saying so is the useful act.
+  #
+  # THE CHECK IS THE FINALIZER LIST, NOT THE OBJECT'S EXISTENCE. An object whose finalizers really
+  # were removed still takes a few seconds to be collected, so "is it gone yet" false-positives on a
+  # force that worked -- and a warning that fires when nothing is wrong is one readers learn to
+  # ignore, which is the whole reason this branch prints at all.
   sleep 3
-  if [ -n "$(kubectl ${ns_args[@]+"${ns_args[@]}"} get "$kind" "$name" -o name 2>/dev/null)" ]; then
+  if [ -n "$(kubectl ${ns_args[@]+"${ns_args[@]}"} get "$kind" "$name" \
+    -o jsonpath='{.metadata.finalizers}' 2>/dev/null)" ]; then
     echo "[case-48] ${kind}/${name} IS STILL THERE after the force. Remove it by hand:"
     echo "[case-48]   kubectl ${ns_args[@]+"${ns_args[@]}"} patch $kind $name --type=merge -p '{\"metadata\":{\"finalizers\":null}}'"
   fi
@@ -186,6 +192,13 @@ spec:
   quotaCeiling: 256Mi
 YAML
 )"
+# WHY `created` ONLY HERE, WHERE case-45 ACCEPTS `configured` AND `unchanged` TOO. The difference is
+# the namespace, not an oversight. case-45 applies into a caller-supplied $NS that outlives the run,
+# so an object can survive a delete that timed out and a re-apply legitimately reports the one it
+# found. Everything here lives in TEST_NS="kvc-i-${SFX}", created and destroyed per run with a random
+# suffix, and the cluster-scoped objects carry that suffix in their names -- so an object under one of
+# these names can only be one this run made. `created` is therefore the exact assertion, and widening
+# it would accept a collision that should never happen.
 # THE CHECK COUNTS, IT DOES NOT MATCH A SUBSTRING, and over a multi-document manifest that is the
 # difference between a guard and a decoration. `kubectl apply` reports the three objects in ONE
 # stream, so a run where the backend was created and the pool was REFUSED still contains the word
