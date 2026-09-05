@@ -308,35 +308,47 @@ func validateModelDeploymentRoleServiceNames(
 // The refusal names acceleratorKey, because "these roles want different hardware" is the reason a
 // user reaches for two instanceTypes, and it is expressible INSIDE one pool: Kueue assigns a
 // ResourceFlavor per PodSet.
+// THE ERROR IS REPORTED ON THE LIST, NOT ON A ROLE, and that is the accurate place for it. No single
+// role is wrong here: disagreement is a property of the set, and any one of the named types could be
+// the one the user meant to keep. Anchoring on roles[0] and blaming everyone who differs from it
+// inverts the report whenever the OUTLIER IS FIRST -- [A, B, B] would blame both roles that already
+// agree with each other and say nothing about the one that has to change. Naming every type that
+// appears lets the user pick, and it is one error rather than N-1.
 func validateModelDeploymentRoleInstanceTypes(md *workercore.ModelDeployment) field.ErrorList {
 	if len(md.Spec.Roles) < 2 {
 		return nil
 	}
 
-	var errs field.ErrorList
-
-	rolesPath := field.NewPath("spec", "roles")
-	first := md.Spec.Roles[0].InstanceType
-	for i := 1; i < len(md.Spec.Roles); i++ {
-		if md.Spec.Roles[i].InstanceType == first {
+	// Insertion-ordered rather than a set, so the message lists the types the way the object does.
+	var named []string
+	seen := sets.New[string]()
+	for i := range md.Spec.Roles {
+		it := md.Spec.Roles[i].InstanceType
+		if seen.Has(it) {
 			continue
 		}
-
-		errs = append(errs, field.Invalid(
-			rolesPath.Index(i).Child("instanceType"), md.Spec.Roles[i].InstanceType,
-			fmt.Sprintf(
-				"every role must name the same instanceType (%s is %q): the roles form one Kueue "+
-					"Workload, one Workload carries one queue name, and the queue name comes from "+
-					"the instanceType — so roles on two of them cannot be admitted together at all. "+
-					"To put roles on different accelerator models within one pool, leave the "+
-					"instanceType alone and set %s",
-				rolesPath.Index(0).Child("instanceType"), first,
-				rolesPath.Index(i).Child("acceleratorKey"),
-			),
-		))
+		seen.Insert(it)
+		// UNQUOTED, because field.Invalid renders the value with %q itself: quoting here would
+		// reach the user as an escaped quote inside a quote.
+		named = append(named, it)
+	}
+	if len(named) < 2 {
+		return nil
 	}
 
-	return errs
+	rolesPath := field.NewPath("spec", "roles")
+
+	return field.ErrorList{field.Invalid(
+		rolesPath, strings.Join(named, ", "),
+		fmt.Sprintf(
+			"every role must name the same instanceType: the roles form one Kueue Workload, one "+
+				"Workload carries one queue name, and the queue name comes from the instanceType — "+
+				"so roles on two of them cannot be admitted together at all. Pick one of the types "+
+				"above for every role. To put roles on different accelerator models within one "+
+				"pool, leave the instanceType alone and set %s",
+			rolesPath.Index(0).Child("acceleratorKey"),
+		),
+	)}
 }
 
 // validateModelDeploymentRoleKinds holds the two rules about what a role is told it is.

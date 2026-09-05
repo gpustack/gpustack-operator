@@ -245,10 +245,16 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 	// is that an unknown key does not fail here -- Kueue keeps only those nodeSelector keys a
 	// candidate flavor pins and drops the rest, so a key no flavor offers stops being a constraint
 	// at all.
+	//
+	// IT MERGES RATHER THAN ASSIGNS. Nothing else writes NodeSelector on this path today, so the two
+	// are equivalent right now -- which is exactly the condition under which an assignment is written
+	// and then silently outgrown. A selector added anywhere earlier would be dropped with no error and
+	// no symptom until a replica landed on a node it was meant to avoid.
 	if role.AcceleratorKey != "" {
-		pod.Spec.NodeSelector = map[string]string{
-			nodefeature.AcceleratableFeatureLabelPrefix + role.AcceleratorKey: "true",
+		if pod.Spec.NodeSelector == nil {
+			pod.Spec.NodeSelector = make(map[string]string, 1)
 		}
+		pod.Spec.NodeSelector[nodefeature.AcceleratableFeatureLabelPrefix+role.AcceleratorKey] = "true"
 	}
 
 	systemmeta.NoteResource(pod, ModelDeploymentResourceType, map[string]string{

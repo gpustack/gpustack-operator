@@ -274,6 +274,18 @@ type ModelDeploymentRole struct {
 	// "acceleratable.feature.gpustack.ai/<key>: true", and nothing else; omitting it takes whatever
 	// the pool assigns, which is the single-role behavior and stays the default.
 	//
+	// ON A POOL DERIVED THE DEFAULT WAY THERE IS NOTHING FOR IT TO CHOOSE BETWEEN. An InstanceType's
+	// identity is model-level, so its ClusterQueue offers flavors of one accelerator model and the
+	// only key this field can legally carry is the one the pool would have assigned anyway. The field
+	// discriminates only inside a pool an administrator authored to span models, and setting it on
+	// any other pool is a no-op that the admission check will still refuse if the key is wrong.
+	//
+	// That makes its future a decision rather than a given: if per-role queues land, the role's own
+	// instanceType carries the hardware choice and this field has no remaining reader. Removing it is
+	// free for exactly as long as ModelDeployment stays unreleased, so the choice is not urgent -- but
+	// it is open, and a reader should not take the field's presence as evidence that it is load-
+	// bearing today.
+	//
 	// It is validated at admission against the keys the role's pool actually offers, and the reason
 	// is that an unknown key does not fail — it is IGNORED. Kueue's flavor assignment keeps only
 	// those nodeSelector keys a candidate flavor's own nodeLabels carry and drops the rest, so a key

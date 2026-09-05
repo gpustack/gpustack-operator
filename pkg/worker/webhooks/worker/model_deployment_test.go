@@ -153,7 +153,28 @@ func TestValidateModelDeployment(t *testing.T) {
 					r.Name, r.InstanceType = "decode", "a100-8x"
 				}),
 			),
-			wantMessage: "roles[1].acceleratorKey",
+			wantMessage: "roles[0].acceleratorKey",
+		},
+		{
+			// THE OUTLIER IS FIRST, which is the arrangement a roles[0]-anchored comparison reports
+			// backwards: it blames the two roles that already agree with each other and says nothing
+			// about the one that has to change. Both types have to appear in the message, because
+			// which one the user meant to keep is not knowable here.
+			//
+			// The case above cannot catch that -- its outlier is last, so anchoring on roles[0]
+			// happens to name the right role and both implementations pass it.
+			name: "role_instance_types_differ_with_the_outlier_first",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.InstanceType = "prefill", "a100-8x"
+				}),
+				role(func(r *workercore.ModelDeploymentRole) { r.Name = "decode" }),
+				role(func(r *workercore.ModelDeploymentRole) { r.Name = "decode2" }),
+			),
+			// The PATH is asserted beside the content: an error on spec.roles rather than on
+			// spec.roles[N].instanceType is what "no single role is at fault" means, and it is the
+			// half a substring of the type names alone would not pin.
+			wantMessage: `spec.roles: Invalid value: "a100-8x, h20-8x"`,
 		},
 		{
 			// The rule is vacuous at length 1, asserted so the single-role behavior cannot regress
