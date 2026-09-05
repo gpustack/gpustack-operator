@@ -1324,7 +1324,7 @@ be **accepted**.
   markers and installed by `pkg/worker/webhooks/setup.go`. The worker's ServiceAccount is bound to
   `cluster-admin` (`deploy/gpustack-operator/chart/templates/worker/serviceaccount.yaml`), so there
   is **no per-resource RBAC rule to add**. `deploy/gpustack-operator/chart/**` is in no task's
-  `Owns`; the guard is an e2e assertion that a `helm install` still ends with the CRD present (T12).
+  `Owns`; the guard is an e2e assertion that a `helm install` still ends with the CRD present (T12a).
 - **Defaults go in the CRD schema.** `+k8s:validation:default=` markers cover `connector: auto`,
   `replicas: 1` and the port default, so **one validating webhook is the whole admission surface**
   for this CRD — there is no mutating webhook.
@@ -1518,9 +1518,13 @@ be **accepted**.
   signal) need the Go type, and they gate on it explicitly.
 - **The e2e harness's own two known defects** (`deploy.sh` never upgrades and silently reinstalls
   over a torn-down release; `teardown.sh` strips finalizers from a hard-coded kind list that cannot
-  contain a CRD this spec adds, then exits 0 with the drain hung) → T12 and T13 gate on the fixed
-  scripts landing on the default branch. `ModelDeployment` carries a finalizer — it must remove its
-  own `usedBy` entry — so the second defect is certain to bite rather than merely possible. The
+  contain a CRD this spec adds, then exits 0 with the drain hung) → T12b and T13 gate on the fixed
+  scripts landing on the default branch. **T12a did not, and that is a correction rather than an
+  exception**: both defects are in `deploy.sh` and `teardown.sh`, and a case invoked directly against
+  a cluster that is already deployed touches neither. Measured — case-45, case-47 and case-48 were
+  all run that way. `ModelDeployment` carries a finalizer — it must remove its own `usedBy` entry —
+  so the second defect is certain to bite rather than merely possible for anyone running the suite
+  THROUGH the harness, which is the reading the sentence above needed and did not carry. The
   build does **not** fork a private copy of either script: two divergent copies of a harness are
   harder to diagnose than the one defect.
 - **A user's take-over command line silently drops the cache** → that is the point of marking the
@@ -1608,7 +1612,7 @@ existing e2e skill:
 bash cases/case-45.sh    # replicas reach ready, endpoint serves
 bash cases/case-46.sh    # the headline: shared cache, hit rate beats a single replica
 bash cases/case-47.sh    # same Binding shares; the isolation half is deferred, and says why
-bash cases/case-48.sh    # the deliberate break: CacheAttached is never True
+bash cases/case-48.sh    # the deliberate break: an unreachable pool renders no connector at all
 ```
 
 ### Project Structure
@@ -1642,7 +1646,7 @@ docs/
   architecture.md                      # the life-of-a-request table gains the ModelDeployment row
 
 .claude/skills/gpustack-operator-e2e/cases/
-  case-45.sh .. case-48.sh             # T12, T13
+  case-45.sh, case-47.sh, case-48.sh   # T12a, T12b, T13 (case-46 is T13's, and is not written)
 ```
 
 The brief this spec is built from names three files as the minimum
@@ -2067,7 +2071,7 @@ truthful); after T13 (the headline claim is measured and recorded).
   rather than composed. One of them was wrong: `cann8.2-910b-sglang0.5.18` is not published and
   `cann9.0-910b-sglang0.5.18` is.
 
-- [ ] **T12a · e2e: the functional cases that need no accelerator**
+- [x] **T12a · e2e: the functional cases that need no accelerator**
   **SPLIT FROM T12, WHOSE CHECKBOX HAD THE WRONG GRAIN.** Its Gate named a two-GPU node, which is
   what case-45's serving rows need and what case-47 and case-48 never needed: the first proves
   block sharing through the store's own client, the second asserts a FAILURE (`CacheAttached` not
@@ -2102,10 +2106,31 @@ truthful); after T13 (the headline claim is measured and recorded).
   the replicas run an engine rather than this probe, so "the engine reads the variable and forwards
   it" is a separate claim, and it is case-59's, already measured there. A case that drove the probe
   and claimed the engine's behaviour would be asserting something it never looked at.
-  **case-48** — the deliberate break:
-  an image without the matching per-vendor wheel, and separately a Binding pointing at an unreachable
-  pool; the assertion is `CacheAttached != True` in both, and the case **records which shape the
-  engine took**. Each case reports its verdict the way the suite already does, which is a convention
+  **case-48** — the deliberate break: an image without the matching per-vendor wheel, and separately
+  a Binding pointing at an unreachable pool. The acceptance was written as `CacheAttached != True` in
+  both, and **writing the case showed that comparison to be vacuous on the very environment this task
+  was split off to run in**: with no engine image no replica becomes Ready, so the condition reads
+  `Unknown/NoReplicaReady` for a healthy deployment and a broken one alike, and a row asserting only
+  that would pass with the connector deleted, with the controller stopped, or with nothing created at
+  all. Every row therefore pairs it with something that is **not** true of everything —
+  `DomainRegistered`'s own value on the same object, or the connector's carriers on the Pod spec — so
+  the case asserts more than the acceptance asked, not less.
+  ⇒ It uses **vllm**, for the same class of reason case-47 uses sglang. That engine's connector
+  travels on four separate carriers — a Pod annotation, a downwardAPI volume and its mount, a
+  `MOONCAKE_CONFIG_PATH` variable and a `--kv-transfer-config` argument — so "no connector was
+  rendered" is four independent absences rather than one boolean, and a PARTIAL render stays visible.
+  That is the outcome `resolveModelDeploymentConnection` returns nil to avoid: a client pointed at an
+  address that answers nothing looks like a cache miss from outside the Pod, while a replica that was
+  never configured says so in its own spec. The unreachable pool is an **external** backend at a name
+  RFC 2606 reserves, so the fixture starts no workload and breaks no working pool.
+  ⇒ **The first vehicle splits, and only one half is answerable without an accelerator.** That the
+  operator renders the connector regardless of what the image can do is asserted — it inspects no
+  image and reads no release matrix, so a missing wheel is invisible to it and only the engine can
+  report it. What the engine then does, abort at init or serve on without the cache, needs an engine
+  that runs; what this cluster produces instead is a container that never came up, a **third** shape
+  and neither of the two. The case **records the shape it saw** and SKIPs, naming which of the three,
+  because reporting the third as one of the other two is the substitution this whole plan refuses.
+  Each case reports its verdict the way the suite already does, which is a convention
   rather than a library: a `record` helper appending `STATUS|CHECK|OBJECT` rows to a local array, a
   `STATUS | CHECK | OBJECT` table at the end split on that delimiter rather than on whitespace, and
   `exit 1` when any row failed. There is no `lib.sh` to import; the cases carry those few lines
@@ -2114,7 +2139,21 @@ truthful); after T13 (the headline claim is measured and recorded).
   row that only checks for rejection would keep passing with the webhook deleted. The chart guard
   rides here: after `helm install`, the `modeldeployments` CRD is present —
   no chart manifest was added, the worker installs it.
-  Verify: `bash cases/case-47.sh; bash cases/case-48.sh`, each PASS
+  ⇒ **Two teardown facts, both found by running a case twice and neither visible by reading it.** A
+  case here creates objects the shared fixture knows nothing about, and that library deletes its own
+  BY NAME — so a Binding a case adds is still there when the library's wait expires, and its
+  force-a-finalizer path, written to be rare and loud, fires on every run instead. The deeper one:
+  that path was firing on the FIXTURE's Binding, not on the added one, because case-47's probe writes
+  a payload and a reuse domain still holding an object is one the master will not release the quota
+  of. **The first diagnosis was written from the shape of the code and was wrong**; the run that
+  printed the object's name is what corrected it, and the probe now removes what it wrote. case-48's
+  objects wedge for a reason that cannot be drained at all — its pool's release READS a ledger from a
+  master that does not resolve, and its backend waits behind the pool — so that case forces them
+  itself and says why forcing is safe there and is not in general.
+  Verify: `bash cases/case-47.sh` — 3 PASS / 0 FAIL / 0 SKIP, and a teardown that prints `cleanup`
+  and nothing after it; `bash cases/case-48.sh` — 4 PASS / 0 FAIL / 1 SKIP, the SKIP being the
+  engine's shape above. The counts are the gate, not the exit status: a SKIP is not a pass, and an
+  exit code answers "did anything fail" rather than "did anything run".
 
 - [ ] **T12b · e2e: case-45's serving rows**
   Split from T12. The refusal surface, the controller-level condition, the replica-rendering row and
@@ -2133,7 +2172,9 @@ truthful); after T13 (the headline claim is measured and recorded).
   Verify: `bash cases/case-45.sh` with 0 SKIP rows remaining
 
 - [ ] **T13 · The headline measurement: several replicas beat one, and the numbers are recorded**
-  Blocked by: T12
+  Blocked by: **T12b**, not T12a — the split left this reference behind, and the two halves block
+  different things. T12a is done and blocks nothing here; what this needs is case-45 serving on a
+  real accelerator, which is exactly T12b's own gate.
   Owns: `.claude/skills/gpustack-operator-e2e/cases/case-46.sh`, this spec's Test Plan
   Gate: case-45 green on the two-GPU node
   **First step, before a measurement point is chosen: re-run F8's observation table.** What each
@@ -2577,19 +2618,26 @@ Run against a local two-node cluster with two consumer GPUs on one node. No RDMA
   consequence of the gap* — both deployments' blocks under one domain — so that the day that entry
   flips, this case **fails**.
   ⇒ **THAT MECHANISM DID NOT FIRE, and the reason is worth more than the correction.** The day came:
-  SGLang forwards a tenant at the version this project ships. Nothing failed, because case-47 does
-  not exist yet — a deferral that is supposed to expire on its own can only do so once the case
-  carrying the assertion is written. Until then the guarantee is a sentence, and this spec had three
+  SGLang forwards a tenant at the version this project ships. Nothing failed, because case-47 did not
+  exist at that moment — a deferral that is supposed to expire on its own can only do so once the
+  case carrying the assertion is written. Until then the guarantee is a sentence, and this spec had three
   more deferrals in exactly that state at the same moment. A deferral
   that cannot detect its own end is a deletion. The isolation half remains the one that matters —
   a shared cache that leaks across reuse boundaries is worse than no shared cache — which is exactly
   why the gap is written into the case, the status and the reference page instead of being left for
   a reader to discover.
-- **case-48 — the deliberate break.** Two vehicles, run separately: an engine image without the
-  matching per-vendor `mooncake-transfer-engine` wheel, and a Binding pointing at an unreachable
-  pool. The assertion in both is `CacheAttached != True`; the case records which shape the engine
-  took — aborting at init, or serving on without the cache — because that is not predictable from
-  the sources and is worth knowing once.
+- **case-48 — the deliberate break, and one vehicle of the two only half-answered.** A Binding
+  pointing at an unreachable pool is answered in full: no connector at all is rendered — not a
+  partial one — measured against a control on a Ready Binding that renders all four of vLLM's
+  carriers, with `DomainRegistered=False/BindingNotReady` naming the Binding that exists rather than
+  `BindingNotFound` naming one that does not. The other vehicle, an engine image without the matching
+  per-vendor `mooncake-transfer-engine` wheel, asserts the operator's half — the connector is
+  rendered regardless, because nothing here inspects an image — and **SKIPs the engine's half**.
+  Which shape the engine takes, aborting at init or serving on without the cache, is still not known:
+  it is not predictable from the sources, it needs an image that serves, and what a cluster with no
+  engine image produces is a container that never came up, which is a third shape and neither of the
+  two. `CacheAttached != True` is asserted nowhere on its own, because on that cluster it is true of
+  every deployment there is.
 
 **Not covered by any of the above, and it needs a case of its own.** The controller reconciles the
 Service and now watches it, but **nothing asserts the watch**. It cannot be asserted at the unit
@@ -2785,6 +2833,12 @@ comparison with one side missing is an assertion about nothing.
   case-48 records the observed shape rather than asserting one; if it turns out to be "abort", the
   `CacheAttached=False` state is far rarer in practice than this spec assumes, and the `Degraded`
   phase carries most of the diagnostic weight instead.
+  ⇒ **The case that will answer this now exists, and answers it with a SKIP.** That matters more than
+  it reads: until the case was written, this question had no vehicle at all, and a question with no
+  vehicle is indistinguishable from one nobody has. The SKIP row names the third shape it did see — a
+  container that never came up, which is a property of the image and not of an engine — so the day
+  this runs on hardware that serves, the row changes from SKIP to an observation rather than from
+  nothing to something.
 - **Should the deployment stop rendering replicas when `DomainRegistered` goes `False`?** This spec
   leaves running Pods running when an admin deletes the Binding, on the grounds that tearing down a
   serving deployment because an admin object vanished is worse than serving without a cache. That is
