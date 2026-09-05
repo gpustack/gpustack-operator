@@ -15,6 +15,7 @@ import (
 	"gpustack.ai/gpustack/binding"
 	"gpustack.ai/gpustack/binding/dcmi"
 	"gpustack.ai/gpustack/pkg/device"
+	"gpustack.ai/gpustack/pkg/devicemanager/ascendproduct"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/loggerx"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
@@ -42,17 +43,23 @@ func init() {
 }
 
 type ascend struct {
-	once   sync.Once
-	dcmi   *dcmi.DCMI
-	logger klog.Logger
+	once sync.Once
+	dcmi *dcmi.DCMI
+	// product is the A5 shape this node is, shared with the allocator's own copy of the rule. It is
+	// read once per process rather than once per pass: a node cannot change shape while the device
+	// manager runs.
+	product *ascendproduct.Resolver
+	logger  klog.Logger
 }
 
 // New creates a new ascend device interface and initializes the DCMI library.
 func New(opts device.DetectorOptions) device.Detector {
 	logger := opts.Logger.WithName(Manufacturer)
+	lib := dcmi.New(binding.WithLogger(logger))
 	return &ascend{
-		dcmi:   dcmi.New(binding.WithLogger(logger)),
-		logger: logger,
+		dcmi:    lib,
+		product: ascendproduct.NewResolver(productDriver{lib: lib}),
+		logger:  logger,
 	}
 }
 
@@ -233,6 +240,12 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 						Gateway:    gw.String(),
 					}
 				}
+			}
+
+			// The UB fabric is an A5 construct and every query behind this is V2-only, so an
+			// older generation is not asked: it would refuse once per accelerator per pass.
+			if grpList[grpIndex].Family == ascendproduct.Family {
+				topo.Fabric = in.readFabric(dev, card, i, logger)
 			}
 
 			var status device.AcceleratorStatus

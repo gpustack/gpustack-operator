@@ -71,6 +71,11 @@ func (in DeviceEthernet) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in DeviceFabric) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.DeviceFabric"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in DeviceInterface) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.DeviceInterface"
 }

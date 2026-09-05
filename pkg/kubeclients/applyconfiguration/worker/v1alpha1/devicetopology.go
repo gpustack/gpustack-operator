@@ -39,6 +39,9 @@ type DeviceTopologyApplyConfiguration struct {
 	// Absent for a device with no PCI path at all, never an empty-but-present marker. Ordered
 	// by construction, so two consecutive reads of unchanged hardware are byte-identical.
 	PciSwitches []string `json:"pciSwitches,omitempty"`
+	// Fabric is the scale-up interconnect domain this device belongs to. Absent on a device
+	// whose generation has no such fabric, and on one whose driver could not be asked.
+	Fabric *DeviceFabricApplyConfiguration `json:"fabric,omitempty"`
 }
 
 // DeviceTopologyApplyConfiguration constructs a declarative configuration of the DeviceTopology type for use with
@@ -102,5 +105,13 @@ func (b *DeviceTopologyApplyConfiguration) WithPciSwitches(values ...string) *De
 	for i := range values {
 		b.PciSwitches = append(b.PciSwitches, values[i])
 	}
+	return b
+}
+
+// WithFabric sets the Fabric field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Fabric field is set to the value of the last call.
+func (b *DeviceTopologyApplyConfiguration) WithFabric(value *DeviceFabricApplyConfiguration) *DeviceTopologyApplyConfiguration {
+	b.Fabric = value
 	return b
 }

@@ -312,6 +312,57 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																					Description: "CpuAffinity is the CPU cores that are close to the device.",
 																					Type:        "string",
 																				},
+																				"fabric": {
+																					Description: "Fabric is the scale-up interconnect domain this device belongs to. Absent on a device\nwhose generation has no such fabric, and on one whose driver could not be asked.",
+																					Type:        "object",
+																					Required: []string{
+																						"kind",
+																						"id",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"cliqueId": {
+																							Description: "CliqueID is the subset of the domain that can actually address one another, where the\ndomain is partitioned into more than one.\nNVIDIA only, and on that generation it is load-bearing rather than decorative: two GPUs\nsharing ID but not CliqueID are in one fabric and still cannot reach each other, so a\nconsumer that compares ID alone would co-locate a job that cannot communicate.",
+																							Type:        "string",
+																						},
+																						"endpoints": {
+																							Description: "Endpoints are this device's own addresses on the fabric, in the manufacturer's own\nencoding.\nAscend only, where each entry is a UB endpoint identifier as 32 lowercase hex characters.\nThe bytes are published UNPARSED on purpose: the function entity, the die, the port and\nwhether an endpoint carries device-to-device traffic are all bit fields inside them, so a\nconsumer derives whichever it needs rather than this API tracking a vendor bit layout that\nonly the vendor may change.\nOrdered by construction, so two consecutive reads of unchanged hardware are byte-identical.",
+																							Type:        "array",
+																							Items: &v1.JSONSchemaPropsOrArray{
+																								Schema: &v1.JSONSchemaProps{
+																									Type: "string",
+																								},
+																							},
+																							Nullable:  true,
+																							XListType: ptr.To[string]("atomic"),
+																						},
+																						"id": {
+																							Description: "ID identifies the domain, and is comparable ACROSS WORKERS — that is the whole point of\npublishing it, since a domain spanning machines cannot be recognized from one machine's\nrecord alone.\nAscend reports the super pod id, NVIDIA the fabric cluster uuid, AMD the XGMI hive id.",
+																							Type:        "string",
+																						},
+																						"kind": {
+																							Description: "Kind names the interconnect, and is what makes ID interpretable at all: an Ascend UB super\npod id, an NVIDIA NVLink cluster uuid and an AMD XGMI hive id share no namespace, so two\ndevices are in one domain only when Kind AND ID both match.\nOne of `ub`, `nvlink` or `xgmi`.",
+																							Type:        "string",
+																						},
+																						"memberCount": {
+																							Description: "MemberCount is how many members the domain reports having. Zero means the manufacturer\ndoes not report it, never a domain with no members.\nAscend only, from the super pod's own scale. It says how large the domain is without\nenumerating it, which is what a scheduler needs before it has seen every worker in it.\nNot named Size: every protobuf message carries a generated Size() method, and a field of\nthat name collides with it.",
+																							Type:        "integer",
+																							Format:      "int64",
+																						},
+																						"nodeIndex": {
+																							Description: "NodeIndex is this worker's index within the domain, as the domain numbers its machines —\nnot a Kubernetes node name and not comparable to one.\nAscend only, from the super pod's server id.",
+																							Type:        "string",
+																						},
+																						"rackId": {
+																							Description: "RackID is the rack this worker sits in, as the domain numbers its racks.\nAscend only, from the super pod's chassis id.",
+																							Type:        "string",
+																						},
+																						"type": {
+																							Description: "Type is the domain's shape, as a word rather than a vendor number — `pod-1d`, `pod-2d`,\n`server-8p`, `server-16p`, `server-32p`, `card-1p`, `card-4p`.\nAscend only. A consumer assembling a communication plan reads it to tell a super pod from\na plain server from a standalone card, which is what decides the plan's own shape.",
+																							Type:        "string",
+																						},
+																					},
+																					Nullable: true,
+																				},
 																				"numaAffinity": {
 																					Description: "NumaAffinity is the NUMA node that the device is attached to. Empty means UNKNOWN and is\nnever normalised to node 0 — that would report an affinity nobody read. The kernel's -1\n\"no affinity\" sentinel and a reading that does not parse both arrive here as empty, so\nthis field and the interface fields below carry the same contract.",
 																					Type:        "string",

@@ -303,6 +303,91 @@ message DeviceEthernet {
   optional string gateway = 3;
 }
 
+// DeviceFabric describes the scale-up interconnect domain a device belongs to — the set of
+// accelerators that can address one another directly over the manufacturer's own interconnect,
+// which on some generations spans machines.
+//
+// It is recorded PER DEVICE and never as a group- or worker-level field, because the domain
+// CROSS-CUTS both: NVIDIA reports a clique per GPU and one machine can hold several, and AMD's
+// hive id is likewise read per GPU. So "same model, same machine, different domain" is
+// reachable, and a coarser field would flatten it. The domain ITSELF is a DERIVED aggregation —
+// the devices sharing Kind and ID — which is the same rule DevicesSpec.Interfaces states for
+// relating an interface to an accelerator: publish comparable coordinates, never a stored
+// cross-reference. Recording a higher level's fact on each device also matches RoCE above, which
+// belongs to the card rather than to the accelerator.
+//
+// Only the Ascend detector fills this today. The fields below say which manufacturer publishes
+// each, so that an empty value is readable as "this generation has none" rather than as a hole:
+// what a manufacturer's driver does not report, its detector cannot record.
+//
+// Not every interconnect fits. Cambricon's MLU-Link publishes no domain identity at all, only
+// per-link remote information, so it describes an EDGE LIST and is not recorded here.
+message DeviceFabric {
+  // Kind names the interconnect, and is what makes ID interpretable at all: an Ascend UB super
+  // pod id, an NVIDIA NVLink cluster uuid and an AMD XGMI hive id share no namespace, so two
+  // devices are in one domain only when Kind AND ID both match.
+  //
+  // One of `ub`, `nvlink` or `xgmi`.
+  optional string kind = 1;
+
+  // ID identifies the domain, and is comparable ACROSS WORKERS — that is the whole point of
+  // publishing it, since a domain spanning machines cannot be recognized from one machine's
+  // record alone.
+  //
+  // Ascend reports the super pod id, NVIDIA the fabric cluster uuid, AMD the XGMI hive id.
+  optional string id = 2;
+
+  // Type is the domain's shape, as a word rather than a vendor number — `pod-1d`, `pod-2d`,
+  // `server-8p`, `server-16p`, `server-32p`, `card-1p`, `card-4p`.
+  //
+  // Ascend only. A consumer assembling a communication plan reads it to tell a super pod from
+  // a plain server from a standalone card, which is what decides the plan's own shape.
+  optional string type = 3;
+
+  // CliqueID is the subset of the domain that can actually address one another, where the
+  // domain is partitioned into more than one.
+  //
+  // NVIDIA only, and on that generation it is load-bearing rather than decorative: two GPUs
+  // sharing ID but not CliqueID are in one fabric and still cannot reach each other, so a
+  // consumer that compares ID alone would co-locate a job that cannot communicate.
+  optional string cliqueId = 4;
+
+  // MemberCount is how many members the domain reports having. Zero means the manufacturer
+  // does not report it, never a domain with no members.
+  //
+  // Ascend only, from the super pod's own scale. It says how large the domain is without
+  // enumerating it, which is what a scheduler needs before it has seen every worker in it.
+  //
+  // Not named Size: every protobuf message carries a generated Size() method, and a field of
+  // that name collides with it.
+  optional uint32 memberCount = 5;
+
+  // NodeIndex is this worker's index within the domain, as the domain numbers its machines —
+  // not a Kubernetes node name and not comparable to one.
+  //
+  // Ascend only, from the super pod's server id.
+  optional string nodeIndex = 6;
+
+  // RackID is the rack this worker sits in, as the domain numbers its racks.
+  //
+  // Ascend only, from the super pod's chassis id.
+  optional string rackId = 7;
+
+  // Endpoints are this device's own addresses on the fabric, in the manufacturer's own
+  // encoding.
+  //
+  // Ascend only, where each entry is a UB endpoint identifier as 32 lowercase hex characters.
+  // The bytes are published UNPARSED on purpose: the function entity, the die, the port and
+  // whether an endpoint carries device-to-device traffic are all bit fields inside them, so a
+  // consumer derives whichever it needs rather than this API tracking a vendor bit layout that
+  // only the vendor may change.
+  //
+  // Ordered by construction, so two consecutive reads of unchanged hardware are byte-identical.
+  //
+  // +listType=atomic
+  repeated string endpoints = 8;
+}
+
 // DeviceInterface describes one network interface of the worker.
 //
 // Enumeration is interface-first: the interface is the identity and its PCI device is resolved
@@ -496,6 +581,10 @@ message DeviceTopology {
   //
   // +listType=atomic
   repeated string pciSwitches = 7;
+
+  // Fabric is the scale-up interconnect domain this device belongs to. Absent on a device
+  // whose generation has no such fabric, and on one whose driver could not be asked.
+  optional DeviceFabric fabric = 8;
 }
 
 // Devices is the schema for worker.gpustack.ai.

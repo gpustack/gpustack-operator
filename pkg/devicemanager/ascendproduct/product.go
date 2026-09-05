@@ -19,6 +19,11 @@ import (
 	"sync"
 )
 
+// Family is the device family the detector gives every A5 soc, and the gate every caller here is
+// behind: A5 soc names are an open set (Ascend950PR, Ascend950DT) that the detector collapses onto
+// one family by prefix, and no older generation declares any of the queries this package makes.
+const Family = "950"
+
 // Type is an A5 product's shape, as a word.
 //
 // A word rather than the vendor's bare number because "pod, server or card" is what both consumers
