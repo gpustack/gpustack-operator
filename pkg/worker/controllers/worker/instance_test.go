@@ -16,6 +16,7 @@ import (
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -919,6 +920,87 @@ func TestInstanceReconciler_AcceleratedDetailNotReadyRequeues(t *testing.T) {
 	require.NoError(t, cli.Get(context.Background(),
 		ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, got))
 	assert.False(t, got.Spec.Stop, "a not-ready type does not stop the instance")
+}
+
+// TestInstanceReconciler_NoPublishedEntranceRequeues is the entrance half of the same fail-safe, and
+// it is deliberately shaped like the Detail one beside it.
+//
+// The queue-name label is what routes a replica into its pool, and it is read from the type's
+// published status.entrance. A Pod carrying none is not queued by Kueue at all -- the kubelet runs it
+// directly, charging no quota and passing none of the gates -- so no Pod may be built before the
+// entrance exists.
+//
+// It covers a CPU-ONLY type on purpose: the Detail guard above only fires for acceleratable types, so
+// a non-accelerated Instance passes straight through it and this is the only thing standing between
+// it and an unqueued Pod.
+//
+// What makes the requeue a fail-safe and not a spin is that the entrance is published for every type,
+// not only the accelerated ones: InstanceTypeReconciler.computeStatus assigns status.entrance outside
+// its `if acceleratable` branch and outside the draining check, so the CPU-only type this test covers
+// reaches one on the same pass an accelerated one does. Move that assignment under the accelerated
+// branch and this wait becomes a loop with no exit -- which this test cannot see, because it asserts
+// only that the first pass requeues.
+func TestInstanceReconciler_NoPublishedEntranceRequeues(t *testing.T) {
+	const typeName = "cpu-type"
+	inst := newReadyInstance("default", "inst", typeName)
+	// Not acceleratable, so the Detail guard does not apply; status.entrance is not published yet.
+	it := &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: typeName},
+		Spec:       workercore.InstanceTypeSpec{Acceleratable: false},
+	}
+	cq := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: typeName}}
+	cli := buildInstanceClient(inst, it, cq)
+
+	res, err := reconcileInstance(t, cli, "default", "inst")
+	require.NoError(t, err)
+	assert.Positive(t, res.RequeueAfter, "reconcile requeues while no entrance is published")
+
+	pod := &core.Pod{}
+	err = cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, pod)
+	assert.True(t, kerrors.IsNotFound(err),
+		"no Pod may be created before the type publishes the queue it belongs to")
+}
+
+// TestConvertPodFromInstance_QueueLabelIsThePublishedEntrance pins WHICH of the two spellings the
+// rendered Pod carries.
+//
+// The published entrance and FormatLocalQueueName(type name) agree on a healthy cluster, so a
+// fixture that spelled them the same could not tell a read from a recompute apart. This one spells
+// them differently, which is the whole assertion.
+func TestConvertPodFromInstance_QueueLabelIsThePublishedEntrance(t *testing.T) {
+	const typeName = "h20-8x"
+	inst := &workercore.Instance{
+		ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "inst"},
+		Spec: workercore.InstanceSpec{
+			Type: typeName,
+			InstanceTemplate: workercore.InstanceTemplate{
+				Image: "img",
+				Resources: &workercore.InstanceResources{
+					CPU:          qty("1"),
+					RAM:          qty("2Gi"),
+					LocalStorage: qty("10Gi"),
+				},
+			},
+			Volume: workercore.InstanceVolume{
+				Ephemeral: &workercore.InstanceEphemeralVolume{Capacity: qty("10Gi")},
+			},
+		},
+	}
+	it := &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: typeName},
+		Status:     workercore.InstanceTypeStatus{Entrance: "queue-for-h20-8x"},
+	}
+
+	cli := buildInstanceClient(inst, it)
+	r := &InstanceReconciler{Client: cli, APIReader: cli}
+	pod := r.convertPodFromInstance(context.Background(), inst, it)
+
+	require.NotNil(t, pod)
+	assert.Equal(t, "queue-for-h20-8x", pod.Labels[kueuectrlconst.QueueLabel],
+		"the label must be the entrance the type published, not one derived from its name")
+	assert.NotEqual(t, nodefeature.FormatLocalQueueName(typeName),
+		pod.Labels[kueuectrlconst.QueueLabel],
+		"the fixture spells the two differently so this test can discriminate")
 }
 
 // TestInstanceReconciler_RebuildsAdmissionRejectedPod covers the admission-rejection rebuild

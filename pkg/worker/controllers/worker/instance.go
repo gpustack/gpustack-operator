@@ -329,6 +329,23 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 		}
 
+		// The queue-name label is READ from the type's published entrance rather than recomputed from
+		// its name, so a type that has not published one yet has no Pod built against it. A Pod
+		// carrying no queue-name label is not queued by Kueue at all -- the kubelet runs it directly,
+		// charging no quota and passing none of the gates the chain applies -- and one carrying a
+		// guessed name is routed at a LocalQueue that may not exist.
+		//
+		// WAITED FOR RATHER THAN FAILED, which is this path's own idiom and not the ModelDeployment
+		// one. That render returns an error because it has several ways to be unable to build a Pod;
+		// this one returns no error at all, and expresses "the type's status has not caught up" as the
+		// guard directly above does. The periodic requeue is also what stands in for a watch here:
+		// this controller watches ClusterQueue StopPolicy transitions, deliberately ignoring status
+		// churn, so nothing would wake it when the entrance is published.
+		if instType.Status.Entrance == "" {
+			logger.V(2).Info("instance type publishes no queue entrance yet; requeue in 2s")
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		}
+
 		// If the instance is marked as stopping/stopped/ready, mark it as starting first
 		// to avoid racing with other controllers or users to update the instance status.
 		if inst.Status.Phase == InstancePhaseStopping ||
@@ -589,10 +606,13 @@ func (r *InstanceReconciler) convertPodFromInstance(
 			Name:      inst.Name,
 			Namespace: inst.Namespace,
 			Labels: map[string]string{
-				// The queue-name label references the LocalQueue, which is
-				// named by the hash of the ClusterQueue(InstanceType) name.
-				kueuectrlconst.QueueLabel:           nodefeature.FormatLocalQueueName(inst.Spec.Type), // Scheduling.
-				deviceplugin.InstancePartOfLabelKey: string(inst.UID),                                 // Accessing.
+				// The LocalQueue that fronts this type's pool, taken from what the type PUBLISHES
+				// rather than derived from its name. The two agree only while the ClusterQueue is
+				// created under the InstanceType's own name and both sides spell the result with
+				// FormatLocalQueueName -- neither of which this package states or owns. The caller
+				// guarantees it is non-empty; see the entrance guard in Reconcile.
+				kueuectrlconst.QueueLabel:           instType.Status.Entrance, // Scheduling.
+				deviceplugin.InstancePartOfLabelKey: string(inst.UID),         // Accessing.
 			},
 		},
 		Spec: core.PodSpec{
