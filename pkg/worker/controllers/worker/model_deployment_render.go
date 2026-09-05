@@ -142,6 +142,25 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 		return nil, err
 	}
 
+	// THE ENTRANCE IS READ, NOT RECOMPUTED, and the difference is the whole point of this line.
+	// role.InstanceType names an InstanceType; the label Kueue admits on names the LocalQueue that
+	// fronts that type's ClusterQueue, and the type's own status is where that name is published --
+	// by the same reconcile that creates the LocalQueue. Deriving it here from the name instead
+	// would be a second answer to one question, written by a second function: equal today, because
+	// the ClusterQueue carries the InstanceType's name and both sides spell it with
+	// FormatLocalQueueName, and silently divergent the day either half of that stops holding. The
+	// half that drifted would be this one, whose symptom is a Pod routed at a LocalQueue that does
+	// not exist -- admitted by nothing, with nothing naming the field.
+	entrance := in.InstanceType.Status.Entrance
+	if entrance == "" {
+		// An InstanceType whose status has not been computed yet, exactly like an accelerator detail
+		// that is not there: refuse to render rather than fall back. A Pod carrying no queue-name
+		// label at all is not queued by Kueue, it is admitted by the kubelet directly -- charging no
+		// quota and bypassing every gate the chain exists to apply.
+		return nil, fmt.Errorf(
+			"instance type %q publishes no queue entrance yet", in.InstanceType.Name)
+	}
+
 	// A role that replaces the command owns the whole argv, so the operator contributes neither
 	// engine arguments nor the client environment that only its own arguments would have used.
 	takeOver := len(tmpl.Command) > 0
@@ -188,7 +207,7 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 		ObjectMeta: meta.ObjectMeta{
 			Name:      modelDeploymentPodName(md, role, in.Ordinal),
 			Namespace: md.Namespace,
-			Labels:    modelDeploymentPodLabels(md, role),
+			Labels:    modelDeploymentPodLabels(md, role, entrance),
 		},
 		Spec: core.PodSpec{
 			// A replica is not a shell box: nothing nsenters into it, so it needs neither the host
@@ -289,16 +308,19 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 // that routes it into the role's pool, and the part-of label every object this operator renders
 // carries.
 //
-// The entrance label sits outside the selector deliberately. It is derived from the role's
-// InstanceType, which a spec update can change, and a selector that moved with it would orphan
-// every replica already running.
+// The entrance label sits outside the selector deliberately. It follows the role's InstanceType,
+// which a spec update can change, and a selector that moved with it would orphan every replica
+// already running.
+//
+// The entrance arrives as a VALUE, read from the InstanceType's status by the caller rather than
+// derived from role.InstanceType here, so that this operator and the reconcile that creates the
+// LocalQueue cannot disagree about the queue's name. See renderModelDeploymentPod for what deriving
+// it would cost.
 func modelDeploymentPodLabels(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, entrance string,
 ) map[string]string {
 	labels := modelDeploymentSelectorLabels(md, role)
-	// The queue-name label references the LocalQueue, which is named by the hash of the
-	// ClusterQueue(InstanceType) name.
-	labels[kueuectrlconst.QueueLabel] = nodefeature.FormatLocalQueueName(role.InstanceType)
+	labels[kueuectrlconst.QueueLabel] = entrance
 	labels["app.kubernetes.io/part-of"] = "gpustack-operator-worker"
 
 	return labels

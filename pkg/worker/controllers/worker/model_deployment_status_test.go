@@ -27,7 +27,10 @@ func readyReplica(md *workercore.ModelDeployment, ordinal int32, ready bool) *co
 	pod.Name = modelDeploymentPodName(md, &md.Spec.Roles[0], ordinal)
 	pod.Namespace = md.Namespace
 	pod.UID = types.UID(pod.Name + "-uid")
-	pod.Labels = modelDeploymentPodLabels(md, &md.Spec.Roles[0])
+	// A LITERAL rather than FormatLocalQueueName(role.InstanceType): the entrance a replica carries
+	// is read from the InstanceType's status, so a fixture that re-derived it from the name would
+	// agree with a render that wrongly did the same and stop discriminating between them.
+	pod.Labels = modelDeploymentPodLabels(md, &md.Spec.Roles[0], "fixture-entrance")
 	// The controller reference is what the reconciler selects on, so a fixture without one is
 	// invisible to every path that lists replicas rather than being handed them.
 	kubemeta.ControlOnWithoutBlock(pod, md, workercore.SchemeGroupVersionKind("ModelDeployment"))

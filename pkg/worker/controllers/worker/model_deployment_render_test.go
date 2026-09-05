@@ -53,6 +53,11 @@ func newRenderInstanceType(mutate ...func(*worker.InstanceType)) *worker.Instanc
 			LocalStorage:  "512Gi",
 		},
 		Status: workercore.InstanceTypeStatus{
+			// DELIBERATELY NOT FormatLocalQueueName("h20-8x"). The entrance is read from this field,
+			// and a fixture spelling it the way a name-derived render would spell it could not tell
+			// the two apart -- the assertion in _Identity would pass either way. This value is one
+			// no derivation produces.
+			Entrance: "queue-for-h20-8x",
 			// The observed detail carries what image synthesis needs, so a role naming no image
 			// still renders. A case that wants the unsynthesizable path clears one of these.
 			Detail: workercore.InstanceTypeDetail{
@@ -115,8 +120,10 @@ func TestRenderModelDeploymentPod_Identity(t *testing.T) {
 	assert.Equal(t, "qwen", pod.Labels[modelDeploymentLabelKeyInstance])
 	assert.Equal(t, "server", pod.Labels[modelDeploymentLabelKeyComponent])
 
-	assert.Equal(t, nodefeature.FormatLocalQueueName("h20-8x"), pod.Labels[kueuectrlconst.QueueLabel],
-		"the entrance label is what routes a replica into its role's pool")
+	// The InstanceType's PUBLISHED entrance, verbatim -- not FormatLocalQueueName of its name. The
+	// fixture spells the two differently on purpose, so this asserts which one the render read.
+	assert.Equal(t, "queue-for-h20-8x", pod.Labels[kueuectrlconst.QueueLabel],
+		"the entrance label is read from the InstanceType's status, not derived from its name")
 	assert.True(t, systemmeta.MatchResource(pod, ModelDeploymentResourceType))
 
 	require.Len(t, pod.OwnerReferences, 1)
@@ -747,8 +754,21 @@ func TestModelDeploymentPodSpecHash_MovesWithEveryRenderedInput(t *testing.T) {
 			},
 		},
 		{
-			name:   "instance type — the entrance label moves with it",
-			mutate: func(md *workercore.ModelDeployment) { md.Spec.Roles[0].InstanceType = "h20-4x" },
+			// BOTH SIDES MOVE, because that is what naming another pool actually does: the
+			// reconciler reads the InstanceType by the name the role carries
+			// (getModelDeploymentInstanceType), so a different name is a different object and a
+			// different published entrance. Mutating the name alone would render the SAME entrance
+			// and assert nothing -- the entrance is no longer derived from the name.
+			name:    "instance type — the entrance label moves with it",
+			mutate:  func(md *workercore.ModelDeployment) { md.Spec.Roles[0].InstanceType = "h20-4x" },
+			instype: func(it *worker.InstanceType) { it.Name, it.Status.Entrance = "h20-4x", "queue-for-h20-4x" },
+		},
+		{
+			// The entrance alone, with the role's instanceType untouched: a pool whose LocalQueue
+			// was renamed under a deployment that never changed. The replicas must be recreated
+			// carrying the new one, or they stay routed at a queue that is gone.
+			name:    "the published entrance, with the instance type name unchanged",
+			instype: func(it *worker.InstanceType) { it.Status.Entrance = "queue-renamed" },
 		},
 		{
 			name:    "unit resources — the derived host request moves without the spec moving",

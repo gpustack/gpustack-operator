@@ -108,7 +108,7 @@ request to either are **not** here.
 | annotation `kueue.x-k8s.io/pod-group-total-count` | the sum of every role's `replicas` | how many Pods Kueue waits for before composing anything |
 | annotation `kueue.x-k8s.io/role-hash` | the role's `name` | the PodSet's identity, so two identically-shaped roles stay two PodSets |
 | annotation `kueue.x-k8s.io/pod-group-serving` | `"true"` | an inference deployment never finishes; without it Kueue reclaims the quota of a replica that exited |
-| label `kueue.x-k8s.io/queue-name` | derived from `instanceType` | unchanged; Kueue refuses a group whose Pods disagree on it |
+| label `kueue.x-k8s.io/queue-name` | the `status.entrance` **published by** the role's InstanceType | unchanged; Kueue refuses a group whose Pods disagree on it. Read from the type rather than re-derived from its name, so this operator and the reconcile that creates the LocalQueue cannot disagree about the queue |
 | label `app.kubernetes.io/component` | the role's `name` | unchanged; what a `Service` selects on and what `status.roles[]` is attributed by |
 | `spec.nodeSelector` | **only when the role sets `acceleratorKey`**: one entry, `acceleratable.feature.gpustack.ai/<acceleratorKey>: "true"` | what makes Kueue assign this PodSet that accelerator model's flavor. A role naming no key carries no entry and takes whatever the pool assigns |
 
@@ -124,7 +124,8 @@ assignment and per-role status would all disappear with nothing erroring.
 
 ### One `instanceType` for every role
 
-A Kueue Workload carries one `queueName`, and the queue name is derived from `instanceType`. So roles
+A Kueue Workload carries one `queueName`, and that name is the one the role's `instanceType`
+publishes as its `status.entrance`. So roles
 on two `instanceType`s cannot be one group and cannot be admitted together at all — Kueue enforces the
 same rule on the Pods, unretryably, so letting it through would trade a refusal for a group that never
 assembles.
