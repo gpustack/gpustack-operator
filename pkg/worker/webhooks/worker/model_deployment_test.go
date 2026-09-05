@@ -634,6 +634,42 @@ func TestValidateModelDeploymentAcceleratorKeys(t *testing.T) {
 	}
 }
 
+// TestValidateModelDeploymentAcceleratorKeys_ReadsThroughAColdCache covers the moment a flavor
+// exists at the API server and not yet in the informer.
+//
+// IT NEEDS TWO DIFFERENT CLIENTS, which is why it does not join the table above: that fixture hands
+// the same fake to Client and APIReader, so a cache miss and a deletion are indistinguishable in it
+// and this defect cannot be expressed. Here the cache is missing the flavor the queue already
+// references, and the reader has it.
+//
+// The failure it pins is a refusal rather than a crash: the cold flavor's keys would be dropped from
+// the offered set while the warm flavor still counted, leaving `read` non-zero -- so the rule speaks,
+// and refuses a key the pool genuinely offers.
+func TestValidateModelDeploymentAcceleratorKeys_ReadsThroughAColdCache(t *testing.T) {
+	cq := clusterQueue("h20-8x", "warm", "cold")
+	warm := acceleratedFlavor("warm", "nvidia-l40s")
+	cold := acceleratedFlavor("cold", "nvidia-h20")
+
+	cache := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+		WithObjects(cq, warm).Build() // no `cold`: the informer has not caught up
+	reader := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+		WithObjects(cq, warm, cold).Build()
+
+	wh := &ModelDeploymentWebhook{Client: cache, APIReader: reader}
+
+	// The key is pinned by `cold` alone, so `warm` being readable is what makes this a wrong refusal
+	// rather than the deliberate silence of a pool that answered nothing.
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.Name, r.AcceleratorKey = "prefill", "nvidia-h20"
+		}))
+
+	errs := wh.validate(context.Background(), md, nil)
+
+	assert.Empty(t, errs,
+		"a key pinned by a flavor the cache has not seen yet must not be refused as unoffered")
+}
+
 // TestValidateModelDeploymentRoleServiceNames_ExemptsRolesTheObjectAlreadyHad covers the half of the
 // rule that keeps it from stranding an object.
 //

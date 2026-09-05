@@ -542,7 +542,9 @@ func (r *ModelDeploymentWebhook) getClusterQueue(
 //
 // A flavor that has since been deleted is skipped rather than failing the read, and it does not
 // count: the queue drops the reference on its next reconcile, and refusing in between would refuse
-// on a state that is already being repaired.
+// on a state that is already being repaired. Deletion is established against the API SERVER, not
+// against the cache -- a flavor the cache has not caught up with yet is present, and dropping it
+// would shrink the offered set while the rest of it still counted.
 func (r *ModelDeploymentWebhook) poolAcceleratorKeys(
 	ctx context.Context, cq *kueue.ClusterQueue,
 ) (sets.Set[string], int, error) {
@@ -557,12 +559,30 @@ func (r *ModelDeploymentWebhook) poolAcceleratorKeys(
 			seen.Insert(quotas.Name)
 
 			rf := new(kueue.ResourceFlavor)
-			if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: string(quotas.Name)}, rf); err != nil {
-				if kerrors.IsNotFound(err) {
-					continue
+			key := ctrlcli.ObjectKey{Name: string(quotas.Name)}
+			if err := r.Client.Get(ctx, key, rf); err != nil {
+				if !kerrors.IsNotFound(err) {
+					return nil, 0, fmt.Errorf("get resource flavor %q: %w", quotas.Name, err)
 				}
 
-				return nil, 0, fmt.Errorf("get resource flavor %q: %w", quotas.Name, err)
+				// A CACHE MISS IS NOT A DELETION, and the difference decides whether a correct object
+				// is refused. The queue we just read already references this flavor, so a flavor
+				// created moments ago is absent from the informer while being present at the API
+				// server -- and skipping it here would drop its keys from the offered set while OTHER
+				// flavors still counted, leaving `read` non-zero and a perfectly valid acceleratorKey
+				// refused as one the pool does not offer.
+				//
+				// The uncached read is what getClusterQueue does one function above, for the same
+				// reason and on the same admission path.
+				if err = r.APIReader.Get(ctx, key, rf, ctrlclix.WithoutQuorum); err != nil {
+					if kerrors.IsNotFound(err) {
+						// Genuinely gone. The queue drops the reference on its next reconcile, and
+						// refusing in between would refuse on a state already being repaired.
+						continue
+					}
+
+					return nil, 0, fmt.Errorf("get resource flavor %q: %w", quotas.Name, err)
+				}
 			}
 			read++
 			keys.Insert(nodefeature.ExtractAcceleratableKeys(rf.Spec.NodeLabels)...)
