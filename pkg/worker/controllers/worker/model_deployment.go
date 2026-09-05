@@ -274,6 +274,24 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// answer to our delete, observable only on a cluster that runs it.
 	rebuild := resizing || leaving
 
+	// Set by any delete this pass ISSUES, as opposed to any departure it OBSERVES. The two are
+	// different moments: `leaving` reads a DeletionTimestamp that was already there when the pass
+	// started, so a replica this loop deletes below is invisible to it until the next pass.
+	//
+	// Without this the group can be extended in the same pass one of its members is removed. The
+	// window is narrow, because the reshaping edits all move `resizing` and take the rebuild branch
+	// instead -- a role rename leaves no entry under the old name, and a trim that keeps the total
+	// still moves that role's replica count. What is left is a replica that is already GONE (so
+	// `leaving` is deliberately false and its name is back in `desired`) beside a replica whose hash
+	// changed: one create and one delete, in one pass, ending in a group whose members disagree. The
+	// pass after that sees the terminating member, rebuilds the whole group, and throws the fresh
+	// replica away with it.
+	//
+	// So the creates are suppressed and the pass requeues instead. Nothing is lost: the group needs
+	// every member before Kueue admits any of it, so a create deferred by one pass costs nothing a
+	// rebuild would not have cost anyway.
+	var departed bool
+
 	for i := range actual {
 		pod := &actual[i]
 		if pod.DeletionTimestamp != nil {
@@ -299,6 +317,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 				logger.Error(err, "delete replica", "pod", pod.Name)
 				return ctrl.Result{}, err
 			}
+			departed = true
 
 			continue
 		}
@@ -353,6 +372,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			logger.Error(err, "delete outdated replica", "pod", pod.Name)
 			return ctrl.Result{}, err
 		}
+		departed = true
 	}
 
 	// A name still held by a terminating replica is not a failure, so it does not end the pass: the
@@ -373,6 +393,12 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			logger.Error(err, "delete group workload")
 			return ctrl.Result{}, err
 		}
+	} else if departed {
+		// A delete this pass issued, short of a rebuild. The Workload is deliberately LEFT ALONE:
+		// the deletes here are the ordinary rollout, and the pass that observes the terminating
+		// replica takes the rebuild branch above, which is what removes it.
+		requeue = true
+		desired = nil
 	}
 	// A FAILED CREATE DOES NOT END THE PASS EITHER, and that is what makes the incomplete group a
 	// REPORTED state rather than a silent one. Returning here would skip the status write below, so

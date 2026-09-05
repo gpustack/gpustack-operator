@@ -287,6 +287,42 @@ func TestModelDeploymentReconciler_RecreatesOnASpecChange(t *testing.T) {
 	}
 }
 
+// TestModelDeploymentReconciler_DoesNotExtendTheGroupInAPassThatRemovesFromIt pins the one window
+// where the converge loop could both create and delete in a single pass.
+//
+// The reshaping edits do not reach it: they move the resize predicate and take the rebuild branch,
+// which deletes everything and creates nothing. What reaches it is a replica that is already GONE --
+// not terminating, so `leaving` is deliberately false and its name is back in the desired set --
+// standing beside a replica whose fingerprint changed. Without the guard the pass deletes the second
+// and creates the first, leaving a group whose members disagree, and the next pass throws the fresh
+// replica away along with the rest.
+func TestModelDeploymentReconciler_DoesNotExtendTheGroupInAPassThatRemovesFromIt(t *testing.T) {
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	names := replicaNames(t, cli)
+	require.Len(t, names, 2)
+
+	// One replica vanishes outright, the way a finished eviction leaves it: no DeletionTimestamp for
+	// the pass to observe, and its name owed by the spec again.
+	gone := new(core.Pod)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: "team-a", Name: names[0]}, gone))
+	require.NoError(t, cli.Delete(context.Background(), gone))
+
+	// And the spec moves, so the surviving replica's fingerprint no longer matches.
+	changed := getModelDeployment(t, cli)
+	changed.Spec.Roles[0].Template.Image = "vllm/vllm-openai:v0.26.0"
+	require.NoError(t, cli.Update(context.Background(), changed))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.Empty(t, replicaNames(t, cli),
+		"the pass that deletes the outdated replica must not create the missing one beside it")
+}
+
 // TestModelDeploymentReconciler_LocksBeforeRendering pins the ordering the teardown depends on. The
 // finalizer has to be on the object before the first replica exists, or a deployment deleted
 // moments after creation would leave replicas holding accelerators nothing accounts for.
