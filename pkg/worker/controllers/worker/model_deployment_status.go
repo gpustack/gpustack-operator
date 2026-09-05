@@ -224,7 +224,16 @@ func (r *ModelDeploymentReconciler) listModelDeploymentWorkloads(
 	byPod := make(map[types.UID]*kueue.Workload, len(wlList.Items))
 	for i := range wlList.Items {
 		for _, ref := range wlList.Items[i].OwnerReferences {
-			if ref.Kind != "Pod" {
+			// THE CONTROLLER REFERENCE, which is what the comment above says and what the code was
+			// not checking. An object may carry many owner references and at most one controller,
+			// so taking the first Pod-kinded one attributes the Workload to whichever owner was
+			// listed first -- and a mis-attributed Workload reports another replica's admission
+			// state as this one's, which is a wrong answer rather than a missing one.
+			//
+			// The API version is checked with it: "Pod" is not a reserved word, and a resource of
+			// that kind in another group would match on the kind alone.
+			if ref.Kind != "Pod" || ref.APIVersion != "v1" ||
+				ref.Controller == nil || !*ref.Controller {
 				continue
 			}
 			byPod[ref.UID] = &wlList.Items[i]
