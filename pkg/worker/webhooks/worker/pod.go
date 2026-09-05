@@ -18,8 +18,8 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
-	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/webhook"
+	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 )
 
 // PodWebhook hooks core Pods routed to a GPUStack queue (selected by the
@@ -385,42 +385,7 @@ func (r *PodWebhook) cardVRAMMib(ctx context.Context, pod *core.Pod) (int64, err
 	if err != nil {
 		return 0, err
 	}
-	return instanceTypeCardVRAMMib(it)
-}
-
-// instanceTypeCardVRAMMib parses the per-card VRAM (MiB) from an InstanceType's observed
-// Status.Detail.Memory. An empty value is the not-yet-ready state (reject as retryable rather than
-// mis-size); a non-positive or unparseable value is a hard error.
-func instanceTypeCardVRAMMib(it *workercore.InstanceType) (int64, error) {
-	memStr := it.Status.Detail.Memory
-	if memStr == "" {
-		return 0, fmt.Errorf("instance type %s has no per-card memory yet (detail not ready)", it.Name)
-	}
-	q, err := resource.ParseQuantity(memStr)
-	if err != nil {
-		return 0, fmt.Errorf("parse memory %q of instance type %s: %w", memStr, it.Name, err)
-	}
-	mib := q.Value() / quantityx.Mi
-	if mib <= 0 {
-		return 0, fmt.Errorf("instance type %s has non-positive memory %q", it.Name, memStr)
-	}
-	return mib, nil
-}
-
-// partitionProfile finds a partition profile in the fronting InstanceType's observed
-// physical-slice inventory (Status.Detail), returning the aggregate (its per-instance MemoryMib
-// and pool-wide instance ceiling Count), whether the accelerator Detail has been computed at all,
-// and whether the profile was found.
-func partitionProfile(
-	it *workercore.InstanceType, profile string,
-) (prof workercore.AcceleratorSlicedPhysicalDetailProfile, ready, found bool) {
-	ready = it.Status.Detail.AcceleratorReady()
-	for _, p := range it.Status.Detail.SlicedDetail.Physical.Profiles {
-		if p.Name == profile {
-			return p, ready, true
-		}
-	}
-	return workercore.AcceleratorSlicedPhysicalDetailProfile{}, ready, false
+	return workerctrl.InstanceTypeCardVRAMMib(it)
 }
 
 // partitionContainerUnits validates a container's partition profile request against the fronting
@@ -441,7 +406,7 @@ func (r *PodWebhook) partitionContainerUnits(
 	if err != nil {
 		return 0, err
 	}
-	prof, ready, found := partitionProfile(it, profile)
+	prof, ready, found := workerctrl.PartitionProfile(it, profile)
 	if !found {
 		if !ready {
 			return 0, fmt.Errorf("instance type %s is not ready yet (accelerator detail not computed); retry", it.Name)
@@ -456,7 +421,7 @@ func (r *PodWebhook) partitionContainerUnits(
 		return 0, fmt.Errorf("instance type %s is not ready yet (partition profile %q has no memory detail); retry",
 			it.Name, profile)
 	}
-	cardVRAMMib, err := instanceTypeCardVRAMMib(it)
+	cardVRAMMib, err := workerctrl.InstanceTypeCardVRAMMib(it)
 	if err != nil {
 		return 0, err
 	}

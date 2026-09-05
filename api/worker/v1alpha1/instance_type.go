@@ -190,6 +190,37 @@ type InstanceTypeAcceleratorDetail struct {
 	// ComputeCapability is the compute capability of the accelerator, e.g. "8.0", "7.0".
 	ComputeCapability string `json:"computeCapability,omitempty" protobuf:"bytes,3,opt,name=computeCapability"`
 
+	// RuntimeVersion is the accelerator runtime version observed across the pool, normalized to
+	// "major.minor" by the detectors, e.g. "12.9" for CUDA or "8.2" for CANN.
+	//
+	// It is the MINIMUM over every node backing the accelerator group, not an arbitrary
+	// representative. One InstanceType spans every such node, and a driver rollout makes them
+	// disagree for as long as it runs; a container built against an older runtime runs on a newer
+	// driver but not the reverse, so the lowest version present is the one whose image every node
+	// can run. That is the property that matters, because a workload's image is fixed before
+	// admission chooses which node it lands on.
+	//
+	// An empty value means NOTHING WAS OBSERVED - no synced flavor, or a pool with no accelerator
+	// group of its own - and is distinct from a pool whose nodes all report the same version. A
+	// consumer must not read it as a default.
+	//
+	// IT IS ALWAYS THE FIRST ELEMENT OF RuntimeVersions, which is where that invariant is
+	// maintained: both are assigned from one sorted list, so they cannot disagree by construction.
+	RuntimeVersion string `json:"runtimeVersion,omitempty" protobuf:"bytes,6,opt,name=runtimeVersion"`
+
+	// RuntimeVersions is every distinct runtime version the pool's nodes report, ascending.
+	//
+	// It exists so that a consumer can tell a pool that AGREES from one that does not, which the
+	// single value above cannot express. A driver rollout makes the nodes disagree for as long as
+	// it runs, and a workload built from the minimum needs to be able to say what it skipped.
+	//
+	// A consumer reads disagreement as len() > 1 and the skipped versions as the tail. That is a
+	// length comparison rather than a second copy of the aggregation, which is the whole reason
+	// this is published instead of being recomputed from the Devices ledger downstream.
+	//
+	// +listType=atomic
+	RuntimeVersions []string `json:"runtimeVersions,omitempty" protobuf:"bytes,7,rep,name=runtimeVersions"`
+
 	// SlicedDetail is the pool's aggregated slicing capability for this accelerator group.
 	SlicedDetail AcceleratorSlicedDetail `json:"slicedDetail,omitempty" protobuf:"bytes,4,opt,name=slicedDetail"`
 

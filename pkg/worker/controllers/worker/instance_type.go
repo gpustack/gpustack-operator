@@ -32,6 +32,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
 	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
+	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/worker/apistatus"
 	"gpustack.ai/gpustack/pkg/worker/kuberequest"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -459,6 +460,13 @@ func (r *InstanceTypeReconciler) computeDetail(
 		detail.Memory = notes["memory"]
 		detail.Cores = notes["cores"]
 		detail.SlicedDetail = poolAcceleratorSlicedDetail(devices, it.Spec.AcceleratorGroup)
+		// THE INVARIANT LIVES HERE: both fields come from one sorted list, so the single value is
+		// the list's first element by construction rather than by a second computation that could
+		// drift from it.
+		detail.RuntimeVersions = poolAcceleratorRuntimeVersions(devices, it.Spec.AcceleratorGroup)
+		if len(detail.RuntimeVersions) > 0 {
+			detail.RuntimeVersion = detail.RuntimeVersions[0]
+		}
 		// The cpuDetail note rides an accelerated flavor only when CPU-manufacturer awareness is
 		// on (a CPU flavor always carries it), matching how the flavor reconciler records it.
 		if settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx) {
@@ -511,6 +519,98 @@ func poolAcceleratorSlicedDetail(
 		}
 	}
 	return device.AggregateAcceleratorSlicedDetail(cards)
+}
+
+// poolAcceleratorRuntimeVersions returns every distinct accelerator runtime version the nodes
+// backing the accelerator group report, ASCENDING, or nil when none reports one.
+//
+// It walks the structure poolAcceleratorSlicedDetail walks - every node's Devices ledger, groups
+// matched on the full "${manufacturer}-${group ID}" key - and takes RuntimeVersion where that
+// function takes the cards.
+//
+// ONE SORTED LIST IS THE ONLY OUTPUT, and that is what makes the two published fields unable to
+// disagree: the single runtimeVersion is this list's first element, assigned at the one call site
+// below rather than computed a second way. A redundant field with no invariant behind it is not one
+// fact and one view of it, it is two facts that can contradict each other.
+//
+// Ascending, because the first element has to be the minimum: a container built against an older
+// runtime runs on a newer driver but not the reverse, so the lowest version present is the only one
+// whose image every node in the pool can run - and which node a replica lands on is decided by
+// admission, after the image is already fixed in the Pod spec.
+//
+// Nil means nothing was observed, which is not the same as a pool that agrees on one version. A
+// group present but reporting no version contributes nothing rather than an empty entry.
+//
+// De-duplication is NUMERIC rather than textual, so that a pool reporting "9" on one node and "9.0"
+// on another reads as agreement. Two spellings of one version are not a rollout in progress, and a
+// consumer decides that question by this list's length.
+func poolAcceleratorRuntimeVersions(devices []workercore.Devices, acceleratorKey string) []string {
+	var versions []string
+	for i := range devices {
+		for j := range devices[i].Spec.Groups {
+			g := &devices[i].Spec.Groups[j]
+			if !acceleratorGroupMatches(g.Manufacturer, g.ID, acceleratorKey) || g.RuntimeVersion == "" {
+				continue
+			}
+			// A string that is not a version is dropped on the same grounds as an empty one: a
+			// non-version is not a version present. Nothing upstream guarantees the shape --
+			// device.NormalizeVersion passes a segment it cannot parse through unchanged -- so a
+			// node reporting "N/A" would otherwise fold to 0.0 and become this pool's published
+			// minimum, silently choosing the image for every replica on it.
+			if _, _, ok := splitRuntimeVersion(g.RuntimeVersion); !ok {
+				continue
+			}
+			versions = append(versions, g.RuntimeVersion)
+		}
+	}
+	slices.SortFunc(versions, compareRuntimeVersions)
+
+	return slices.CompactFunc(versions, func(a, b string) bool {
+		return compareRuntimeVersions(a, b) == 0
+	})
+}
+
+// compareRuntimeVersions orders two runtime versions NUMERICALLY on (major, minor).
+//
+// Lexical order is wrong here and wrong in a way that looks right on the common cases: "12.8"
+// precedes "12.9" either way, but "12.9" precedes "9.0" lexically while 12.9 is the newer runtime.
+// Any pool spanning a single-digit and a double-digit major would pick the wrong minimum.
+//
+// The detectors normalize every version through device.NormalizeVersion, whose output is
+// "major.minor" - or the original string when it has no minor part. A missing MINOR counts as zero,
+// which is the correct reading of "9". A major that does not parse is not given a reading here: it
+// never reaches this comparator, because the collection above drops it.
+func compareRuntimeVersions(a, b string) int {
+	aMajor, aMinor, _ := splitRuntimeVersion(a)
+	bMajor, bMinor, _ := splitRuntimeVersion(b)
+	if c := cmp.Compare(aMajor, bMajor); c != 0 {
+		return c
+	}
+
+	return cmp.Compare(aMinor, bMinor)
+}
+
+// splitRuntimeVersion splits a "major.minor" runtime version into its two numeric parts.
+// ok is false when a segment that is PRESENT does not parse, and an ABSENT minor is not that case.
+// "9" is version 9.0 and belongs in the list; "N/A" and "12.x" are not versions at all, and folding
+// either to a number would sort it against real versions, publish it as the pool-wide minimum this
+// type reports, and let de-duplication return a list of length one -- garbage wearing the shape of
+// agreement. Only the non-versions are excluded, and they are excluded where versions are collected.
+func splitRuntimeVersion(v string) (major, minor int, ok bool) {
+	majorStr, minorStr, hasMinor := strings.Cut(v, ".")
+	major, err := strconvx.Atoi[int](majorStr)
+	if err != nil {
+		return 0, 0, false
+	}
+	if !hasMinor {
+		return major, 0, true
+	}
+	minor, err = strconvx.Atoi[int](minorStr)
+	if err != nil {
+		return 0, 0, false
+	}
+
+	return major, minor, true
 }
 
 // instanceTypeScheduleLabels builds the schedule discriminator labels stamped on the backing

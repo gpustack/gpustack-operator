@@ -159,3 +159,27 @@ func (*KVCachePoolSpec) ProtoMessage() {}
 func (*KVCachePoolStatus) ProtoMessage() {}
 
 func (*KVCachePoolUsage) ProtoMessage() {}
+
+func (*ModelDeployment) ProtoMessage() {}
+
+func (*ModelDeploymentKVCache) ProtoMessage() {}
+
+func (*ModelDeploymentKVCacheDomain) ProtoMessage() {}
+
+func (*ModelDeploymentKVCacheStatus) ProtoMessage() {}
+
+func (*ModelDeploymentList) ProtoMessage() {}
+
+func (*ModelDeploymentModel) ProtoMessage() {}
+
+func (*ModelDeploymentRole) ProtoMessage() {}
+
+func (*ModelDeploymentRoleResources) ProtoMessage() {}
+
+func (*ModelDeploymentRoleStatus) ProtoMessage() {}
+
+func (*ModelDeploymentSpec) ProtoMessage() {}
+
+func (*ModelDeploymentStatus) ProtoMessage() {}
+
+func (*ModelDeploymentTemplate) ProtoMessage() {}

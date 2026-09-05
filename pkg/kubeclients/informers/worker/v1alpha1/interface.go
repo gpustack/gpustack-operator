@@ -25,6 +25,8 @@ type Interface interface {
 	KVCachePools() KVCachePoolInformer
 	// KVCachePoolBindings returns a KVCachePoolBindingInformer.
 	KVCachePoolBindings() KVCachePoolBindingInformer
+	// ModelDeployments returns a ModelDeploymentInformer.
+	ModelDeployments() ModelDeploymentInformer
 }
 
 type version struct {
@@ -66,4 +68,9 @@ func (v *version) KVCachePools() KVCachePoolInformer {
 // KVCachePoolBindings returns a KVCachePoolBindingInformer.
 func (v *version) KVCachePoolBindings() KVCachePoolBindingInformer {
 	return &kVCachePoolBindingInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// ModelDeployments returns a ModelDeploymentInformer.
+func (v *version) ModelDeployments() ModelDeploymentInformer {
+	return &modelDeploymentInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }

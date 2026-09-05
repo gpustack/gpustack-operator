@@ -300,6 +300,8 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1alpha1().KVCachePools().Informer()}, nil
 	case workerv1alpha1.SchemeGroupVersion.WithResource("kvcachepoolbindings"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1alpha1().KVCachePoolBindings().Informer()}, nil
+	case workerv1alpha1.SchemeGroupVersion.WithResource("modeldeployments"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1alpha1().ModelDeployments().Informer()}, nil
 
 	}
 

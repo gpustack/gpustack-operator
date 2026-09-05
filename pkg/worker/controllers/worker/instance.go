@@ -32,6 +32,7 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
+	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/worker/apistatus"
@@ -491,7 +492,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 
 	overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
 
-	additionalVols, additionalMounts := convertAdditionalVolumes(inst)
+	additionalVols, additionalMounts := convertAdditionalVolumes(inst.Spec.AdditionalVolumes)
 
 	// Construct containers.
 	// Main container.
@@ -509,7 +510,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 			}
 			return sc
 		}(),
-		Resources: getResourceRequirements(inst, instType, true, overcommit, true, false),
+		Resources: getResourceRequirements(inst.Spec.Resources, instType, true, overcommit, true, false),
 		Ports: slicex.Transform(inst.Spec.Ports, func(p workercore.InstancePort) core.ContainerPort {
 			return core.ContainerPort{
 				Name:          getPortName(p),
@@ -560,7 +561,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 					},
 				},
 			},
-			Resources: getResourceRequirements(inst, instType, false, false, false, true),
+			Resources: getResourceRequirements(inst.Spec.Resources, instType, false, false, false, true),
 			Env: []core.EnvVar{
 				{
 					Name:  "VOLUME_MOUNT_PATH",
@@ -681,8 +682,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 //
 // An entry with no source is skipped rather than rendered: admission rejects one, and a volume with
 // an empty source would make the API server refuse the whole Pod on every reconcile.
-func convertAdditionalVolumes(inst *workercore.Instance) (vols []core.Volume, mounts []core.VolumeMount) {
-	avs := inst.Spec.AdditionalVolumes
+func convertAdditionalVolumes(avs []workercore.InstanceAdditionalVolume) (vols []core.Volume, mounts []core.VolumeMount) {
 	if len(avs) == 0 {
 		return nil, nil
 	}
@@ -1029,8 +1029,14 @@ func getPortName(port workercore.InstancePort) string {
 // count plus the per-card memory/compute percentages, which the Pod webhook folds
 // into .sliced.units; everything else (a non-sliced type, or a 0% request) uses the
 // raw quantity and the exclusive resource name.
+// getResourceRequirements renders the resource keys one container asks for.
+//
+// It takes the RESOURCES rather than the object holding them, because two CRDs now render Pods
+// against one InstanceType and the accelerator-key algebra below — which mode's key to emit, which
+// manufacturer's spelling, which credits the Pod webhook will fold — must exist exactly once. A
+// second copy would be a manifest of the same facts, free to drift from this one.
 func getResourceRequirements(
-	inst *workercore.Instance,
+	instRess *workercore.InstanceResources,
 	instType *worker.InstanceType,
 	withGeneral, withGeneralOvercommit bool,
 	withAccelerator bool,
@@ -1043,9 +1049,9 @@ func getResourceRequirements(
 
 	if withGeneral {
 		for n, q := range map[core.ResourceName]resource.Quantity{
-			core.ResourceCPU:              inst.Spec.Resources.CPU,
-			core.ResourceMemory:           inst.Spec.Resources.RAM,
-			core.ResourceEphemeralStorage: inst.Spec.Resources.LocalStorage,
+			core.ResourceCPU:              instRess.CPU,
+			core.ResourceMemory:           instRess.RAM,
+			core.ResourceEphemeralStorage: instRess.LocalStorage,
 		} {
 			rr.Limits[n] = q
 			if withGeneralOvercommit {
@@ -1057,12 +1063,12 @@ func getResourceRequirements(
 	}
 
 	requestAccelerator := instType.Spec.Acceleratable &&
-		inst.Spec.Resources.Accelerator != nil &&
-		inst.Spec.Resources.Accelerator.Sign() > 0
+		instRess.Accelerator != nil &&
+		instRess.Accelerator.Sign() > 0
 	if requestAccelerator {
-		cardQ := *inst.Spec.Resources.Accelerator
+		cardQ := *instRess.Accelerator
 		manufacturer := instType.Status.Detail.Manufacturer
-		partProfile := inst.Spec.Resources.AcceleratorPartitionedProfile
+		partProfile := instRess.AcceleratorPartitionedProfile
 		partCardResName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModePartitioned)
 		partProfileResName := nodefeature.GetAcceleratablePartitionedProfileResourceName(manufacturer, partProfile)
 		switch {
@@ -1078,7 +1084,7 @@ func getResourceRequirements(
 				rr.Requests[partCardResName] = one
 				rr.Limits[partProfileResName] = one
 				rr.Requests[partProfileResName] = one
-			case instType.Status.Detail.IsLogicallySliceable() && inst.Spec.Resources.AcceleratorSlicedMemoryPercentage > 0:
+			case instType.Status.Detail.IsLogicallySliceable() && instRess.AcceleratorSlicedMemoryPercentage > 0:
 				// A sliced request emits the bare card count C (.sliced, which Kueue
 				// folds into credits via multiplyBy) plus the per-card memory/compute
 				// percentages. The Pod webhook folds .sliced.memory-percentage into the
@@ -1086,8 +1092,8 @@ func getResourceRequirements(
 				slicedResName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModeSliced)
 				memResName := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(manufacturer)
 				coresResName := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(manufacturer)
-				memQ := *resource.NewQuantity(int64(inst.Spec.Resources.AcceleratorSlicedMemoryPercentage), resource.DecimalSI)
-				coresQ := *resource.NewQuantity(int64(inst.Spec.Resources.AcceleratorSlicedCoresPercentage), resource.DecimalSI)
+				memQ := *resource.NewQuantity(int64(instRess.AcceleratorSlicedMemoryPercentage), resource.DecimalSI)
+				coresQ := *resource.NewQuantity(int64(instRess.AcceleratorSlicedCoresPercentage), resource.DecimalSI)
 				rr.Limits[slicedResName] = cardQ
 				rr.Requests[slicedResName] = cardQ
 				rr.Limits[memResName] = memQ
@@ -1115,4 +1121,77 @@ func getResourceRequirements(
 	}
 
 	return rr
+}
+
+// PartitionProfileMemoryPercent reports the share of one card's VRAM the requested hardware
+// partition profile occupies, as a percentage in [1,100].
+//
+// It reports sizeable=false when the pool offers the profile but its observed Detail cannot size
+// it yet — the profile's per-instance memory has not been populated, or the per-card VRAM has not
+// — which is a transient state during detection or a device-manager rollout skew. The caller must
+// reject such a request as retryable rather than fall back to whole-card sizing.
+//
+// It reports (0, true) when the request is not a partition request at all, or when the named
+// profile is not offered. That second case is permanent, not transient, and each caller's own
+// validation rejects it with a message naming the offered profiles.
+//
+// It sits beside getResourceRequirements rather than in the webhook package it was written for,
+// because sizing a request against an InstanceType is now done by two callers — the Instance
+// webhook, which defaults the values onto the object, and the ModelDeployment renderer, which has
+// no mutating webhook and derives them at render time. A second copy of a VRAM-anchored percentage
+// would be free to drift from this one, and the symptom of that drift is a Pod whose host CPU and
+// memory do not match the fraction of the card it holds.
+func PartitionProfileMemoryPercent(
+	instType *workercore.InstanceType, profile string,
+) (pct int64, sizeable bool) {
+	if profile == "" {
+		return 0, true
+	}
+	prof, _, found := PartitionProfile(instType, profile)
+	if !found {
+		return 0, true
+	}
+	if prof.MemoryMib <= 0 {
+		return 0, false
+	}
+	cardVRAMMib, err := InstanceTypeCardVRAMMib(instType)
+	if err != nil || cardVRAMMib <= 0 {
+		return 0, false
+	}
+	return min(max(prof.MemoryMib*100/cardVRAMMib, 1), 100), true
+}
+
+// PartitionProfile finds a partition profile in an InstanceType's observed physical-slice
+// inventory (Status.Detail), returning the aggregate (its per-instance MemoryMib and pool-wide
+// instance ceiling Count), whether the accelerator Detail has been computed at all, and whether
+// the profile was found.
+func PartitionProfile(
+	instType *workercore.InstanceType, profile string,
+) (prof workercore.AcceleratorSlicedPhysicalDetailProfile, ready, found bool) {
+	ready = instType.Status.Detail.AcceleratorReady()
+	for _, p := range instType.Status.Detail.SlicedDetail.Physical.Profiles {
+		if p.Name == profile {
+			return p, ready, true
+		}
+	}
+	return workercore.AcceleratorSlicedPhysicalDetailProfile{}, ready, false
+}
+
+// InstanceTypeCardVRAMMib parses the per-card VRAM (MiB) from an InstanceType's observed
+// Status.Detail.Memory. An empty value is the not-yet-ready state (reject as retryable rather than
+// mis-size); a non-positive or unparseable value is a hard error.
+func InstanceTypeCardVRAMMib(instType *workercore.InstanceType) (int64, error) {
+	memStr := instType.Status.Detail.Memory
+	if memStr == "" {
+		return 0, fmt.Errorf("instance type %s has no per-card memory yet (detail not ready)", instType.Name)
+	}
+	q, err := resource.ParseQuantity(memStr)
+	if err != nil {
+		return 0, fmt.Errorf("parse memory %q of instance type %s: %w", memStr, instType.Name, err)
+	}
+	mib := q.Value() / quantityx.Mi
+	if mib <= 0 {
+		return 0, fmt.Errorf("instance type %s has non-positive memory %q", instType.Name, memStr)
+	}
+	return mib, nil
 }

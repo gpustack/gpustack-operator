@@ -641,7 +641,8 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 		}
 		memPct := instRess.AcceleratorSlicedMemoryPercentage
 		coresPct := instRess.AcceleratorSlicedCoresPercentage
-		partitionPct, sizeable := partitionProfileMemoryPercent(instType, instRess.AcceleratorPartitionedProfile)
+		partitionPct, sizeable := workerctrl.PartitionProfileMemoryPercent(
+			(*workercore.InstanceType)(instType), instRess.AcceleratorPartitionedProfile)
 		if !sizeable {
 			// The pool offers the profile but cannot size it yet. Reject as retryable, the same
 			// way slicingRequestNotReady does for an uncomputed Detail — whole-card sizing here
@@ -776,37 +777,6 @@ func sizeAcceleratorUnitByPercent(
 		}
 	}
 	return nil
-}
-
-// partitionProfileMemoryPercent reports the share of one card's VRAM the requested hardware
-// partition profile occupies, as a percentage in [1,100].
-//
-// It reports sizeable=false when the pool offers the profile but its observed Detail cannot size
-// it yet — the profile's per-instance memory has not been populated, or the per-card VRAM has not
-// — which is a transient state during detection or a device-manager rollout skew. The caller must
-// reject such a request as retryable, exactly as the Pod webhook does for the same state: falling
-// back to whole-card sizing would persist an Instance sized for a whole card, and Default does not
-// run again to correct it.
-//
-// It reports (0, true) when the request is not a partition request at all, or when the named
-// profile is not offered. That second case is permanent, not transient, and validation rejects it
-// on its own terms with a message naming the offered profiles.
-func partitionProfileMemoryPercent(instType *worker.InstanceType, profile string) (pct int64, sizeable bool) {
-	if profile == "" {
-		return 0, true
-	}
-	prof, _, found := partitionProfile((*workercore.InstanceType)(instType), profile)
-	if !found {
-		return 0, true
-	}
-	if prof.MemoryMib <= 0 {
-		return 0, false
-	}
-	cardVRAMMib, err := instanceTypeCardVRAMMib((*workercore.InstanceType)(instType))
-	if err != nil || cardVRAMMib <= 0 {
-		return 0, false
-	}
-	return min(max(prof.MemoryMib*100/cardVRAMMib, 1), 100), true
 }
 
 // slicingRequestNotReady reports whether the request asks for a share of a card — a logical slice

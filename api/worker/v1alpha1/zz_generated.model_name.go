@@ -379,3 +379,63 @@ func (in KVCachePoolStatus) OpenAPIModelName() string {
 func (in KVCachePoolUsage) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.KVCachePoolUsage"
 }
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeployment) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeployment"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentKVCache) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentKVCache"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentKVCacheDomain) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentKVCacheDomain"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentKVCacheStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentKVCacheStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentModel) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentModel"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentRole) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRole"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentRoleResources) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRoleResources"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentRoleStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRoleStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentTemplate) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentTemplate"
+}

@@ -1137,14 +1137,27 @@ func TestInstanceTypeReconciler_ComputesDetail(t *testing.T) {
 		// The Devices ledger carries the per-card slicing detail (Spec.Groups) the reconciler
 		// aggregates into SlicedDetail, plus the pool labels listFlavorPoolDevices selects on. The
 		// group ID is the bare model ("a10g"); Manufacturer+"-"+ID reconstructs the accelerator key.
-		dev := devicesWithGroups("node-a", slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g",
-			logicalCard("0", 128, true), logicalCard("1", 128, true)))
-		dev.Labels = map[string]string{
+		poolDeviceLabels := map[string]string{
 			featureKey:                 "true",
 			core.LabelOSStable:         "linux",
 			core.LabelArchStable:       "amd64",
 			systemname.ManagedLabelKey: "true",
 		}
+		groupA := slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g",
+			logicalCard("0", 128, true), logicalCard("1", 128, true))
+		groupA.RuntimeVersion = "12.9"
+		dev := devicesWithGroups("node-a", groupA)
+		dev.Labels = poolDeviceLabels
+
+		// A SECOND NODE IN THE SAME POOL, mid driver rollout: same accelerator group, an OLDER
+		// runtime, and no cards -- so it changes the runtime-version aggregate without touching the
+		// SlicedDetail assertions below. Two DIFFERENT versions is what gives the value assertions
+		// below their discriminating power: with one node the list's first and last elements are the
+		// same element, and a single value taken from the wrong end would still match.
+		groupB := slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g")
+		groupB.RuntimeVersion = "12.4"
+		devB := devicesWithGroups("node-b", groupB)
+		devB.Labels = poolDeviceLabels
 
 		it := &workercore.InstanceType{
 			ObjectMeta: meta.ObjectMeta{
@@ -1156,7 +1169,7 @@ func TestInstanceTypeReconciler_ComputesDetail(t *testing.T) {
 				AcceleratorGroup: key, Acceleratable: true, OS: "linux", Arch: "amd64",
 			},
 		}
-		cli := buildInstanceTypeClient(it, cq, rf, dev)
+		cli := buildInstanceTypeClient(it, cq, rf, dev, devB)
 		reconcileInstanceTypeN(t, cli, name, 4)
 
 		got := getInstanceType(t, cli, name)
@@ -1170,6 +1183,27 @@ func TestInstanceTypeReconciler_ComputesDetail(t *testing.T) {
 			"SlicedDetail sums the two logically sliceable cards' counts (2×128)")
 		assert.True(t, d.SlicedDetail.Logical.CoresPercentageOvercommit,
 			"SlicedDetail carries the overcommit flag")
+
+		// The two runtime-version fields, and the invariant that ties them together. The pool
+		// disagrees, so the list has both versions ascending and the single value is the older one:
+		// the only version whose image both nodes can run.
+		assert.Equal(t, []string{"12.4", "12.9"}, d.RuntimeVersions,
+			"every distinct version the pool reports, ascending")
+		assert.Equal(t, "12.4", d.RuntimeVersion,
+			"the minimum, because admission picks the node after the image is already fixed")
+		// THE INVARIANT, AND IT HAS NO DISCRIMINATING POWER TODAY. The two assertions above pin both
+		// fields to exact values, so every mutation that breaks the invariant is already red before
+		// reaching this line, and deleting this line would change nothing. It is kept because it
+		// states a RELATION instead of a value: when this case's versions are legitimately updated,
+		// the assertions above are rewritten and this one still holds the two fields together.
+		// Do not read it as a guard that catches something the rest of this case misses.
+		require.NotEmpty(t, d.RuntimeVersions, "an empty list would panic on the index below")
+		assert.Equal(t, d.RuntimeVersions[0], d.RuntimeVersion,
+			"a redundant field with nothing holding it is two facts that can contradict each other, "+
+				"so the single value must be the list's first element")
+		assert.Len(t, d.RuntimeVersions, 2,
+			"a consumer reads disagreement as len() > 1, which is a length comparison rather than "+
+				"a second copy of the aggregation")
 
 		// The Detail lives in computeStatus, so later reconciles recompute it identically — never
 		// erase it — and a stable status writes nothing (the DeepEqual guard).
@@ -1593,6 +1627,176 @@ func TestInstanceTypeReconciler_AlignsClusterQueue(t *testing.T) {
 			for _, k := range []string{"unitCPU", "unitRAM", "localStorage"} {
 				assert.NotContainsf(t, notes, k, "unit spec is not a queue note (%q)", k)
 			}
+		})
+	}
+}
+
+// nodeDevicesRuntime builds a single-node Devices whose SPEC ledger declares accelerator groups.
+//
+// The runtime version lives on the spec side, which is the side the detail aggregation reads. The
+// status side carries the allocation ledger and has no version field at all, so a fixture built
+// with nodeDevices cannot exercise this.
+func nodeDevicesRuntime(name string, groups ...workercore.DevicesGroup) workercore.Devices {
+	return workercore.Devices{
+		ObjectMeta: meta.ObjectMeta{Name: name},
+		Spec:       workercore.DevicesSpec{Groups: groups},
+	}
+}
+
+// runtimeGroup is one accelerator group reporting a runtime version.
+func runtimeGroup(manufacturer, id, version string) workercore.DevicesGroup {
+	return workercore.DevicesGroup{Manufacturer: manufacturer, ID: id, RuntimeVersion: version}
+}
+
+func TestPoolAcceleratorRuntimeVersions(t *testing.T) {
+	const key = "nvidia-a10g"
+
+	testCases := []struct {
+		name    string
+		devices []workercore.Devices
+		want    []string
+		why     string
+	}{
+		{
+			name: "one node reports its version",
+			devices: []workercore.Devices{
+				nodeDevicesRuntime("a", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "12.9")),
+			},
+			want: []string{"12.9"},
+		},
+		{
+			name: "the lowest across nodes, whatever the iteration order",
+			devices: []workercore.Devices{
+				nodeDevicesRuntime("a", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "12.9")),
+				nodeDevicesRuntime("b", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "12.4")),
+				nodeDevicesRuntime("c", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "13.0")),
+			},
+			want: []string{"12.4", "12.9", "13.0"},
+			why:  "the minimum is the only version whose image every node in the pool can run",
+		},
+		{
+			// THE CASE THAT DISTINGUISHES NUMERIC FROM LEXICAL COMPARISON, on the major part.
+			// A string comparison answers "12.9" here, because '1' sorts before '9'. Every case
+			// above passes with either implementation, which is why this one has to exist.
+			name: "a single-digit major is lower than a double-digit major",
+			devices: []workercore.Devices{
+				nodeDevicesRuntime("a", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "12.9")),
+				nodeDevicesRuntime("b", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "9.0")),
+			},
+			want: []string{"9.0", "12.9"},
+			why:  "9.0 is the older runtime, and it sorts AFTER 12.9 lexically",
+		},
+		{
+			// The same distinction on the minor part: "12.10" sorts before "12.9" lexically.
+			name: "a two-digit minor is higher than a one-digit minor",
+			devices: []workercore.Devices{
+				nodeDevicesRuntime("a", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "12.10")),
+				nodeDevicesRuntime("b", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "12.9")),
+			},
+			want: []string{"12.9", "12.10"},
+			why:  "minor 9 is older than minor 10, and sorts after it lexically",
+		},
+		{
+			name: "a version with no minor part reads as minor zero",
+			devices: []workercore.Devices{
+				nodeDevicesRuntime("a", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "9.1")),
+				nodeDevicesRuntime("b", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "9")),
+			},
+			want: []string{"9", "9.1"},
+			why:  "NormalizeVersion passes a version with no minor part through unchanged",
+		},
+		{
+			name: "another group's version is not this pool's",
+			devices: []workercore.Devices{
+				nodeDevicesRuntime("a",
+					runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "12.9"),
+					runtimeGroup(nodefeature.ManufacturerNVIDIA, "l4", "11.0")),
+			},
+			want: []string{"12.9"},
+			why:  "the l4 group backs a different InstanceType",
+		},
+		{
+			name: "the same group ID under a different manufacturer is a different group",
+			devices: []workercore.Devices{
+				nodeDevicesRuntime("a",
+					runtimeGroup(nodefeature.ManufacturerAMD, "a10g", "6.4"),
+					runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "12.9")),
+			},
+			want: []string{"12.9"},
+			why:  "ConstructGroupID strips the vendor prefix, so a bare ID can collide across vendors",
+		},
+		{
+			name: "a matching group reporting no version contributes nothing",
+			devices: []workercore.Devices{
+				nodeDevicesRuntime("a", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "")),
+				nodeDevicesRuntime("b", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "12.9")),
+			},
+			want: []string{"12.9"},
+			why:  "an unreported version is an absence, not a lower bound of zero",
+		},
+		{
+			// THE SAME CLAIM WITH THE ORDER REVERSED, and only this direction tests it. With the
+			// unreported version first, the accumulator is still at its empty sentinel when the
+			// blank arrives, so dropping the skip changes nothing and the case above passes either
+			// way. With it last, a dropped skip parses "" as (0,0), finds it lower than 12.9, and
+			// overwrites a real answer with an absence.
+			name: "an unreported version arriving last does not overwrite a real one",
+			devices: []workercore.Devices{
+				nodeDevicesRuntime("a", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "12.9")),
+				nodeDevicesRuntime("b", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "")),
+			},
+			want: []string{"12.9"},
+			why:  "the empty accumulator doubles as the sentinel, so this claim is order-sensitive",
+		},
+		{
+			// A NON-VERSION IS NOT A VERSION PRESENT, and this is the case that separates the two
+			// readings folded into "a segment that does not parse counts as zero". A missing MINOR
+			// really is zero -- "9" is 9.0. A major that does not parse is not a low version, and
+			// treating it as 0.0 would sort it first, publish it as the pool-wide minimum, and let
+			// de-duplication return a single entry: garbage wearing the shape of agreement.
+			name: "a version that does not parse is dropped, not read as zero",
+			devices: []workercore.Devices{
+				nodeDevicesRuntime("a", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "N/A")),
+				nodeDevicesRuntime("b", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "12.9")),
+			},
+			want: []string{"12.9"},
+			why:  "nothing upstream guarantees the shape: NormalizeVersion passes it through unchanged",
+		},
+		{
+			// The reversed order, for the reason the blank pair above gives: with the good version
+			// first, a dropped filter is what overwrites a real answer with a non-answer.
+			name: "a version that does not parse arriving last does not become the minimum",
+			devices: []workercore.Devices{
+				nodeDevicesRuntime("a", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "12.9")),
+				nodeDevicesRuntime("b", runtimeGroup(nodefeature.ManufacturerNVIDIA, "a10g", "12.x")),
+			},
+			want: []string{"12.9"},
+			why:  "a partly-numeric string is the dangerous shape: it looks like a version",
+		},
+		{
+			name: "no matching group observes nothing",
+			devices: []workercore.Devices{
+				nodeDevicesRuntime("a", runtimeGroup(nodefeature.ManufacturerNVIDIA, "l4", "12.9")),
+			},
+			want: nil,
+			why:  "empty is distinct from a pool that agrees on a version, and must not be defaulted",
+		},
+		{
+			name:    "no devices at all",
+			devices: nil,
+			want:    nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := poolAcceleratorRuntimeVersions(tc.devices, key)
+			assert.Equal(t, tc.want, got, tc.why)
+			// The first element has to be the minimum, because the published single value IS this
+			// element. Asserting the ordering as a property covers every case at once, including
+			// the ones whose expectation above happens to be a single entry.
+			assert.True(t, slices.IsSortedFunc(got, compareRuntimeVersions),
+				"the list must be ascending: its first element is what gets published as the version")
 		})
 	}
 }

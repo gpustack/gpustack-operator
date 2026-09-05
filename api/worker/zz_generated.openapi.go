@@ -129,6 +129,18 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.KVCachePoolSpec{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_KVCachePoolSpec(ref),
 		v1alpha1.KVCachePoolStatus{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_KVCachePoolStatus(ref),
 		v1alpha1.KVCachePoolUsage{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_KVCachePoolUsage(ref),
+		v1alpha1.ModelDeployment{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_ModelDeployment(ref),
+		v1alpha1.ModelDeploymentKVCache{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCache(ref),
+		v1alpha1.ModelDeploymentKVCacheDomain{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCacheDomain(ref),
+		v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCacheStatus(ref),
+		v1alpha1.ModelDeploymentList{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentList(ref),
+		v1alpha1.ModelDeploymentModel{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentModel(ref),
+		v1alpha1.ModelDeploymentRole{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref),
+		v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref),
+		v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref),
+		v1alpha1.ModelDeploymentSpec{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref),
+		v1alpha1.ModelDeploymentStatus{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref),
+		v1alpha1.ModelDeploymentTemplate{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentTemplate(ref),
 		corev1.AWSElasticBlockStoreVolumeSource{}.OpenAPIModelName():         schema_k8sio_api_core_v1_AWSElasticBlockStoreVolumeSource(ref),
 		corev1.Affinity{}.OpenAPIModelName():                                 schema_k8sio_api_core_v1_Affinity(ref),
 		corev1.AppArmorProfile{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_AppArmorProfile(ref),
@@ -4383,6 +4395,33 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeAcceleratorDetail(ref commo
 							Format:      "",
 						},
 					},
+					"runtimeVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RuntimeVersion is the accelerator runtime version observed across the pool, normalized to \"major.minor\" by the detectors, e.g. \"12.9\" for CUDA or \"8.2\" for CANN.\n\nIt is the MINIMUM over every node backing the accelerator group, not an arbitrary representative. One InstanceType spans every such node, and a driver rollout makes them disagree for as long as it runs; a container built against an older runtime runs on a newer driver but not the reverse, so the lowest version present is the one whose image every node can run. That is the property that matters, because a workload's image is fixed before admission chooses which node it lands on.\n\nAn empty value means NOTHING WAS OBSERVED - no synced flavor, or a pool with no accelerator group of its own - and is distinct from a pool whose nodes all report the same version. A consumer must not read it as a default.\n\nIT IS ALWAYS THE FIRST ELEMENT OF RuntimeVersions, which is where that invariant is maintained: both are assigned from one sorted list, so they cannot disagree by construction.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"runtimeVersions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "RuntimeVersions is every distinct runtime version the pool's nodes report, ascending.\n\nIt exists so that a consumer can tell a pool that AGREES from one that does not, which the single value above cannot express. A driver rollout makes the nodes disagree for as long as it runs, and a workload built from the minimum needs to be able to say what it skipped.\n\nA consumer reads disagreement as len() > 1 and the skipped versions as the tail. That is a length comparison rather than a second copy of the aggregation, which is the whole reason this is published instead of being recomputed from the Devices ledger downstream.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
 					"slicedDetail": {
 						SchemaProps: spec.SchemaProps{
 							Description: "SlicedDetail is the pool's aggregated slicing capability for this accelerator group.",
@@ -4620,6 +4659,33 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeDetail(ref common.Reference
 							Description: "ComputeCapability is the compute capability of the accelerator, e.g. \"8.0\", \"7.0\".",
 							Type:        []string{"string"},
 							Format:      "",
+						},
+					},
+					"runtimeVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RuntimeVersion is the accelerator runtime version observed across the pool, normalized to \"major.minor\" by the detectors, e.g. \"12.9\" for CUDA or \"8.2\" for CANN.\n\nIt is the MINIMUM over every node backing the accelerator group, not an arbitrary representative. One InstanceType spans every such node, and a driver rollout makes them disagree for as long as it runs; a container built against an older runtime runs on a newer driver but not the reverse, so the lowest version present is the one whose image every node can run. That is the property that matters, because a workload's image is fixed before admission chooses which node it lands on.\n\nAn empty value means NOTHING WAS OBSERVED - no synced flavor, or a pool with no accelerator group of its own - and is distinct from a pool whose nodes all report the same version. A consumer must not read it as a default.\n\nIT IS ALWAYS THE FIRST ELEMENT OF RuntimeVersions, which is where that invariant is maintained: both are assigned from one sorted list, so they cannot disagree by construction.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"runtimeVersions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "RuntimeVersions is every distinct runtime version the pool's nodes report, ascending.\n\nIt exists so that a consumer can tell a pool that AGREES from one that does not, which the single value above cannot express. A driver rollout makes the nodes disagree for as long as it runs, and a workload built from the minimum needs to be able to say what it skipped.\n\nA consumer reads disagreement as len() > 1 and the skipped versions as the tail. That is a length comparison rather than a second copy of the aggregation, which is the whole reason this is published instead of being recomputed from the Devices ledger downstream.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
 						},
 					},
 					"slicedDetail": {
@@ -6417,6 +6483,719 @@ func schema_gpustack_api_worker_v1alpha1_KVCachePoolUsage(ref common.ReferenceCa
 		},
 		Dependencies: []string{
 			resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeployment(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeployment is the schema for worker.gpustack.ai.\n\nIt is N replicas of one inference-engine role attached to a KV cache pool, so that the replicas hit each other's cached prefixes instead of each re-computing the same prefill.\n\nIt RENDERS PODS DIRECTLY. The admission chain keys on Pods — a plain Pod is a first-class citizen of it and an Instance is sugar that renders one — so rendering Pods reuses every existing gate with no new integration point. Instance could not serve as the substrate: it renders exactly one Pod, and its spec is immutable after creation, which turns a rolling update into recreate-everything.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelDeploymentSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelDeploymentStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentSpec{}.OpenAPIModelName(), v1alpha1.ModelDeploymentStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCache(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentKVCache attaches the deployment to a KV cache pool.\n\nTHE REUSE DOMAIN IS NOT DECLARED HERE, AND THAT IS A SECURITY PROPERTY. The storage layer's tenant IS the reuse domain, so every distinct domain is a tenant with its own quota ledger: a workload free to name arbitrary domains could mint unlimited tenants in its namespace and escape the namespace quota ceiling entirely. Domain naming therefore lives on the KVCachePoolBinding, which an admin owns.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"poolRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PoolRef names a KVCachePoolBinding IN THIS NAMESPACE. The Binding is the authorization point: an admin creating one in a namespace is what grants that namespace access to the pool. The type is a LocalObjectReference rather than a namespaced one so that reaching another namespace — or naming the cluster-scoped pool, or a bare endpoint URL — is unrepresentable rather than merely rejected.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
+					"connector": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Connector selects how the engine's transfer configuration is produced. \"auto\" synthesizes it from the pool's backend type and the engine. The enum has one value on purpose: it reserves the discriminator, so naming a specific connector later is an enum widening rather than a new field. There is no \"none\" — synthesizing nothing is reachable through a full command replacement, which also marks the role unmanaged and moves CacheAttached to Unknown.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"poolRef"},
+			},
+		},
+		Dependencies: []string{
+			corev1.LocalObjectReference{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCacheDomain(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentKVCacheDomain is the reuse identity echoed from the Binding.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the reuse identity, and it is the storage layer's tenant. Two deployments echoing the same name share KV; two echoing different names do not.",
+							Default:     "",
+							MaxLength:   ptr.To[int64](63),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"blockSize": {
+						SchemaProps: spec.SchemaProps{
+							Description: "BlockSize and Dtype are what this domain's blocks are made of. They are echoed rather than validated here: the Binding requires and freezes both, so an entry missing one could only be a writer bug.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"dtype": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+				},
+				Required: []string{"name", "blockSize", "dtype"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCacheStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentKVCacheStatus is the reuse domain this deployment attached to.\n\nEvery field is READ FROM THE BINDING, never declared here. It is echoed onto this object so that diagnosing a cache that is not shared takes one object rather than two — a wrong block size or dtype is silent cache pollution, where writes succeed, reads succeed and the tensors are wrong.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"binding": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Binding is the KVCachePoolBinding this deployment resolved, in this namespace.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"pool": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Pool is the KVCachePool that Binding points at.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"domain": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Domain is the reuse identity, echoed from the Binding's immutable domain block.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentKVCacheDomain{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"binding", "pool", "domain"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentKVCacheDomain{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentList holds the list of ModelDeployment.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelDeployment{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeployment{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentModel(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentModel names the model the engine serves.\n\nIt provisions nothing. Weights arrive through the role template's volumes or through the engine's own hub client; a weight-provisioning block here would be the first step towards the general-purpose serving CR this deliberately is not.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the identifier the engine serves, e.g. \"Qwen/Qwen2.5-72B-Instruct\".",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRole is one engine role and its replicas.\n\nReplicas and InstanceType are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to admission and scheduling — Kueue PodSet counts and flavor selection — so a template that could shadow them would make the admission feasibility check read a ledger that does not match reality. The template may override container content and nothing else.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name identifies the role. In this version there is exactly one role and its name is free-form; the spec that introduces P/D disaggregation gives the name meaning.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](63),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"replicas": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Replicas is how many Pods this role runs. Each is an independent Kueue Workload: this version creates no pod group, which is correct for one role whose replicas are independently useful and is what the P/D spec replaces with cross-role atomic admission.",
+							Minimum:     ptr.To[float64](1),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"instanceType": {
+						SchemaProps: spec.SchemaProps{
+							Description: "InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against. It is what the queue-name entrance label is derived from.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"resources": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Resources is what one replica of this role asks of an accelerator, and it is a STRUCTURED FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.\n\nIt carries only the ACCELERATOR half of a request, because that is the only half a workload decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit resources scaled by the requested card count, exactly as the Instance webhook derives them, so they are not expressible here at all — which is a stronger guarantee than refusing them would be, since a field that does not exist cannot be shadowed by a template either.\n\nInstanceType alone cannot supply this. An InstanceType's UnitResources size ONE card, and how many cards a replica wants is a property of the model being served rather than of the pool it is admitted against; two deployments on one InstanceType routinely want different counts.",
+							Ref:         ref(v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName()),
+						},
+					},
+					"extraArgs": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "ExtraArgs is appended AFTER the operator-synthesized arguments. An entry naming a key the operator owns is REJECTED rather than merged: a silent merge produces two values for one connector argument and no way to tell which one won.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+					"env": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "name",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Env is appended the same way and refused on the same terms. Keys the operator merely defaults are not owned: a user's value wins there and no rejection follows.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstanceEnvVar{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"template": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Template overlays the rendered container. The operator renders first and merges this on top. A non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator synthesizes no engine arguments and no client environment, the role is marked unmanaged and CacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args, because a second append tier beside ExtraArgs would have no defined precedence and would make the take-over tier ambiguous — args alone would be neither take-over nor append.\n\nThe template is MUTABLE, unlike the one an Instance carries. Immutability there is a rule the Instance webhook enforces on InstanceSpec rather than a property of any template type, and not carrying it here is what makes a rollout possible at all.\n\nIts Resources are refused at admission. The accelerator request belongs in the role's own Resources and the rest is derived from the InstanceType, so a template able to shadow either would make the admission feasibility check read a ledger that does not match reality.",
+							Ref:         ref(v1alpha1.ModelDeploymentTemplate{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"name", "instanceType"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName(), v1alpha1.ModelDeploymentTemplate{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRoleResources is what one replica of a role asks of an accelerator.\n\nIt deliberately mirrors the accelerator fields of InstanceResources — the same names, the same meanings — rather than inventing a second vocabulary for one request, and it deliberately omits that type's CPU, RAM and LocalStorage, which are derived here rather than declared.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"accelerator": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Accelerator is how many accelerator cards ONE REPLICA asks for. Absent or zero on an acceleratable InstanceType is a CPU-only replica, which is legitimate for a small model.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"acceleratorSlicedMemoryPercentage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced InstanceType, as a percentage in [0,100]. 0 disables slicing, making the request an exclusive whole-accelerator one. It is ignored by an InstanceType offering no slicing.",
+							Minimum:     ptr.To[float64](0),
+							Maximum:     ptr.To[float64](100),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"acceleratorSlicedCoresPercentage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorSlicedCoresPercentage is the per-accelerator compute budget requested on a sliced InstanceType, as a percentage in [0,100], independent of the memory percentage.",
+							Minimum:     ptr.To[float64](0),
+							Maximum:     ptr.To[float64](100),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"acceleratorPartitionedProfile": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a partition-offering InstanceType, e.g. \"3g.40gb\". A non-empty value is mutually exclusive with the two slice percentages: hardware partitioning and software slicing cannot both apply to one accelerator. It is ignored by an InstanceType offering no partition.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRoleStatus is one role's observed readiness.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the role this entry describes.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"desired": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Neither carries omitempty: they are counted from a Pod list that succeeded, so a zero here is an observed zero and must serialize as one. A failed list writes no status at all.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"ready": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"integer"},
+							Format:  "int32",
+						},
+					},
+					"unmanaged": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Unmanaged is true when the role replaced the whole command line, so the operator synthesized no engine argument and no client environment for it. It carries no omitempty for the same reason the counts do not: false is the ordinary case and must be visible as an answer rather than as a missing field.",
+							Default:     false,
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"name", "desired", "ready", "unmanaged"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentSpec defines the desired state of ModelDeployment.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"model": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Model names what the engine serves.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentModel{}.OpenAPIModelName()),
+						},
+					},
+					"engine": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Engine selects the inference engine, which decides which argument keys the operator owns and which carrier the transfer configuration arrives on. Ownership is per (engine, key): a key one engine owns is an ordinary user argument on another.\n\nIt does NOT decide the connector, which follows the role's hardware instead. An Ascend pool running this engine gets a different connector than an NVIDIA pool running it, because the connector is a property of the accelerator backend.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"engineVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "EngineVersion is the engine's own version, e.g. \"0.25.1\" for vllm or \"0.5.18\" for sglang.\n\nIt is free-form and UNVALIDATED, by decision. Together with each role's observed hardware it assembles that role's runner image; the operator checks neither that the combination was ever published nor that the version supports the installed driver. The user guarantees version alignment. A gate would need the runner's release matrix compiled into the operator, and the failure it would prevent is already legible without one, as an ImagePullBackOff on a tag that does not exist.\n\nIt is per deployment rather than per role, which is what lets one engine and one version assemble a DIFFERENT image for each role: the backend half of the tag comes from the role's own InstanceType. A prefill role on NVIDIA and a decode role on Ascend therefore need no extra field. That works because the published version sets overlap across backends, which is measured rather than assumed - though not across ALL of them, so a per-role override is a thing the P/D spec may need and this one does not.\n\nThe lower bound is not decoration: `required` makes the key present, not the value non-empty, and an empty version assembles a malformed tag whose ImagePullBackOff names a tag the user never typed.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"kvCache": {
+						SchemaProps: spec.SchemaProps{
+							Description: "KVCache attaches the deployment to a KV cache pool.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentKVCache{}.OpenAPIModelName()),
+						},
+					},
+					"roles": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Roles are the engine roles this deployment runs.\n\nIt is a LIST FROM THE FIRST VERSION although only one entry is accepted today, because the spec that introduces P/D disaggregation adds entries to it rather than replacing the field. The length-1 bound lives in the validating webhook and not here, so that the refusal can name the spec that lifts it, and so that lifting it is a webhook edit rather than a schema change every stored object would have to survive.",
+							MinItems:    ptr.To[int64](1),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelDeploymentRole{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"model", "engine", "engineVersion", "kvCache", "roles"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentKVCache{}.OpenAPIModelName(), v1alpha1.ModelDeploymentModel{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRole{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentStatus defines the observed state of ModelDeployment.\n\nIt is REBUILT FROM OBSERVED STATE ON EVERY RECONCILE, so a stale field cannot survive a disagreement with the Pods.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"phase": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Phase summarizes the conditions: Starting, Ready, Degraded, Deleting. Ready means every role's ready count equals its desired count; Degraded means at least one replica is ready and at least one is not.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"phaseMessage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PhaseMessage carries the reason for the phase.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"conditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"type",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "type",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved, CacheAttached. The three are independent — \"quota reserved but cache not attached\" is a real and actionable state — which is what a single phase string cannot carry.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(apiv1.Condition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"endpoint": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Endpoint is the one address every replica serves behind, in the form http://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.",
+							MaxLength:   ptr.To[int64](512),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"roles": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Roles is one entry per declared role.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"kvCache": {
+						SchemaProps: spec.SchemaProps{
+							Description: "KVCache is the reuse domain this deployment actually attached to, read from the Binding. It exists so an operator can tell a cache-sharing misconfiguration from a cache that is merely cold by reading this object alone.\n\nA POINTER because omitempty does not omit a zero-valued struct: held by value it would serialize as an empty object on every pass where the Binding could not be resolved, which a reader cannot tell from a domain whose every field happens to be empty.",
+							Ref:         ref(v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentTemplate(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentTemplate overlays the container the operator renders for one replica.\n\nIT EXISTS BECAUSE InstanceTemplate'S Image IS REQUIRED AND THIS ONE'S CANNOT BE. A role that names no image has one synthesized from the accelerator backend its InstanceType observed, so requiring the field would force every user of the overlay to give up synthesis — two capabilities this API offers, excluding each other for no reason other than a shared struct. Relaxing the marker on InstanceTemplate was rejected: it would move a guarantee the Instance's schema holds today down into a webhook, which is later, more expensive and easier to bypass, and it would do that to a published API for the convenience of an unpublished one.\n\nThe fields are InstanceTemplate's, minus VolumeMount, which nothing here reads — an unused field in a schema is a promise, and strict decoding turns leaving it out into a clear refusal rather than a value silently ignored. Numbering restarts at 1 and runs contiguously because this type is new in an unreleased API; there is nothing on the wire to reserve around.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"image": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Image is the container image to run. Leaving it empty is the ordinary case: the operator then synthesizes one from the pool's accelerator backend, the observed runtime version and the requested engine.",
+							MaxLength:   ptr.To[int64](512),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"imagePullPolicy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagePullPolicy is the pull policy for Image.\n\n\nPossible enum values:\n - `\"Always\"` means that kubelet always attempts to pull the latest image. Container will fail If the pull fails.\n - `\"IfNotPresent\"` means that kubelet pulls if the image isn't present on disk. Container will fail if the image isn't present and the pull fails.\n - `\"Never\"` means that kubelet never pulls an image, but only uses a local image. Container will fail if the image isn't present",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Always", "IfNotPresent", "Never"},
+						},
+					},
+					"command": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Command replaces the whole argv, which is the TAKE-OVER tier described on the role's Template field. The operator contributes no engine argument and no client environment.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+					"privileged": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Privileged runs the container privileged.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"ports": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"port",
+									"protocol",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "port",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Ports are the container ports to expose in addition to the engine's own.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstancePort{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"env": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "name",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Env are environment entries merged on top of the role's own. A name the operator owns is refused here just as it is in the role's Env: the renderer drops owned names from both tiers, so admission has to refuse both, or one path becomes a silent drop.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstanceEnvVar{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"resources": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Resources is present ONLY so that supplying it can be refused with a message that says where the request belongs. Dropping the field would let strict decoding refuse it earlier and more cheaply, but an unknown-field error says \"not here\" while the webhook's says \"it goes in the role's own Resources\" — and mistaking the template for the place resources live is the whole reason anyone writes this field.",
+							Ref:         ref(v1alpha1.InstanceResources{}.OpenAPIModelName()),
+						},
+					},
+					"imagePullSecret": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagePullSecret is the secret used to pull Image.",
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
+					"additionalVolumes": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "AdditionalVolumes are volumes mounted into the container alongside the operator's own.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstanceAdditionalVolume{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.InstanceAdditionalVolume{}.OpenAPIModelName(), v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.InstancePort{}.OpenAPIModelName(), v1alpha1.InstanceResources{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
 	}
 }
 
