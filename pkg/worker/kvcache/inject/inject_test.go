@@ -357,3 +357,28 @@ func TestRender_Refusals(t *testing.T) {
 		})
 	}
 }
+
+// TestSupportsRole_AgreesWithRender is what keeps SupportsRole from becoming a second opinion.
+//
+// An admission handler refuses a role by asking the table, and the container is configured by
+// asking Render. If the two disagreed, one direction would refuse a role that renders fine and the
+// other would admit a role that cannot be rendered at all -- and neither would fail anywhere else.
+// The vLLM branch is where a disagreement could actually appear: renderSGLang reads the table, while
+// vllmKVRole maps the roles in its own switch.
+//
+// The pairs are enumerated from Engines() and the whole role set rather than listed, so an engine
+// added to the package without a table entry fails here instead of silently reporting false.
+func TestSupportsRole_AgreesWithRender(t *testing.T) {
+	roles := map[string]Role{"none": RoleNone, "prefill": RolePrefill, "decode": RoleDecode}
+
+	for _, engine := range Engines() {
+		for label, role := range roles {
+			t.Run(string(engine)+"/"+label, func(t *testing.T) {
+				_, err := Render(Input{Engine: engine, Role: role, Connection: testConnection()})
+
+				assert.Equal(t, err == nil, SupportsRole(engine, role),
+					"the table and the renderer must answer alike for %q/%q", engine, role)
+			})
+		}
+	}
+}

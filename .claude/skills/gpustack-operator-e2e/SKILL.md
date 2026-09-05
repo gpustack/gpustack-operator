@@ -91,6 +91,9 @@ Each case is self-contained; its header (see **Case header contract**) states go
 | 45 | The ModelDeployment admission surface: every refusal fires, and each one from the layer that owns it (schema / webhook / controller) | `pkg/worker/webhooks/worker/model_deployment.go`, `pkg/worker/controllers/worker/model_deployment{,_binding}.go`, `api/worker/v1alpha1/model_deployment.go` | yes (confirm) | any (no GPU), and deliberately **no** KVCachePoolBinding — the case names one that does not exist. Optionally `E2E_MD_INSTANCE_TYPE` to pick the InstanceType |
 | 47 | Two ModelDeployments on one Binding are rendered one reuse domain and a third on another Binding a different one, and the rendered value is what the store partitions on. Uses **sglang** deliberately: on the vLLM family no tenant travels, so two deployments render byte-identical configurations and "they share" would pass with the Binding doing nothing | `pkg/worker/controllers/worker/model_deployment_connector.go`, `pkg/worker/controllers/worker/model_deployment_binding.go`, `pkg/worker/kvcache/inject/**` | yes (confirm) | any (no GPU, no engine image) + a registry the cluster can pull the Mooncake image from; the replicas are never expected to start, every asserted value is on the Pod spec |
 | 48 | The failure side: a Binding whose pool cannot be reached renders no connector AT ALL — measured against a control on a Ready Binding — and a rendered connector is never reported as an attached cache. Uses **vllm** deliberately: its connector travels on four separate carriers, so "no connector" is four independent absences and a PARTIAL render is visible. `CacheAttached != True` is true of every deployment on a cluster with no engine image, so no row asserts it alone | `pkg/worker/controllers/worker/model_deployment_binding.go` (`resolveModelDeploymentConnection`), `pkg/worker/controllers/worker/model_deployment_cache_attached.go`, `pkg/worker/kvcache/inject/vllm.go` | yes (confirm) | any (no GPU, no engine image) + a registry the cluster can pull the Mooncake image from + an InstanceType (`E2E_MD_INSTANCE_TYPE` to pick one); the replicas are never expected to start, and one row SKIPs — which shape the engine takes when the connector cannot initialize needs an image that serves |
+| 49 | A multi-role ModelDeployment becomes ONE Kueue Workload with one PodSet per role, and deleting it completes | `pkg/worker/controllers/worker/model_deployment{,_pod_group}.go`, `api/worker/v1alpha1/model_deployment.go` | yes (confirm) | any (no GPU, no engine image) + an InstanceType and, in `<NS>`, the pool's entrance LocalQueue. The replicas are placeholders that never serve, so the two serving rows SKIP. Optionally `E2E_MD_INSTANCE_TYPE` / `E2E_MD_IMAGE` |
+| 50 | A short pool starves a P/D deployment WHOLE: the role that would have fit alone waits too | `pkg/worker/controllers/worker/model_deployment_pod_group.go`, `pkg/worker/controllers/worker/model_deployment.go` | yes (confirm) | as CASE 49. The shortage is made by OCCUPYING the quota, never by editing the ClusterQueue, so the case needs enough nominal quota to leave a one-role window and SKIPs, printing both numbers, when the pool's own numbers cannot make one |
+| 51 | Every P/D refusal fires, from the layer that owns it, and a group shape change rebuilds the group | `pkg/worker/webhooks/worker/model_deployment.go`, `pkg/worker/controllers/worker/model_deployment{,_pod_group}.go`, `api/worker/v1alpha1/model_deployment.go` | yes (confirm) | as CASE 49; the one-instanceType row SKIPs on a cluster that materialized a single InstanceType |
 | 52 | The NIC/RDMA inventory is published, is stable across passes, and the `rdma.*` labels agree with it in both directions. A detector restart is driven but its outcome is not claimed — an unchanged record is also what a replacement that never reported produces, so that check SKIPs | `pkg/devicemanager/detector/{network,link,detector}.go`, `pkg/devicemanager/detector/network_linux.go`, `pkg/nodefeature/rdma.go`, `pkg/device/topology_distance.go`, `api/worker/v1alpha1/devices.go`, `binding/helper*.go` | yes (confirm) | any node running a device manager; the RDMA-positive checks skip individually without RDMA hardware |
 | 53 | The headline: a plain Deployment reads and writes a KV cache pool with one label | `pkg/worker/webhooks/worker/pod_kv_cache*.go`, `pkg/worker/kvcache/inject/**` | yes (confirm) | any (no GPU, no RDMA) + a registry the cluster can pull the Mooncake image from |
 | 54 | No workload lock-in: an LWS Pod and a bare Pod get the identical injection | `pkg/worker/webhooks/worker/pod_kv_cache*.go`, `pkg/worker/kvcache/inject/**` | yes (confirm) | as CASE 53; the LWS half needs the leaderworkerset.x-k8s.io CRD, and self-skips without it |
@@ -175,6 +178,27 @@ Each note below is something the **lead** must act on before or around a run. Wh
   device manager, never by each — is only exercised where two manufacturers are present. Read a PASS
   there as "not double-counted on this node", not as "the election was tested".
 - **CASES 25, 31, 32 and 34 record observations, not thresholds** — accepted consequences with stated containment, measured and printed as a copyable block for the design record; each still carries one hard assertion where a real regression would hide. **CASE 28 prints the same block but is a guard**, and only an explicit `F11_EXPECT=observe` demotes its verdict to a recording.
+- **CASES 49–51 carry a placeholder image, and it is plumbing rather than a mock.** A ModelDeployment
+  role names no image of its own; the operator synthesizes one from what the InstanceType has
+  observed, and a CPU-only InstanceType has observed no accelerator — so on the cluster these three
+  are meant to run on, every role would be refused by the CONTROLLER for a reason none of them is
+  about (`names no image and none could be synthesized`). Each role therefore carries an explicit
+  `template.image`, `E2E_MD_IMAGE` overrides it, and no assertion in any of the three reads anything a
+  replica runs. Cases 47 and 48 take the same escape with a real Mooncake image, because theirs read
+  the rendered Pod spec.
+- **Run CASES 49–51 in a namespace that carries the pool's entrance LocalQueue**, which is what routes
+  a group into its ClusterQueue — `kubectl -n <NS> get localqueue` before deciding. It is not created
+  everywhere: on a fresh docker-desktop the operator materialized one in `default`, `kube-public` and
+  `kube-node-lease` and **none in `gpustack-system`**, which is the namespace the Flow's `$NS` holds.
+  A group in a namespace without one is created and then never admitted, which reads like a quota
+  problem.
+- **A ModelDeployment's replicas cannot be deleted while their Workload lives.** Kueue holds a
+  finalizer on every Pod of a group and releases it only when the group finishes or the Workload is
+  deleted, and the group these render is annotated *serving* — which Kueue defines as never finished.
+  The Workload is owned by those same Pods without a controller reference, so garbage collection is
+  blocked on them in turn. The operator breaks the cycle itself, and CASE 49 has a row asserting it
+  does; the cleanup traps of all three delete without waiting and then release the Workload by hand,
+  so a regression in that path fails one row instead of hanging every case that follows.
 
 
 ## Case header contract

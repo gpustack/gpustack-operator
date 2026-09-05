@@ -53,6 +53,11 @@ func newRenderInstanceType(mutate ...func(*worker.InstanceType)) *worker.Instanc
 			LocalStorage:  "512Gi",
 		},
 		Status: workercore.InstanceTypeStatus{
+			// DELIBERATELY NOT FormatLocalQueueName("h20-8x"). The entrance is read from this field,
+			// and a fixture spelling it the way a name-derived render would spell it could not tell
+			// the two apart -- the assertion in _Identity would pass either way. This value is one
+			// no derivation produces.
+			Entrance: "queue-for-h20-8x",
 			// The observed detail carries what image synthesis needs, so a role naming no image
 			// still renders. A case that wants the unsynthesizable path clears one of these.
 			Detail: workercore.InstanceTypeDetail{
@@ -115,8 +120,10 @@ func TestRenderModelDeploymentPod_Identity(t *testing.T) {
 	assert.Equal(t, "qwen", pod.Labels[modelDeploymentLabelKeyInstance])
 	assert.Equal(t, "server", pod.Labels[modelDeploymentLabelKeyComponent])
 
-	assert.Equal(t, nodefeature.FormatLocalQueueName("h20-8x"), pod.Labels[kueuectrlconst.QueueLabel],
-		"the entrance label is what routes a replica into its role's pool")
+	// The InstanceType's PUBLISHED entrance, verbatim -- not FormatLocalQueueName of its name. The
+	// fixture spells the two differently on purpose, so this asserts which one the render read.
+	assert.Equal(t, "queue-for-h20-8x", pod.Labels[kueuectrlconst.QueueLabel],
+		"the entrance label is read from the InstanceType's status, not derived from its name")
 	assert.True(t, systemmeta.MatchResource(pod, ModelDeploymentResourceType))
 
 	require.Len(t, pod.OwnerReferences, 1)
@@ -124,6 +131,77 @@ func TestRenderModelDeploymentPod_Identity(t *testing.T) {
 	assert.Equal(t, md.UID, pod.OwnerReferences[0].UID)
 	assert.True(t, ptr.Deref(pod.OwnerReferences[0].Controller, false),
 		"the reference must be a CONTROLLER reference, or the owned-Pod watch never fires")
+}
+
+// TestRenderModelDeploymentPod_AcceleratorKeyNodeSelector is F4's render half, and it is asserted by
+// DIFFING two renders rather than by reading one.
+//
+// The claim is not "a nodeSelector entry appears" -- it is that the field adds exactly that entry and
+// changes nothing else. Reading the entry off one render would pass just as happily if the key had
+// also moved a resource request, a label or an environment variable, and every one of those would be
+// a change to what the role runs, made by a field whose whole documented effect is where it runs.
+//
+// The spec hash is excluded because it MUST move: it covers the Pod's labels, annotations and spec,
+// so a render that added the entry without moving the hash would leave a replica built before the
+// change indistinguishable from one built after it.
+func TestRenderModelDeploymentPod_AcceleratorKeyNodeSelector(t *testing.T) {
+	render := func(key string) *core.Pod {
+		t.Helper()
+
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].AcceleratorKey = key
+		})
+		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			Deployment:   md,
+			Role:         &md.Spec.Roles[0],
+			Ordinal:      0,
+			InstanceType: newRenderInstanceType(),
+		})
+		require.NoError(t, err)
+		delete(pod.Annotations, modelDeploymentPodSpecHashAnnotation)
+
+		return pod
+	}
+
+	without, with := render(""), render("nvidia-h20")
+
+	assert.Nil(t, without.Spec.NodeSelector,
+		"a role naming no key takes whatever the pool assigns, which is the single-role behavior")
+	assert.Equal(t, map[string]string{
+		nodefeature.AcceleratableFeatureLabelPrefix + "nvidia-h20": "true",
+	}, with.Spec.NodeSelector, "exactly one entry, and it is the one an accelerated flavor pins")
+
+	// Everything else must be byte-identical, which is what makes "and nothing else" checkable.
+	with.Spec.NodeSelector = nil
+	assert.Equal(t, without, with,
+		"the accelerator key decides WHERE a replica runs and must not touch WHAT it runs")
+}
+
+// TestRenderModelDeploymentPod_AcceleratorKeyMovesTheSpecHash is the other half of the pair above.
+//
+// The diff case deletes the hash to compare the rest; this one asserts the hash is what the deleted
+// value would have shown. Without it, a renderer that set the nodeSelector after the fingerprint
+// would satisfy every assertion above and still leave every running replica looking current.
+func TestRenderModelDeploymentPod_AcceleratorKeyMovesTheSpecHash(t *testing.T) {
+	hash := func(key string) string {
+		t.Helper()
+
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].AcceleratorKey = key
+		})
+		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			Deployment:   md,
+			Role:         &md.Spec.Roles[0],
+			Ordinal:      0,
+			InstanceType: newRenderInstanceType(),
+		})
+		require.NoError(t, err)
+
+		return pod.Annotations[modelDeploymentPodSpecHashAnnotation]
+	}
+
+	assert.NotEqual(t, hash(""), hash("nvidia-h20"),
+		"a replica built before the key was set must be told from one built after it")
 }
 
 // TestRenderModelDeploymentPod_EntranceLabelIsNotInTheSelector states why the two label sets are
@@ -552,6 +630,29 @@ func TestRenderModelDeploymentPod_SynthesizesTheImage(t *testing.T) {
 		assert.Contains(t, err.Error(), "has no runner backend",
 			"this one never resolves, so the message must name the manufacturer")
 	})
+
+	// THE FALLBACK IS WHAT MAKES THIS AN ERROR PATH RATHER THAN A DEFAULT. A Pod carrying no
+	// queue-name label is not queued by Kueue at all -- the kubelet runs it directly, charging no
+	// quota and passing none of the gates the chain applies. So an InstanceType that has not
+	// published its entrance yet has to stop the render, exactly as an uncomputed accelerator detail
+	// does, rather than yield a Pod that would run.
+	t.Run("an instance type with no published entrance refuses", func(t *testing.T) {
+		md := newRenderDeployment()
+		it := newRenderInstanceType(func(it *worker.InstanceType) {
+			it.Status.Entrance = ""
+		})
+
+		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			Deployment:   md,
+			Role:         &md.Spec.Roles[0],
+			InstanceType: it,
+		})
+		require.Error(t, err)
+		assert.Nil(t, pod, "no Pod may be returned, or a caller could create one with no queue")
+		assert.Contains(t, err.Error(), "publishes no queue entrance yet")
+		assert.Contains(t, err.Error(), "h20-8x",
+			"the message must name the instance type, since the field is two objects away")
+	})
 }
 
 // TestRenderModelDeploymentPod_ClientConfigMount pins where the rendered client configuration is
@@ -676,8 +777,21 @@ func TestModelDeploymentPodSpecHash_MovesWithEveryRenderedInput(t *testing.T) {
 			},
 		},
 		{
-			name:   "instance type — the entrance label moves with it",
-			mutate: func(md *workercore.ModelDeployment) { md.Spec.Roles[0].InstanceType = "h20-4x" },
+			// BOTH SIDES MOVE, because that is what naming another pool actually does: the
+			// reconciler reads the InstanceType by the name the role carries
+			// (getModelDeploymentInstanceType), so a different name is a different object and a
+			// different published entrance. Mutating the name alone would render the SAME entrance
+			// and assert nothing -- the entrance is no longer derived from the name.
+			name:    "instance type — the entrance label moves with it",
+			mutate:  func(md *workercore.ModelDeployment) { md.Spec.Roles[0].InstanceType = "h20-4x" },
+			instype: func(it *worker.InstanceType) { it.Name, it.Status.Entrance = "h20-4x", "queue-for-h20-4x" },
+		},
+		{
+			// The entrance alone, with the role's instanceType untouched: a pool whose LocalQueue
+			// was renamed under a deployment that never changed. The replicas must be recreated
+			// carrying the new one, or they stay routed at a queue that is gone.
+			name:    "the published entrance, with the instance type name unchanged",
+			instype: func(it *worker.InstanceType) { it.Status.Entrance = "queue-renamed" },
 		},
 		{
 			name:    "unit resources — the derived host request moves without the spec moving",

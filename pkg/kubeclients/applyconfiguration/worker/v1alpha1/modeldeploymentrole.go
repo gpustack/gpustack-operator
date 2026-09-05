@@ -2,6 +2,10 @@
 
 package v1alpha1
 
+import (
+	workerv1alpha1 "gpustack.ai/gpustack/api/worker/v1alpha1"
+)
+
 // ModelDeploymentRoleApplyConfiguration represents a declarative configuration of the ModelDeploymentRole type for use
 // with apply.
 //
@@ -12,12 +16,27 @@ package v1alpha1
 // make the admission feasibility check read a ledger that does not match reality. The template may
 // override container content and nothing else.
 type ModelDeploymentRoleApplyConfiguration struct {
-	// Name identifies the role. In this version there is exactly one role and its name is free-form;
-	// the spec that introduces P/D disaggregation gives the name meaning.
+	// Name identifies the role, and it is also the name of the Kueue PodSet the role becomes.
+	//
+	// The pattern is Kueue's own PodSetReference shape, and it is enforced here because the name is
+	// written verbatim into each Pod's role-hash annotation: Kueue groups a pod group's Pods into
+	// PodSets by that annotation, so a name it cannot take as a PodSet reference is a name whose
+	// role does not survive the grouping.
+	//
+	// UNIQUENESS IS THE SCHEMA'S. Roles is a list-map keyed on this field, so the API server refuses
+	// a duplicate during validation, before any webhook runs. The webhook carries the same rule as a
+	// backstop for that marker being dropped, and never gets to speak while it is there. Uniqueness
+	// matters for the same reason the pattern does: two roles sharing a name collapse into one
+	// PodSet whose count is their sum, which is a silent merge rather than an error.
 	Name *string `json:"name,omitempty"`
-	// Replicas is how many Pods this role runs. Each is an independent Kueue Workload: this version
-	// creates no pod group, which is correct for one role whose replicas are independently useful
-	// and is what the P/D spec replaces with cross-role atomic admission.
+	// Replicas is how many Pods this role runs. They are NOT independent Workloads: every replica of
+	// every role joins one Kueue pod group, so the deployment is admitted as a unit or not at all.
+	//
+	// CHANGING THIS NUMBER REBUILDS THE GROUP. It moves the total the group declares, which every Pod
+	// carries and which Kueue requires them all to agree on, so the operator deletes the group's Pods
+	// and recreates them under the new total rather than adding or trimming a few. The cost is the
+	// one the recreate rollout already states: a replica that leaves loses its cached blocks to its
+	// siblings.
 	Replicas *int32 `json:"replicas,omitempty"`
 	// InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.
 	// It is what the queue-name entrance label is derived from.
@@ -53,10 +72,57 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// Instance webhook enforces on InstanceSpec rather than a property of any template type, and not
 	// carrying it here is what makes a rollout possible at all.
 	//
+	// EDITING IT RESTARTS EVERY ROLE, not just the replicas this template belongs to. Changing it
+	// changes a replica's rendered Pod, that replica is deleted — and every replica of the deployment
+	// is one member of a single Kueue pod group whose members cannot leave one at a time. So the
+	// group is rebuilt whole. The same is true of a `replicas` change, of adding or removing a role,
+	// and of a departure this operator did not initiate: a preemption, a node drain, an eviction. The
+	// mechanism and the full list are in docs/reference/model-deployment.md under "Rollout is
+	// recreate".
+	//
 	// Its Resources are refused at admission. The accelerator request belongs in the role's own
 	// Resources and the rest is derived from the InstanceType, so a template able to shadow either
 	// would make the admission feasibility check read a ledger that does not match reality.
 	Template *ModelDeploymentTemplateApplyConfiguration `json:"template,omitempty"`
+	// Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name:
+	// Name is free-form and identifies the PodSet, while this selects behavior, and a semantic
+	// reachable by typing a string is a semantic one typo away from silently changing. Two roles
+	// may share a kind and differ in name.
+	//
+	// It defaults to Server, which is the shape a deployment written before disaggregation existed
+	// has, so such a deployment renders exactly as it did.
+	Kind *workerv1alpha1.ModelDeploymentRoleKind `json:"kind,omitempty"`
+	// AcceleratorKey is the accelerator device key ("<manufacturer>-<model>", e.g. "nvidia-h20")
+	// this role's Pods must land on. It renders as ONE nodeSelector entry,
+	// "acceleratable.feature.gpustack.ai/<key>: true", and nothing else; omitting it takes whatever
+	// the pool assigns, which is the single-role behavior and stays the default.
+	//
+	// ON A POOL DERIVED THE DEFAULT WAY THERE IS NOTHING FOR IT TO CHOOSE BETWEEN. An InstanceType's
+	// identity is model-level, so its ClusterQueue offers flavors of one accelerator model and the
+	// only key this field can legally carry is the one the pool would have assigned anyway. It
+	// discriminates only inside a pool an administrator authored to span models. Whether the field
+	// survives is an open decision recorded in the spec, not here.
+	//
+	// It is validated at admission against the keys the role's pool actually offers, and the reason
+	// is that an unknown key does not fail — it is IGNORED. Kueue's flavor assignment keeps only
+	// those nodeSelector keys a candidate flavor's own nodeLabels carry and drops the rest, so a key
+	// no flavor offers stops being a constraint: an arbitrary flavor is assigned, the Workload is
+	// admitted, and the Pod then sits Pending at the scheduler because the real node label does not
+	// match. The mistake would surface two gates downstream with nothing naming it.
+	//
+	// ITS SHAPE IS BOUNDED BY THE SCHEMA, INDEPENDENTLY OF THAT CHECK. This value becomes the NAME
+	// segment of a label key, and a label name stops at 63 characters over a restricted alphabet
+	// where an object name runs to 253 over a wider one. The pool check cannot stand in for the
+	// bound: it deliberately refuses NOTHING when the pool's flavors cannot be read, so a malformed
+	// key passes straight through it into a nodeSelector the API server then rejects on every Pod
+	// create — a permanent reconcile failure whose cause is a field two objects away.
+	//
+	// TIGHTENING IT STRANDS NO STORED OBJECT, which is what makes this a permitted change rather than
+	// a compatibility break. No released version can hold a value it now refuses, because
+	// ModelDeployment is in no released version — checked per tag with
+	// `git cat-file -e "$t:api/worker/v1alpha1/model_deployment.go"`, absent from all 37, rather than
+	// inferred from when it merged.
+	AcceleratorKey *string `json:"acceleratorKey,omitempty"`
 }
 
 // ModelDeploymentRoleApplyConfiguration constructs a declarative configuration of the ModelDeploymentRole type for use with
@@ -125,5 +191,21 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithEnv(values ...*InstanceEnvVa
 // If called multiple times, the Template field is set to the value of the last call.
 func (b *ModelDeploymentRoleApplyConfiguration) WithTemplate(value *ModelDeploymentTemplateApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
 	b.Template = value
+	return b
+}
+
+// WithKind sets the Kind field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Kind field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithKind(value workerv1alpha1.ModelDeploymentRoleKind) *ModelDeploymentRoleApplyConfiguration {
+	b.Kind = &value
+	return b
+}
+
+// WithAcceleratorKey sets the AcceleratorKey field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AcceleratorKey field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithAcceleratorKey(value string) *ModelDeploymentRoleApplyConfiguration {
+	b.AcceleratorKey = &value
 	return b
 }

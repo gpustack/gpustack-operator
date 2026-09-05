@@ -2,6 +2,10 @@
 
 package v1alpha1
 
+import (
+	workerv1alpha1 "gpustack.ai/gpustack/api/worker/v1alpha1"
+)
+
 // ModelDeploymentRoleStatusApplyConfiguration represents a declarative configuration of the ModelDeploymentRoleStatus type for use
 // with apply.
 //
@@ -19,6 +23,28 @@ type ModelDeploymentRoleStatusApplyConfiguration struct {
 	// reason the counts do not: false is the ordinary case and must be visible as an answer rather
 	// than as a missing field.
 	Unmanaged *bool `json:"unmanaged,omitempty"`
+	// Kind echoes the role's kind, so reading the status alone answers which half of a
+	// disaggregated deployment an entry describes. It carries no omitempty: every role has a kind,
+	// defaulted if the user named none, so an absent value would mean the status was written by
+	// something that did not know about kinds rather than that the role has none.
+	Kind *workerv1alpha1.ModelDeploymentRoleKind `json:"kind,omitempty"`
+	// AssignedFlavor is the ResourceFlavor Kueue assigned to this role's PodSet for its ACCELERATOR
+	// credits, and it is a POINTER because "not assigned yet" and "assigned" are different facts: a
+	// role waiting for quota has no flavor, and reporting that as the empty string would read as an
+	// assignment to a flavor with no name.
+	//
+	// It is per role rather than per deployment because Kueue assigns a flavor per PodSet: two
+	// roles of one deployment can land on two accelerator models, which is what AcceleratorKey
+	// exists to ask for, and a single deployment-wide field could not say that.
+	//
+	// AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather than a
+	// gap in it. The answer is read through the same function the per-accelerator admission gate
+	// reads it with, which speaks only of accelerator credits — so a role admitted on a pool that
+	// carries no accelerator at all names a flavor for `cpu` and nothing here. Observed on a CPU-only
+	// cluster: the Workload holds an assignment, both roles are Ready, and this stays unset. The two
+	// answers are kept identical on purpose; a flavor reported here that the gate would not fit
+	// against would be worse than none.
+	AssignedFlavor *string `json:"assignedFlavor,omitempty"`
 }
 
 // ModelDeploymentRoleStatusApplyConfiguration constructs a declarative configuration of the ModelDeploymentRoleStatus type for use with
@@ -56,5 +82,21 @@ func (b *ModelDeploymentRoleStatusApplyConfiguration) WithReady(value int32) *Mo
 // If called multiple times, the Unmanaged field is set to the value of the last call.
 func (b *ModelDeploymentRoleStatusApplyConfiguration) WithUnmanaged(value bool) *ModelDeploymentRoleStatusApplyConfiguration {
 	b.Unmanaged = &value
+	return b
+}
+
+// WithKind sets the Kind field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Kind field is set to the value of the last call.
+func (b *ModelDeploymentRoleStatusApplyConfiguration) WithKind(value workerv1alpha1.ModelDeploymentRoleKind) *ModelDeploymentRoleStatusApplyConfiguration {
+	b.Kind = &value
+	return b
+}
+
+// WithAssignedFlavor sets the AssignedFlavor field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AssignedFlavor field is set to the value of the last call.
+func (b *ModelDeploymentRoleStatusApplyConfiguration) WithAssignedFlavor(value string) *ModelDeploymentRoleStatusApplyConfiguration {
+	b.AssignedFlavor = &value
 	return b
 }

@@ -100,7 +100,7 @@ card can host a whole exclusive card.
 
 Wiring that must hold: `installKueue` applies the `gpustack-node-devices` AdmissionCheck object right
 after the Kueue install; `NodeDevicesAdmissionCheckReconciler` sets its `Active=True`; and
-`InstanceTypeReconciler.ensureClusterQueue` references it in `spec.admissionChecksStrategy` **only when
+`NodeQueueReconciler.fillClusterQueue` references it in `spec.admissionChecksStrategy` **only when
 `acceleratable && derived && the AC is Active`**. The Instance's Pod → Kueue `Workload` gets a quota
 reservation, then the AC reads the phantom ledger (uncached, via `APIReader`) and writes
 `admissionChecks[gpustack-node-devices].state = Retry`; the Workload never reaches `Admitted`.

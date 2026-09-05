@@ -6723,17 +6723,18 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 				Properties: map[string]spec.Schema{
 					"name": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Name identifies the role. In this version there is exactly one role and its name is free-form; the spec that introduces P/D disaggregation gives the name meaning.",
+							Description: "Name identifies the role, and it is also the name of the Kueue PodSet the role becomes.\n\nThe pattern is Kueue's own PodSetReference shape, and it is enforced here because the name is written verbatim into each Pod's role-hash annotation: Kueue groups a pod group's Pods into PodSets by that annotation, so a name it cannot take as a PodSet reference is a name whose role does not survive the grouping.\n\nUNIQUENESS IS THE SCHEMA'S. Roles is a list-map keyed on this field, so the API server refuses a duplicate during validation, before any webhook runs. The webhook carries the same rule as a backstop for that marker being dropped, and never gets to speak while it is there. Uniqueness matters for the same reason the pattern does: two roles sharing a name collapse into one PodSet whose count is their sum, which is a silent merge rather than an error.",
 							Default:     "",
 							MinLength:   ptr.To[int64](1),
 							MaxLength:   ptr.To[int64](63),
+							Pattern:     "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"replicas": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Replicas is how many Pods this role runs. Each is an independent Kueue Workload: this version creates no pod group, which is correct for one role whose replicas are independently useful and is what the P/D spec replaces with cross-role atomic admission.",
+							Description: "Replicas is how many Pods this role runs. They are NOT independent Workloads: every replica of every role joins one Kueue pod group, so the deployment is admitted as a unit or not at all.\n\nCHANGING THIS NUMBER REBUILDS THE GROUP. It moves the total the group declares, which every Pod carries and which Kueue requires them all to agree on, so the operator deletes the group's Pods and recreates them under the new total rather than adding or trimming a few. The cost is the one the recreate rollout already states: a replica that leaves loses its cached blocks to its siblings.",
 							Minimum:     ptr.To[float64](1),
 							Type:        []string{"integer"},
 							Format:      "int32",
@@ -6801,8 +6802,25 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 					},
 					"template": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Template overlays the rendered container. The operator renders first and merges this on top. A non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator synthesizes no engine arguments and no client environment, the role is marked unmanaged and CacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args, because a second append tier beside ExtraArgs would have no defined precedence and would make the take-over tier ambiguous — args alone would be neither take-over nor append.\n\nThe template is MUTABLE, unlike the one an Instance carries. Immutability there is a rule the Instance webhook enforces on InstanceSpec rather than a property of any template type, and not carrying it here is what makes a rollout possible at all.\n\nIts Resources are refused at admission. The accelerator request belongs in the role's own Resources and the rest is derived from the InstanceType, so a template able to shadow either would make the admission feasibility check read a ledger that does not match reality.",
+							Description: "Template overlays the rendered container. The operator renders first and merges this on top. A non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator synthesizes no engine arguments and no client environment, the role is marked unmanaged and CacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args, because a second append tier beside ExtraArgs would have no defined precedence and would make the take-over tier ambiguous — args alone would be neither take-over nor append.\n\nThe template is MUTABLE, unlike the one an Instance carries. Immutability there is a rule the Instance webhook enforces on InstanceSpec rather than a property of any template type, and not carrying it here is what makes a rollout possible at all.\n\nEDITING IT RESTARTS EVERY ROLE, not just the replicas this template belongs to. Changing it changes a replica's rendered Pod, that replica is deleted — and every replica of the deployment is one member of a single Kueue pod group whose members cannot leave one at a time. So the group is rebuilt whole. The same is true of a `replicas` change, of adding or removing a role, and of a departure this operator did not initiate: a preemption, a node drain, an eviction. The mechanism and the full list are in docs/reference/model-deployment.md under \"Rollout is recreate\".\n\nIts Resources are refused at admission. The accelerator request belongs in the role's own Resources and the rest is derived from the InstanceType, so a template able to shadow either would make the admission feasibility check read a ledger that does not match reality.",
 							Ref:         ref(v1alpha1.ModelDeploymentTemplate{}.OpenAPIModelName()),
+						},
+					},
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable by typing a string is a semantic one typo away from silently changing. Two roles may share a kind and differ in name.\n\nIt defaults to Server, which is the shape a deployment written before disaggregation existed has, so such a deployment renders exactly as it did.\n\n\nPossible enum values:\n - `\"decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"decode", "prefill", "server"},
+						},
+					},
+					"acceleratorKey": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorKey is the accelerator device key (\"<manufacturer>-<model>\", e.g. \"nvidia-h20\") this role's Pods must land on. It renders as ONE nodeSelector entry, \"acceleratable.feature.gpustack.ai/<key>: true\", and nothing else; omitting it takes whatever the pool assigns, which is the single-role behavior and stays the default.\n\nON A POOL DERIVED THE DEFAULT WAY THERE IS NOTHING FOR IT TO CHOOSE BETWEEN. An InstanceType's identity is model-level, so its ClusterQueue offers flavors of one accelerator model and the only key this field can legally carry is the one the pool would have assigned anyway. It discriminates only inside a pool an administrator authored to span models. Whether the field survives is an open decision recorded in the spec, not here.\n\nIt is validated at admission against the keys the role's pool actually offers, and the reason is that an unknown key does not fail — it is IGNORED. Kueue's flavor assignment keeps only those nodeSelector keys a candidate flavor's own nodeLabels carry and drops the rest, so a key no flavor offers stops being a constraint: an arbitrary flavor is assigned, the Workload is admitted, and the Pod then sits Pending at the scheduler because the real node label does not match. The mistake would surface two gates downstream with nothing naming it.\n\nITS SHAPE IS BOUNDED BY THE SCHEMA, INDEPENDENTLY OF THAT CHECK. This value becomes the NAME segment of a label key, and a label name stops at 63 characters over a restricted alphabet where an object name runs to 253 over a wider one. The pool check cannot stand in for the bound: it deliberately refuses NOTHING when the pool's flavors cannot be read, so a malformed key passes straight through it into a nodeSelector the API server then rejects on every Pod create — a permanent reconcile failure whose cause is a field two objects away.\n\nTIGHTENING IT STRANDS NO STORED OBJECT, which is what makes this a permitted change rather than a compatibility break. No released version can hold a value it now refuses, because ModelDeployment is in no released version — checked per tag with `git cat-file -e \"$t:api/worker/v1alpha1/model_deployment.go\"`, absent from all 37, rather than inferred from when it merged.",
+							MaxLength:   ptr.To[int64](63),
+							Pattern:     "^[a-z0-9A-Z]([-_.a-z0-9A-Z]*[a-z0-9A-Z])?$",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 				},
@@ -6899,8 +6917,24 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 							Format:      "",
 						},
 					},
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind echoes the role's kind, so reading the status alone answers which half of a disaggregated deployment an entry describes. It carries no omitempty: every role has a kind, defaulted if the user named none, so an absent value would mean the status was written by something that did not know about kinds rather than that the role has none.\n\nPossible enum values:\n - `\"decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"decode", "prefill", "server"},
+						},
+					},
+					"assignedFlavor": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AssignedFlavor is the ResourceFlavor Kueue assigned to this role's PodSet for its ACCELERATOR credits, and it is a POINTER because \"not assigned yet\" and \"assigned\" are different facts: a role waiting for quota has no flavor, and reporting that as the empty string would read as an assignment to a flavor with no name.\n\nIt is per role rather than per deployment because Kueue assigns a flavor per PodSet: two roles of one deployment can land on two accelerator models, which is what AcceleratorKey exists to ask for, and a single deployment-wide field could not say that.\n\nAN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather than a gap in it. The answer is read through the same function the per-accelerator admission gate reads it with, which speaks only of accelerator credits — so a role admitted on a pool that carries no accelerator at all names a flavor for `cpu` and nothing here. Observed on a CPU-only cluster: the Workload holds an assignment, both roles are Ready, and this stays unset. The two answers are kept identical on purpose; a flavor reported here that the gate would not fit against would be worse than none.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
-				Required: []string{"name", "desired", "ready", "unmanaged"},
+				Required: []string{"name", "desired", "ready", "unmanaged", "kind"},
 			},
 		},
 	}

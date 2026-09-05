@@ -43,7 +43,7 @@ spec:
 // CRDs, so nothing orders the CRD ahead of a custom resource in the same render. Apply
 // only sets spec, so it never clobbers the controller-owned Active condition, and the
 // step is safe to repeat. The worker's NodeDevicesAdmissionCheckReconciler marks the
-// check Active and InstanceTypeReconciler references it from accelerated ClusterQueues,
+// check Active and NodeQueueReconciler references it from accelerated ClusterQueues,
 // so the scheduling chain does not materialize without it.
 func InstallNodeDevicesAdmissionCheck(ctx context.Context) error {
 	restCfg := system.LoopbackKubeRestConfig.Get()

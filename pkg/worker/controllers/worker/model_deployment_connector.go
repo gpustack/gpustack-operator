@@ -28,6 +28,13 @@ type ModelDeploymentConnectorInput struct {
 	// every owned-key decision.
 	Engine string
 
+	// Kind is what the engine is told this role is, and it is the ONE term that makes a prefill role
+	// and a decode role different configurations rather than two copies of one.
+	//
+	// Its zero value is the deployment shape that predates disaggregation, which renders exactly what
+	// a single-role deployment always rendered.
+	Kind workercore.ModelDeploymentRoleKind
+
 	// Manufacturer is the accelerator vendor of the role's pool, as this project spells it, e.g.
 	// "nvidia" or "ascend". It selects the CONNECTOR, which the engine does not.
 	//
@@ -238,13 +245,22 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		return ModelDeploymentConnectorRender{}, err
 	}
 
-	// Role is always RoleNone, because this version admits exactly one role and so has no
-	// prefill/decode split to describe. That is what makes the rendered kv_role `kv_both` -- the
-	// value this function used to hardcode. Same output, now read from the table the disaggregated
-	// case will read too, rather than from a constant that would have to be found and changed.
+	// The role is the kind, mapped onto the renderer's vocabulary. An unset kind maps to RoleNone,
+	// which renders exactly what a single-role deployment always rendered -- the whole reason that
+	// mapping is not a special case here.
+	//
+	// A kind with no mapping is REFUSED rather than rendered as RoleNone. Admission already turns
+	// such a kind away, so reaching this line means the two disagree, and the failure a fallback
+	// would produce is the silent one: a decoder configured as a plain server, serving whole
+	// requests and looking healthy.
+	role, ok := modelDeploymentInjectRole(in.Kind)
+	if !ok {
+		return ModelDeploymentConnectorRender{}, fmt.Errorf("unsupported role kind %q", in.Kind)
+	}
+
 	res, err := inject.Render(inject.Input{
 		Engine: engine,
-		Role:   inject.RoleNone,
+		Role:   role,
 		Domain: in.Domain,
 		Connection: inject.Connection{
 			MasterAddress: in.MasterServerAddress,
@@ -292,6 +308,75 @@ func modelDeploymentInjectEngine(engine, manufacturer string) (inject.Engine, er
 	default:
 		return "", fmt.Errorf("unsupported engine %q", engine)
 	}
+}
+
+// ModelDeploymentEffectiveRoleKind is the kind a role has, resolving the unset field.
+//
+// The CRD schema defaults it, so nothing arriving from the API server carries an empty one -- but
+// every in-process caller that builds the value in Go does, and there are several: the webhook's
+// rules, the connector's mapping and the status echo. Reading the zero value as a kind of its own
+// would make them disagree about the same object, and the status echo is where that becomes visible:
+// status.roles[].kind is a REQUIRED field with no enum, so an empty one is written out and stored.
+func ModelDeploymentEffectiveRoleKind(
+	role *workercore.ModelDeploymentRole,
+) workercore.ModelDeploymentRoleKind {
+	if role.Kind == "" {
+		return workercore.ModelDeploymentRoleKindServer
+	}
+
+	return role.Kind
+}
+
+// modelDeploymentInjectRole maps this API's role kind onto the renderer's role.
+//
+// THE TWO ENUMS ARE SEPARATE FOR THE SAME REASON THE ENGINE ONES ARE. This API's "server" names a
+// deployment shape — one process doing both halves — while the renderer's RoleNone names the absence
+// of a prefill/decode split. They coincide today, and they are still not the same statement.
+//
+// An unset kind maps to the same place as "server": the CRD schema defaults the field, so nothing
+// arriving from the API server carries an empty one, but a Go caller constructing the value directly
+// does. Reading the zero value as an unknown kind would refuse every such caller.
+func modelDeploymentInjectRole(kind workercore.ModelDeploymentRoleKind) (inject.Role, bool) {
+	switch kind {
+	case "", workercore.ModelDeploymentRoleKindServer:
+		return inject.RoleNone, true
+	case workercore.ModelDeploymentRoleKindPrefill:
+		return inject.RolePrefill, true
+	case workercore.ModelDeploymentRoleKindDecode:
+		return inject.RoleDecode, true
+	default:
+		return "", false
+	}
+}
+
+// ModelDeploymentSupportsRoleKind reports whether the engine's rendering has a term for this kind.
+//
+// It exists so admission can refuse a kind the engine cannot be told about, where the user can still
+// fix it, rather than rendering a configuration the engine rejects at container start. The answer is
+// the renderer's own table and not a copy of it: a second table would agree today and diverge on
+// whichever engine release lands next, with nothing failing in between.
+//
+// THE POOL'S ACCELERATOR VENDOR IS NOT KNOWN AT ADMISSION — it is observed from the nodes long
+// after — and the vendor is what splits the vLLM value into two renderer engines. So the kind is
+// supported only when EVERY engine this API value can map to renders it. That is the one answer that
+// cannot become wrong once the vendor is observed.
+func ModelDeploymentSupportsRoleKind(engine string, kind workercore.ModelDeploymentRoleKind) bool {
+	role, ok := modelDeploymentInjectRole(kind)
+	if !ok {
+		return false
+	}
+
+	for _, manufacturer := range []string{"", nodefeature.ManufacturerAscend} {
+		injectEngine, err := modelDeploymentInjectEngine(engine, manufacturer)
+		if err != nil {
+			return false
+		}
+		if !inject.SupportsRole(injectEngine, role) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // THE PER-ENGINE RENDERERS THAT USED TO LIVE HERE ARE GONE, one for the vLLM-family file and one

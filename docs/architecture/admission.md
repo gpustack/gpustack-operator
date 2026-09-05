@@ -81,6 +81,17 @@ partitioned accelerator: it stays queued, not admitted into a permanent `Pending
 `accelerators` counts *instances*, not accelerators — one hosts as many replicas as its remaining
 geometry allows.
 
+**Feasibility is per role.** A Workload composed from a pod group carries one PodSet per role, and
+[each PodSet gets its own ResourceFlavor](scheduling-chain.md#stage-4-the-kueue-chain) — so a demand
+is judged against the accelerators of the flavor **its own** PodSet was assigned, never against every
+accelerator in the pool.
+
+- Two PodSets' demands merge only when the flavor agrees as well as the family.
+- An accelerator is eligible for a demand only when its own key is one that demand's flavor covers.
+- The per-accelerator budget stays global to the Workload, so two roles on one flavor cannot spend one
+  accelerator twice.
+- The verdict message names the role that is starved.
+
 The ledger seeds every accelerator at `M`, so an exclusive over-admit coarse `credits` let through is
 caught exactly and held with `Retry`, transient and self-healing once Kueue re-admits after the backoff.
 A **check-only** gate: never preempts, never `Rejected`.

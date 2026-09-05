@@ -141,6 +141,20 @@ The capacity labels drive a Kueue chain built by `pkg/worker/controllers/worker`
 ClusterQueue per pool**: with exclusive / shared / sliced / partitioned in one queue there is
 no cross-queue borrowing to broker, so `spec.cohortName` stays empty.
 
+**Kueue assigns a ResourceFlavor per PodSet, not per Workload.** Each PodSet forms its own assignment
+group and a candidate flavor is evaluated against that PodSet's own `nodeSelector`, so one ClusterQueue
+can serve two accelerator models at once: a Workload's PodSets may land on different flavors of the
+same pool.
+
+That is what lets a multi-role workload put each role on the model it asked for. The selector driving
+it is one `acceleratable.feature.gpustack.ai/<aKey>` entry — exactly the key an accelerated flavor pins
+in its `nodeLabels`.
+
+A key **no** candidate flavor pins is not a constraint that fails. `flavorSelector` keeps only the
+nodeSelector keys the flavor carries and drops the rest, so an unknown key is ignored and an arbitrary
+flavor is assigned — which is why anything writing such a selector validates it against the pool first;
+see [Model Deployment](../reference/model-deployment.md#prefill-and-decode).
+
 ## Naming and grouping
 
 The **`ResourceFlavor` is the finest grain and setting-independent**: always the CPU key, plus the

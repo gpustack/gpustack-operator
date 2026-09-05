@@ -1,6 +1,8 @@
 package worker
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -9,9 +11,15 @@ import (
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
+	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
 // modelDeployment builds a valid single-role deployment for the given engine, which every case then
@@ -44,6 +52,19 @@ func role(mutate func(*workercore.ModelDeploymentRole)) workercore.ModelDeployme
 	return r
 }
 
+// numberedRoles builds n roles that differ only in name, for the cases about how many there may be.
+// Every other rule passes on them, so a refusal is the count rule's and nothing else's.
+func numberedRoles(n int) []workercore.ModelDeploymentRole {
+	roles := make([]workercore.ModelDeploymentRole, 0, n)
+	for i := range n {
+		roles = append(roles, role(func(r *workercore.ModelDeploymentRole) {
+			r.Name = fmt.Sprintf("role-%d", i)
+		}))
+	}
+
+	return roles
+}
+
 func TestValidateModelDeployment(t *testing.T) {
 	testCases := []struct {
 		name string
@@ -63,7 +84,161 @@ func TestValidateModelDeployment(t *testing.T) {
 				role(func(r *workercore.ModelDeploymentRole) { r.Name = "prefill" }),
 				role(func(r *workercore.ModelDeploymentRole) { r.Name = "decode" }),
 			),
-			wantMessage: "specs/*-pd-atomic-admission.md",
+		},
+		{
+			// The bound is Kueue's, so the refusal has to say so: a user who reads only the number
+			// files a bug here, and a user who reads whose number it is goes and looks at the
+			// Workload their roles become.
+			name:        "roles_eleven",
+			md:          modelDeployment(workercore.ModelDeploymentEngineVLLM, numberedRoles(11)...),
+			wantMessage: "Kueue caps Workload.spec.podSets at 10",
+		},
+		{
+			name: "roles_ten",
+			md:   modelDeployment(workercore.ModelDeploymentEngineVLLM, numberedRoles(10)...),
+		},
+		{
+			// A duplicate name does not collide, it MERGES: the name is the PodSet name, so two
+			// roles sharing one become a single PodSet whose count is their sum.
+			name: "role_names_duplicate",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) { r.Name = "worker" }),
+				role(func(r *workercore.ModelDeploymentRole) { r.Name = "worker" }),
+			),
+			wantMessage: "grouping both roles into one PodSet whose count is their sum",
+		},
+		{
+			// The Service fronting a role is named <deployment>-<role>, and a Service name is a DNS
+			// LABEL -- 63 characters, where an object name runs to 253. Both halves are legal
+			// separately, which is why neither field's own maxLength can catch this.
+			name: "role_service_name_too_long",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					// "qwen-72b" is 8, plus the hyphen, so 55 here is the first length that overflows.
+					r.Name = strings.Repeat("d", 55)
+				}),
+			),
+			wantMessage: "which is not a valid Service name: must be no more than 63 characters",
+		},
+		{
+			// The boundary itself must be ACCEPTED, or the case above would also pass against a rule
+			// that refuses one character too early.
+			name: "role_service_name_at_the_bound",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) { r.Name = strings.Repeat("d", 54) }),
+			),
+		},
+		{
+			// A LENGTH CHECK ALONE MISSES THIS. An object name is a DNS SUBDOMAIN, so a dotted
+			// deployment name is legal and its combined Service name is not -- well inside 63
+			// characters, which is why the rule has to check the shape rather than the size.
+			name: "role_service_name_from_a_dotted_deployment",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) { r.Name = "prefill" }))
+				md.Name = "team.model.serving"
+
+				return md
+			}(),
+			wantMessage: "which is not a valid Service name",
+		},
+		{
+			// One Workload carries one queue name, and the queue name comes from the instanceType.
+			// The refusal must point at acceleratorKey, because wanting different hardware is why a
+			// user reaches for a second instanceType and it is expressible inside one pool.
+			name: "role_instance_types_differ",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) { r.Name = "prefill" }),
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.InstanceType = "decode", "a100-8x"
+				}),
+			),
+			wantMessage: "roles[0].acceleratorKey",
+		},
+		{
+			// THE OUTLIER IS FIRST, which is the arrangement a roles[0]-anchored comparison reports
+			// backwards: it blames the two roles that already agree with each other and says nothing
+			// about the one that has to change. Both types have to appear in the message, because
+			// which one the user meant to keep is not knowable here.
+			//
+			// The case above cannot catch that -- its outlier is last, so anchoring on roles[0]
+			// happens to name the right role and both implementations pass it.
+			name: "role_instance_types_differ_with_the_outlier_first",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.InstanceType = "prefill", "a100-8x"
+				}),
+				role(func(r *workercore.ModelDeploymentRole) { r.Name = "decode" }),
+				role(func(r *workercore.ModelDeploymentRole) { r.Name = "decode2" }),
+			),
+			// The PATH is asserted beside the content: an error on spec.roles rather than on
+			// spec.roles[N].instanceType is what "no single role is at fault" means, and it is the
+			// half a substring of the type names alone would not pin.
+			wantMessage: `spec.roles: Invalid value: "a100-8x, h20-8x"`,
+		},
+		{
+			// The rule is vacuous at length 1, asserted so the single-role behavior cannot regress
+			// into needing a second role to agree with.
+			name: "role_instance_type_single",
+			md:   modelDeployment(workercore.ModelDeploymentEngineVLLM),
+		},
+		{
+			name: "role_kinds_prefill_and_decode",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.Kind = "prefill", workercore.ModelDeploymentRoleKindPrefill
+				}),
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.Kind = "decode", workercore.ModelDeploymentRoleKindDecode
+				}),
+			),
+		},
+		{
+			// "One plain server plus a prefiller" is not a shape anything consumes, and rendering a
+			// transfer configuration for it would mean inventing what it means.
+			name: "role_kinds_server_beside_prefill",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.Kind = "server", workercore.ModelDeploymentRoleKindServer
+				}),
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.Kind = "prefill", workercore.ModelDeploymentRoleKindPrefill
+				}),
+			),
+			wantMessage: "cannot be combined with another kind",
+		},
+		{
+			// The kind is unset, which the schema defaults to server. The rules have to read the
+			// zero value the same way, or an object built in Go and the same object round-tripped
+			// through the API server would be judged differently.
+			name: "role_kinds_unset_beside_prefill",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) { r.Name = "server" }),
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.Kind = "prefill", workercore.ModelDeploymentRoleKindPrefill
+				}),
+			),
+			wantMessage: "cannot be combined with another kind",
+		},
+		{
+			// SGLang's store configuration has no prefill/decode equivalent, so the refusal names
+			// the engine: the kind is legal, and this engine is what has no term for it.
+			name: "role_kind_unsupported_by_engine",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.Kind = "prefill", workercore.ModelDeploymentRoleKindPrefill
+				}),
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.Kind = "decode", workercore.ModelDeploymentRoleKindDecode
+				}),
+			),
+			wantMessage: `engine "sglang" has no rendering term for kind "prefill"`,
+		},
+		{
+			// The same engine with the kind it does render is accepted, so the case above fails for
+			// the engine and not because two roles or a kind field are refused outright.
+			name: "role_kind_server_on_sglang",
+			md:   modelDeployment(workercore.ModelDeploymentEngineSGLang),
 		},
 		{
 			name: "extra_args_owned_key",
@@ -260,7 +435,7 @@ func TestValidateModelDeployment(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			errs := validateModelDeployment(tc.md)
+			errs := validateModelDeployment(tc.md, nil)
 
 			if tc.wantMessage == "" {
 				assert.Empty(t, errs, "expected acceptance")
@@ -275,38 +450,273 @@ func TestValidateModelDeployment(t *testing.T) {
 	}
 }
 
-// TestValidateModelDeploymentRoles_TwoRolesWithoutTheLengthRule is the seam the next spec inherits.
+// TestValidateModelDeployment_TwoRolesPassTheWholePath is the seam the single-role spec left, now
+// spent.
 //
-// It calls the rules that outlive this version WITHOUT the length predicate and expects two roles to
-// pass, so that lifting the restriction really is deleting one call. Asserting the seam here is the
-// difference between a separable predicate and one that merely looks separable.
-func TestValidateModelDeploymentRoles_TwoRolesWithoutTheLengthRule(t *testing.T) {
+// It used to call the rules that outlive that version WITHOUT the length predicate, to prove the
+// restriction was one deletable call. It now calls the FULL path and expects the same two roles to
+// pass, which is what that seam was for: the predicate is gone and nothing took its place.
+func TestValidateModelDeployment_TwoRolesPassTheWholePath(t *testing.T) {
 	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
 		role(func(r *workercore.ModelDeploymentRole) { r.Name = "prefill" }),
 		role(func(r *workercore.ModelDeploymentRole) { r.Name = "decode" }),
 	)
 
-	assert.Empty(t, validateModelDeploymentRoles(md))
-	assert.NotEmpty(t, validateModelDeploymentSingleRole(md),
-		"the length rule is the only thing refusing two roles")
-}
-
-// TestValidateModelDeploymentSingleRole_NamesTheSpec pins the message shape the acceptance criteria
-// ask for: the refusal must point at a plan, not merely decline.
-func TestValidateModelDeploymentSingleRole_NamesTheSpec(t *testing.T) {
-	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
-		role(func(r *workercore.ModelDeploymentRole) { r.Name = "prefill" }),
-		role(func(r *workercore.ModelDeploymentRole) { r.Name = "decode" }),
-	)
-
-	errs := validateModelDeploymentSingleRole(md)
-	require.Len(t, errs, 1)
-
-	message := errs[0].Error()
-	assert.Contains(t, message, "pd-atomic-admission")
-	assert.Contains(t, message, "not supported by this version")
+	assert.Empty(t, validateModelDeploymentRoles(md), "the per-role rules are unchanged by the lift")
+	assert.Empty(t, validateModelDeployment(md, nil), "nothing refuses two roles any more")
 }
 
 func errsContain(aggregate, want string) bool {
 	return strings.Contains(aggregate, want)
+}
+
+// acceleratedFlavor builds a ResourceFlavor pinning one accelerator key, the way NodeFlavorReconciler
+// writes one.
+func acceleratedFlavor(name, acceleratorKey string) *kueue.ResourceFlavor {
+	return &kueue.ResourceFlavor{
+		ObjectMeta: meta.ObjectMeta{Name: name},
+		Spec: kueue.ResourceFlavorSpec{
+			NodeLabels: map[string]string{
+				nodefeature.AcceleratableFeatureLabelPrefix + acceleratorKey: "true",
+				// The ".count" sibling is a node-batch pin and carries something other than "true",
+				// so it must not be read as a second key. Seeding it here is what makes that real.
+				nodefeature.AcceleratableFeatureLabelPrefix + acceleratorKey + ".count": "8",
+				"kubernetes.io/os": "linux",
+			},
+		},
+	}
+}
+
+// cpuFlavor builds the flavor a non-accelerated pool carries: real, and pinning no accelerator.
+func cpuFlavor(name string) *kueue.ResourceFlavor {
+	return &kueue.ResourceFlavor{
+		ObjectMeta: meta.ObjectMeta{Name: name},
+		Spec: kueue.ResourceFlavorSpec{
+			NodeLabels: map[string]string{"kubernetes.io/os": "linux"},
+		},
+	}
+}
+
+// clusterQueue builds the queue an InstanceType backs, referencing the named flavors. The queue's
+// name IS the InstanceType's, which is what lets the webhook resolve one from the other.
+func clusterQueue(name string, flavors ...string) *kueue.ClusterQueue {
+	quotas := make([]kueue.FlavorQuotas, 0, len(flavors))
+	for _, f := range flavors {
+		quotas = append(quotas, kueue.FlavorQuotas{Name: kueue.ResourceFlavorReference(f)})
+	}
+
+	return &kueue.ClusterQueue{
+		ObjectMeta: meta.ObjectMeta{Name: name},
+		Spec: kueue.ClusterQueueSpec{
+			ResourceGroups: []kueue.ResourceGroup{{Flavors: quotas}},
+		},
+	}
+}
+
+func newModelDeploymentWebhook(objs ...ctrlcli.Object) *ModelDeploymentWebhook {
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(objs...).
+		Build()
+
+	return &ModelDeploymentWebhook{Client: cli, APIReader: cli}
+}
+
+// TestValidateModelDeploymentAcceleratorKeys covers the one rule that asks the cluster.
+//
+// Its most important row is the empty one: a key is accepted when the pool has no flavors to compare
+// it against, because a fresh cluster passes through that state and a refusal there would report an
+// absence as a verdict. The row is separate from the CPU-pool row on purpose — the two look alike
+// from the key set alone and mean opposite things.
+func TestValidateModelDeploymentAcceleratorKeys(t *testing.T) {
+	withKeys := func(keys ...string) *workercore.ModelDeployment {
+		roles := make([]workercore.ModelDeploymentRole, 0, len(keys))
+		for i, key := range keys {
+			roles = append(roles, role(func(r *workercore.ModelDeploymentRole) {
+				r.Name, r.AcceleratorKey = fmt.Sprintf("role-%d", i), key
+			}))
+		}
+
+		return modelDeployment(workercore.ModelDeploymentEngineVLLM, roles...)
+	}
+
+	testCases := []struct {
+		name        string
+		objs        []ctrlcli.Object
+		md          *workercore.ModelDeployment
+		wantMessage string
+	}{
+		{
+			name: "key_offered_by_the_pool",
+			objs: []ctrlcli.Object{
+				clusterQueue("h20-8x", "h20-8"),
+				acceleratedFlavor("h20-8", "nvidia-h20"),
+			},
+			md: withKeys("nvidia-h20"),
+		},
+		{
+			name: "key_absent_from_the_pool",
+			objs: []ctrlcli.Object{
+				clusterQueue("h20-8x", "h20-8"),
+				acceleratedFlavor("h20-8", "nvidia-h20"),
+			},
+			md:          withKeys("nvidia-a100"),
+			wantMessage: `offers [nvidia-h20]`,
+		},
+		{
+			// Two models in one pool is the shape acceleratorKey exists for: each role names one,
+			// and Kueue assigns a ResourceFlavor per PodSet.
+			name: "two_keys_both_offered",
+			objs: []ctrlcli.Object{
+				clusterQueue("h20-8x", "h20-8", "a100-8"),
+				acceleratedFlavor("h20-8", "nvidia-h20"),
+				acceleratedFlavor("a100-8", "nvidia-a100"),
+			},
+			md: withKeys("nvidia-h20", "nvidia-a100"),
+		},
+		{
+			// An empty list is not evidence of absence while the pool is still being built, so this
+			// is accepted and left to the per-accelerator check, which reports a shortage as Retry.
+			name: "pool_has_no_flavors_yet",
+			objs: []ctrlcli.Object{clusterQueue("h20-8x")},
+			md:   withKeys("nvidia-h20"),
+		},
+		{
+			// The queue itself has not been created yet. Same reasoning, one step earlier.
+			name: "pool_queue_absent",
+			objs: nil,
+			md:   withKeys("nvidia-h20"),
+		},
+		{
+			// A referenced flavor that no longer exists is skipped AND does not count, so a pool
+			// mid-teardown reads as "no answer" rather than as "does not offer that".
+			name: "pool_flavor_already_deleted",
+			objs: []ctrlcli.Object{clusterQueue("h20-8x", "h20-8")},
+			md:   withKeys("nvidia-h20"),
+		},
+		{
+			// A CPU pool HAS answered: its flavor is real and pins no accelerator. That is the one
+			// empty key set which is a refusal, and it is why the flavor count is carried out of
+			// the read rather than inferred from the set being empty.
+			name: "pool_carries_no_accelerator",
+			objs: []ctrlcli.Object{
+				clusterQueue("h20-8x", "cpu-only"),
+				cpuFlavor("cpu-only"),
+			},
+			md:          withKeys("nvidia-h20"),
+			wantMessage: "carries no accelerator at all",
+		},
+		{
+			// No role asks for a key, so the cluster is never read at all — asserted by giving the
+			// webhook nothing to read.
+			name: "no_role_names_a_key",
+			objs: nil,
+			md:   modelDeployment(workercore.ModelDeploymentEngineVLLM),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			wh := newModelDeploymentWebhook(tc.objs...)
+
+			errs := wh.validate(context.Background(), tc.md, nil)
+
+			if tc.wantMessage == "" {
+				assert.Empty(t, errs, "expected acceptance")
+
+				return
+			}
+
+			require.NotEmpty(t, errs, "expected a refusal")
+			assert.True(t, errsContain(errs.ToAggregate().Error(), tc.wantMessage),
+				"refusal must name %q, got: %s", tc.wantMessage, errs.ToAggregate().Error())
+		})
+	}
+}
+
+// TestValidateModelDeploymentAcceleratorKeys_ReadsThroughAColdCache covers the moment a flavor
+// exists at the API server and not yet in the informer.
+//
+// IT NEEDS TWO DIFFERENT CLIENTS, which is why it does not join the table above: that fixture hands
+// the same fake to Client and APIReader, so a cache miss and a deletion are indistinguishable in it
+// and this defect cannot be expressed. Here the cache is missing the flavor the queue already
+// references, and the reader has it.
+//
+// The failure it pins is a refusal rather than a crash: the cold flavor's keys would be dropped from
+// the offered set while the warm flavor still counted, leaving `read` non-zero -- so the rule speaks,
+// and refuses a key the pool genuinely offers.
+func TestValidateModelDeploymentAcceleratorKeys_ReadsThroughAColdCache(t *testing.T) {
+	cq := clusterQueue("h20-8x", "warm", "cold")
+	warm := acceleratedFlavor("warm", "nvidia-l40s")
+	cold := acceleratedFlavor("cold", "nvidia-h20")
+
+	cache := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+		WithObjects(cq, warm).Build() // no `cold`: the informer has not caught up
+	reader := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+		WithObjects(cq, warm, cold).Build()
+
+	wh := &ModelDeploymentWebhook{Client: cache, APIReader: reader}
+
+	// The key is pinned by `cold` alone, so `warm` being readable is what makes this a wrong refusal
+	// rather than the deliberate silence of a pool that answered nothing.
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.Name, r.AcceleratorKey = "prefill", "nvidia-h20"
+		}))
+
+	errs := wh.validate(context.Background(), md, nil)
+
+	assert.Empty(t, errs,
+		"a key pinned by a flavor the cache has not seen yet must not be refused as unoffered")
+}
+
+// TestValidateModelDeploymentRoleServiceNames_ExemptsRolesTheObjectAlreadyHad covers the half of the
+// rule that keeps it from stranding an object.
+//
+// The Service-name rule arrived after objects could exist, and a deployment's own name is immutable.
+// Applied unconditionally on update, a stored role whose combined name is too long would make EVERY
+// later edit fail admission — including the edit that removes that role — with nothing the user could
+// do about it. So a role the object already carried is exempt, and one being added or renamed is not.
+func TestValidateModelDeploymentRoleServiceNames_ExemptsRolesTheObjectAlreadyHad(t *testing.T) {
+	tooLong := strings.Repeat("d", 55)
+
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		role(func(r *workercore.ModelDeploymentRole) { r.Name = tooLong }))
+
+	testCases := []struct {
+		name     string
+		existing sets.Set[string]
+		refused  bool
+		why      string
+	}{
+		{
+			name:    "on create, nothing is grandfathered",
+			refused: true,
+			why:     "the mistake is being made now, where the message can still help",
+		},
+		{
+			name:     "on update, a role the object already had is left alone",
+			existing: sets.New(tooLong),
+			why:      "refusing it would strand the object: md.Name cannot be shortened and every edit runs through here",
+		},
+		{
+			name:     "on update, a role that is new is still refused",
+			existing: sets.New("some-other-role"),
+			refused:  true,
+			why:      "the exemption is for what was stored, not for the update verb",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			errs := validateModelDeploymentRoleServiceNames(md, tc.existing)
+			if !tc.refused {
+				assert.Empty(t, errs, tc.why)
+
+				return
+			}
+			require.Len(t, errs, 1, tc.why)
+			assert.Contains(t, errs[0].Error(), "not a valid Service name", tc.why)
+		})
+	}
 }

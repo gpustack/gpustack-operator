@@ -11,6 +11,7 @@ package inject
 
 import (
 	"fmt"
+	"slices"
 )
 
 // Engine names the inference engine whose configuration is being rendered.
@@ -73,6 +74,34 @@ func ParseRole(value string) (Role, error) {
 			"role %q is not recognised; set %q, %q, or leave the annotation off",
 			value, RolePrefill, RoleDecode)
 	}
+}
+
+// engineRoleSupport is the set of roles each engine's rendering has a term for.
+//
+// It is a table rather than a branch inside each renderer because an ADMISSION handler has to ask
+// the question before anything is rendered: a role an engine has no term for must be refused where
+// the user can still fix it, not at container start. A caller that could only learn the answer by
+// calling Render would have to build a whole Input to ask.
+//
+// The renderers read this table rather than restating it, so it is a live constraint rather than
+// documentation -- the same reason engineTenantSupport is read instead of each renderer knowing its
+// own engine. Substituting an entry changes what renders.
+var engineRoleSupport = map[Engine][]Role{
+	// Both vLLM-family engines share renderVLLM, whose vllmKVRole maps all three onto kv_both,
+	// kv_producer and kv_consumer.
+	EngineVLLM:       {RoleNone, RolePrefill, RoleDecode},
+	EngineVLLMAscend: {RoleNone, RolePrefill, RoleDecode},
+	// SGLang's store configuration has no prefill/decode equivalent, so the only role it renders is
+	// the absence of one.
+	EngineSGLang: {RoleNone},
+}
+
+// SupportsRole reports whether the engine's rendering has a term for the role.
+//
+// An unknown engine, and a role outside the accepted set, both report false: the side that claims
+// less, and the side that refuses rather than renders something nothing reads.
+func SupportsRole(engine Engine, role Role) bool {
+	return slices.Contains(engineRoleSupport[engine], role)
 }
 
 // Connection is what resolution already established about the pool the Pod will talk to.

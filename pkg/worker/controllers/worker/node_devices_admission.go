@@ -38,7 +38,8 @@ const (
 	// claims; the worker's Prepare() applies an AdmissionCheck object carrying it.
 	_NodeDevicesControllerName = "worker.gpustack.ai/node-devices"
 	// _NodeDevicesAdmissionCheckName is the name of that AdmissionCheck object, the
-	// reference InstanceTypeReconciler adds to accelerated ClusterQueues.
+	// reference NodeQueueReconciler adds to accelerated ClusterQueues. InstanceTypeReconciler
+	// creates the queue and never sets the field.
 	_NodeDevicesAdmissionCheckName = "gpustack-node-devices"
 	// _NodeDevicesFieldOwner owns the AdmissionCheckState this controller patches.
 	_NodeDevicesFieldOwner = "gpustack-node-devices"

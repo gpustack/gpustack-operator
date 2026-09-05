@@ -189,7 +189,8 @@ func TestModelDeploymentReconciler_SecondPassWritesNothing(t *testing.T) {
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 2)
-	require.Equal(t, 3, writes.creates, "the first pass creates two replicas and one Service")
+	require.Equal(t, 4, writes.creates,
+		"the first pass creates two replicas, the deployment-wide Service and the role's own")
 	require.Equal(t, 1, writes.updates, "and adds the finalizer")
 	require.Equal(t, 1, writes.statusUpdates, "and reports the status once")
 
@@ -220,8 +221,14 @@ func TestModelDeploymentReconciler_RecreatesADeletedReplica(t *testing.T) {
 }
 
 // TestModelDeploymentReconciler_ScaleDownRemovesTheHighestOrdinals pins why the ordinal is in the
-// name. Which replicas to remove is decidable from the spec alone, so a scale down does not have to
+// name. Which replicas survive is decidable from the spec alone, so a scale down does not have to
 // choose between Pods that look alike.
+//
+// IT TAKES TWO PASSES, and that is the pod group's doing rather than an accident of the fixture. A
+// replicas change moves the group's declared total, which every Pod carries and which Kueue requires
+// them all to agree on, so the change rebuilds the whole group: the first pass deletes, and the
+// second creates the new set once no Pod declares the old total. Asserting after one pass is what
+// the pre-group version of this test did.
 func TestModelDeploymentReconciler_ScaleDownRemovesTheHighestOrdinals(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 4 })
 	cli := newModelDeploymentClient(md, newRenderInstanceType())
@@ -233,6 +240,11 @@ func TestModelDeploymentReconciler_ScaleDownRemovesTheHighestOrdinals(t *testing
 	scaled := getModelDeployment(t, cli)
 	scaled.Spec.Roles[0].Replicas = 2
 	require.NoError(t, cli.Update(context.Background(), scaled))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Empty(t, replicaNames(t, cli),
+		"the group is rebuilt, so nothing is created while a Pod still declares the old total")
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -273,6 +285,42 @@ func TestModelDeploymentReconciler_RecreatesOnASpecChange(t *testing.T) {
 	for i := range podList.Items {
 		assert.Equal(t, "vllm/vllm-openai:v0.26.0", podList.Items[i].Spec.Containers[0].Image)
 	}
+}
+
+// TestModelDeploymentReconciler_DoesNotExtendTheGroupInAPassThatRemovesFromIt pins the one window
+// where the converge loop could both create and delete in a single pass.
+//
+// The reshaping edits do not reach it: they move the resize predicate and take the rebuild branch,
+// which deletes everything and creates nothing. What reaches it is a replica that is already GONE --
+// not terminating, so `leaving` is deliberately false and its name is back in the desired set --
+// standing beside a replica whose fingerprint changed. Without the guard the pass deletes the second
+// and creates the first, leaving a group whose members disagree, and the next pass throws the fresh
+// replica away along with the rest.
+func TestModelDeploymentReconciler_DoesNotExtendTheGroupInAPassThatRemovesFromIt(t *testing.T) {
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	names := replicaNames(t, cli)
+	require.Len(t, names, 2)
+
+	// One replica vanishes outright, the way a finished eviction leaves it: no DeletionTimestamp for
+	// the pass to observe, and its name owed by the spec again.
+	gone := new(core.Pod)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: "team-a", Name: names[0]}, gone))
+	require.NoError(t, cli.Delete(context.Background(), gone))
+
+	// And the spec moves, so the surviving replica's fingerprint no longer matches.
+	changed := getModelDeployment(t, cli)
+	changed.Spec.Roles[0].Template.Image = "vllm/vllm-openai:v0.26.0"
+	require.NoError(t, cli.Update(context.Background(), changed))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.Empty(t, replicaNames(t, cli),
+		"the pass that deletes the outdated replica must not create the missing one beside it")
 }
 
 // TestModelDeploymentReconciler_LocksBeforeRendering pins the ordering the teardown depends on. The

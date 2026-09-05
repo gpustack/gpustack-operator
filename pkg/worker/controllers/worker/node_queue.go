@@ -159,10 +159,15 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 	eGroups := buildResourceGroups(rfList, acceleratable, firstNotes["manufacturer"])
 
 	changed := false
-	// Reference the node-devices AdmissionCheck on an auto-derived accelerated queue, but only
-	// once it reports Active: Kueue turns a ClusterQueue that lists a missing or inactive
+	// Reference the node-devices AdmissionCheck on an accelerated queue, but only once it
+	// reports Active: Kueue turns a ClusterQueue that lists a missing or inactive
 	// AdmissionCheck inactive, so it would stop admitting. The Watches on the AdmissionCheck
 	// re-runs this reconcile when it activates, and drops the reference when it goes away.
+	//
+	// The derived-from-node setting below is read as a cluster-wide switch, not as "was THIS
+	// queue derived": with it off the administrator authors ClusterQueues through the
+	// InstanceType API, and this reconciler still fills them but references the check on none
+	// of them. So the gate runs on every accelerated queue in the cluster, or on no queue at all.
 	var admissionChecks *kueue.AdmissionChecksStrategy
 	if acceleratable &&
 		settings.InstanceTypeDerivedFromNode.ShouldValueBool(ctx) &&

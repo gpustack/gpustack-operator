@@ -142,6 +142,25 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 		return nil, err
 	}
 
+	// THE ENTRANCE IS READ, NOT RECOMPUTED, and the difference is the whole point of this line.
+	// role.InstanceType names an InstanceType; the label Kueue admits on names the LocalQueue that
+	// fronts that type's ClusterQueue, and the type's own status is where that name is published --
+	// by the same reconcile that creates the LocalQueue. Deriving it here from the name instead
+	// would be a second answer to one question, written by a second function: equal today, because
+	// the ClusterQueue carries the InstanceType's name and both sides spell it with
+	// FormatLocalQueueName, and silently divergent the day either half of that stops holding. The
+	// half that drifted would be this one, whose symptom is a Pod routed at a LocalQueue that does
+	// not exist -- admitted by nothing, with nothing naming the field.
+	entrance := in.InstanceType.Status.Entrance
+	if entrance == "" {
+		// An InstanceType whose status has not been computed yet, exactly like an accelerator detail
+		// that is not there: refuse to render rather than fall back. A Pod carrying no queue-name
+		// label at all is not queued by Kueue, it is admitted by the kubelet directly -- charging no
+		// quota and bypassing every gate the chain exists to apply.
+		return nil, fmt.Errorf(
+			"instance type %q publishes no queue entrance yet", in.InstanceType.Name)
+	}
+
 	// A role that replaces the command owns the whole argv, so the operator contributes neither
 	// engine arguments nor the client environment that only its own arguments would have used.
 	takeOver := len(tmpl.Command) > 0
@@ -188,7 +207,7 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 		ObjectMeta: meta.ObjectMeta{
 			Name:      modelDeploymentPodName(md, role, in.Ordinal),
 			Namespace: md.Namespace,
-			Labels:    modelDeploymentPodLabels(md, role),
+			Labels:    modelDeploymentPodLabels(md, role, entrance),
 		},
 		Spec: core.PodSpec{
 			// A replica is not a shell box: nothing nsenters into it, so it needs neither the host
@@ -212,10 +231,56 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 		pod.Spec.RuntimeClassName = ptr.To(in.RuntimeClassName)
 	}
 
+	// The accelerator model this role asked for, as ONE nodeSelector entry and nothing else.
+	//
+	// It is what drives Kueue's per-PodSet flavor assignment: each PodSet forms its own assignment
+	// group, and a candidate flavor is evaluated per PodSet by matching this selector against that
+	// flavor's own nodeLabels -- which is how two roles of one deployment land on two accelerator
+	// models. An accelerated ResourceFlavor's nodeLabels carry exactly this key.
+	//
+	// A role naming no key gets NO entry, which is the single-role behavior: it takes whatever the
+	// pool assigns. Rendering an empty key instead would be a selector nothing satisfies.
+	//
+	// The key having to exist in the pool is admission's rule rather than this one's, and the reason
+	// is that an unknown key does not fail here -- Kueue keeps only those nodeSelector keys a
+	// candidate flavor pins and drops the rest, so a key no flavor offers stops being a constraint
+	// at all.
+	//
+	// IT MERGES RATHER THAN ASSIGNS. Nothing else writes NodeSelector on this path today, so the two
+	// are equivalent right now -- which is exactly the condition under which an assignment is written
+	// and then silently outgrown. A selector added anywhere earlier would be dropped with no error and
+	// no symptom until a replica landed on a node it was meant to avoid.
+	if role.AcceleratorKey != "" {
+		if pod.Spec.NodeSelector == nil {
+			pod.Spec.NodeSelector = make(map[string]string, 1)
+		}
+		pod.Spec.NodeSelector[nodefeature.AcceleratableFeatureLabelPrefix+role.AcceleratorKey] = "true"
+	}
+
 	systemmeta.NoteResource(pod, ModelDeploymentResourceType, map[string]string{
 		ModelDeploymentResourceNoteRole: role.Name,
 	})
 	kubemeta.ControlOnWithoutBlock(pod, md, workercore.SchemeGroupVersionKind("ModelDeployment"))
+
+	// The Kueue group metadata, which is what makes every replica of every role ONE Workload rather
+	// than one Workload each. It goes on here, before the fingerprint, for the same reason the
+	// connector's annotations do: the group's declared total is one of the values a spec change
+	// moves, and a fingerprint blind to it would leave every replica declaring a size the deployment
+	// no longer has.
+	//
+	// The labels and the annotations are applied together because the group's own type returns them
+	// together -- a Pod carrying the membership label without the total count joins a group whose
+	// size Kueue cannot learn, and no Workload is composed at all.
+	group := ModelDeploymentPodGroup(md, role)
+	for k, v := range group.Labels {
+		pod.Labels[k] = v
+	}
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string, len(group.Annotations)+1)
+	}
+	for k, v := range group.Annotations {
+		pod.Annotations[k] = v
+	}
 
 	// THE CONNECTOR'S ANNOTATIONS GO ON BEFORE THE FINGERPRINT, and the order is the whole reason
 	// this carrier works. The client configuration lives in one of these annotations rather than in
@@ -249,16 +314,19 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 // that routes it into the role's pool, and the part-of label every object this operator renders
 // carries.
 //
-// The entrance label sits outside the selector deliberately. It is derived from the role's
-// InstanceType, which a spec update can change, and a selector that moved with it would orphan
-// every replica already running.
+// The entrance label sits outside the selector deliberately. It follows the role's InstanceType,
+// which a spec update can change, and a selector that moved with it would orphan every replica
+// already running.
+//
+// The entrance arrives as a VALUE, read from the InstanceType's status by the caller rather than
+// derived from role.InstanceType here, so that this operator and the reconcile that creates the
+// LocalQueue cannot disagree about the queue's name. See renderModelDeploymentPod for what deriving
+// it would cost.
 func modelDeploymentPodLabels(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, entrance string,
 ) map[string]string {
 	labels := modelDeploymentSelectorLabels(md, role)
-	// The queue-name label references the LocalQueue, which is named by the hash of the
-	// ClusterQueue(InstanceType) name.
-	labels[kueuectrlconst.QueueLabel] = nodefeature.FormatLocalQueueName(role.InstanceType)
+	labels[kueuectrlconst.QueueLabel] = entrance
 	labels["app.kubernetes.io/part-of"] = "gpustack-operator-worker"
 
 	return labels

@@ -3,10 +3,10 @@
 > **Purpose** — the `ModelDeployment` contract: what you declare, what the operator owns and will
 > refuse to merge, how a role's runner image is assembled, and what each status condition means.
 > **Audience** users, operators, contributors · **Prerequisites** [KV Cache Pool](../kv-cache/pool.md) ·
-> **Read time** ~13 min
+> **Read time** ~17 min
 
-A `ModelDeployment` is N replicas of one inference-engine role attached to a KV cache pool, so that
-the replicas hit each other's cached prefixes instead of each re-computing the same prefill.
+A `ModelDeployment` is N replicas of one or more inference-engine roles attached to a KV cache pool, so
+that the replicas hit each other's cached prefixes instead of each re-computing the same prefill.
 
 It renders **Pods** directly, which is why it needs no new admission gate: a Pod is a first-class
 citizen of the chain in [Admission](../architecture/admission.md), so every rule there applies to a
@@ -15,6 +15,7 @@ replica unchanged.
 ## Contents
 
 - [A minimal deployment](#a-minimal-deployment)
+- [Prefill and decode](#prefill-and-decode)
 - [The reuse domain is inherited](#the-reuse-domain-is-inherited)
 - [The three override tiers](#the-three-override-tiers)
 - [What the operator owns](#what-the-operator-owns)
@@ -53,9 +54,10 @@ spec:
 `KVCachePool`, or a bare endpoint URL is unrepresentable rather than merely rejected. The Binding is
 the authorization point — an admin creating one in a namespace is what grants that namespace access.
 
-`roles` is a list from the first version, and this version accepts exactly one entry. The
-length-1 bound lives in the validating webhook rather than in the schema so that the refusal can name
-the spec that lifts it.
+`roles` takes **1 to 10** entries. The upper bound is Kueue's rather than this operator's — every role
+becomes one PodSet of the deployment's single Workload, and `Workload.spec.podSets` is capped at ten —
+and it lives in the validating webhook rather than in the schema so the refusal can say whose limit it
+is, and so tracking an upstream number is not a schema change every stored object must survive.
 
 `replicas` and `instanceType` are structured fields and stay so: they are inputs to Kueue PodSet
 counts and flavor selection, so a template able to shadow them would make the feasibility check read
@@ -64,6 +66,96 @@ a ledger that does not match reality.
 Each replica's accelerator request lives in `roles[].resources`, whose fields mirror
 [Accelerator Requests](../accelerator-requests.md). CPU, memory and ephemeral storage are **derived**
 from the InstanceType's per-unit resources scaled by the card count, so they are not expressible here.
+
+## Prefill and decode
+
+Several roles in one deployment are admitted **atomically**: a pool that cannot fit all of them leaves
+all of them queued, instead of admitting the prefillers and stranding them waiting for decoders that
+never arrive.
+
+```yaml
+  roles:
+    - name: prefill
+      kind: prefill                        # server (default) | prefill | decode
+      replicas: 2
+      instanceType: gpustack-nvidia-h20-linux-amd64
+      acceleratorKey: nvidia-h20           # which model inside the pool
+      resources:
+        accelerator: 2
+    - name: decode
+      kind: decode
+      replicas: 2
+      instanceType: gpustack-nvidia-h20-linux-amd64   # identical, and it must be
+      acceleratorKey: nvidia-h20
+      resources:
+        accelerator: 2
+```
+
+`name` identifies the role and becomes the Kueue PodSet name; `kind` selects behaviour and is closed.
+They are separate because a semantic reachable by typing a free-form string is a semantic one typo away
+from silently changing. Two roles may share a `kind` and differ in `name`.
+
+`kind` adds **one term** to the synthesized transfer configuration — the role discriminator the engine's
+own KV-transfer configuration takes, vLLM's `kv_role` and its per-engine equivalents. Nothing else
+changes. Pairing a prefiller with a decoder, negotiating a transport between them, and routing a
+request to either are **not** here.
+
+### What every Pod of the group carries
+
+| Key | Value | What it is for |
+|---|---|---|
+| label `kueue.x-k8s.io/pod-group-name` | the deployment's name, or `gpustack-fnv64-<hash>` when that is too long for a label value | membership: it is what makes the replicas one group |
+| annotation `kueue.x-k8s.io/pod-group-total-count` | the sum of every role's `replicas` | how many Pods Kueue waits for before composing anything |
+| annotation `kueue.x-k8s.io/role-hash` | the role's `name` | the PodSet's identity, so two identically-shaped roles stay two PodSets |
+| annotation `kueue.x-k8s.io/pod-group-serving` | `"true"` | an inference deployment never finishes; without it Kueue reclaims the quota of a replica that exited |
+| annotation `modeldeployment.gpustack.ai/role-replicas` | the role's own `replicas` | ours, not Kueue's, and the only entry here Kueue does not read. It is what makes the rebuild predicate see a **reshape**: moving prefill 2 / decode 2 to prefill 1 / decode 3 leaves the total at four, so a check reading the total alone would trim one replica and add another in the same pass |
+| label `kueue.x-k8s.io/queue-name` | the `status.entrance` **published by** the role's InstanceType | unchanged; Kueue refuses a group whose Pods disagree on it. Read from the type rather than re-derived from its name, so this operator and the reconcile that creates the LocalQueue cannot disagree about the queue |
+| label `app.kubernetes.io/component` | the role's `name` | unchanged; what a `Service` selects on and what `status.roles[]` is attributed by |
+| `spec.nodeSelector` | **only when the role sets `acceleratorKey`**: one entry, `acceleratable.feature.gpustack.ai/<acceleratorKey>: "true"` | what makes Kueue assign this PodSet that accelerator model's flavor. A role naming no key carries no entry and takes whatever the pool assigns |
+
+The `role-hash` annotation is load-bearing rather than cosmetic. Kueue takes it verbatim when present
+and otherwise derives a digest of the Pod spec's *shape*, so two roles that render identically would
+collapse into one PodSet holding both their replicas — and per-role counting, per-role flavor
+assignment and per-role status would all disappear with nothing erroring.
+
+> **`kueue.x-k8s.io/pod-group-fast-admission` must never be set.** That path composes the Workload from
+> the first runnable Pod alone and gives that single PodSet the whole group's total, so every role
+> collapses into one and per-role flavor assignment goes with it. The Workload still looks well formed.
+> The operator never sets it, and a test asserts its absence.
+
+### One `instanceType` for every role
+
+A Kueue Workload carries one `queueName`, and that name is the one the role's `instanceType`
+publishes as its `status.entrance`. So roles
+on two `instanceType`s cannot be one group and cannot be admitted together at all — Kueue enforces the
+same rule on the Pods, unretryably, so letting it through would trade a refusal for a group that never
+assembles.
+
+Different **hardware** per role is expressible inside one pool instead, because
+[Kueue assigns a ResourceFlavor per PodSet](../architecture/scheduling-chain.md#stage-4-the-kueue-chain):
+`acceleratorKey` is how a prefiller and a decoder land on two accelerator models of the same
+manufacturer. Across manufacturers stays impossible — a queue's accelerator quota is
+`credits.gpustack.ai/<manufacturer>`, one resource name per manufacturer.
+
+`acceleratorKey` is validated at admission against the flavors the role's pool actually offers, and
+that is not tidiness. It is the rule that compensates for
+[what flavor assignment does with a key no flavor pins](../architecture/scheduling-chain.md#stage-4-the-kueue-chain):
+without this check the deployment would be admitted onto an arbitrary model and its Pods would sit
+`Pending` at the scheduler, two gates downstream of the mistake with nothing naming it.
+
+A pool with no flavors yet is not a refusal. An empty read is not evidence of absence while the pool is
+still being built, and a key that stays wrong is then the per-accelerator check's `Retry`. A pool whose
+flavors are real and carry no accelerator at all *is* a refusal: it has answered.
+
+### Addressing a role
+
+Each role gets a `ClusterIP` Service named `<deployment>-<role>`, beside the deployment-wide one, so a
+decoder is reachable **as** a decoder. Nothing in the operator dials these names — no router exists yet
+— they are there for whatever pairs the roles.
+
+`status.endpoint` stays the deployment-wide Service, which fronts the **first** role. It is not a
+router and must not be read as one: a Service selecting every role would round-robin a request onto a
+process configured as a producer and one configured as a consumer.
 
 ## The reuse domain is inherited
 
@@ -249,8 +341,22 @@ appearing as an unattributable `ImagePullBackOff`.
 
 `status.phase` is the field to read first: `Starting`, `Ready`, `Degraded` or `Deleting`. `Degraded`
 means some replicas are ready and some are not — serving, at less than the capacity asked for.
-`status.roles[]` carries `desired`, `ready` and `unmanaged` per role, and `status.endpoint` is the one
-address every replica serves behind, in the form `http://<name>.<namespace>.svc:<port>`.
+`status.roles[]` carries `name`, `kind`, `desired`, `ready`, `unmanaged` and `assignedFlavor` per role,
+and `status.endpoint` is the address the deployment-wide Service serves on, in the form
+`http://<name>.<namespace>.svc:<port>`.
+
+`assignedFlavor` answers *which accelerator model did this role actually get*, read from the group
+Workload's per-PodSet assignment. It is **absent** rather than empty while no assignment exists,
+because "not assigned yet" and "assigned to a flavor with no name" are different facts and one of them
+reads as an answer.
+
+**Absent does not only mean "not admitted yet".** The field reports the flavor of a role's
+*accelerator* credits. A role admitted onto a pool carrying no accelerator at all reports nothing here
+while being perfectly healthy — its Workload holds an assignment, naming a flavor for `cpu`.
+
+That is the field's contract rather than a gap in it. The answer is read through the same lens the
+per-accelerator admission gate uses, and a flavor reported here that the gate would not fit against
+would be worse than none.
 
 Three conditions carry the axes a single phase cannot. They are independent: "quota reserved but cache
 not attached" is a real and actionable state.
@@ -264,16 +370,24 @@ not attached" is a real and actionable state.
 | `False` | `BindingNotReady` | wait for it, or look at the pool it points at |
 | `False` | `BindingDeleting` | find who deleted it; the replicas keep writing to the domain they attached to |
 
-**`QuotaReserved`** — whether every replica holds Kueue quota. It reads each Workload's own conditions
-rather than asking the admission gate, because the gate stops evaluating a Workload once it is
-admitted: anything derived from the gate would answer for the moment of admission and never again.
+**`QuotaReserved`** — whether the deployment's **one** Workload holds Kueue quota. `True` therefore
+covers every role by construction and cannot be true for one and not another. It reads that Workload's
+own conditions rather than asking the admission gate, because the gate stops evaluating a Workload once
+it is admitted: anything derived from the gate would answer for the moment of admission and never again.
 
 | Value | Reason | Meaning |
 |---|---|---|
-| `True` | `Reserved` | every replica has quota reserved in the named cluster queue |
-| `False` | `Pending` | some replicas are waiting for quota |
-| `Unknown` | `AdmissionInFlight` | some replicas have no Workload yet — Kueue creates them asynchronously, so absence is admission in flight, not refusal |
+| `True` | `Reserved` | the group has quota reserved in the named cluster queue |
+| `False` | `Pending` | the group is waiting for quota |
+| `False` | `PodGroupIncomplete` | fewer Pods exist than the group declares, so Kueue composes **no Workload at all**; the message carries `<have>/<want>` |
+| `Unknown` | `AdmissionInFlight` | the group is complete and has no Workload yet — Kueue composes it asynchronously, so absence is admission in flight, not refusal |
 | `Unknown` | `NoReplicas` | no replica has been created yet |
+| `Unknown` | `AllReplicasTerminating` | every replica is on its way out, so none holds quota to report on |
+
+`PodGroupIncomplete` and `AdmissionInFlight` are the same observation — no Workload — and they mean
+opposite things. One clears in a moment; the other is the deployment sitting with gated Pods and an
+empty `kubectl get workloads` until something creates the missing replica. Telling them apart is why
+the reason exists.
 
 **`CacheAttached`** — whether the cache is observed to be in effect, which is a different question
 from whether it was configured. It is judged downstream of the engine and **never** on a rendered flag
@@ -324,6 +438,31 @@ the replica and the lease window on each of three paths — `ReplicaEvicted`, `R
 `ReplicaRestarted` — so an operator correlating a burst of failed requests with a replica that went
 away has the correlation written down rather than inferred.
 
+**Any replica leaving rebuilds the whole group.** This is stronger than the recreate policy above, and
+it is a contract rather than a symptom. Kueue holds a finalizer on every Pod of the group and releases
+it only when the group's Workload is deleted — a *serving* group is never finished, so nothing else
+releases it — and deleting that Workload makes Kueue stop the group. A departing replica therefore
+takes its siblings with it, and the deployment is rebuilt whole on the next pass.
+
+**Most departures are not a spec change.** These all restart every role:
+
+| Cause | Who initiates it |
+|---|---|
+| a `replicas` change, or adding or removing a role | you |
+| a `template` edit, or any change to a replica's rendered Pod | you |
+| **Kueue preempting** the deployment for a higher-priority workload | the scheduler |
+| **a node being drained**, cordoned or replaced | the cluster |
+| **the kubelet evicting** a replica under node pressure | the node |
+| `kubectl delete pod` on one replica | you |
+
+On a cluster with preemption enabled, a whole-deployment restart is therefore **routine rather than an
+incident** — worth knowing before you chase one as a fault. It is also the only recovery available: an
+evicted replica is held by Kueue's finalizer and cannot leave until the Workload does.
+
+A shape change additionally takes **two passes**. The group's declared total is carried by every Pod
+and Kueue requires them all to agree on it, so nothing is created while any Pod still declares the old
+one.
+
 ## What admission refuses
 
 One validating webhook is the whole admission surface for this CR; defaults live in the CRD schema,
@@ -331,7 +470,13 @@ so there is no mutating webhook.
 
 | Refused | Message names |
 |---|---|
-| more than one role | the spec that lifts the bound |
+| more than 10 roles | Kueue's 10-PodSet cap on `Workload.spec.podSets` as the cause, not merely the number |
+| two roles sharing a `name` | the duplicate — refused by the **schema**, since `roles` is a list keyed on `name`, so this one never reaches the webhook |
+| roles on different `instanceType`s | every type named, on `spec.roles` rather than on any one role — disagreement is a property of the set — plus the one-queue-name reason and `roles[].acceleratorKey` as the way to differentiate hardware within one pool |
+| a role whose `<deployment>-<role>` is not a DNS-1035 label | the combined **Service** name, which is what the pair becomes; over 63 characters or carrying a dot from a subdomain-shaped deployment name. A role the object **already had** is exempt, so a rule added later cannot strand a stored object |
+| `kind: server` beside any other kind | that a server serves whole requests by itself, so the combination describes no arrangement |
+| a `kind` the engine has no term for | the engine and the kind — today, `prefill` or `decode` on SGLang |
+| an `acceleratorKey` the pool does not offer | the keys it does offer, and that Kueue would drop the unknown one rather than fail on it |
 | an owned key in `extraArgs` | the key, the engine, and `template.command` as the way to own it |
 | an owned name in `env` | the same three |
 | `template.resources` | `roles[].resources` and `roles[].instanceType` as where the request is decided |
@@ -340,11 +485,16 @@ so there is no mutating webhook.
 | a self-declared reuse domain | nothing — the field does not exist |
 | an EMPTY `poolRef.name` | the Binding as the authorization point, and that an empty reference names none |
 
-A manufacturer with no runner backend is refused **at render time and not at admission**, and there
-are two independent reasons rather than one. The rule needs the InstanceType's OBSERVED detail, and
-this webhook holds no client at all — every rule above is answered from the submitted object. Even
-with one, `InstanceType.status` has not converged on a freshly created object, so the rule would
-refuse a perfectly legal deployment for losing a race against the InstanceType reconciler.
+Every rule above except the `acceleratorKey` one is answered from the submitted object. That one asks
+the cluster, because "which accelerator models does this pool offer" is a question about the cluster:
+the webhook resolves the roles' shared `instanceType` to its ClusterQueue and reads the accelerator
+keys that queue's own ResourceFlavors pin. It runs only once the object's own shape holds, so a
+malformed deployment is never told what a pool offers alongside the reason it has no single pool.
+
+A manufacturer with no runner backend is still refused **at render time and not at admission**, and the
+reason is not the missing client. The rule needs the InstanceType's OBSERVED detail, and
+`InstanceType.status` has not converged on a freshly created object — so the rule would refuse a
+perfectly legal deployment for losing a race against the InstanceType reconciler.
 
 The render-time refusal reaches a reader as a `RenderFailed` warning event carrying the renderer's
 own message, because a pass that cannot build a replica aborts before writing any status.
