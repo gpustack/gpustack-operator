@@ -421,6 +421,32 @@ func TestModelDeploymentReconciler_RenderFailureIsEventedNotOnlyLogged(t *testin
 		"the Event carries the renderer's own message: a reason without the cause sends nobody anywhere")
 }
 
+// TestModelDeploymentReconciler_RenderFailureWithoutARecorderDoesNotPanic exercises the DEFENDED
+// path rather than the defense.
+//
+// The guard beside this Event exists because `Recorder` is populated only by `SetupController`, so
+// a reconciler built directly carries none — which is every reconciler in this package's tests. The
+// sibling test above sets one, so it proves the Event is emitted and proves nothing about the nil
+// case: a guard whose absence panics is only tested by a caller that would have panicked.
+func TestModelDeploymentReconciler_RenderFailureWithoutARecorderDoesNotPanic(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Template.Image = ""
+	})
+	it := newRenderInstanceType(func(it *worker.InstanceType) {
+		it.Status.Detail.Manufacturer = "cambricon" // no runner backend, and never will resolve
+	})
+
+	_, err := reconcileModelDeploymentWith(t, &ModelDeploymentReconciler{
+		Client:    newModelDeploymentClient(md, it),
+		APIReader: newModelDeploymentClient(md, it),
+		// Recorder deliberately absent.
+	})
+
+	require.Error(t, err, "the render failure is still reported to the caller")
+	assert.Contains(t, err.Error(), "has no runner backend",
+		"and it is the renderer's own message, not one the missing Recorder replaced")
+}
+
 func boolPtr(b bool) *bool { return &b }
 
 // TestMapModelDeploymentInstanceType covers the watch that keeps a synthesized image current.
