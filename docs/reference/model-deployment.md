@@ -227,8 +227,9 @@ The variant applies to **Ascend only**: `310P` to `310p`, `910B` to `910b`, `910
 `950`. Across the whole matrix the variant is populated for `cann` alone. Ascend `910` and `310B`
 publish none, so a role on one of those must name an image.
 
-`engineVersion` is required, free-form and **unvalidated** — the operator checks neither that the
-combination was ever published nor that the version supports the installed driver. You guarantee
+`engineVersion` is required and non-empty — a schema `minLength`, not a webhook rule — and otherwise
+**free-form**: the operator checks neither that the combination was ever published nor that the
+version supports the installed driver. You guarantee
 version alignment; a bad combination surfaces as an `ImagePullBackOff` on a tag that does not exist.
 
 It is per deployment rather than per role, which is what lets one engine and one version assemble a
@@ -337,11 +338,16 @@ so there is no mutating webhook.
 | a partition profile together with a slice percentage | both slice fields; one accelerator cannot serve both |
 | a `poolRef` outside this namespace | nothing — it is unrepresentable in the type |
 | a self-declared reuse domain | nothing — the field does not exist |
+| an EMPTY `poolRef.name` | the Binding as the authorization point, and that an empty reference names none |
 
-A manufacturer with no runner backend is refused **at render time and not at admission**, and the
-difference matters: admission reads `InstanceType.status`, which has not converged on a freshly
-created object, so a webhook would refuse a perfectly legal deployment for losing a race against the
-InstanceType reconciler.
+A manufacturer with no runner backend is refused **at render time and not at admission**, and there
+are two independent reasons rather than one. The rule needs the InstanceType's OBSERVED detail, and
+this webhook holds no client at all — every rule above is answered from the submitted object. Even
+with one, `InstanceType.status` has not converged on a freshly created object, so the rule would
+refuse a perfectly legal deployment for losing a race against the InstanceType reconciler.
+
+The render-time refusal reaches a reader as a `RenderFailed` warning event carrying the renderer's
+own message, because a pass that cannot build a replica aborts before writing any status.
 
 ## Operating notes
 
