@@ -228,6 +228,42 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			continue
 		}
 
+		if connection == nil && md.Status.KVCache != nil {
+			// LOSING THE CONNECTOR IS NOT A REASON TO REBUILD A REPLICA, and without this the hash
+			// makes it one. A pass that cannot resolve the connection renders replicas without a
+			// connector, so every running replica's hash differs from the desired one and the
+			// recreate below would fire on all of them at once.
+			//
+			// The guard is BOTH halves. A deployment that never resolved a domain has no connector
+			// to lose, so a hash difference there comes from the spec and must still roll out --
+			// suppressing it on `connection == nil` alone breaks the ordinary rollout of every
+			// deployment that does not use a cache at all, which is what the spec-change test says
+			// when this branch is written without the second half.
+			//
+			// What reaches that state is ordinary rather than exotic: a store leader restart makes
+			// every Binding on the pool briefly not-Ready -- measured at 3.5 to 32 seconds in this
+			// project -- and a deployment whose Binding is not usable resolves no connection. So a
+			// few seconds of store unavailability would delete every replica of every deployment on
+			// that pool, and each one then reloads its weights. The blip becomes the outage.
+			//
+			// Leaving them alone is also what this design already decided for the neighboring case:
+			// an admin deleting the Binding leaves running Pods running, because tearing down a
+			// serving deployment because an admin object vanished is worse than serving without a
+			// cache. The same reasoning covers a Binding that is merely unwell.
+			//
+			// Nothing is lost when it comes back. The connector resolves to the same values, the
+			// desired hash returns to what these replicas already carry, and this branch stops
+			// firing. If it comes back with a DIFFERENT endpoint, the hash differs from the one they
+			// carry and they are recreated on that pass -- which is the rollout that should happen.
+			//
+			// New replicas are still created below, without a connector: a replica that does not
+			// exist yet cannot be given an address that does not exist yet either.
+			logger.V(3).Info("no connection this pass; leaving the replica as built",
+				"pod", pod.Name)
+
+			continue
+		}
+
 		// The rollout is recreate rather than surge: a replica built before a spec change is deleted
 		// here and rebuilt by the pass that observes its absence. The cost is this replica's cached
 		// blocks, which its siblings lose when it goes.

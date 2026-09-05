@@ -21,6 +21,26 @@ import (
 //
 // Usable means BOTH halves the resolution reads: the phase its own controller derives, and the
 // QuotaGranted axis. A fixture that set only the phase would let a regression on the axis pass.
+// newRenderPool and newRenderBackend complete the chain a rendered connector is built from. A
+// converge fixture that carries only the Binding resolves NO connection, so every replica it renders
+// carries no connector -- which makes any claim about what happens to a connector vacuously true.
+func newRenderPool() *workercore.KVCachePool {
+	return &workercore.KVCachePool{
+		ObjectMeta: meta.ObjectMeta{Name: "shared"},
+		Spec:       workercore.KVCachePoolSpec{Backends: []string{"kvcb"}},
+		Status:     workercore.KVCachePoolStatus{ClientEndpoint: "master:50051"},
+	}
+}
+
+func newRenderBackend() *workercore.KVCacheBackend {
+	return &workercore.KVCacheBackend{
+		ObjectMeta: meta.ObjectMeta{Name: "kvcb"},
+		Spec: workercore.KVCacheBackendSpec{
+			Transport: workercore.KVCacheBackendTransport{Protocol: "TCP"},
+		},
+	}
+}
+
 func newRenderBinding(mutate ...func(*workercore.KVCachePoolBinding)) *workercore.KVCachePoolBinding {
 	kvcpb := &workercore.KVCachePoolBinding{
 		ObjectMeta: meta.ObjectMeta{Name: "shared-kv", Namespace: "team-a"},
@@ -201,7 +221,11 @@ func TestModelDeploymentBinding_Usability(t *testing.T) {
 // admin object vanishing is not a reason to stop serving; the condition is the signal.
 func TestModelDeploymentBinding_MissingBindingKeepsTheReplicasServing(t *testing.T) {
 	md := newRenderDeployment()
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), newRenderBinding())
+	// With the pool and the backend, so the replicas below are built WITH a connector. Without them
+	// the deployment never had one, and "the replicas keep serving" would hold whatever losing a
+	// connector does to a replica -- which is the half this acceptance is actually about.
+	cli := newModelDeploymentClient(md, newRenderInstanceType(), newRenderBinding(),
+		newRenderPool(), newRenderBackend())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -260,7 +284,13 @@ func TestModelDeploymentBinding_ConvergenceIsNotGatedOnTheBinding(t *testing.T) 
 func TestModelDeploymentBinding_ALeaderRestartDropsNothing(t *testing.T) {
 	md := newRenderDeployment()
 	writes := new(modelDeploymentWrites)
-	cli := newCountingModelDeploymentClient(writes, md, newRenderInstanceType(), newRenderBinding())
+	// THE POOL AND THE BACKEND ARE IN THE FIXTURE ON PURPOSE. Without them no connection resolves,
+	// the replicas are rendered with no connector at all, and this test's own claim -- that a store
+	// blip tears nothing down -- holds for a reason that has nothing to do with the connector. It
+	// passed that way before they were added, which is what a measurement point sitting upstream of
+	// the fault looks like.
+	cli := newCountingModelDeploymentClient(writes, md, newRenderInstanceType(), newRenderBinding(),
+		newRenderPool(), newRenderBackend())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
