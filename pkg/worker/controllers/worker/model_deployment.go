@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	core "k8s.io/api/core/v1"
@@ -588,7 +589,83 @@ func (r *ModelDeploymentReconciler) SetupController(_ context.Context, opts cont
 			&worker.InstanceType{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentInstanceType),
 		).
+		Watches(
+			// The pool's published client endpoint is the address every replica dials, and it is
+			// rendered into the Pod. It MOVES: a store leader restart or a recreated Service gives
+			// the pool a new address, and the deployment's own Binding can stay Ready across that,
+			// so the Binding watch above does not cover it. Without this watch the spec hash goes on
+			// matching replicas built from an address nobody answers, which is the one failure this
+			// design refuses to render on purpose -- from outside the Pod it is indistinguishable
+			// from a cache miss.
+			&workercore.KVCachePool{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentPool),
+		).
+		Watches(
+			// The backend's transport protocol is the connector's other rendered input, and
+			// `spec.transport` is absent from the backend webhook's immutability rule, so an admin
+			// can edit it on a running pool. Same staleness, same silence.
+			&workercore.KVCacheBackend{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentBackend),
+		).
 		Complete(r)
+}
+
+// mapModelDeploymentPool enqueues every deployment attached to a pool, through the Bindings that
+// grant access to it.
+//
+// It goes pool -> Bindings -> deployments rather than listing every deployment and resolving each
+// one's Binding: the Binding is what names the pool, and a cluster has far fewer Bindings than the
+// N+1 reads that walk would cost. Each deployment matches exactly one Binding, so no request is
+// emitted twice.
+func (r *ModelDeploymentReconciler) mapModelDeploymentPool(
+	ctx context.Context, obj ctrlcli.Object,
+) []ctrlreconcile.Request {
+	kvcpbList := new(workercore.KVCachePoolBindingList)
+	if err := r.Client.List(ctx, kvcpbList, ctrlclix.WithoutQuorum); err != nil {
+		ctrllog.FromContext(ctx).Error(err, "list kv cache pool bindings for kv cache pool",
+			"kv cache pool", ctrlcli.ObjectKeyFromObject(obj))
+
+		return nil
+	}
+
+	var reqs []ctrlreconcile.Request
+	for i := range kvcpbList.Items {
+		kvcpb := &kvcpbList.Items[i]
+		if kvcpb.Spec.PoolRef.Name != obj.GetName() {
+			continue
+		}
+		reqs = append(reqs, r.mapModelDeploymentBinding(ctx, kvcpb)...)
+	}
+
+	return reqs
+}
+
+// mapModelDeploymentBackend enqueues every deployment on a pool that names this backend.
+//
+// One more hop than the pool's, for the same reason: the deployment references a Binding, the
+// Binding a pool, and the pool a backend. A pool admits exactly one backend, but the field is a
+// list, so membership is tested rather than equality.
+func (r *ModelDeploymentReconciler) mapModelDeploymentBackend(
+	ctx context.Context, obj ctrlcli.Object,
+) []ctrlreconcile.Request {
+	kvcpList := new(workercore.KVCachePoolList)
+	if err := r.Client.List(ctx, kvcpList, ctrlclix.WithoutQuorum); err != nil {
+		ctrllog.FromContext(ctx).Error(err, "list kv cache pools for kv cache backend",
+			"kv cache backend", ctrlcli.ObjectKeyFromObject(obj))
+
+		return nil
+	}
+
+	var reqs []ctrlreconcile.Request
+	for i := range kvcpList.Items {
+		kvcp := &kvcpList.Items[i]
+		if !slices.Contains(kvcp.Spec.Backends, obj.GetName()) {
+			continue
+		}
+		reqs = append(reqs, r.mapModelDeploymentPool(ctx, kvcp)...)
+	}
+
+	return reqs
 }
 
 // mapModelDeploymentInstanceType enqueues every deployment with a role admitted against the type.
