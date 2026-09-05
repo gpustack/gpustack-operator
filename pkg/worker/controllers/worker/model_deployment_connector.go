@@ -153,13 +153,18 @@ var modelDeploymentOwnedKeys = map[string]struct {
 	// configuration with defaults — a 4 GiB segment and a "localhost" identity.
 	//
 	// MOONCAKE_TENANT_ID IS OWNED AND MUST NEVER BE DEFAULTED, and this is the one entry here that
-	// is a security property rather than a correctness one. The tenant IS the reuse domain, and
-	// every distinct domain is a tenant with its own quota ledger -- so a workload that could set
-	// this variable could mint tenants in its namespace and escape the namespace ceiling. The API
-	// already refuses a self-declared domain, which is the durable half of that guarantee; this is
-	// the other half, because the variable is a second path to the same value and an unowned key
-	// would leave it open. Defaulted is exactly the wrong class: that class lets a user's value
-	// win.
+	// is a security property rather than a correctness one. The tenant IS the reuse domain, so a
+	// workload that could set this variable could name a domain the API refuses to let it name. The
+	// API refusing a self-declared domain is the durable half of that guarantee; this is the other
+	// half, because the variable is a second path to the same value and an unowned key would leave
+	// it open. Defaulted is exactly the wrong class: that class lets a user's value win.
+	//
+	// THE ESCAPE THIS PREVENTS IS BOUNDED BY SOMETHING NOT MEASURED HERE. The full attack -- mint
+	// domains, get one quota account each, exceed the namespace ceiling -- needs each domain to
+	// carry an INDEPENDENT quota account, and this store's quota behaves as an eviction trigger
+	// rather than a hard ledger. That step is an assumption rather than a measurement, tracked on
+	// the kv-cache side. Data isolation between domains IS measured (case-47), and it is a different
+	// claim. Owning the key is right either way, which is why it does not wait on the answer.
 	//
 	// It appears in this table because the renderer emits it for THIS engine, at the version this
 	// project ships. Nothing here decides that -- the shared renderer reads a measured table -- so
