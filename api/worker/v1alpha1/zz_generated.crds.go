@@ -3642,6 +3642,12 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 														"instanceType",
 													},
 													Properties: map[string]v1.JSONSchemaProps{
+														"acceleratorKey": {
+															Description: "AcceleratorKey is the accelerator device key (\"<manufacturer>-<model>\", e.g. \"nvidia-h20\")\nthis role's Pods must land on. It renders as ONE nodeSelector entry,\n\"acceleratable.feature.gpustack.ai/<key>: true\", and nothing else; omitting it takes whatever\nthe pool assigns, which is the single-role behavior and stays the default.\nIt is validated at admission against the keys the role's pool actually offers, and the reason\nis that an unknown key does not fail — it is IGNORED. Kueue's flavor assignment keeps only\nthose nodeSelector keys a candidate flavor's own nodeLabels carry and drops the rest, so a key\nno flavor offers stops being a constraint: an arbitrary flavor is assigned, the Workload is\nadmitted, and the Pod then sits Pending at the scheduler because the real node label does not\nmatch. The mistake would surface two gates downstream with nothing naming it.\nITS SHAPE IS BOUNDED BY THE SCHEMA, INDEPENDENTLY OF THAT CHECK. This value becomes the NAME\nsegment of a label key, and a label name stops at 63 characters over a restricted alphabet\nwhere an object name runs to 253 over a wider one. The pool check cannot stand in for the\nbound: it deliberately refuses NOTHING when the pool's flavors cannot be read, so a malformed\nkey passes straight through it into a nodeSelector the API server then rejects on every Pod\ncreate — a permanent reconcile failure whose cause is a field two objects away.\nTIGHTENING IT STRANDS NO STORED OBJECT, which is what makes this a permitted change rather than\na compatibility break. No released version can hold a value it now refuses, because\nModelDeployment is in no released version — checked per tag with\n`git cat-file -e \"$t:api/worker/v1alpha1/model_deployment.go\"`, absent from all 37, rather than\ninferred from when it merged.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](63),
+															Pattern:     `^[a-z0-9A-Z]([-_.a-z0-9A-Z]*[a-z0-9A-Z])?$`,
+														},
 														"env": {
 															Description: "Env is appended the same way and refused on the same terms. Keys the operator merely defaults\nare not owned: a user's value wins there and no rejection follows.",
 															Type:        "array",
@@ -3687,14 +3693,33 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															MaxLength:   ptr.To[int64](253),
 															MinLength:   ptr.To[int64](1),
 														},
+														"kind": {
+															Description: "Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name:\nName is free-form and identifies the PodSet, while this selects behavior, and a semantic\nreachable by typing a string is a semantic one typo away from silently changing. Two roles\nmay share a kind and differ in name.\nIt defaults to Server, which is the shape a deployment written before disaggregation existed\nhas, so such a deployment renders exactly as it did.",
+															Type:        "string",
+															Default: &v1.JSON{
+																Raw: []byte(`"server"`),
+															},
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"server"`),
+																},
+																{
+																	Raw: []byte(`"prefill"`),
+																},
+																{
+																	Raw: []byte(`"decode"`),
+																},
+															},
+														},
 														"name": {
-															Description: "Name identifies the role. In this version there is exactly one role and its name is free-form;\nthe spec that introduces P/D disaggregation gives the name meaning.",
+															Description: "Name identifies the role, and it is also the name of the Kueue PodSet the role becomes.\nThe pattern is Kueue's own PodSetReference shape, and it is enforced here because the name is\nwritten verbatim into each Pod's role-hash annotation: Kueue groups a pod group's Pods into\nPodSets by that annotation, so a name it cannot take as a PodSet reference is a name whose\nrole does not survive the grouping.\nUNIQUENESS IS THE SCHEMA'S. Roles is a list-map keyed on this field, so the API server refuses\na duplicate during validation, before any webhook runs. The webhook carries the same rule as a\nbackstop for that marker being dropped, and never gets to speak while it is there. Uniqueness\nmatters for the same reason the pattern does: two roles sharing a name collapse into one\nPodSet whose count is their sum, which is a silent merge rather than an error.",
 															Type:        "string",
 															MaxLength:   ptr.To[int64](63),
 															MinLength:   ptr.To[int64](1),
+															Pattern:     `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`,
 														},
 														"replicas": {
-															Description: "Replicas is how many Pods this role runs. Each is an independent Kueue Workload: this version\ncreates no pod group, which is correct for one role whose replicas are independently useful\nand is what the P/D spec replaces with cross-role atomic admission.",
+															Description: "Replicas is how many Pods this role runs. They are NOT independent Workloads: every replica of\nevery role joins one Kueue pod group, so the deployment is admitted as a unit or not at all.\nCHANGING THIS NUMBER REBUILDS THE GROUP. It moves the total the group declares, which every Pod\ncarries and which Kueue requires them all to agree on, so the operator deletes the group's Pods\nand recreates them under the new total rather than adding or trimming a few. The cost is the\none the recreate rollout already states: a replica that leaves loses its cached blocks to its\nsiblings.",
 															Type:        "integer",
 															Format:      "int32",
 															Default: &v1.JSON{
@@ -3743,7 +3768,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Nullable: true,
 														},
 														"template": {
-															Description: "Template overlays the rendered container. The operator renders first and merges this on top.\nA non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator\nsynthesizes no engine arguments and no client environment, the role is marked unmanaged and\nCacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args,\nbecause a second append tier beside ExtraArgs would have no defined precedence and would make\nthe take-over tier ambiguous — args alone would be neither take-over nor append.\nThe template is MUTABLE, unlike the one an Instance carries. Immutability there is a rule the\nInstance webhook enforces on InstanceSpec rather than a property of any template type, and not\ncarrying it here is what makes a rollout possible at all.\nIts Resources are refused at admission. The accelerator request belongs in the role's own\nResources and the rest is derived from the InstanceType, so a template able to shadow either\nwould make the admission feasibility check read a ledger that does not match reality.",
+															Description: "Template overlays the rendered container. The operator renders first and merges this on top.\nA non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator\nsynthesizes no engine arguments and no client environment, the role is marked unmanaged and\nCacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args,\nbecause a second append tier beside ExtraArgs would have no defined precedence and would make\nthe take-over tier ambiguous — args alone would be neither take-over nor append.\nThe template is MUTABLE, unlike the one an Instance carries. Immutability there is a rule the\nInstance webhook enforces on InstanceSpec rather than a property of any template type, and not\ncarrying it here is what makes a rollout possible at all.\nEDITING IT RESTARTS EVERY ROLE, not just the replicas this template belongs to. Changing it\nchanges a replica's rendered Pod, that replica is deleted — and every replica of the deployment\nis one member of a single Kueue pod group whose members cannot leave one at a time. So the\ngroup is rebuilt whole. The same is true of a `replicas` change, of adding or removing a role,\nand of a departure this operator did not initiate: a preemption, a node drain, an eviction. The\nmechanism and the full list are in docs/reference/model-deployment.md under \"Rollout is\nrecreate\".\nIts Resources are refused at admission. The accelerator request belongs in the role's own\nResources and the rest is derived from the InstanceType, so a template able to shadow either\nwould make the admission feasibility check read a ledger that does not match reality.",
 															Type:        "object",
 															Properties: map[string]v1.JSONSchemaProps{
 																"additionalVolumes": {
@@ -4179,12 +4204,22 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 														"desired",
 														"ready",
 														"unmanaged",
+														"kind",
 													},
 													Properties: map[string]v1.JSONSchemaProps{
+														"assignedFlavor": {
+															Description: "AssignedFlavor is the ResourceFlavor Kueue assigned to this role's PodSet for its ACCELERATOR\ncredits, and it is a POINTER because \"not assigned yet\" and \"assigned\" are different facts: a\nrole waiting for quota has no flavor, and reporting that as the empty string would read as an\nassignment to a flavor with no name.\nIt is per role rather than per deployment because Kueue assigns a flavor per PodSet: two\nroles of one deployment can land on two accelerator models, which is what AcceleratorKey\nexists to ask for, and a single deployment-wide field could not say that.\nAN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather than a\ngap in it. The answer is read through the same function the per-accelerator admission gate\nreads it with, which speaks only of accelerator credits — so a role admitted on a pool that\ncarries no accelerator at all names a flavor for `cpu` and nothing here. Observed on a CPU-only\ncluster: the Workload holds an assignment, both roles are Ready, and this stays unset. The two\nanswers are kept identical on purpose; a flavor reported here that the gate would not fit\nagainst would be worse than none.",
+															Type:        "string",
+															Nullable:    true,
+														},
 														"desired": {
 															Description: "Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Neither\ncarries omitempty: they are counted from a Pod list that succeeded, so a zero here is an\nobserved zero and must serialize as one. A failed list writes no status at all.",
 															Type:        "integer",
 															Format:      "int32",
+														},
+														"kind": {
+															Description: "Kind echoes the role's kind, so reading the status alone answers which half of a\ndisaggregated deployment an entry describes. It carries no omitempty: every role has a kind,\ndefaulted if the user named none, so an absent value would mean the status was written by\nsomething that did not know about kinds rather than that the role has none.",
+															Type:        "string",
 														},
 														"name": {
 															Description: "Name is the role this entry describes.",

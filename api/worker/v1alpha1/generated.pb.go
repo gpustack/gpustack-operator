@@ -4683,6 +4683,16 @@ func (m *ModelDeploymentRole) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.AcceleratorKey)
+	copy(dAtA[i:], m.AcceleratorKey)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.AcceleratorKey)))
+	i--
+	dAtA[i] = 0x4a
+	i -= len(m.Kind)
+	copy(dAtA[i:], m.Kind)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Kind)))
+	i--
+	dAtA[i] = 0x42
 	if m.Template != nil {
 		{
 			size, err := m.Template.MarshalToSizedBuffer(dAtA[:i])
@@ -4812,6 +4822,18 @@ func (m *ModelDeploymentRoleStatus) MarshalToSizedBuffer(dAtA []byte) (int, erro
 	_ = i
 	var l int
 	_ = l
+	if m.AssignedFlavor != nil {
+		i -= len(*m.AssignedFlavor)
+		copy(dAtA[i:], *m.AssignedFlavor)
+		i = encodeVarintGenerated(dAtA, i, uint64(len(*m.AssignedFlavor)))
+		i--
+		dAtA[i] = 0x32
+	}
+	i -= len(m.Kind)
+	copy(dAtA[i:], m.Kind)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Kind)))
+	i--
+	dAtA[i] = 0x2a
 	i--
 	if m.Unmanaged {
 		dAtA[i] = 1
@@ -6731,6 +6753,10 @@ func (m *ModelDeploymentRole) Size() (n int) {
 		l = m.Template.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
+	l = len(m.Kind)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.AcceleratorKey)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -6762,6 +6788,12 @@ func (m *ModelDeploymentRoleStatus) Size() (n int) {
 	n += 1 + sovGenerated(uint64(m.Desired))
 	n += 1 + sovGenerated(uint64(m.Ready))
 	n += 2
+	l = len(m.Kind)
+	n += 1 + l + sovGenerated(uint64(l))
+	if m.AssignedFlavor != nil {
+		l = len(*m.AssignedFlavor)
+		n += 1 + l + sovGenerated(uint64(l))
+	}
 	return n
 }
 
@@ -8176,6 +8208,8 @@ func (this *ModelDeploymentRole) String() string {
 		`ExtraArgs:` + fmt.Sprintf("%v", this.ExtraArgs) + `,`,
 		`Env:` + repeatedStringForEnv + `,`,
 		`Template:` + strings.Replace(this.Template.String(), "ModelDeploymentTemplate", "ModelDeploymentTemplate", 1) + `,`,
+		`Kind:` + fmt.Sprintf("%v", this.Kind) + `,`,
+		`AcceleratorKey:` + fmt.Sprintf("%v", this.AcceleratorKey) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -8202,6 +8236,8 @@ func (this *ModelDeploymentRoleStatus) String() string {
 		`Desired:` + fmt.Sprintf("%v", this.Desired) + `,`,
 		`Ready:` + fmt.Sprintf("%v", this.Ready) + `,`,
 		`Unmanaged:` + fmt.Sprintf("%v", this.Unmanaged) + `,`,
+		`Kind:` + fmt.Sprintf("%v", this.Kind) + `,`,
+		`AssignedFlavor:` + valueToStringGenerated(this.AssignedFlavor) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -22934,6 +22970,70 @@ func (m *ModelDeploymentRole) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 8:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Kind", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Kind = ModelDeploymentRoleKind(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 9:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AcceleratorKey", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.AcceleratorKey = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -23230,6 +23330,71 @@ func (m *ModelDeploymentRoleStatus) Unmarshal(dAtA []byte) error {
 				}
 			}
 			m.Unmanaged = bool(v != 0)
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Kind", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Kind = ModelDeploymentRoleKind(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AssignedFlavor", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			s := string(dAtA[iNdEx:postIndex])
+			m.AssignedFlavor = &s
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
