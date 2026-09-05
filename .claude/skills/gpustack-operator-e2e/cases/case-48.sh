@@ -100,6 +100,15 @@ case48_force_delete() {
   echo "[case-48] ${kind}/${name} did not release in 30s; forcing its finalizer off."
   kubectl ${ns_args[@]+"${ns_args[@]}"} patch "$kind" "$name" --type=merge \
     -p '{"metadata":{"finalizers":null}}' >/dev/null 2>&1 || true
+  # THE FORCE IS VERIFIED, because `|| true` on the patch means a failure is silent. Two of the
+  # three objects here are CLUSTER-SCOPED and nothing else will ever collect them, so a patch that
+  # did not take leaves them Terminating forever -- and a teardown that says nothing reads as one
+  # that worked. This does not retry: if the patch failed, saying so is the useful act.
+  sleep 3
+  if [ -n "$(kubectl ${ns_args[@]+"${ns_args[@]}"} get "$kind" "$name" -o name 2>/dev/null)" ]; then
+    echo "[case-48] ${kind}/${name} IS STILL THERE after the force. Remove it by hand:"
+    echo "[case-48]   kubectl ${ns_args[@]+"${ns_args[@]}"} patch $kind $name --type=merge -p '{\"metadata\":{\"finalizers\":null}}'"
+  fi
 }
 case48_teardown() {
   if [ -n "${TEST_NS:-}" ]; then

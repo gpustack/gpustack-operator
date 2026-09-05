@@ -301,7 +301,13 @@ if [ "$nobind_ready" = yes ]; then
   apply_out="$(manifest "    template:
       image: docker.io/library/busybox:1.36" "" \
     | sed "s/case45-probe/case45-nobind/" | kubectl apply -f - 2>&1 | tr '\n' ' ')"
-  if [ -z "$apply_out" ] || [ -n "${apply_out##*created*}" ]; then
+  # `created` OR `configured` OR `unchanged`: the delete at the top of this block passes
+  # --timeout=60s, and a finalizer that outlasts it leaves the object in place, so a re-apply
+  # reports the object it found rather than one it made. All three mean the same thing to the rows
+  # below -- the object exists -- while only "created" would turn a slow finalizer into a FAIL
+  # blaming the controller.
+  if [ -z "$apply_out" ] || { [ -n "${apply_out##*created*}" ] && [ -n "${apply_out##*configured*}" ] &&
+    [ -n "${apply_out##*unchanged*}" ]; }; then
     nobind_ready=no
     record SKIP "the controller-level rows for case45-nobind" \
       "the manifest was never created, so nothing below has a subject: ${apply_out:-<no output at all>}"
