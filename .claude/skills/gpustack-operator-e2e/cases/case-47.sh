@@ -69,10 +69,32 @@ CASE_ID=47
 # Binding's `usedBy` can name has to be removed before the fixture, or it converts that library's
 # rare-and-loud path into a routine one.
 #
+# THAT RULE WAS NECESSARY AND NOT SUFFICIENT. The wrapper removed all three deployments and the
+# forced branch fired anyway, and it took two more runs to learn why, for two different reasons.
+#
+# The first of those runs printed the warning with NO name under it, and the diagnosis written here
+# from the shape of the code alone -- the SECOND BINDING this case creates, which `kvi_teardown`
+# never deletes because it deletes its own two BY NAME -- was a guess dressed as a finding. It is a
+# real leak and the delete below closes it, but it was not the object being forced.
+#
+# => THE SHARED TEARDOWN DELETES BY NAME. Whatever this case created in that namespace, this case
+# removes -- claimant or not.
+#
+# The second run, with that delete in, NAMED the object: `bind-i`, the fixture's own Binding, held at
+# `Releasable=False(LedgerNotReleased)` -- "the master will not remove the quota of reuse domain
+# ... while it still holds objects". The cause is this case's own store probe. It writes a payload to
+# prove the tenant partitions, and a domain holding an object is exactly what the master will not
+# release. Nothing to do with a claim, and nothing the delete above could have reached.
+#
+# => THE PROBE DRAINS WHAT IT WROTE, at the end of the probe below, for the same reason this wrapper
+# exists at all: a warning that fires on every run stops being read. Measured on the third run, with
+# the drain in: the teardown printed `cleanup` and nothing after it.
+#
 # Measured after both runs of this case: zero KVCachePoolBindings, KVCachePools, KVCacheBackends and
 # ModelDeployments left, and no fixture namespace -- the forced release does not accumulate here,
 # because this fixture deletes the backend too and the master goes with it. That is a property of
-# THIS fixture and not of forcing a finalizer in general.
+# THIS fixture and not of forcing a finalizer in general, and it is why the leak above cost a
+# printed warning rather than a poisoned cluster.
 #
 # Wrapping keeps the shared teardown's own order intact rather than reimplementing it, and keeps the
 # knowledge of ModelDeployment out of a library that deliberately does not know the CR layer.
@@ -80,6 +102,12 @@ case47_teardown() {
   if [ -n "${TEST_NS:-}" ]; then
     kubectl -n "$TEST_NS" delete modeldeployments.worker.gpustack.ai \
       case47-a case47-b case47-c --ignore-not-found --wait=true --timeout=90s >/dev/null 2>&1
+    # Issued without waiting: the deployments above are gone by now, so nothing holds this one, and
+    # kvi_teardown's own loop is already a wait over every Binding left in the namespace.
+    if [ -n "${OTHER_BINDING:-}" ]; then
+      kubectl -n "$TEST_NS" delete kvcachepoolbindings.worker.gpustack.ai "$OTHER_BINDING" \
+        --ignore-not-found --wait=false >/dev/null 2>&1
+    fi
   fi
   kvi_teardown
 }
@@ -239,6 +267,19 @@ print('PUT rc=%d' % a.put('${PAYLOAD}', b'${PAYLOAD}'))
 print('SAME len=%d' % len(a.get('${PAYLOAD}') or b''))
 c = cli('${TC}')
 print('OTHER len=%d' % len(c.get('${PAYLOAD}') or b''))
+# The drain, and it belongs to the teardown rather than to any assertion above: a reuse domain that
+# still holds an object is one the master refuses to release the quota of, which is what makes the
+# shared teardown force a finalizer on every run of this case. Retried on -706 (the write's lease has
+# not expired) rather than slept through, because that TTL is a master startup parameter; -704 is
+# already-absent and is done, not a failure.
+import time
+deadline = time.time() + 60
+while True:
+    rc = a.remove('${PAYLOAD}')
+    print('REMOVE rc=%d' % rc)
+    if rc != -706 or time.time() > deadline:
+        break
+    time.sleep(3)
 " >"$LOG" 2>&1
 
   same="$(grep -m1 '^SAME len=' "$LOG" | sed 's/.*len=//')"
