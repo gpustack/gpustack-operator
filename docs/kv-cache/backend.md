@@ -1,10 +1,11 @@
 # KV Cache Backend
 
 > **Purpose** — how a `KVCacheBackend` runs a Mooncake store, what its status is read from, and the
-> two things that surprise operators: capacity is observed rather than summed, and shrinking a group
-> discards the cache that member held.
+> three things that surprise operators: capacity is observed rather than derived, shrinking a group
+> discards the cache that member held, and a local disk tier can be configured correctly and still
+> hold nothing — which this project has not yet observed it doing otherwise.
 > **Audience** operators, contributors · **Prerequisites** [Architecture](../architecture.md) ·
-> **Read time** ~14 min
+> **Read time** ~20 min
 
 A `KVCacheBackend` declares a pooled KV cache for inference workloads. The operator runs a **leader**
 (one metadata process) and a **member** group (one store process per selected node), then reports what
@@ -20,6 +21,7 @@ rendered flag, environment variable and metric keeps the vendor's spelling.
 - [The metadata plane](#the-metadata-plane)
 - [The leader](#the-leader)
 - [The members](#the-members)
+- [The local disk tier](#the-local-disk-tier)
 - [What status reports](#what-status-reports)
 - [Growing and shrinking a group](#growing-and-shrinking-a-group)
 - [The external mode](#the-external-mode)
@@ -43,24 +45,33 @@ spec:
       leader: {}                     # replicas and allocationStrategy default
       members:
         - nodeSelector: {kubernetes.io/os: linux}
-          medium: DRAM               # schema: DRAM | LocalDisk | NoF | CXL | DFS — only DRAM runs
+          medium: DRAM               # the one value: what this group's SEGMENT is made of
           capacityPerMember: 4Gi
 ```
 
 `connection.managed` and `connection.external` are both optional pointers and **exactly one** must be
-set; neither and both are refused at admission with a message naming the two. This scope reconciles
-**one** member group — a second is schema-valid and webhook-refused, naming the tiering follow-on, so
-a shape that is not yet reconciled fails at admission rather than half-way through a reconcile.
+set; neither and both are refused at admission with a message naming the two. Several member groups
+are allowed; at most one of them may carry a [local disk tier](#the-local-disk-tier).
 
-The medium axis works the same way. The schema names all five media the store supports, so a tiered
-backend will not have to change the shape, but **only `DRAM` is reconciled** and the other four are
-refused at admission naming what would have to render them: the leader's file or DAX flags, and a
-mount on the member.
+**`members[].medium` has one value, `DRAM`**, and it is an identity rather than a choice: the group
+says what it contributes, so a second medium widens the enum instead of being inferred from a field
+that is not there. It is the same reason `spec.type` names `Mooncake` and nothing else.
 
-> **Why refuse rather than accept and approximate** — a `DFS` group that was admitted would come up
-> holding its segment in host memory, while `status.capacity` read the leader's *file* gauges and
-> reported zero. The object would say one thing, the running member another, and nothing would
-> report a fault. A refusal at apply time is the only version of that an operator can act on.
+An earlier shape offered five values. Four of them named things that are **not member groups**, and
+each is reached another way:
+
+| Was a `medium` value | What it actually is | Where it lives |
+|---|---|---|
+| `LocalDisk` | a tier on the members that already hold the memory replica | [`members[].localDisk`](#the-local-disk-tier) |
+| `NoF` | an NVMe-oF target coordinate, registered once, with no node affinity and no Pod | no API surface; it is not a member group |
+| `CXL` | a DAX device the **leader process** allocates from | `leader.extraArgs`: `enable_cxl`, `cxl_path`, `cxl_size` |
+| `DFS` | a distributed filesystem the **leader process** allocates from | the leader's own environment, which this API does not render |
+
+> **Why the shape matters more than the names** — the leader routes an offload task to the client
+> holding the key's memory replica. A member group with no memory segment is therefore never chosen,
+> so a group declared as "the disk one" would report its disk capacity to the leader and never
+> receive a single write. The object would say one thing, the running member another, and nothing
+> would report a fault.
 
 The object is **cluster-scoped**: it names nodes, claims host memory and host paths, and on the RDMA
 path needs `hostNetwork` and `/dev/infiniband`. Only a cluster administrator can legitimately declare
@@ -240,6 +251,15 @@ configured — and the peer-to-peer plane is what binds them. Write firewall and
 between member nodes, and from engine clients, as a **range**. The rendered Pod declares no fixed
 data-plane `containerPort`, because a fixed list would be a false statement.
 
+**The management port is fixed, and on `RDMA` it lands on the node.** A member serves its HTTP API on
+`8080 + <group index>` — the first group on `8080`, a second group on `8081`. A `TCP` group holds that
+port inside its own pod network namespace, but an `RDMA` group holds the host's, so on every node an
+RDMA group selects that port must be free. Reserve one port from `8080` upward per member group.
+
+> **Why it moves per group** — two RDMA groups whose node selectors both match one node place two
+> host-network Pods on it. On a single fixed port only the first binds; the second runs, never passes
+> readiness, and reports nothing about why.
+
 **A member advertises its POD IP, and that is what a client dials.** The address becomes the host
 half of the segment's `te_endpoint`, which `status.members[]` is joined against and which the engine
 hands to clients. Rules written for the data plane therefore target pod addresses, not node ones.
@@ -250,6 +270,148 @@ hands to clients. Rules written for the data plane therefore target pod addresse
 > leader appends a port of its own to build the segment name and that port is fresh on every start,
 > so the name never survived a restart anyway. On the RDMA path the pod holds the host's network
 > namespace and this is the node's address regardless.
+
+## The local disk tier
+
+A member group may declare a directory on each of its nodes, which configures the store client's
+offload keys to point at it. It is **two halves and admission requires both**, because either alone
+is accepted by the store and then does nothing it reports:
+
+```yaml
+spec:
+  connection:
+    managed:
+      leader:
+        offload:
+          enabled: true                # the leader's half
+          onEvict: true                # optional; requires enabled
+      members:
+      - nodeSelector: { kvcache: "true" }
+        medium: DRAM
+        capacityPerMember: 500Gi
+        localDisk:                     # the members' half
+          path: /var/lib/kvcache
+          capacity: 4Ti                # optional; unset means the store's own ceiling
+```
+
+| what it renders | where |
+|---|---|
+| `MOONCAKE_OFFLOAD_ENABLED`, `MOONCAKE_OFFLOAD_FILE_STORAGE_PATH`, `MOONCAKE_OFFLOAD_TOTAL_SIZE_LIMIT_BYTES` | the member container |
+| a `hostPath` volume and mount at `localDisk.path` | the member Pod |
+| `-enable_offload=true`, `-offload_on_evict=true` | the leader's argv |
+| a `preStop` hook, and a termination window derived from `scaleIn.gracePeriodSeconds` | the member Pod |
+
+**A tier is a layer on a member group, never a group of its own** — see
+[The two axes](#the-two-axes) for why the shape has to be this way.
+
+### What has been verified, and what has not
+
+**Verified on a cluster:** the member registers a local disk segment and the leader accepts it,
+logging `Mount local disk segment with client id ... enable offloading is: 1`;
+`master_total_file_capacity_bytes` becomes exactly the `localDisk.capacity` declared; the leader runs
+with `enable_offload=1`; and eviction fires under a low watermark.
+
+**Not verified:** that data is written to the tier. Filling a member's memory segment to 97 percent
+under a 0.3 watermark, the leader logged `No memory freed this cycle; N objects deferred for disk
+offload` while `master_allocated_file_size_bytes` stayed at **0** and the tier directory stayed
+**empty** — in both the `onEvict` and the default configuration. This is what was observed here; it
+is not a claim about the store in general, and the cause is not established.
+
+**So check it yourself before relying on the tier**, with the one figure that answers the question:
+
+```console
+$ kubectl exec -n gpustack-system deploy/<backend>-leader -- \
+    python3 -c "import urllib.request;print([l for l in \
+    urllib.request.urlopen('http://127.0.0.1:9003/metrics').read().decode().splitlines() \
+    if l.startswith('master_allocated_file_size_bytes')])"
+```
+
+`master_allocated_file_size_bytes` is **bytes actually written to the tier**. A tier that is
+configured but holding nothing reads `0` here while everything else looks healthy — the Pods are
+Ready, and `status.capacity` reports the tier's size, because that figure is **capacity, not usage**
+(see [What status reports](#what-status-reports)).
+
+### The directory has to exist, and be writable by the image's user
+
+`localDisk.path` is mounted with `type: Directory`, so **the directory must already exist on every
+node the group selects**. This is deliberate: a directory the kubelet creates is owned by `root` with
+mode `0755`, while the published store image runs as **uid 65532**, and the member then starts and
+cannot write to it. `fsGroup` does not help — it does not apply to `hostPath` volumes.
+
+**The uid depends on the image**, since `members[].image` may put a different vendor's build on a
+group. Read it off the image you are using:
+
+```console
+$ docker run --rm --entrypoint id <your-member-image>
+uid=65532 gid=0(root) groups=0(root)
+```
+
+Then create the directory on each node with that uid:
+
+```console
+$ install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
+```
+
+Five rules the path has to satisfy, all enforced at apply time:
+
+- It must be **absolute**.
+- It must not be the **root directory**.
+- It **may not overlap `/dev/infiniband`** — equal to it, inside it, or containing it. A sibling such
+  as `/dev/infiniband-cache` is fine.
+- It **may not contain a `..` component**.
+- It **may not begin or end with whitespace**, spaces and tabs alike.
+
+> **Why** — the root directory would mount the node's whole filesystem into a third-party container.
+> The RDMA transport mounts `/dev/infiniband` into this same container, and two mounts on one path
+> are resolved by the kubelet with one shadowing the other, which nothing on the object would record;
+> that rule holds whatever `spec.transport.protocol` says today, because the field is editable. The
+> `..` rule mirrors the store's own, which refuses such a path before checking whether the directory
+> exists. The whitespace rule exists because the path is mounted exactly as written, so a trailing
+> space produces a different directory than the one an operator read on the screen.
+
+⛔ **The tier is frozen once a group has it: it cannot be added to a running group, removed from one,
+or moved to another `path`.** Members would have to restart to mount the directory, and whatever they
+already wrote would stay on their nodes with nothing addressing it. `capacity` is the exception and
+moves **either way** — raising or lowering it re-renders one variable, and the tier's contents survive
+the restart that follows.
+
+⛔ **`leader.offload.enabled` cannot be turned off on its own while a group carries a tier**, because
+the pair rule refuses the half-configuration in both directions. It comes off only together with the
+tier, in the one edit below.
+
+**There is exactly one exit, and it needs the tier on the last group.** The rules pair groups **by
+position** and stop at the end of the new list, so an update that drops the **last** group and clears
+`leader.offload` in the same edit is admitted. Dropping an earlier group is refused: every position
+after it would be compared against a different group's spec, which is also why reordering `members`
+is refused. That message is accurate rather than confused about which group you meant.
+
+⛔ **A backend whose only group carries a tier has no exit but deletion.** `members` requires at least
+one entry, so that group cannot be removed, and replacing it in place is the forbidden edit. Deleting
+the `KVCacheBackend` is what is left, and it takes the leader and every member with it. Put a tier on
+the last group if you want to be able to take it off.
+
+**Three failure modes, all loud:**
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Refused at `kubectl apply` | the path breaks one of the five rules above, or the tier was added, removed or repathed on a running group | fix the path, or leave the tier alone; the message names which rule |
+| Member Pod stuck, event says `FailedMount ... hostPath type check failed` | the directory does not exist on that node | create it as above |
+| Member Pod runs but never becomes Ready; container log carries `FileStorageConfig: no write permission on directory: <path>` and `Store startup failed (attempt N): Invalid FileStorage configuration` | the directory exists but the image's user cannot write to it | `chown` it to the uid above |
+
+The last one never reaches a Ready state — the member's REST port opens only after the store mounts,
+so the readiness probe never passes — and `MembersMounted` reports the shortfall rather than the
+backend looking healthy.
+
+### What the tier costs that nothing accounts for
+
+The `hostPath` is **not** counted into any resource request, and it cannot be: the kubelet's
+ephemeral-storage accounting covers the container filesystem, `emptyDir` volumes and logs, never a
+`hostPath`. A request against it would reserve a figure nothing polices and would keep the member off
+the very node that has the disk.
+
+**Watching that filesystem is yours.** `localDisk.capacity` renders the store's own ceiling, which is
+the only bound on what the tier writes; nothing in Kubernetes will evict or throttle the member when
+the node's disk fills.
 
 ## What status reports
 
@@ -295,9 +457,17 @@ So `kubectl get kvcb -w` moves on its own.
 > more honest than an empty one — so it has no age bound at all while that read keeps failing. The
 > condition is what says whether the list was refreshed; the list alone never does.
 
-**Capacity is observed, never summed.** `status.capacity` is read from the leader's own counters —
-`master_total_capacity_bytes` for a memory medium, `master_total_file_capacity_bytes` for a file one.
-Nothing multiplies `capacityPerMember` by a replica count.
+**Capacity is observed, not derived.** `status.capacity` is read from the leader's own counters,
+never from what the spec declares — nothing multiplies `capacityPerMember` by a replica count. A
+backend with no disk tier reads `master_total_capacity_bytes`; one **with** a tier reads that plus
+`master_total_file_capacity_bytes`. Adding two **observed** families is not the same thing as
+adding up what members were asked to provide.
+
+**`status.capacity.total` is capacity, not usage**, and a disk tier contributes the ceiling the
+member declared — published as soon as the member registers, before anything is written there.
+
+To ask whether the **disk** tier is holding data, the figure to read is not on the CR at all — see
+[What has been verified, and what has not](#what-has-been-verified-and-what-has-not).
 
 ⛔ **Capacity is absent — not zero — while the leader is starting.** `/metrics` is ungated: a leader
 that is up but not serving answers 200 with a well-formed exposition whose gauges all read zero, and a
@@ -309,6 +479,17 @@ leader is what allocation goes through, so a running member Pod it does not list
 counted in `MembersMounted`'s message instead. The two fields the listing cannot supply — node name
 and medium — are joined in from the member Pod behind that segment, and left **empty** rather than
 guessed when nothing matches.
+
+⛔ **Two member Pods behind one address cannot be told apart, and the status reports that.** A segment
+is named by an address plus a transfer port bound at random, which no Pod carries, so a segment
+arriving on an address two **ready** members share traces to neither. `MembersMounted` goes `False`
+with `AmbiguousMemberIdentity`, naming the shared key and the Pods; the node and medium stay empty.
+Give the groups node selectors that keep them on different nodes.
+
+Two groups on one node are **not** ambiguous by themselves. A `TCP` member advertises its own pod IP,
+so each segment carries a distinct address even though both Pods answer to the node's name; the
+condition is raised only for a shared address a segment actually arrives on, which is the `RDMA` case
+where both Pods hold the host's network namespace.
 
 A failed listing scrape **keeps** the previous list and sets `MembersMounted=False`; a failed capacity
 scrape **clears** the figures. That asymmetry is deliberate: capacity is two pointers and has an
@@ -327,6 +508,16 @@ count, leader included.
 > selector. A widening moves no fingerprint; an image, argv, environment, resource or fabric change
 > moves it and every member is recreated.
 
+⛔ **A Pod runs the template it was created from, so a setting cannot protect the same edit that
+removes it.** Anything rendered into the member Pod — the shutdown hook, its grace, the environment —
+reaches a member only when that member is recreated. A departing member leaves with what it started
+with.
+
+⇒ To make such a setting apply to a shrink, do it in **two steps**: change only the setting and wait
+for members to be recreated with it (their pod-spec-hash annotation moves), then narrow the selector
+or remove the group. `scaleIn.gracePeriodSeconds` below is the case this bites today; the property
+belongs to the Pod template, not to that field.
+
 **Existing objects are not rebalanced.** How fast the cluster converges onto a new member depends on
 `allocationStrategy`: `FreeRatioFirst` (the default) biases new writes toward the emptier member,
 `Random` does not.
@@ -334,11 +525,40 @@ count, leader included.
 ⛔ **Shrinking a group discards the cache that member held.** Narrowing the selector, or removing a
 node, unmounts that member's segment **immediately** — there is no drain.
 
-> **Why it is not drained** — nothing reachable from a Pod's shutdown can make it graceful.
-> `store.close()` takes no grace argument, `unmount_segment`'s `grace_period_seconds` defaults to `0`
-> and `0` takes the immediate path, and no console script in the image can issue a graceful unmount at
-> all. The `terminationGracePeriodSeconds` the operator sets lets the entrypoint finish its own
+> **Why it is not drained** — the member's own API does take a graceful unmount with a grace period,
+> but it requires the segment ids and **no route returns a client its own**. The name is not
+> derivable either: the leader appends a port of its own choosing and that port is fresh on every
+> start. The `terminationGracePeriodSeconds` the operator sets lets the entrypoint finish its own
 > shutdown — it does not preserve the data.
+
+**`scaleIn.gracePeriodSeconds` reaches the disk tier only.** A member with a
+[local disk tier](#the-local-disk-tier) gets a `preStop` hook that deregisters the tier with the
+leader and then holds for the grace, so offload reads a peer already asked for finish there instead
+of failing. A group with no tier renders no hook and the setting is inert.
+
+```yaml
+spec:
+  connection:
+    managed:
+      scaleIn:
+        gracePeriodSeconds: 30       # 0..3600
+```
+
+**The Pod's termination window is derived from it**, as `gracePeriodSeconds + 60`, rather than being
+a second field beside it. That is what makes the relationship hold: two independent fields could be
+set so the kubelet kills the container in the middle of the wait, and no validation makes that
+impossible — it only makes it checkable.
+
+The upper bound of 3600 is the member endpoint's own; above it the call is refused with a `400`, so a
+larger value would render a hook that fails every time it runs.
+
+> **It does not make a shrink lossless.** The memory segment is still dropped, per the paragraph
+> above. What the grace covers is the tier's deregistration, so a reader gets a clean miss rather
+> than a peer that is about to disappear.
+
+Migrating a member's data before it leaves — the store's drain job API — is **not** offered here. It
+is stateful orchestration, and it covers only two of the store's five replica types: a drain over a
+backend with a disk tier reports success while leaving that tier's data where it was.
 
 ## The external mode
 
