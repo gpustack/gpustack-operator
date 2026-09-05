@@ -102,6 +102,17 @@ if [ -z "$IT" ]; then
 fi
 
 # Emit a manifest. $1 is spliced in under the single role, $2 under spec.kvCache; both may be empty.
+#
+# The poolRef name expands with a bare dash and NOT with a colon-dash, and the difference is the
+# entire point of the row that uses it: the colon form substitutes the default for an EMPTY value as
+# well as an unset one, so it would quietly rewrite the empty name the empty-poolRef row is trying to
+# submit -- and that row would then pass against a manifest carrying a perfectly good name.
+#
+# THIS EXPLANATION LIVES OUT HERE RATHER THAN AS A YAML COMMENT INSIDE THE HEREDOC, and that is not
+# taste. The heredoc is unquoted -- it has to be, every field in it is a variable -- so the shell
+# expands its contents, backticks included. A YAML comment is inert to YAML and is NOT inert to the
+# shell: written inside, this paragraph produced ":-: command not found" on stderr twice per call,
+# because the backticks around the two expansion forms were read as command substitution.
 # `poolRef` is a LocalObjectReference by design, which is why this case has no cross-namespace row:
 # see the assertion on the schema below.
 manifest() {
@@ -118,7 +129,7 @@ spec:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:
     poolRef:
-      name: ${BINDING}
+      name: ${PROBE_BINDING-$BINDING}
 ${2}
   roles:
   - name: server
@@ -224,6 +235,20 @@ else
 fi
 
 # --- schema rows: these never reach the webhook, and that is the design ---
+
+# THE ONLY RULE HERE THAT IS IN THE WEBHOOK BECAUSE OF A TYPE RATHER THAN BY CHOICE, which is why it
+# earns a row of its own. Every other bound in this spec gets its lower bound from a schema marker --
+# earlier, cheaper, and applied to every client. This field's type is upstream's
+# `core.LocalObjectReference`, and a marker cannot be attached to a struct this API does not own, so
+# the bound has to live in the webhook. `required` makes the KEY present, not the VALUE non-empty:
+# `poolRef: {name: ""}` satisfies the schema completely.
+#
+# PROBE_BINDING is this case's own variable, unlike ENGINE above, so clearing it afterwards restores
+# the default rather than discarding something a caller set.
+PROBE_BINDING=""
+refuses "an empty poolRef name is refused by the webhook, which is where the type forces it" \
+  "must not be empty" "" ""
+unset PROBE_BINDING
 
 refuses "a self-declared reuse domain is refused by strict decoding" \
   "strict decoding error" "" "    domain: i-declare-my-own"
