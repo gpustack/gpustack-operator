@@ -13,6 +13,21 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 )
 
+// renderModelDeploymentServices renders every Service a deployment owns: the one it is reached
+// through, and one per role.
+//
+// The deployment-wide one is FIRST, and the order is part of the contract: the caller garbage
+// collects by name, and status reads its endpoint.
+func renderModelDeploymentServices(md *workercore.ModelDeployment) []*core.Service {
+	svcs := make([]*core.Service, 0, len(md.Spec.Roles)+1)
+	svcs = append(svcs, renderModelDeploymentService(md))
+	for i := range md.Spec.Roles {
+		svcs = append(svcs, renderModelDeploymentRoleService(md, &md.Spec.Roles[i]))
+	}
+
+	return svcs
+}
+
 // renderModelDeploymentService renders the one Service a deployment is reached through.
 //
 // It is deliberately NOT what instance.go does. convertServiceFromPod renders one NodePort Service
@@ -20,16 +35,55 @@ import (
 // to. N interchangeable replicas behind one address is a different shape: a per-Pod NodePort would
 // publish N addresses with no load balancing across them, and burn one node port per replica.
 //
-// It fronts the FIRST role. With one role that is the only reading; the spec that introduces P/D
-// roles decides which of several is the front door, and does so knowing what a router in front of
-// them means — a question a single-role deployment cannot answer and must not pre-empt.
+// IT STILL FRONTS THE FIRST ROLE, and with P/D roles that stays true rather than being decided
+// otherwise. The single-role spec left the choice to this one; this one's Non-Goals answer it by
+// declining to route: nothing here steers a request between a prefiller and a decoder, so no role is
+// a front door in the sense that would make choosing between them meaningful. A Service selecting
+// EVERY role would be worse than arbitrary — it would round-robin a request onto a process
+// configured as a producer and one configured as a consumer, which is the silent wrong answer this
+// spec's whole kind field exists to prevent. Per-role addressability is what this task adds; a real
+// front door needs the router, and that is a later spec.
 func renderModelDeploymentService(md *workercore.ModelDeployment) *core.Service {
-	role := &md.Spec.Roles[0]
+	return renderModelDeploymentServiceFor(md, &md.Spec.Roles[0], md.Name)
+}
+
+// renderModelDeploymentRoleService renders the Service that fronts ONE role.
+//
+// A P/D deployment needs it because a decoder has to be reachable AS a decoder: the two roles are
+// deliberately different configurations, so an address that resolves to "whichever replica" is not
+// an address for either of them. Nothing in this spec calls it — no router exists yet — and that is
+// exactly why it is rendered now: the pairing spec that will call it should find the addresses
+// already there rather than have to change this object's shape to get them.
+//
+// The name is <deployment>-<role>, and a Service name is a DNS-1035 label that stops at 63
+// characters while an object name runs to 253.
+//
+// THIS IS A NEW CLASS OF FAILURE, NOT AN INHERITED ONE — an earlier version of this comment claimed
+// otherwise and was wrong. The deployment-wide Service fails only for a deployment whose own name is
+// too long; this one fails for a 40-character deployment with a 30-character role, both of which are
+// legal on their own. The reachable input set changed, which is what decides it, rather than whether
+// the failure has a familiar shape.
+//
+// So the webhook refuses the combination at admission — validateModelDeploymentRoleServiceNames —
+// where the message can name both halves. Without that the Pod-side of the deployment works, the
+// per-role Service is rejected on every create, and the reconciler retries forever with the cause
+// two objects away from the field that caused it.
+func renderModelDeploymentRoleService(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) *core.Service {
+	return renderModelDeploymentServiceFor(md, role, md.Name+"-"+role.Name)
+}
+
+// renderModelDeploymentServiceFor is the shape both Services share: a ClusterIP fronting one role's
+// replicas, on that role's port, owned by the deployment.
+func renderModelDeploymentServiceFor(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, name string,
+) *core.Service {
 	port := modelDeploymentServicePort(role)
 
 	svc := &core.Service{
 		ObjectMeta: meta.ObjectMeta{
-			Name:      md.Name,
+			Name:      name,
 			Namespace: md.Namespace,
 			Labels:    modelDeploymentSelectorLabels(md, role),
 		},
@@ -38,6 +92,9 @@ func renderModelDeploymentService(md *workercore.ModelDeployment) *core.Service 
 			// The selector carries identity only. A Service's selector is mutable, unlike a
 			// Deployment's, but moving it would orphan every replica it used to front — so nothing
 			// a spec update can change is in it, and the entrance label in particular is not.
+			//
+			// It names the DEPLOYMENT as well as the role. A selector on the role alone would make
+			// two deployments in one namespace, each running a role called "decode", share endpoints.
 			Selector: modelDeploymentSelectorLabels(md, role),
 			Ports: []core.ServicePort{{
 				Name:       port.Name,

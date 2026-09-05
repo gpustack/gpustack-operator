@@ -212,10 +212,50 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 		pod.Spec.RuntimeClassName = ptr.To(in.RuntimeClassName)
 	}
 
+	// The accelerator model this role asked for, as ONE nodeSelector entry and nothing else.
+	//
+	// It is what drives Kueue's per-PodSet flavor assignment: each PodSet forms its own assignment
+	// group, and a candidate flavor is evaluated per PodSet by matching this selector against that
+	// flavor's own nodeLabels -- which is how two roles of one deployment land on two accelerator
+	// models. An accelerated ResourceFlavor's nodeLabels carry exactly this key.
+	//
+	// A role naming no key gets NO entry, which is the single-role behavior: it takes whatever the
+	// pool assigns. Rendering an empty key instead would be a selector nothing satisfies.
+	//
+	// The key having to exist in the pool is admission's rule rather than this one's, and the reason
+	// is that an unknown key does not fail here -- Kueue keeps only those nodeSelector keys a
+	// candidate flavor pins and drops the rest, so a key no flavor offers stops being a constraint
+	// at all.
+	if role.AcceleratorKey != "" {
+		pod.Spec.NodeSelector = map[string]string{
+			nodefeature.AcceleratableFeatureLabelPrefix + role.AcceleratorKey: "true",
+		}
+	}
+
 	systemmeta.NoteResource(pod, ModelDeploymentResourceType, map[string]string{
 		ModelDeploymentResourceNoteRole: role.Name,
 	})
 	kubemeta.ControlOnWithoutBlock(pod, md, workercore.SchemeGroupVersionKind("ModelDeployment"))
+
+	// The Kueue group metadata, which is what makes every replica of every role ONE Workload rather
+	// than one Workload each. It goes on here, before the fingerprint, for the same reason the
+	// connector's annotations do: the group's declared total is one of the values a spec change
+	// moves, and a fingerprint blind to it would leave every replica declaring a size the deployment
+	// no longer has.
+	//
+	// The labels and the annotations are applied together because the group's own type returns them
+	// together -- a Pod carrying the membership label without the total count joins a group whose
+	// size Kueue cannot learn, and no Workload is composed at all.
+	group := ModelDeploymentPodGroup(md, role)
+	for k, v := range group.Labels {
+		pod.Labels[k] = v
+	}
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string, len(group.Annotations)+1)
+	}
+	for k, v := range group.Annotations {
+		pod.Annotations[k] = v
+	}
 
 	// THE CONNECTOR'S ANNOTATIONS GO ON BEFORE THE FINGERPRINT, and the order is the whole reason
 	// this carrier works. The client configuration lives in one of these annotations rather than in

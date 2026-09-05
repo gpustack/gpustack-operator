@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,6 +25,24 @@ func getModelDeploymentService(t *testing.T, cli ctrlcli.Client) *core.Service {
 	return svc
 }
 
+// serviceNames lists every Service in the namespace, sorted, so a case states the whole set it
+// expects rather than probing for the names it happens to think of. It does NOT filter by owner:
+// a Service the deployment failed to clean up is exactly what several of these cases are about.
+func serviceNames(t *testing.T, cli ctrlcli.Client) []string {
+	t.Helper()
+
+	svcList := new(core.ServiceList)
+	require.NoError(t, cli.List(context.Background(), svcList, ctrlcli.InNamespace("team-a")))
+
+	names := make([]string, 0, len(svcList.Items))
+	for i := range svcList.Items {
+		names = append(names, svcList.Items[i].Name)
+	}
+	slices.Sort(names)
+
+	return names
+}
+
 // TestRenderModelDeploymentService_IsOneClusterIPForEveryReplica states the shape, and states it
 // against the alternative this repository already implements. instance.go renders one NodePort
 // Service PER POD, which is right for a single addressable box; N interchangeable replicas behind
@@ -37,15 +56,115 @@ func TestRenderModelDeploymentService_IsOneClusterIPForEveryReplica(t *testing.T
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
 
-	svcList := new(core.ServiceList)
-	require.NoError(t, cli.List(context.Background(), svcList, ctrlcli.InNamespace("team-a")))
-	require.Len(t, svcList.Items, 1, "four replicas are fronted by ONE Service, not one each")
+	// TWO Services for ONE role, and the count is per ROLE rather than per replica: the
+	// deployment-wide address and that role's own. Four replicas still produce no fourth Service,
+	// which is the property this case is about.
+	assert.Equal(t, []string{"qwen", "qwen-server"}, serviceNames(t, cli),
+		"four replicas are fronted per ROLE, not one Service each")
 
-	svc := &svcList.Items[0]
+	svc := getModelDeploymentService(t, cli)
 	assert.Equal(t, core.ServiceTypeClusterIP, svc.Spec.Type)
 	assert.Equal(t, "qwen", svc.Name)
 	assert.True(t, systemmeta.MatchResource(svc, ModelDeploymentResourceType))
 	assert.True(t, modelDeploymentOwns(svc, getModelDeployment(t, cli)))
+}
+
+// TestModelDeploymentService_OnePerRoleBesideTheDeploymentWide is T7's shape.
+//
+// WHY A P/D DEPLOYMENT NEEDS THIS AT ALL: the two roles are deliberately different configurations,
+// so an address resolving to "whichever replica" is an address for neither of them — a decoder has
+// to be reachable AS a decoder. Nothing in this spec calls these addresses, because no router
+// exists yet; they are rendered now so the pairing spec finds them rather than having to change
+// this object's shape to get them.
+func TestModelDeploymentService_OnePerRoleBesideTheDeploymentWide(t *testing.T) {
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"qwen", "qwen-decode", "qwen-prefill"}, serviceNames(t, cli))
+
+	svcList := new(core.ServiceList)
+	require.NoError(t, cli.List(context.Background(), svcList, ctrlcli.InNamespace("team-a")))
+	byName := map[string]*core.Service{}
+	for i := range svcList.Items {
+		byName[svcList.Items[i].Name] = &svcList.Items[i]
+	}
+
+	md := getModelDeployment(t, cli)
+	for _, name := range []string{"qwen-prefill", "qwen-decode"} {
+		svc := byName[name]
+		assert.Equal(t, core.ServiceTypeClusterIP, svc.Spec.Type, "%s", name)
+		assert.True(t, modelDeploymentOwns(svc, md), "%s must be owned by the deployment", name)
+	}
+
+	// The selector names the DEPLOYMENT as well as the role. Without that, two deployments in one
+	// namespace each running a role called "decode" would share endpoints -- and the symptom is a
+	// request served by another team's model, not an error.
+	assert.Equal(t, map[string]string{
+		modelDeploymentLabelKeyName:      modelDeploymentLabelValueName,
+		modelDeploymentLabelKeyInstance:  "qwen",
+		modelDeploymentLabelKeyComponent: "decode",
+	}, byName["qwen-decode"].Spec.Selector)
+
+	// The deployment-wide one still fronts the FIRST role, unchanged. It is not a router and must
+	// not become one: a Service selecting every role would round-robin a request onto a process
+	// configured as a producer and one configured as a consumer.
+	assert.Equal(t, byName["qwen-prefill"].Spec.Selector, byName["qwen"].Spec.Selector)
+}
+
+// TestModelDeploymentService_RemovingARoleRemovesItsService covers what an owner reference does NOT
+// collect.
+//
+// The deployment still exists, so nothing about the reference is stale and Kubernetes leaves the
+// Service behind. A leftover keeps RESOLVING, to a selector no Pod matches, so a caller wired to a
+// decoder that was removed gets connection refused rather than NXDOMAIN and reads it as the decoder
+// being down.
+func TestModelDeploymentService_RemovingARoleRemovesItsService(t *testing.T) {
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Equal(t, []string{"qwen", "qwen-decode", "qwen-prefill"}, serviceNames(t, cli))
+
+	shrunk := getModelDeployment(t, cli)
+	shrunk.Spec.Roles = shrunk.Spec.Roles[:1]
+	require.NoError(t, cli.Update(context.Background(), shrunk))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"qwen", "qwen-prefill"}, serviceNames(t, cli),
+		"the removed role's Service goes with it")
+}
+
+// TestModelDeploymentService_SurvivesTheGroupRebuild pins the one interaction between T4 and T7.
+//
+// A replicas change deletes every Pod of the group and creates none until they are gone. A Service
+// rebuilt alongside them would drop its allocated ClusterIP, so every client that resolved the name
+// would be talking to an address nothing answers on -- for a change that was only ever about how
+// many replicas there are.
+func TestModelDeploymentService_SurvivesTheGroupRebuild(t *testing.T) {
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	before := getModelDeploymentService(t, cli)
+
+	grown := getModelDeployment(t, cli)
+	grown.Spec.Roles[0].Replicas = 3
+	require.NoError(t, cli.Update(context.Background(), grown))
+
+	// The rebuild pass, the one that leaves the deployment with no replicas at all.
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Empty(t, replicaNames(t, cli))
+
+	assert.Equal(t, []string{"qwen", "qwen-decode", "qwen-prefill"}, serviceNames(t, cli),
+		"a deployment with no replicas still has its addresses")
+	after := getModelDeploymentService(t, cli)
+	assert.Equal(t, before.UID, after.UID)
+	assert.Equal(t, before.ResourceVersion, after.ResourceVersion)
 }
 
 // TestRenderModelDeploymentService_SelectsExactlyTheRolesPods is the property that decides whether
@@ -139,6 +258,16 @@ func TestModelDeploymentReconciler_ScalingDoesNotRecreateTheService(t *testing.T
 	scaled.Spec.Roles[0].Replicas = 2
 	require.NoError(t, cli.Update(context.Background(), scaled))
 
+	// A replicas change rebuilds the group, so the scale takes two passes: the first deletes every
+	// Pod, the second creates the new set. The Service must survive BOTH -- the pass that leaves the
+	// deployment with no replicas at all is the one most likely to decide it has nothing to front.
+	*writes = modelDeploymentWrites{}
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	require.Empty(t, replicaNames(t, cli), "the rebuild pass creates nothing")
+	assert.Zero(t, writes.creates, "and it recreates no Service either")
+
 	*writes = modelDeploymentWrites{}
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -148,7 +277,7 @@ func TestModelDeploymentReconciler_ScalingDoesNotRecreateTheService(t *testing.T
 	assert.Equal(t, before.UID, after.UID)
 	assert.Equal(t, before.ResourceVersion, after.ResourceVersion,
 		"and the Service was not touched at all")
-	assert.Zero(t, writes.creates, "no Service was recreated")
+	assert.Equal(t, 2, writes.creates, "the only creates are the two replicas")
 }
 
 // TestAlignModelDeploymentService covers what convergence corrects and what it must leave alone.

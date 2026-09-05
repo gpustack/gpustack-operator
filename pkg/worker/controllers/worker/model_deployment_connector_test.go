@@ -2,6 +2,7 @@ package worker
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -179,6 +180,196 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 			assert.NotEmpty(t, got.VolumeMounts, "a projected volume nothing mounts reaches no container")
 		})
 	}
+}
+
+// connectorInputForKind is the fixture above with a role kind, for the cases that vary only in it.
+func connectorInputForKind(
+	engine, manufacturer string, kind workercore.ModelDeploymentRoleKind,
+) ModelDeploymentConnectorInput {
+	in := connectorInput(engine, manufacturer)
+	in.Kind = kind
+
+	return in
+}
+
+// TestSynthesizeModelDeploymentConnector_RoleDiscriminator is the golden per (engine, kind).
+//
+// It is what makes G1 falsifiable at all. If a prefill role and a decode role rendered the same
+// configuration they would not be prefill and decode -- they would be replicas of one role that
+// happen to share a Workload, and the atomic-admission demonstration would pass identically for a
+// deployment that has nothing to do with P/D.
+//
+// The two vLLM-family rows are both here because they share this renderer and NOT a connector
+// registry: a single expected connector name would pass while one of the two engines could not start.
+func TestSynthesizeModelDeploymentConnector_RoleDiscriminator(t *testing.T) {
+	testCases := []struct {
+		name         string
+		engine       string
+		manufacturer string
+		kind         workercore.ModelDeploymentRoleKind
+		wantArg      string
+	}{
+		{
+			name: "vllm_server", engine: workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+			kind:         workercore.ModelDeploymentRoleKindServer,
+			wantArg:      `{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_both"}`,
+		},
+		{
+			name: "vllm_prefill", engine: workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+			kind:         workercore.ModelDeploymentRoleKindPrefill,
+			wantArg:      `{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}`,
+		},
+		{
+			name: "vllm_decode", engine: workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+			kind:         workercore.ModelDeploymentRoleKindDecode,
+			wantArg:      `{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}`,
+		},
+		{
+			name: "vllm_ascend_prefill", engine: workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerAscend,
+			kind:         workercore.ModelDeploymentRoleKindPrefill,
+			wantArg:      `{"kv_connector":"AscendStoreConnector","kv_role":"kv_producer"}`,
+		},
+		{
+			name: "vllm_ascend_decode", engine: workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerAscend,
+			kind:         workercore.ModelDeploymentRoleKindDecode,
+			wantArg:      `{"kv_connector":"AscendStoreConnector","kv_role":"kv_consumer"}`,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := SynthesizeModelDeploymentConnector(
+				connectorInputForKind(tc.engine, tc.manufacturer, tc.kind))
+			require.NoError(t, err)
+
+			require.Len(t, got.Args, 2)
+			assert.Equal(t, "--kv-transfer-config", got.Args[0])
+			assert.JSONEq(t, tc.wantArg, got.Args[1])
+		})
+	}
+}
+
+// TestSynthesizeModelDeploymentConnector_ServerIsTheSingleRoleRender is the regression guard that
+// this spec does not change what a deployment written before it renders.
+//
+// An unset kind and an explicit server must be the SAME render, byte for byte, and both must be the
+// render the single-role golden case above pins. Two ways to say "no split" that produced two
+// configurations would roll every existing deployment the moment the field was defaulted.
+func TestSynthesizeModelDeploymentConnector_ServerIsTheSingleRoleRender(t *testing.T) {
+	unset, err := SynthesizeModelDeploymentConnector(
+		connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA))
+	require.NoError(t, err)
+
+	server, err := SynthesizeModelDeploymentConnector(connectorInputForKind(
+		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
+		workercore.ModelDeploymentRoleKindServer))
+	require.NoError(t, err)
+
+	assert.Equal(t, unset, server, "an unset kind and an explicit server are one shape")
+	assert.Equal(t, []string{
+		"--kv-transfer-config",
+		`{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_both"}`,
+	}, server.Args, "and it is what the single-role golden case pins")
+}
+
+// TestSynthesizeModelDeploymentConnector_DiscriminatorTravelsInAnOwnedKey is the owned-key half.
+//
+// The discriminator is not a key of its own -- it is a field inside the vLLM transfer-config
+// document. That means the key a user would have to supply to overwrite it is already owned, so the
+// webhook already refuses it, and the refusal and the render read the same table.
+//
+// The owned name is DERIVED from the render rather than restated: the case finds which argument
+// changed between two kinds and asks whether THAT one is owned. Restating "--kv-transfer-config"
+// would keep passing if the discriminator ever moved to an argument nobody owns, which is exactly the
+// change this exists to catch.
+func TestSynthesizeModelDeploymentConnector_DiscriminatorTravelsInAnOwnedKey(t *testing.T) {
+	server, err := SynthesizeModelDeploymentConnector(connectorInputForKind(
+		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
+		workercore.ModelDeploymentRoleKindServer))
+	require.NoError(t, err)
+	prefill, err := SynthesizeModelDeploymentConnector(connectorInputForKind(
+		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
+		workercore.ModelDeploymentRoleKindPrefill))
+	require.NoError(t, err)
+
+	require.Equal(t, len(server.Args), len(prefill.Args),
+		"the kind changes a value, not the shape of the command line")
+	assert.Equal(t, server.Env, prefill.Env, "and it changes nothing in the environment")
+
+	var carriers []string
+	for i := range prefill.Args {
+		if prefill.Args[i] != server.Args[i] {
+			// The changed entry is a value; the key it belongs to is the flag before it.
+			carriers = append(carriers, ModelDeploymentArgName(prefill.Args[i-1]))
+		}
+	}
+
+	require.Len(t, carriers, 1, "exactly one argument carries the discriminator")
+	assert.True(t, ModelDeploymentOwnsArg(workercore.ModelDeploymentEngineVLLM, carriers[0]),
+		"%s carries the role discriminator and must be owned, or a user could supply a second one "+
+			"and no rule would say which won", carriers[0])
+}
+
+// TestSynthesizeModelDeploymentConnector_RoleTheEngineCannotBeTold covers the two ways a kind fails
+// to render, and neither may fall back to a plain server.
+//
+// A decoder configured as a server serves whole requests and looks healthy, which is the silent
+// wrong result the whole kind field exists to prevent.
+func TestSynthesizeModelDeploymentConnector_RoleTheEngineCannotBeTold(t *testing.T) {
+	_, err := SynthesizeModelDeploymentConnector(connectorInputForKind(
+		workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA,
+		workercore.ModelDeploymentRoleKindPrefill))
+	require.Error(t, err, "sglang has no prefill/decode equivalent, so it is refused rather than rendered")
+
+	_, err = SynthesizeModelDeploymentConnector(connectorInputForKind(
+		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, "router"))
+	require.ErrorContains(t, err, "router",
+		"a kind with no mapping is refused naming it, never rendered as a plain server")
+}
+
+// TestModelDeploymentConnector_ReachesThePodPerRole closes the gap the cases above leave open.
+//
+// Every one of them calls the synthesis directly, so all of them would still pass if the reconciler
+// stopped handing it the role's kind: the parameter would never enter the system under test, and
+// each role's Pod would carry the plain-server configuration while the tests stayed green. This one
+// runs the reconciler and reads the rendered Pods.
+//
+// The pool and the backend are in the fixture beside the Binding for the same reason: a converge
+// fixture carrying only the Binding resolves NO connection, and every claim about a connector then
+// holds vacuously.
+func TestModelDeploymentConnector_ReachesThePodPerRole(t *testing.T) {
+	md := twoRoleDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+		md.Spec.Roles[1].Kind = workercore.ModelDeploymentRoleKindDecode
+	})
+	cli := newModelDeploymentClient(md, newRenderInstanceType(),
+		newRenderBinding(), newRenderPool(), newRenderBackend())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	byRole := map[string]string{}
+	pods := replicaPods(t, cli)
+	for i := range pods {
+		pod := &pods[i]
+		// The operator owns the whole argv, so the synthesized arguments are folded into Command;
+		// the container carries no Args at all.
+		argv := pod.Spec.Containers[0].Command
+		at := slices.Index(argv, "--kv-transfer-config")
+		require.GreaterOrEqual(t, at, 0, "%s carries no transfer configuration at all", pod.Name)
+		byRole[modelDeploymentPodRole(pod)] = argv[at+1]
+	}
+
+	require.Len(t, byRole, 2)
+	assert.JSONEq(t,
+		`{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}`, byRole["prefill"])
+	assert.JSONEq(t,
+		`{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}`, byRole["decode"])
 }
 
 // TestSynthesizeModelDeploymentConnector_SGLangEnvironmentCarrier states the four properties that

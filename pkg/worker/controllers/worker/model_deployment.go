@@ -9,6 +9,7 @@ import (
 	core "k8s.io/api/core/v1"
 	node "k8s.io/api/node/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 	ctrlrecord "k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
@@ -123,6 +124,21 @@ func (r *ModelDeploymentReconciler) teardownModelDeployment(
 				}
 			}
 
+			// Deleting the replicas is not enough to make them leave. Kueue holds a finalizer on every
+			// Pod of a group it manages, and the group this operator builds is annotated as SERVING —
+			// which Kueue defines as a group that never finishes, so the terminal replicas are read as
+			// awaiting replacement and their finalizers are never released. The one path that does
+			// release them is the Workload being deleted.
+			//
+			// Nothing else breaks the cycle. That Workload's only owners are the very Pods that cannot
+			// leave, and they own it without a controller reference, so garbage collection waits for
+			// all of them; there is no replacement timeout to fall back on. Left alone the deployment
+			// stays in Deleting forever, which is what a run measured before this delete was added.
+			if err = r.deleteModelDeploymentGroupWorkload(ctx, md, pods); err != nil {
+				logger.Error(err, "delete group workload")
+				return ctrl.Result{}, err
+			}
+
 			logger.V(3).Info("replica deletion in progress; requeue in 2s", "replicas", len(pods))
 
 			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
@@ -211,10 +227,67 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		return ctrl.Result{}, err
 	}
 
+	// F10: a change to any role's replicas, or to the set of roles, moves the group's declared total,
+	// and Kueue refuses to compose a Workload for a group whose Pods disagree on it. So such a change
+	// is a REBUILD of the whole group rather than a per-replica rollout: while any Pod still declares
+	// the old total, the survivors are deleted and NOTHING is created.
+	//
+	// The create is what has to wait, and that is the whole point of the flag. Deleting alone would
+	// not be enough: a Pod that has been asked to terminate is still a member of the group until it
+	// actually goes, so adding the new replica beside it produces exactly the mixed-total state this
+	// exists to avoid -- and that state's symptom is no Workload at all, which reads like the
+	// operator having stopped rather than like a rollout in progress.
+	//
+	// The predicate reads the terminating Pods too, for the same reason.
+	resizing := modelDeploymentGroupIsResizing(md, actual)
+
+	// A DEPARTING REPLICA REBUILDS THE GROUP TOO, for a reason that is Kueue's rather than ours.
+	//
+	// Kueue holds a finalizer on every Pod of a group and releases it when the group finishes or when
+	// the Workload is deleted -- and a group annotated as serving, which every group here is, is one
+	// Kueue defines as never finished. So a replica asked to leave cannot leave, and the Workload that
+	// would release it is owned by that very replica without a controller reference, which puts
+	// garbage collection behind the same wall. Deleting a replica and waiting is a wait with no end,
+	// and it reads as a slow rollout rather than as a stop.
+	//
+	// Deleting that Workload is the way out, and it costs the group: Kueue answers by stopping every
+	// member. So the whole group comes down and is rebuilt, and any change that removes a replica --
+	// including a template edit that would once have replaced one Pod -- restarts every role.
+	//
+	// LEVEL-TRIGGERED ON THE DEPARTURE, not on this pass having issued it. A replica that is already
+	// GONE is not a departure, and must not be treated as one -- the group is merely short of its
+	// total then, and deleting its survivors would widen exactly the gap that keeps Kueue from
+	// composing a Workload.
+	//
+	// MOST DEPARTURES ARE NOT THIS OPERATOR'S DOING, which is what makes the cost above operational
+	// rather than theoretical. A node being drained, Kueue preempting for a higher-priority workload,
+	// and the kubelet evicting under pressure all delete a replica, and each therefore restarts every
+	// role of the deployment. On a cluster with preemption enabled that is a routine event, not an
+	// incident. It is also the only recovery available: the evicted Pod is held by Kueue's finalizer
+	// and cannot leave until the Workload does, so the group has to come down either way.
+	leaving := slices.ContainsFunc(actual, func(pod core.Pod) bool {
+		return pod.DeletionTimestamp != nil
+	})
+
+	// The survivors are deleted here rather than left to the stop Kueue performs when the Workload
+	// goes. Relying on that would make the group's teardown a side effect of another controller's
+	// answer to our delete, observable only on a cluster that runs it.
+	rebuild := resizing || leaving
+
 	for i := range actual {
 		pod := &actual[i]
 		if pod.DeletionTimestamp != nil {
 			// Already on its way out; a create issued now would race the delete and be rejected.
+			continue
+		}
+
+		if rebuild {
+			logger.Info("rebuilding the pod group", "pod", pod.Name, "resizing", resizing)
+			if err = r.Client.Delete(ctx, pod); err != nil && !kerrors.IsNotFound(err) {
+				logger.Error(err, "delete replica of the rebuilt group", "pod", pod.Name)
+				return ctrl.Result{}, err
+			}
+
 			continue
 		}
 
@@ -287,6 +360,31 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// window a departure event is for — a replica on its way out — no event and no status were
 	// written at all.
 	var requeue bool
+	if rebuild {
+		// The new group is created by the pass that finds the old one gone, in one go, exactly as a
+		// deployment that never had one is. Requeuing rather than returning keeps the status write
+		// below on the path, so the rebuild is visible while it happens.
+		requeue = true
+		desired = nil
+
+		// Without this the deletes above are requests nobody can honor: the replicas carry Kueue's
+		// finalizer, and this Workload is the only thing whose removal releases it.
+		if err = r.deleteModelDeploymentGroupWorkload(ctx, md, actual); err != nil {
+			logger.Error(err, "delete group workload")
+			return ctrl.Result{}, err
+		}
+	}
+	// A FAILED CREATE DOES NOT END THE PASS EITHER, and that is what makes the incomplete group a
+	// REPORTED state rather than a silent one. Returning here would skip the status write below, so
+	// the one pass that knows the group is short of its total would be the one pass that says
+	// nothing — and the symptom of an incomplete group is already silence: Pods exist, they are
+	// gated, and Kueue composes no Workload at all.
+	//
+	// The remaining creates are still issued, because the group needs every one of them before
+	// anything is admitted; stopping at the first failure would leave the group shorter than it had
+	// to be. The error is returned after the status is written, so the pass is still not treated as
+	// successful and the missing replicas are retried.
+	var createErr error
 	for name := range desired {
 		if err = r.Client.Create(ctx, desired[name]); err != nil {
 			if kerrors.IsAlreadyExists(err) {
@@ -299,8 +397,11 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 				continue
 			}
 			logger.Error(err, "create replica", "pod", name)
+			if createErr == nil {
+				createErr = err
+			}
 
-			return ctrl.Result{}, err
+			continue
 		}
 		logger.Info("created replica", "pod", name)
 	}
@@ -323,6 +424,12 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	if err = r.syncModelDeploymentStatus(ctx, md, actual, domain); err != nil {
 		logger.Error(err, "sync status")
 		return ctrl.Result{}, err
+	}
+
+	// Returned only now, so the pass is not treated as successful and the missing replicas are
+	// retried — but after the status has told a reader why the group is short.
+	if createErr != nil {
+		return ctrl.Result{}, createErr
 	}
 
 	if requeue {
@@ -377,15 +484,33 @@ func (r *ModelDeploymentReconciler) recordModelDeploymentRuntimeVersionSkew(
 	r.Recorder.Event(md, core.EventTypeWarning, modelDeploymentEventRuntimeVersionSkew, message)
 }
 
-// syncModelDeploymentService converges the one Service the deployment is reached through.
+// syncModelDeploymentService converges every Service the deployment owns: the one it is reached
+// through, and one per role.
 //
 // It aligns an existing Service rather than replacing it, because the allocated ClusterIP is state
-// the operator did not write and every client that resolved the name is still using.
+// the operator did not write and every client that resolved the name is still using. It is also why
+// a Service is NOT rebuilt when the group is: the group's shape decides which Pods exist, and the
+// address they answer on must survive that.
 func (r *ModelDeploymentReconciler) syncModelDeploymentService(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) error {
-	expected := renderModelDeploymentService(md)
+	expected := renderModelDeploymentServices(md)
 
+	wanted := sets.New[string]()
+	for _, svc := range expected {
+		wanted.Insert(svc.Name)
+		if err := r.syncOneModelDeploymentService(ctx, md, svc); err != nil {
+			return err
+		}
+	}
+
+	return r.pruneModelDeploymentServices(ctx, md, wanted)
+}
+
+// syncOneModelDeploymentService creates or aligns one rendered Service.
+func (r *ModelDeploymentReconciler) syncOneModelDeploymentService(
+	ctx context.Context, md *workercore.ModelDeployment, expected *core.Service,
+) error {
 	actual := new(core.Service)
 	err := r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(expected), actual, ctrlclix.WithoutQuorum)
 	if err != nil {
@@ -407,6 +532,46 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentService(
 	}
 
 	return r.Client.Update(ctx, actual)
+}
+
+// pruneModelDeploymentServices deletes the Services this deployment owns that the spec no longer
+// names.
+//
+// A role removed or renamed leaves its Service behind, and an owner reference does NOT collect it:
+// the deployment still exists, so nothing about the reference is stale. What the leftover does is
+// worse than occupy a name — it keeps resolving, to a selector no Pod matches now, so a caller
+// wired to a decoder that was removed gets connection refused rather than NXDOMAIN, and reads it as
+// the decoder being down.
+func (r *ModelDeploymentReconciler) pruneModelDeploymentServices(
+	ctx context.Context, md *workercore.ModelDeployment, wanted sets.Set[string],
+) error {
+	logger := ctrllog.FromContext(ctx)
+
+	svcList := new(core.ServiceList)
+	err := r.Client.List(ctx, svcList,
+		ctrlcli.InNamespace(md.Namespace),
+		ctrlcli.MatchingLabels{
+			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
+			modelDeploymentLabelKeyInstance: md.Name,
+		},
+		ctrlclix.WithoutQuorum)
+	if err != nil {
+		return err
+	}
+
+	for i := range svcList.Items {
+		svc := &svcList.Items[i]
+		if wanted.Has(svc.Name) || !modelDeploymentOwns(svc, md) {
+			continue
+		}
+
+		logger.Info("removing the service of a role no longer in the spec", "service", svc.Name)
+		if err = r.Client.Delete(ctx, svc); err != nil && !kerrors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // renderModelDeploymentPods renders every replica of every role, keyed by Pod name.
@@ -453,6 +618,10 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 			roleConnection := *connection
 			roleConnection.Engine = md.Spec.Engine
 			roleConnection.Manufacturer = instType.Status.Detail.Manufacturer
+			// The kind is the role's, and it is the only per-role term in the synthesized
+			// configuration: it is what makes a prefiller and a decoder two configurations rather
+			// than two copies of one, which is what the atomic admission of the pair is FOR.
+			roleConnection.Kind = role.Kind
 
 			connector, err := SynthesizeModelDeploymentConnector(roleConnection)
 			if err != nil {
