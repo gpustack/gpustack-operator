@@ -1,6 +1,6 @@
 # Spec: AMD GPU slicing shim — the library logical slicing needs, and the evidence it works
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 > **This spec ships the library, not the capability.** `libvrocm.so`'s sources, the feasibility gates that

@@ -1,6 +1,6 @@
 # Spec: ModelDeployment PD Roles — Cross-Role Atomic Admission
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 ## Summary

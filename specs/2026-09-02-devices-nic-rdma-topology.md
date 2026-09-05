@@ -1,6 +1,6 @@
 # Spec: `Devices` NIC/RDMA topology — the relation NFD cannot express
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 ## Summary
