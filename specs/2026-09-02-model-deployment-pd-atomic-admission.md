@@ -496,6 +496,17 @@ Acceptance:
 - The field is **not** expressible through `roles[].template`: a template carrying a nodeSelector is
   not possible (the type has no such field) and this spec does not add one.
 
+> **Whether the field survives is open.** On a pool derived the default way it has nothing to choose
+> between: an InstanceType's identity is model-level, so the queue offers flavors of one accelerator
+> model and the only key the field can legally carry is the one the pool would have assigned anyway.
+> It discriminates only inside a pool an administrator authored to span models.
+>
+> If per-role queues land instead (the route recorded in the heterogeneous-P/D issue, which takes
+> `roles[*].instanceType` off its must-agree rule), the role's own `instanceType` carries the hardware
+> choice and this field has no remaining reader. Withdrawing it is free for exactly as long as
+> `ModelDeployment` stays unreleased, so the decision is **not urgent and should not be made by
+> default** — but it is open, and the field's presence is not evidence that it is load-bearing.
+
 #### F5 — `roles[].kind`, and the connector term it selects
 
 **Why this is in the spec at all, stated as sharply as it can be: without it G1 is not falsifiable,
@@ -551,8 +562,10 @@ Acceptance:
   rejected naming the key, exactly as the other owned keys are.
 - A `kind` the current engine rendering has no term for is rejected at admission, naming the engine
   and the kind — not rendered and left to fail at container start.
-- `kind: server` in a multi-role deployment is rejected; `kind: server` in a single-role deployment is
-  the default and is accepted.
+- `kind: server` **beside a non-server kind** is rejected: a server serves whole requests by itself,
+  so the combination describes no arrangement. Several roles that are all `server` are accepted —
+  they are ordinary replicas of one shape, which is what a deployment written before disaggregation
+  existed looks like when it grows a second role.
 
 #### F6 — Gate 3 becomes per-role: a demand is judged against its own role's cards
 
