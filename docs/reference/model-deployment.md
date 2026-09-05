@@ -272,11 +272,20 @@ or a log line.
 > socket never bound. In the same project another undeclared switch fails loudly instead. One
 > switch's failure mode cannot be inferred from another's.
 
+> **Two rows are not reachable yet.** The per-replica reader this condition takes is an interface the
+> reconciler is built with, and no concrete implementation is wired: the operator therefore reads
+> every replica as giving no account. So the first `CacheActive` row and the `CacheOperationsFailing`
+> row below describe the contract rather than current behaviour — today `True` is reached only
+> through the domain-holds-data row, and a serving deployment whose every store operation fails reads
+> as `Unknown`/`NoObservationAvailable`. The rows are documented rather than removed because the
+> condition's semantics are what a consumer codes against, and they are marked rather than left
+> implicit because a table a reader trusts must not describe a state the operator cannot produce.
+
 | Value | Reason | Meaning |
 |---|---|---|
-| `True` | `CacheActive` | a ready replica reports succeeding store operations |
+| `True` | `CacheActive` | *(not reachable yet)* a ready replica reports succeeding store operations |
 | `True` | `CacheActive` | no replica gave an account, and the reuse domain holds data — this attributes to the domain, which is shared by every deployment on its Binding |
-| `False` | `CacheOperationsFailing` | a ready replica reports store operations of which **none** succeeded; the engine is serving without the cache |
+| `False` | `CacheOperationsFailing` | *(not reachable yet)* a ready replica reports store operations of which **none** succeeded; the engine is serving without the cache |
 | `Unknown` | `Unmanaged` | a role took over its command line, so the operator rendered no cache client |
 | `Unknown` | `NoReplicaReady` | no replica is ready, so no engine has an account to give |
 | `Unknown` | `NoObservationAvailable` | ready replicas gave no account and the domain reports nothing held |
@@ -294,10 +303,9 @@ or unavailable knobs, and that is a decision rather than an omission: a rollout 
 availability against **cache** as well as against capacity, and choosing that trade needs the hit-rate
 instrument this CR exists to build.
 
-The cost is real and worth stating. `kv_lease_duration` defaults to **30s**. It does not expire
-because a request queued for a long time, but it **does** expire when the engine's heartbeat is
-interrupted — preemption, eviction, restart — and under the default failure policy the requests still
-waiting on those blocks then fail.
+The cost is real and worth stating, and it rides on the block lease described under
+[What a cache changes about a workload](kv-cache-injection.md#what-a-cache-changes-about-a-workload): a lease survives a long queue and does **not**
+survive an interrupted heartbeat, which is what a departing replica is.
 
 So a departing replica costs its siblings the blocks it held. The deployment records an event naming
 the replica and the lease window on each of three paths — `ReplicaEvicted`, `ReplicaLeaving`,
@@ -326,18 +334,11 @@ InstanceType reconciler.
 
 ## Operating notes
 
-**A NetworkPolicy or port reservation must be a range, not a list.** The transfer engine picks its
-ports at random. One observed run bound 15002 and 15995; a second client took 16566 and 16655, none of
-them configured. A policy written as a port list will drop cache traffic intermittently.
-
-**This startup line is benign, and it is an `ERROR`:**
-
-```text
-E transfer_metadata.cpp:991] Local segment descriptor not found
-```
-
-It is expected on a client that mounts no segment of its own, which is exactly the role every replica
-here plays — the pool's members provide the storage. It needs no action and is not worth filing.
+**Two notes apply to every workload on a pool, replicas included, and are stated once under**
+[What a cache changes about a workload](kv-cache-injection.md#what-a-cache-changes-about-a-workload): the transfer engine binds ports nobody
+configured, so a NetworkPolicy or port reservation has to be a range rather than a list; and the
+`transfer_metadata.cpp` "Local segment descriptor not found" line at startup is an `ERROR` that is
+benign on a client mounting no segment of its own — which is what every replica here is.
 
 **A replica serves on port 8000** unless the role's template names its own container port. The
 Service in front of the replicas takes that port, and `status.endpoint` reports it.
