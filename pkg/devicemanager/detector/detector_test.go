@@ -276,6 +276,55 @@ func TestNodeWideDeviceGroups(t *testing.T) {
 	}
 }
 
+// TestNodeWideFabricDomain pins why the fabric labels are reduced over the node-wide groups as well.
+//
+// The domain key claims something about EVERY accelerator the node has. Reduced over one pass's own
+// groups it makes that claim on the strength of one manufacturer's hardware, so a node holding both a
+// super pod member and a GPU publishes the super pod's domain while the GPU is in no such domain at
+// all. Two things go wrong at once: the key promises co-location the node does not offer, and — since
+// the stale-key removal deletes a fabric key a pass did not report — the other manufacturer's pass
+// then deletes it, every pass, forever. Reducing over the whole node fixes both, because every writer
+// touching the object computes the same answer.
+func TestNodeWideFabricDomain(t *testing.T) {
+	inPod := device.DevicesGroup{
+		ID: "npu", Manufacturer: "ascend",
+		Accelerators: []device.Accelerator{{
+			ID:       "npu-0",
+			Topology: device.Topology{Fabric: &device.Fabric{Kind: "ub", ID: "7", MemberCount: 384}},
+		}},
+	}
+	// A GPU carries no fabric record at all, which is disagreement rather than absence of evidence.
+	gpu := device.DevicesGroup{
+		ID: "gpu", Manufacturer: "nvidia",
+		Accelerators: []device.Accelerator{{ID: "gpu-0"}},
+	}
+	own := device.DevicesGroupList{inPod}
+
+	// Over this pass's own groups the domain looks unanimous, because the only accelerator the pass
+	// can see is in it. This is the reading that was wrong.
+	assert.Equal(t,
+		map[string]string{
+			nodefeature.NodeFabricDomainLabelKey:  "ub-7",
+			nodefeature.NodeFabricMembersLabelKey: "384",
+		},
+		nodefeature.ConstructFabricNodeLabels(own),
+		"one pass alone sees unanimity")
+
+	// Over the whole node it is not unanimous, so no key is published at all.
+	assert.Empty(t,
+		nodefeature.ConstructFabricNodeLabels(
+			nodeWideDeviceGroups(own, device.DevicesGroupList{inPod, gpu}, sets.New("ascend"))),
+		"the node as a whole has no single domain")
+
+	// And the other manufacturer's pass, whose own groups hold no fabric either way, computes that
+	// same empty answer rather than a competing one.
+	assert.Empty(t,
+		nodefeature.ConstructFabricNodeLabels(
+			nodeWideDeviceGroups(device.DevicesGroupList{gpu},
+				device.DevicesGroupList{inPod, gpu}, sets.New("nvidia"))),
+		"both writers agree, so neither deletes the other's key")
+}
+
 func TestAlignDeviceGroupsOrder(t *testing.T) {
 	group := func(manufacturer, id string, indexes ...uint32) device.DevicesGroup {
 		accels := make([]device.Accelerator, 0, len(indexes))

@@ -39,10 +39,12 @@ const (
 // Both keys describe the node AS A WHOLE, so both are withheld unless the node has one unambiguous
 // answer. See NodeFabricDomainLabelKey for why a partial answer is worse than none here.
 //
-// It returns an empty map rather than nil for a node with no such fabric. Note that these labels are
-// ADD-ONLY at the object they are written to, exactly like the accelerator labels beside them and
-// unlike the RDMA set: a domain that stops being reported is overwritten when it changes, but not
-// removed when it disappears. A consumer that must not act on a stale domain reads `Devices`.
+// It returns an empty map rather than nil for a node with no such fabric, and an empty result is
+// MEANINGFUL at the object these are written to: the writer removes the keys under this prefix that
+// a pass did not report, so a node taken out of its super pod loses the label rather than keeping a
+// domain it has left. That is what makes withholding a decision instead of a silence — and it is why
+// the reduction below insists on the WHOLE node, since the removal is only sound when every writer
+// touching the object computes the same answer.
 func ConstructFabricNodeLabels(groups device.DevicesGroupList) map[string]string {
 	labels := map[string]string{}
 
