@@ -227,7 +227,10 @@ metadata:
   namespace: ${TEST_NS}
 spec:
   engine: vllm
-  engineVersion: "0.11.0"
+  # The newest vLLM the runner project publishes. Inert here -- the role names its image explicitly,
+  # so nothing is synthesized from this -- but a version no runner ships would read as the version
+  # under test, and this case tests nothing about an engine.
+  engineVersion: "0.27.1"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:
