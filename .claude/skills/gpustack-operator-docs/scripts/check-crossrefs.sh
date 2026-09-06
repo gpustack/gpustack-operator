@@ -84,16 +84,29 @@ function fence_closes(marker, open) {
 # before the label are still inside the parens, so the whole group is a citation and NOT a place
 # the pointer can land. Reading only the immediate neighbours classified "(see F6)" as a target,
 # which let a genuinely dangling "(F6)" elsewhere in the same file pass the gate.
-function in_paren_pointer(line, at, len,   post, j, ch) {
+function in_paren_pointer(line, at, len,   post, j, ch, seg) {
   post = substr(line, at + len, 1)
   if (post != ")") return 0
+  seg = ""
   for (j = at - 1; j >= 1; j--) {
     ch = substr(line, j, 1)
-    if (ch == "(") return 1
+    if (ch == "(") break
     if (ch == ")") return 0
-    if (ch !~ /[A-Za-z .,]/) return 0
+    if (ch !~ /[A-Za-z0-9 .,]/) return 0
+    seg = ch seg
   }
-  return 0
+  if (j < 1) return 0
+  if (seg == "") return 1
+
+  # More than one label can share a paren group -- "(T24 and T21)" is two citations, and reading
+  # only the immediate neighbours classified the second one as a target.
+  #
+  # But "MetaX (C500, C550)" is a list of model names, and those are lexically identical to labels.
+  # What separates the two is a WORD that is not itself a label: "and", "see", "per". Without one,
+  # the neighbours are just more names -- and accepting them reports every hardware list in this
+  # corpus as a dangling pointer (measured: A30, H100, C550 and six more).
+  gsub(/[A-Z]{1,2}[0-9]+[a-z]?/, " ", seg)
+  return (seg ~ /[A-Za-z][A-Za-z]/)
 }
 { lines[FNR] = $0 }
 END {

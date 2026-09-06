@@ -174,6 +174,44 @@ else
 fi
 
 echo
+echo "=== rule 1: two labels in one paren group are both pointers ==="
+# "(T24 and T21)" is two citations. Reading only the immediate neighbours made the second one a
+# target, so a dangling first one passed the gate. Both shapes are in the corpus.
+build
+rm "$TREE/specs/dangling.md"
+cat > "$TREE/specs/pair.md" <<'EOF'
+# Spec: Pair
+
+The rebase happened twice on the same branch (Y8 and Z9), each time for a patch.
+
+#### Y8 - the one that exists
+
+Content.
+EOF
+run
+if printf '%s' "$out" | grep -q 'pair.md.*(Z9) appears on no other line'; then
+  pass "the second label in \"(Y8 and Z9)\" is a pointer, not a target"
+else
+  fail "(Z9) was masked by sharing a paren group with (Y8) -- got: $out"
+fi
+
+echo
+echo "=== rule 1: a list of model names in one paren group is NOT a citation ==="
+# The counterweight to the case above, and the reason the rule keys on a connective WORD rather
+# than on "another label is nearby": model names are lexically identical to labels. Widening the
+# scan to accept digits reported A30, H100 and C550 in this corpus.
+build
+rm "$TREE/specs/dangling.md"
+printf '# Spec: Vendors\n\nSupported: MetaX (C500, C550), NVIDIA (A100 / H100), Hygon (Z100, Z100L).\n' \
+  > "$TREE/specs/vendors.md"
+run
+if printf '%s' "$out" | grep -qE 'vendors.md.*\((C550|H100|Z100L)\)'; then
+  fail "a model name in a list was read as a dangling pointer -- got: $out"
+else
+  pass "(C500, C550) and (A100 / H100) are lists, not citations"
+fi
+
+echo
 echo "=== rule 2: the cited section must contain the figure as a WORD ==="
 # "someone" contains "one"; a substring match made it satisfy a claim counting "one".
 build
