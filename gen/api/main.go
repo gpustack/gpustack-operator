@@ -27,6 +27,40 @@ func main() {
 	}
 }
 
+// resolveProjectDir turns the working directory into the path the generators may write
+// against, or refuses.
+//
+// The generators compute their output base by trimming projectModule off this path, so a
+// directory that does not end in it makes the trim a no-op and sends every generator one
+// module path too shallow. That failure is not clean: go-to-protobuf rewrites the
+// generated files before anything notices the path is wrong, so the refusal has to happen
+// above the first write.
+//
+// Two details carry the whole check:
+//
+//   - the path is resolved first, because os.Getwd can return the logical $PWD while the
+//     Go toolchain follows symlinks. A checkout reached through a link named after the
+//     module path would pass a check on the unresolved path and still fail underneath.
+//   - the separator is part of the suffix, making it a directory boundary rather than a
+//     string tail: "/tmp/mygpustack.ai/gpustack" ends in the module path, and trimming it
+//     yields "/tmp/my" -- exactly the wrong-tree write this exists to stop.
+func resolveProjectDir(pwd string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(pwd)
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory %q: %w", pwd, err)
+	}
+
+	if !strings.HasSuffix(filepath.ToSlash(resolved), "/"+projectModule) {
+		return "", fmt.Errorf(
+			"working directory %q does not end in the module import path %q: "+
+				"the generators derive their output base by trimming it off, so running here "+
+				"would write to the wrong tree; run from a checkout whose resolved path ends in %[2]q",
+			resolved, projectModule)
+	}
+
+	return resolved, nil
+}
+
 func generate() error {
 	// Prepare.
 	pwd, err := os.Getwd()
@@ -34,18 +68,10 @@ func generate() error {
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
-	// REFUSE BEFORE WRITING ANYTHING. The output base is computed by trimming
-	// projectModule off this path, so on a directory that does not end in it the trim is
-	// a no-op and every generator writes one module path too shallow. That is not a clean
-	// failure: go-to-protobuf rewrites the generated files before it reaches the point
-	// where the bad path is noticed, leaving a tree whose damage only shows up in the
-	// next `git diff`. The check has to happen here, above the first write.
-	if !strings.HasSuffix(filepath.ToSlash(pwd), projectModule) {
-		return fmt.Errorf(
-			"working directory %q does not end in the module import path %q: "+
-				"the generators derive their output base by trimming it off, so running here "+
-				"would write to the wrong tree; run from a checkout whose real path ends in %[2]q",
-			pwd, projectModule)
+	// REFUSE BEFORE WRITING ANYTHING, and use the resolved path for everything after.
+	pwd, err = resolveProjectDir(pwd)
+	if err != nil {
+		return err
 	}
 
 	header, err := os.ReadFile(filepath.Join(pwd, "/hack/boilerplate/go.txt"))
