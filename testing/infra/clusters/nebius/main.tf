@@ -30,9 +30,10 @@ locals {
         os            = var.cpu_instance_types.os
         preemptible   = false
         mig           = false
-        # Nothing logs in to the CPU node, and a public address is a quota'd resource
-        # (vpc.ipv4-address.public.count), so this group does not take one.
-        public_ip = false
+        # Defaults to false: the accelerator tests drive GPU nodes, not this one, and a public
+        # address is a quota'd resource (vpc.ipv4-address.public.count). Turn it on for the one
+        # workflow that needs inbound reach -- building images on the node itself.
+        public_ip = var.cpu_instance_types.public_ip
         gpu       = null
       }
     },

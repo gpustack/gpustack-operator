@@ -22,12 +22,23 @@ variable "name_prefix" {
 
 variable "release" {
   # Named "release" to match clusters/k3s and clusters/eks. Only "<major>.<minor>" is accepted
-  # (e.g. "1.33"). Nebius refuses a version within a month of its end of life -- the create call
+  # (e.g. "1.35"). Nebius refuses a version within a month of its end of life -- the create call
   # fails with "k8s version <x> is deprecated and cannot be used" -- so this default tracks a
   # version that is still current, not the oldest one that works.
-  description = "Kubernetes version for the cluster control plane and node groups, e.g. '1.33'."
+  #
+  # To find the current upper bound, ask the compatibility matrix for a candidate version:
+  #
+  #   nebius mk8s v1 node-group get-compatibility-matrix \
+  #     --cluster-kubernetes-version 1.36 --format json
+  #
+  # A version Nebius knows returns a populated "versions" array; one it does not returns the
+  # empty object {}. Read the BODY: the exit code is 0 either way, so a check that tests only
+  # the status will happily pick a version that cannot be created. That query does not say
+  # whether a known version is still creatable, though -- it answers for deprecated versions
+  # just as happily -- so it gives the ceiling, not the floor.
+  description = "Kubernetes version for the cluster control plane and node groups, e.g. '1.35'."
   type        = string
-  default     = "1.33"
+  default     = "1.35"
 }
 
 variable "ssh_public_key" {
@@ -67,12 +78,19 @@ variable "node_boot_disk_type" {
 # The (singular) CPU node group's shape, mirroring clusters/eks's cpu_instance_types. No
 # image_family: unlike a standalone compute VM (computes/nebius), the mk8s node template picks
 # its image from `os` alone for a driverless (CPU) platform.
+#
+# public_ip gives the node a public IPv4, which is what makes it reachable over SSH. It defaults
+# to false because the accelerator tests drive GPU nodes, not this one, and every address is
+# charged against the project's vpc.ipv4-address.public.count quota. Set it to true for the one
+# workflow that does need inbound reach: building images on the node itself. Dropping the address
+# does not cost the node its outbound internet (see README), so pulls work either way.
 variable "cpu_instance_types" {
-  description = "Instance type for the CPU node group: platform/preset (see the region table above) plus os."
+  description = "Instance type for the CPU node group: platform/preset (see the region table above), os, and whether the node takes a public IPv4 (public_ip, default false; true makes it SSH-reachable at one public-address quota unit)."
   type = object({
-    platform = string
-    preset   = string
-    os       = string
+    platform  = string
+    preset    = string
+    os        = string
+    public_ip = optional(bool, false)
   })
   default = { platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }
 }
@@ -93,7 +111,8 @@ variable "cpu_instance_types" {
 # public_ip gives the group's nodes a public IPv4, which is what makes them reachable over SSH —
 # how the hardware-partition tests toggle MIG on the card — and so defaults to true for a GPU
 # group. Each address is charged against the project's vpc.ipv4-address.public.count quota, so set
-# it to false on a GPU group nobody logs in to; the CPU group never takes one (see README).
+# it to false on a GPU group nobody logs in to; the CPU group has its own flag, off by default
+# (see README).
 variable "gpu_instance_types" {
   description = "GPU node groups keyed by group name (each becomes gpu-<name>). platform+preset are required; os and drivers_preset default to the newest match from `nebius mk8s node-group get-compatibility-matrix` for var.release; preemptible defaults to false; mig defaults to whether the platform supports NVIDIA MIG; public_ip defaults to true, giving the nodes an SSH-reachable public IPv4 at the cost of one public-address quota unit each."
   type = map(object({
