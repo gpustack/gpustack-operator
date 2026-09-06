@@ -1,6 +1,7 @@
-# This workflow enforces the documentation contract on pull requests/pushes that
-# touch markdown. ci.yml deliberately ignores "docs/**" and "**.md", and GitHub's
-# path filters are per-workflow rather than per-job, so the check needs its own.
+# This workflow enforces the documentation and spec contracts on pull requests/pushes that touch
+# markdown, or that move a top-level test name a spec's Verify line points at. ci.yml deliberately
+# ignores "docs/**" and "**.md", and GitHub's path filters are per-workflow rather than per-job, so
+# the check needs its own.
 
 name: Docs
 
@@ -22,7 +23,10 @@ on:
       - "docs/**"
       # README.md links ./LICENSE, and the script resolves non-markdown link targets too.
       - "LICENSE"
-      - ".claude/skills/gpustack-operator-docs/scripts/check-docs.sh"
+      # A renamed test breaks a spec's `go test -run` line without touching any markdown, so the
+      # check that catches it has to run when the test names move, not only when prose moves.
+      - "**/*_test.go"
+      - ".claude/skills/gpustack-operator-docs/scripts/*.sh"
       - "hack/lint.sh"
       - ".github/workflows/docs.yml"
   pull_request:
@@ -34,7 +38,10 @@ on:
       - "docs/**"
       # README.md links ./LICENSE, and the script resolves non-markdown link targets too.
       - "LICENSE"
-      - ".claude/skills/gpustack-operator-docs/scripts/check-docs.sh"
+      # A renamed test breaks a spec's `go test -run` line without touching any markdown, so the
+      # check that catches it has to run when the test names move, not only when prose moves.
+      - "**/*_test.go"
+      - ".claude/skills/gpustack-operator-docs/scripts/*.sh"
       - "hack/lint.sh"
       - ".github/workflows/docs.yml"
 
@@ -49,7 +56,10 @@ jobs:
           persist-credentials: false
       # Links and anchors, the "## Contents" list, each page's header block and
       # footer, the docs/README.md index, the prose paragraph cap, the page line
-      # and "##" caps, and every index label against its page's H1.
+      # and "##" caps, every index label against its page's H1 -- and, over specs/,
+      # the Status word, every `go test -run` that must select something, and
+      # cross-references. The two self-tests run first: they are what establishes
+      # that the rules can fail at all.
       # The script's portability floor is onetrueawk, which is what macOS ships; ubuntu-24.04's default
       # awk is gawk and would silently accept a gawk-only extension no macOS contributor could run.
       # This pins the implementation, not the version: noble's original-awk is newer (2023-11-27) than

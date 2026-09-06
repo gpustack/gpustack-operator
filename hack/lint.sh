@@ -15,10 +15,31 @@ function chart_lint() {
 }
 
 function docs_lint() {
-  # The documentation contract: links and anchors, each page's Contents/header/footer, the
-  # docs/README.md index and its labels, and the three size caps. The check itself is bash and awk
-  # over the corpus — no cluster, and no golangci-lint pass — so it runs in a second or two.
-  bash "${ROOT_DIR}/.claude/skills/gpustack-operator-docs/scripts/check-docs.sh" "${ROOT_DIR}"
+  local scripts="${ROOT_DIR}/.claude/skills/gpustack-operator-docs/scripts"
+  local failed=()
+
+  # The two self-tests run FIRST and are part of the gate. Each builds a throwaway tree, breaks one
+  # thing, and asserts the checker names it — because a checker that has only ever been seen to
+  # pass cannot be told apart from one that cannot fail, which is the defect half of these rules
+  # exist to catch.
+  #
+  # Then the three contracts, all of them, before the verdict: links and anchors, each page's
+  # Contents/header/footer, the docs/README.md index and the size caps (check-docs); the spec
+  # Status word and every `go test -run` that names a test (check-specs); and cross-references
+  # (check-crossrefs). Every one is bash and awk over the corpus — no cluster, no golangci-lint
+  # pass — so running all five costs a few seconds.
+  #
+  # Stopping at the first failure would cost one CI round per finding, which is the same reason
+  # docs.yml reports every broken external URL rather than the first.
+  for check in check-specs-selftest check-crossrefs-selftest check-docs check-specs check-crossrefs; do
+    if ! bash "${scripts}/${check}.sh" "${ROOT_DIR}"; then
+      failed+=("${check}")
+    fi
+  done
+
+  if [[ ${#failed[@]} -gt 0 ]]; then
+    gpustack::log::fatal "docs lint failed: ${failed[*]}"
+  fi
 }
 
 function lint() {
