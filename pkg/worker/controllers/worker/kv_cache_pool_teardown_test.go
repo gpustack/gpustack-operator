@@ -878,6 +878,109 @@ func TestKVCachePoolTeardown_AMissingLedgerIsAlreadyReleased(t *testing.T) {
 	}
 }
 
+// newManagedReconcileBackend is the backend issue 164 reports on: a MANAGED one running with
+// multi-tenancy, publishing an admin address a test's fake master answers on.
+//
+// The status is written by hand rather than by a pass of the backend's own reconciler, because that
+// pass derives the address from the object's name — it would publish the leader Service's DNS name,
+// and every read against it would leave this machine looking for a host that does not exist.
+func newManagedReconcileBackend(name, admin string) *workercore.KVCacheBackend {
+	kvcb := &workercore.KVCacheBackend{
+		ObjectMeta: meta.ObjectMeta{Name: name},
+		Spec: workercore.KVCacheBackendSpec{
+			Type:  "Mooncake",
+			Image: "example.com/mooncake:v0",
+			Connection: workercore.KVCacheBackendConnection{
+				Managed: &workercore.KVCacheBackendManaged{
+					Leader: workercore.KVCacheBackendLeader{
+						Replicas:     ptr.To[int32](1),
+						MultiTenancy: true,
+					},
+					Members: []workercore.KVCacheBackendMember{{
+						NodeSelector:      map[string]string{"kvcache-dram": "true"},
+						Medium:            "DRAM",
+						CapacityPerMember: resource.MustParse("500Gi"),
+					}},
+				},
+			},
+		},
+	}
+	kvcb.Status.Endpoints = []workercore.KVCacheBackendEndpoint{
+		{Name: workercore.KVCacheBackendEndpointNameClient, Address: "mc.example:50051"},
+		{Name: workercore.KVCacheBackendEndpointNameAdmin, Address: admin},
+	}
+	systemmeta.Lock(kvcb)
+	return kvcb
+}
+
+// TestKVCachePoolTeardown_MultiTenancyWithdrawnMidFlightStillDeletesBothObjects walks issue 164's own
+// reproduction to its end, with BOTH reconcilers on one cluster.
+//
+// The per-rule tests above each pin one exit. This one asserts the property the reproduction is
+// written to check and none of them covers: the two teardowns COMPOSE. The pool releases, which is
+// what clears the claim, which is what lets the backend's own teardown past the refusal it was
+// holding on.
+func TestKVCachePoolTeardown_MultiTenancyWithdrawnMidFlightStillDeletesBothObjects(t *testing.T) {
+	ctx := context.Background()
+	master := newFakeMaster()
+	address := master.start(t)
+
+	kvcb := newManagedReconcileBackend("mooncake-dram", address)
+	poolReconciler, cli := newReconciler(
+		kvcb,
+		newTestKVCachePool("shared", "mooncake-dram"),
+		newBoundBinding("team-a", "chat", "shared", "team-a-chat", resource.MustParse("20Ti")),
+	)
+	backendReconciler := &KVCacheBackendReconciler{Client: cli, AdminHTTP: newAdminHTTPClient()}
+	reconcileBackend := func(t *testing.T) {
+		t.Helper()
+		_, err := backendReconciler.Reconcile(ctx, ctrl.Request{
+			NamespacedName: ctrlcli.ObjectKey{Name: "mooncake-dram"},
+		})
+		require.NoError(t, err)
+	}
+
+	// Both reach the state the reproduction starts from: the pool holds a ceiling on the master and
+	// the backend records the claim.
+	reconcilePool(t, poolReconciler, "shared")
+	require.Contains(t, master.held(), "team-a-chat")
+	require.NotEmpty(t, readBackend(t, cli, "mooncake-dram").Status.UsedBy)
+
+	// Multi-tenancy is turned off on the live backend. The webhook refuses this edit now, so what is
+	// written here is the object an operator ALREADY has — the state the refusal cannot reach back
+	// into — and the master answers its ledger accordingly.
+	live := readBackend(t, cli, "mooncake-dram")
+	live.Spec.Connection.Managed.Leader.MultiTenancy = false
+	require.NoError(t, cli.Update(ctx, live))
+	master.refuse(409, `{"success":false,"error_code":-1011,"error_message":"UNAVAILABLE_IN_CURRENT_MODE"}`)
+
+	deleteObject(t, cli, readBinding(t, cli, "team-a", "chat"))
+	deleteObject(t, cli, readPool(t, cli, "shared"))
+	require.NoError(t, cli.Delete(ctx, readBackend(t, cli, "mooncake-dram")))
+
+	// The backend goes first and is refused, naming what to go and remove. That refusal is step 2 of
+	// the reproduction, and it is correct: what was wrong is that it never ended.
+	reconcileBackend(t)
+	got := readBackend(t, cli, "mooncake-dram")
+	require.True(t, KVCacheBackendConditionDeletable.IsFalse(got))
+	require.Contains(t, KVCacheBackendConditionDeletable.GetMessage(got), "KVCachePool/shared")
+
+	reconcilePool(t, poolReconciler, "shared")
+	assert.True(t, kerrors.IsNotFound(
+		cli.Get(ctx, ctrlcli.ObjectKey{Name: "shared"}, new(workercore.KVCachePool))),
+		"the pool's finalizer completes against a master that holds no ledger")
+	assert.True(t, bindingIsGone(t, cli, "team-a", "chat"),
+		"and takes the binding it was holding with it")
+
+	// Two passes, because the backend releases only once the workloads it rendered are gone rather
+	// than once their deletes were accepted.
+	reconcileBackend(t)
+	reconcileBackend(t)
+	assert.True(t, kerrors.IsNotFound(
+		cli.Get(ctx, ctrlcli.ObjectKey{Name: "mooncake-dram"}, new(workercore.KVCacheBackend))),
+		"and the backend drains on its own once nothing claims it")
+}
+
 // conditionReason reads the reason off a condition, which the accessor does not expose.
 func conditionReason(t *testing.T, obj any, ct kubeapistatus.ConditionType) string {
 	t.Helper()

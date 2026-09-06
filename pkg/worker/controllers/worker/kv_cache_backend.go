@@ -1961,6 +1961,9 @@ func (r *KVCacheBackendReconciler) teardownKVCacheBackend(
 	if len(live) > 0 {
 		logger.V(2).Info("kv cache backend is in use; holding the lock",
 			"usedBy", len(live))
+		if err := r.syncHeldKVCacheBackendWorkloads(ctx, kvcb); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, r.syncStatus(ctx, kvcb, r.computeStatus(kvcb, live))
 	}
 
@@ -1999,6 +2002,44 @@ func (r *KVCacheBackendReconciler) teardownKVCacheBackend(
 	}
 	logger.V(2).Info("released kv cache backend")
 	return ctrl.Result{}, nil
+}
+
+// syncHeldKVCacheBackendWorkloads converges the rendered workloads of a backend whose teardown is
+// HELD by a live consumer.
+//
+// A held teardown is still a serving backend: the deletion is refused for as long as something
+// consumes it, so its spec still governs what runs. Without this, a spec edit made after the deletion
+// timestamp lands is accepted by the API server and reaches nothing — the Deployment keeps the args of
+// the pass before, and the leader pod never restarts. That is the only exit from a consumer whose own
+// release depends on how the master is configured: the edit the operator is told to make would have
+// no path to the process it has to reach.
+//
+// It converges what this backend has ALREADY rendered and starts nothing new, which is what the
+// published addresses decide: a serving pass publishes them only after both leader objects converged,
+// so a backend carrying none never rendered. Rendering there would create a Deployment, a Service and
+// a member group for an object on its way out, and the pass after this one would delete them again.
+//
+// A missing image is skipped rather than returned, on the same terms as the serving path: the image
+// comes partly from an editable setting, so an admin clearing it must not fail a teardown that is
+// otherwise proceeding.
+func (r *KVCacheBackendReconciler) syncHeldKVCacheBackendWorkloads(
+	ctx context.Context, kvcb *workercore.KVCacheBackend,
+) error {
+	if kvcb.Spec.Connection.Managed == nil || len(kvcb.Status.Endpoints) == 0 {
+		return nil
+	}
+
+	image, err := resolveKVCacheBackendImage(ctx, kvcb)
+	if err != nil {
+		ctrllog.FromContext(ctx).Error(err,
+			"resolve kv cache backend image while its teardown is held")
+		return nil
+	}
+
+	if err = r.syncLeaderWorkload(ctx, kvcb, image); err != nil {
+		return err
+	}
+	return r.syncMemberWorkloads(ctx, kvcb, image)
 }
 
 // deleteRenderedWorkloads removes everything a managed backend renders, and is a no-op for an
