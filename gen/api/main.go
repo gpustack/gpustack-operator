@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	klog "k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
@@ -12,6 +13,12 @@ import (
 	"gpustack.ai/gpustack/gen/api/builder"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
+
+// projectModule is this repository's module import path. The generators derive their
+// output base by trimming it off the working directory (see builder.Config.Project), so
+// it is both the value they are configured with and the suffix the working directory has
+// to carry -- one constant for both, because a mismatch between them is silent.
+const projectModule = "gpustack.ai/gpustack"
 
 func main() {
 	err := generate()
@@ -27,6 +34,20 @@ func generate() error {
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
+	// REFUSE BEFORE WRITING ANYTHING. The output base is computed by trimming
+	// projectModule off this path, so on a directory that does not end in it the trim is
+	// a no-op and every generator writes one module path too shallow. That is not a clean
+	// failure: go-to-protobuf rewrites the generated files before it reaches the point
+	// where the bad path is noticed, leaving a tree whose damage only shows up in the
+	// next `git diff`. The check has to happen here, above the first write.
+	if !strings.HasSuffix(filepath.ToSlash(pwd), projectModule) {
+		return fmt.Errorf(
+			"working directory %q does not end in the module import path %q: "+
+				"the generators derive their output base by trimming it off, so running here "+
+				"would write to the wrong tree; run from a checkout whose real path ends in %[2]q",
+			pwd, projectModule)
+	}
+
 	header, err := os.ReadFile(filepath.Join(pwd, "/hack/boilerplate/go.txt"))
 	if err != nil {
 		return err
@@ -34,7 +55,7 @@ func generate() error {
 
 	cfg := builder.Config{
 		ProjectDir:    pwd,
-		Project:       "gpustack.ai/gpustack",
+		Project:       projectModule,
 		ClientsName:   "kubeclients",
 		ClientSetName: "kubernetes",
 		Header:        stringx.FromBytes(ptr.To(bytes.TrimSpace(header))),
