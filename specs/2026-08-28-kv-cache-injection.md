@@ -837,11 +837,13 @@ cannot be rendered at admission time.
   result this spec refuses everywhere else. What SGLang's equivalent knob is belongs to the
   prefill/decode spec, and is recorded in Open Questions.
 - `vllm-ascend` uses the vLLM synthesis. It has its own enum value so the two can diverge later without
-  an API change. It needs **no transport special-casing of its own**: `Ascend` is already one of the
-  values the backend's `spec.transport.protocol` enum accepts, and `mooncake.MemberProtocol` already
-  maps it to the artifact's `ascend`. So this engine resolves its protocol through the same D4 map as
-  every other engine, and what Ascend additionally needs — the CANN runtime present in the container —
-  is an image concern this webhook cannot see and does not judge.
+  an API change. Its transport needs **no spelling of its own**: `Ascend` is already one of the values
+  the backend's `spec.transport.protocol` enum accepts, and `mooncake.MemberProtocol` already maps it to
+  the artifact's `ascend`, so this engine resolves its protocol through the same D4 map as every other
+  engine. It does have a **transport requirement**: its store backend accepts `ascend` and raises on
+  every other value, so the synthesis refuses that pair rather than rendering a container that cannot
+  start — see the transport bullet under Open Questions. What Ascend additionally needs — the CANN
+  runtime present in the container — is an image concern this webhook cannot see and does not judge.
 
 #### F6 — Refuse rather than guess
 
@@ -1848,8 +1850,16 @@ declaration through the workload CR and through this webhook produces the same c
   published `-npu` wheel ships `ascend_transport.so` as a separate shared library linking
   `libascendcl.so`, so `ascend` is one of the transports the backend spec's `transport.protocol` enum
   accepts. What Ascend needs is the CANN runtime present in the container, which is an image concern.
-  `vllm-ascend` therefore resolves to `ascend` where the backend offers it and `tcp` otherwise, using
-  the same enum value the backend spec defines rather than a spelling of its own.
+  `vllm-ascend` therefore uses the same enum value the backend spec defines rather than a spelling of
+  its own — and it uses **only** that one: its store backend accepts `ascend` and raises
+  `NotImplementedError` on every other transport before the container serves a request. So there is no
+  fallback to `tcp`. A pool offering anything else is **refused**, and the refusal happens in the
+  synthesis both surfaces share rather than at either caller, because the transport and the engine meet
+  there and nowhere earlier. The requirement is recorded per engine in
+  `inject.engineTransportConstraint`, beside the version and source line it was measured at.
+  The condition worth stating separately: the failing pool is not one somebody misconfigured.
+  `spec.transport.protocol` defaults to `Auto`, which resolves to `tcp`, so a pool left entirely at its
+  defaults is exactly the one this engine cannot use.
 - **Does the workload CR use this webhook, or render its configuration directly?** Both must produce
   identical results; if they diverge, the same declaration gives users different behaviour. Whichever is
   chosen, the equivalence needs the test named in the Test Plan's e2e section.

@@ -18,11 +18,113 @@ func TestEngines_AreAllKnown(t *testing.T) {
 			assert.NotEmpty(t, facts.Version,
 				"every entry records the version it was measured at, or a later reader cannot tell "+
 					"whether the fact is still current")
-			assert.NotEmpty(t, facts.Source,
+			assert.NotEmpty(t, facts.TenantSource,
 				"every entry names the source line the fact was read from, so the discriminating "+
 					"check can be re-run without finding the file again")
 		})
 	}
+}
+
+// TestEngines_HaveMeasuredTransportConstraint is the transport table's counterpart to the pin above.
+//
+// An engine with no entry is LET THROUGH by checkTransport, so a missing row is not a compile error
+// and not a refusal -- it is silently the permissive answer. This is what makes the omission visible.
+//
+// The version and the source line are required for the same reason they are on the tenant table, and
+// here they carry more weight: an entry whose Required is empty says "this engine refuses nothing",
+// and without a source that is indistinguishable from a row nobody measured.
+func TestEngines_HaveMeasuredTransportConstraint(t *testing.T) {
+	var sawConstrained, sawUnconstrained bool
+
+	for _, engine := range Engines() {
+		facts, ok := engineTransportConstraint[engine]
+		t.Run(string(engine), func(t *testing.T) {
+			require.True(t, ok, "engine %q is rendered but its transport requirement is unmeasured, "+
+				"which checkTransport reads as accepting everything", engine)
+			assert.NotEmpty(t, facts.Version,
+				"the release the answer was read from, or a later reader cannot tell whether it is "+
+					"still current")
+			assert.NotEmpty(t, facts.Source,
+				"the source line the answer was read at -- required even when Required is empty, "+
+					"since an unsourced empty is how 'refuses nothing' becomes 'nobody looked'")
+		})
+
+		if facts.Required == "" {
+			sawUnconstrained = true
+		} else {
+			sawConstrained = true
+		}
+	}
+
+	assert.True(t, sawConstrained && sawUnconstrained,
+		"both answers must appear, or this table pins a constant rather than a per-engine measurement")
+}
+
+// TestCheckTransport covers the rule in both directions, and the positive rows are not padding.
+//
+// With only the refusals, a checkTransport that returned an error unconditionally would pass every
+// case: the negative rows cannot tell a measured refusal from a broken one. The engine and the
+// transport are varied SEPARATELY for the same reason -- vllm-ascend is admitted on one transport and
+// refused on three, and tcp is admitted on two engines and refused on one, so neither column can be
+// the whole answer.
+func TestCheckTransport(t *testing.T) {
+	testCases := []struct {
+		name     string
+		engine   Engine
+		protocol string
+		accepted bool
+	}{
+		// THE CASE #172 IS ABOUT, and the condition is not that anybody chose tcp: Auto is the
+		// schema's default and the backend resolves it to this value, so a pool left alone lands here.
+		{name: "vllm-ascend refuses the transport a default pool offers", engine: EngineVLLMAscend, protocol: "tcp"},
+		{name: "vllm-ascend refuses rdma", engine: EngineVLLMAscend, protocol: "rdma"},
+		{name: "vllm-ascend refuses hip", engine: EngineVLLMAscend, protocol: "hip"},
+		// The positive baseline for the constrained engine. Without it a refusal keyed on the engine
+		// alone -- ignoring the transport entirely -- would satisfy every row above.
+		{name: "vllm-ascend accepts ascend", engine: EngineVLLMAscend, protocol: "ascend", accepted: true},
+		// The positive baseline for the default pool: the ordinary deployment must stay admitted, and
+		// this is the row that fails if the rule is ever keyed on the transport alone.
+		{name: "vllm accepts the transport a default pool offers", engine: EngineVLLM, protocol: "tcp", accepted: true},
+		{name: "vllm accepts ascend", engine: EngineVLLM, protocol: "ascend", accepted: true},
+		{name: "sglang accepts the transport a default pool offers", engine: EngineSGLang, protocol: "tcp", accepted: true},
+		// SGLang compares protocol to "rdma" and carries on either way, so this row is the one that
+		// would break if a re-check ever mistook that comparison for a requirement.
+		{name: "sglang accepts rdma", engine: EngineSGLang, protocol: "rdma", accepted: true},
+		// An unmeasured engine claims less. Render refuses it earlier for having no facts at all, so
+		// this pins that the permissive direction is the one the missing entry lands on.
+		{name: "an unmeasured engine is not refused here", engine: Engine("mystery-engine"), protocol: "tcp", accepted: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkTransport(tc.engine, tc.protocol)
+			if tc.accepted {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Equal(t, ReasonTransportUnsupported, reasonOf(t, err))
+		})
+	}
+}
+
+// TestCheckTransport_MessageNamesThePair pins the half a reason code cannot carry.
+//
+// Neither half of the pair is wrong on its own -- the transport is a legal enum value and the engine
+// is a legal engine -- so a message naming only one of them sends its reader to change the wrong
+// object. It also has to name the value that WOULD work, since "unsupported" alone leaves a user
+// guessing between four transports.
+func TestCheckTransport_MessageNamesThePair(t *testing.T) {
+	err := checkTransport(EngineVLLMAscend, "tcp")
+	require.Error(t, err)
+
+	assert.Contains(t, err.Error(), string(EngineVLLMAscend), "the engine half of the pair")
+	assert.Contains(t, err.Error(), `"tcp"`, "the transport half of the pair")
+	assert.Contains(t, err.Error(), `"ascend"`, "and the value that would work")
+	assert.Contains(t, err.Error(), "KVCacheBackend",
+		"the transport is the backend's, and a reader looking for it on the Binding finds nothing")
+	assert.Contains(t, err.Error(), "v0.19.1rc1",
+		"the version behind the answer, so the refusal says why rather than only what")
 }
 
 // TestSupportsTenant_PinsTheMeasuredAnswerPerEngine states each entry explicitly, so that changing one
@@ -168,6 +270,25 @@ func TestRefusal_CarriesReasonNotProse(t *testing.T) {
 	assert.Equal(t, ReasonEngineUnknown, refusal.Reason)
 	assert.Contains(t, refusal.Error(), "vllm-turbo", "the message names the subject it refused")
 	assert.Contains(t, refusal.Error(), "vllm")
+}
+
+// testConnectionFor is testConnection with a transport the engine's store backend accepts.
+//
+// A fixture pairing an engine with a transport it refuses is not a weaker case, it is an IMPOSSIBLE
+// configuration: Render declines the pair, so a case built on one measures that refusal instead of
+// whatever it meant to measure. Every case that varies the engine takes its connection from here.
+//
+// The transport is read out of the table rather than written as a literal, which is deliberate and is
+// safe for one reason worth stating: no case using this helper asserts anything ABOUT the transport
+// rule. They assert vehicles, connector names, roles and tenants, and they need a connection that does
+// not itself refuse. The rule is pinned against literals in TestCheckTransport, where deriving it from
+// the table would make the check circular.
+func testConnectionFor(engine Engine) Connection {
+	conn := testConnection()
+	if required := engineTransportConstraint[engine].Required; required != "" {
+		conn.Protocol = required
+	}
+	return conn
 }
 
 // reasonOf extracts the typed reason, failing the test when the error is not a RefusalError at all --

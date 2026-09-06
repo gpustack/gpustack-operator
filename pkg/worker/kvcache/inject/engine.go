@@ -1,7 +1,12 @@
 // This file holds what is measured about each engine rather than what is rendered for it: whether a
-// given engine version forwards a reuse identity to the store. The admission webhook reads the answer
-// and stamps it onto the Pod; nothing here refuses, because every Binding declares a reuse domain and a
-// refusal keyed on that would reject every Pod.
+// given engine version forwards a reuse identity to the store, and which transport its store backend
+// accepts.
+//
+// THE TWO ANSWERS ARE USED DIFFERENTLY, and the asymmetry is the measurement's, not a policy choice.
+// The tenant answer is STAMPED: every Binding declares a reuse domain, so a refusal keyed on that
+// would reject every Pod, and an engine that ignores the key ignores it in silence. The transport
+// answer is a REFUSAL: an engine handed a transport its backend does not accept raises before it
+// serves a request, so admitting the pair buys nothing and costs a container that cannot start.
 //
 // It is kept apart from the renderers because it ages differently. A renderer changes when this
 // project decides to write something else; this table changes when somebody else ships a new engine
@@ -18,8 +23,12 @@ type engineFacts struct {
 	// Version is the engine release the facts below were read from.
 	Version string
 
-	// Source is the file and line the answer was read at, in that release.
-	Source string
+	// TenantSource is the file and line the answer below was read at, in that release.
+	//
+	// It names the tenant measurement specifically, because this engine has a second measured answer
+	// in transportFacts read from other lines of the same file. A field called Source would be
+	// correct in one type and misleading in the other.
+	TenantSource string
 
 	// ForwardsTenant is whether a tenant identity reaches the store ON THE PATH THIS PROJECT RENDERS.
 	//
@@ -65,7 +74,7 @@ var engineTenantSupport = map[Engine]engineFacts{
 		// MooncakeStoreConfig has no tenant key, and the setup() call passes seven positional
 		// arguments -- local_hostname, metadata_server, global_segment_size, local_buffer_size,
 		// protocol, device_name, master_server_address -- stopping four short of the tenant.
-		Source:         "vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/worker.py:96-152,1040-1048",
+		TenantSource:   "vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/worker.py:96-152,1040-1048",
 		ForwardsTenant: false,
 	},
 	EngineVLLMAscend: {
@@ -90,7 +99,7 @@ var engineTenantSupport = map[Engine]engineFacts{
 		// that the engine could not start, since the factory resolves that name against a registry.
 		// The tenant question absorbed the fact and stopped.
 		Version:        "v0.19.1rc1",
-		Source:         "vllm_ascend/.../ascend_store/backend/mooncake_backend.py:115-124 (the store we now select)",
+		TenantSource:   "vllm_ascend/.../ascend_store/backend/mooncake_backend.py:115-124 (the store we now select)",
 		ForwardsTenant: false,
 	},
 	EngineSGLang: {
@@ -108,8 +117,105 @@ var engineTenantSupport = map[Engine]engineFacts{
 		// closed; an SGLang build older than the variable simply never reads it, and that direction
 		// has no signal at all.
 		Version:        "v0.5.18",
-		Source:         "python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_store.py:107,164,208,257,505-533",
+		TenantSource:   "python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_store.py:107,164,208,257,505-533",
 		ForwardsTenant: true,
+	},
+}
+
+// transportFacts is what has been measured about one engine version's transport requirement.
+//
+// The version and the source line sit beside the answer for the same reason they do on engineFacts: a
+// bare string would be unfalsifiable later, and the discriminating check below has to be re-runnable
+// without first finding the file again.
+type transportFacts struct {
+	// Version is the engine release the answer was read from.
+	Version string
+
+	// Source is the file and line the answer was read at, in that release.
+	//
+	// It is a field of its own rather than a share of engineFacts.TenantSource, because on
+	// vLLM-Ascend the two answers come from different lines of the same file: the tenant question is
+	// answered by the store config's key list, the transport question by a branch in the backend's
+	// constructor. One field for both would send a reader re-checking one of them to the lines that
+	// answer the other.
+	Source string
+
+	// Required is the ONE transport this engine's store backend accepts, in the artifact's own
+	// spelling -- what mooncake.MemberProtocol renders, not what the API enum publishes.
+	//
+	// Empty means the engine refuses no transport, and that is a MEASURED answer rather than a
+	// missing one: every engine has an entry and its Source names where the answer was read. The
+	// distinction decides opposite outcomes -- an unmeasured engine has to be let through, an engine
+	// measured as requiring "ascend" must not be.
+	Required string
+}
+
+// engineTransportConstraint is the measured answer per engine: which transport that engine's store
+// backend accepts.
+//
+// WHY IT IS A TABLE AND NOT AN `if`. The constraint is a fact about somebody else's release, on the
+// same footing as the tenant answer above: it moves when that project ships a new build, and the only
+// way to know is to read that build's source again. A conditional would put the fact in the control
+// flow of whoever asked, where the next engine gets added in one of the two places.
+//
+// WHAT IT PREVENTS. An engine that requires a transport RAISES at startup on every other one, so the
+// container never serves a request -- a functional failure rather than a degradation. And the
+// condition is not that somebody chose a wrong transport: KVCacheBackend.spec.transport.protocol
+// defaults to Auto, which mooncake.MemberProtocol renders as "tcp", so a pool nobody configured hands
+// vLLM-Ascend exactly the value it refuses. Everything left at its default is the case this exists for.
+//
+// HOW TO RE-CHECK AN ENTRY, because this table goes stale silently just as the tenant one does:
+//
+//  0. FIRST, find which store backend THIS PROJECT renders for that engine -- vllmConnectorFor and
+//     renderSGLang decide it -- and re-check that one. A constraint on a backend we never select is
+//     not this row's answer.
+//  1. Find where that backend reads `protocol` off its config, and follow every use of the value.
+//  2. A COMPARISON IS NOT A CONSTRAINT. Read what happens when it does not match: SGLang compares
+//     protocol to "rdma" and its else branch takes the ordinary path, while vLLM-Ascend's else branch
+//     raises. Only the second is a requirement. A re-check that counted comparisons would mark SGLang
+//     as constrained, which is why the entries below record what the else branch DOES rather than
+//     that a branch exists.
+//
+// HOW TO EXERCISE A ROW, which is not the same question. This table is keyed by Engines(), and that
+// list is WIDER than SelectableEngines(): vLLM-Ascend is renderable but not nameable, so its row is
+// reachable only through the ModelDeployment path, where the operator derives the engine from the
+// role's accelerator. Trying to trigger it from the Pod annotation instead gets a refusal from
+// ParseEngine, on the engine name and not on the transport - a reader who reads that as "the table is
+// wrong" has been answered by a different rule.
+//
+// A wrong entry fails in both directions, and neither direction is quiet: too strict refuses a pool
+// that would have worked, too loose admits a container that raises before it serves anything.
+var engineTransportConstraint = map[Engine]transportFacts{
+	EngineVLLM: {
+		Version: "v0.25.1",
+		// protocol appears three times and is never compared: declared on the config class at :108,
+		// read out of the file at :132, handed to store.setup() at :1045. No branch reads its value.
+		Source:   "vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/worker.py:108,132,1045",
+		Required: "",
+	},
+	EngineVLLMAscend: {
+		// REQUIRES ascend, and this is the entry the table exists for. MooncakeBackend's constructor
+		// admits protocol == "ascend" at :34 and raises NotImplementedError for everything else at
+		// :68-69, so tcp, rdma and hip each abort the container at startup.
+		//
+		// The file reader would have hidden this from a reader who stopped at the config class:
+		// from_file defaults an ABSENT protocol key to "ascend" (:121). That default never applies
+		// here, because vllmClientConfig.Protocol carries no omitempty and renderVLLMClientConfig
+		// writes the field unconditionally -- so the value this project chose is always the one that
+		// reaches :34.
+		Version:  "v0.19.1rc1",
+		Source:   "vllm_ascend/.../ascend_store/backend/mooncake_backend.py:34,68-69 (v0.19.1rc1 is da421afa)",
+		Required: "ascend",
+	},
+	EngineSGLang: {
+		// Unconstrained, and the reason is worth recording because this file DOES compare protocol:
+		// :487 tests it against "rdma" as one of four conditions for reusing an already-initialized
+		// transfer engine, and the else branch at :496-498 builds its own instead. Either way the
+		// value reaches store.setup() at :515 unexamined. That comparison is an optimization, not a
+		// requirement, and it is the reason step 2 above is worded the way it is.
+		Version:  "v0.5.18",
+		Source:   "python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_store.py:98,487,496-498,515",
+		Required: "",
 	},
 }
 
@@ -140,5 +246,38 @@ func SupportsTenant(engine Engine) bool {
 // should treat that as the unknown-engine case rather than printing blanks.
 func TenantSupportSource(engine Engine) (version, source string) {
 	facts := engineTenantSupport[engine]
-	return facts.Version, facts.Source
+	return facts.Version, facts.TenantSource
+}
+
+// checkTransport refuses a transport the engine's store backend does not accept.
+//
+// It is the ONE place the table's answer becomes a refusal, so both surfaces that render a client -
+// the Pod admission webhook and the ModelDeployment reconciler - say the same thing about the same
+// pair. A second implementation would agree today and diverge on whichever engine release lands next.
+//
+// An engine with no measured entry is let through, which is the side that claims less: refusing on a
+// fact nobody read would turn an unmeasured engine into a broken one, while admitting it leaves the
+// failure exactly where it already was.
+//
+// The message names BOTH halves of the pair, because neither half is wrong on its own: the transport
+// is a legal value and the engine is a legal engine, and it is the combination that raises. It also
+// names WHERE the transport came from - a reader who goes looking for it on the Binding will not find
+// it, since the pool's KVCacheBackend is what carries it.
+//
+// It does not restate what an unset protocol resolves to. That mapping is mooncake.memberProtocols',
+// and a copy of it here would be a second implementation of one table.
+func checkTransport(engine Engine, protocol string) error {
+	facts := engineTransportConstraint[engine]
+	if facts.Required == "" || facts.Required == protocol {
+		return nil
+	}
+
+	return newRefusal(ReasonTransportUnsupported,
+		"engine %q accepts only the %q transport and this pool offers %q, so its store backend "+
+			"would raise at startup instead of using the cache (measured at %s, %s). The transport "+
+			"belongs to the KVCacheBackend the pool names, not to the Binding: set that backend's "+
+			"spec.transport.protocol to %[2]q, or point this workload at a pool that already offers "+
+			"it. An unset protocol is not neutral here: the field defaults to Auto, which the "+
+			"backend resolves to one concrete transport rather than to whatever an engine wants",
+		engine, facts.Required, protocol, facts.Version, facts.Source)
 }
