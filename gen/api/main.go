@@ -14,10 +14,12 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
-// projectModule is this repository's module import path. The generators derive their
-// output base by trimming it off the working directory (see builder.Config.Project), so
-// it is both the value they are configured with and the suffix the working directory has
-// to carry -- one constant for both, because a mismatch between them is silent.
+// projectModule is this repository's module import path.
+//
+// One constant serves two uses, because a mismatch between them is silent:
+//   - the value the generators are configured with (builder.Config.Project);
+//   - the suffix the working directory must carry, since the output base is that
+//     directory with this trimmed off.
 const projectModule = "gpustack.ai/gpustack"
 
 func main() {
@@ -27,33 +29,27 @@ func main() {
 	}
 }
 
-// resolveProjectDir turns the working directory into the path the generators may write
-// against, or refuses.
+// resolveProjectDir returns the path the generators may write against, or refuses.
 //
-// The generators compute their output base by trimming projectModule off this path, so a
-// directory that does not end in it makes the trim a no-op and sends every generator one
-// module path too shallow. That failure is not clean: go-to-protobuf rewrites the
-// generated files before anything notices the path is wrong, so the refusal has to happen
-// above the first write.
+// The output base is this path with projectModule trimmed off, so a directory not ending
+// in it sends every generator one module path too shallow.
 //
-// Two details carry the whole check:
+// WARNING: the failure is not clean. go-to-protobuf rewrites the generated files before
+// the bad path is noticed, so this must run above the first write.
 //
-//   - the path is resolved first, because os.Getwd can return the logical $PWD while the
-//     Go toolchain follows symlinks. A checkout reached through a link named after the
-//     module path would pass a check on the unresolved path and still fail underneath.
-//   - the separator is part of the suffix, making it a directory boundary rather than a
-//     string tail: "/tmp/mygpustack.ai/gpustack" ends in the module path, and trimming it
-//     yields "/tmp/my" -- exactly the wrong-tree write this exists to stop.
+// Three properties carry the check:
+//   - resolved first, since os.Getwd may return the logical $PWD and a symlink named
+//     after the module path would otherwise pass while the toolchain runs elsewhere;
+//   - the separator is part of the suffix, so "/tmp/mygpustack.ai/gpustack" is refused
+//     rather than trimmed to "/tmp/my";
+//   - the return value is slash-normalized, because the trim downstream is a plain
+//     string operation against a slash-delimited path.
 func resolveProjectDir(pwd string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(pwd)
 	if err != nil {
 		return "", fmt.Errorf("resolve working directory %q: %w", pwd, err)
 	}
 
-	// Slash-normalised, and that form is what gets RETURNED as well as checked. The
-	// trim downstream is a plain string operation against a slash-delimited module path,
-	// so returning a separator-native path would let a directory pass this check and
-	// still trim to nothing -- the same wrong-tree write, one layer further down.
 	normalized := filepath.ToSlash(resolved)
 
 	if !strings.HasSuffix(normalized, "/"+projectModule) {
@@ -74,7 +70,7 @@ func generate() error {
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
-	// REFUSE BEFORE WRITING ANYTHING, and use the resolved path for everything after.
+	// REQUIRED: refuse above the first write; all later paths derive from the result.
 	pwd, err = resolveProjectDir(pwd)
 	if err != nil {
 		return err

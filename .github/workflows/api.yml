@@ -1,7 +1,5 @@
-# This workflow regenerates the API artifacts and fails when the committed tree does
-# not match what the generators produce, mirroring what chart.yml already does for the
-# Helm chart. That asymmetry is why the chart has never drifted and the API had nothing
-# watching it.
+# Regenerates the API artifacts and fails when the committed tree does not match, the way
+# chart.yml already does for the Helm chart. Nothing watched the API side before.
 
 name: API
 
@@ -11,19 +9,17 @@ permissions:
 defaults:
   run:
     shell: bash
-    # Every run step works inside the nested checkout; see the Checkout step for why it
-    # is nested.
+    # See the Checkout step for why the working directory is nested.
     working-directory: gpustack.ai/gpustack
 
-# Pure verification with no side effects, so a superseded run is cancelled rather than
-# left to finish. The key is the pull request number and not its branch name, because two
-# pull requests opened from forks whose branch is called `main` would otherwise share a
-# group and cancel each other.
+# Pure verification, so a superseded run is cancelled rather than left to finish.
 #
-# Event name is part of the group on purpose: an internal pull request fires both events,
-# and the two runs are NOT redundant -- the push run verifies the branch tip while the
-# pull_request run verifies the merge result. Folding them together would drop one of
-# those verdicts rather than deduplicate a repeat.
+# Two properties of the key:
+#   - keyed by pull request number, not branch name: two pull requests from forks whose
+#     branch is called `main` would otherwise share a group and cancel each other;
+#   - event name is part of the group deliberately. An internal pull request fires both
+#     events and the runs are not redundant -- push verifies the branch tip, pull_request
+#     verifies the merge result -- so folding them would drop a verdict.
 concurrency:
   group: api-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -34,11 +30,13 @@ on:
     branches:
       - "main"
       - "v*-dev"
-    # NB(thxCode): these are the generator's INPUTS, which is a wider set than the API
-    # types alone: gen/api reads the webhook markers under pkg/*/webhooks, the external
-    # types it emits clients for come from the module graph (go.mod/go.sum), and the
-    # code-generator itself is vendored under staging/. pkg/kubeclients is an output
-    # rather than an input, and is listed so that hand-editing one is caught too.
+    # NB(thxCode): these are the generator's inputs, a wider set than the API types:
+    #   - gen/api reads the webhook markers under pkg/*/webhooks;
+    #   - gen/api/builder compiles in pkg/utils/{osx,stringx};
+    #   - the external types it emits clients for come from go.mod/go.sum;
+    #   - the code-generator itself is vendored under staging/;
+    #   - `make generate` is dispatched through the Makefile's dynamic target rule.
+    # pkg/kubeclients is an output, listed so hand-editing one is caught too.
     paths:
       - "api/**"
       - "gen/**"
@@ -79,14 +77,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-          # NB(thxCode): the checkout is nested so that the working directory ends in the
-          # module import path. gen/api/main.go sets ProjectDir to os.Getwd() and
-          # gen/api/builder/generate.go derives the generator's output base as
-          # strings.TrimSuffix(ProjectDir, "gpustack.ai/gpustack"). On a default checkout
-          # path that suffix never matches, the trim is a no-op, and the generators write
-          # against a base that is one module path too shallow. A run there does not fail
-          # cleanly either -- go-to-protobuf rewrites the generated files before it dies on
-          # the path arithmetic -- so the nesting is what makes this job possible at all.
+          # REQUIRED: the checkout is nested so the working directory ends in the module
+          # import path. gen/api derives its output base by trimming that path off the
+          # cwd, and on a default checkout path the trim is a no-op -- the generators
+          # then write one module path too shallow, after already rewriting files.
           path: gpustack.ai/gpustack
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -95,11 +89,12 @@ jobs:
       - name: Setup Toolbox Cache
         uses: actions/cache@v4
         with:
-          # Cache the go-installed generator binaries. The key carries a hash of the files
-          # that pin them, because hack/lib/*.sh validates a cached tool by whether the
-          # executable exists and never by its version: without the hash, bumping a pin
-          # leaves the old binary in place and this job would verify drift using the
-          # generator the pin just replaced.
+          # Caches the go-installed generator binaries.
+          #
+          # LIMITED: no restore-keys fallback, on purpose. hack/lib/*.sh accepts a cached
+          # tool by whether the executable exists, never by its version, so a prefix
+          # fallback would restore the binary a pin bump just replaced and this job would
+          # verify drift with the old generator.
           key: api-toolbox-${{ runner.os }}-${{ hashFiles('gpustack.ai/gpustack/hack/lib/**', 'gpustack.ai/gpustack/go.mod') }}
           path: |-
             ${{ github.workspace }}/gpustack.ai/gpustack/.sbin

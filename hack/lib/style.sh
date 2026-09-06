@@ -12,9 +12,9 @@
 goimports_reviser_version=${GOIMPORT_REVISER_VERSION:-"v3.12.6"}
 golangci_lint_version=${GOLANGCI_LINT_VERSION:-"v2.11.4"}
 commitsar_version=${COMMITSAR_VERSION:-"v1.0.3"}
-# Pinned rather than "latest": hack/generate.sh validates goimports before the generators
-# run, so its output is inside the baseline the API drift gate compares against, and a
-# floating specifier makes that baseline move under the check. Bump deliberately.
+# LIMITED: pinned, not "latest". hack/generate.sh validates goimports before the
+# generators run, so its output is inside the baseline the API drift gate compares
+# against and a floating specifier would move that baseline. Bump deliberately.
 goimports_version=${GOIMPORT_VERSION:-"v0.49.0"}
 
 function gpustack::lint::golangci_lint::install() {
