@@ -678,6 +678,79 @@ func TestKVCacheBackendWebhook_ValidateUpdate(t *testing.T) {
 	})
 }
 
+// TestKVCacheBackendWebhook_MultiTenancyCannotBeWithdrawnFromAClaimedBackend is the second of the
+// three exits from the deadlock issue 164 reports: a create-time invariant that never protected the
+// later edit.
+//
+// A KVCachePool is refused at creation when its backend runs without a tenant ledger, and nothing
+// refused taking the ledger away afterwards — which strands the pool's own finalizer on a master that
+// has no ledger to release from.
+//
+// The refusal needs its POSITIVE baseline, which is why the table carries the unclaimed backend and
+// the opposite direction: a rule that refused every edit to this field, or every edit to a claimed
+// backend, would satisfy the one negative case on its own — and would block the very patch the third
+// exit exists to make work.
+func TestKVCacheBackendWebhook_MultiTenancyCannotBeWithdrawnFromAClaimedBackend(t *testing.T) {
+	claim := workercore.KVCacheObjectReference{Kind: "KVCachePool", Name: "team-a-pool"}
+
+	testCases := []struct {
+		name string
+		// on is what the old object carries, and off what the new one asks for. Spelling both out is
+		// what lets the table hold the opposite direction next to the refused one.
+		was, now bool
+		claimed  bool
+		mutate   func(*workercore.KVCacheBackend)
+
+		wantMsg string
+	}{
+		{
+			name: "withdrawn from a backend a pool holds", was: true, claimed: true,
+			wantMsg: "multi-tenancy cannot be turned off while KVCachePool/team-a-pool",
+		},
+		{
+			name: "withdrawn from a backend nothing holds", was: true,
+		},
+		{
+			name: "turned back on while a pool holds it", now: true, claimed: true,
+		},
+		{
+			name: "left on while a pool holds it", was: true, now: true, claimed: true,
+		},
+		{
+			name: "an unrelated edit to a claimed backend that never had it", claimed: true,
+			mutate: func(k *workercore.KVCacheBackend) { k.Spec.Image = "example.com/mooncake:v1" },
+		},
+	}
+
+	wh := &KVCacheBackendWebhook{}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+			oldKvcb.Spec.Connection.Managed.Leader.MultiTenancy = tc.was
+			newKvcb.Spec.Connection.Managed.Leader.MultiTenancy = tc.now
+			if tc.claimed {
+				// On BOTH, because status is a subresource: an update to the spec carries whatever
+				// status the API server already holds, so a fixture that put the claim on only one of
+				// them would be describing a request no client can send.
+				oldKvcb.Status.UsedBy = []workercore.KVCacheObjectReference{claim}
+				newKvcb.Status.UsedBy = []workercore.KVCacheObjectReference{claim}
+			}
+			if tc.mutate != nil {
+				tc.mutate(newKvcb)
+			}
+
+			_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+			if tc.wantMsg == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.wantMsg,
+				"an operator whose edit is refused needs to know what to go and remove")
+		})
+	}
+}
+
 // TestKVCacheBackendWebhook_DiskTierIsFrozenExceptItsCapacity pins the three edits a group that
 // ALREADY has a disk tier can and cannot make.
 //

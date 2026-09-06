@@ -68,6 +68,7 @@ func (r *KVCacheBackendWebhook) ValidateUpdate(
 
 	errs := validateKVCacheBackendSpec(ctx, newKvcb, oldKvcb.Spec.Image != newKvcb.Spec.Image)
 	errs = append(errs, validateKVCacheBackendImmutable(oldKvcb, newKvcb)...)
+	errs = append(errs, validateKVCacheBackendMultiTenancyWithdrawal(oldKvcb, newKvcb)...)
 	if len(errs) > 0 {
 		return nil, kerrors.NewInvalid(newKvcb.GroupVersionKind().GroupKind(), newKvcb.Name, errs)
 	}
@@ -775,6 +776,65 @@ func validateKVCacheBackendImmutable(oldKvcb, newKvcb *workercore.KVCacheBackend
 	}
 
 	return errs
+}
+
+// kvCacheBackendMaxConsumerNames caps how many claimants the refusal below spells out.
+const kvCacheBackendMaxConsumerNames = 20
+
+// validateKVCacheBackendMultiTenancyWithdrawal refuses taking the tenant ledger away from a backend
+// something already holds.
+//
+// A KVCachePool is refused at creation when its backend runs without multi-tenancy. That rule
+// governs one admission moment and leaves the other open — the flag can be withdrawn under a pool
+// already admitted — and this is the second half of it.
+//
+// What the withdrawal costs is not only quota correctness, where every request falls into one default
+// tenant and two reuse domains read each other's blocks. It costs the EXIT: a pool's finalizer
+// releases what it registered on the master, and a master with no ledger has nothing to release from.
+//
+// The claims are read from the OLD object, which is what the API server holds: status is a
+// subresource, so an update to the spec carries whatever status was already there and cannot flip
+// this rule's input in the same request that flips the flag.
+//
+// It refuses on the RAW list rather than on the claims that still resolve, because this handler holds
+// no client. An entry naming a pool that is gone therefore refuses too, and status.usedBy is where an
+// operator clears it — the same list the backend's own finalizer refuses deletion on.
+//
+// The claimants are NAMED in the refusal, because an operator whose edit is refused needs to know
+// what to go and remove. Sampled, since usedBy has no item bound and the message is what carries the
+// refusal.
+func validateKVCacheBackendMultiTenancyWithdrawal(
+	oldKvcb, newKvcb *workercore.KVCacheBackend,
+) field.ErrorList {
+	oldManaged, newManaged := oldKvcb.Spec.Connection.Managed, newKvcb.Spec.Connection.Managed
+	if oldManaged == nil || newManaged == nil {
+		return nil
+	}
+	if !oldManaged.Leader.MultiTenancy || newManaged.Leader.MultiTenancy {
+		return nil
+	}
+	if len(oldKvcb.Status.UsedBy) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(oldKvcb.Status.UsedBy))
+	for _, ref := range oldKvcb.Status.UsedBy {
+		names = append(names, ref.Kind+"/"+ref.Name)
+	}
+	consumers := strings.Join(names, ", ")
+	if len(names) > kvCacheBackendMaxConsumerNames {
+		consumers = fmt.Sprintf("%s and %d more",
+			strings.Join(names[:kvCacheBackendMaxConsumerNames], ", "),
+			len(names)-kvCacheBackendMaxConsumerNames)
+	}
+
+	return field.ErrorList{field.Forbidden(
+		field.NewPath("spec", "connection", "managed", "leader", "multiTenancy"),
+		fmt.Sprintf("multi-tenancy cannot be turned off while %s consume(s) this backend: the master "+
+			"would hold no tenant ledger, every request would fall into one default tenant where two "+
+			"reuse domains read each other's blocks, and the quota each consumer registered could no "+
+			"longer be released — which leaves them undeletable. Remove them first",
+			consumers))}
 }
 
 // validateKVCacheBackendLocalDiskImmutable freezes whether a group has a disk tier and where it
