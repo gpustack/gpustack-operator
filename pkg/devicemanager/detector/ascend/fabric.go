@@ -112,7 +112,12 @@ func newFabric(spod *dcmi.SpodInfo, productType productascend.Type, endpoints []
 		Type:      string(productType),
 		Endpoints: endpoints,
 	}
-	if spod != nil {
+	// The coordinates are published only for a shape that is actually in a super pod. The driver
+	// answers the query for a plain server too -- that answer is how Resolver established the shape
+	// -- so taking it at face value would hand every standalone 8P server whatever placeholder id
+	// the driver carries, and two of them would then share a domain across machines with no
+	// interconnect. See Type.InSuperPod.
+	if spod != nil && productType.InSuperPod() {
 		fabric.ID = strconvx.FormatUint(uint64(spod.Super_pod_id), 10)
 		fabric.MemberCount = spod.Scale_type
 		fabric.NodeIndex = strconvx.FormatUint(uint64(spod.Server_id), 10)

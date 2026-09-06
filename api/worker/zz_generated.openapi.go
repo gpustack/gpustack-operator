@@ -2711,7 +2711,7 @@ func schema_gpustack_api_worker_v1alpha1_DeviceFabric(ref common.ReferenceCallba
 					},
 					"id": {
 						SchemaProps: spec.SchemaProps{
-							Description: "ID identifies the domain, and is comparable ACROSS WORKERS — that is the whole point of publishing it, since a domain spanning machines cannot be recognized from one machine's record alone.\n\nAscend reports the super pod id, NVIDIA the fabric cluster uuid, AMD the XGMI hive id.",
+							Description: "ID identifies the domain, and is comparable ACROSS WORKERS — that is the whole point of publishing it, since a domain spanning machines cannot be recognized from one machine's record alone.\n\nAscend reports the super pod id, NVIDIA the fabric cluster uuid, AMD the XGMI hive id.\n\nEmpty where no domain was identified — and on Ascend that includes a device whose shape is not in a super pod AT ALL, even though it answered the query. The driver answers it for a plain server too, since that answer is how the shape is established, so an id is published only for `pod-1d` and `pod-2d`. Publishing the placeholder a standalone server reports would give two unrelated machines one domain, and this field is compared across workers.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -2733,21 +2733,21 @@ func schema_gpustack_api_worker_v1alpha1_DeviceFabric(ref common.ReferenceCallba
 					},
 					"memberCount": {
 						SchemaProps: spec.SchemaProps{
-							Description: "MemberCount is how many members the domain reports having. Zero means the manufacturer does not report it, never a domain with no members.\n\nAscend only, from the super pod's own scale. It says how large the domain is without enumerating it, which is what a scheduler needs before it has seen every worker in it.\n\nNot named Size: every protobuf message carries a generated Size() method, and a field of that name collides with it.",
+							Description: "MemberCount is how many members the domain reports having. Zero means the manufacturer does not report it, never a domain with no members.\n\nAscend only, from the super pod's own scale. It says how large the domain is without enumerating it, which is what a scheduler needs before it has seen every worker in it. Published under the same rule as ID: only for a shape that is in a super pod.\n\nNot named Size: every protobuf message carries a generated Size() method, and a field of that name collides with it.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
 					},
 					"nodeIndex": {
 						SchemaProps: spec.SchemaProps{
-							Description: "NodeIndex is this worker's index within the domain, as the domain numbers its machines — not a Kubernetes node name and not comparable to one.\n\nAscend only, from the super pod's server id.",
+							Description: "NodeIndex is this worker's index within the domain, as the domain numbers its machines — not a Kubernetes node name and not comparable to one.\n\nAscend only, from the super pod's server id. Published under the same rule as ID: only for a shape that is in a super pod.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"rackId": {
 						SchemaProps: spec.SchemaProps{
-							Description: "RackID is the rack this worker sits in, as the domain numbers its racks.\n\nAscend only, from the super pod's chassis id.",
+							Description: "RackID is the rack this worker sits in, as the domain numbers its racks.\n\nAscend only, from the super pod's chassis id. Published under the same rule as ID: only for a shape that is in a super pod.",
 							Type:        []string{"string"},
 							Format:      "",
 						},

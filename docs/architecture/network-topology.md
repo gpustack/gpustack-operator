@@ -175,6 +175,12 @@ It is recorded per accelerator, in `spec.groups[].accelerators[].topology.fabric
 | `nodeIndex`, `rackId` | where this machine sits inside the domain, as the domain numbers them |
 | `endpoints` | this accelerator's own addresses on the fabric |
 
+**Four of these are published only for a super pod.** `id`, `memberCount`, `nodeIndex` and `rackId`
+are withheld on an Ascend shape that is not in one — `server-8p`, `card-4p` and the rest — even
+though the driver answers the super pod query for those too, since that answer is what establishes
+the shape. Publishing the placeholder a standalone server reports would hand two unrelated machines
+one domain, and `id` is compared across nodes. `kind`, `type` and `endpoints` still travel.
+
 > **Why per accelerator, when a domain plainly spans machines** — because it also **cross-cuts** a
 > machine. NVIDIA reports a clique per GPU and one node can hold several; AMD's hive id is likewise
 > read per GPU. A node- or group-level field would flatten that. The domain itself is a **derived

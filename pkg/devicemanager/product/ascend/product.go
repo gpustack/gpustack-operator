@@ -50,6 +50,23 @@ const (
 	TypeCard4P Type = "card-4p"
 )
 
+// InSuperPod reports whether this shape is a member of a super pod, and therefore whether the super
+// pod coordinates the driver reports about it mean anything.
+//
+// The distinction is load-bearing rather than descriptive. The driver answers the super pod query on
+// every shape that reaches it -- it is how a server's own type is established at all -- so a plain
+// server gets an answer with a placeholder id in it, and a consumer that published that id would
+// give two unrelated single machines the same domain. A domain id is compared ACROSS workers, so
+// that is not a cosmetic error: it is two machines with no interconnect between them advertised as
+// one fabric.
+//
+// An unnamed shape reports false. A build that has no word for a product cannot tell whether it is
+// in a pod, and withholding a domain costs a scheduler a co-location it might have made, while
+// inventing one costs it a job that cannot communicate.
+func (t Type) InSuperPod() bool {
+	return t == TypePod1D || t == TypePod2D
+}
+
 // The vendor's own product-type numbering, which the super pod reports itself by.
 const (
 	codeServer8P  uint32 = 0

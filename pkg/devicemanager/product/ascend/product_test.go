@@ -39,6 +39,34 @@ func (d *fakeDriver) SuperPodType(_, _ int32) (uint32, error) {
 // The vendor's own rule, restated: a super pod names its own shape, except on the two inference
 // cards, which are recognized by the mainboard the chip is mounted on and never reach the super-pod
 // query at all.
+// Which shapes carry meaningful super pod coordinates, and which merely get an answer.
+//
+// The driver answers the super pod query for every shape that reaches it, so this predicate is what
+// separates "reported a domain" from "is in a domain". Every named shape is listed rather than only
+// the two that return true: a product added later defaults to being outside a pod, and that default
+// is only visible if the false cases are enumerated.
+func TestType_InSuperPod(t *testing.T) {
+	cases := []struct {
+		productType Type
+		want        bool
+	}{
+		{productType: TypePod1D, want: true},
+		{productType: TypePod2D, want: true},
+		{productType: TypeServer8P, want: false},
+		{productType: TypeServer16P, want: false},
+		{productType: TypeServer32P, want: false},
+		{productType: TypeCard1P, want: false},
+		{productType: TypeCard4P, want: false},
+		// A shape this build has no word for cannot be assumed into a pod.
+		{productType: "", want: false},
+	}
+	for _, c := range cases {
+		t.Run(string(c.productType), func(t *testing.T) {
+			assert.Equal(t, c.want, c.productType.InSuperPod())
+		})
+	}
+}
+
 func TestResolver_Resolve(t *testing.T) {
 	cases := []struct {
 		name         string

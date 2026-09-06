@@ -83,11 +83,27 @@ func TestNewFabric(t *testing.T) {
 			},
 		},
 		{
-			name:    "coordinates alone",
+			// THE case this gate exists for. The driver answers the super pod query on a standalone
+			// server too -- that answer is how Resolver established the shape at all -- so publishing
+			// it unguarded would give every 8P server whatever id the driver carries there, and two
+			// unrelated machines would advertise one domain across no interconnect. The shape and the
+			// endpoints still travel; only the coordinates are withheld.
+			name:      "a plain server's coordinates are withheld",
+			spod:      spod,
+			product:   productascend.TypeServer8P,
+			endpoints: []string{eidHex},
+			want: &device.Fabric{
+				Kind: "ub", Type: "server-8p", Endpoints: []string{eidHex},
+			},
+		},
+		{
+			// Same withholding for a shape this build has no word for: it cannot tell whether that
+			// product is in a pod, and a domain invented here is compared across workers.
+			name:    "coordinates alone, from a shape with no name",
 			spod:    spod,
 			product: "",
 			want: &device.Fabric{
-				Kind: "ub", ID: "7", MemberCount: 384, NodeIndex: "3", RackID: "11",
+				Kind: "ub",
 			},
 		},
 		{

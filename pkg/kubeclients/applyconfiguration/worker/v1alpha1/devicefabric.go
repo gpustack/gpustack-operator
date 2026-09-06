@@ -36,6 +36,12 @@ type DeviceFabricApplyConfiguration struct {
 	// record alone.
 	//
 	// Ascend reports the super pod id, NVIDIA the fabric cluster uuid, AMD the XGMI hive id.
+	//
+	// Empty where no domain was identified — and on Ascend that includes a device whose shape is
+	// not in a super pod AT ALL, even though it answered the query. The driver answers it for a
+	// plain server too, since that answer is how the shape is established, so an id is published
+	// only for `pod-1d` and `pod-2d`. Publishing the placeholder a standalone server reports
+	// would give two unrelated machines one domain, and this field is compared across workers.
 	ID *string `json:"id,omitempty"`
 	// Type is the domain's shape, as a word rather than a vendor number — `pod-1d`, `pod-2d`,
 	// `server-8p`, `server-16p`, `server-32p`, `card-1p`, `card-4p`.
@@ -55,6 +61,7 @@ type DeviceFabricApplyConfiguration struct {
 	//
 	// Ascend only, from the super pod's own scale. It says how large the domain is without
 	// enumerating it, which is what a scheduler needs before it has seen every worker in it.
+	// Published under the same rule as ID: only for a shape that is in a super pod.
 	//
 	// Not named Size: every protobuf message carries a generated Size() method, and a field of
 	// that name collides with it.
@@ -62,11 +69,13 @@ type DeviceFabricApplyConfiguration struct {
 	// NodeIndex is this worker's index within the domain, as the domain numbers its machines —
 	// not a Kubernetes node name and not comparable to one.
 	//
-	// Ascend only, from the super pod's server id.
+	// Ascend only, from the super pod's server id. Published under the same rule as ID: only for
+	// a shape that is in a super pod.
 	NodeIndex *string `json:"nodeIndex,omitempty"`
 	// RackID is the rack this worker sits in, as the domain numbers its racks.
 	//
-	// Ascend only, from the super pod's chassis id.
+	// Ascend only, from the super pod's chassis id. Published under the same rule as ID: only for
+	// a shape that is in a super pod.
 	RackID *string `json:"rackId,omitempty"`
 	// Endpoints are this device's own addresses on the fabric, in the manufacturer's own
 	// encoding.
