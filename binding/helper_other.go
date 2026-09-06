@@ -23,8 +23,13 @@ func getCPUNumaNodeMapping() []int {
 	return mapping
 }
 
+// getNumaNodeByBDF reports UNKNOWN on every platform that is not linux, because there is no sysfs
+// to read it from. It returned "0" before, which is the same overclaim the linux path was fixed for
+// and worse here: it made this the answer on EVERY device, so a proximity comparison run on darwin
+// could only ever say the accelerator and the interface share a node. A measurement point with one
+// possible reading cannot disagree with anything.
 func getNumaNodeByBDF(bdf string) string {
-	return "0"
+	return ""
 }
 
 func getPhysicalPackageIdByBDF(bdf string) string {

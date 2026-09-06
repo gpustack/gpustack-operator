@@ -219,6 +219,19 @@ func (s *ResourceServer) advertiseCard(
 		}
 	}
 
+	// NO TOPOLOGY IS AN ANSWER HERE, AND IT IS THE ANSWER WHEN THE KERNEL REPORTED NO AFFINITY.
+	// An empty NumaAffinity means the accelerator's NUMA node is unknown -- the kernel's -1 in
+	// /sys/bus/pci/devices/<bdf>/numa_node, which a virtualized host reports for every device -- so
+	// no node is named and kubelet's topology manager is left unconstrained.
+	//
+	// The alternative was in place until it was measured: unknown used to arrive as "0", so every
+	// accelerator on such a host advertised a hint of node 0. That is worse than saying nothing,
+	// and the reason is asymmetric. On a single-NUMA host the two are equivalent. On a multi-socket
+	// host whose driver does not report affinity, the hint pinned the device to a node nobody had
+	// measured, and under the single-numa-node policy that hint is what decides admission: kubelet
+	// would place the workload against a proximity claim the kernel had declined to make, the
+	// placement would succeed, and only the performance would be wrong. A wrong hint became no
+	// hint deliberately.
 	var topology *deviceplugin.TopologyInfo
 	if numa := binding.StrRangeToList(acc.Topology.NumaAffinity); len(numa) > 0 {
 		topology = &deviceplugin.TopologyInfo{

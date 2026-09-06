@@ -81,6 +81,11 @@ func GetNumaNodeCPUMapping() map[int][]int {
 //
 // The input is a string in the format "domain:bus:device.function" (e.g., "0000:00:1f.2").
 // The output is the NUMA node number as a string, or an empty string if the BDF is invalid or if there is no associated NUMA node.
+//
+// Empty means UNKNOWN and is never read as node 0. The kernel reports "no affinity" as -1 in
+// /sys/bus/pci/devices/<bdf>/numa_node, and a virtualized host commonly reports it for every
+// device, so this is the ordinary case rather than an edge one. Callers comparing two devices'
+// affinity must treat empty on either side as "cannot say", not as a match.
 func GetNumaNodeByBDF(bdf string) string {
 	return getNumaNodeByBDF(bdf)
 }
