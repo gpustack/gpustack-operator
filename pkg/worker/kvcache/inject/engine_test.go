@@ -82,7 +82,9 @@ func TestParseEngine(t *testing.T) {
 		valid bool
 	}{
 		{name: "vllm", input: "vllm", want: EngineVLLM, valid: true},
-		{name: "vllm-ascend", input: "vllm-ascend", want: EngineVLLMAscend, valid: true},
+		// Renderable but NOT nameable: the operator derives it from the pool's accelerator, and
+		// ModelDeployment.spec.engine already refuses the same value for the same reason.
+		{name: "vllm-ascend", input: "vllm-ascend", valid: false},
 		{name: "sglang", input: "sglang", want: EngineSGLang, valid: true},
 		{name: "unknown value", input: "tensorrt", valid: false},
 		{name: "empty", input: "", valid: false},
@@ -101,6 +103,30 @@ func TestParseEngine(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+// TestParseEngine_AscendIsRefusedByName pins the half of the refusal that a bare error cannot carry.
+//
+// The value is renderable -- the operator derives it -- so refusing it without naming what to use
+// instead sends a user looking for a third annotation, which is the dead end this alignment exists
+// to close. Asserting only "it errors" would pass on a message that says nothing.
+func TestParseEngine_AscendIsRefusedByName(t *testing.T) {
+	_, err := ParseEngine(string(EngineVLLMAscend))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), string(EngineVLLM),
+		"the refusal must name the engine to set instead")
+	assert.NotContains(t, err.Error(), "set one of",
+		"and it must not fall through to the generic list, which would offer no reason")
+}
+
+// TestSelectableEngines_MatchesTheModelDeploymentEnum states the invariant this split exists for:
+// what a user may name here is what the other API's enum publishes. The two surfaces described one
+// concept with different value sets, and one of them had already ruled the mixed value wrong.
+func TestSelectableEngines_MatchesTheModelDeploymentEnum(t *testing.T) {
+	assert.Equal(t, []Engine{EngineVLLM, EngineSGLang}, SelectableEngines(),
+		"ModelDeployment.spec.engine publishes exactly vllm and sglang")
+	assert.Contains(t, Engines(), EngineVLLMAscend,
+		"while the renderer keeps it, because the operator still derives and renders it")
 }
 
 // TestParseRole covers the role annotation, whose empty value is legal and means "no role".
