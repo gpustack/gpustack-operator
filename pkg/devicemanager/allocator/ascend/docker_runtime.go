@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
 )
 
@@ -54,16 +53,13 @@ const dockerRuntimeMajor950 = 26
 // preflight exists to rule out -- and the reason carries the raw value so an operator sees what was
 // there.
 //
-// The row names no accelerator: the runtime is one node-level fact, and the caller attaches it to
-// each accelerator it is a precondition for.
+// The row names neither an accelerator nor a mode: the runtime is one node-level fact, and the
+// caller attaches it to each accelerator and each mode it is a precondition for.
 func checkDockerRuntime(path string) device.PreflightCheck {
 	c := device.PreflightCheck{
 		Capability: dockerRuntimeCapability,
-		// Every A5 allocation carries the same injection whatever mode serves it, so the row is
-		// filed under the baseline mode rather than repeated once per mode.
-		Mode:  device.PreflightModeOf(workercore.DeviceAllocationModeExclusive),
-		State: device.PreflightStateUnavailable,
-		Depth: device.PreflightDepthDeclared,
+		State:      device.PreflightStateUnavailable,
+		Depth:      device.PreflightDepthDeclared,
 	}
 
 	version, err := readDockerRuntimeVersion(path)
