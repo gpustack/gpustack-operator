@@ -172,6 +172,21 @@ template**, or drop the label there. It does not undo an existing Pod: the injec
 volume stay, and most of a running Pod's spec is immutable — the change takes effect when the
 workload rolls.
 
+> **The label and the two written annotations are frozen once the Pod exists**, which is why the
+> paragraph above says *template*. Editing `kvcache.gpustack.ai/inject`, `.../injected` or
+> `.../client-config` on a live Pod is refused, and so is removing one. Injection runs at CREATE and
+> only there, so a label added afterwards would leave a Pod carrying the label that says it uses a
+> cache and none of the configuration; an edited `injected` would be a record of a decision nobody
+> made; and an edited `client-config` would swap the master address, transport and segment sizes under
+> a running container, since the file at `/etc/gpustack/kvcache/mooncake.json` is a `downwardAPI`
+> projection of that annotation. Every other metadata edit is left alone, finalizers included.
+>
+> That guard is a validating webhook on UPDATE with `failurePolicy: Ignore`, so it does **not** hold
+> while the webhook is unreachable. The direction is deliberate: it keeps a record honest, and it must
+> never be the reason a live Pod cannot be updated or finished — under `Fail` an unreachable webhook
+> would block finalizer removal on every opted-in Pod, and a pool's own teardown waits behind exactly
+> that.
+
 ## The cluster needs a Binding whose domain is `default`
 
 **This applies to pools serving vLLM.** SGLang writes under its own reuse domain and needs no such
