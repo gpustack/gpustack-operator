@@ -3,6 +3,7 @@ package ascend
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	klog "k8s.io/klog/v2"
@@ -29,6 +30,21 @@ const (
 		"a second container until it is turned off"
 )
 
+// a5PreconditionModes are the allocation modes the two A5 host-state rows are preconditions for:
+// every mode this allocator serves.
+//
+// Mode says which allocation a row is a precondition FOR, so a row that holds for all of them has to
+// be filed under all of them. The vendor runtime resolves the same injection whichever server
+// answers, and HCCL reads the same host ranktable, so filing either row under one mode would leave a
+// report filtered by any other saying this node has no such precondition at all -- which is the
+// reading that sends an operator to debug the wrong layer.
+var a5PreconditionModes = []workercore.DeviceAllocationMode{
+	workercore.DeviceAllocationModeExclusive,
+	workercore.DeviceAllocationModeShared,
+	workercore.DeviceAllocationModeSliced,
+	workercore.DeviceAllocationModeVisibility,
+}
+
 // NewPreflighter returns the Ascend preflighter, which reads the two preconditions an allocation
 // here depends on: the driver flag every allocation that puts a second container on an accelerator
 // needs, and -- on A5 -- the vendor runtime version that turns the injected env into device nodes.
@@ -42,7 +58,12 @@ func NewPreflighter(opts device.PreflighterOptions) device.AcceleratorPreflighte
 		share:       newShareDriver(logger),
 		product:     productascend.NewResolver(newProductDriver(logger)),
 		installInfo: dockerRuntimeInstallInfo,
-		dryRun:      opts.DryRun,
+		// Joined onto the host root, unlike installInfo above: /usr/local/Ascend is bind-mounted at
+		// its own name in every deployment that runs this, so the runtime's file is readable as
+		// written -- and /etc is not mounted anywhere, so reading this one unjoined would read the
+		// CONTAINER's /etc, find nothing, and report the healthy answer on every node.
+		rootInfo: filepath.Join(opts.HostRoot, hcclRootInfoPath),
+		dryRun:   opts.DryRun,
 	}
 }
 
@@ -55,7 +76,10 @@ type preflighter struct {
 	// installInfo is where the vendor runtime recorded its version. It is a field rather than the
 	// constant read directly, so the A5 row can be established against a file a test wrote.
 	installInfo string
-	dryRun      bool
+	// rootInfo is the host ranktable the vendor runtime mounts into every container. A field for the
+	// same reason installInfo is, and read on the same nodes: A5 and no other.
+	rootInfo string
+	dryRun   bool
 }
 
 func (p *preflighter) PreflightAccelerator(groups device.DevicesGroupList) device.PreflightGroup {
@@ -65,13 +89,14 @@ func (p *preflighter) PreflightAccelerator(groups device.DevicesGroupList) devic
 	}
 
 	for i := range groups {
-		// The vendor runtime's version is a precondition for A5 and for nothing else, so a node
-		// carrying none never reads the file. It is one node-level fact, read here rather than
-		// beside each accelerator so that a group of eight reads it once.
-		var runtime device.PreflightCheck
+		// The vendor runtime's version and the host ranktable are preconditions for A5 and for
+		// nothing else, so a node carrying none never reads either file. Both are node-level facts,
+		// read here rather than beside each accelerator so that a group of eight reads them once.
+		var runtime, rankTable device.PreflightCheck
 		serves950 := groups[i].Family == family950
 		if serves950 {
 			runtime = checkDockerRuntime(p.installInfo)
+			rankTable = checkRankTable(p.rootInfo)
 		}
 
 		accels := groups[i].Accelerators
@@ -80,10 +105,14 @@ func (p *preflighter) PreflightAccelerator(groups device.DevicesGroupList) devic
 
 			// Filed on each accelerator rather than once on the group, for the reason the preflight
 			// runner's own node-wide rows are: that is what Checks is, and a reader filtering the
-			// report by accelerator would never find a node-wide row.
+			// report by accelerator would never find a node-wide row. Filed on each mode for the
+			// same reason -- see a5PreconditionModes.
 			if serves950 {
-				runtime.Accelerator = accels[j].ID
-				grp.Checks = append(grp.Checks, runtime)
+				for _, mode := range a5PreconditionModes {
+					runtime.Accelerator, runtime.Mode = accels[j].ID, device.PreflightModeOf(mode)
+					rankTable.Accelerator, rankTable.Mode = accels[j].ID, device.PreflightModeOf(mode)
+					grp.Checks = append(grp.Checks, runtime, rankTable)
+				}
 			}
 		}
 	}

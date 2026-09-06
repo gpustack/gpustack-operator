@@ -3,6 +3,7 @@ package ascend
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -146,15 +147,19 @@ func TestPreflightAccelerator_DockerRuntimeRowIsA5Only(t *testing.T) {
 
 	grp := p.PreflightAccelerator(devs.Spec.Groups)
 
-	// Each row names the accelerator it was filed under, so a reader filtering the report by
-	// accelerator finds the node-wide fact rather than missing it.
+	// Each row names the accelerator AND the mode it was filed under, so a reader filtering the
+	// report by either finds the node-wide fact rather than missing it.
 	var carried []string
 	for _, check := range grp.Checks {
 		if check.Capability != dockerRuntimeCapability {
 			continue
 		}
 		assert.Equal(t, device.PreflightStateOK, check.State)
-		carried = append(carried, check.Accelerator)
+		carried = append(carried, check.Accelerator+"/"+check.Mode)
 	}
-	assert.Equal(t, []string{"a5-0"}, carried, "the runtime row is filed on the A5 accelerator alone")
+	sort.Strings(carried)
+	assert.Equal(t, []string{
+		"a5-0/exclusive", "a5-0/shared", "a5-0/sliced", "a5-0/visibility",
+	}, carried, "the runtime row is filed on the A5 accelerator alone, once per mode it is a "+
+		"precondition for")
 }

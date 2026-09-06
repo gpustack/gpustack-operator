@@ -413,7 +413,9 @@ Three things are worth knowing before you read those rows:
 | Iluvatar | IXML | | | | |
 | MThreads | MTML | | | | |
 
-**An empty cell is "this manufacturer has none"**, not a value left out.
+**An empty cell is "this manufacturer has none"**, not a value left out. Ascend files two more rows on
+an A5 accelerator, which are neither a driver read nor a probe — see [The A5 host-state
+rows](#the-a5-host-state-rows).
 
 > **Read the `mode` column, not the capability name.** Every row in a report carries a `mode`, and it
 > is what makes two manufacturers comparable: `container-share` and `cu-mask-topology` are different
@@ -443,6 +445,33 @@ happened, and says so explicitly if the restore failed and the accelerator was l
 Under `--dry-run` the ask is withheld, because asking is a write however briefly the mode is held.
 The row then reports the mode as read and says it was not established — which is a different answer
 from a capability that was checked and found working.
+
+### The A5 host-state rows
+
+**Ascend files two more rows on an Atlas A5 (950) accelerator and on no other.** Neither reads a
+driver and neither starts a container: each reads one file the host either carries or does not, so
+both come back at the `declared` depth. Each is one node-level fact, and it is a precondition for
+every mode the accelerator serves — so each is repeated on every accelerator and under every mode,
+and a report filtered by either still carries it.
+
+| Row | Reads | `ok` means | `unavailable` means |
+|---|---|---|---|
+| `ascend-docker-runtime` | the version the vendor runtime's installer recorded under `/usr/local/Ascend` | MindCluster 26.0.0 or newer, the release where A5 support landed | an older release, or a version that could not be read: an allocation on this accelerator fails at container creation |
+| `hccl-ranktable` | `/etc/hccl_rootinfo.json`, through the mounted host root | the host carries no such file, **or** carries one at version `2.0` | any other version, a file that could not be parsed, or a host root this command could not look in: multi-card jobs on this accelerator fail to initialise HCCL |
+
+**Why each of those fails, and how to correct it, is in [Vendor
+Prerequisites](../vendor-prerequisites.md#ascend)** — the mechanism is stated there once, and the
+`reason` on the row itself carries it verbatim, so a report is readable without this page.
+
+Two things about these rows are worth reading off the table rather than inferring:
+
+- **An absent ranktable is `ok`, not a prerequisite nobody installed.** It is the healthy state,
+  which is why that row treats an unreadable file the opposite way to the one above it.
+- **A host root this command could not look in is `unavailable`, not `ok`.** A missing
+  `/etc/hccl_rootinfo.json` and an unmounted host root are the same absence to the filesystem, and
+  only the first is a healthy node. A run with [no host root to
+  enter](#when-a-step-is-emitted-instead-of-run) does not stop — it carries on as a dry run — so this
+  row says the host was never looked at rather than clearing it.
 
 ### The slice rows, and what the probe needs
 

@@ -508,6 +508,15 @@ type (
 		// preflighter that skips the ask says so in the row's detail, so a dry run does not read as
 		// a capability that was checked and found working.
 		DryRun bool
+		// HostRoot is where the host's own root filesystem is bind-mounted, and every host path a
+		// preflighter reads must be joined onto it.
+		//
+		// The command runs in a container while the facts it reports are the host's, and only paths
+		// the deployment happens to bind-mount at their own name -- /usr/local/Ascend, /usr/local/dcmi
+		// -- are readable without it. Reading an unmounted path such as /etc without joining does not
+		// fail: it silently reads the CONTAINER's copy, which for most of them means "absent", and a
+		// check whose absent branch is its passing branch then reports ok on every node.
+		HostRoot string
 	}
 
 	// AcceleratorPreflighter is an optional companion to Allocator, implemented by every
