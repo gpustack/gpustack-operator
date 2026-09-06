@@ -313,7 +313,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																					Type:        "string",
 																				},
 																				"numaAffinity": {
-																					Description: "NumaAffinity is the NUMA node that the device is attached to. Empty means UNKNOWN and is\nnever normalised to node 0 — that would report an affinity nobody read.\nTHE PRODUCER DOES NOT HOLD THAT CONTRACT YET, and saying so here is the point: the bus\nhelper behind this field answers \"0\" for node 0, for the kernel's -1 \"no affinity\"\nsentinel and for an unparseable reading alike, so an unknown affinity reaches a reader as\nnode 0. The interface fields below DO map the sentinel to empty, which is why only this\none carries the caveat. Tracked at\nhttps://github.com/gpustack/gpustack-operator/issues/182.",
+																					Description: "NumaAffinity is the NUMA node that the device is attached to. Empty means UNKNOWN and is\nnever normalised to node 0 — that would report an affinity nobody read. The kernel's -1\n\"no affinity\" sentinel and a reading that does not parse both arrive here as empty, so\nthis field and the interface fields below carry the same contract.",
 																					Type:        "string",
 																				},
 																				"pciBusId": {

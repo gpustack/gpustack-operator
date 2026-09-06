@@ -109,15 +109,8 @@ func BusDistance(accelerator Topology, iface Interface) TopologyDistance {
 
 	// Beyond the bridge subtree, NUMA is the only coordinate left. An unknown NUMA on either side
 	// cannot be read as "the same node": treating it as node 0 would assert an affinity the kernel
-	// denied.
-	//
-	// Both sides now encode "unknown" the same way, and that is what makes this guard sufficient
-	// rather than half of one. The interface side always mapped the kernel's `-1` sentinel to
-	// empty; the ACCELERATOR side used to return "0" for node 0, for `-1` and for an unparseable
-	// reading alike, so an accelerator with no affinity arrived here indistinguishable from one on
-	// node 0 and this comparison answered NODE against an interface genuinely on node 0. The fix
-	// could not live here — the information was gone before the call — so it is in the shared bus
-	// helper (`binding.GetNumaNodeByBDF`), which now reports unknown as unknown.
+	// denied. Both sides spell unknown as empty -- the accelerator's value comes from
+	// `binding.GetNumaNodeByBDF` -- so this one guard covers both.
 	if accelerator.NumaAffinity == "" || iface.NumaAffinity == "" {
 		return TopologyDistanceUnknown
 	}
