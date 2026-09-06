@@ -643,10 +643,11 @@ generic "a Kubernetes cluster" wording).
   reader in the same change; the catalog `Sliceable` reader (T7) is removed earlier only because dropping a
   reader is always safe.
 - **Protobuf field-number reuse** — `generated.proto` carries no `reserved` declaration and a hand-added one is
-  clobbered by `make generate`, so reservation cannot be enforced durably (Codex R11). **Resolved (2026-07-21)
-  by dropping reservation entirely:** every message is renumbered **contiguously** (natural-number ordering) as
-  fields are removed, so there are no reserved numbers to protect and `protobuf_reserved_test.go` is deleted
-  (T10). This is a deliberate pre-release wire break; no client depends on the old numbers yet.
+  clobbered by `make generate`, so reservation cannot be enforced durably (finding R11 of the Codex review of
+  this spec, not this document's own R-series). **Resolved (2026-07-21) by dropping reservation entirely:**
+  every message is renumbered **contiguously** (natural-number ordering) as fields are removed, so there are
+  no reserved numbers to protect and `protobuf_reserved_test.go` is deleted (T10). This is a deliberate
+  pre-release wire break; no client depends on the old numbers yet.
 - **Flag removal crash-loops deployed DaemonSets** → F3's deployment-compatibility gate (verify `deploy/`,
   else deprecation shim; Ask-first).
 - **Node-vs-Devices cardinality skew** — F4 changes the card-count source from the Node `.count` label (built
