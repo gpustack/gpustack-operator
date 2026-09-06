@@ -271,7 +271,7 @@ make lint
 go test ./pkg/nodefeature/... ./pkg/worker/... ./pkg/devicemanager/... ./pkg/deviceplugin/...
 make generate   # after editing api/worker/v1/instance_type.go + new webhook
 # Kueue transformations are rendered at runtime via a Go text/template; pin factors via the unit test:
-go test ./pkg/worker/kuberess/... -run Test_kueueChartTransformations
+go test ./pkg/worker/kuberess/... -run TestChartKueueTransformationsMatchNodeFeature
 # E2E (local k3s / docker-desktop) via the gpustack-operator-e2e skill:
 bash .claude/skills/gpustack-operator-e2e/cases/<new-pooling-case>.sh gpustack-system
 ```

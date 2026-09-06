@@ -55,7 +55,7 @@ named so a reader can tell "not yet" from "not ever".
   only behaviour is to be refused teaches a reader that the feature exists.
 - **High availability of the leader beyond a single replica.** `spec.connection.managed.leader.replicas`
   accepts `1` and only `1` in this scope. Multi-replica election, `-enable_ha`, an HA backend store and
-  leader-follower status belong to the **master-HA** spec (S5). The HA backend store — `-enable_ha`
+  leader-follower status belong to the **master-HA** spec. The HA backend store — `-enable_ha`
   with `-ha_backend_type=etcd|redis|k8s` — is a **different axis from the metadata plane** (F4) and
   exists only at `replicas > 1`, so it belongs to S5 rather than here. One measured fact travels with
   the exclusion, because it decides whether S5 can ship on an official artifact at all: on the
@@ -85,11 +85,13 @@ named so a reader can tell "not yet" from "not ever".
   here — `members` is a list, each entry carries its own `medium` — so the shape never has to change
   later. This scope reconciles **exactly one member group**, and the webhook refuses a second one with
   a message naming the follow-on. Data migration between media, and the master's `drain_jobs` admin
-  API, belong to the **tiering-and-drain** spec (S4).
+  API, belong to the tiering-and-drain spec, since shipped as
+  `specs/2026-09-05-kv-cache-media-and-scaling.md`.
 - **More than one backend behind one quota domain.** A quota domain fronting several backends belongs
-  to the **master-HA / multi-backend** spec (S5).
+  to the **master-HA / multi-backend** spec.
 - **Quota, tenants and reuse domains.** `tenant_id`, `/api/v1/tenant_quotas` and per-tenant accounting
-  belong to the **pool-and-quota** spec (S3). `KVCacheBackend` carries no tenant field.
+  belong to the pool-and-quota spec, since shipped as `specs/2026-08-28-kv-cache-pool.md`.
+  `KVCacheBackend` carries no tenant field.
 - **Anything about workloads, engines, routers or prefill/decode disaggregation.** Those belong to the
   **engine** specs (S6/S7/S8). Nothing here reads or writes a workload object.
 - **Building a Mooncake container image.** This scope *consumes* an image named in `spec.image`. Which
@@ -439,7 +441,7 @@ something ships one.
 **HA backend store** — `-enable_ha` with `-ha_backend_type=etcd|redis|k8s` — which is how *several*
 leader replicas elect one among them. That is where a **Kubernetes lease** lives, and it is why no
 Kubernetes option appears on the metadata plane: leader election is not metadata discovery. It exists
-only at `replicas > 1`, which this scope refuses, so it belongs to the master-HA follow-on (S5).
+only at `replicas > 1`, which this scope refuses, so it belongs to the master-HA follow-on.
 
 And when S5 gets there, one measured fact decides what it can ship on: **`-ha_backend_type=k8s` is
 refused at startup by the published artifact**, with `UNAVAILABLE_IN_CURRENT_MODE, backend_type=k8s`,
@@ -1651,7 +1653,7 @@ after T10 (status is fully observed); after T12 (every acceptance item is met).
       move them silently. The absences are asserted by name — a test lists every flag this scope does
       not run and fails if one appears — because an addition here is a behaviour change nobody asked
       for, and a golden argv alone would only say "different".
-      Verify: `go test ./pkg/worker/kvcache/ -run LeaderFlags` — a golden argv per case, asserted
+      Verify: `go test ./pkg/worker/kvcache/mooncake/ -run LeaderFlags` — a golden argv per case, asserted
       element by element, plus a determinism case: the reconciler converges the Deployment every
       pass, so an argv whose order wandered would rewrite the object forever.
 
@@ -1673,8 +1675,9 @@ after T10 (status is fully observed); after T12 (every acceptance item is met).
       reads, since that one port serves the Prometheus exposition and the HTTP admin API both (F7).
       They are two fields because a consumer handed the admin address fails at connect time with
       nothing to point at, and the quota spec republishes both for its own two readers.
-      Verify: `go test ./pkg/worker/kvcache/ -run LeaderWorkload ./pkg/worker/controllers/worker/ -run
-      KVCacheBackend`; against a fake client, a second reconcile issues no update. The two probe paths
+      Verify: `go test ./pkg/worker/kvcache/mooncake/ -run LeaderWorkload` and
+      `go test ./pkg/worker/controllers/worker/ -run KVCacheBackend`; against a fake client, a second
+      reconcile issues no update. The two probe paths
       are asserted as **different** paths, since the whole point is that one gates and the other does
       not, and a render that pointed both at `/health` would look right and probe nothing.
 
@@ -1694,7 +1697,7 @@ after T10 (status is fully observed); after T12 (every acceptance item is met).
       RDMA path setting exactly `hostNetwork: true`, a `/dev/infiniband` hostPath and the `IPC_LOCK` +
       `SYS_RESOURCE` capabilities and **never** `privileged`; the TCP path setting none of them; **no
       fixed data-plane `containerPort`** on any path.
-      Verify: `go test ./pkg/worker/kvcache/ -run MemberWorkload` — one case per medium, one per
+      Verify: `go test ./pkg/worker/kvcache/mooncake/ -run MemberWorkload` — one case per medium, one per
       protocol including `Auto`, one asserting `Auto` and `TCP` render an IDENTICAL Pod spec (the
       resolution is a rename, not a second code path), one asserting the rendered Pod declares no
       data-plane port, one asserting a group's `image` override wins over `spec.image` while an unset
@@ -1720,7 +1723,7 @@ after T10 (status is fully observed); after T12 (every acceptance item is met).
       outcomes, none of which is a zero. The listing decoder — and only that one, since `/health` and
       `/metrics` are never gated — has a fourth: a **503** carrying `service plane is not active`,
       which is the master saying it is not serving yet, so it maps to a phase and not to an error.
-      Verify: `go test ./pkg/worker/kvcache/ -run Admin` over the recorded fixtures.
+      Verify: `go test ./pkg/worker/kvcache/mooncake/ -run Admin` over the recorded fixtures.
 
 - [x] **T8 · `status.capacity` from the master's counters**
       Blocked by: T5, T7

@@ -1191,10 +1191,17 @@ the baseline.
       `testing/chart-baseline/`. Output is byte-stable across runs. This is the parity oracle
       for T8–T10 and must be captured while the Go templates still exist. Without `-update` the
       test **verifies** instead of writing, so it keeps guarding the oracle until T12 deletes it.
-      Verify: `go test ./pkg/worker/kuberess/ -run TestDumpChartValuesBaseline -args -update`,
-      then re-run it and diff `shasum testing/chart-baseline/*.yaml` across the two runs → identical.
-      (The `git status --porcelain testing/chart-baseline` form only works post-commit: new files
-      stay `??` while the builder holds them, and the builder may not stage.)
+      Verified at the time by `go test ./pkg/worker/kuberess/ -run TestDumpChartValuesBaseline -args
+      -update`, then re-running it and diffing `shasum testing/chart-baseline/*.yaml` across the two
+      runs → identical. (The `git status --porcelain testing/chart-baseline` form only works
+      post-commit: new files stay `??` while the builder holds them, and the builder may not stage.)
+      ⛔ **THIS IS NOT RE-RUNNABLE, BY DESIGN.** The oracle was temporary and T12 deleted it, exactly
+      as the Acceptance above says it would: `baseline_dump_test.go` and `testing/chart-baseline/`
+      are both gone. It is recorded rather than removed because deleting the line would delete the
+      record that the parity it guarded was ever checked. Nothing replaces it and nothing needs to:
+      the oracle compared the subcharts against the Go templates they were replacing, so its subject
+      stopped existing when those templates did. ⛔ That is not a claim that the shipped charts are
+      unguarded today — it is only a statement about this line.
 
 - [x] **T3 · Vendoring machinery + four subchart trees, all disabled**
       Blocked by: None

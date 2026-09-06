@@ -1193,7 +1193,7 @@ Fake-client reconciler/webhook tests (project convention — no envtest cluster)
   `Remaining` restores; assert the MIG `.sliced.units` fold equals `MemoryMibToUnits(profile.MemoryMib, cardVRAM)`
   (identical to a same-VRAM soft request) on the actual card generation; note the mode is non-persistent across
   reboot (Hopper+). This is the observable proof of criteria 1/2/5/6 and the Kueue-coverage
-  path (NEW-9) + capacity-key allocatable path (C6).
+  path (NEW-9) + capacity-key allocatable path (F7).
 - **A100 (Ampere, reset-required) — deferred/external:** no A100 in this environment; the reset-required enable
   sequence is documented for administrators and validated externally, not gated on this spec (Open Question 4).
 

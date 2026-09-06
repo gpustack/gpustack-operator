@@ -65,8 +65,8 @@ Each is out of scope by decision. The subject that owns it is named so "not yet"
   and it **silently covers only two of the five replica types**, which makes the operation's own
   success signal untrustworthy for exactly the tier this spec adds. That coverage claim is
   established in Alternatives, under "Take `drain_jobs` in this scope" — it names the two types and
-  cites the artifact source that decides them. It belongs to the leader-high-availability subject
-  (S5), which already owns the drain axis in the phased plan.
+  cites the artifact source that decides them. It belongs to the leader high-availability spec, which
+  owns the drain axis.
 - **`scaleIn.policy` as an enum.** The design draft carried `GracePeriod | Migrate`. With `Migrate`
   deferred above, the enum would ship with one value, which is a knob nobody can turn. The grace
   period ships as a **number**, and `policy` arrives with the second value that makes it a choice.
