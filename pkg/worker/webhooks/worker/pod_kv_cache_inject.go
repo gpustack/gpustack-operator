@@ -332,7 +332,11 @@ var shellNames = []string{"sh", "bash", "dash", "ash", "zsh", "ksh"}
 //
 //	a shell's -c            the appended flag becomes $0 and $1 and never reaches the engine
 //	a command in one token  `env -S "sh -c ..."` - there is nothing on the command line to test
-//	a script by path        whether it forwards "$@" is inside the image, not on the command line
+//	a script as the program  whether it forwards "$@" is inside the image, not on the command line
+//
+// The third covers both spellings of the same launch. `./run.sh` and `sh /app/run.sh` hand the same
+// unreadable file the same appended flag, so refusing one and admitting the other would only teach
+// the spelling that gets through.
 //
 // WHAT THIS DOES NOT DO is decide whether the launcher enumeration below is complete, and no
 // reading of it should be taken as evidence either way. A launcher this parser has never heard of
@@ -372,41 +376,28 @@ func checkShellWrapper(ctr *core.Container) error {
 	}
 	program := path.Base(argv[0])
 	if !slices.Contains(shellNames, program) {
-		// A LAUNCHER CAN BE AN ARBITRARY SCRIPT, AND ITS TRANSPARENCY LIVES IN ITS BODY. Whether
-		// appending reaches the engine depends on whether the script forwards "$@" - which is the
-		// contents of a file inside the image, not a token on the command line. No enumeration
-		// closes that: it is not a launcher this parser has not heard of, it is a launcher whose
-		// behavior is not on the command line at all. Measured on the images this repository names:
-		// lmsysorg/sglang runs `/opt/nvidia/nvidia_entrypoint.sh`, and admitting it was never
-		// justified, only lucky.
-		//
-		// So this refuses rather than guesses, which is the whole point of failing closed: it turns
-		// "cannot tell" from a silent admission into a message. The cost is a script that DOES
-		// forward "$@" and is now refused, and the remedy the message names is the same one the
-		// shell case gives.
-		if strings.HasSuffix(program, ".sh") {
-			return fmt.Errorf("container %q runs the script %q, and whether anything this webhook "+
-				"appends to args reaches the engine depends on whether that script forwards its "+
-				"arguments - which admission cannot read, because it is inside the image. Launch "+
-				"the engine directly - put its executable in command and its arguments in args - "+
-				"or add the connector flag inside the script yourself", ctr.Name, program)
-		}
-
-		return nil
+		// A launcher can be an arbitrary script, and its transparency lives in its body rather than
+		// on the command line. No enumeration of launchers closes that: this is not a launcher the
+		// parser has not heard of, it is one whose behavior admission cannot read at all.
+		return scriptByPath(ctr.Name, program)
 	}
-	// A shell stops reading options at its first operand: `sh /app/run.sh -c config` passes -c to the
-	// SCRIPT as $1, and that launch is perfectly appendable. An earlier revision scanned the whole
-	// argv and refused those, turning an ordinary command line into a startup failure. So this walks
-	// only the option prefix and stops exactly where the shell would.
+	// A shell stops reading options at its first operand, and so does this scan: in
+	// `sh /app/run.sh -c config` the -c belongs to the SCRIPT rather than to the shell, so it is not
+	// the shape this refusal is about. Where the scan stops is where the shell's command file is,
+	// and that file gets the same test a directly executed script gets.
 	for i := 1; i < len(argv); i++ {
 		arg := argv[i]
 		switch {
 		case arg == "--":
 			// Options ended without -c; whatever follows is the command file.
+			if i+1 < len(argv) {
+				return scriptByPath(ctr.Name, path.Base(argv[i+1]))
+			}
+
 			return nil
 		case len(arg) < 2 || (arg[0] != '-' && arg[0] != '+'):
 			// The command file itself. "-" alone is an operand too, not an option bundle.
-			return nil
+			return scriptByPath(ctr.Name, path.Base(arg))
 		case isShellCommandFlag(arg):
 			// Fall through to the refusal. Checked BEFORE the operand rules below, because a bundle can
 			// be both - `-co` is command mode whose -o still takes an operand.
@@ -435,6 +426,34 @@ func checkShellWrapper(ctr *core.Container) error {
 	return nil
 }
 
+// scriptByPath refuses a launch whose program is a shell script, and admits anything else.
+//
+// Whether an appended argument reaches the engine depends on whether the script forwards "$@", and
+// that is the contents of a file inside the image rather than a token on the command line. So this
+// refuses rather than guesses, which is the whole point of failing closed: it turns "cannot tell"
+// from a silent admission into a message. The cost is a script that DOES forward "$@" and is now
+// refused, and the remedy the message names is the same one the shell case gives.
+//
+// The caller reaches it from both spellings, because the uncertainty is identical: `./run.sh` runs
+// the script directly, `sh /app/run.sh` hands the same file to an interpreter, and the appended flag
+// becomes that script's $1 either way.
+//
+// A .sh suffix is a convention rather than a guarantee, so this is neither sound nor complete: a
+// script without the suffix is admitted, and a program that merely ends in .sh would be refused.
+// Reading the file is not available at admission, and the suffix is the only signal on the command
+// line.
+func scriptByPath(ctrName, program string) error {
+	if !strings.HasSuffix(program, ".sh") {
+		return nil
+	}
+
+	return fmt.Errorf("container %q runs the script %q, and whether anything this webhook "+
+		"appends to args reaches the engine depends on whether that script forwards its "+
+		"arguments - which admission cannot read, because it is inside the image. Launch "+
+		"the engine directly - put its executable in command and its arguments in args - "+
+		"or add the connector flag inside the script yourself", ctrName, program)
+}
+
 // launcherGrammar is the only part of a launcher's option syntax that matters here: which of its
 // options take the FOLLOWING token as their operand. Everything else is a flag or the command.
 type launcherGrammar struct {
@@ -444,6 +463,17 @@ type launcherGrammar struct {
 	// operandLong holds the long options that accept a separated operand. The --opt=value form
 	// needs no entry, since the value travels inside the token.
 	operandLong []string
+	// opaqueShort holds the option letters whose operand is a whole COMMAND LINE rather than a
+	// value, spelled as they appear after a single dash. env(1)'s -S is the only one among the
+	// launchers below: it splits its operand into a program and its arguments.
+	//
+	// These are kept apart from operandShort because stepping over such an option leaves nothing
+	// to test - the program is inside the token that was skipped. Meeting one therefore ends
+	// resolution with "cannot tell" rather than with a program, whatever follows it.
+	opaqueShort string
+	// opaqueLong holds the long spellings of the same options. Unlike operandLong this covers the
+	// --opt=value form too, since the command line is inside the token either way.
+	opaqueLong []string
 	// positionalOperands is how many operands of the launcher's OWN sit between its options and the
 	// command, as `timeout DURATION COMMAND` has one. Zero means the first non-option token is the
 	// command, which is the shape of every other entry here.
@@ -473,9 +503,14 @@ var shellLaunchers = map[string]launcherGrammar{
 	// GNU coreutils env(1): -u NAME, -C DIR, -S STRING, -a ARG, and the long forms of all four, which
 	// getopt_long also accepts separated. Its three --*-signal options take an OPTIONAL operand
 	// (`[=SIG]`), so their separated form consumes nothing and they are correctly absent here.
+	//
+	// -S is the odd one out and sits in the opaque fields: its operand is a command line rather
+	// than a value, so it is not something to step over.
 	"env": {
-		operandShort: "uCSa",
-		operandLong:  []string{"--unset", "--chdir", "--split-string", "--argv0"},
+		operandShort: "uCa",
+		operandLong:  []string{"--unset", "--chdir", "--argv0"},
+		opaqueShort:  "S",
+		opaqueLong:   []string{"--split-string"},
 	},
 	// tini(1) parses with plain getopt, so only -p SIGNAL and -e EXIT_CODE reach past themselves.
 	"tini": {operandShort: "pe"},
@@ -514,19 +549,19 @@ var shellOperandLong = []string{"--rcfile", "--init-file"}
 // is not a fourth special case to add - it says the first word is simply not always the program. So
 // the prefix is RESOLVED rather than enumerated against.
 //
-// SCOPE, stated because the gap is real. Two shapes are not resolved, and both are admitted and
-// injected - the same outcome as before this function existed, not a new one:
-//   - A launcher whose own first positional operand is an ARGUMENT rather than the program: `gosu
-//     USER sh -c`, `chroot DIR sh -c`. Nothing here distinguishes that operand from a command.
-//     (A multi-call binary's applet name is not this case - see busybox below.)
-//   - `env -S "sh -c ..."`, where the whole command line is one string this parser cannot look
-//     inside. -S is stepped over as an ordinary operand, which leaves no command to test.
+// SCOPE, stated because the gap is real. One shape is not resolved, and it is admitted and injected
+// - the same outcome as before this function existed, not a new one: a launcher whose own first
+// positional operand is an ARGUMENT rather than the program, as in `gosu USER sh -c` or
+// `chroot DIR sh -c`. Nothing here distinguishes that operand from a command. (A multi-call binary's
+// applet name is not this case - see busybox below.)
 //
-// insideOneString reports that the command line, if there is one, sits inside a single token this
-// parser cannot look into - `env -S "sh -c ..."` being the shape that motivates it. The argv is nil
+// insideOneString reports that the launcher was handed a command line inside a single token this
+// parser cannot look into, which is `env -S "sh -c ..."` and its spellings. The resolved argv is nil
 // in that case, which is indistinguishable from "nothing to run" without this second return, and
 // those two deserve opposite answers: nothing to run is admitted, a command hidden in a string is
-// refused.
+// refused. Which token is opaque comes from the launcher's own grammar rather than from where the
+// argv happened to end - `env -S "sh -c ..." trailing` resolved to `trailing` and was admitted while
+// the hidden shell ran.
 func shellLaunchArgv(argv []string) (resolved []string, insideOneString bool) {
 	for len(argv) > 0 {
 		grammar, ok := shellLaunchers[path.Base(argv[0])]
@@ -534,9 +569,9 @@ func shellLaunchArgv(argv []string) (resolved []string, insideOneString bool) {
 			return argv, false
 		}
 
-		var swallowed bool
-		argv, swallowed = stripLauncherOperands(argv[1:], grammar)
-		if swallowed {
+		var opaque bool
+		argv, opaque = stripLauncherOperands(argv[1:], grammar)
+		if opaque {
 			return nil, true
 		}
 	}
@@ -547,19 +582,22 @@ func shellLaunchArgv(argv []string) (resolved []string, insideOneString bool) {
 // stripLauncherOperands drops one launcher's own arguments - NAME=value assignments, its flags, and
 // the operands its options consume - and returns the argv starting at the command it will exec.
 //
-// swallowed reports that an operand-taking option consumed the last token there was, so any command
-// line is inside that token rather than after it. It is returned rather than folded into an empty
-// argv because an argv that simply ENDED - `tini --` with the command supplied separately - is
-// appendable, and one whose command was swallowed is not.
+// opaque reports that the launcher was told to run a command line carried INSIDE one of its tokens,
+// which is `env -S "sh -c ..."` and nothing else among the launchers here. There is then no program
+// on the argv to test, so it is returned rather than folded into an empty argv: those two deserve
+// opposite answers.
 //
-// TREATING EVERY EMPTY RESULT AS "CANNOT TELL" IS THE CONSERVATIVE DEFAULT AND IT IS WRONG ON THE
-// COMMONEST SHAPE THERE IS. `tini --` resolves to an empty argv and is perfectly appendable: the
-// appended arguments ARE the command tini execs. Measured over the runner image families this
-// operator synthesizes, 56 of 60 ship exactly that entrypoint - so folding the two cases together
-// would not cost the one refusal failing closed is meant to cost, it would refuse almost everything
-// and make the check unusable. The distinction is cheap and local; the default that looks safe is
-// not.
-func stripLauncherOperands(argv []string, grammar launcherGrammar) (resolved []string, swallowed bool) {
+// AN EMPTY RESULT IS NOT "CANNOT TELL", AND TREATING IT AS ONE WOULD BE WRONG ON THE COMMONEST SHAPE
+// THERE IS. `tini --` resolves to an empty argv and is perfectly appendable: the appended arguments
+// ARE the command tini execs. Measured over the runner image families this operator synthesizes, 56
+// of 60 ship exactly that entrypoint - so refusing an empty argv would not cost the one refusal
+// failing closed is meant to cost, it would refuse almost everything and make the check unusable.
+//
+// An operand-taking option left without its operand - `env -u` as the last token - is empty for the
+// same reason and admitted for it: env will fail on its own terms, and there is no command line
+// there for a shell to hide in. That case used to be folded in with -S by counting the tokens left,
+// which refused it under a message describing a command line it does not have.
+func stripLauncherOperands(argv []string, grammar launcherGrammar) (resolved []string, opaque bool) {
 	// Operands of the launcher's own that sit before the command, consumed as they are met. A
 	// launcher declaring none behaves exactly as before: the first non-option token is the command.
 	positional := grammar.positionalOperands
@@ -571,10 +609,17 @@ func stripLauncherOperands(argv []string, grammar launcherGrammar) (resolved []s
 			return argv[1:], false
 		case strings.HasPrefix(arg, "--"):
 			name, _, inline := strings.Cut(arg, "=")
+			if slices.Contains(grammar.opaqueLong, name) {
+				return nil, true
+			}
 			takesNext = !inline && slices.Contains(grammar.operandLong, name)
 		case arg != "" && arg[0] == '-':
 			// A lone "-" carries no letters, so it reaches past nothing; env(1) reads it as -i.
-			takesNext = bundleTakesNextToken(arg[1:], grammar.operandShort)
+			var isOpaque bool
+			takesNext, isOpaque = bundleOperand(arg[1:], grammar)
+			if isOpaque {
+				return nil, true
+			}
 		case strings.Contains(arg, "="):
 			// A NAME=value assignment, which env(1) accepts before the command.
 		case positional > 0:
@@ -585,11 +630,10 @@ func stripLauncherOperands(argv []string, grammar launcherGrammar) (resolved []s
 			return argv, false
 		}
 		if takesNext {
-			// Two tokens left means this option's operand IS the last one, so a command line, if the
-			// author wrote one, is inside it. One token left is the same situation with the operand
-			// missing. Both are the swallowed case; anything longer leaves a program to test.
-			if len(argv) <= 2 {
-				return nil, true
+			if len(argv) < 2 {
+				// The operand is missing, so there is no command here and no token it could be
+				// inside. Empty and admitted, as above.
+				return nil, false
 			}
 			argv = argv[2:]
 
@@ -601,18 +645,25 @@ func stripLauncherOperands(argv []string, grammar launcherGrammar) (resolved []s
 	return argv, false
 }
 
-// bundleTakesNextToken reports whether a short-option bundle reaches past itself for an operand.
+// bundleOperand classifies a short-option bundle: whether it reaches past itself for an operand, and
+// whether that operand is a command line this parser cannot look inside.
 //
-// An operand-taking letter consumes whatever remains of the bundle when there is any - `-uNAME`
-// unsets NAME - so only a bundle ENDING in such a letter takes the token that follows. That is the
-// same rule the shell scan applies to -o, and getting it wrong either way hides a shell.
-func bundleTakesNextToken(bundle, operandLetters string) bool {
+// The FIRST operand-taking letter decides, because it consumes whatever remains of the bundle when
+// there is any - `-uNAME` unsets NAME - so only a bundle ENDING in such a letter takes the token that
+// follows. That is the same rule the shell scan applies to -o, and getting it wrong either way hides
+// a shell. An opaque letter is opaque wherever it sits: `-Ssh -c vllm` carries the command line
+// inside its own token, `-S 'sh -c vllm'` in the next one, and neither leaves a program to test.
+func bundleOperand(bundle string, grammar launcherGrammar) (takesNext, opaque bool) {
 	for i, letter := range bundle {
-		if strings.ContainsRune(operandLetters, letter) {
-			return i == len(bundle)-1
+		switch {
+		case strings.ContainsRune(grammar.opaqueShort, letter):
+			return false, true
+		case strings.ContainsRune(grammar.operandShort, letter):
+			return i == len(bundle)-1, false
 		}
 	}
-	return false
+
+	return false, false
 }
 
 // isShellCommandFlag reports whether a shell option bundle contains "c", covering -c as well as the
