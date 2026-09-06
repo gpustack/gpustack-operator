@@ -219,7 +219,7 @@ source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
 |---|---|---|
 | `project_id` | Nebius project ID (required); its region fixes node placement & platform availability | *(required)* |
 | `name_prefix` | Prefix for the cluster and its network/subnet/security-group names (a random suffix is appended) | `gpustack-nebius` |
-| `release` | Kubernetes version (`<major>.<minor>`) | `1.33` |
+| `release` | Kubernetes version (`<major>.<minor>`) | `1.35` |
 | `ssh_public_key` | Path to the SSH public key injected into every node via cloud-init | `~/.ssh/id_rsa.pub` |
 | `node_boot_disk_size_gb` | Node boot disk size, in GiB, for every node group | `100` |
 | `node_boot_disk_type` | Node boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |

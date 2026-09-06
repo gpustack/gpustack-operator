@@ -22,12 +22,23 @@ variable "name_prefix" {
 
 variable "release" {
   # Named "release" to match clusters/k3s and clusters/eks. Only "<major>.<minor>" is accepted
-  # (e.g. "1.33"). Nebius refuses a version within a month of its end of life -- the create call
+  # (e.g. "1.35"). Nebius refuses a version within a month of its end of life -- the create call
   # fails with "k8s version <x> is deprecated and cannot be used" -- so this default tracks a
   # version that is still current, not the oldest one that works.
-  description = "Kubernetes version for the cluster control plane and node groups, e.g. '1.33'."
+  #
+  # To find the current upper bound, ask the compatibility matrix for a candidate version:
+  #
+  #   nebius mk8s v1 node-group get-compatibility-matrix \
+  #     --cluster-kubernetes-version 1.36 --format json
+  #
+  # A version Nebius knows returns a populated "versions" array; one it does not returns the
+  # empty object {}. Read the BODY: the exit code is 0 either way, so a check that tests only
+  # the status will happily pick a version that cannot be created. That query does not say
+  # whether a known version is still creatable, though -- it answers for deprecated versions
+  # just as happily -- so it gives the ceiling, not the floor.
+  description = "Kubernetes version for the cluster control plane and node groups, e.g. '1.35'."
   type        = string
-  default     = "1.33"
+  default     = "1.35"
 }
 
 variable "ssh_public_key" {
