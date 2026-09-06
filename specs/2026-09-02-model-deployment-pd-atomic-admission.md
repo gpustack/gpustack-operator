@@ -133,7 +133,7 @@ rather than deleted because it is the problem statement T10 was written against.
 - **Making the pool itself span models.** A ClusterQueue whose identity is manufacturer-level rather
   than model-level — the ResourceFlavor label, the `PoolScheduleLabels` input and the unit spec of
   such a pool — is a change to **every** pool's behaviour in the existing scheduling chain, and it is
-  not this spec's. This spec adds one field to one CRD. See *Dependencies* for what S7 delivers with
+  not this spec's. This spec adds one field to one CRD. See *Dependencies* for what the model-level pool work delivers with
   and without it.
 - **The P/D data path in every form.** This spec makes the two roles **distinguishable in
   configuration** (F5) and stops there. It does **not** deliver, and asserts nothing about:
@@ -1658,6 +1658,32 @@ not fill it.
   agreement is being re-established is a behaviour to observe. Choosing it on an assumption would risk
   evicting a serving deployment on every scale.
 
+- **Derive the parallelism degree from the card count, instead of carrying it as a field.** Rejected,
+  and the alternative it loses to is a `roles[]` field. Nothing validates the contiguous port window a
+  disaggregated deployment needs, and that window is sized by the engine, the card count and the
+  parallelism; the first two are on the API and the third is on none of the four CRs, which is what
+  blocks the validator. The field, the per-engine formulas and the validator are separate work,
+  tracked at <https://github.com/gpustack/gpustack-operator/issues/203>.
+
+  **Deriving is the tempting option because it is right in the common case**, and that is precisely
+  its defect: under pipeline parallelism the card count is the product of two degrees, so a check
+  built on it is correct exactly where it is not needed and silently permissive on the deployments
+  large enough to need it. A formula missing an input is worse than no formula, because it passes.
+
+  **The decisive fact is that parallelism is already being consumed.** SGLang divides the KV segment
+  by it — `global_segment_size // tp_scale_factor`, v0.5.18 `mooncake_store.py:413-416` — so adding
+  the field is not inventing an input to make a check possible; it is declaring a quantity that is
+  already changing behaviour.
+
+  Per role rather than per deployment, since prefill and decode can run different degrees while
+  `spec.engineVersion` sits one level up. The engine's own parallelism argument joins the
+  operator-owned key set, so it is refused in `roles[].extraArgs` instead of silently disagreeing
+  with the field — the rule that already governs every other owned key.
+
+  ⚠️ The Ascend window needs only the card count (`[20000, 20000 + npu_per_node * 1000)`), so that
+  half is writable today — and shipping only it would leave a validator that looks general and covers
+  one vendor.
+
 ## Open Questions
 
 > **One entry below is not a question.** The `status.roles[].kind` enum closes with a code change, not
@@ -1673,34 +1699,6 @@ not fill it.
   every status write fail, and T8 fills it from `ModelDeploymentEffectiveRoleKind`. Adding the enum is
   therefore safe and is left to a follow-up, because it changes what the API server accepts on a
   status write and wants its own verification rather than a rider on this one.
-
-- **[DECIDED, recorded here because the implementation is separate] Parallelism becomes a `roles[]`
-  field rather than being derived.** Nothing validates the contiguous port window a disaggregated
-  deployment needs, and the window is sized by the engine, the card count and the parallelism. The
-  first two are on the API; parallelism is on none of the four CRs. Tracked at
-  <https://github.com/gpustack/gpustack-operator/issues/203>; the field, the per-engine formulas and
-  the validator are their own work.
-
-  **The decisive fact is that parallelism is already being consumed.** SGLang divides the KV segment
-  by it — `global_segment_size // tp_scale_factor`, v0.5.18
-  `mooncake_store.py:413-416` — so this is not a new input invented for a check; it is a quantity
-  that is already changing behaviour while being declared nowhere.
-
-  ⛔ **Deriving it from the card count is the option to avoid**, and it is the tempting one because
-  it is right in the common case. Where it is wrong is pipeline parallelism, where cards are the
-  product of two degrees — so the check would be correct exactly when it is not needed and silently
-  permissive on the deployments large enough to need it.
-
-  **Per role, not per deployment**: prefill and decode can run different degrees, while
-  `spec.engineVersion` sits one level up.
-
-  The engine's own parallelism argument joins the operator-owned key set, so it is refused in
-  `roles[].extraArgs` rather than silently disagreeing with the field. That is the rule already
-  applied to every other owned key, so it needs no new mechanism.
-
-  ⚠️ **The Ascend window can be written first, but not alone.** `AscendDirectTransport` claims
-  `[20000, 20000 + npu_per_node * 1000)`, which needs only the card count — so that half is writable
-  today, and shipping only it would leave a validator that looks general and covers one vendor.
 
 - **Can a serving pod group be scaled in place?** F10 rebuilds the group because
   `validatePodGroupMetadata` requires every Pod to carry the same `pod-group-total-count`, and

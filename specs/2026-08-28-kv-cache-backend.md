@@ -57,15 +57,15 @@ named so a reader can tell "not yet" from "not ever".
   accepts `1` and only `1` in this scope. Multi-replica election, `-enable_ha`, an HA backend store and
   leader-follower status belong to the **master-HA** spec. The HA backend store — `-enable_ha`
   with `-ha_backend_type=etcd|redis|k8s` — is a **different axis from the metadata plane** (F4) and
-  exists only at `replicas > 1`, so it belongs to S5 rather than here. One measured fact travels with
-  the exclusion, because it decides whether S5 can ship on an official artifact at all: on the
+  exists only at `replicas > 1`, so it belongs to the master-HA spec rather than here. One measured fact travels with
+  the exclusion, because it decides whether that spec can ship on an official artifact at all: on the
   published wheel's master, `-ha_backend_type=k8s` is refused at startup with
   `UNAVAILABLE_IN_CURRENT_MODE` — the Kubernetes-lease backend is declared but not compiled in — so a
   lease-based HA mode requires a self-built image. The refusal is identical on two published artifacts
   across two CUDA generations, and `k8s_lease_helper.cpp` does appear in the binary's strings — the
   backend is declared and not compiled in, which is why the flag is accepted before it is refused. The
   etcd backend, by contrast, ships: `libetcd_wrapper.so` (22 MB) and `EtcdTenantQuotaPolicyStore` are
-  both in the wheel and `etcd` is the flag's own default. It was not run, so S5 owns proving it.
+  both in the wheel and `etcd` is the flag's own default. It was not run, so the master-HA spec owns proving it.
 
   **How urgent that follow-on is has not been measured, and the measurement comes first.** What a
   leader restart costs is unrecorded: the members hold the bytes, the leader holds the index of which
@@ -93,7 +93,7 @@ named so a reader can tell "not yet" from "not ever".
   belong to the pool-and-quota spec, since shipped as `specs/2026-08-28-kv-cache-pool.md`.
   `KVCacheBackend` carries no tenant field.
 - **Anything about workloads, engines, routers or prefill/decode disaggregation.** Those belong to the
-  **engine** specs (S6/S7/S8). Nothing here reads or writes a workload object.
+  engine-side specs — KV cache injection, ModelDeployment and P/D disaggregation. Nothing here reads or writes a workload object.
 - **Building a Mooncake container image.** This scope *consumes* an image named in `spec.image`. Which
   vendor variant that image is built from is an operational decision, informed by F2's measured table
   but made outside this spec.
@@ -443,13 +443,13 @@ leader replicas elect one among them. That is where a **Kubernetes lease** lives
 Kubernetes option appears on the metadata plane: leader election is not metadata discovery. It exists
 only at `replicas > 1`, which this scope refuses, so it belongs to the master-HA follow-on.
 
-And when S5 gets there, one measured fact decides what it can ship on: **`-ha_backend_type=k8s` is
+And when the master-HA spec gets there, one measured fact decides what it can ship on: **`-ha_backend_type=k8s` is
 refused at startup by the published artifact**, with `UNAVAILABLE_IN_CURRENT_MODE, backend_type=k8s`,
 identically on two artifacts across two CUDA generations. `k8s_lease_helper.cpp` does appear in the
 binary's strings — the backend is declared and not compiled in, which is why the flag is accepted
 before it is refused. So Kubernetes-lease election needs a self-built image. The etcd backend, by
 contrast, ships: `libetcd_wrapper.so` (22 MB) and `EtcdTenantQuotaPolicyStore` are both in the wheel
-and `etcd` is that flag's own default. It was not run, so S5 owns proving it.
+and `etcd` is that flag's own default. It was not run, so the master-HA spec owns proving it.
 
 Keeping the two apart is what stops an operator deploying an etcd for a single-leader backend that
 never contacts one.
@@ -2049,6 +2049,28 @@ not restated here, because a second copy of a measurement is the copy that goes 
   a DaemonSet states and anti-affinity only approximates. Kueue's Topology-Aware Scheduling accounts
   for a Deployment just the same, so it is not an argument either way. The shape is revisited when
   several members per node, or rollout control over a shrink, is actually needed.
+- **Several members per node, split by NUMA.** Not taken, and both halves of the question that once
+  paired with it are now answered: rollout control over a shrink was settled by
+  `specs/2026-09-05-kv-cache-media-and-scaling.md`, which sends a grace period and deliberately does
+  **not** change the DaemonSet shape, leaving NUMA as the only remaining candidate.
+
+  **The reason to reopen it is not memory locality**, and that framing is what gets it dismissed for
+  lacking a benchmark. This operator already discovers the NUMA affinity of NICs and their RDMA
+  devices, and RDMA is this backend's fast transport, so several members per node is the **only**
+  mechanism that could place a segment on the same NUMA node as the interface serving it — without
+  it, that discovered topology has no consumer on this path.
+
+  **Trigger, written so it can be checked rather than argued:** a two-socket node whose `devices`
+  report RDMA interfaces on more than one NUMA node, **and** that node's member observed transferring
+  across the socket boundary. No such evidence exists today.
+
+  ⛔ **One group per NUMA domain is not the shape it would take**, and the obstacle is structural
+  rather than a cost: a group selects nodes via `nodeSelector`, and NUMA is a property *inside* a
+  node rather than a label *on* one, so "the NUMA 0 of this node" is not expressible by the mechanism
+  groups are built on. It would also multiply groups by socket count against a list capped at 32, in
+  which every group's identity is its position. `capacityPerMember` keeps its name so this can land
+  later without an API rename. Tracked at
+  <https://github.com/gpustack/gpustack-operator/issues/219>.
 - **Compute `status.capacity` from the spec.** Rejected: it makes the status a restatement of the
   spec, so a member that failed to mount is invisible. The master's own counter is the only figure
   that can disagree with the request, and that disagreement is the signal.
@@ -2060,9 +2082,28 @@ not restated here, because a second copy of a measurement is the copy that goes 
   the tiering work that will exercise them, and a field per flag would freeze names before the
   semantics are settled. The `extraArgs` passthrough keeps them reachable in the meantime, which is
   what stops an operator from patching the rendered objects.
-- **Expose `-quota_bytes` as a `spec.quota` field.** Rejected: it is a **global** storage-backend
-  quota, not a per-tenant one, and naming it `quota` here would collide with the per-tenant quota
-  vocabulary a later spec owns. It stays reachable through `extraArgs`.
+- **Expose `-quota_bytes` as a `spec.quota` field.** Rejected on the NAME, and that distinction was
+  later found to be doing more work than it could carry: `quota` collides with the per-tenant
+  vocabulary a later spec owns, which refuses a spelling and not the exposure. It was being read as
+  the latter.
+
+  ⇒ **Now decided: expose it, as `leader.storageQuota`.** The rule this API applies is that a field
+  exists when a second reader validates against it — the reason `leader.multiTenancy` is a field
+  rather than an `extraArgs` key. That reader was hypothetical when this was first deferred and is
+  not any more: `KVCachePoolBinding.spec.quotaCeiling` has landed, and nothing compares the sum of a
+  backend's tenant ceilings against its global quota.
+
+  ⛔ **That comparison is a status observation, NOT an admission refusal**, which is the part most
+  likely to be re-added by the next reader. Two Bindings admitted concurrently each read a state
+  without the other, so a webhook summing them holds no lock and both pass; and refusing is unfair in
+  the direction that matters, since a Binding that is itself legal would be rejected for headroom
+  someone else took. The second-reader rule still holds — the reader is a controller instead of a
+  webhook.
+
+  The name matches the artifact's own words and is distinguishable at a glance from `quotaCeiling`,
+  which is one tenant's request. ⛔ Not a bare `quota`, and not `globalQuota` — "global" carries other
+  meanings in Kubernetes. Implementation is separate work, tracked at
+  <https://github.com/gpustack/gpustack-operator/issues/223>.
 - **Copy `master_key_count`, the soft-pin count and the request counters into `status`.** Rejected: the
   master already exposes them on a scrapeable endpoint, and a status copy is a staler second source of
   the same numbers.
@@ -2075,62 +2116,10 @@ not restated here, because a second copy of a measurement is the copy that goes 
   mode later, where a connection string with credentials would leak to anyone who can read the
   Deployment. Whether such flags should move to Secret-backed environment variables — for those flags
   only, keeping argv for the rest — is open.
-- ~~**The member workload shape past one member per node.**~~ **Decided: keep one member per
-  selected node.** Both halves of this question have since been answered, so it is recorded here as
-  a decision with its trigger rather than left reading as undecided.
-
-  Rollout control over a shrink was settled by the tiering-and-drain spec, which sends a grace
-  period and deliberately does **not** change the DaemonSet shape. That left NUMA splitting as the
-  only remaining candidate, and it is **not taken**, on evidence rather than on cost.
-
-  **The reason to reopen it is not memory locality.** That framing is what gets it dismissed, and it
-  undersells the case: this operator already discovers the NUMA affinity of NICs and their RDMA
-  devices, and RDMA is this backend's fast transport. Several members per node is the **only**
-  mechanism that could place a segment on the same NUMA node as the interface serving it, so without
-  it that discovered topology has no consumer on this path.
-
-  **Trigger, stated so it can be checked rather than argued:** a two-socket node whose `devices`
-  report RDMA interfaces on more than one NUMA node, **and** that node's member observed
-  transferring across the socket boundary. No such evidence exists today.
-
-  ⛔ **One group per NUMA domain is not the shape**, and the obstacle is structural rather than a
-  cost: a group selects nodes via `nodeSelector`, and NUMA is a property *inside* a node rather than
-  a label *on* one, so "the NUMA 0 of this node" is not expressible by the mechanism groups are
-  built on. It would also multiply groups by socket count against a list capped at 32, in which
-  every group's identity is its position.
-
-  `capacityPerMember` keeps its name, which is what lets this land later without an API rename.
-  Tracked at <https://github.com/gpustack/gpustack-operator/issues/219>.
 - **Whether `spec.type` should ever express "an existing RWX volume"** — a shared-filesystem backend
   nobody manages, where the engine's own `fs://` layer does the work. It is out of the enum, not
   reserved in it: it arrives as a value when something implements it, and widening an enum is not an
   API change.
-- ~~**Whether this API should expose `-quota_bytes` at all, and under what name.**~~
-  **Decided: expose it, as `leader.storageQuota`.** Recorded here; the implementation is a separate
-  piece of work, tracked at <https://github.com/gpustack/gpustack-operator/issues/223>.
-
-  **The old rejection did not support the conclusion it was carrying.** Alternatives rejected
-  exposing it *as `spec.quota`* because that name collides with the per-tenant vocabulary. That
-  refuses a **name**, and naming is fixable by naming; it was being read as refusing **exposure**.
-
-  The rule this API already applies is "a field exists when a second reader validates against it" --
-  the reason `leader.multiTenancy` is a field rather than an `extraArgs` key. When this was first
-  deferred the confusable neighbour was hypothetical; `KVCachePoolBinding.spec.quotaCeiling` has
-  since landed, so the second reader now exists: nothing today compares the sum of a backend's
-  tenant ceilings against its global quota.
-
-  ⛔ **That comparison is NOT an admission refusal, and this is the part most likely to be
-  re-added by the next reader.** Two Bindings admitted concurrently each read a state that does not
-  include the other, so both pass — a webhook has no lock over the set it would be summing. Worse,
-  refusing is unfair in the direction that matters: a Binding that is itself entirely legal gets
-  rejected because someone else claimed the headroom first, which is neither its author's fault nor
-  something its author can fix. ⇒ The over-subscription is reported as an **observation on the
-  backend's status**, where it describes the cluster rather than blaming a request. The
-  second-reader rule still holds — the reader is a controller instead of a webhook.
-
-  **Name:** `leader.storageQuota`. It matches the artifact's own words (a storage-backend quota) and
-  is distinguishable at a glance from `quotaCeiling`, which is one tenant's request. ⛔ Not any name
-  that is a bare `quota`, and not `globalQuota` -- "global" carries other meanings in Kubernetes.
 - **Whether the master can serve its own metadata plane** with `-enable_http_metadata_server`, which
   is what the reserved `httpServer` mode would render. The flag is measured present; it is not
   measured sufficient, which is why the webhook refuses the value rather than shipping it.
