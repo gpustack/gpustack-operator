@@ -15,7 +15,8 @@ node groups, and point your local kubeconfig at it.
   plus one `gpu-<name>` group per `gpu_instance_types` key (every node gets
   cloud-init injecting an SSH user + key, same idiom as `computes/nebius`).
 - Gives each **GPU** group's nodes a public IPv4 so they can be reached over SSH
-  (`public_ip`, default `true`); the CPU group takes none. See
+  (`public_ip`, default `true`); the CPU group takes none unless
+  `cpu_instance_types.public_ip` asks for one. See
   [Public addresses](#public-addresses).
 - On every **GPU** node, installs `gpustack-node-prep.service` — a boot-time
   oneshot that moves the image's vendor device-plugin **static Pod** manifest
@@ -120,7 +121,10 @@ is what the provider charges. Only the groups that need an address take one:
   the cluster over SSH — the hardware-partition tests toggle MIG on the card that
   way, and they take the node's address as a run-time input rather than guess it,
   so a GPU node that cannot be reached cannot be partition-tested.
-- **The CPU group: none, always.** Nothing logs in to it.
+- **The CPU group: none by default.** The accelerator tests drive GPU nodes, not
+  this one. Set `public_ip = true` in `cpu_instance_types` for the one workflow
+  that does need inbound reach — building images on the node itself, natively,
+  instead of under emulation on a workstation of another architecture.
 
 Set `public_ip = false` on a GPU group nobody has to log in to (a scale-out node,
 a second flavour that only has to schedule) to bring the requirement down
@@ -211,7 +215,8 @@ Node groups don't expose per-node IPs in Terraform state, so reach individual
 nodes via `kubectl ... get nodes -o wide` -> `ssh ubuntu@<ExternalIP>`; the SSH
 source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
 `computes/nebius`. Only a group with `public_ip = true` has an `ExternalIP` at all
-— the CPU node has none ([public addresses](#public-addresses)).
+— the CPU node has none unless `cpu_instance_types.public_ip` asks for one
+([public addresses](#public-addresses)).
 
 ## Variables
 
@@ -223,7 +228,7 @@ source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
 | `ssh_public_key` | Path to the SSH public key injected into every node via cloud-init | `~/.ssh/id_rsa.pub` |
 | `node_boot_disk_size_gb` | Node boot disk size, in GiB, for every node group | `100` |
 | `node_boot_disk_type` | Node boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |
-| `cpu_instance_types` | Instance type for the CPU node group: `{platform, preset, os}` | `{ platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }` |
+| `cpu_instance_types` | Instance type for the CPU node group: `{platform, preset, os, public_ip (optional)}`. `public_ip` defaults to `false`; `true` gives the node an SSH-reachable public IPv4 at one public-address quota unit ([public addresses](#public-addresses)). | `{ platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }` |
 | `gpu_instance_types` | GPU node groups keyed by group name (each becomes `gpu-<name>`): `{platform, preset, os (optional), drivers_preset (optional), preemptible (optional), mig (optional), public_ip (optional)}`. `os`/`drivers_preset` default to the newest match from the compatibility matrix for `release`; `preemptible` defaults to `false` ([preemptible nodes](#preemptible-nodes)); `mig` defaults to whether the platform supports MIG ([groups that cannot be partitioned](#groups-that-cannot-be-partitioned)); `public_ip` defaults to `true`, so the node is SSH-reachable, at one public-address quota unit per node ([public addresses](#public-addresses)). | `{ h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" } }` |
 | `switch_kube_context` | Let `get-credentials` leave this cluster current; `false` restores the previous context | `true` |
 

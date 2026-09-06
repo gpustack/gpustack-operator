@@ -78,12 +78,19 @@ variable "node_boot_disk_type" {
 # The (singular) CPU node group's shape, mirroring clusters/eks's cpu_instance_types. No
 # image_family: unlike a standalone compute VM (computes/nebius), the mk8s node template picks
 # its image from `os` alone for a driverless (CPU) platform.
+#
+# public_ip gives the node a public IPv4, which is what makes it reachable over SSH. It defaults
+# to false because the accelerator tests drive GPU nodes, not this one, and every address is
+# charged against the project's vpc.ipv4-address.public.count quota. Set it to true for the one
+# workflow that does need inbound reach: building images on the node itself. Dropping the address
+# does not cost the node its outbound internet (see README), so pulls work either way.
 variable "cpu_instance_types" {
-  description = "Instance type for the CPU node group: platform/preset (see the region table above) plus os."
+  description = "Instance type for the CPU node group: platform/preset (see the region table above), os, and whether the node takes a public IPv4 (public_ip, default false; true makes it SSH-reachable at one public-address quota unit)."
   type = object({
-    platform = string
-    preset   = string
-    os       = string
+    platform  = string
+    preset    = string
+    os        = string
+    public_ip = optional(bool, false)
   })
   default = { platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }
 }
