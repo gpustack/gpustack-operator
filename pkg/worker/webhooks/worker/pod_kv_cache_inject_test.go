@@ -163,6 +163,11 @@ func TestPodKVCacheInject_RefusesAShellWrapper(t *testing.T) {
 		name          string
 		command, args []string
 		refuse        bool
+		// wantMsg is the phrase that identifies WHICH reason the refusal gave, and asserting it per
+		// row is what keeps the three apart. They lead to different next moves - rewrite the shell
+		// invocation, unpack the single argument, or look inside the script - so a test that only
+		// checked "some error" would let any one of them answer for another.
+		wantMsg string
 	}{
 		{name: "-c in command", command: []string{"/bin/sh", "-c"}, args: []string{"vllm serve"}, refuse: true},
 		{name: "-c in args", command: []string{"/bin/sh"}, args: []string{"-c", "vllm serve"}, refuse: true},
@@ -244,6 +249,45 @@ func TestPodKVCacheInject_RefusesAShellWrapper(t *testing.T) {
 		// a command. An earlier revision admitted this, reasoning that "the shell fails on its own
 		// terms" - it does not, it runs the wrong thing, and the injection is what put it there.
 		{name: "trailing -c", command: []string{"/bin/sh", "-c"}, refuse: true},
+
+		// FAILING CLOSED: the two shapes this check used to admit because it could not read them.
+		// Neither is a launcher missing from the enumeration - both are launches whose behavior is
+		// not on the command line at all, which is why no entry would fix them.
+		//
+		// A script by path. Measured on lmsysorg/sglang, whose entrypoint is
+		// /opt/nvidia/nvidia_entrypoint.sh: whether an appended flag reaches the engine depends on
+		// whether that file forwards "$@", and admission cannot open the file.
+		{
+			name: "a script by path", command: []string{"/opt/nvidia/nvidia_entrypoint.sh"},
+			args: []string{"vllm", "serve"}, refuse: true, wantMsg: "forwards its arguments",
+		},
+		{
+			name:    "a script by path behind a launcher it knows",
+			command: []string{"tini", "--", "/app/entrypoint.sh"}, args: []string{"vllm", "serve"},
+			refuse: true, wantMsg: "forwards its arguments",
+		},
+		// The whole command line inside one token. env -S splits the string itself, so there is
+		// nothing on the argv to test and the -S operand is the last token there is.
+		{
+			name: "env -S hides the command line", command: []string{"env", "-S", "sh -c 'vllm serve'"},
+			refuse: true, wantMsg: "inside a single argument",
+		},
+		{
+			name:    "env --split-string hides it too",
+			command: []string{"env", "--split-string", "sh -c 'vllm serve'"},
+			refuse:  true, wantMsg: "inside a single argument",
+		},
+
+		// AND THE SHAPES FAILING CLOSED MUST NOT TOUCH. A launcher whose options simply ended leaves
+		// the appended args AS the command, which is the appendable case: `tini --` plus args runs
+		// exactly those args. Refusing it would be the false refusal that makes fail-closed
+		// unusable, and it is the shape 56 of the 60 runner-image families ship.
+		{name: "tini with the command in args", command: []string{"tini", "--"}, args: []string{"vllm", "serve"}},
+		{name: "tini and nothing else", command: []string{"tini", "--"}},
+		// An operand-taking option with real tokens after it still resolves.
+		{name: "env -u then a program", command: []string{"env", "-u", "HOME", "vllm"}, args: []string{"serve"}},
+		// A program that merely has a script-looking argument is not a script launch.
+		{name: "a program taking a script argument", command: []string{"vllm", "serve", "--x", "a.sh"}},
 	}
 
 	for _, tc := range testCases {
@@ -258,7 +302,11 @@ func TestPodKVCacheInject_RefusesAShellWrapper(t *testing.T) {
 				return
 			}
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "positional parameters",
+			want := tc.wantMsg
+			if want == "" {
+				want = "positional parameters"
+			}
+			assert.Contains(t, err.Error(), want,
 				"the message has to say WHY appending cannot work, or the fix is not obvious")
 		})
 	}

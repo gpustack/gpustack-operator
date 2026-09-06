@@ -324,8 +324,21 @@ func checkLaunchArgs(ctr *core.Container) error {
 // shellNames are the interpreters for which "-c" means "the next argument is the whole script".
 var shellNames = []string{"sh", "bash", "dash", "ash", "zsh", "ksh"}
 
-// checkShellWrapper refuses a container launched through a shell's -c, because appending to its args
-// cannot reach the engine.
+// checkShellWrapper refuses a container whose launch cannot be SHOWN to carry an appended argument
+// through to the engine. It fails closed: "cannot tell" is a refusal with a message, not an
+// admission.
+//
+// Three shapes are refused, and the message says which, because the reader's next move differs:
+//
+//	a shell's -c            the appended flag becomes $0 and $1 and never reaches the engine
+//	a command in one token  `env -S "sh -c ..."` - there is nothing on the command line to test
+//	a script by path        whether it forwards "$@" is inside the image, not on the command line
+//
+// WHAT THIS DOES NOT DO is decide whether the launcher enumeration below is complete, and no
+// reading of it should be taken as evidence either way. A launcher this parser has never heard of
+// still resolves to itself and is still admitted, exactly as before, because an unrecognized
+// launcher is indistinguishable from an ordinary program by construction. That gap is the one
+// tracked as #169; failing closed narrows the OTHER two, which are detectable.
 //
 // After `sh -c <script>`, everything further is a POSITIONAL PARAMETER: the flag becomes $0 and its
 // value $1, and the shell never passes either to what it runs. Measured, not assumed -
@@ -347,8 +360,38 @@ var shellNames = []string{"sh", "bash", "dash", "ash", "zsh", "ksh"}
 // problem here. Requiring argv[0] to be a shell narrows the refusal to the case where the behavior
 // is guaranteed by POSIX rather than inferred from an absence of counter-examples.
 func checkShellWrapper(ctr *core.Container) error {
-	argv := shellLaunchArgv(slices.Concat(ctr.Command, ctr.Args))
-	if len(argv) == 0 || !slices.Contains(shellNames, path.Base(argv[0])) {
+	argv, insideOneString := shellLaunchArgv(slices.Concat(ctr.Command, ctr.Args))
+	if insideOneString {
+		return fmt.Errorf("container %q hides its command line inside a single argument, so this "+
+			"webhook cannot tell what would run or whether appending to args would reach it. "+
+			"Launch the engine directly - put its executable in command and its arguments in args - "+
+			"or add the connector flag inside that argument yourself", ctr.Name)
+	}
+	if len(argv) == 0 {
+		return nil
+	}
+	program := path.Base(argv[0])
+	if !slices.Contains(shellNames, program) {
+		// A LAUNCHER CAN BE AN ARBITRARY SCRIPT, AND ITS TRANSPARENCY LIVES IN ITS BODY. Whether
+		// appending reaches the engine depends on whether the script forwards "$@" - which is the
+		// contents of a file inside the image, not a token on the command line. No enumeration
+		// closes that: it is not a launcher this parser has not heard of, it is a launcher whose
+		// behavior is not on the command line at all. Measured on the images this repository names:
+		// lmsysorg/sglang runs `/opt/nvidia/nvidia_entrypoint.sh`, and admitting it was never
+		// justified, only lucky.
+		//
+		// So this refuses rather than guesses, which is the whole point of failing closed: it turns
+		// "cannot tell" from a silent admission into a message. The cost is a script that DOES
+		// forward "$@" and is now refused, and the remedy the message names is the same one the
+		// shell case gives.
+		if strings.HasSuffix(program, ".sh") {
+			return fmt.Errorf("container %q runs the script %q, and whether anything this webhook "+
+				"appends to args reaches the engine depends on whether that script forwards its "+
+				"arguments - which admission cannot read, because it is inside the image. Launch "+
+				"the engine directly - put its executable in command and its arguments in args - "+
+				"or add the connector flag inside the script yourself", ctr.Name, program)
+		}
+
 		return nil
 	}
 	// A shell stops reading options at its first operand: `sh /app/run.sh -c config` passes -c to the
@@ -387,7 +430,7 @@ func checkShellWrapper(ctr *core.Container) error {
 			"reaching the engine. The Pod would start, record itself as injected, and never enable "+
 			"the connector. Launch the engine directly - put its executable in command and its "+
 			"arguments in args - or add the connector flag to the script yourself",
-			ctr.Name, path.Base(argv[0]), arg)
+			ctr.Name, program, arg)
 	}
 	return nil
 }
@@ -478,20 +521,45 @@ var shellOperandLong = []string{"--rcfile", "--init-file"}
 //     (A multi-call binary's applet name is not this case - see busybox below.)
 //   - `env -S "sh -c ..."`, where the whole command line is one string this parser cannot look
 //     inside. -S is stepped over as an ordinary operand, which leaves no command to test.
-func shellLaunchArgv(argv []string) []string {
+//
+// insideOneString reports that the command line, if there is one, sits inside a single token this
+// parser cannot look into - `env -S "sh -c ..."` being the shape that motivates it. The argv is nil
+// in that case, which is indistinguishable from "nothing to run" without this second return, and
+// those two deserve opposite answers: nothing to run is admitted, a command hidden in a string is
+// refused.
+func shellLaunchArgv(argv []string) (resolved []string, insideOneString bool) {
 	for len(argv) > 0 {
 		grammar, ok := shellLaunchers[path.Base(argv[0])]
 		if !ok {
-			return argv
+			return argv, false
 		}
-		argv = stripLauncherOperands(argv[1:], grammar)
+
+		var swallowed bool
+		argv, swallowed = stripLauncherOperands(argv[1:], grammar)
+		if swallowed {
+			return nil, true
+		}
 	}
-	return argv
+
+	return argv, false
 }
 
 // stripLauncherOperands drops one launcher's own arguments - NAME=value assignments, its flags, and
 // the operands its options consume - and returns the argv starting at the command it will exec.
-func stripLauncherOperands(argv []string, grammar launcherGrammar) []string {
+//
+// swallowed reports that an operand-taking option consumed the last token there was, so any command
+// line is inside that token rather than after it. It is returned rather than folded into an empty
+// argv because an argv that simply ENDED - `tini --` with the command supplied separately - is
+// appendable, and one whose command was swallowed is not.
+//
+// TREATING EVERY EMPTY RESULT AS "CANNOT TELL" IS THE CONSERVATIVE DEFAULT AND IT IS WRONG ON THE
+// COMMONEST SHAPE THERE IS. `tini --` resolves to an empty argv and is perfectly appendable: the
+// appended arguments ARE the command tini execs. Measured over the runner image families this
+// operator synthesizes, 56 of 60 ship exactly that entrypoint - so folding the two cases together
+// would not cost the one refusal failing closed is meant to cost, it would refuse almost everything
+// and make the check unusable. The distinction is cheap and local; the default that looks safe is
+// not.
+func stripLauncherOperands(argv []string, grammar launcherGrammar) (resolved []string, swallowed bool) {
 	// Operands of the launcher's own that sit before the command, consumed as they are met. A
 	// launcher declaring none behaves exactly as before: the first non-option token is the command.
 	positional := grammar.positionalOperands
@@ -500,7 +568,7 @@ func stripLauncherOperands(argv []string, grammar launcherGrammar) []string {
 		takesNext := false
 		switch {
 		case arg == "--":
-			return argv[1:]
+			return argv[1:], false
 		case strings.HasPrefix(arg, "--"):
 			name, _, inline := strings.Cut(arg, "=")
 			takesNext = !inline && slices.Contains(grammar.operandLong, name)
@@ -514,18 +582,23 @@ func stripLauncherOperands(argv []string, grammar launcherGrammar) []string {
 			// before the default arm so the token after it is still tested as a program.
 			positional--
 		default:
-			return argv
+			return argv, false
 		}
 		if takesNext {
-			if len(argv) < 2 {
-				return nil
+			// Two tokens left means this option's operand IS the last one, so a command line, if the
+			// author wrote one, is inside it. One token left is the same situation with the operand
+			// missing. Both are the swallowed case; anything longer leaves a program to test.
+			if len(argv) <= 2 {
+				return nil, true
 			}
 			argv = argv[2:]
+
 			continue
 		}
 		argv = argv[1:]
 	}
-	return argv
+
+	return argv, false
 }
 
 // bundleTakesNextToken reports whether a short-option bundle reaches past itself for an operand.
