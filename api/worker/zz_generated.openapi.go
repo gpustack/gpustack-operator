@@ -3003,7 +3003,7 @@ func schema_gpustack_api_worker_v1alpha1_DeviceTopology(ref common.ReferenceCall
 					},
 					"numaAffinity": {
 						SchemaProps: spec.SchemaProps{
-							Description: "NumaAffinity is the NUMA node that the device is attached to.",
+							Description: "NumaAffinity is the NUMA node that the device is attached to. Empty means UNKNOWN and is never normalised to node 0 — that would report an affinity nobody read.\n\nTHE PRODUCER DOES NOT HOLD THAT CONTRACT YET, and saying so here is the point: the bus helper behind this field answers \"0\" for node 0, for the kernel's -1 \"no affinity\" sentinel and for an unparseable reading alike, so an unknown affinity reaches a reader as node 0. The interface fields below DO map the sentinel to empty, which is why only this one carries the caveat. Tracked at https://github.com/gpustack/gpustack-operator/issues/182.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
