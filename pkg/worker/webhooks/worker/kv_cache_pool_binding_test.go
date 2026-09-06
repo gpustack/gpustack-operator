@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -297,6 +298,34 @@ func TestKVCachePoolBindingWebhook_ADomainIsNotClaimedByTheObjectUnderAdmission(
 
 	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
 	require.NoError(t, err)
+}
+
+// TestKVCachePoolBindingWebhook_ADuplicateDomainIsTrueOfOneMasterAndOfTwo pins the refusal's message
+// against the one way it can be wrong while naming the right objects.
+//
+// The refusal holds whether or not the two Bindings are served by the same master, and its REASON does
+// not: on one master the two would share cache and one ledger entry, on two independent backends they
+// share neither. A message stating only the first sends an operator on two backends to investigate a
+// collision that cannot occur between two ledgers, which is worse than a vague message — it is a
+// correct object with a wrong causality.
+func TestKVCachePoolBindingWebhook_ADuplicateDomainIsTrueOfOneMasterAndOfTwo(t *testing.T) {
+	wh := newKVCachePoolBindingWebhook(newKVCachePool(), otherKVCachePoolBinding("team-a-chat"))
+
+	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
+	require.Error(t, err)
+
+	msg := err.Error()
+	assert.Contains(t, msg, "team-b/batch",
+		"the refusal names the Binding holding the domain, which is where the operator looks first")
+	assert.Contains(t, msg, "registered once cluster-wide",
+		"the scope of the registry is what the refusal actually turns on")
+	assert.Contains(t, msg, "Served by one master, the two would share cache",
+		"the collision is stated WITH the condition that produces it, never on its own")
+	assert.Contains(t, msg, "Served by two independent backends, they share nothing",
+		"the case with no sharing at all is stated too, so nobody goes looking for a collision")
+	assert.Contains(t, msg, "which the engines that forward no tenant write under",
+		"the advice to rename dead-ends on the one name an engine picks, so it says so: renaming "+
+			"is admitted and the Pods that made the domain necessary still write elsewhere")
 }
 
 // TestKVCachePoolBindingWebhook_DeleteIsTheFinalizersDecision states where the refusal lives: this
