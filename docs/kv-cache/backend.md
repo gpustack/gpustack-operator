@@ -236,6 +236,17 @@ degrades the metadata plane** rather than erroring. It is asserted byte-for-byte
 The client splits that key on commas into a device filter and nothing special-cases the string, so
 setting it produces a filter matching a device no host has. **Empty means "use every device found".**
 
+⛔ **`members[].extraArgs` is the exception to the table above: it renders into the container's
+argv**, as `-D key=value`, not into an environment variable. `leader.extraArgs` does the same on the
+leader, as `-key=value`.
+
+⛔ **Either way the value is world-readable.** Anyone who can read the Pod or its controller can read
+it, and it stays there for the life of the object. **Do not put a credential in `extraArgs`.**
+
+> **Why there is no check** — the operator renders no flag that carries a credential, so this field
+> is the only way one arrives. Nothing refuses it at admission: a credential is not recognisable in a
+> `map[string]string`, and a guess wrong in either direction would be worse than this sentence.
+
 `spec.transport.protocol` accepts `Auto`, `TCP`, `RDMA`, `HIP` and `Ascend`, and defaults to `Auto`
 whether or not the `transport` block is written at all. **`Auto` resolves to `TCP`** — it is not a
 per-node probe that promotes itself.
@@ -349,6 +360,15 @@ Then create the directory on each node with that uid:
 ```console
 $ install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
 ```
+
+There is **no switch that makes the operator do this for you**, and that is an open decision rather
+than a closed one.
+
+> **Why** — an init container that created and `chown`ed the path would have to name a single uid,
+> and the command above is the evidence against that: the uid is a property of the image, and
+> `members[].image` can differ per group. The other spelling, `chmod 0777`, opens the directory to
+> every process on the node. Both need a caveat attached, which is why neither ships. If you run one
+> uid across your whole backend, you know something this API does not — that is what would settle it.
 
 Five rules the path has to satisfy, all enforced at apply time:
 
@@ -555,8 +575,10 @@ larger value would render a hook that fails every time it runs.
 > than a peer that is about to disappear.
 
 Migrating a member's data before it leaves — the store's drain job API — is **not** offered here. It
-is stateful orchestration, and it covers only two of the store's five replica types: a drain over a
-backend with a disk tier reports success while leaving that tier's data where it was.
+is stateful orchestration, and it reaches only the memory and NVMe-oF replicas: it cannot name the
+segments of the disk-backed ones and skips those keys without counting them as blocked, so **a drain
+over a backend with a disk tier reports success while leaving that tier's data where it was** — and
+its own success signal does not tell you that happened.
 
 ## The external mode
 

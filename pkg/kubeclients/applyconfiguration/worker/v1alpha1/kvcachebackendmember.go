@@ -29,6 +29,19 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// the memory. NVMe-oF is a target coordinate registered once, with no node affinity and no
 	// Pod. A DAX device and a distributed filesystem are configured on the leader's own process,
 	// not on any member. Each is reachable, and none of them through this field.
+	//
+	// NARROWING THIS ENUM CARRIES A RESIDUAL RISK, KNOWINGLY ACCEPTED. An object created with one
+	// of the four removed values, while this CRD was installed but the webhook was not, becomes
+	// undeletable: CRD schema validation runs on the WRITE path only (rest.BeforeCreate /
+	// rest.BeforeUpdate), so the object still reads back fine, but every update is refused —
+	// including the controller removing its finalizer. Reads are not the failure; deletion is.
+	//
+	// The exposure is development clusters only. This type is absent from every tag from v0.7.3
+	// through v0.8.6, so no cluster running a release can hold such an object. The
+	// accepted risk is therefore bounded by the first release that ships this type, and clearing
+	// it is that release's job: before it, either confirm no leftover objects exist, or write down
+	// a recovery procedure. Widening the enum later is not a breaking change, so a fifth medium
+	// that turns out to be a member group after all costs nothing to add.
 	Medium *string `json:"medium,omitempty"`
 	// CapacityPerMember sizes ONE member, not one node: a node can eventually run several
 	// members, one per NUMA domain. It becomes the member's global segment size and is counted
@@ -42,6 +55,11 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// is keyed by CONFIG KEY rather than by environment-variable name — one namespace per side,
 	// each the one its own binary documents. A key that collides with one derived from a field
 	// above is refused at admission.
+	//
+	// EVERY VALUE HERE IS WORLD-READABLE. Each entry is rendered into the member container's argv
+	// as -D key=value, so it is visible to anyone who can read the Pod or its controller, and it
+	// stays visible for the life of the object. A credential does not belong here. This operator
+	// renders no flag that carries one, so this field is the only way one arrives.
 	ExtraArgs map[string]string `json:"extraArgs,omitempty"`
 	// Image overrides the backend's Image for this member group only. Left unset, the group runs
 	// the backend's Image.

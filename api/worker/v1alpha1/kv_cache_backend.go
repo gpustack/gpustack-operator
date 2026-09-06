@@ -145,6 +145,20 @@ type KVCacheBackendManaged struct {
 	// every position after it — the members there are rebuilt against a different group's spec, and
 	// their cache goes with them.
 	//
+	// GIVING A GROUP A NAME OF ITS OWN IS POSSIBLE AND IS DELIBERATELY NOT DONE. A name independent
+	// of position would make reordering free, and the price of introducing one is paid once, in
+	// full: a DaemonSet's spec.selector cannot be changed after creation, so every existing member
+	// DaemonSet has to be deleted and recreated, and the entire cache goes with them. The criterion
+	// is whether one full rebuild is worth it, and the trigger would be operators genuinely needing
+	// to reorder or delete middle groups often enough to amortize that migration. There is no
+	// evidence of such a need today. That is the state of the decision, not an argument for either
+	// side, and a reader who has that evidence is the one who should reopen it.
+	//
+	// What the immutability refusal protects is THE CACHE, not against a misjudgement. "Comparing
+	// groups by index misjudges them" is not the reason: it agrees with how rendering already
+	// works, since after a reorder the group at position i really does hold different content and
+	// those members would be rebuilt against another group's spec regardless.
+	//
 	// The cap of 32 is a SAFETY BOUND, not a statement about how many groups are useful. The port
 	// derivation would stay valid to 57455; what makes 32 the right place to stop is that the shapes
 	// this list is for — a hot and a cold tier, or one group per kind of hardware — are a handful,
@@ -166,9 +180,11 @@ type KVCacheBackendManaged struct {
 //
 // It carries a duration and NOT a policy enum. The other policy a draft of this API carried —
 // migrating a member's data before it leaves — needs the store's drain job API, which is stateful
-// orchestration this scope does not enter and which silently covers only two of the store's five
-// replica types. So a policy field would ship with one value, which is a knob nobody can turn. It
-// arrives when there are two; widening an enum is not a breaking change.
+// orchestration this scope does not enter and which reaches only the memory and NVMe-oF replicas:
+// it cannot name the segments of the disk-backed ones, and skips those keys without counting them
+// as blocked, so it reports success over a disk tier it left untouched. So a policy field would
+// ship with one value, which is a knob nobody can turn. It arrives when there are two; widening an
+// enum is not a breaking change.
 type KVCacheBackendScaleIn struct {
 	// GracePeriodSeconds is how long a departing member holds its local disk tier open after
 	// deregistering it with the leader, so offload reads already in flight finish there rather
@@ -178,6 +194,13 @@ type KVCacheBackendScaleIn struct {
 	// not for want of a verb: the member's own API takes a graceful unmount with a grace period,
 	// but it requires the segment ids, no route returns a client its own ids, and the name is not
 	// derivable because the leader appends a fresh port on every start.
+	//
+	// So this is blocked on an upstream route, and one upstream route is the whole of what unblocks
+	// it: a way for a client to read back its own segment ids. It is NOT blocked on the shutdown
+	// hook talking to a fresh process that has forgotten them — a preStop runs against the same
+	// process that mounted the segments, so anything reasoning from client identity is testing the
+	// wrong claim. Until that route exists, shrinking a group drops the memory it held, and for a
+	// cache that is a cost rather than a fault: the data is recomputable.
 	//
 	// The Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so
 	// the kubelet cannot kill the container in the middle of the wait this configures.
@@ -298,6 +321,11 @@ type KVCacheBackendLeader struct {
 	// ExtraArgs passes flags this API does not enumerate straight through to the leader, after
 	// the derived ones. A key that collides with a flag rendered from a field above is refused
 	// at admission, because two sources for one flag make the rendered command ambiguous.
+	//
+	// EVERY VALUE HERE IS WORLD-READABLE. Each entry is rendered into the leader container's argv
+	// as -key=value, so it is visible to anyone who can read the Pod or its controller, and it
+	// stays visible for the life of the object. A credential does not belong here. This operator
+	// renders no flag that carries one, so this field is the only way one arrives.
 	ExtraArgs map[string]string `json:"extraArgs,omitempty" protobuf:"bytes,3,rep,name=extraArgs"`
 
 	// Offload turns on writing evicted keys to the members' local disk tier. It is the leader's
@@ -387,6 +415,19 @@ type KVCacheBackendMember struct {
 	// Pod. A DAX device and a distributed filesystem are configured on the leader's own process,
 	// not on any member. Each is reachable, and none of them through this field.
 	//
+	// NARROWING THIS ENUM CARRIES A RESIDUAL RISK, KNOWINGLY ACCEPTED. An object created with one
+	// of the four removed values, while this CRD was installed but the webhook was not, becomes
+	// undeletable: CRD schema validation runs on the WRITE path only (rest.BeforeCreate /
+	// rest.BeforeUpdate), so the object still reads back fine, but every update is refused —
+	// including the controller removing its finalizer. Reads are not the failure; deletion is.
+	//
+	// The exposure is development clusters only. This type is absent from every tag from v0.7.3
+	// through v0.8.6, so no cluster running a release can hold such an object. The
+	// accepted risk is therefore bounded by the first release that ships this type, and clearing
+	// it is that release's job: before it, either confirm no leftover objects exist, or write down
+	// a recovery procedure. Widening the enum later is not a breaking change, so a fifth medium
+	// that turns out to be a member group after all costs nothing to add.
+	//
 	// +required
 	// +k8s:validation:enum=["DRAM"]
 	Medium string `json:"medium" protobuf:"bytes,2,name=medium"`
@@ -407,6 +448,11 @@ type KVCacheBackendMember struct {
 	// is keyed by CONFIG KEY rather than by environment-variable name — one namespace per side,
 	// each the one its own binary documents. A key that collides with one derived from a field
 	// above is refused at admission.
+	//
+	// EVERY VALUE HERE IS WORLD-READABLE. Each entry is rendered into the member container's argv
+	// as -D key=value, so it is visible to anyone who can read the Pod or its controller, and it
+	// stays visible for the life of the object. A credential does not belong here. This operator
+	// renders no flag that carries one, so this field is the only way one arrives.
 	ExtraArgs map[string]string `json:"extraArgs,omitempty" protobuf:"bytes,5,rep,name=extraArgs"`
 
 	// Image overrides the backend's Image for this member group only. Left unset, the group runs
@@ -456,6 +502,17 @@ type KVCacheBackendMemberLocalDisk struct {
 	// It is REQUIRED and has no default. The store defaults it to a path of its own, and choosing
 	// a host directory on somebody else's nodes is not a default this operator may pick: the wrong
 	// one fills a filesystem that nothing in Kubernetes accounts for.
+	//
+	// CREATING THIS DIRECTORY AND GIVING IT THE RIGHT OWNER IS YOURS, NOT THIS OPERATOR'S. Nothing
+	// here creates or chowns the path; a member whose container cannot write it fails at start.
+	// That is a deliberate omission rather than a missing feature, and the reason is recorded here
+	// so it can be judged rather than inherited: both ways of writing it need an apology attached.
+	// An init container that chowns has to name a uid, while members[].image can put a different
+	// vendor's build — and a different uid — on each group, so the uid that is right for one group
+	// is a guess for the next. A chmod 0777 instead opens the directory to every process on the
+	// node. A design where either choice needs a caveat is one that is not settled, so the switch
+	// that would render it does not exist. An operator who has a uid that holds for their whole
+	// backend has information this API does not, which is the case that would settle it.
 	//
 	// +required
 	// +k8s:validation:maxLength=4096

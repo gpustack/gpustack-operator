@@ -21,6 +21,17 @@ type KVCacheBackendMemberLocalDiskApplyConfiguration struct {
 	// It is REQUIRED and has no default. The store defaults it to a path of its own, and choosing
 	// a host directory on somebody else's nodes is not a default this operator may pick: the wrong
 	// one fills a filesystem that nothing in Kubernetes accounts for.
+	//
+	// CREATING THIS DIRECTORY AND GIVING IT THE RIGHT OWNER IS YOURS, NOT THIS OPERATOR'S. Nothing
+	// here creates or chowns the path; a member whose container cannot write it fails at start.
+	// That is a deliberate omission rather than a missing feature, and the reason is recorded here
+	// so it can be judged rather than inherited: both ways of writing it need an apology attached.
+	// An init container that chowns has to name a uid, while members[].image can put a different
+	// vendor's build — and a different uid — on each group, so the uid that is right for one group
+	// is a guess for the next. A chmod 0777 instead opens the directory to every process on the
+	// node. A design where either choice needs a caveat is one that is not settled, so the switch
+	// that would render it does not exist. An operator who has a uid that holds for their whole
+	// backend has information this API does not, which is the case that would settle it.
 	Path *string `json:"path,omitempty"`
 	// Capacity caps what this tier stores. Left unset, the store's own ceiling applies and nothing
 	// is rendered, so a ceiling that moves upstream is a change to investigate rather than one
