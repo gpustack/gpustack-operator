@@ -1,6 +1,6 @@
 # Spec: KV Cache Media Tiering and Scale-In
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 > **What this delivered, and what it did not.** The API surface, the rendering, the admission rules,
