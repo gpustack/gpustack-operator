@@ -61,12 +61,20 @@ func TestResolveProjectDir(t *testing.T) {
 			}
 			// The resolved path is what the generators are configured with, so an
 			// accepted directory has to come back resolved rather than as given.
-			want, err := filepath.EvalSymlinks(tc.dir)
+			//
+			// NB: the slash-normalisation half of this assertion carries no information
+			// off Windows: filepath.ToSlash is the identity on any platform whose
+			// separator is already '/', so injecting a defect that returns the
+			// un-normalised path leaves this test green here. It is asserted anyway
+			// because the value is what the downstream trim runs against, but do not
+			// read a passing run on linux or darwin as having exercised it.
+			w, err := filepath.EvalSymlinks(tc.dir)
 			if err != nil {
 				t.Fatalf("EvalSymlinks(%q): %v", tc.dir, err)
 			}
+			want := filepath.ToSlash(w)
 			if got != want {
-				t.Fatalf("resolveProjectDir(%q) = %q, want the resolved path %q", tc.dir, got, want)
+				t.Fatalf("resolveProjectDir(%q) = %q, want the resolved slash-normalised path %q", tc.dir, got, want)
 			}
 		})
 	}

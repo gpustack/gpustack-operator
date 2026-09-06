@@ -50,7 +50,13 @@ func resolveProjectDir(pwd string) (string, error) {
 		return "", fmt.Errorf("resolve working directory %q: %w", pwd, err)
 	}
 
-	if !strings.HasSuffix(filepath.ToSlash(resolved), "/"+projectModule) {
+	// Slash-normalised, and that form is what gets RETURNED as well as checked. The
+	// trim downstream is a plain string operation against a slash-delimited module path,
+	// so returning a separator-native path would let a directory pass this check and
+	// still trim to nothing -- the same wrong-tree write, one layer further down.
+	normalized := filepath.ToSlash(resolved)
+
+	if !strings.HasSuffix(normalized, "/"+projectModule) {
 		return "", fmt.Errorf(
 			"working directory %q does not end in the module import path %q: "+
 				"the generators derive their output base by trimming it off, so running here "+
@@ -58,7 +64,7 @@ func resolveProjectDir(pwd string) (string, error) {
 			resolved, projectModule)
 	}
 
-	return resolved, nil
+	return normalized, nil
 }
 
 func generate() error {
