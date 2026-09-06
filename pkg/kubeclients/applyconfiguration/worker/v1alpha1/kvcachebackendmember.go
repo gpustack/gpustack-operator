@@ -29,11 +29,44 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// the memory. NVMe-oF is a target coordinate registered once, with no node affinity and no
 	// Pod. A DAX device and a distributed filesystem are configured on the leader's own process,
 	// not on any member. Each is reachable, and none of them through this field.
+	//
+	// NARROWING THIS ENUM CARRIES A RESIDUAL RISK, KNOWINGLY ACCEPTED. An object created with one
+	// of the four removed values, while this CRD was installed but the webhook was not, becomes
+	// undeletable: CRD schema validation runs on the WRITE path only (rest.BeforeCreate /
+	// rest.BeforeUpdate), so the object still reads back fine, but every update is refused —
+	// including the controller removing its finalizer. Reads are not the failure; deletion is.
+	//
+	// The exposure is development clusters only. This type is absent from every tag from v0.7.3
+	// through v0.8.6, so no cluster running a release can hold such an object. The
+	// accepted risk is therefore bounded by the first release that ships this type, and clearing
+	// it is that release's job: before it, either confirm no leftover objects exist, or write down
+	// a recovery procedure. Widening the enum later is not a breaking change, so a fifth medium
+	// that turns out to be a member group after all costs nothing to add.
 	Medium *string `json:"medium,omitempty"`
 	// CapacityPerMember sizes ONE member, not one node: a node can eventually run several
 	// members, one per NUMA domain. It becomes the member's global segment size and is counted
 	// into the member Pod's own resource request, so a member that does not fit stays Pending
 	// instead of overcommitting the node.
+	//
+	// SEVERAL MEMBERS PER NODE IS DECIDED AND NOT DONE, and this field is named for the shape it
+	// would take rather than the one that ships. What is deferred is splitting a node's members by
+	// NUMA domain; today one selected node runs one member.
+	//
+	// The reason to reopen it is NOT memory locality, and reading it that way is how it gets
+	// dismissed a second time. This operator already discovers the NUMA affinity of NICs and their
+	// RDMA devices, and RDMA is this backend's fast transport, so several members per node is the
+	// only mechanism that could put a segment on the same NUMA node as the interface that serves
+	// it. Without it that discovered topology has no consumer on this path.
+	//
+	// The trigger is therefore decidable rather than a matter of taste: a two-socket node whose
+	// devices report RDMA interfaces on more than one NUMA node, AND that node's member observed
+	// transferring across the socket boundary. There is no such evidence today.
+	//
+	// One group per NUMA domain is NOT the shape it would take, and the obstacle is structural
+	// rather than a cost. A group selects nodes through nodeSelector, and NUMA is a property inside
+	// a node, not a label on one -- so "the NUMA 0 of this node" is not expressible by the mechanism
+	// groups are built on. It would also multiply groups by socket count against a list capped at
+	// 32, and every group's identity is its position.
 	CapacityPerMember *resource.Quantity `json:"capacityPerMember,omitempty"`
 	// LocalBufferSize is the member client's local staging buffer, counted into the Pod's
 	// memory request beside CapacityPerMember.
@@ -42,6 +75,13 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// is keyed by CONFIG KEY rather than by environment-variable name — one namespace per side,
 	// each the one its own binary documents. A key that collides with one derived from a field
 	// above is refused at admission.
+	//
+	// EVERY VALUE HERE IS WORLD-READABLE, on three paths and not one. It is stored verbatim on THIS
+	// object, which is cluster-scoped, so reading it needs no access to any workload; it is then
+	// rendered into the member container's argv as -D key=value, which exposes it again to anyone
+	// who can read the Pod or the DaemonSet carrying it. It stays readable for the life of the
+	// object. A credential does not belong here. This operator renders no flag that carries one, so
+	// this field is the only way one arrives.
 	ExtraArgs map[string]string `json:"extraArgs,omitempty"`
 	// Image overrides the backend's Image for this member group only. Left unset, the group runs
 	// the backend's Image.

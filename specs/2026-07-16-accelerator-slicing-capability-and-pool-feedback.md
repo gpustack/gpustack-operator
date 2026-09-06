@@ -312,7 +312,7 @@ GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/device/... ./pkg/device
 # Whole-module build smoke (confirms the CGO detectors still compile after the field move):
 GODEBUG=gotypesalias=0 CGO_ENABLED=1 go build ./...
 # Kueue transformation factors are unchanged; the pin test still applies:
-go test ./pkg/worker/kuberess/... -run Test_kueueChartTransformations
+go test ./pkg/worker/kuberess/... -run TestChartKueueTransformationsMatchNodeFeature
 
 # E2E (local k3s / docker-desktop) via the gpustack-operator-e2e skill:
 bash .claude/skills/gpustack-operator-e2e/cases/<sliced-capacity-case>.sh gpustack-system

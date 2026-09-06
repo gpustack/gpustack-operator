@@ -62,10 +62,11 @@ Each is out of scope by decision. The subject that owns it is named so "not yet"
   key's replica from one segment to another and is the only mechanism that could make a shrink
   lossless. It is not taken here for two reasons that compound: it is **stateful orchestration** —
   create a job, poll it, then scale — which is a reconcile shape nothing in this operator has yet;
-  and it **silently covers only two of the five replica types**, which is measured below (F6) and
-  makes the operation's own success signal untrustworthy for exactly the tier this spec adds. It
-  belongs to the leader-high-availability subject (S5), which already owns the drain axis in the
-  phased plan.
+  and it **silently covers only two of the five replica types**, which makes the operation's own
+  success signal untrustworthy for exactly the tier this spec adds. That coverage claim is
+  established in Alternatives, under "Take `drain_jobs` in this scope" — it names the two types and
+  cites the artifact source that decides them. It belongs to the leader high-availability spec, which
+  owns the drain axis.
 - **`scaleIn.policy` as an enum.** The design draft carried `GracePeriod | Migrate`. With `Migrate`
   deferred above, the enum would ship with one value, which is a knob nobody can turn. The grace
   period ships as a **number**, and `policy` arrives with the second value that makes it a choice.
@@ -1126,13 +1127,24 @@ that sentence travels with the row so a later reader cannot mistake a green suit
   needs the value parsed rather than typed. Recorded at length in F7 so the next spec does not read
   the absence as an oversight and put the fields back.
 - **Take `drain_jobs` in this scope** so a shrink can be lossless. Rejected on two compounding
-  facts: it is stateful orchestration, and it covers only `MEMORY` and `NOF_SSD` replicas —
-  `Replica::get_segment_names()` returns an empty vector for `DISK`, `LOCAL_DISK` and `DFS`
-  (`mooncake-store/include/replica.h:759-781`), and the drain planner skips a key whose segments it
-  cannot name without counting it as blocked (`master_service.cpp:12519-12525`). So a drain over a
-  backend with a disk tier reports success while leaving that tier's data where it was. Shipping it
-  next to the tier this spec adds would pair a lossless-sounding operation with the one tier it is
-  silently lossy for.
+  facts: it is stateful orchestration, and it covers only `MEMORY` and `NOF_SSD` replicas. This is
+  the section that establishes that coverage claim, so its coordinates carry the version they were
+  read at — all of them **v0.3.13**, the artifact this spec reads throughout:
+  - `Replica::get_segment_names()` returns an empty vector for `DISK`, `LOCAL_DISK` and `DFS`
+    (`mooncake-store/include/replica.h:759-781`), and `GetReplicaSegmentNames()` keeps only the
+    values it yields (`mooncake-store/include/master_service.h:1517-1528`), so those three replica
+    types contribute no name at all.
+  - The drain planner then skips a key whose segments it cannot name **without counting it as
+    blocked** (`mooncake-store/src/master_service.cpp:12518-12524`). That is what makes the loss
+    silent rather than merely reported, and it is decidable rather than inferred: the two branches
+    immediately after it — a hard-pinned or unexpired key at `:12526-12532`, and no eligible target
+    at `:12537-12540` — both `insert` into `blocked_unit_keys` before their `continue`, while this
+    one does not. The same function is what the job's own "remaining" tally counts
+    (`:12600-12609`), so such a key appears in neither figure.
+
+  So a drain over a backend with a disk tier reports success while leaving that tier's data where it
+  was. Shipping it next to the tier this spec adds would pair a lossless-sounding operation with the
+  one tier it is silently lossy for.
 - **Attribute each segment to one member Pod when two Pods answer to the same index key.** Allowing
   more than one member group made this reachable: two groups can be scheduled onto one node, and on
   the RDMA path both Pods hold the host's network namespace, so both answer to that node's name and

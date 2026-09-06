@@ -124,7 +124,7 @@ go test ./pkg/nodefeature/... ./pkg/worker/...
 # The Kueue credits transformations are rendered by the worker at runtime via a
 # Go text/template (not helm), so the integer factors are pinned by this unit test
 # (it parses the rendered manager config back), not by `helm template`:
-go test ./pkg/worker/kuberess/... -run Test_kueueChartTransformations
+go test ./pkg/worker/kuberess/... -run TestChartKueueTransformationsMatchNodeFeature
 bash .claude/skills/gpustack-operator-e2e/cases/case-5.sh gpustack-system  # sliced admission + true credit
 ```
 ### Project Structure (files in scope)

@@ -21,6 +21,20 @@ type KVCacheBackendManagedApplyConfiguration struct {
 	// every position after it — the members there are rebuilt against a different group's spec, and
 	// their cache goes with them.
 	//
+	// GIVING A GROUP A NAME OF ITS OWN IS POSSIBLE AND IS DELIBERATELY NOT DONE. A name independent
+	// of position would make reordering free, and the price of introducing one is paid once, in
+	// full: a DaemonSet's spec.selector cannot be changed after creation, so every existing member
+	// DaemonSet has to be deleted and recreated, and the entire cache goes with them. The criterion
+	// is whether one full rebuild is worth it, and the trigger would be operators genuinely needing
+	// to reorder or delete middle groups often enough to amortize that migration. There is no
+	// evidence of such a need today. That is the state of the decision, not an argument for either
+	// side, and a reader who has that evidence is the one who should reopen it.
+	//
+	// What the immutability refusal protects is THE CACHE, not against a misjudgement. "Comparing
+	// groups by index misjudges them" is not the reason: it agrees with how rendering already
+	// works, since after a reorder the group at position i really does hold different content and
+	// those members would be rebuilt against another group's spec regardless.
+	//
 	// The cap of 32 is a SAFETY BOUND, not a statement about how many groups are useful. The port
 	// derivation would stay valid to 57455; what makes 32 the right place to stop is that the shapes
 	// this list is for — a hot and a cold tier, or one group per kind of hardware — are a handful,

@@ -9,9 +9,11 @@ package v1alpha1
 //
 // It carries a duration and NOT a policy enum. The other policy a draft of this API carried —
 // migrating a member's data before it leaves — needs the store's drain job API, which is stateful
-// orchestration this scope does not enter and which silently covers only two of the store's five
-// replica types. So a policy field would ship with one value, which is a knob nobody can turn. It
-// arrives when there are two; widening an enum is not a breaking change.
+// orchestration this scope does not enter and which reaches only the memory and NVMe-oF replicas:
+// it cannot name the segments of the disk-backed ones, and skips those keys without counting them
+// as blocked, so it reports success over a disk tier it left untouched. So a policy field would
+// ship with one value, which is a knob nobody can turn. It arrives when there are two; widening an
+// enum is not a breaking change.
 type KVCacheBackendScaleInApplyConfiguration struct {
 	// GracePeriodSeconds is how long a departing member holds its local disk tier open after
 	// deregistering it with the leader, so offload reads already in flight finish there rather
@@ -21,6 +23,13 @@ type KVCacheBackendScaleInApplyConfiguration struct {
 	// not for want of a verb: the member's own API takes a graceful unmount with a grace period,
 	// but it requires the segment ids, no route returns a client its own ids, and the name is not
 	// derivable because the leader appends a fresh port on every start.
+	//
+	// So this is blocked on an upstream route, and one upstream route is the whole of what unblocks
+	// it: a way for a client to read back its own segment ids. It is NOT blocked on the shutdown
+	// hook talking to a fresh process that has forgotten them — a preStop runs against the same
+	// process that mounted the segments, so anything reasoning from client identity is testing the
+	// wrong claim. Until that route exists, shrinking a group drops the memory it held, and for a
+	// cache that is a cost rather than a fault: the data is recomputable.
 	//
 	// The Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so
 	// the kubelet cannot kill the container in the middle of the wait this configures.

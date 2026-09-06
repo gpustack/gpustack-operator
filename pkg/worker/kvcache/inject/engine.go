@@ -37,6 +37,13 @@ type engineFacts struct {
 
 // engineTenantSupport is the measured answer per engine.
 //
+// WHY IT CANNOT SIMPLY GO AWAY, since removing it reads as tidying. Tenant injection CANNOT FAIL
+// LOUD: an engine that does not read the key ignores it in silence, and nothing here observes that
+// afterwards. So the injection stamp records the ACTION and its BASIS instead of an outcome, and
+// this table IS that basis -- which engine version, and which source line, the answer came from.
+// Deleting it would not remove an unused lookup; it would leave the stamp asserting something with
+// nothing behind it.
+//
 // HOW TO RE-CHECK AN ENTRY, because this table is the one thing here that goes stale silently:
 //
 //  0. FIRST, find which connector or loader THIS PROJECT renders for that engine, and re-check that

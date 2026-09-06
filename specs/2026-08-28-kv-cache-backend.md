@@ -55,17 +55,17 @@ named so a reader can tell "not yet" from "not ever".
   only behaviour is to be refused teaches a reader that the feature exists.
 - **High availability of the leader beyond a single replica.** `spec.connection.managed.leader.replicas`
   accepts `1` and only `1` in this scope. Multi-replica election, `-enable_ha`, an HA backend store and
-  leader-follower status belong to the **master-HA** spec (S5). The HA backend store — `-enable_ha`
+  leader-follower status belong to the **master-HA** spec. The HA backend store — `-enable_ha`
   with `-ha_backend_type=etcd|redis|k8s` — is a **different axis from the metadata plane** (F4) and
-  exists only at `replicas > 1`, so it belongs to S5 rather than here. One measured fact travels with
-  the exclusion, because it decides whether S5 can ship on an official artifact at all: on the
+  exists only at `replicas > 1`, so it belongs to the master-HA spec rather than here. One measured fact travels with
+  the exclusion, because it decides whether that spec can ship on an official artifact at all: on the
   published wheel's master, `-ha_backend_type=k8s` is refused at startup with
   `UNAVAILABLE_IN_CURRENT_MODE` — the Kubernetes-lease backend is declared but not compiled in — so a
   lease-based HA mode requires a self-built image. The refusal is identical on two published artifacts
   across two CUDA generations, and `k8s_lease_helper.cpp` does appear in the binary's strings — the
   backend is declared and not compiled in, which is why the flag is accepted before it is refused. The
   etcd backend, by contrast, ships: `libetcd_wrapper.so` (22 MB) and `EtcdTenantQuotaPolicyStore` are
-  both in the wheel and `etcd` is the flag's own default. It was not run, so S5 owns proving it.
+  both in the wheel and `etcd` is the flag's own default. It was not run, so the master-HA spec owns proving it.
 
   **How urgent that follow-on is has not been measured, and the measurement comes first.** What a
   leader restart costs is unrecorded: the members hold the bytes, the leader holds the index of which
@@ -85,13 +85,15 @@ named so a reader can tell "not yet" from "not ever".
   here — `members` is a list, each entry carries its own `medium` — so the shape never has to change
   later. This scope reconciles **exactly one member group**, and the webhook refuses a second one with
   a message naming the follow-on. Data migration between media, and the master's `drain_jobs` admin
-  API, belong to the **tiering-and-drain** spec (S4).
+  API, belong to the tiering-and-drain spec, since shipped as
+  `specs/2026-09-05-kv-cache-media-and-scaling.md`.
 - **More than one backend behind one quota domain.** A quota domain fronting several backends belongs
-  to the **master-HA / multi-backend** spec (S5).
+  to the **master-HA / multi-backend** spec.
 - **Quota, tenants and reuse domains.** `tenant_id`, `/api/v1/tenant_quotas` and per-tenant accounting
-  belong to the **pool-and-quota** spec (S3). `KVCacheBackend` carries no tenant field.
+  belong to the pool-and-quota spec, since shipped as `specs/2026-08-28-kv-cache-pool.md`.
+  `KVCacheBackend` carries no tenant field.
 - **Anything about workloads, engines, routers or prefill/decode disaggregation.** Those belong to the
-  **engine** specs (S6/S7/S8). Nothing here reads or writes a workload object.
+  engine-side specs — KV cache injection, ModelDeployment and P/D disaggregation. Nothing here reads or writes a workload object.
 - **Building a Mooncake container image.** This scope *consumes* an image named in `spec.image`. Which
   vendor variant that image is built from is an operational decision, informed by F2's measured table
   but made outside this spec.
@@ -439,15 +441,15 @@ something ships one.
 **HA backend store** — `-enable_ha` with `-ha_backend_type=etcd|redis|k8s` — which is how *several*
 leader replicas elect one among them. That is where a **Kubernetes lease** lives, and it is why no
 Kubernetes option appears on the metadata plane: leader election is not metadata discovery. It exists
-only at `replicas > 1`, which this scope refuses, so it belongs to the master-HA follow-on (S5).
+only at `replicas > 1`, which this scope refuses, so it belongs to the master-HA follow-on.
 
-And when S5 gets there, one measured fact decides what it can ship on: **`-ha_backend_type=k8s` is
+And when the master-HA spec gets there, one measured fact decides what it can ship on: **`-ha_backend_type=k8s` is
 refused at startup by the published artifact**, with `UNAVAILABLE_IN_CURRENT_MODE, backend_type=k8s`,
 identically on two artifacts across two CUDA generations. `k8s_lease_helper.cpp` does appear in the
 binary's strings — the backend is declared and not compiled in, which is why the flag is accepted
 before it is refused. So Kubernetes-lease election needs a self-built image. The etcd backend, by
 contrast, ships: `libetcd_wrapper.so` (22 MB) and `EtcdTenantQuotaPolicyStore` are both in the wheel
-and `etcd` is that flag's own default. It was not run, so S5 owns proving it.
+and `etcd` is that flag's own default. It was not run, so the master-HA spec owns proving it.
 
 Keeping the two apart is what stops an operator deploying an etcd for a single-leader backend that
 never contacts one.
@@ -969,8 +971,15 @@ it restarts on **what changed** rather than on **that the template changed**.
   - The Python binding that does take one, `unmount_segment(segment_ids, grace_period_seconds=0)`,
     defaults to zero, and a zero goes straight to the immediate unmount rather than to
     `GracefulUnmountSegment`.
-  - No shipped console script can issue that RPC, and a `preStop` could not issue it either: a fresh
-    client would not know the segment id the running process holds.
+  - No shipped console script can issue that RPC. **A `preStop` is blocked too, but not for the
+    reason this spec originally gave.** The original reason — that a fresh client would not know the
+    segment id the running process holds — is **wrong, and is corrected here rather than deleted
+    because it was load-bearing**: a `preStop` hook runs against the *same* process that mounted the
+    segments, so client identity was never the obstacle. The real obstacle is upstream and narrower:
+    `segment_ids` is required, **no route returns a client its own ids**, and the name is not
+    derivable because the leader appends a fresh port on every start. One upstream route — a way to
+    read back your own segment ids — is the whole of what unblocks this, which is what a later
+    attempt should test rather than re-testing the client-identity claim.
   - What the master DOES offer is `POST /api/v1/drain_jobs`, which **migrates** a segment's data to
     named target segments rather than unmounting it. That is a different and stronger operation than
     a graceful unmount, it needs the remaining members to have room, and it is a stateful
@@ -1644,7 +1653,7 @@ after T10 (status is fully observed); after T12 (every acceptance item is met).
       move them silently. The absences are asserted by name — a test lists every flag this scope does
       not run and fails if one appears — because an addition here is a behaviour change nobody asked
       for, and a golden argv alone would only say "different".
-      Verify: `go test ./pkg/worker/kvcache/ -run LeaderFlags` — a golden argv per case, asserted
+      Verify: `go test ./pkg/worker/kvcache/mooncake/ -run LeaderFlags` — a golden argv per case, asserted
       element by element, plus a determinism case: the reconciler converges the Deployment every
       pass, so an argv whose order wandered would rewrite the object forever.
 
@@ -1666,8 +1675,9 @@ after T10 (status is fully observed); after T12 (every acceptance item is met).
       reads, since that one port serves the Prometheus exposition and the HTTP admin API both (F7).
       They are two fields because a consumer handed the admin address fails at connect time with
       nothing to point at, and the quota spec republishes both for its own two readers.
-      Verify: `go test ./pkg/worker/kvcache/ -run LeaderWorkload ./pkg/worker/controllers/worker/ -run
-      KVCacheBackend`; against a fake client, a second reconcile issues no update. The two probe paths
+      Verify: `go test ./pkg/worker/kvcache/mooncake/ -run LeaderWorkload` and
+      `go test ./pkg/worker/controllers/worker/ -run KVCacheBackend`; against a fake client, a second
+      reconcile issues no update. The two probe paths
       are asserted as **different** paths, since the whole point is that one gates and the other does
       not, and a render that pointed both at `/health` would look right and probe nothing.
 
@@ -1687,7 +1697,7 @@ after T10 (status is fully observed); after T12 (every acceptance item is met).
       RDMA path setting exactly `hostNetwork: true`, a `/dev/infiniband` hostPath and the `IPC_LOCK` +
       `SYS_RESOURCE` capabilities and **never** `privileged`; the TCP path setting none of them; **no
       fixed data-plane `containerPort`** on any path.
-      Verify: `go test ./pkg/worker/kvcache/ -run MemberWorkload` — one case per medium, one per
+      Verify: `go test ./pkg/worker/kvcache/mooncake/ -run MemberWorkload` — one case per medium, one per
       protocol including `Auto`, one asserting `Auto` and `TCP` render an IDENTICAL Pod spec (the
       resolution is a rename, not a second code path), one asserting the rendered Pod declares no
       data-plane port, one asserting a group's `image` override wins over `spec.image` while an unset
@@ -1713,7 +1723,7 @@ after T10 (status is fully observed); after T12 (every acceptance item is met).
       outcomes, none of which is a zero. The listing decoder — and only that one, since `/health` and
       `/metrics` are never gated — has a fourth: a **503** carrying `service plane is not active`,
       which is the master saying it is not serving yet, so it maps to a phase and not to an error.
-      Verify: `go test ./pkg/worker/kvcache/ -run Admin` over the recorded fixtures.
+      Verify: `go test ./pkg/worker/kvcache/mooncake/ -run Admin` over the recorded fixtures.
 
 - [x] **T8 · `status.capacity` from the master's counters**
       Blocked by: T5, T7
@@ -2039,6 +2049,28 @@ not restated here, because a second copy of a measurement is the copy that goes 
   a DaemonSet states and anti-affinity only approximates. Kueue's Topology-Aware Scheduling accounts
   for a Deployment just the same, so it is not an argument either way. The shape is revisited when
   several members per node, or rollout control over a shrink, is actually needed.
+- **Several members per node, split by NUMA.** Not taken, and both halves of the question that once
+  paired with it are now answered: rollout control over a shrink was settled by
+  `specs/2026-09-05-kv-cache-media-and-scaling.md`, which sends a grace period and deliberately does
+  **not** change the DaemonSet shape, leaving NUMA as the only remaining candidate.
+
+  **The reason to reopen it is not memory locality**, and that framing is what gets it dismissed for
+  lacking a benchmark. This operator already discovers the NUMA affinity of NICs and their RDMA
+  devices, and RDMA is this backend's fast transport, so several members per node is the **only**
+  mechanism that could place a segment on the same NUMA node as the interface serving it — without
+  it, that discovered topology has no consumer on this path.
+
+  **Trigger, written so it can be checked rather than argued:** a two-socket node whose `devices`
+  report RDMA interfaces on more than one NUMA node, **and** that node's member observed transferring
+  across the socket boundary. No such evidence exists today.
+
+  ⛔ **One group per NUMA domain is not the shape it would take**, and the obstacle is structural
+  rather than a cost: a group selects nodes via `nodeSelector`, and NUMA is a property *inside* a
+  node rather than a label *on* one, so "the NUMA 0 of this node" is not expressible by the mechanism
+  groups are built on. It would also multiply groups by socket count against a list capped at 32, in
+  which every group's identity is its position. `capacityPerMember` keeps its name so this can land
+  later without an API rename. Tracked at
+  <https://github.com/gpustack/gpustack-operator/issues/219>.
 - **Compute `status.capacity` from the spec.** Rejected: it makes the status a restatement of the
   spec, so a member that failed to mount is invisible. The master's own counter is the only figure
   that can disagree with the request, and that disagreement is the signal.
@@ -2050,9 +2082,28 @@ not restated here, because a second copy of a measurement is the copy that goes 
   the tiering work that will exercise them, and a field per flag would freeze names before the
   semantics are settled. The `extraArgs` passthrough keeps them reachable in the meantime, which is
   what stops an operator from patching the rendered objects.
-- **Expose `-quota_bytes` as a `spec.quota` field.** Rejected: it is a **global** storage-backend
-  quota, not a per-tenant one, and naming it `quota` here would collide with the per-tenant quota
-  vocabulary a later spec owns. It stays reachable through `extraArgs`.
+- **Expose `-quota_bytes` as a `spec.quota` field.** Rejected on the NAME, and that distinction was
+  later found to be doing more work than it could carry: `quota` collides with the per-tenant
+  vocabulary a later spec owns, which refuses a spelling and not the exposure. It was being read as
+  the latter.
+
+  ⇒ **Now decided: expose it, as `leader.storageQuota`.** The rule this API applies is that a field
+  exists when a second reader validates against it — the reason `leader.multiTenancy` is a field
+  rather than an `extraArgs` key. That reader was hypothetical when this was first deferred and is
+  not any more: `KVCachePoolBinding.spec.quotaCeiling` has landed, and nothing compares the sum of a
+  backend's tenant ceilings against its global quota.
+
+  ⛔ **That comparison is a status observation, NOT an admission refusal**, which is the part most
+  likely to be re-added by the next reader. Two Bindings admitted concurrently each read a state
+  without the other, so a webhook summing them holds no lock and both pass; and refusing is unfair in
+  the direction that matters, since a Binding that is itself legal would be rejected for headroom
+  someone else took. The second-reader rule still holds — the reader is a controller instead of a
+  webhook.
+
+  The name matches the artifact's own words and is distinguishable at a glance from `quotaCeiling`,
+  which is one tenant's request. ⛔ Not a bare `quota`, and not `globalQuota` — "global" carries other
+  meanings in Kubernetes. Implementation is separate work, tracked at
+  <https://github.com/gpustack/gpustack-operator/issues/223>.
 - **Copy `master_key_count`, the soft-pin count and the request counters into `status`.** Rejected: the
   master already exposes them on a scrapeable endpoint, and a status copy is a staler second source of
   the same numbers.
@@ -2065,17 +2116,10 @@ not restated here, because a second copy of a measurement is the copy that goes 
   mode later, where a connection string with credentials would leak to anyone who can read the
   Deployment. Whether such flags should move to Secret-backed environment variables — for those flags
   only, keeping argv for the rest — is open.
-- **The member workload shape past one member per node.** A DaemonSet is chosen on semantics, and it
-  places exactly one member per selected node. Several members per node (one per NUMA domain) and
-  rollout control over a shrink both point at a different shape; which of the two forces the change
-  first is open, and `capacityPerMember` is named so it survives either.
 - **Whether `spec.type` should ever express "an existing RWX volume"** — a shared-filesystem backend
   nobody manages, where the engine's own `fs://` layer does the work. It is out of the enum, not
   reserved in it: it arrives as a value when something implements it, and widening an enum is not an
   API change.
-- **Whether this API should expose `-quota_bytes` at all, and under what name.** It is a global
-  storage-backend quota, distinct from the per-tenant quota a later spec owns, and any name that does
-  not say "global" will be read as the tenant one.
 - **Whether the master can serve its own metadata plane** with `-enable_http_metadata_server`, which
   is what the reserved `httpServer` mode would render. The flag is measured present; it is not
   measured sufficient, which is why the webhook refuses the value rather than shipping it.

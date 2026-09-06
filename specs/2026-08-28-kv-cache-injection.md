@@ -643,9 +643,10 @@ Three consequences the renderer is built around, each measured rather than assum
   file changes nothing, because `from_file` never reads it. vLLM-Ascend reads the same file with a
   reader closed at **six** of those names, without `mode` or `enable_offload`
   (`mooncake_backend.py:115-124`) — it ignores the `mode` we render, which is safe only because vLLM
-  does not pass `mode` to `setup()` either. SGLang's reader is closed at ten keys of
-  its own (`mooncake_store.py:114-141`), which are not these eight; the per-engine table below is the
-  one both renderers work from.
+  does not pass `mode` to `setup()` either. SGLang's reader is closed at thirteen keys of
+  its own (v0.5.18 `mooncake_store.py:110-167`, `from_file`, one per field of the
+  `MooncakeStoreConfig` dataclass at `:93-107`), which are not these eight; the per-engine table below
+  is the one both renderers work from.
 
 **The vehicle is per engine, and the reason is a value only the runtime knows.** vLLM must take a
 file; SGLang must take environment variables. An earlier draft of this spec closed this the other way
@@ -680,8 +681,8 @@ cannot be rendered at admission time.
   (`vllm/distributed/kv_transfer/kv_connector/v1/mooncake/rdma_utils.py:21-25`) from `get_ip()`. A Pod's
   IP does not exist when a mutating webhook runs — the Pod has not been scheduled, let alone assigned
   one.
-  `_load_config` offers three sources (`mooncake_store.py:242-260`), and the decisive difference between
-  them is *when their contents are fixed*, not what they can express:
+  `_load_config` offers three sources (v0.5.18 `mooncake_store.py:294-314`), and the decisive
+  difference between them is *when their contents are fixed*, not what they can express:
 
   | source | contents fixed | can carry the Pod's IP |
   |---|---|---|
@@ -690,17 +691,20 @@ cannot be rendered at admission time.
   | the environment | **at container start, by the kubelet** | yes, through `fieldRef: status.podIP` |
 
   The first two are the same failure for the same reason, and both were checked rather than assumed:
-  `from_file` (`mooncake_store.py:114-141`) and `load_from_extra_config` (`mooncake_store.py:183-221`)
-  are key-for-key isomorphic, each falling back to `envs.<NAME>.default`. That attribute is the literal
-  default (`environ.py:41-42`); `.get()` is the accessor that reads the process environment
-  (`environ.py:54-72`) and neither of those two paths calls it. So on either of them an unwritten
-  `local_hostname` resolves to the literal `"localhost"` (`environ.py:296`) — the same wrong value on
-  every Pod in the pool — and a written one would be a value this webhook had to invent.
-  Only `load_from_env` reads through `.get()` (`mooncake_store.py:167-180`), which is what lets
+  `from_file` (v0.5.18 `mooncake_store.py:110-167`) and `load_from_extra_config`
+  (v0.5.18 `mooncake_store.py:212-261`) are key-for-key isomorphic, each falling back to
+  `envs.<NAME>.default`. That attribute is the literal default assigned in `EnvField.__init__`
+  (v0.5.18 `environ.py:39-40`); `.get()` is the accessor that reads the process environment
+  (`EnvField.get`, v0.5.18 `environ.py:57`, resolving the default through `_resolve_default` at
+  `:52-55`) and neither of those two paths calls it. So on either of them an unwritten
+  `local_hostname` resolves to the literal `"localhost"` (v0.5.18 `environ.py:702`,
+  `MOONCAKE_LOCAL_HOSTNAME`) — the same wrong value on every Pod in the pool — and a written one
+  would be a value this webhook had to invent.
+  Only `load_from_env` reads through `.get()` (v0.5.18 `mooncake_store.py:170-210`), which is what lets
   `MOONCAKE_LOCAL_HOSTNAME` be a `fieldRef` the kubelet resolves at container start — exactly when vLLM
   computes its own.
   That variable has a **two-level** fallback: unset, `load_from_env` reads the legacy, ungeneric name
-  `LOCAL_HOSTNAME` before giving up to the literal (`mooncake_store.py:158-165`). This webhook always
+  `LOCAL_HOSTNAME` before giving up to the literal (v0.5.18 `mooncake_store.py:183-190`). This webhook always
   sets `MOONCAKE_LOCAL_HOSTNAME` explicitly, so the fallback is never reached — but the safety comes from
   setting it, **not** from the variable having no other source. A bare `LOCAL_HOSTNAME` is a name another
   component may well export, and a design that relied on the fallback would be relying on nobody else
@@ -710,7 +714,8 @@ cannot be rendered at admission time.
   at the moment the file is written. The env path is selected by **not setting**
   `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, which drops `_load_config` past the file branch.
 - **`config.local_hostname` is not always what reaches `setup()`, and running that down makes the case
-  narrower and stronger rather than weaker.** There is a branch (`mooncake_store.py:353-370`) that takes
+  narrower and stronger rather than weaker.** There is a branch (v0.5.18 `mooncake_store.py:482-498`,
+  the shared-transfer-engine reuse test) that takes
   a self-derived session id instead, under **four** conditions at once: a shared transfer engine exists,
   `device_name` equals that engine's own IB device, `metadata_server` is `P2PHANDSHAKE`, and `protocol`
   is `rdma`. Only when all four hold does the file path accidentally produce a correct hostname.
@@ -1000,7 +1005,8 @@ included, so a fixture using it would be *more capable than the engine it stands
 a tenant the real connector truncates, and case 3's stamp would read "enforced" for a deployment where
 nothing enforces it. A test that quietly outperforms the thing it models proves the wrong
 system. The vLLM fixture therefore mirrors `worker.py:1040-1048` argument for argument (seven), and the
-SGLang one mirrors `mooncake_store.py:372-381` (eight, the extra one a transfer-engine handle). Both
+SGLang one mirrors the `setup()` call at v0.5.18 `mooncake_store.py:510-520` (eight, the extra one a
+transfer-engine handle). Both
 stop short of parameter 11. What this does **not** prove is vLLM's own parsing of
 `--kv-transfer-config`, which needs a GPU host; that is a bounded, named gap with a hardware follow-up,
 not a claim quietly folded into a green local run. It is also why acceptance is stated as bytes moving
@@ -1124,7 +1130,7 @@ accepted on the strength of a flag being accepted.
 - **A Pod is stamped as injected while its injection is inert** → this is the one accepted silent
   outcome in the design, and it has exactly one entrance: an SGLang container whose own
   `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` or `--hicache-storage-backend-extra-config` outranks the
-  injected environment (`_load_config`, `mooncake_store.py:242-260`). The precedence is correct — an
+  injected environment (`_load_config`, v0.5.18 `mooncake_store.py:294-314`). The precedence is correct — an
   explicit user configuration should beat a defaulted one — so gating on it would reject a legitimate
   manifest. What is left is diagnosis: both entrances are named by name in the documentation, and the
   F7 stamp records the vehicle, so "the annotation says injected but the cache is cold" resolves to a
@@ -1314,7 +1320,7 @@ reads and writes the pool, and a domain-carrying one is refused).
   workload already declaring a variable of the same name leaves the workload's value in place, per this
   repository's standing rule that an injection never overrides what a workload declared for itself. The
   package doc comment records the source lines the per-engine vehicle choice rests on
-  (`worker.py:144-151`, `mooncake_store.py:114-141,242-260`, `environ.py:41-42,54-72`,
+  (`worker.py:144-151`, v0.5.18 `mooncake_store.py:110-167,294-314`, v0.5.18 `environ.py:39-40,52-57`,
   `rdma_utils.py:21-25`). No cluster, no engine, no Kubernetes client.
   Verify: `go test ./pkg/worker/kvcache/inject/...`
 

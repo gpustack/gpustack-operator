@@ -236,6 +236,15 @@ degrades the metadata plane** rather than erroring. It is asserted byte-for-byte
 The client splits that key on commas into a device filter and nothing special-cases the string, so
 setting it produces a filter matching a device no host has. **Empty means "use every device found".**
 
+⛔ **`members[].extraArgs` is the exception to the table above: it renders into the container's
+argv**, as `-D key=value`, not into an environment variable. `leader.extraArgs` does the same on the
+leader, as `-key=value`.
+
+⛔ **Either way the value is world-readable, on three paths.** It is stored verbatim on the
+`KVCacheBackend` — which is cluster-scoped, so reading it needs no access to any workload — and it is
+rendered into the container's argv, readable again from the Pod and from the DaemonSet or Deployment
+carrying it. **Do not put a credential in `extraArgs`.** Nothing refuses one at admission.
+
 `spec.transport.protocol` accepts `Auto`, `TCP`, `RDMA`, `HIP` and `Ascend`, and defaults to `Auto`
 whether or not the `transport` block is written at all. **`Auto` resolves to `TCP`** — it is not a
 per-node probe that promotes itself.
@@ -349,6 +358,13 @@ Then create the directory on each node with that uid:
 ```console
 $ install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
 ```
+
+There is **no switch that makes the operator do this for you.**
+
+> **Why** — an init container would have to name a single uid, and the command above is the evidence
+> against that: the uid is a property of the image, and `members[].image` can differ per group. The
+> decision and the alternative that was weighed against it are recorded in
+> `specs/2026-09-05-kv-cache-media-and-scaling.md`.
 
 Five rules the path has to satisfy, all enforced at apply time:
 
@@ -555,8 +571,10 @@ larger value would render a hook that fails every time it runs.
 > than a peer that is about to disappear.
 
 Migrating a member's data before it leaves — the store's drain job API — is **not** offered here. It
-is stateful orchestration, and it covers only two of the store's five replica types: a drain over a
-backend with a disk tier reports success while leaving that tier's data where it was.
+is stateful orchestration, and it reaches only the memory and NVMe-oF replicas: it cannot name the
+segments of the disk-backed ones and skips those keys without counting them as blocked, so **a drain
+over a backend with a disk tier reports success while leaving that tier's data where it was** — and
+its own success signal does not tell you that happened.
 
 ## The external mode
 
