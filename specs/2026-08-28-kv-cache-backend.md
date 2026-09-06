@@ -969,8 +969,15 @@ it restarts on **what changed** rather than on **that the template changed**.
   - The Python binding that does take one, `unmount_segment(segment_ids, grace_period_seconds=0)`,
     defaults to zero, and a zero goes straight to the immediate unmount rather than to
     `GracefulUnmountSegment`.
-  - No shipped console script can issue that RPC, and a `preStop` could not issue it either: a fresh
-    client would not know the segment id the running process holds.
+  - No shipped console script can issue that RPC. **A `preStop` is blocked too, but not for the
+    reason this spec originally gave.** The original reason — that a fresh client would not know the
+    segment id the running process holds — is **wrong, and is corrected here rather than deleted
+    because it was load-bearing**: a `preStop` hook runs against the *same* process that mounted the
+    segments, so client identity was never the obstacle. The real obstacle is upstream and narrower:
+    `segment_ids` is required, **no route returns a client its own ids**, and the name is not
+    derivable because the leader appends a fresh port on every start. One upstream route — a way to
+    read back your own segment ids — is the whole of what unblocks this, which is what a later
+    attempt should test rather than re-testing the client-identity claim.
   - What the master DOES offer is `POST /api/v1/drain_jobs`, which **migrates** a segment's data to
     named target segments rather than unmounting it. That is a different and stronger operation than
     a graceful unmount, it needs the remaining members to have room, and it is a stateful
