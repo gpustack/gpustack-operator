@@ -7,9 +7,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -721,6 +723,159 @@ func TestKVCachePoolTeardown_ADomainIsRegisteredBeforeTheStatusNamesIt(t *testin
 		"and it is not a claim: a released binding asks for nothing, which is what deletes the entry")
 	assert.Empty(t, master.tenants,
 		"nor a tenant, which is what drops it from the rendered policy")
+}
+
+// reconcilePoolReturning runs one pass and hands back what it returned, which is the half
+// reconcilePool asserts away. A teardown that FAILS and one that HOLDS both leave the object in
+// place, and only the returned error tells them apart.
+func reconcilePoolReturning(t *testing.T, r *KVCachePoolReconciler, name string) error {
+	t.Helper()
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: ctrlcli.ObjectKey{Name: name},
+	})
+	return err
+}
+
+// TestKVCachePoolTeardown_AMissingLedgerIsAlreadyReleased is the first of the three exits from the
+// deadlock issue 164 reports: a master running without multi-tenancy holds NO tenant ledger, so a
+// teardown that reads one is not waiting for an answer — it has one, and there is nothing to release.
+//
+// Every release is paired with the read failure that must still HOLD, on the same shape. A rule that
+// let any failed ledger read through would release a pool over entries still sitting on a master
+// nobody could reach — and would satisfy every "the object was deleted" assertion while doing it.
+//
+// The two shapes are not decoration either: a pool with nothing of its own registered reaches only the
+// policy re-render, and a pool that registered a reuse domain reaches the ledger REMOVAL in front of
+// it. The two read the ledger through different calls, so one fixed without the other still deadlocks.
+func TestKVCachePoolTeardown_AMissingLedgerIsAlreadyReleased(t *testing.T) {
+	const (
+		// 409 UNAVAILABLE_IN_CURRENT_MODE: the ledger does not exist, because the master was not
+		// started with multi-tenancy.
+		multiTenancyOff = `{"success":false,"error_code":-1011,"error_message":"UNAVAILABLE_IN_CURRENT_MODE"}`
+		// 503 on the SAME code: a leader whose service plane has not come up. The ledger may well be
+		// there and this pass simply could not read it, which is the difference the rule turns on.
+		ledgerNotAnswering = `{"success":false,"error_code":-1011}`
+	)
+
+	testCases := []struct {
+		name string
+		// registered puts a reuse domain of this pool's on the master before the teardown runs, which
+		// is what routes the pass through the ledger removal as well as through the re-render.
+		registered   bool
+		refuseStatus int
+		refuseBody   string
+
+		wantReleased bool
+		// wantDeletes is how many removals the teardown may issue. It takes both values on purpose:
+		// asserting only that a missing ledger issues none would pass on a teardown that never
+		// removes anything at all.
+		wantDeletes int
+		// wantHeldBy is the Releasable reason a pool that is not released must carry. Empty, with
+		// wantReleased false, means the pass is expected to FAIL outright instead.
+		wantHeldBy string
+	}{
+		{
+			name:         "a master answering its ledger releases a pool that registered nothing",
+			wantReleased: true,
+		},
+		{
+			name:         "and so does one that holds no ledger at all",
+			refuseStatus: 409,
+			refuseBody:   multiTenancyOff,
+			wantReleased: true,
+		},
+		{
+			name:         "while a ledger that merely did not answer fails the re-render",
+			refuseStatus: 503,
+			refuseBody:   ledgerNotAnswering,
+		},
+		{
+			name:         "a pool with a domain of its own has its entry removed",
+			registered:   true,
+			wantReleased: true,
+			wantDeletes:  1,
+		},
+		{
+			name:         "and is released by a master with no ledger to remove it from",
+			registered:   true,
+			refuseStatus: 409,
+			refuseBody:   multiTenancyOff,
+			wantReleased: true,
+		},
+		{
+			name:         "while a ledger that did not answer holds it",
+			registered:   true,
+			refuseStatus: 503,
+			refuseBody:   ledgerNotAnswering,
+			wantHeldBy:   KVCachePoolReasonLedgerNotReleased,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			master := newFakeMaster()
+			address := master.start(t)
+
+			objs := []ctrlcli.Object{
+				newReconcileBackend("mooncake-dram", address),
+				newTestKVCachePool("shared", "mooncake-dram"),
+			}
+			if tc.registered {
+				objs = append(objs, newBoundBinding("team-a", "chat", "shared", "team-a-chat",
+					resource.MustParse("20Ti")))
+			}
+			r, cli := newReconciler(objs...)
+
+			// One serving pass first, so the teardown meets state this controller actually built
+			// against a master that DID hold a ledger — which is the order the issue reports and the
+			// only one that leaves an entry to reason about.
+			reconcilePool(t, r, "shared")
+			if tc.registered {
+				require.Contains(t, master.held(), "team-a-chat",
+					"the entry has to be on the master before its removal means anything")
+				require.NotEmpty(t, readPool(t, cli, "shared").Status.Domains)
+				deleteObject(t, cli, readBinding(t, cli, "team-a", "chat"))
+			}
+			deleteObject(t, cli, readPool(t, cli, "shared"))
+
+			master.refuse(tc.refuseStatus, tc.refuseBody)
+			err := reconcilePoolReturning(t, r, "shared")
+
+			_, deletes, _, _ := master.counts()
+			assert.Equal(t, tc.wantDeletes, deletes,
+				"a ledger that does not exist has nothing to remove, and a pass that removed "+
+					"something anyway would be acting on an answer it never got")
+
+			kvcp := new(workercore.KVCachePool)
+			getErr := cli.Get(context.Background(), ctrlcli.ObjectKey{Name: "shared"}, kvcp)
+
+			if tc.wantReleased {
+				require.NoError(t, err)
+				assert.True(t, kerrors.IsNotFound(getErr),
+					"expected the pool to be released and collected, got %v", getErr)
+				if tc.registered {
+					assert.NotContains(t, readQuotaPolicyDocument(t, cli, "mooncake-dram"),
+						"team-a-chat",
+						"the seed is the OTHER place a tenant is written, and the master copies it "+
+							"back over its own policy on every container start: skipping the "+
+							"re-render would release the pool and leave its tenant to come back")
+				}
+				return
+			}
+
+			require.NoError(t, getErr, "a pool that is not released is still there")
+			if tc.wantHeldBy == "" {
+				require.Error(t, err,
+					"a read that says nothing about whether the entries are still there must not "+
+						"be taken as permission to let go")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantHeldBy, conditionReason(t, kvcp, KVCachePoolConditionReleasable))
+			assert.Equal(t, KVCachePoolPhaseDeleting, kvcp.Status.Phase)
+		})
+	}
 }
 
 // conditionReason reads the reason off a condition, which the accessor does not expose.
