@@ -1674,6 +1674,34 @@ not fill it.
   therefore safe and is left to a follow-up, because it changes what the API server accepts on a
   status write and wants its own verification rather than a rider on this one.
 
+- **[DECIDED, recorded here because the implementation is separate] Parallelism becomes a `roles[]`
+  field rather than being derived.** Nothing validates the contiguous port window a disaggregated
+  deployment needs, and the window is sized by the engine, the card count and the parallelism. The
+  first two are on the API; parallelism is on none of the four CRs. Tracked at
+  <https://github.com/gpustack/gpustack-operator/issues/203>; the field, the per-engine formulas and
+  the validator are their own work.
+
+  **The decisive fact is that parallelism is already being consumed.** SGLang divides the KV segment
+  by it — `global_segment_size // tp_scale_factor`, v0.5.18
+  `mooncake_store.py:413-416` — so this is not a new input invented for a check; it is a quantity
+  that is already changing behaviour while being declared nowhere.
+
+  ⛔ **Deriving it from the card count is the option to avoid**, and it is the tempting one because
+  it is right in the common case. Where it is wrong is pipeline parallelism, where cards are the
+  product of two degrees — so the check would be correct exactly when it is not needed and silently
+  permissive on the deployments large enough to need it.
+
+  **Per role, not per deployment**: prefill and decode can run different degrees, while
+  `spec.engineVersion` sits one level up.
+
+  The engine's own parallelism argument joins the operator-owned key set, so it is refused in
+  `roles[].extraArgs` rather than silently disagreeing with the field. That is the rule already
+  applied to every other owned key, so it needs no new mechanism.
+
+  ⚠️ **The Ascend window can be written first, but not alone.** `AscendDirectTransport` claims
+  `[20000, 20000 + npu_per_node * 1000)`, which needs only the card count — so that half is writable
+  today, and shipping only it would leave a validator that looks general and covers one vendor.
+
 - **Can a serving pod group be scaled in place?** F10 rebuilds the group because
   `validatePodGroupMetadata` requires every Pod to carry the same `pod-group-total-count`, and
   `equivalentToWorkload` compares PodSet counts. What Kueue 0.18.4 actually does to an admitted
