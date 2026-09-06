@@ -111,7 +111,8 @@ variable "cpu_instance_types" {
 # public_ip gives the group's nodes a public IPv4, which is what makes them reachable over SSH —
 # how the hardware-partition tests toggle MIG on the card — and so defaults to true for a GPU
 # group. Each address is charged against the project's vpc.ipv4-address.public.count quota, so set
-# it to false on a GPU group nobody logs in to; the CPU group never takes one (see README).
+# it to false on a GPU group nobody logs in to; the CPU group has its own flag, off by default
+# (see README).
 variable "gpu_instance_types" {
   description = "GPU node groups keyed by group name (each becomes gpu-<name>). platform+preset are required; os and drivers_preset default to the newest match from `nebius mk8s node-group get-compatibility-matrix` for var.release; preemptible defaults to false; mig defaults to whether the platform supports NVIDIA MIG; public_ip defaults to true, giving the nodes an SSH-reachable public IPv4 at the cost of one public-address quota unit each."
   type = map(object({
