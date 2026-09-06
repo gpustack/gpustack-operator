@@ -17,6 +17,13 @@ import (
 // Toggle of the functions.
 var (
 	getPCIDevicesDefaultClassPrefixes []string
+
+	// sysfsPCIDevicesPath is where the kernel publishes per-device PCI attributes. It is a variable
+	// rather than a constant so the NUMA classification below can be exercised against a
+	// constructed tree: the three readings that have to stay distinguishable -- a node number, the
+	// kernel's -1 sentinel, and text that does not parse -- cannot all be arranged on one host.
+	// Nothing outside a test assigns it.
+	sysfsPCIDevicesPath = "/sys/bus/pci/devices"
 )
 
 func init() {
@@ -114,16 +121,23 @@ func getNumaNodeByBDF(bdf string) string {
 		return ""
 	}
 
-	s, err := readText("/sys/bus/pci/devices/" + bdf + "/numa_node")
+	s, err := readText(filepath.Join(sysfsPCIDevicesPath, bdf, "numa_node"))
 	if err != nil {
 		return ""
 	}
 
+	// Node 0 is a node; -1 is the kernel saying it has no affinity to report, and an unparseable
+	// reading is not a node either. Returning "0" for all three made an accelerator with no
+	// affinity indistinguishable from one on node 0, and the proximity comparison downstream then
+	// answered NODE against an interface genuinely on node 0 -- a measured-proximity claim the
+	// kernel had declined to make. safeInt already reports a failed parse as the same -1, so the
+	// one test below covers both.
 	n := safeInt(s, -1)
-	if n > 0 {
-		return strconv.Itoa(n)
+	if n < 0 {
+		return ""
 	}
-	return "0"
+
+	return strconv.Itoa(n)
 }
 
 func getPhysicalPackageIdByBDF(bdf string) string {
