@@ -320,7 +320,11 @@ echo "[case-43] ${MEMBERS} member(s); master reports ${ALLOC_MI}Mi allocatable; 
 kubectl create namespace "$NS_A" >/dev/null 2>&1 || true
 kubectl create namespace "$NS_B" >/dev/null 2>&1 || true
 
-kubectl apply -f - >/dev/null 2>&1 <<YAML
+# The pool is the subject of every check below and the two bindings both point at it, so its apply is
+# read back too. Refused with the output discarded, the binding gate a few lines down would still
+# pass — a Binding naming an absent pool is accepted — and the convergence wait after it would report
+# a binding that did not become Ready, which is true and blames the wrong object.
+pool_out="$(kubectl apply -f - 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: KVCachePool
 metadata:
@@ -330,12 +334,24 @@ spec:
   quota:
     total: ${ALLOC_MI}Mi
 YAML
+)"
+if ! kubectl get kvcachepools.worker.gpustack.ai "$POOL" -o name >/dev/null 2>&1; then
+  echo "[case-43] FATAL: no kvcachepool/${POOL} after the apply, so every check below has no" >&2
+  echo "                 subject. The apply said:" >&2
+  printf '%s\n' "${pool_out:-<no output at all>}" >&2
+  exit 1
+fi
 
-# TWO DOCUMENTS, AND THE OUTPUT IS COUNTED RATHER THAN DISCARDED. `kubectl apply` reports both
-# bindings in ONE stream, so a run where bind-a was created and bind-b refused is indistinguishable
-# from a clean one with the output thrown away — and the check right below would then wait 180s for an
-# object nobody made and report it as a binding that did not converge. A count also carries the empty
-# case for free: no output at all counts zero.
+# TWO DOCUMENTS, AND BOTH BINDINGS ARE READ BACK RATHER THAN THE OUTPUT BEING DISCARDED. `kubectl
+# apply` reports both in ONE stream, so a run where bind-a was created and bind-b refused is
+# indistinguishable from a clean one with the output thrown away — and the check right below would
+# then wait 180s for an object nobody made and report it as a binding that did not converge.
+#
+# The gate is the objects' EXISTENCE, not the words the apply printed. Counting ` created` lines
+# instead makes the gate depend on how they came to be there: a re-run over a surviving namespace, or
+# the retrying kubectl shim resending an apply whose response was lost, both report
+# `configured`/`unchanged` for objects that are present and correct. The apply output is still
+# captured, because a refusal's text is the only diagnosis of why an object is missing.
 bind_out="$(kubectl apply -f - 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: KVCachePoolBinding
@@ -354,13 +370,15 @@ spec:
   domain: {name: ${DOM_B}, blockSize: 16, dtype: bfloat16}
 YAML
 )"
-# `created` is the exact word here, not one of created/configured/unchanged: both namespaces carry
-# this run's random suffix and are made a few lines above, so an object under either name can only be
-# one this run just made.
-bind_created="$(printf '%s\n' "$bind_out" | grep -c ' created$' || true)"
-if [ "${bind_created:-0}" -ne 2 ]; then
-  echo "[case-43] FATAL: ${bind_created:-0} of 2 bindings were created, so the convergence check" >&2
-  echo "                 below has no subject and would blame the operator for their absence:" >&2
+bind_missing=""
+for pair in "${NS_A} bind-a" "${NS_B} bind-b"; do
+  set -- $pair
+  kubectl -n "$1" get kvcachepoolbindings.worker.gpustack.ai "$2" -o name >/dev/null 2>&1 \
+    || bind_missing="${bind_missing} $1/$2"
+done
+if [ -n "$bind_missing" ]; then
+  echo "[case-43] FATAL: absent after the apply:${bind_missing} — the convergence check below has" >&2
+  echo "                 no subject and would blame the operator for their absence. The apply said:" >&2
   printf '%s\n' "${bind_out:-<no output at all>}" >&2
   exit 1
 fi
@@ -654,7 +672,7 @@ echo "== 9. a backend with nothing mounted is not a pool with an empty cache =="
 
 # The startup-ordering trap: every effective quota is zero and no write can succeed, while every
 # object still looks correctly configured. The member selector matches no node on purpose.
-# Counted for the same reason as the bindings above: the backend and the pool arrive in one stream,
+# Read back for the same reason as the bindings above: the backend and the pool arrive in one stream,
 # and the only check in this section reads the POOL. Created the backend and refused the pool, and the
 # poll below would spend its whole window on an absent object and then report a missing condition as
 # the operator's silence — which is the exact substitution this section exists to rule out.
@@ -685,10 +703,14 @@ spec:
     total: 1Gi
 YAML
 )"
-empty_created="$(printf '%s\n' "$empty_out" | grep -c ' created$' || true)"
-if [ "${empty_created:-0}" -ne 2 ]; then
-  echo "[case-43] FATAL: ${empty_created:-0} of 2 objects were created, so the check below has no" >&2
-  echo "                 subject and would read an absence as a missing condition:" >&2
+empty_missing=""
+kubectl get kvcachebackends.worker.gpustack.ai "$EMPTY_BACKEND" -o name >/dev/null 2>&1 \
+  || empty_missing="${empty_missing} kvcachebackend/${EMPTY_BACKEND}"
+kubectl get kvcachepools.worker.gpustack.ai "$EMPTY_POOL" -o name >/dev/null 2>&1 \
+  || empty_missing="${empty_missing} kvcachepool/${EMPTY_POOL}"
+if [ -n "$empty_missing" ]; then
+  echo "[case-43] FATAL: absent after the apply:${empty_missing} — the check below has no subject" >&2
+  echo "                 and would read an absence as a missing condition. The apply said:" >&2
   printf '%s\n' "${empty_out:-<no output at all>}" >&2
   exit 1
 fi

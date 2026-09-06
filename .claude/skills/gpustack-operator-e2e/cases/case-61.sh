@@ -11,14 +11,21 @@
 #              correctly, so every existing reading about that Service is identical with the watch
 #              removed.
 #
-#              THE FIGURE IS THE UID, AND THE ATTRIBUTION IS THE REPLICAS' RESOURCE VERSIONS. A row
-#              that only checked the Service exists at the end would pass if the delete had silently
-#              failed, so the recreated Service must carry a DIFFERENT uid. And a row that stopped
-#              there would pass with the watch removed on any cluster where a replica happened to
-#              write its status in the same window -- the controller also owns the replicas, so a Pod
-#              event wakes it and the Service comes back for a reason this case is not about. So the
-#              replicas' resourceVersions are captured either side of the window: unchanged means no
-#              Pod event could have driven the reconcile, and the Service watch is what is left.
+#              THE FIGURE IS THE UID, AND THE ATTRIBUTION IS EVERY OTHER OBJECT THIS CONTROLLER IS
+#              WOKEN BY. A row that only checked the Service exists at the end would pass if the
+#              delete had silently failed, so the recreated Service must carry a DIFFERENT uid. And a
+#              row that stopped there would pass with the watch removed on any cluster where some
+#              other watched object happened to be written in the same window: the controller also
+#              owns the replicas and watches the InstanceType, the KVCachePoolBinding, the
+#              KVCachePool and the KVCacheBackend -- the last four with no generation predicate, so a
+#              status write on any of them wakes it and the Service comes back for a reason this case
+#              is not about. So all of them are sampled either side of the window, and the row says
+#              only what that sample supports: nothing else the controller watches moved.
+#
+#              EVERY COMPARISON HERE IS ALSO ASKED WHAT IT RECORDS WHEN BOTH SIDES ARE EMPTY, because
+#              an absence and a quiet object read alike. With no replica Pod at all the quiescence
+#              loop would declare quiescence after 9s of nothing and the attribution would compare ""
+#              to "", so a replica has to be OBSERVED before either reading means anything.
 #
 #              A shortage, a filler and a quota edit are all deliberately absent. Whether the group
 #              is admitted has nothing to do with Service reconciliation, and the quieter the
@@ -39,8 +46,10 @@
 # Expected:    - the deployment's own Service is created;
 #              - after `kubectl delete svc`, a Service of the same name exists again within the
 #                bound, carrying a different uid;
-#              - no replica Pod changed between the delete and the recreate, so the correction is
-#                attributable to the Service watch and to nothing else.
+#              - nothing else this controller watches changed between the delete and the recreate,
+#                which leaves the Service watch as what drove the reconcile. SKIP, not FAIL, when
+#                something did move or when no replica was ever observed: neither is a defect in
+#                anything, it just means that run cannot say which watch did the work.
 #
 # Cleanup:     Trap deletes the deployment and, if its replicas are wedged behind Kueue's finalizer,
 #              the Workload that holds them. Idempotent, runs on pass AND fail, safe to re-run. It
@@ -79,11 +88,58 @@ if [ -z "$IT" ]; then
   exit 2
 fi
 
-# Every Pod of the group, as name=resourceVersion, sorted so two samples compare as text.
+# Every Pod of the group, as name=resourceVersion, sorted so two samples compare as text. Used for
+# the quiescence loop, where the replicas are the only churn source worth waiting out.
 replica_versions() {
   kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${MD}" \
     -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.resourceVersion}{"\n"}{end}' 2>/dev/null \
     | sort | tr '\n' ' '
+}
+
+# One kind's resourceVersions, or a loud READ-FAILED line if the read itself failed.
+#
+# The distinction is the whole reliability of the attribution below. `kubectl get` over a kind with
+# no objects prints nothing and exits 0; over a kind that cannot be read -- CRD absent, RBAC, a
+# transport failure the shim ran out of retries on -- it also prints nothing to stdout. Discarding
+# the failure would make an unreadable kind indistinguishable from an empty one, and that kind would
+# then drop silently out of both samples while the row went on claiming it.
+sample() {
+  local label="$1" out
+  shift
+  if out="$(kubectl "$@" 2>/dev/null)"; then
+    # Command substitution strips the trailing newline, so it is put back here rather than left to
+    # glue this kind's last line onto the next kind's first one. A kind with no objects prints
+    # nothing at all, which is why the empty case is skipped instead of emitting a blank line.
+    if [ -n "$out" ]; then
+      printf '%s\n' "$out"
+    fi
+  else
+    printf '%s=READ-FAILED\n' "$label"
+  fi
+
+  return 0
+}
+
+# Everything this controller is woken by EXCEPT the Service under test, as
+# kind/name=resourceVersion. The controller Owns the replica Pods and the Service, and Watches the
+# InstanceType, the KVCachePoolBinding, the KVCachePool and the KVCacheBackend; its own spec is
+# filtered by a GenerationChangedPredicate and nothing here edits it, but it is sampled anyway so
+# the list needs no argument about that.
+watched_versions() {
+  {
+    sample pods -n "$NS" get pods -l "app.kubernetes.io/instance=${MD}" \
+      -o jsonpath="{range .items[*]}pod/{.metadata.name}={.metadata.resourceVersion}{\"\\n\"}{end}"
+    sample instancetype get instancetypes.worker.gpustack.ai "$IT" \
+      -o jsonpath="instancetype/{.metadata.name}={.metadata.resourceVersion}{\"\\n\"}"
+    sample modeldeployment -n "$NS" get modeldeployments.worker.gpustack.ai "$MD" \
+      -o jsonpath="modeldeployment/{.metadata.name}={.metadata.resourceVersion}{\"\\n\"}"
+    sample kvcachepoolbindings get kvcachepoolbindings.worker.gpustack.ai -A \
+      -o jsonpath="{range .items[*]}kvcachepoolbinding/{.metadata.namespace}/{.metadata.name}={.metadata.resourceVersion}{\"\\n\"}{end}"
+    sample kvcachepools get kvcachepools.worker.gpustack.ai \
+      -o jsonpath="{range .items[*]}kvcachepool/{.metadata.name}={.metadata.resourceVersion}{\"\\n\"}{end}"
+    sample kvcachebackends get kvcachebackends.worker.gpustack.ai \
+      -o jsonpath="{range .items[*]}kvcachebackend/{.metadata.name}={.metadata.resourceVersion}{\"\\n\"}{end}"
+  } | sort | tr '\n' ' '
 }
 
 # Delete a wedged group's Workload by hand. Kueue holds a finalizer on every Pod of a group and
@@ -120,8 +176,16 @@ cleanup() {
   echo "[case-61] cleanup"
   kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai "$MD" \
     --ignore-not-found --wait=false >/dev/null 2>&1
-  sleep 5
-  force_release
+  # Retried rather than done once. force_release finds the Workload through the Pods it owns, so a
+  # single shot right after the delete finds nothing when admission is still in flight or when the
+  # Pod list races the deletion -- and the wedged finalizers it exists to clear then survive, which
+  # is exactly the contamination it exists to prevent. Each round is cheap and the loop ends as soon
+  # as the Pods are gone.
+  for _ in $(seq 1 12); do
+    sleep 5
+    force_release
+    [ -z "$(replica_versions)" ] && break
+  done
 }
 trap cleanup EXIT
 
@@ -152,17 +216,18 @@ spec:
         command: ["/pause"]
 YAML
 )"
-case "$apply_out" in
-  *created* | *configured* | *unchanged*) ;;
-  *)
-    record FAIL "the deployment's Service is created" \
-      "the deployment was not accepted, so nothing below has a subject: $(printf '%s' "$apply_out" | tr '\n' ' ' | cut -c1-220)"
-    echo
-    echo "STATUS|CHECK|OBJECT"
-    printf '%s\n' "${ROWS[@]}" | column -t -s '|'
-    exit 1
-    ;;
-esac
+# The gate is that the object is THERE, not that the apply printed one of three words. A substring
+# match would take a refusal whose text happens to contain "created" for success, and matching the
+# exact word instead would make the gate depend on whether this run is the first over a surviving
+# namespace. Reading the object back answers the question the checks below actually need.
+if ! kubectl -n "$NS" get modeldeployments.worker.gpustack.ai "$MD" -o name >/dev/null 2>&1; then
+  record FAIL "the deployment's Service is created" \
+    "no modeldeployment/${MD} after the apply, so nothing below has a subject. The apply said: $(printf '%s' "${apply_out:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
+  echo
+  echo "STATUS|CHECK|OBJECT"
+  printf '%s\n' "${ROWS[@]}" | column -t -s '|'
+  exit 1
+fi
 
 first_uid=""
 for _ in $(seq 1 30); do
@@ -180,7 +245,21 @@ if [ -z "$first_uid" ]; then
 fi
 record PASS "the deployment's Service is created" "svc/${MD} uid=${first_uid}"
 
-echo "== 2. wait for the replicas to go quiet =="
+echo "== 2. wait for a replica to appear, then for the replicas to go quiet =="
+
+# A replica has to be OBSERVED before "unchanged" carries any information. With no Pod at all
+# replica_versions returns the empty string forever, the loop below compares "" to "" and declares
+# quiescence after 9s of nothing, and the attribution row would then compare two empty samples and
+# pass. Whether Kueue admits this group is not this case's subject and not something it arranges, so
+# the absence is recorded and carried rather than treated as a failure.
+replicas_seen=false
+for _ in $(seq 1 40); do
+  if [ -n "$(replica_versions)" ]; then
+    replicas_seen=true
+    break
+  fi
+  sleep 3
+done
 
 # Quiescence is a precondition of the attribution, not a nicety. While the replicas are still being
 # written the controller is being woken by its Pod watch several times a second, and a Service
@@ -198,8 +277,23 @@ for _ in $(seq 1 40); do
   fi
   last="$now"
 done
-echo "[case-61] replicas unchanged for ${quiet_for}s: ${last:-<none>}"
-before="$last"
+echo "[case-61] replica(s) observed: ${replicas_seen}; unchanged for ${quiet_for}s: ${last:-<none>}"
+
+# Whether the attribution row can say anything, decided BEFORE the window and from the preconditions
+# rather than from the reading. Exhausting the loop without ever reaching 9 quiet seconds used to
+# fall through here silently: the sample was taken mid-churn, the row would SKIP or - worse - pass on
+# two samples that merely happened to match, and nothing said the precondition itself had failed.
+attributable=true
+attribution_note=""
+if [ "$replicas_seen" != true ]; then
+  attributable=false
+  attribution_note="no replica Pod was ever observed, so an unchanged sample would be a reading about an absence rather than about a watch"
+elif [ "$quiet_for" -lt 9 ]; then
+  attributable=false
+  attribution_note="the replicas never went 9s without a write (${quiet_for}s at best), so the controller was being woken throughout the window"
+fi
+
+before="$(watched_versions)"
 
 echo "== 3. delete the Service out of band =="
 del_out="$(kubectl -n "$NS" delete svc "$MD" 2>&1)"
@@ -218,7 +312,7 @@ for _ in $(seq 1 "$RECREATE_BOUND"); do
   sleep 1
 done
 
-after="$(replica_versions)"
+after="$(watched_versions)"
 
 echo "== 4. the readings =="
 if [ -n "$new_uid" ]; then
@@ -238,14 +332,19 @@ else
   esac
 fi
 
-# The attribution. A SKIP rather than a FAIL: a replica writing its status in the window is not a
-# defect in anything, it just means this run cannot say WHICH watch did the work.
-if [ "$before" = "$after" ]; then
-  record PASS "nothing but the Service watch could have woken the controller" \
-    "every replica's resourceVersion is unchanged across the window: ${after:-<no replicas>}"
+# The attribution, and it claims only what the sample supports: no OTHER object this controller
+# watches moved, which leaves the Service watch. Every failure mode is a SKIP rather than a FAIL --
+# a watched object being written in the window is not a defect in anything, it just means this run
+# cannot say which watch did the work, and the uid row above stands on its own either way.
+if [ "$attributable" != true ]; then
+  record SKIP "no other object this controller watches changed in the window" \
+    "the precondition failed, so the row above passes unattributed: ${attribution_note}"
+elif [ "$before" = "$after" ]; then
+  record PASS "no other object this controller watches changed in the window" \
+    "identical either side of the delete, so no Pod, InstanceType, Binding, pool or backend event could have driven the reconcile: ${after}"
 else
-  record SKIP "nothing but the Service watch could have woken the controller" \
-    "a replica changed in the window, so the row above passes unattributed: before=[${before}] after=[${after}]"
+  record SKIP "no other object this controller watches changed in the window" \
+    "something moved, so the row above passes unattributed: before=[${before}] after=[${after}]"
 fi
 
 echo

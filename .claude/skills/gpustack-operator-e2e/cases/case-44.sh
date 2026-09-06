@@ -184,12 +184,16 @@ if ! wait_for kvcachebackends.worker.gpustack.ai "$BACKEND" '{.status.phase}' Re
   exit 1
 fi
 
-# TWO DOCUMENTS, AND THE OUTPUT IS COUNTED RATHER THAN DISCARDED. `kubectl apply` reports the pool
-# and the binding in ONE stream, so with the output thrown away a run that created the pool and had
-# the binding refused looks exactly like a clean one — and the grant check below would then report
-# effectiveQuota as absent, blaming the ledger for an object nobody made. A count also carries the
-# empty case for free: no output at all counts zero. `created` is the exact word because both names
-# carry this run's random suffix.
+# TWO DOCUMENTS, AND BOTH OBJECTS ARE READ BACK RATHER THAN THE OUTPUT BEING DISCARDED. `kubectl
+# apply` reports the pool and the binding in ONE stream, so with the output thrown away a run that
+# created the pool and had the binding refused looks exactly like a clean one — and the grant check
+# below would then report effectiveQuota as absent, blaming the ledger for an object nobody made.
+#
+# The gate is the objects' EXISTENCE, not the words the apply printed. Counting ` created` lines
+# instead makes the gate depend on how the objects came to be there: a re-run over a surviving
+# namespace, or the retrying kubectl shim resending an apply whose response was lost, both report
+# `configured`/`unchanged` for objects that are present and correct. The apply output is still
+# captured, because a refusal's text is the only diagnosis of why an object is missing.
 apply_out="$(kubectl apply -f - 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: KVCachePool
@@ -209,10 +213,14 @@ spec:
   domain: {name: ${DOMAIN}, blockSize: 16, dtype: bfloat16}
 YAML
 )"
-apply_created="$(printf '%s\n' "$apply_out" | grep -c ' created$' || true)"
-if [ "${apply_created:-0}" -ne 2 ]; then
+missing=""
+kubectl get kvcachepools.worker.gpustack.ai "$POOL" -o name >/dev/null 2>&1 \
+  || missing="${missing} kvcachepool/${POOL}"
+kubectl -n "$NS_Q" get kvcachepoolbindings.worker.gpustack.ai bind-q -o name >/dev/null 2>&1 \
+  || missing="${missing} ${NS_Q}/kvcachepoolbinding/bind-q"
+if [ -n "$missing" ]; then
   record FAIL "the pool and its binding exist" \
-    "${apply_created:-0} of 2 objects were created, so nothing below has a subject: \
+    "absent after the apply:${missing} — so nothing below has a subject. The apply said: \
 $(printf '%s' "${apply_out:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
   echo
   echo "STATUS | CHECK | OBJECT"

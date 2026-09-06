@@ -109,11 +109,17 @@ trap cleanup EXIT
 kubectl create namespace "$NS" >/dev/null 2>&1 || true
 
 echo "== deploying a worker with no chart behind it, at the OLD build (${OLD_IMAGE}) =="
-# FOUR DOCUMENTS, AND THE OUTPUT IS COUNTED. `kubectl apply` reports them in ONE stream, so a run
+# FOUR DOCUMENTS, AND ALL FOUR ARE READ BACK. `kubectl apply` reports them in ONE stream, so a run
 # where the ServiceAccount or the binding was refused and the Deployment was not still reaches the
 # rollout check below — which then spends 1200s and names the old image as the suspect, a diagnosis
-# about something that was never wrong. A count also carries the empty case for free: no output at
-# all counts zero.
+# about something that was never wrong.
+#
+# The gate is the objects' EXISTENCE, not the words the apply printed. Counting ` created` lines
+# instead makes the gate depend on how they came to be there: this case's namespace is created with
+# `|| true` a few lines above precisely so a crashed run can be re-run, and over a surviving
+# namespace apply reports `configured`/`unchanged`. The retrying kubectl shim does the same when an
+# apply lands but its response is lost. The output is still captured, because a refusal's text is the
+# only diagnosis of why an object is missing.
 worker_out="$(kubectl apply -f - 2>&1 <<EOF
 apiVersion: v1
 kind: ServiceAccount
@@ -225,13 +231,19 @@ spec:
               value: ${WORKER}
 EOF
 )"
-# `created` and nothing wider: $NS is this case's own namespace, made a few lines above, and the
-# ClusterRoleBinding carries the same per-case name, so an object under any of these names can only
-# be one this run just made.
-worker_created="$(printf '%s\n' "$worker_out" | grep -c ' created$' || true)"
-if [ "${worker_created:-0}" -ne 4 ]; then
+worker_missing=""
+for spec in "serviceaccount ${NS}" "service ${NS}" "deployment ${NS}" "clusterrolebinding -"; do
+  set -- $spec
+  if [ "$2" = "-" ]; then
+    kubectl get "$1" "$WORKER" -o name >/dev/null 2>&1 || worker_missing="${worker_missing} $1/${WORKER}"
+  else
+    kubectl -n "$2" get "$1" "$WORKER" -o name >/dev/null 2>&1 \
+      || worker_missing="${worker_missing} $2/$1/${WORKER}"
+  fi
+done
+if [ -n "$worker_missing" ]; then
   record FAIL "the hand-rolled worker exists" \
-    "${worker_created:-0} of 4 objects were created, so the rollout below has no subject: \
+    "absent after the apply:${worker_missing} — so the rollout below has no subject. The apply said: \
 $(printf '%s' "${worker_out:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
   report
   exit 1
