@@ -15,10 +15,17 @@ defaults:
     # is nested.
     working-directory: gpustack.ai/gpustack
 
-# Pure verification with no side effects, and an internal pull request fires both the
-# push and the pull_request event, so superseded runs are cancelled rather than queued.
+# Pure verification with no side effects, so a superseded run is cancelled rather than
+# left to finish. The key is the pull request number and not its branch name, because two
+# pull requests opened from forks whose branch is called `main` would otherwise share a
+# group and cancel each other.
+#
+# Event name is part of the group on purpose: an internal pull request fires both events,
+# and the two runs are NOT redundant -- the push run verifies the branch tip while the
+# pull_request run verifies the merge result. Folding them together would drop one of
+# those verdicts rather than deduplicate a repeat.
 concurrency:
-  group: api-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
+  group: api-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 on:
@@ -36,6 +43,8 @@ on:
       - "api/**"
       - "gen/**"
       - "pkg/*/webhooks/**"
+      - "pkg/utils/osx/**"
+      - "pkg/utils/stringx/**"
       - "pkg/kubeclients/**"
       - "staging/**"
       - "go.mod"
@@ -50,6 +59,8 @@ on:
       - "api/**"
       - "gen/**"
       - "pkg/*/webhooks/**"
+      - "pkg/utils/osx/**"
+      - "pkg/utils/stringx/**"
       - "pkg/kubeclients/**"
       - "staging/**"
       - "go.mod"

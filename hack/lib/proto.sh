@@ -17,6 +17,10 @@
 
 protoc_version=${PROTOC_VERSION:-"v33.5"}
 protoc_gen_go_version=${PROTOC_GEN_GO_VERSION:-"v1.36.11"}
+# Pinned to the head of gogo/protobuf master as of 2022-10-24, which is where that branch
+# has stood since. The project is unmaintained and its last tag (v1.3.2, 2020) predates
+# commits this repository depends on, so a commit hash is the only stable specifier. As
+# with goimports, a floating "master" would move the drift gate baseline. Bump deliberately.
 protoc_gen_gogo_version=${PROTOC_GEN_GOGO_VERSION:-"f67b8970b736"}
 protoc_gen_go_grpc_version=${PROTOC_GEN_GO_GRPC_VERSION:-"v1.78.0"}
 protoc_gen_validate_version=${PROTOC_GEN_VALIDATE_VERSION:-"v1.3.0"}
