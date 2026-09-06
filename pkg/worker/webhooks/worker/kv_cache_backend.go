@@ -476,9 +476,11 @@ func validateKVCacheBackendScaleIn(
 	// number, this one names the reason. A reader who hits the schema's bound first has still been
 	// stopped from shipping a hook that fails on every shutdown.
 	//
-	// LIMITED: no value violates both bounds, since a grace cannot exceed the ceiling and be
-	// negative at once. They accumulate rather than return so that moving the bounds apart later
-	// reports both violations instead of only the first.
+	// LIMITED: no grace is both above the ceiling and negative, so only one bound can fire and
+	// either could return early unobserved. They accumulate so that moving a bound later — a floor
+	// above zero, a ceiling that follows the endpoint's — reports both violations rather than the
+	// first alone. No test covers that: the aggregation case in this package's tests passes either
+	// way, so this note is what has to stop the next edit.
 	if scaleIn.GracePeriodSeconds > mooncake.MemberMaxGracePeriodSeconds {
 		errs = append(errs, field.Invalid(gracePath, scaleIn.GracePeriodSeconds, fmt.Sprintf(
 			"must not exceed %d: the member's own endpoint refuses a larger grace with a 400, so "+

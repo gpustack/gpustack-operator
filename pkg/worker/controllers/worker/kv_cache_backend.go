@@ -749,7 +749,7 @@ func (r *KVCacheBackendReconciler) observeMembers(
 	// or a medium rather than with a guessed one, and the condition below reports the ambiguity
 	// instead of a number derived from it.
 	//
-	// ⛔ Collected inside this loop rather than over the whole index, because a shared key that no
+	// Collected inside this loop rather than over the whole index, because a shared key that no
 	// segment uses is not a problem: two TCP groups on one node share that node's name, and the
 	// leader reports each of their segments by its own distinct pod IP, so every segment resolves.
 	// Judging the index instead of the listing would move that healthy backend to Degraded and tell
@@ -977,7 +977,7 @@ func memberPodStuck(pod *core.Pod) (memberPodFault, bool) {
 // two member groups can select one node, and then both of their Pods answer to that node's name; on
 // the RDMA path both also hold the host's network namespace, so both answer to its address too.
 //
-// ⛔ When more than one READY Pod answers to the key a segment arrived on, the identity cannot be
+// When more than one READY Pod answers to the key a segment arrived on, the identity cannot be
 // recovered, and that is a property of the data rather than of this code: the leader reports a
 // segment as "<host>:<transfer port>", and BOTH of the fields it offers — segment_name and
 // te_endpoint — are that shape. The transfer port is bound at random and is not a fact any Pod
@@ -1128,7 +1128,7 @@ func memberPodNames(facts []memberPodFacts) []string {
 
 // describeAmbiguousKeys renders the sharing as one clause, sorted so the condition message is
 // byte-identical across reconciles and does not churn the object.
-// ⛔ BOUNDED, on both axes, and the reason is that this message can be the largest thing this
+// LIMITED, on both axes, and the reason is that this message can be the largest thing this
 // controller writes. One ambiguous key per node is what a two-group RDMA backend produces, so the
 // number of clauses answers to the cluster's size rather than to anything here — a thousand nodes
 // renders past `Condition.message`'s 32 KiB schema limit, every status write is then rejected, and the

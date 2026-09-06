@@ -831,9 +831,10 @@ func TestKVCacheBackendWebhook_ADiskTierLeavesOnlyWithTheLastGroup(t *testing.T)
 // three chosen here are independent and land in different validators — a path rule, a quantity rule
 // and a scale-in bound — so the assertion is about the aggregation and not about any one of them.
 //
-// LIMITED: this does not exercise the two scale-in bounds accumulating, because no value violates
-// both at once. What it does catch is any of these validators being changed back to return on its
-// first error, which is the defect class that motivated it.
+// LIMITED: it does not cover the two scale-in bounds accumulating, and passes if either of them
+// returns early again. No grace is both above the ceiling and negative, so only one of those bounds
+// can fire whatever they do with the error. What this covers is any of these validators returning on
+// its first error rather than collecting.
 func TestKVCacheBackendWebhook_ReportsEveryViolationAtOnce(t *testing.T) {
 	kvcb := newKVCacheBackend()
 	withDiskTier()(kvcb)
