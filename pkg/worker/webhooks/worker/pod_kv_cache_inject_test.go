@@ -131,8 +131,10 @@ func TestPodKVCacheInject_StampTenantFollowsTheEngine(t *testing.T) {
 		engine string
 		want   bool
 	}{
+		// vllm-ascend is absent because it cannot arrive here: the annotation refuses it, and the
+		// operator derives it further in. Its stamp is covered where it is reachable, in the
+		// inject package's own table.
 		{engine: "vllm", want: false},
-		{engine: "vllm-ascend", want: false},
 		{engine: "sglang", want: true},
 	}
 	require.NotEqual(t, testCases[0].want, testCases[len(testCases)-1].want,
@@ -293,7 +295,6 @@ func TestPodKVCacheInject_StampVehicleFollowsTheEngine(t *testing.T) {
 		engine, want string
 	}{
 		{engine: "vllm", want: "file"},
-		{engine: "vllm-ascend", want: "file"},
 		{engine: "sglang", want: "environment"},
 	}
 
@@ -306,6 +307,26 @@ func TestPodKVCacheInject_StampVehicleFollowsTheEngine(t *testing.T) {
 			assert.Equal(t, tc.want, stampOf(t, pod).Vehicle)
 		})
 	}
+}
+
+// TestPodKVCacheInject_AscendIsNotAnEngineAUserNames asserts the refusal AT THE SURFACE THE VALUE
+// ARRIVES ON, which is the annotation and not the constant block.
+//
+// `ModelDeployment.spec.engine` had already ruled that vllm_ascend is an accelerator backend rather
+// than an engine, while this annotation went on accepting it: one concept, two published value sets.
+// Aligning them only means anything if the refusal lands where a user can see it, so this asserts
+// the admission error and that it names the value to use instead -- a bare rejection would send the
+// reader looking for a third annotation to carry the distinction, which is the dead end that
+// alignment exists to close.
+func TestPodKVCacheInject_AscendIsNotAnEngineAUserNames(t *testing.T) {
+	pod := kvCachePod()
+	pod.Annotations[KVCacheEngineAnnotationKey] = "vllm-ascend"
+
+	err := admit(t, pod)
+	require.Error(t, err, "the annotation must refuse a value the other API surface already closed")
+	assert.Contains(t, err.Error(), `"vllm"`,
+		"and it must name the engine to set instead, since the operator picks the Ascend "+
+			"connector from the pool's accelerator on its own")
 }
 
 // TestPodKVCacheInject_ObservabilityDefaultsOnAndYieldToTheUser. These two change no result, which is

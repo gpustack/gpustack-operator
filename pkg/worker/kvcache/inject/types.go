@@ -29,27 +29,53 @@ const (
 	EngineSGLang     Engine = "sglang"
 )
 
-// Engines returns every engine this package accepts, in a stable order.
+// Engines returns every engine this package RENDERS FOR, in a stable order.
 //
-// It exists so callers and tests enumerate one list instead of restating it: a value accepted by
-// ParseEngine but missing from here would be renderable yet undescribed by the facts table.
+// It exists so callers and tests enumerate one list instead of restating it: a value renderable but
+// missing from here would be undescribed by the facts table.
+//
+// It is WIDER than the set a user may name -- see SelectableEngines.
 func Engines() []Engine {
 	return []Engine{EngineVLLM, EngineVLLMAscend, EngineSGLang}
 }
 
-// ParseEngine converts the engine annotation's value, refusing anything it does not know.
+// SelectableEngines returns the engines a user may NAME, in a stable order.
+//
+// EngineVLLMAscend is absent, and that is what keeps this annotation agreeing with
+// ModelDeployment.spec.engine, which closed the same question first: vllm_ascend is the package the
+// runner installs when the accelerator backend is CANN, not an engine anybody picks. It is DERIVED
+// here too -- the operator selects it from the pool's accelerator -- so it stays renderable while
+// ceasing to be nameable. Two API surfaces publishing different value sets for one concept is what
+// this split removes; it is not a second surface describing the difference.
+func SelectableEngines() []Engine {
+	return []Engine{EngineVLLM, EngineSGLang}
+}
+
+// ParseEngine converts the engine annotation's value, refusing anything a user may not name.
 //
 // An unknown value is a refusal rather than a default because there is no safe engine to guess:
 // each takes different flags, and injecting the wrong set produces a container that starts normally
 // and caches nothing.
 func ParseEngine(value string) (Engine, error) {
-	for _, engine := range Engines() {
+	for _, engine := range SelectableEngines() {
 		if string(engine) == value {
 			return engine, nil
 		}
 	}
+
+	// Refused HERE rather than by dropping the constant, because this is where the value arrives.
+	// It names the replacement, since the reason it is refused is also the reason the replacement
+	// is right: the accelerator decides the package, so the engine to name is the plain one.
+	if value == string(EngineVLLMAscend) {
+		return "", newRefusal(ReasonEngineUnknown,
+			"engine %q is not one this annotation takes: it names the Python package vllm_ascend, "+
+				"which the runner installs when the accelerator backend is CANN, rather than an "+
+				"engine anybody picks. Set %q -- the operator renders the Ascend connector on its "+
+				"own for a pool whose accelerator is Ascend", value, EngineVLLM)
+	}
+
 	return "", newRefusal(ReasonEngineUnknown,
-		"engine %q is not one this operator can configure; set one of %v", value, Engines())
+		"engine %q is not one this operator can configure; set one of %v", value, SelectableEngines())
 }
 
 // Role is the prefill/decode role a caller may declare for its Pod.

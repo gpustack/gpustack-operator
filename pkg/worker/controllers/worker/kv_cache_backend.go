@@ -228,6 +228,24 @@ func encodedStringSize(s string) int {
 const (
 	kvCacheBackendMaxNames       = 20
 	kvCacheBackendMaxDetailRunes = 2 << 10
+
+	// kvCacheBackendMaxAmbiguityBytes bounds the ambiguity clause list, and it is DERIVED FROM THE
+	// SCHEMA LIMIT rather than reused from the name cap above.
+	//
+	// Condition.message is capped at 32 KiB. Bounding the list by a COUNT cannot honor that cap,
+	// because a clause has no bounded width: it carries a key and a nested name list, and both are
+	// object names of up to 253 characters, so twenty clauses is anywhere from a few hundred bytes
+	// to well past the limit. Counting bytes is the only bound that answers to the thing being
+	// limited.
+	//
+	// 2 KiB of the 32 is held back for the sentence that frames this list and for the "and N more"
+	// suffix, both of which are written outside the budget.
+	//
+	// One clause always fits, so the list can never be truncated to nothing: listBoundedNames caps
+	// it at kvCacheBackendMaxNames names, which puts the widest possible clause near 5.4 KiB. That
+	// relationship is asserted by a test rather than left to hold by luck, since raising the name
+	// cap is what would break it.
+	kvCacheBackendMaxAmbiguityBytes = 30 << 10
 )
 
 // listBoundedNames names a bounded sample and says how many it left out.
@@ -1134,6 +1152,10 @@ func memberPodNames(facts []memberPodFacts) []string {
 // renders past `Condition.message`'s 32 KiB schema limit, every status write is then rejected, and the
 // reconcile retries forever WITHOUT ever publishing the ambiguity it was trying to report. A fault
 // report that grows with the fault is the one shape that fails exactly when it is needed.
+//
+// The outer bound is therefore BYTES and not clauses. Clauses vary in width by more than an order of
+// magnitude, so a count that is safe for short node names overruns the limit for long ones, and the
+// overrun lands on the path that is already failing.
 func describeAmbiguousKeys(ambiguous map[string][]string) string {
 	clauses := make([]string, 0, len(ambiguous))
 	for key, sharing := range ambiguous {
@@ -1142,13 +1164,26 @@ func describeAmbiguousKeys(ambiguous map[string][]string) string {
 	}
 	slices.Sort(clauses)
 
-	if len(clauses) > kvCacheBackendMaxNames {
-		return fmt.Sprintf("%s; and %d more shared key(s)",
-			strings.Join(clauses[:kvCacheBackendMaxNames], "; "),
-			len(clauses)-kvCacheBackendMaxNames)
+	const separator = "; "
+
+	kept, used := 0, 0
+	for _, clause := range clauses {
+		next := used + len(clause)
+		if kept > 0 {
+			next += len(separator)
+		}
+		if next > kvCacheBackendMaxAmbiguityBytes {
+			break
+		}
+		used, kept = next, kept+1
 	}
 
-	return strings.Join(clauses, "; ")
+	if kept == len(clauses) {
+		return strings.Join(clauses, separator)
+	}
+
+	return fmt.Sprintf("%s; and %d more shared key(s)",
+		strings.Join(clauses[:kept], separator), len(clauses)-kept)
 }
 
 // indexMemberPod files one Pod under one key, KEEPING the Pods already there.

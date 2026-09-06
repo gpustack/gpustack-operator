@@ -2266,9 +2266,14 @@ func TestKVCacheBackendStatus_TheAmbiguityMessageIsBounded(t *testing.T) {
 		message := describeAmbiguousKeys(ambiguous)
 		assert.Less(t, len(message), conditionMessageMax,
 			"a thousand-node backend must still render a message the api server accepts")
-		assert.Contains(t, message, "and 980 more shared key(s)",
-			"the count of what was left out is the actionable half; a truncated list without it "+
-				"reads like the whole answer")
+
+		// How many clauses survive is a property of the byte budget, so asserting a fixed number
+		// here would pin the budget rather than the behavior. What must hold whatever the budget
+		// is: kept plus dropped is the number the operator actually has. The count of what was left
+		// out is the actionable half; a truncated list without it reads like the whole answer.
+		kept := strings.Count(message, "ready member pod(s) answer to")
+		assert.Contains(t, message, fmt.Sprintf("; and %d more shared key(s)", 1000-kept),
+			"the list is truncated, and what it dropped is counted exactly")
 	})
 
 	t.Run("many pods on one key", func(t *testing.T) {
@@ -2283,6 +2288,61 @@ func TestKVCacheBackendStatus_TheAmbiguityMessageIsBounded(t *testing.T) {
 			"the names within one key are bounded by the same helper the shortfall uses")
 		assert.Contains(t, message, "500 ready member pod(s)",
 			"and the COUNT is not truncated with the list: it is what says how bad this is")
+	})
+
+	// The two cases above use short names, so they pass under ANY bound -- including one expressed
+	// as a clause count, which is what this used to be. A clause carries a key and a nested list of
+	// names, all of them object names of up to 253 characters, so its width varies by more than an
+	// order of magnitude and a count that is safe here overruns the schema limit there.
+	t.Run("widest names the api server accepts", func(t *testing.T) {
+		wide := strings.Repeat("n", 253)
+
+		ambiguous := map[string][]string{}
+		for i := range 200 {
+			sharing := make([]string, 0, 50)
+			for j := range 50 {
+				sharing = append(sharing, fmt.Sprintf("%s%03d", wide[:250], j))
+			}
+			ambiguous[fmt.Sprintf("%s%03d", wide[:250], i)] = sharing
+		}
+
+		message := describeAmbiguousKeys(ambiguous)
+		assert.Less(t, len(message), conditionMessageMax,
+			"the widest names the api server accepts must still render a message it accepts; "+
+				"bounding by clause count instead of bytes puts this near 108 KiB")
+		assert.Contains(t, message, "more shared key(s)",
+			"and what was dropped is still counted")
+	})
+
+	// The budget holds back room for the framing sentence, so the clause list alone must leave it.
+	t.Run("the framing sentence fits beside the widest list", func(t *testing.T) {
+		wide := strings.Repeat("n", 253)
+
+		ambiguous := map[string][]string{}
+		for i := range 200 {
+			ambiguous[fmt.Sprintf("%s%03d", wide[:250], i)] = []string{wide, wide}
+		}
+
+		assert.LessOrEqual(t, len(describeAmbiguousKeys(ambiguous)), kvCacheBackendMaxAmbiguityBytes,
+			"the list is what the budget bounds; the sentence around it is written outside it")
+	})
+
+	// One clause always fits, so truncation can never produce an empty list with a dangling "and N
+	// more". It holds because listBoundedNames caps the nested list -- raising that cap is what
+	// would break it, which is why the relationship is asserted rather than assumed.
+	t.Run("one widest clause fits the budget", func(t *testing.T) {
+		wide := strings.Repeat("n", 253)
+
+		sharing := make([]string, 0, kvCacheBackendMaxNames*4)
+		for range kvCacheBackendMaxNames * 4 {
+			sharing = append(sharing, wide)
+		}
+
+		message := describeAmbiguousKeys(map[string][]string{wide: sharing})
+		assert.LessOrEqual(t, len(message), kvCacheBackendMaxAmbiguityBytes,
+			"the widest single clause must fit, or a one-key ambiguity renders as nothing but a count")
+		assert.Contains(t, message, "ready member pod(s) answer to",
+			"and it is the clause that survives, not just the suffix")
 	})
 }
 
