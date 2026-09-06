@@ -17,7 +17,7 @@
 
 protoc_version=${PROTOC_VERSION:-"v33.5"}
 protoc_gen_go_version=${PROTOC_GEN_GO_VERSION:-"v1.36.11"}
-protoc_gen_gogo_version=${PROTOC_GEN_GOGO_VERSION:-"master"}
+protoc_gen_gogo_version=${PROTOC_GEN_GOGO_VERSION:-"f67b8970b736"}
 protoc_gen_go_grpc_version=${PROTOC_GEN_GO_GRPC_VERSION:-"v1.78.0"}
 protoc_gen_validate_version=${PROTOC_GEN_VALIDATE_VERSION:-"v1.3.0"}
 protoc_gen_grpc_gateway_version=${PROTOC_GEN_GRPC_GATEWAY_VERSION:-"v2.27.7"}
