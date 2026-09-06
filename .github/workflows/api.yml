@@ -1,0 +1,80 @@
+# This workflow regenerates the API artifacts and fails when the committed tree does
+# not match what the generators produce, mirroring what chart.yml already does for the
+# Helm chart. That asymmetry is why the chart has never drifted and the API had nothing
+# watching it.
+
+name: API
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+    # Every run step works inside the nested checkout; see the Checkout step for why it
+    # is nested.
+    working-directory: gpustack.ai/gpustack
+
+on:
+  workflow_dispatch: { }
+  push:
+    branches:
+      - "main"
+      - "v*-dev"
+    paths:
+      - "api/**"
+      - "gen/**"
+      - "pkg/kubeclients/**"
+      - "hack/**"
+      - ".github/workflows/api.yml"
+  pull_request:
+    branches:
+      - "main"
+      - "v*-dev"
+    paths:
+      - "api/**"
+      - "gen/**"
+      - "pkg/kubeclients/**"
+      - "hack/**"
+      - ".github/workflows/api.yml"
+
+jobs:
+  verify-generated:
+    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # NB(thxCode): the checkout is nested so that the working directory ends in the
+          # module import path. gen/api/main.go sets ProjectDir to os.Getwd() and
+          # gen/api/builder/generate.go derives the generator's output base as
+          # strings.TrimSuffix(ProjectDir, "gpustack.ai/gpustack"). On a default checkout
+          # path that suffix never matches, the trim is a no-op, and the generators write
+          # against a base that is one module path too shallow. A run there does not fail
+          # cleanly either -- go-to-protobuf rewrites the generated files before it dies on
+          # the path arithmetic -- so the nesting is what makes this job possible at all.
+          path: gpustack.ai/gpustack
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: gpustack.ai/gpustack/go.mod
+      - name: Setup Toolbox Cache
+        uses: actions/cache@v4
+        with:
+          # Cache the go-installed generator binaries.
+          key: api-toolbox-${{ runner.os }}
+          path: |-
+            ${{ github.workspace }}/gpustack.ai/gpustack/.sbin
+      - name: Generate
+        run: make generate
+      - name: Verify Generated
+        run: |
+          changed="$(git status --porcelain)"
+          if [[ -n "${changed}" ]]; then
+            echo "::error::generated artifacts are out of date; run 'make generate' and commit the result"
+            echo "${changed}"
+            git --no-pager diff
+            exit 1
+          fi
