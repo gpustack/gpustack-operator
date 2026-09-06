@@ -192,9 +192,18 @@ function gpustack::lint::goimports::install() {
 }
 
 function gpustack::lint::goimports::validate() {
+  # goimports has no version flag (-version and -V both exit 2 with the usage text), so the pin
+  # is compared against the module version `go install` stamped into the binary. Existence alone
+  # would keep a .sbin populated before a pin bump, and hack/generate.sh runs goimports over the
+  # generated tree -- its output is inside the baseline the API drift gate compares against.
   # shellcheck disable=SC2046
   if [[ -n "$(command -v $(gpustack::lint::goimports::bin))" ]]; then
-    return 0
+    # shellcheck disable=SC2046
+    if gpustack::util::go_module_version_is \
+      "$(gpustack::util::go_module_version $(gpustack::lint::goimports::bin))" \
+      "${goimports_version}"; then
+      return 0
+    fi
   fi
 
   gpustack::log::info "installing goimports"

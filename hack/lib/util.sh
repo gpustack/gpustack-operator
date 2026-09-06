@@ -165,6 +165,40 @@ function gpustack::util::awk_inplace() {
   fi
 }
 
+# gpustack::util::go_module_version prints the module version stamped into a binary built by
+# `go install`, e.g. "v0.49.0" or "v1.3.3-0.20221024144010-f67b8970b736". It is how a tool with
+# no --version flag is still compared against its pin.
+#
+# Prints nothing when the name resolves to no executable, when that executable is not a Go binary,
+# or when it carries no build info. A caller reads the empty string as "does not match the pin",
+# which reinstalls -- the safe direction, since the alternative is running a generator whose
+# version nobody established.
+function gpustack::util::go_module_version() {
+  local path
+  path="$(command -v "${1}" 2>/dev/null)"
+  if [[ -z "${path}" ]]; then
+    return 0
+  fi
+  go version -m "${path}" 2>/dev/null | awk '$1 == "mod" { print $3; exit }'
+}
+
+# gpustack::util::go_module_version_is reports whether a go-installed binary matches its pin.
+# Two pin forms are in use in hack/lib: a tag, which go stamps verbatim, and a commit, which go
+# stamps as the trailing field of a pseudo-version.
+function gpustack::util::go_module_version_is() {
+  local installed="${1}" pin="${2}"
+  if [[ -z "${installed}" ]]; then
+    return 1
+  fi
+  if [[ "${installed}" == "${pin}" ]]; then
+    return 0
+  fi
+  if [[ "${installed}" == *"-${pin}" ]]; then
+    return 0
+  fi
+  return 1
+}
+
 function gpustack::util::decode64() {
   if [[ $# -eq 0 ]]; then
     cat | base64 --decode

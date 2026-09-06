@@ -91,10 +91,15 @@ jobs:
         with:
           # Caches the go-installed generator binaries.
           #
-          # LIMITED: no restore-keys fallback, on purpose. hack/lib/*.sh accepts a cached
-          # tool by whether the executable exists, never by its version, so a prefix
-          # fallback would restore the binary a pin bump just replaced and this job would
-          # verify drift with the old generator.
+          # LIMITED: no restore-keys fallback, on purpose. The key hashes hack/lib/**, so a pin
+          # bump misses the cache and the four tools this job runs -- protoc, protoc-gen-go,
+          # protoc-gen-gogo and goimports, the ones hack/generate.sh validates -- are reinstalled
+          # at the new pin. A prefix fallback would restore the binaries a bump just replaced.
+          #
+          # Their validators in hack/lib/ now compare the installed version against the pin, so a
+          # restored-but-stale binary would be caught rather than used. That is a second line, not
+          # a licence to add the fallback: it costs a reinstall on every bump either way, and the
+          # cache key is what keeps this job from depending on that check being right.
           key: api-toolbox-${{ runner.os }}-${{ hashFiles('gpustack.ai/gpustack/hack/lib/**', 'gpustack.ai/gpustack/go.mod') }}
           path: |-
             ${{ github.workspace }}/gpustack.ai/gpustack/.sbin

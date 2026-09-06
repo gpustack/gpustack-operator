@@ -129,9 +129,18 @@ function gpustack::protoc::protoc_gen_gogo::install() {
 }
 
 function gpustack::protoc::protoc_gen_gogo::validate() {
+  # protoc-gen-gogo has no version flag -- it is a protoc plugin and answers --version with
+  # "no files to generate" on exit 1 -- so the pin is compared against the module version
+  # `go install` stamped into the binary. Existence alone would keep a .sbin populated before a
+  # pin bump, and `make generate` would run the generator the bump replaced.
   # shellcheck disable=SC2046
   if [[ -n "$(command -v $(gpustack::protoc::protoc_gen_gogo::bin))" ]]; then
-    return 0
+    # shellcheck disable=SC2046
+    if gpustack::util::go_module_version_is \
+      "$(gpustack::util::go_module_version $(gpustack::protoc::protoc_gen_gogo::bin))" \
+      "${protoc_gen_gogo_version}"; then
+      return 0
+    fi
   fi
 
   gpustack::log::info "installing protoc-gen-gogo"
