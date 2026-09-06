@@ -37,6 +37,20 @@ type engineFacts struct {
 
 // engineTenantSupport is the measured answer per engine.
 //
+// WHO READS IT, AND WHY IT CANNOT SIMPLY GO AWAY. Removing this table has been proposed and is
+// declared void; the reason is recorded here because the proposal was reasonable and will occur to
+// the next reader too. It has three live consumers: engineFactsFor, which separates "measured as
+// truncating" from "never measured" and gates injection on the difference; SupportsTenant, which is
+// what the SGLang renderer asks before emitting a tenant; and TenantSupportSource, which the
+// admission path reads to stamp the version behind the answer.
+//
+// The third one settles it. Tenant injection CANNOT FAIL LOUD -- an engine that does not read the
+// key ignores it in silence, and neither the config key nor the environment variable is observable
+// from here afterwards. That is why the stamp records the ACTION and its BASIS rather than an
+// outcome, and this table is that basis: which engine version, and which source line, the answer
+// came from. Deleting it would not remove an unused lookup, it would remove the evidence a decision
+// already made is standing on, leaving a stamp that asserts something with nothing behind it.
+//
 // HOW TO RE-CHECK AN ENTRY, because this table is the one thing here that goes stale silently:
 //
 //  0. FIRST, find which connector or loader THIS PROJECT renders for that engine, and re-check that
