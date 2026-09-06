@@ -3,7 +3,7 @@
 > **Purpose** — how a `KVCacheBackend` runs a Mooncake store, what its status is read from, and the
 > three things that surprise operators: capacity is observed rather than derived, shrinking a group
 > discards the cache that member held, and a local disk tier can be configured correctly and still
-> hold nothing — which this project has not yet observed it doing otherwise.
+> hold nothing.
 > **Audience** operators, contributors · **Prerequisites** [Architecture](../architecture.md) ·
 > **Read time** ~20 min
 
@@ -304,20 +304,15 @@ spec:
 **A tier is a layer on a member group, never a group of its own** — see
 [The two axes](#the-two-axes) for why the shape has to be this way.
 
-### What has been verified, and what has not
+### A configured tier can hold nothing
 
-**Verified on a cluster:** the member registers a local disk segment and the leader accepts it,
-logging `Mount local disk segment with client id ... enable offloading is: 1`;
-`master_total_file_capacity_bytes` becomes exactly the `localDisk.capacity` declared; the leader runs
-with `enable_offload=1`; and eviction fires under a low watermark.
+⛔ **A tier can be accepted, report its full capacity, and still hold no data — with nothing else on
+the object looking wrong.** The member Pods are Ready, the leader logs the mount, and
+`status.capacity` reports the size the tier declared, because that figure is **capacity, not usage**
+(see [What status reports](#what-status-reports)).
 
-**Not verified:** that data is written to the tier. Filling a member's memory segment to 97 percent
-under a 0.3 watermark, the leader logged `No memory freed this cycle; N objects deferred for disk
-offload` while `master_allocated_file_size_bytes` stayed at **0** and the tier directory stayed
-**empty** — in both the `onEvict` and the default configuration. This is what was observed here; it
-is not a claim about the store in general, and the cause is not established.
-
-**So check it yourself before relying on the tier**, with the one figure that answers the question:
+**Read `master_allocated_file_size_bytes` before relying on the tier**, which is the one figure that
+answers the question:
 
 ```console
 $ kubectl exec -n gpustack-system deploy/<backend>-leader -- \
@@ -326,10 +321,13 @@ $ kubectl exec -n gpustack-system deploy/<backend>-leader -- \
     if l.startswith('master_allocated_file_size_bytes')])"
 ```
 
-`master_allocated_file_size_bytes` is **bytes actually written to the tier**. A tier that is
-configured but holding nothing reads `0` here while everything else looks healthy — the Pods are
-Ready, and `status.capacity` reports the tier's size, because that figure is **capacity, not usage**
-(see [What status reports](#what-status-reports)).
+`master_allocated_file_size_bytes` is **bytes actually written to the tier**, so `0` on a tier you
+expect to be filling means the data path is not working, whatever the rest of the object says.
+
+What this project has and has not observed of that data path, and what would count as settling it,
+is recorded in
+[the spec](../../specs/2026-09-05-kv-cache-media-and-scaling.md#the-one-item-that-did-not-pass-no-byte-reached-the-disk)
+and tracked in [issue #200](https://github.com/gpustack/gpustack-operator/issues/200).
 
 ### The directory has to exist, and be writable by the image's user
 
@@ -467,7 +465,7 @@ adding up what members were asked to provide.
 member declared — published as soon as the member registers, before anything is written there.
 
 To ask whether the **disk** tier is holding data, the figure to read is not on the CR at all — see
-[What has been verified, and what has not](#what-has-been-verified-and-what-has-not).
+[A configured tier can hold nothing](#a-configured-tier-can-hold-nothing).
 
 ⛔ **Capacity is absent — not zero — while the leader is starting.** `/metrics` is ungated: a leader
 that is up but not serving answers 200 with a well-formed exposition whose gauges all read zero, and a
