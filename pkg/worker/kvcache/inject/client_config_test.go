@@ -27,8 +27,8 @@ var vllmReadableKeys = sets.New(
 )
 
 // sglangReadableVariables is every variable SGLang's `load_from_env` reads, transcribed from
-// `mooncake_store.py:167-180` with the names from `environ.py:294-304`. A literal list, for the same
-// reason as above.
+// v0.5.18 `mooncake_store.py:170-210` with the names from that release's Mooncake store block in
+// `environ.py:698-712`. A literal list, for the same reason as above.
 var sglangReadableVariables = sets.New(
 	"MOONCAKE_LOCAL_HOSTNAME",
 	"MOONCAKE_TE_META_DATA_SERVER",

@@ -1,12 +1,18 @@
 // This file renders for SGLang. Its vehicle is the environment, and the reason is evaluation time
 // rather than key coverage.
 //
-// SGLang picks its configuration source in `_load_config` (`mooncake_store.py:242-260`): the launch
-// argument's extra config, then a file, then the environment. The first two are fixed when the caller
-// runs - at admission, before a Pod has an IP - and both fall back key-for-key to `envs.<NAME>.default`
-// (`mooncake_store.py:114-141` and `:193-221`), which is the literal attribute (`environ.py:41-42`) and
-// not the accessor that reads the process environment (`environ.py:54-72`). So on either of them
-// `local_hostname` resolves to the literal "localhost" on every Pod in the pool.
+// Every upstream coordinate in this file is READ AT v0.5.18 and names its symbol, because the file
+// it points into has tripled in length across releases: a bare line number silently comes to mean
+// "wherever this is today", while the symbol is what relocates the claim after the file moves.
+//
+// SGLang picks its configuration source in `_load_config` (v0.5.18 `mooncake_store.py:294-314`): the
+// launch argument's extra config, then a file, then the environment. The first two are fixed when the
+// caller runs - at admission, before a Pod has an IP - and both fall back key-for-key to
+// `envs.<NAME>.default` (v0.5.18 `mooncake_store.py:110-168` `from_file` and `:212-261`
+// `load_from_extra_config`), which is the literal attribute assigned in `EnvField.__init__`
+// (v0.5.18 `environ.py:39-40`) and not the accessor that reads the process environment
+// (`EnvField.get` at v0.5.18 `environ.py:57`, defaulting through `_resolve_default` at `:52-55`).
+// So on either of them `local_hostname` resolves to the literal "localhost" on every Pod in the pool.
 //
 // That key is an address: vLLM computes its own from the local IP (`rdma_utils.py:21-25`). Only the
 // environment defers evaluation to the kubelet, where a fieldRef to status.podIP resolves at container
@@ -25,7 +31,8 @@ import (
 )
 
 const (
-	// The variables SGLang reads through `.get()` in `load_from_env` (`mooncake_store.py:167-180`).
+	// The variables SGLang reads through `.get()` in `load_from_env`
+	// (v0.5.18 `mooncake_store.py:170-210`).
 	//
 	// sglangMetadataServerEnv carries a spelling trap worth stating: META_DATA has an underscore the
 	// readable METADATA does not. A wrong spelling here does not error - the key simply falls back to
