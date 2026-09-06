@@ -5277,8 +5277,9 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref common.Referen
 				Properties: map[string]spec.Schema{
 					"replicas": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Replicas is how many leader processes run. One, and only one, in this scope: electing a leader among several needs a backend store this scope does not enter, and the webhook refuses anything else while naming that follow-on rather than silently running one anyway.",
+							Description: "Replicas is how many leader processes run. One, and only one, in this scope: electing a leader among several needs a backend store this scope does not enter, and the webhook refuses anything else while naming that follow-on rather than silently running one anyway.\n\nREQUIRED: the ceiling is duplicated in the schema on purpose, because the two layers catch different absences. The webhook's message explains; this one still holds when the webhook is not installed, which is when a second leader would be rendered rather than refused. Raising it belongs with the field that configures the election, and widening a maximum is not a breaking change.",
 							Minimum:     ptr.To[float64](1),
+							Maximum:     ptr.To[float64](1),
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},

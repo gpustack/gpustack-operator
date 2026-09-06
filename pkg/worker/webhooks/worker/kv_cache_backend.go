@@ -27,6 +27,15 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
+// MaxLeaderReplicas is the most leader processes this scope runs, and it is exported because the
+// SCHEMA carries the same ceiling and a test holds the two equal.
+//
+// REQUIRED: raise both together. They catch different absences -- this one explains, the schema's
+// still holds when the webhook is not installed -- and raising one alone yields the worst pairing:
+// admission accepts what the schema then rejects, reporting an error against a field nobody got
+// wrong. The test asserts EQUALITY rather than the value, so it survives the ceiling moving.
+const MaxLeaderReplicas = 1
+
 // KVCacheBackendWebhook validates a v1alpha1.KVCacheBackend.
 //
 // It is validating only. Every default this API has — the backend type, the leader's replica count
@@ -370,10 +379,10 @@ func validateKVCacheBackendManaged(
 ) field.ErrorList {
 	var errs field.ErrorList
 
-	if replicas := managed.Leader.Replicas; replicas != nil && *replicas != 1 {
+	if replicas := managed.Leader.Replicas; replicas != nil && *replicas > MaxLeaderReplicas {
 		errs = append(errs, field.Invalid(fldPath.Child("leader", "replicas"), *replicas,
-			"only 1 is supported: electing a leader among several needs an HA backend store, "+
-				"which the leader high-availability subject owns"))
+			fmt.Sprintf("at most %d is supported: electing a leader among several needs an HA "+
+				"backend store, which the leader high-availability subject owns", MaxLeaderReplicas)))
 	}
 
 	errs = append(errs, validateExtraArgs(managed.Leader.ExtraArgs,
