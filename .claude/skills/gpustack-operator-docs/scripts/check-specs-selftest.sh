@@ -283,6 +283,20 @@ else
 fi
 
 echo
+echo "=== a spec path with a space is reported too, and does not abort the run ==="
+# The Status loop feeds \$f straight to sed, so a fragment aborts the whole script under set -e
+# with a raw sed error -- a different and worse outcome than the corpus loop's silent skip. The
+# assertion is that the run still reaches its own summary rather than dying mid-way.
+build
+cp "$SPEC" "$MINI/tree/specs/a spec with spaces.md"
+run
+if printf '%s' "$out" | grep -q 'which is not a file' && printf '%s' "$out" | grep -q 'go test -run patterns'; then
+  pass "the fragment is reported and the run continues to the next rule"
+else
+  fail "the run aborted or stayed silent -- got: $out"
+fi
+
+echo
 echo "=== go test -run: prose naming the flag is not a command ==="
 build
 # shellcheck disable=SC2016  # the backticks are markdown inline code, and must not expand

@@ -63,6 +63,13 @@ STATUS_WORDS='Shipped Building Planned Built'
 # --- 1, 2. the Status line ---------------------------------------------------
 echo "==> spec Status"
 for f in $SPECS; do
+  # Same guard as the rule 3 loop below, and here it matters more: this loop feeds `$f` straight to
+  # `sed`, so a fragment from a split path aborts the whole run under `set -e` with a raw sed error
+  # instead of the counted report the other loop produces.
+  if [ ! -f "$f" ]; then
+    err "specs lists '$f', which is not a file — a path with a space in it splits into fragments and would otherwise abort the run"
+    continue
+  fi
   line3=$(sed -n '3p' "$f")
   case "$line3" in
     "Status: "*) ;;
