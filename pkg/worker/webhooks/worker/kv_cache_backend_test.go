@@ -823,6 +823,39 @@ func TestKVCacheBackendWebhook_ADiskTierLeavesOnlyWithTheLastGroup(t *testing.T)
 	}
 }
 
+// TestKVCacheBackendWebhook_ReportsEveryViolationAtOnce pins that a spec breaking several unrelated
+// rules is refused with all of them named, rather than one at a time.
+//
+// An operator fixing a manifest by re-applying it reads one message per round trip, so a validator
+// that returns on its first finding turns a three-rule mistake into three apply-and-read cycles. The
+// three chosen here are independent and land in different validators — a path rule, a quantity rule
+// and a scale-in bound — so the assertion is about the aggregation and not about any one of them.
+//
+// LIMITED: this does not exercise the two scale-in bounds accumulating, because no value violates
+// both at once. What it does catch is any of these validators being changed back to return on its
+// first error, which is the defect class that motivated it.
+func TestKVCacheBackendWebhook_ReportsEveryViolationAtOnce(t *testing.T) {
+	kvcb := newKVCacheBackend()
+	withDiskTier()(kvcb)
+	kvcb.Spec.Connection.Managed.Members[0].LocalDisk.Path = "var/lib/relative"
+	kvcb.Spec.Connection.Managed.Members[0].CapacityPerMember = resource.MustParse("0")
+	kvcb.Spec.Connection.Managed.ScaleIn = &workercore.KVCacheBackendScaleIn{GracePeriodSeconds: -1}
+
+	wh := &KVCacheBackendWebhook{}
+	_, err := wh.ValidateCreate(context.Background(), kvcb)
+	require.Error(t, err)
+
+	for _, want := range []string{
+		"must be an absolute path",
+		"must be greater than 0",
+		"must not be negative",
+	} {
+		require.Contains(t, err.Error(), want,
+			"every violated rule has to be named in one refusal, or fixing a manifest costs one "+
+				"apply per mistake")
+	}
+}
+
 // TestKVCacheBackendWebhook_ValidateImageFallback pins the one rule that needs a cross-object read:
 // the image may come from the object or from the cluster-wide setting, and a backend naming neither
 // is refused with a message pointing at both places.

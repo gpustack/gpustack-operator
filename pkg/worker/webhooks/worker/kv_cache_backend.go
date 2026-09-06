@@ -469,20 +469,25 @@ func validateKVCacheBackendScaleIn(
 		return nil
 	}
 
+	var errs field.ErrorList
 	gracePath := fldPath.Child("gracePeriodSeconds")
 
 	// The schema bounds this too, and the duplication is on purpose: the schema's message names a
 	// number, this one names the reason. A reader who hits the schema's bound first has still been
 	// stopped from shipping a hook that fails on every shutdown.
+	//
+	// LIMITED: no value violates both bounds, since a grace cannot exceed the ceiling and be
+	// negative at once. They accumulate rather than return so that moving the bounds apart later
+	// reports both violations instead of only the first.
 	if scaleIn.GracePeriodSeconds > mooncake.MemberMaxGracePeriodSeconds {
-		return field.ErrorList{field.Invalid(gracePath, scaleIn.GracePeriodSeconds, fmt.Sprintf(
+		errs = append(errs, field.Invalid(gracePath, scaleIn.GracePeriodSeconds, fmt.Sprintf(
 			"must not exceed %d: the member's own endpoint refuses a larger grace with a 400, so "+
 				"this would render a shutdown hook that fails every time it runs",
-			mooncake.MemberMaxGracePeriodSeconds))}
+			mooncake.MemberMaxGracePeriodSeconds)))
 	}
 	if scaleIn.GracePeriodSeconds < 0 {
-		return field.ErrorList{field.Invalid(gracePath, scaleIn.GracePeriodSeconds,
-			"must not be negative")}
+		errs = append(errs, field.Invalid(gracePath, scaleIn.GracePeriodSeconds,
+			"must not be negative"))
 	}
 
 	// A grace on a backend with no disk tier is not refused. It is inert — there is nothing to
@@ -490,7 +495,7 @@ func validateKVCacheBackendScaleIn(
 	// depend on the order in which two independent fields are edited, and an operator adding the
 	// tier next would have to remove and re-add the grace around it.
 
-	return nil
+	return errs
 }
 
 const quantityTooLarge = "must not exceed 9223372036854775807 (2^63-1) bytes: the renderer reads " +
