@@ -175,6 +175,22 @@ It is recorded per accelerator, in `spec.groups[].accelerators[].topology.fabric
 | `nodeIndex`, `rackId` | where this machine sits inside the domain, as the domain numbers them |
 | `endpoints` | this accelerator's own addresses on the fabric |
 
+**Four of these are published only for a super pod.** `id`, `memberCount`, `nodeIndex` and `rackId`
+are withheld on an Ascend node that is in none — and the driver answers the super pod query even
+there, since that answer is what establishes the shape, so the shape alone does not decide it. The
+rule is the vendor's own:
+
+- the two pod shapes are in a super pod;
+- a `server-8p`, `card-1p` or `card-4p` is in one exactly when the driver reports an id and a size
+  that are not its invalid markers — the "super server", whose id the vendor's own rank table spans
+  machines with;
+- a `server-16p` or `server-32p` never is.
+
+`memberCount` needs a valid size on top of that, since a domain may be identified while its size is
+not, and `kind`, `type` and `endpoints` travel either way. Publishing an invalid marker would hand
+one domain to every unrelated machine carrying it, and `id` is compared across nodes — while reading
+the shape alone would cost a real super server the domain it is in.
+
 > **Why per accelerator, when a domain plainly spans machines** — because it also **cross-cuts** a
 > machine. NVIDIA reports a clique per GPU and one node can hold several; AMD's hive id is likewise
 > read per GPU. A node- or group-level field would flatten that. The domain itself is a **derived

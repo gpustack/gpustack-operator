@@ -163,11 +163,11 @@ type (
 	// accelerators that can address one another directly over the manufacturer's own interconnect,
 	// which on some generations spans machines.
 	//
-	// It is recorded PER DEVICE and never as a group- or worker-level field, because the domain
-	// CROSS-CUTS both: NVIDIA reports a clique per GPU and one machine can hold several, and AMD's
+	// It is recorded on each device and never as a group- or worker-level field, because the domain
+	// cuts across both: NVIDIA reports a clique per GPU and one machine can hold several, and AMD's
 	// hive id is likewise read per GPU. So "same model, same machine, different domain" is
-	// reachable, and a coarser field would flatten it. The domain ITSELF is a DERIVED aggregation —
-	// the devices sharing Kind and ID — which is the same rule DevicesSpec.Interfaces states for
+	// reachable, and a coarser field would flatten it. The domain is itself derived, from the
+	// devices sharing Kind and ID, which is the same rule DevicesSpec.Interfaces states for
 	// relating an interface to an accelerator: publish comparable coordinates, never a stored
 	// cross-reference. Recording a higher level's fact on each device also matches RoCE above, which
 	// belongs to the card rather than to the accelerator.
@@ -177,20 +177,29 @@ type (
 	// what a manufacturer's driver does not report, its detector cannot record.
 	//
 	// Not every interconnect fits. Cambricon's MLU-Link publishes no domain identity at all, only
-	// per-link remote information, so it describes an EDGE LIST and is not recorded here.
+	// per-link remote information, so it describes an edge list and is not recorded here.
 	DeviceFabric struct {
 		// Kind names the interconnect, and is what makes ID interpretable at all: an Ascend UB super
 		// pod id, an NVIDIA NVLink cluster uuid and an AMD XGMI hive id share no namespace, so two
-		// devices are in one domain only when Kind AND ID both match.
+		// devices are in one domain only when Kind and ID both match.
 		//
 		// One of `ub`, `nvlink` or `xgmi`.
 		Kind string `json:"kind" yaml:"kind" protobuf:"bytes,1,name=kind"`
 
-		// ID identifies the domain, and is comparable ACROSS WORKERS — that is the whole point of
+		// ID identifies the domain, and is comparable across workers — that is the whole point of
 		// publishing it, since a domain spanning machines cannot be recognized from one machine's
 		// record alone.
 		//
 		// Ascend reports the super pod id, NVIDIA the fabric cluster uuid, AMD the XGMI hive id.
+		//
+		// Empty where no domain was identified — and on Ascend that includes a device the driver
+		// answered the super pod query for. It answers on every shape, since that answer is how the
+		// shape is established, and marks the coordinates invalid on a machine that is in no super
+		// pod. So an id is published for `pod-1d` and `pod-2d`; for a `server-8p`, `card-1p` or
+		// `card-4p` whose reported id and size are not those markers, which is the "super server"
+		// the vendor's own rank table spans machines with; and never for a `server-16p` or
+		// `server-32p`. Publishing a marker would give two unrelated machines one domain, and this
+		// field is compared across workers.
 		ID string `json:"id" yaml:"id" protobuf:"bytes,2,name=id"`
 
 		// Type is the domain's shape, as a word rather than a vendor number — `pod-1d`, `pod-2d`,
@@ -213,6 +222,8 @@ type (
 		//
 		// Ascend only, from the super pod's own scale. It says how large the domain is without
 		// enumerating it, which is what a scheduler needs before it has seen every worker in it.
+		// Published under the rule ID is, and withheld on top of that where the driver marks the
+		// scale itself invalid: a domain may be identified while its size is not.
 		//
 		// Not named Size: every protobuf message carries a generated Size() method, and a field of
 		// that name collides with it.
@@ -221,19 +232,21 @@ type (
 		// NodeIndex is this worker's index within the domain, as the domain numbers its machines —
 		// not a Kubernetes node name and not comparable to one.
 		//
-		// Ascend only, from the super pod's server id.
+		// Ascend only, from the super pod's server id. Published under the same rule as ID: only for
+		// a shape that is in a super pod.
 		NodeIndex string `json:"nodeIndex,omitempty" yaml:"nodeIndex,omitempty" protobuf:"bytes,6,opt,name=nodeIndex"`
 
 		// RackID is the rack this worker sits in, as the domain numbers its racks.
 		//
-		// Ascend only, from the super pod's chassis id.
+		// Ascend only, from the super pod's chassis id. Published under the same rule as ID: only for
+		// a shape that is in a super pod.
 		RackID string `json:"rackId,omitempty" yaml:"rackId,omitempty" protobuf:"bytes,7,opt,name=rackId"`
 
 		// Endpoints are this device's own addresses on the fabric, in the manufacturer's own
 		// encoding.
 		//
 		// Ascend only, where each entry is a UB endpoint identifier as 32 lowercase hex characters.
-		// The bytes are published UNPARSED on purpose: the function entity, the die, the port and
+		// The bytes are published unparsed on purpose: the function entity, the die, the port and
 		// whether an endpoint carries device-to-device traffic are all bit fields inside them, so a
 		// consumer derives whichever it needs rather than this API tracking a vendor bit layout that
 		// only the vendor may change.

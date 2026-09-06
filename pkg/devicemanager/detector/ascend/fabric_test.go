@@ -83,11 +83,60 @@ func TestNewFabric(t *testing.T) {
 			},
 		},
 		{
-			name:    "coordinates alone",
+			// The case this gate exists for. The driver answers the super pod query on a standalone
+			// server too -- that answer is how Resolver established the shape at all -- and it marks
+			// both coordinates invalid there. Publishing them would give two unrelated machines one
+			// domain across no interconnect. The shape and the endpoints still travel.
+			name: "a plain server's coordinates are withheld",
+			spod: &dcmi.SpodInfo{
+				Super_pod_id: productascend.InvalidSuperPodID,
+				Scale_type:   productascend.InvalidSuperPodSize,
+			},
+			product:   productascend.TypeServer8P,
+			endpoints: []string{eidHex},
+			want: &device.Fabric{
+				Kind: "ub", Type: "server-8p", Endpoints: []string{eidHex},
+			},
+		},
+		{
+			// The other direction of the same gate: an 8P server cabled into a super pod reports
+			// valid coordinates, and the vendor's own rank table uses that id across machines. Read
+			// off the shape alone this node would lose the domain it is really in.
+			name:      "an 8p super server publishes its domain",
+			spod:      spod,
+			product:   productascend.TypeServer8P,
+			endpoints: []string{eidHex},
+			want: &device.Fabric{
+				Kind: "ub", ID: "7", Type: "server-8p",
+				MemberCount: 384, NodeIndex: "3", RackID: "11",
+				Endpoints: []string{eidHex},
+			},
+		},
+		{
+			// A size nobody reported is left at zero rather than published as the marker itself: the
+			// label construction spells "no size reported" that way, and four billion members is not
+			// a domain anyone has.
+			name: "an unreported size is not a member count",
+			spod: &dcmi.SpodInfo{
+				Super_pod_id: 7,
+				Scale_type:   productascend.InvalidSuperPodSize,
+				Server_id:    3,
+				Chassis_id:   11,
+			},
+			product: productascend.TypePod2D,
+			want: &device.Fabric{
+				Kind: "ub", ID: "7", Type: "pod-2d", NodeIndex: "3", RackID: "11",
+			},
+		},
+		{
+			// Same withholding for a shape this build has no word for: it cannot check that product
+			// against the shapes the vendor excludes, and a domain invented here is compared across
+			// workers.
+			name:    "coordinates alone, from a shape with no name",
 			spod:    spod,
 			product: "",
 			want: &device.Fabric{
-				Kind: "ub", ID: "7", MemberCount: 384, NodeIndex: "3", RackID: "11",
+				Kind: "ub",
 			},
 		},
 		{
@@ -102,6 +151,39 @@ func TestNewFabric(t *testing.T) {
 			assert.Equal(t, c.want, newFabric(c.spod, c.product, c.endpoints))
 		})
 	}
+}
+
+// A pass that could not read the coordinates must not withdraw the domain, and a pass that could
+// must be able to.
+//
+// The two are one mechanism, so they are pinned together: withholding removes the published label,
+// so a refused read that reported nothing would take the node out of its super pod for a whole
+// detect interval, while a successful read carrying the invalid markers is how a node that really
+// left one says so, and that must still get through.
+func TestAscend_RememberSuperPod(t *testing.T) {
+	in := &ascend{superPods: make(map[superPodKey]dcmi.SpodInfo)}
+	first, second := superPodKey{cardID: 0, deviceID: 0}, superPodKey{cardID: 1, deviceID: 0}
+
+	// A first pass with nothing remembered reports nothing: there is no domain to preserve, and a
+	// placeholder invented here would be published as one.
+	assert.Nil(t, in.rememberSuperPod(first, nil))
+
+	read := &dcmi.SpodInfo{Super_pod_id: 7, Scale_type: 384}
+	assert.Equal(t, read, in.rememberSuperPod(first, read), "a read that answered is what this pass publishes")
+
+	// The hiccup this exists for.
+	assert.Equal(t, read, in.rememberSuperPod(first, nil), "a refused read reuses the last answer")
+
+	// Per accelerator, so one card's coordinates never stand in for another's.
+	assert.Nil(t, in.rememberSuperPod(second, nil))
+
+	// The withdrawal path: the driver answers, and says this is no longer a membership.
+	left := &dcmi.SpodInfo{
+		Super_pod_id: productascend.InvalidSuperPodID,
+		Scale_type:   productascend.InvalidSuperPodSize,
+	}
+	assert.Equal(t, left, in.rememberSuperPod(first, left))
+	assert.Equal(t, left, in.rememberSuperPod(first, nil), "and it is the new answer that is remembered")
 }
 
 // The domain id is the super pod's own id and not its type, its server index or its rack: reading

@@ -6,8 +6,8 @@
 // rank table this node belongs in -- and the rule that establishes it is the vendor's own two-step,
 // which must not exist in two places and drift.
 //
-// Its PLACE under product/ is taxonomic — one manufacturer's product rule, beside whichever others
-// come to need one — but its being a SEPARATE package at all is a linkage constraint, not tidiness.
+// Its place under product/ is taxonomic — one manufacturer's product rule, beside whichever others
+// come to need one — but its being a separate package at all is a linkage constraint, not tidiness.
 // The allocator imports pkg/deviceplugin, which links Go's plugin package, and that is what makes cgo
 // binding/dcmi abort at dyld load in a darwin test binary; the detector links dcmi there quite
 // happily. So neither package can host the rule for the other: put it in the detector and the
@@ -50,6 +50,50 @@ const (
 	TypeCard4P Type = "card-4p"
 )
 
+// InSuperPod reports whether a device of this shape, answering with these super pod coordinates, is
+// really in a super pod -- and therefore whether the coordinates mean anything.
+//
+// Membership is not a property of the shape alone, and the rule is the vendor's own in two parts
+// (ascend-device-plugin `ProductBase.isPodScene` and `ProductBase.isSuperServer`):
+//
+//   - A pod shape is a super pod in itself.
+//   - Any other shape but the 16P and 32P servers is in one exactly when the driver reports an id
+//     and a size that are not the invalid markers. The vendor calls that a super server, and puts
+//     its super pod id in the rank table's level 0 and level 1 identities, so its domain spans
+//     machines the same way a pod's does.
+//   - The 16P and 32P servers are never in one. The vendor excludes them by name, and their level 1
+//     identity is empty in its own rank table.
+//
+// The distinction is load-bearing rather than descriptive, in both directions. The driver answers
+// the super pod query on every shape that reaches it -- it is how a server's own type is established
+// at all -- so an id published without this rule would give two unrelated single machines the same
+// domain, and a domain id is compared across workers: that is two machines with no interconnect
+// between them advertised as one fabric. Withholding on the shape alone is the opposite error, and
+// costs a real 8P super server the domain it is in.
+//
+// An invalid id withholds the coordinates on every shape, pod included. The marker is how the driver
+// says its answer is not a membership, so publishing it would hand one shared domain to every
+// machine that carries it.
+//
+// An unnamed shape reports false. A build that has no word for a product cannot check it against the
+// two exclusions above, and withholding a domain costs a scheduler a co-location it might have made,
+// while inventing one costs it a job that cannot communicate.
+func (t Type) InSuperPod(superPodID, superPodSize uint32) bool {
+	if superPodID == InvalidSuperPodID {
+		return false
+	}
+
+	switch t {
+	case TypePod1D, TypePod2D:
+		return true
+	case TypeServer8P, TypeCard1P, TypeCard4P:
+		return superPodSize != InvalidSuperPodSize
+	default:
+		// The 16P and 32P servers, and any shape this build has no word for.
+		return false
+	}
+}
+
 // The vendor's own product-type numbering, which the super pod reports itself by.
 const (
 	codeServer8P  uint32 = 0
@@ -59,6 +103,17 @@ const (
 	codeServer32P uint32 = 4
 	codeCard1P    uint32 = 5
 	codeCard4P    uint32 = 6
+)
+
+// InvalidSuperPodID and InvalidSuperPodSize are the vendor's own markers for a coordinate that is
+// not one. The driver answers the super pod query on every shape that reaches it, and all-ones in
+// these two fields is how it says the answer is not a membership -- the vendor's own constants read
+// `InvalidSuperPodID = 0xffffffff` and `InvalidSuperPodSize = 0xffffffff` under the comment "all f
+// -> super pod / not super pod". They are exported because the record's renderer needs the size one
+// to tell an unreported size from a reported zero.
+const (
+	InvalidSuperPodID   uint32 = 0xffffffff
+	InvalidSuperPodSize uint32 = 0xffffffff
 )
 
 // A5 carrier board ids: the mainboard a 300I inference card is mounted on, in its 1P and 4P
@@ -115,7 +170,7 @@ type Driver interface {
 // so a driver that was briefly unready is asked again rather than sinking the answer for the
 // lifetime of the process.
 //
-// Remembering the SHAPE does not stall the detector's periodic re-read of the fabric, and the two
+// Remembering the shape does not stall the detector's periodic re-read of the fabric, and the two
 // are not the same fact. A node moved between super pods of one shape keeps that shape while its
 // domain id changes, and that is what the re-read is for. Changing the shape itself means re-cabling
 // the UB fabric and reloading the driver, which this process's dcmi handle does not survive: the

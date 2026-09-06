@@ -50,6 +50,13 @@ type ascend struct {
 	// manager runs.
 	product *productascend.Resolver
 	logger  klog.Logger
+
+	// superPodsMu guards superPods. A detect pass is the only writer, and the preflight command
+	// reaches the same detector, so the two are serialized rather than assumed not to overlap.
+	superPodsMu sync.Mutex
+	// superPods remembers the coordinates each accelerator last answered the super pod query with.
+	// See rememberSuperPod for why a failed read reuses them instead of reporting none.
+	superPods map[superPodKey]dcmi.SpodInfo
 }
 
 // New creates a new ascend device interface and initializes the DCMI library.
@@ -57,9 +64,10 @@ func New(opts device.DetectorOptions) device.Detector {
 	logger := opts.Logger.WithName(Manufacturer)
 	lib := dcmi.New(binding.WithLogger(logger))
 	return &ascend{
-		dcmi:    lib,
-		product: productascend.NewResolver(productDriver{lib: lib}),
-		logger:  logger,
+		dcmi:      lib,
+		product:   productascend.NewResolver(productDriver{lib: lib}),
+		logger:    logger,
+		superPods: make(map[superPodKey]dcmi.SpodInfo),
 	}
 }
 

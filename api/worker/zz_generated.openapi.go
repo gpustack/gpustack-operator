@@ -2698,12 +2698,12 @@ func schema_gpustack_api_worker_v1alpha1_DeviceFabric(ref common.ReferenceCallba
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "DeviceFabric describes the scale-up interconnect domain a device belongs to — the set of accelerators that can address one another directly over the manufacturer's own interconnect, which on some generations spans machines.\n\nIt is recorded PER DEVICE and never as a group- or worker-level field, because the domain CROSS-CUTS both: NVIDIA reports a clique per GPU and one machine can hold several, and AMD's hive id is likewise read per GPU. So \"same model, same machine, different domain\" is reachable, and a coarser field would flatten it. The domain ITSELF is a DERIVED aggregation — the devices sharing Kind and ID — which is the same rule DevicesSpec.Interfaces states for relating an interface to an accelerator: publish comparable coordinates, never a stored cross-reference. Recording a higher level's fact on each device also matches RoCE above, which belongs to the card rather than to the accelerator.\n\nOnly the Ascend detector fills this today. The fields below say which manufacturer publishes each, so that an empty value is readable as \"this generation has none\" rather than as a hole: what a manufacturer's driver does not report, its detector cannot record.\n\nNot every interconnect fits. Cambricon's MLU-Link publishes no domain identity at all, only per-link remote information, so it describes an EDGE LIST and is not recorded here.",
+				Description: "DeviceFabric describes the scale-up interconnect domain a device belongs to — the set of accelerators that can address one another directly over the manufacturer's own interconnect, which on some generations spans machines.\n\nIt is recorded on each device and never as a group- or worker-level field, because the domain cuts across both: NVIDIA reports a clique per GPU and one machine can hold several, and AMD's hive id is likewise read per GPU. So \"same model, same machine, different domain\" is reachable, and a coarser field would flatten it. The domain is itself derived, from the devices sharing Kind and ID, which is the same rule DevicesSpec.Interfaces states for relating an interface to an accelerator: publish comparable coordinates, never a stored cross-reference. Recording a higher level's fact on each device also matches RoCE above, which belongs to the card rather than to the accelerator.\n\nOnly the Ascend detector fills this today. The fields below say which manufacturer publishes each, so that an empty value is readable as \"this generation has none\" rather than as a hole: what a manufacturer's driver does not report, its detector cannot record.\n\nNot every interconnect fits. Cambricon's MLU-Link publishes no domain identity at all, only per-link remote information, so it describes an edge list and is not recorded here.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Kind names the interconnect, and is what makes ID interpretable at all: an Ascend UB super pod id, an NVIDIA NVLink cluster uuid and an AMD XGMI hive id share no namespace, so two devices are in one domain only when Kind AND ID both match.\n\nOne of `ub`, `nvlink` or `xgmi`.",
+							Description: "Kind names the interconnect, and is what makes ID interpretable at all: an Ascend UB super pod id, an NVIDIA NVLink cluster uuid and an AMD XGMI hive id share no namespace, so two devices are in one domain only when Kind and ID both match.\n\nOne of `ub`, `nvlink` or `xgmi`.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -2711,7 +2711,7 @@ func schema_gpustack_api_worker_v1alpha1_DeviceFabric(ref common.ReferenceCallba
 					},
 					"id": {
 						SchemaProps: spec.SchemaProps{
-							Description: "ID identifies the domain, and is comparable ACROSS WORKERS — that is the whole point of publishing it, since a domain spanning machines cannot be recognized from one machine's record alone.\n\nAscend reports the super pod id, NVIDIA the fabric cluster uuid, AMD the XGMI hive id.",
+							Description: "ID identifies the domain, and is comparable across workers — that is the whole point of publishing it, since a domain spanning machines cannot be recognized from one machine's record alone.\n\nAscend reports the super pod id, NVIDIA the fabric cluster uuid, AMD the XGMI hive id.\n\nEmpty where no domain was identified — and on Ascend that includes a device the driver answered the super pod query for. It answers on every shape, since that answer is how the shape is established, and marks the coordinates invalid on a machine that is in no super pod. So an id is published for `pod-1d` and `pod-2d`; for a `server-8p`, `card-1p` or `card-4p` whose reported id and size are not those markers, which is the \"super server\" the vendor's own rank table spans machines with; and never for a `server-16p` or `server-32p`. Publishing a marker would give two unrelated machines one domain, and this field is compared across workers.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -2733,21 +2733,21 @@ func schema_gpustack_api_worker_v1alpha1_DeviceFabric(ref common.ReferenceCallba
 					},
 					"memberCount": {
 						SchemaProps: spec.SchemaProps{
-							Description: "MemberCount is how many members the domain reports having. Zero means the manufacturer does not report it, never a domain with no members.\n\nAscend only, from the super pod's own scale. It says how large the domain is without enumerating it, which is what a scheduler needs before it has seen every worker in it.\n\nNot named Size: every protobuf message carries a generated Size() method, and a field of that name collides with it.",
+							Description: "MemberCount is how many members the domain reports having. Zero means the manufacturer does not report it, never a domain with no members.\n\nAscend only, from the super pod's own scale. It says how large the domain is without enumerating it, which is what a scheduler needs before it has seen every worker in it. Published under the rule ID is, and withheld on top of that where the driver marks the scale itself invalid: a domain may be identified while its size is not.\n\nNot named Size: every protobuf message carries a generated Size() method, and a field of that name collides with it.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
 					},
 					"nodeIndex": {
 						SchemaProps: spec.SchemaProps{
-							Description: "NodeIndex is this worker's index within the domain, as the domain numbers its machines — not a Kubernetes node name and not comparable to one.\n\nAscend only, from the super pod's server id.",
+							Description: "NodeIndex is this worker's index within the domain, as the domain numbers its machines — not a Kubernetes node name and not comparable to one.\n\nAscend only, from the super pod's server id. Published under the same rule as ID: only for a shape that is in a super pod.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"rackId": {
 						SchemaProps: spec.SchemaProps{
-							Description: "RackID is the rack this worker sits in, as the domain numbers its racks.\n\nAscend only, from the super pod's chassis id.",
+							Description: "RackID is the rack this worker sits in, as the domain numbers its racks.\n\nAscend only, from the super pod's chassis id. Published under the same rule as ID: only for a shape that is in a super pod.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -2759,7 +2759,7 @@ func schema_gpustack_api_worker_v1alpha1_DeviceFabric(ref common.ReferenceCallba
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Endpoints are this device's own addresses on the fabric, in the manufacturer's own encoding.\n\nAscend only, where each entry is a UB endpoint identifier as 32 lowercase hex characters. The bytes are published UNPARSED on purpose: the function entity, the die, the port and whether an endpoint carries device-to-device traffic are all bit fields inside them, so a consumer derives whichever it needs rather than this API tracking a vendor bit layout that only the vendor may change.\n\nOrdered by construction, so two consecutive reads of unchanged hardware are byte-identical.",
+							Description: "Endpoints are this device's own addresses on the fabric, in the manufacturer's own encoding.\n\nAscend only, where each entry is a UB endpoint identifier as 32 lowercase hex characters. The bytes are published unparsed on purpose: the function entity, the die, the port and whether an endpoint carries device-to-device traffic are all bit fields inside them, so a consumer derives whichever it needs rather than this API tracking a vendor bit layout that only the vendor may change.\n\nOrdered by construction, so two consecutive reads of unchanged hardware are byte-identical.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{

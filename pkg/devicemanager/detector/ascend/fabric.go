@@ -30,14 +30,19 @@ const urmaDeviceCountMax = 128
 //
 // The three are independent on purpose: a standalone inference card names its shape from its
 // mainboard and may sit in no super pod at all, so whichever of them answered is recorded and the
-// rest is left absent.
+// rest is left absent. Two of them survive a pass that could not read them -- the shape because the
+// resolver remembers it, the coordinates because rememberSuperPod does -- since a label withheld
+// here is a label removed, and a read that did not happen cannot support that.
 func (in *ascend) readFabric(dev dcmi.Device, cardID, deviceID int32, logger klog.Logger) *device.Fabric {
 	var spod *dcmi.SpodInfo
 	if info, ret := dev.GetSuperPodInfo(); ret.IsSuccess() {
 		spod = &info
 	} else {
-		logger.Info("skipping the fabric domain coordinates", "reason", ret.Error())
+		logger.Info("could not read the fabric domain coordinates",
+			"reason", ret.Error(),
+			"consequence", "reusing whichever this accelerator last answered with, if any")
 	}
+	spod = in.rememberSuperPod(superPodKey{cardID: cardID, deviceID: deviceID}, spod)
 
 	var productType productascend.Type
 	if product, err := in.product.Resolve(cardID, deviceID); err != nil {
@@ -47,6 +52,42 @@ func (in *ascend) readFabric(dev dcmi.Device, cardID, deviceID int32, logger klo
 	}
 
 	return newFabric(spod, productType, readFabricEndpoints(dev, logger))
+}
+
+// superPodKey addresses one accelerator by the (card, device-in-card) pair dcmi names it by, which
+// is stable for the lifetime of the process.
+type superPodKey struct {
+	cardID   int32
+	deviceID int32
+}
+
+// rememberSuperPod records the coordinates a successful read answered with, and returns the ones
+// this pass should publish.
+//
+// A failed read publishes the last coordinates this accelerator answered with, if it ever answered
+// any. The node-wide fabric label is removed when it is withheld, so reporting none on a pass the
+// driver refused would take the node out of its super pod on one dcmi hiccup and only put it back at
+// the next detect pass -- which the detect floor can hold off for minutes. This is the rule the
+// interface inventory already follows: only a read that happened may replace what was recorded.
+//
+// A node that really left its super pod is a different answer rather than no answer -- the driver
+// reports the invalid markers, which Type.InSuperPod refuses -- so the withdrawal still happens, and
+// happens through a read that succeeded.
+func (in *ascend) rememberSuperPod(key superPodKey, spod *dcmi.SpodInfo) *dcmi.SpodInfo {
+	in.superPodsMu.Lock()
+	defer in.superPodsMu.Unlock()
+
+	if spod != nil {
+		in.superPods[key] = *spod
+		return spod
+	}
+
+	remembered, ok := in.superPods[key]
+	if !ok {
+		return nil
+	}
+
+	return &remembered
 }
 
 // readFabricEndpoints lists this accelerator's UB endpoint identifiers, across every urma device --
@@ -112,11 +153,21 @@ func newFabric(spod *dcmi.SpodInfo, productType productascend.Type, endpoints []
 		Type:      string(productType),
 		Endpoints: endpoints,
 	}
-	if spod != nil {
+	// The coordinates are published only where the driver's answer is a membership. It answers the
+	// query for a plain server too -- that answer is how Resolver established the shape -- so taking
+	// it at face value would hand two machines with no interconnect one domain, while reading the
+	// shape alone would deny a real 8P super server the domain it is in. Which shapes may carry one,
+	// and which answers are the vendor's markers for "not in a super pod", is Type.InSuperPod.
+	if spod != nil && productType.InSuperPod(spod.Super_pod_id, spod.Scale_type) {
 		fabric.ID = strconvx.FormatUint(uint64(spod.Super_pod_id), 10)
-		fabric.MemberCount = spod.Scale_type
 		fabric.NodeIndex = strconvx.FormatUint(uint64(spod.Server_id), 10)
 		fabric.RackID = strconvx.FormatUint(uint64(spod.Chassis_id), 10)
+		// A pod shape is in its domain whatever size it reports, so the size carries its own check:
+		// publishing the invalid marker would advertise a domain of four billion members, and zero
+		// is how the label construction already spells a size nobody reported.
+		if spod.Scale_type != productascend.InvalidSuperPodSize {
+			fabric.MemberCount = spod.Scale_type
+		}
 	}
 
 	return fabric

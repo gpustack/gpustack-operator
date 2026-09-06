@@ -36,6 +36,67 @@ func (d *fakeDriver) SuperPodType(_, _ int32) (uint32, error) {
 	return d.superPodType, nil
 }
 
+// Which shapes carry meaningful super pod coordinates, and which merely get an answer.
+//
+// The driver answers the super pod query for every shape that reaches it, so this predicate is what
+// separates "reported a domain" from "is in a domain". Every named shape is listed, at valid
+// coordinates and at invalid ones, because both mistakes are silent: a shape wrongly excluded loses
+// a domain it is in, and a shape wrongly included publishes one it is not.
+func TestType_InSuperPod(t *testing.T) {
+	cases := []struct {
+		name         string
+		productType  Type
+		superPodID   uint32
+		superPodSize uint32
+		want         bool
+	}{
+		// A pod is a super pod in itself, whatever size it reports.
+		{name: "1d pod", productType: TypePod1D, superPodID: 7, superPodSize: 384, want: true},
+		{name: "2d pod", productType: TypePod2D, superPodID: 7, superPodSize: 384, want: true},
+		{
+			name: "1d pod with no size reported", productType: TypePod1D,
+			superPodID: 7, superPodSize: InvalidSuperPodSize, want: true,
+		},
+		// An 8P server cabled into a pod is the vendor's super server, and its id spans machines.
+		{name: "8p super server", productType: TypeServer8P, superPodID: 7, superPodSize: 384, want: true},
+		// The same shape not cabled into one: the driver marks both coordinates invalid.
+		{
+			name: "8p server on its own", productType: TypeServer8P,
+			superPodID: InvalidSuperPodID, superPodSize: InvalidSuperPodSize, want: false,
+		},
+		// Either marker alone is enough to refuse it. The vendor's super server test requires both.
+		{
+			name: "8p server with no size", productType: TypeServer8P,
+			superPodID: 7, superPodSize: InvalidSuperPodSize, want: false,
+		},
+		{
+			name: "8p server with no id", productType: TypeServer8P,
+			superPodID: InvalidSuperPodID, superPodSize: 384, want: false,
+		},
+		// The two shapes the vendor excludes by name, at coordinates that would otherwise qualify.
+		{name: "16p server", productType: TypeServer16P, superPodID: 7, superPodSize: 384, want: false},
+		{name: "32p server", productType: TypeServer32P, superPodID: 7, superPodSize: 384, want: false},
+		// The inference cards are not excluded by name. The A5 card observed so far does not support
+		// the query at all, so the coordinates never arrive -- but where a driver answers with valid
+		// ones, the vendor reads that as a membership.
+		{name: "1p card", productType: TypeCard1P, superPodID: 7, superPodSize: 384, want: true},
+		{name: "4p card", productType: TypeCard4P, superPodID: 7, superPodSize: 384, want: true},
+		{
+			name: "4p card on its own", productType: TypeCard4P,
+			superPodID: InvalidSuperPodID, superPodSize: InvalidSuperPodSize, want: false,
+		},
+		// A shape this build has no word for cannot be checked against the two exclusions.
+		{name: "no name", productType: "", superPodID: 7, superPodSize: 384, want: false},
+		// Zero is a real super pod id and a real size, not an absent answer.
+		{name: "zero coordinates", productType: TypePod1D, superPodID: 0, superPodSize: 0, want: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, c.productType.InSuperPod(c.superPodID, c.superPodSize))
+		})
+	}
+}
+
 // The vendor's own rule, restated: a super pod names its own shape, except on the two inference
 // cards, which are recognized by the mainboard the chip is mounted on and never reach the super-pod
 // query at all.
