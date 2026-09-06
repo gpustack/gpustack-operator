@@ -15,7 +15,7 @@ import (
 	"gpustack.ai/gpustack/binding"
 	"gpustack.ai/gpustack/binding/dcmi"
 	"gpustack.ai/gpustack/pkg/device"
-	"gpustack.ai/gpustack/pkg/devicemanager/ascendproduct"
+	productascend "gpustack.ai/gpustack/pkg/devicemanager/product/ascend"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/loggerx"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
@@ -48,7 +48,7 @@ type ascend struct {
 	// product is the A5 shape this node is, shared with the allocator's own copy of the rule. It is
 	// read once per process rather than once per pass: a node cannot change shape while the device
 	// manager runs.
-	product *ascendproduct.Resolver
+	product *productascend.Resolver
 	logger  klog.Logger
 }
 
@@ -58,7 +58,7 @@ func New(opts device.DetectorOptions) device.Detector {
 	lib := dcmi.New(binding.WithLogger(logger))
 	return &ascend{
 		dcmi:    lib,
-		product: ascendproduct.NewResolver(productDriver{lib: lib}),
+		product: productascend.NewResolver(productDriver{lib: lib}),
 		logger:  logger,
 	}
 }
@@ -244,7 +244,7 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 
 			// The UB fabric is an A5 construct and every query behind this is V2-only, so an
 			// older generation is not asked: it would refuse once per accelerator per pass.
-			if grpList[grpIndex].Family == ascendproduct.Family {
+			if grpList[grpIndex].Family == productascend.Family {
 				topo.Fabric = in.readFabric(dev, card, i, logger)
 			}
 

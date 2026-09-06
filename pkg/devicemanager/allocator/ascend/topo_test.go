@@ -13,11 +13,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
-	"gpustack.ai/gpustack/pkg/devicemanager/ascendproduct"
+	productascend "gpustack.ai/gpustack/pkg/devicemanager/product/ascend"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 )
 
-// fakeProductDriver answers the two node-level reads ascendproduct.Resolver makes. The rule it
+// fakeProductDriver answers the two node-level reads productascend.Resolver makes. The rule it
 // applies to them is that package's and is tested there; what this file establishes is what the
 // allocator does with the answer.
 type fakeProductDriver struct {
@@ -43,8 +43,8 @@ func (d *fakeProductDriver) SuperPodType(_, _ int32) (uint32, error) {
 
 // newFakeProductResolver builds the resolver a server fixture needs. Its default answers a product
 // with a topology file, so a test that is not about the topology env is unaffected by it.
-func newFakeProductResolver() *ascendproduct.Resolver {
-	return ascendproduct.NewResolver(&fakeProductDriver{})
+func newFakeProductResolver() *productascend.Resolver {
+	return productascend.NewResolver(&fakeProductDriver{})
 }
 
 // The vendor's own product-to-file table, restated: every shape this allocator knows names exactly
@@ -53,16 +53,16 @@ func TestHcclTopoFilePaths(t *testing.T) {
 	const topoDir = "/usr/local/Ascend/driver/topo/950/"
 
 	cases := []struct {
-		product ascendproduct.Type
+		product productascend.Type
 		want    string
 	}{
-		{product: ascendproduct.TypeServer8P, want: topoDir + "atlas_850_1.json"},
-		{product: ascendproduct.TypePod1D, want: topoDir + "atlas_950_1.json"},
-		{product: ascendproduct.TypePod2D, want: topoDir + "atlas_950_2.json"},
-		{product: ascendproduct.TypeServer16P, want: topoDir + "atlas_850_2.json"},
-		{product: ascendproduct.TypeServer32P, want: topoDir + "atlas_850_3.json"},
-		{product: ascendproduct.TypeCard1P, want: topoDir + "atlas_350_1.json"},
-		{product: ascendproduct.TypeCard4P, want: topoDir + "atlas_350_3.json"},
+		{product: productascend.TypeServer8P, want: topoDir + "atlas_850_1.json"},
+		{product: productascend.TypePod1D, want: topoDir + "atlas_950_1.json"},
+		{product: productascend.TypePod2D, want: topoDir + "atlas_950_2.json"},
+		{product: productascend.TypeServer16P, want: topoDir + "atlas_850_2.json"},
+		{product: productascend.TypeServer32P, want: topoDir + "atlas_850_3.json"},
+		{product: productascend.TypeCard1P, want: topoDir + "atlas_350_1.json"},
+		{product: productascend.TypeCard4P, want: topoDir + "atlas_350_3.json"},
 	}
 	for _, c := range cases {
 		t.Run(string(c.product), func(t *testing.T) {
@@ -117,7 +117,7 @@ func TestGetContainerAllocateResponse_HcclTopoFilePath(t *testing.T) {
 					Manufacturer:   Manufacturer,
 					AllocationMode: workercore.DeviceAllocationModeExclusive,
 				},
-				product: ascendproduct.NewResolver(c.driver),
+				product: productascend.NewResolver(c.driver),
 			}
 			devs := ascendDevicesFixture()
 			devs.Spec.Groups[0].Family = c.family
@@ -149,7 +149,7 @@ func TestGetContainerAllocateResponse_HcclTopoAddressesTheDcmiDevice(t *testing.
 			Manufacturer:   Manufacturer,
 			AllocationMode: workercore.DeviceAllocationModeExclusive,
 		},
-		product: ascendproduct.NewResolver(d),
+		product: productascend.NewResolver(d),
 	}
 	devs := ascendDevicesFixture()
 	devs.Spec.Groups[0].Family = family950

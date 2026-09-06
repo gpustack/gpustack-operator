@@ -9,7 +9,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
-	"gpustack.ai/gpustack/pkg/devicemanager/ascendproduct"
+	productascend "gpustack.ai/gpustack/pkg/devicemanager/product/ascend"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 )
 
@@ -40,7 +40,7 @@ func NewPreflighter(opts device.PreflighterOptions) device.AcceleratorPreflighte
 	return &preflighter{
 		logger:      logger,
 		share:       newShareDriver(logger),
-		product:     ascendproduct.NewResolver(newProductDriver(logger)),
+		product:     productascend.NewResolver(newProductDriver(logger)),
 		installInfo: dockerRuntimeInstallInfo,
 		dryRun:      opts.DryRun,
 	}
@@ -51,7 +51,7 @@ type preflighter struct {
 	share  shareDriver
 	// product is the real resolver, not a recording stand-in: naming the topology file is a read,
 	// so a simulated allocation can take it as it is without writing anything to the host.
-	product *ascendproduct.Resolver
+	product *productascend.Resolver
 	// installInfo is where the vendor runtime recorded its version. It is a field rather than the
 	// constant read directly, so the A5 row can be established against a file a test wrote.
 	installInfo string

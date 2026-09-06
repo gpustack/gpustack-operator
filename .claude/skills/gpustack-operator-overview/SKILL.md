@@ -40,6 +40,7 @@ pkg/
   devicemanager/                  device-manager subcommand (per-node DaemonSet)
     detector/<mfr>/               per-manufacturer accelerator detection
     allocator/<mfr>/              per-manufacturer device-plugin allocation
+    product/<mfr>/                product-shape rules both halves above share, driver-free
     preflight/                    can this node actually slice? (host chroot, probe containers)
     exporter/                     this node's Instances as Prometheus gauges on /metrics
   kubemetrics/                    Instance utilization from the kubelet, behind both surfaces

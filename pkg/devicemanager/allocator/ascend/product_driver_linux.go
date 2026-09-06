@@ -7,7 +7,7 @@ import (
 
 	"gpustack.ai/gpustack/binding"
 	"gpustack.ai/gpustack/binding/dcmi"
-	"gpustack.ai/gpustack/pkg/devicemanager/ascendproduct"
+	productascend "gpustack.ai/gpustack/pkg/devicemanager/product/ascend"
 )
 
 // newProductDriver returns the real dcmi-backed product reader. It is linux-only for the reason
@@ -18,11 +18,11 @@ import (
 // It holds its own dcmi handle rather than borrowing the container-share driver's. The wrapper never
 // unloads a library it already holds, so a second initializer cannot blank the first one's function
 // pointers; keeping the two seams apart is what lets each be faked on its own.
-func newProductDriver(logger klog.Logger) ascendproduct.Driver {
+func newProductDriver(logger klog.Logger) productascend.Driver {
 	return &dcmiProductDriver{lib: dcmi.New(binding.WithLogger(logger)), logger: logger}
 }
 
-// dcmiProductDriver is the real ascendproduct.Driver, addressing a device by the (card,
+// dcmiProductDriver is the real productascend.Driver, addressing a device by the (card,
 // device-in-card) pair dcmi names it by. Its behavior against a real driver is proven by the e2e
 // run: a darwin test binary cannot link binding/dcmi at all.
 type dcmiProductDriver struct {

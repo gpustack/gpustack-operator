@@ -7,7 +7,7 @@ import (
 
 	"gpustack.ai/gpustack/binding/dcmi"
 	"gpustack.ai/gpustack/pkg/device"
-	"gpustack.ai/gpustack/pkg/devicemanager/ascendproduct"
+	productascend "gpustack.ai/gpustack/pkg/devicemanager/product/ascend"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 )
 
@@ -39,7 +39,7 @@ func (in *ascend) readFabric(dev dcmi.Device, cardID, deviceID int32, logger klo
 		logger.Info("skipping the fabric domain coordinates", "reason", ret.Error())
 	}
 
-	var productType ascendproduct.Type
+	var productType productascend.Type
 	if product, err := in.product.Resolve(cardID, deviceID); err != nil {
 		logger.Info("skipping the fabric domain shape", "reason", err.Error())
 	} else if productType = product.Type; productType == "" {
@@ -102,7 +102,7 @@ func fabricEndpoints(eids []dcmi.UrmaEidInfo) []string {
 // record: it says this accelerator is on a UB fabric whose domain could not be identified, and the
 // endpoints next to it are still what a communication plan is built from. Suppressing the whole
 // record there would discard them.
-func newFabric(spod *dcmi.SpodInfo, productType ascendproduct.Type, endpoints []string) *device.Fabric {
+func newFabric(spod *dcmi.SpodInfo, productType productascend.Type, endpoints []string) *device.Fabric {
 	if spod == nil && productType == "" && len(endpoints) == 0 {
 		return nil
 	}

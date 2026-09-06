@@ -1,4 +1,4 @@
-package ascendproduct
+package ascend
 
 import (
 	"errors"
