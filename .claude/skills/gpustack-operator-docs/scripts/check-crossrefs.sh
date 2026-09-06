@@ -67,6 +67,34 @@ done
 # --- 1. a cited label leads somewhere ---------------------------------------
 echo "==> cross-reference targets"
 read -r -d '' RULE1 <<'AWKX' || true
+function fence_line(l,   n, c) {
+  if (l !~ /^ {0,3}(`{3,}|~{3,})/) return ""
+  sub(/^ +/, "", l)
+  c = substr(l, 1, 1)
+  n = 0
+  while (substr(l, n + 1, 1) == c) n++
+  return c n
+}
+function fence_closes(marker, open) {
+  return substr(marker, 1, 1) == substr(open, 1, 1) && \
+         (length(marker) - 1) + 0 >= (length(open) - 1) + 0
+}
+# Is the label at position "at" inside a parenthesised group that closes right after it? That is
+# the shape of a pointer, and it covers "(F6)" as well as "(see F6)" and "(per T12b)" -- the words
+# before the label are still inside the parens, so the whole group is a citation and NOT a place
+# the pointer can land. Reading only the immediate neighbours classified "(see F6)" as a target,
+# which let a genuinely dangling "(F6)" elsewhere in the same file pass the gate.
+function in_paren_pointer(line, at, len,   post, j, ch) {
+  post = substr(line, at + len, 1)
+  if (post != ")") return 0
+  for (j = at - 1; j >= 1; j--) {
+    ch = substr(line, j, 1)
+    if (ch == "(") return 1
+    if (ch == ")") return 0
+    if (ch !~ /[A-Za-z .,]/) return 0
+  }
+  return 0
+}
 { lines[FNR] = $0 }
 END {
   # Two shapes, and they are told apart by one character. "(R2):" introduces the thing it trails --
@@ -77,18 +105,33 @@ END {
   # What is decidable, and is the defect worth gating, is a label that occurs nowhere in this file
   # except in the pointer itself.
   for (i = 1; i <= FNR; i++) {
+    # A label inside a fenced code block is a string in a command or a struct field, not a place a
+    # prose pointer lands. Counting those as targets masked dangling citations: this corpus has 283
+    # label-shaped tokens inside fences.
+    fl = fence_line(lines[i])
+    if (fl != "") {
+      if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0
+      continue
+    }
+    if (fence) continue
+
     s = lines[i]
+    off = 0
     while (match(s, /[A-Z]{1,2}[0-9]+[a-z]?/)) {
       lab = substr(s, RSTART, RLENGTH)
       pre = (RSTART > 1) ? substr(s, RSTART - 1, 1) : " "
       post = substr(s, RSTART + RLENGTH, 1)
       after = substr(s, RSTART + RLENGTH + 1, 1)
-      isptr = (pre == "(" && post == ")" && after != ":")
+      # The left boundary is not optional. Without it "Cambricon (MLU370)" reads as a pointer to a
+      # label "LU370", because the label pattern happily starts mid-word.
+      isptr = (pre !~ /[A-Za-z0-9]/ && post == ")" && after != ":" && \
+               in_paren_pointer(lines[i], off + RSTART, RLENGTH))
       if (isptr) {
         citeat[lab, ++ncite[lab]] = i
       } else if (pre !~ /[A-Za-z0-9]/ && post !~ /[A-Za-z0-9]/) {
         if (!((lab, i) in target)) { target[lab, i] = 1; ntarget[lab]++ }
       }
+      off += RSTART + RLENGTH - 1
       s = substr(s, RSTART + RLENGTH)
     }
   }
@@ -104,7 +147,12 @@ END {
 }
 AWKX
 for f in $MD; do
-  [ -f "$f" ] || continue
+  # Reported, not skipped: these lists are word-split, so a corpus path containing a space arrives
+  # as fragments, and skipping them silently is how a file escapes the check with the gate green.
+  if [ ! -f "$f" ]; then
+    err "the corpus lists '$f', which is not a file — a path with a space in it splits into fragments and would otherwise be skipped silently"
+    continue
+  fi
   awk "$RULE1" "$f" > "$WORK/r1"
   while IFS= read -r hit; do
     [ -n "$hit" ] && err "$hit"
@@ -114,18 +162,42 @@ done
 # --- 2. the quantity in the citing sentence, in the cited section ------------
 echo "==> quantities cited across a reference (report only)"
 read -r -d '' RULE2 <<'AWKX' || true
+# Does "line" contain "w" as a whole word? index() alone matches substrings, which made a section
+# saying "someone" satisfy a claim counting "one" and "twofold" satisfy "two" -- false negatives on
+# exactly the side this rule is supposed to prompt about, while the citing side was already bounded.
+function has_word(line, w,   p, rest, pre, post, off) {
+  rest = line
+  off = 0
+  while ((p = index(rest, w)) > 0) {
+    pre = (off + p > 1) ? substr(line, off + p - 1, 1) : " "
+    post = substr(line, off + p + length(w), 1)
+    if (pre !~ /[A-Za-z]/ && post !~ /[A-Za-z]/) return 1
+    rest = substr(rest, p + length(w))
+    off += p + length(w) - 1
+  }
+  return 0
+}
 { lines[FNR] = $0 }
-/^#+ +[A-Z]{1,2}[0-9]+[a-z]?[^A-Za-z0-9]/ {
+# Every heading, so a section ends at the next heading of its level whether or not that one carries
+# a label. The label itself may be the whole heading text ("#### F6"), so the character after it is
+# tested rather than required to exist.
+/^#+ +/ {
   h = $0
   lvl = 0
   while (substr(h, lvl + 1, 1) == "#") lvl++
+  hlvl[FNR] = lvl
   sub(/^#+ +/, "", h)
   if (match(h, /^[A-Z]{1,2}[0-9]+[a-z]?/)) {
     lab = substr(h, RSTART, RLENGTH)
-    defline[lab] = FNR
-    deflvl[lab] = lvl
+    nxt = substr(h, RSTART + RLENGTH, 1)
+    if (nxt == "" || nxt !~ /[A-Za-z0-9]/) {
+      # A label introduced twice in one file makes every pointer to it ambiguous, and silently
+      # keeping the last one would judge citations against the wrong section.
+      if (lab in defline) dup[lab] = dup[lab] " " defline[lab]
+      defline[lab] = FNR
+      deflvl[lab] = lvl
+    }
   }
-  hlvl[FNR] = lvl
 }
 END {
   # Only a label a heading introduces has a section with edges. For a label defined in a table row
@@ -157,11 +229,14 @@ END {
         t = substr(t, RSTART + RLENGTH)
         if (pre ~ /[A-Za-z]/ || post ~ /[A-Za-z]/) continue
         found = 0
-        for (j = defline[lab]; j <= endline[lab]; j++) if (index(tolower(lines[j]), fig) > 0) { found = 1; break }
+        for (j = defline[lab]; j <= endline[lab]; j++) if (has_word(tolower(lines[j]), fig)) { found = 1; break }
         if (!found && index(miss, fig) == 0) miss = miss (miss == "" ? "" : ", ") fig
       }
       if (miss != "") printf "%s:%d: cites (%s) for a claim counting \"%s\"; the section at line %d never says it\n", FILENAME, i, lab, miss, defline[lab]
     }
+  }
+  for (lab in dup) {
+    printf "%s:%d: (%s) is introduced by more than one heading (also at%s); every pointer to it is ambiguous, and the span checked above is the last one\n", FILENAME, defline[lab], lab, dup[lab]
   }
 }
 AWKX

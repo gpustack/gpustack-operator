@@ -129,6 +129,118 @@ else
 fi
 
 echo
+echo "=== rule 1: a word inside the parens does not turn a pointer into a target ==="
+# "(see F6)" is still a pointer. Reading only the immediate neighbours classified it as a target,
+# which let a genuinely dangling "(F6)" in the same file pass the gate.
+build
+rm "$TREE/specs/dangling.md"
+cat > "$TREE/specs/seeref.md" <<'EOF'
+# Spec: See Ref
+
+The classification is measured below (Z9), and the drain path is covered (see Z9).
+EOF
+run
+if printf '%s' "$out" | grep -q 'seeref.md.*(Z9) appears on no other line'; then
+  pass "(see Z9) does not count as somewhere (Z9) can land"
+else
+  fail "(see Z9) was treated as a target, masking the dangling (Z9) -- got: $out"
+fi
+
+echo
+echo "=== rule 1: a label inside a fenced code block is not a target ==="
+build
+rm "$TREE/specs/dangling.md"
+# shellcheck disable=SC2016  # the backticks are a markdown fence, and must not expand
+printf '# Spec: Fenced\n\nThe drain path is covered (Z9).\n\n```go\n// Z9 is a struct field name here, not a section.\ntype Z9 struct{}\n```\n' \
+  > "$TREE/specs/fenced.md"
+run
+if printf '%s' "$out" | grep -q 'fenced.md.*(Z9) appears on no other line'; then
+  pass "a fenced occurrence does not mask a dangling pointer"
+else
+  fail "the fenced Z9 was counted as a target -- got: $out"
+fi
+
+echo
+echo "=== rule 1: a label pattern starting mid-word is not a label ==="
+# "Cambricon (MLU370)" must not read as a pointer to "LU370".
+build
+rm "$TREE/specs/dangling.md"
+printf '# Spec: Model\n\nSupported: Cambricon (MLU370), Hygon (Z100).\n' > "$TREE/specs/model.md"
+run
+if printf '%s' "$out" | grep -qE 'model.md.*\((LU370|100)\)'; then
+  fail "a model number was read as a label -- got: $out"
+else
+  pass "(MLU370) and (Z100) are not read as labels"
+fi
+
+echo
+echo "=== rule 2: the cited section must contain the figure as a WORD ==="
+# "someone" contains "one"; a substring match made it satisfy a claim counting "one".
+build
+rm "$TREE/specs/dangling.md" "$TREE/specs/figure.md"
+cat > "$TREE/specs/word.md" <<'EOF'
+# Spec: Word
+
+The gauge covers only one of the tiers, which is measured below (F6).
+
+#### F6 - status.capacity
+
+Someone has to classify the media, and twofold growth is expected.
+
+#### F7 - something else
+EOF
+run
+if printf '%s' "$out" | grep -q 'word.md:3: cites (F6) for a claim counting "one"'; then
+  pass "\"someone\" does not satisfy a claim counting \"one\""
+else
+  fail "the substring match swallowed the finding -- got: $out"
+fi
+
+echo
+echo "=== rule 2: a heading that is only the label still defines it ==="
+build
+rm "$TREE/specs/dangling.md" "$TREE/specs/figure.md"
+cat > "$TREE/specs/bare.md" <<'EOF'
+# Spec: Bare
+
+The gauge covers two of the five tiers, which is measured below (F6).
+
+#### F6
+
+Two independent problems.
+
+#### F7 - something else
+EOF
+run
+if printf '%s' "$out" | grep -q 'bare.md:3: cites (F6) for a claim counting "five"'; then
+  pass "a bare \"#### F6\" heading registers as the definition"
+else
+  fail "the bare heading was not registered -- got: $out"
+fi
+
+echo
+echo "=== rule 2: a label introduced twice is reported, not silently overwritten ==="
+build
+rm "$TREE/specs/dangling.md" "$TREE/specs/figure.md"
+cat > "$TREE/specs/dupe.md" <<'EOF'
+# Spec: Dupe
+
+#### F6 - the first one
+
+Content.
+
+#### F6 - the second one
+
+Content.
+EOF
+run
+if printf '%s' "$out" | grep -q 'dupe.md.*(F6) is introduced by more than one heading'; then
+  pass "the duplicate heading is reported"
+else
+  fail "the duplicate was silently overwritten -- got: $out"
+fi
+
+echo
 echo "=== Go comments are scanned, not skipped ==="
 build
 rm "$TREE/specs/dangling.md"
