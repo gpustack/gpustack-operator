@@ -15,16 +15,31 @@ defaults:
     # is nested.
     working-directory: gpustack.ai/gpustack
 
+# Pure verification with no side effects, and an internal pull request fires both the
+# push and the pull_request event, so superseded runs are cancelled rather than queued.
+concurrency:
+  group: api-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch: { }
   push:
     branches:
       - "main"
       - "v*-dev"
+    # NB(thxCode): these are the generator's INPUTS, which is a wider set than the API
+    # types alone: gen/api reads the webhook markers under pkg/*/webhooks, the external
+    # types it emits clients for come from the module graph (go.mod/go.sum), and the
+    # code-generator itself is vendored under staging/. pkg/kubeclients is an output
+    # rather than an input, and is listed so that hand-editing one is caught too.
     paths:
       - "api/**"
       - "gen/**"
+      - "pkg/*/webhooks/**"
       - "pkg/kubeclients/**"
+      - "staging/**"
+      - "go.mod"
+      - "go.sum"
       - "hack/**"
       - ".github/workflows/api.yml"
   pull_request:
@@ -34,7 +49,11 @@ on:
     paths:
       - "api/**"
       - "gen/**"
+      - "pkg/*/webhooks/**"
       - "pkg/kubeclients/**"
+      - "staging/**"
+      - "go.mod"
+      - "go.sum"
       - "hack/**"
       - ".github/workflows/api.yml"
 
@@ -63,8 +82,12 @@ jobs:
       - name: Setup Toolbox Cache
         uses: actions/cache@v4
         with:
-          # Cache the go-installed generator binaries.
-          key: api-toolbox-${{ runner.os }}
+          # Cache the go-installed generator binaries. The key carries a hash of the files
+          # that pin them, because hack/lib/*.sh validates a cached tool by whether the
+          # executable exists and never by its version: without the hash, bumping a pin
+          # leaves the old binary in place and this job would verify drift using the
+          # generator the pin just replaced.
+          key: api-toolbox-${{ runner.os }}-${{ hashFiles('gpustack.ai/gpustack/hack/lib/**', 'gpustack.ai/gpustack/go.mod') }}
           path: |-
             ${{ github.workspace }}/gpustack.ai/gpustack/.sbin
       - name: Generate
