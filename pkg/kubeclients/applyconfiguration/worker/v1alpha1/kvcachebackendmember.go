@@ -76,10 +76,12 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// each the one its own binary documents. A key that collides with one derived from a field
 	// above is refused at admission.
 	//
-	// EVERY VALUE HERE IS WORLD-READABLE. Each entry is rendered into the member container's argv
-	// as -D key=value, so it is visible to anyone who can read the Pod or its controller, and it
-	// stays visible for the life of the object. A credential does not belong here. This operator
-	// renders no flag that carries one, so this field is the only way one arrives.
+	// EVERY VALUE HERE IS WORLD-READABLE, on three paths and not one. It is stored verbatim on THIS
+	// object, which is cluster-scoped, so reading it needs no access to any workload; it is then
+	// rendered into the member container's argv as -D key=value, which exposes it again to anyone
+	// who can read the Pod or the DaemonSet carrying it. It stays readable for the life of the
+	// object. A credential does not belong here. This operator renders no flag that carries one, so
+	// this field is the only way one arrives.
 	ExtraArgs map[string]string `json:"extraArgs,omitempty"`
 	// Image overrides the backend's Image for this member group only. Left unset, the group runs
 	// the backend's Image.

@@ -322,10 +322,12 @@ type KVCacheBackendLeader struct {
 	// the derived ones. A key that collides with a flag rendered from a field above is refused
 	// at admission, because two sources for one flag make the rendered command ambiguous.
 	//
-	// EVERY VALUE HERE IS WORLD-READABLE. Each entry is rendered into the leader container's argv
-	// as -key=value, so it is visible to anyone who can read the Pod or its controller, and it
-	// stays visible for the life of the object. A credential does not belong here. This operator
-	// renders no flag that carries one, so this field is the only way one arrives.
+	// EVERY VALUE HERE IS WORLD-READABLE, on three paths and not one. It is stored verbatim on THIS
+	// object, which is cluster-scoped, so reading it needs no access to any workload; it is then
+	// rendered into the leader container's argv as -key=value, which exposes it again to anyone who
+	// can read the Pod or the Deployment carrying it. It stays readable for the life of the object.
+	// A credential does not belong here. This operator renders no flag that carries one, so this
+	// field is the only way one arrives.
 	ExtraArgs map[string]string `json:"extraArgs,omitempty" protobuf:"bytes,3,rep,name=extraArgs"`
 
 	// Offload turns on writing evicted keys to the members' local disk tier. It is the leader's
@@ -469,10 +471,12 @@ type KVCacheBackendMember struct {
 	// each the one its own binary documents. A key that collides with one derived from a field
 	// above is refused at admission.
 	//
-	// EVERY VALUE HERE IS WORLD-READABLE. Each entry is rendered into the member container's argv
-	// as -D key=value, so it is visible to anyone who can read the Pod or its controller, and it
-	// stays visible for the life of the object. A credential does not belong here. This operator
-	// renders no flag that carries one, so this field is the only way one arrives.
+	// EVERY VALUE HERE IS WORLD-READABLE, on three paths and not one. It is stored verbatim on THIS
+	// object, which is cluster-scoped, so reading it needs no access to any workload; it is then
+	// rendered into the member container's argv as -D key=value, which exposes it again to anyone
+	// who can read the Pod or the DaemonSet carrying it. It stays readable for the life of the
+	// object. A credential does not belong here. This operator renders no flag that carries one, so
+	// this field is the only way one arrives.
 	ExtraArgs map[string]string `json:"extraArgs,omitempty" protobuf:"bytes,5,rep,name=extraArgs"`
 
 	// Image overrides the backend's Image for this member group only. Left unset, the group runs

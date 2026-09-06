@@ -240,12 +240,10 @@ setting it produces a filter matching a device no host has. **Empty means "use e
 argv**, as `-D key=value`, not into an environment variable. `leader.extraArgs` does the same on the
 leader, as `-key=value`.
 
-⛔ **Either way the value is world-readable.** Anyone who can read the Pod or its controller can read
-it, and it stays there for the life of the object. **Do not put a credential in `extraArgs`.**
-
-> **Why there is no check** — the operator renders no flag that carries a credential, so this field
-> is the only way one arrives. Nothing refuses it at admission: a credential is not recognisable in a
-> `map[string]string`, and a guess wrong in either direction would be worse than this sentence.
+⛔ **Either way the value is world-readable, on three paths.** It is stored verbatim on the
+`KVCacheBackend` — which is cluster-scoped, so reading it needs no access to any workload — and it is
+rendered into the container's argv, readable again from the Pod and from the DaemonSet or Deployment
+carrying it. **Do not put a credential in `extraArgs`.** Nothing refuses one at admission.
 
 `spec.transport.protocol` accepts `Auto`, `TCP`, `RDMA`, `HIP` and `Ascend`, and defaults to `Auto`
 whether or not the `transport` block is written at all. **`Auto` resolves to `TCP`** — it is not a
@@ -361,14 +359,12 @@ Then create the directory on each node with that uid:
 $ install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
 ```
 
-There is **no switch that makes the operator do this for you**, and that is an open decision rather
-than a closed one.
+There is **no switch that makes the operator do this for you.**
 
-> **Why** — an init container that created and `chown`ed the path would have to name a single uid,
-> and the command above is the evidence against that: the uid is a property of the image, and
-> `members[].image` can differ per group. The other spelling, `chmod 0777`, opens the directory to
-> every process on the node. Both need a caveat attached, which is why neither ships. If you run one
-> uid across your whole backend, you know something this API does not — that is what would settle it.
+> **Why** — an init container would have to name a single uid, and the command above is the evidence
+> against that: the uid is a property of the image, and `members[].image` can differ per group. The
+> decision and the alternative that was weighed against it are recorded in
+> `specs/2026-09-05-kv-cache-media-and-scaling.md`.
 
 Five rules the path has to satisfy, all enforced at apply time:
 
