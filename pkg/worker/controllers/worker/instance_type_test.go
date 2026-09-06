@@ -803,6 +803,45 @@ func TestParseNodeFlavorCount(t *testing.T) {
 	}
 }
 
+// TestInstanceTypeReconciler_PublishesEntranceOutsideBothBranches pins WHERE the entrance
+// assignment sits, which is what gives the Instance controller's entrance requeue a terminus.
+//
+// computeStatus has two branches a status field can end up inside — `if acceleratable` and
+// `if !draining` — and status.entrance is deliberately outside both, so a CPU-only type and a
+// draining queue publish one too. Moving the assignment into either branch turns that requeue into
+// a busy-wait for whatever the branch excludes, so all four combinations are asserted here rather
+// than the one a happy-path fixture would cover.
+func TestInstanceTypeReconciler_PublishesEntranceOutsideBothBranches(t *testing.T) {
+	cases := []struct {
+		name          string
+		acceleratable bool
+		draining      bool
+	}{
+		{"cpu-only, queue open", false, false},
+		{"cpu-only, queue draining", false, true},
+		{"accelerated, queue open", true, false},
+		{"accelerated, queue draining", true, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			it := &workercore.InstanceType{
+				ObjectMeta: meta.ObjectMeta{Name: "pool"},
+				Spec:       workercore.InstanceTypeSpec{Acceleratable: c.acceleratable},
+			}
+			cq := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: "pool"}}
+			if c.draining {
+				cq.Spec.StopPolicy = ptr.To(kueue.HoldAndDrain)
+			}
+			cli := buildInstanceTypeClient(it, cq)
+			r := &InstanceTypeReconciler{Client: cli, APIReader: cli}
+
+			st := r.computeStatus(context.Background(), it, cq, false)
+			assert.NotEmpty(t, st.Entrance,
+				"every type publishes an entrance, whatever its shape and whatever its queue is doing")
+		})
+	}
+}
+
 func buildInstanceTypeClient(objs ...ctrlcli.Object) ctrlcli.Client {
 	return ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).

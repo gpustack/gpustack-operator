@@ -165,6 +165,56 @@ function gpustack::util::awk_inplace() {
   fi
 }
 
+# gpustack::util::go_module_version prints the module version stamped into a binary built by
+# `go install`, e.g. "v0.49.0" or "v1.3.3-0.20221024144010-f67b8970b736". It is how a tool with
+# no --version flag is still compared against its pin.
+#
+# Prints nothing when the name resolves to no executable, when that executable is not a Go binary,
+# or when it carries no build info. A caller reads the empty string as "does not match the pin",
+# which reinstalls -- the safe direction, since the alternative is running a generator whose
+# version nobody established.
+function gpustack::util::go_module_version() {
+  local path
+  path="$(command -v "${1}" 2>/dev/null)"
+  if [[ -z "${path}" ]]; then
+    return 0
+  fi
+  go version -m "${path}" 2>/dev/null | awk '$1 == "mod" { print $3; exit }'
+}
+
+# gpustack::util::go_module_version_is reports whether a go-installed binary matches its pin.
+# Two pin forms are in use in hack/lib: a tag, which go stamps verbatim, and a commit, which go
+# stamps as the trailing field of a pseudo-version.
+#
+# THE TWO SIDES OF A COMMIT PIN ARE ABBREVIATED TO DIFFERENT LENGTHS, and that is the whole
+# subtlety here. `hack/lib/cgo.sh` pins full 40-character hashes while go stamps 12 characters
+# (`v0.0.0-20220810182948-cef5ec7833f3`), so neither equality nor a `-<pin>` suffix test can ever
+# hold. Comparing them as abbreviations of one another is what they actually are.
+#
+# Both sides must be at least 7 characters, which is git's own floor for an unambiguous
+# abbreviation -- without it a truncated or empty pin would prefix-match every commit.
+function gpustack::util::go_module_version_is() {
+  local installed="${1}" pin="${2}" commit
+  if [[ -z "${installed}" ]] || [[ -z "${pin}" ]]; then
+    return 1
+  fi
+  if [[ "${installed}" == "${pin}" ]]; then
+    return 0
+  fi
+
+  commit="${installed##*-}"
+  if [[ "${commit}" == "${installed}" ]]; then
+    return 1
+  fi
+  if [[ ${#commit} -lt 7 ]] || [[ ${#pin} -lt 7 ]]; then
+    return 1
+  fi
+  if [[ "${pin}" == "${commit}"* ]] || [[ "${commit}" == "${pin}"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
 function gpustack::util::decode64() {
   if [[ $# -eq 0 ]]; then
     cat | base64 --decode

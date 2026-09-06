@@ -41,10 +41,35 @@ the source types above and regenerate.
    with `Could not make proto path relative … No such file or directory`. Run it from the **main
    checkout** instead. A symlink does not help (the Go toolchain canonicalizes it back to the real
    worktree path). To generate against uncommitted worktree changes without touching the shared main
-   checkout: WIP-commit the worktree, `git worktree add --detach /tmp/<x>/gpustack.ai/gpustack HEAD`,
-   run `make generate` there, copy the regenerated files back into the worktree, `git worktree remove
-   --force`, then `git reset` the WIP commit. (`go build`/`go test`/`make lint` all run fine from a
-   worktree — only `make generate` is path-sensitive.)
+   checkout, WIP-commit the worktree and generate from a throwaway worktree **under `$HOME`**:
+
+   ```bash
+   GEN="${HOME}/.gpustack-gen/gpustack.ai/gpustack"
+   git -C <repo> worktree prune
+   git -C <repo> worktree add --detach "$GEN" HEAD
+   real=$( cd "$GEN" && pwd -P )
+   case "$real" in */gpustack.ai/gpustack) ;; *) echo "REFUSING: $real"; exit 1 ;; esac
+   ( cd "$GEN" && make generate )
+   ```
+
+   Then copy the regenerated files back into the worktree, `git worktree remove --force`, and
+   `git reset` the WIP commit.
+
+   Two reasons the path is `$HOME` and not `/tmp`, and a third why the `case` line stays:
+
+   - On darwin `/tmp` is a symlink to `/private/tmp`, so `pwd -P` and the logical cwd disagree while
+     **both** end in the module import path. The suffix check passes and the run still dies with
+     `directory /private/tmp/…/gen/api outside main module or its selected dependencies`.
+   - `/private/tmp` is swept. Measured 2026-09-06: a worktree there was created, verified (suffix,
+     clean `git status`, expected `HEAD`) and was gone by the next command, listed as `prunable`.
+     There is no signal between verifying the path and losing it.
+   - A failed run is destructive, so the path has to be rejected by something that exits non-zero
+     **before** the generator starts. go-to-protobuf wipes and partially rewrites every
+     `generated.pb.go` / `generated.proto` before it fails on the path arithmetic — roughly 19k
+     deleted lines across `api/{v1,worker/v1,worker/v1alpha1}`, silent until the next `git diff`.
+
+   (`go build`/`go test`/`make lint` all run fine from a worktree — only `make generate` is
+   path-sensitive.)
 
 2. Review that the diff is confined to source edits + generated files:
 

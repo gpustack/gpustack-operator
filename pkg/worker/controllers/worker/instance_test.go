@@ -961,6 +961,69 @@ func TestInstanceReconciler_NoPublishedEntranceRequeues(t *testing.T) {
 		"no Pod may be created before the type publishes the queue it belongs to")
 }
 
+// TestInstanceReconciler_EntranceRequeueTerminates asserts the half the test above cannot see:
+// that the wait it pins has an end.
+//
+// Everything TestInstanceReconciler_NoPublishedEntranceRequeues looks at happens on the first
+// reconcile, and on the first reconcile a fail-safe and a busy-wait are the same observation. What
+// separates them is that InstanceTypeReconciler.computeStatus assigns status.entrance outside both
+// `if acceleratable` and `if !draining`, so the CPU-only type here reaches one. Move that
+// assignment under the accelerated branch and this test goes red on its second pass: no entrance is
+// ever published, no Pod is ever built, and the requeue has no exit.
+func TestInstanceReconciler_EntranceRequeueTerminates(t *testing.T) {
+	const typeName = "cpu-type"
+	ctx := context.Background()
+
+	inst := newReadyInstance("default", "inst", typeName)
+	// Sized, because this test reaches the Pod-building path the requeue guards.
+	inst.Spec.InstanceTemplate = workercore.InstanceTemplate{
+		Image: "img",
+		Resources: &workercore.InstanceResources{
+			CPU:          qty("1"),
+			RAM:          qty("2Gi"),
+			LocalStorage: qty("10Gi"),
+		},
+	}
+	inst.Spec.Volume = workercore.InstanceVolume{
+		Ephemeral: &workercore.InstanceEphemeralVolume{Capacity: qty("10Gi")},
+	}
+	it := &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: typeName},
+		Spec:       workercore.InstanceTypeSpec{Acceleratable: false},
+	}
+	cq := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: typeName}}
+	cli := buildInstanceClient(inst, it, cq)
+
+	// Pass one: nothing is published, so no Pod and a requeue.
+	res, err := reconcileInstance(t, cli, "default", "inst")
+	require.NoError(t, err)
+	require.Positive(t, res.RequeueAfter, "reconcile requeues while no entrance is published")
+
+	// The type controller publishes what ends the wait. It is computed here rather than asserted
+	// as a fixture constant, so the terminus this test claims is the one production produces.
+	coreIT := &workercore.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: typeName},
+		Spec:       workercore.InstanceTypeSpec{Acceleratable: false},
+	}
+	st := (&InstanceTypeReconciler{Client: cli, APIReader: cli}).computeStatus(ctx, coreIT, cq, false)
+	require.NotEmpty(t, st.Entrance,
+		"a CPU-only type reaches an entrance on the same pass an accelerated one does")
+
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: typeName}, it))
+	it.Status = st
+	require.NoError(t, cli.Update(ctx, it))
+
+	// Pass two: the wait is over. A Pod exists, and it carries the entrance that was published.
+	_, err = reconcileInstance(t, cli, "default", "inst")
+	require.NoError(t, err)
+
+	pod := &core.Pod{}
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, pod),
+		"the requeue ends once the type publishes an entrance")
+	assert.Equal(t, st.Entrance, pod.Labels[kueuectrlconst.QueueLabel],
+		"the Pod is queued at the entrance the type published")
+}
+
 // TestConvertPodFromInstance_QueueLabelIsThePublishedEntrance pins WHICH of the two spellings the
 // rendered Pod carries.
 //

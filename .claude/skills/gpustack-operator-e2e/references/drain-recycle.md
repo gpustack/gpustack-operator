@@ -3,6 +3,10 @@
 Background for CASE 2–6 of `specs/2026-06-29-instancetype-unified-pool-refactor.md`. Read this
 before running or debugging those cases.
 
+Every `F…` label below — F3a, F3b, F3d, F5d — is a feature row of that spec, and is only readable
+there. A bare `(F5d)` in this page names no document, so it is spelled out once here rather than
+left for each reader to guess at.
+
 Post-refactor shape the cases assume: unit specs are **Queue/InstanceType-managed** (not on the
 node); all three modes fold into **one isolated ClusterQueue per pool** (**Cohort removed** — there
 is no borrow topology and **no `schedule.gpustack.ai/drain` tombstone** anymore); `InstanceType` is a
