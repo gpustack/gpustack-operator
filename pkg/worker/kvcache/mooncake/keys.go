@@ -44,8 +44,14 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 	// Keys are the flag's own name without its leading dash, which is how extraArgs is keyed.
 	Derived: []string{
 		"allocation_strategy",
+		// Both halves of the disk tier's leader switch. They are derived from leader.offload, and
+		// reaching them through the hatch would put the tier's two sides out of step with the
+		// admission rule that keeps them paired — a leader offloading with no member declaring a
+		// tier, or the reverse, with nothing on the object saying so.
+		"enable_offload",
 		"enable_multi_tenants",
 		"metrics_port",
+		"offload_on_evict",
 		"pod_name",
 		"pod_namespace",
 		"rpc_port",
@@ -89,8 +95,9 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 //
 // These are CONFIG keys, not environment-variable names: the member's extraArgs is keyed the way
 // its own entrypoint documents, and the renderer maps each to its MOONCAKE_* variable. The tiering
-// knobs — offload, promotion, eviction — are deliberately absent, because reaching them is what the
-// escape hatch is for.
+// knobs this API does not render — promotion, eviction — are deliberately absent, because reaching
+// them is what the escape hatch is for. The disk tier's two are NOT among them any more: they come
+// from members[].localDisk now, so they are derived rather than reachable.
 //
 // There is no Forbidden entry here, and the rendering shape is the reason: a member's extraArgs
 // becomes a per-key override, so a key named after a config FILE would set a config key of that
@@ -112,11 +119,24 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 // environment and wins over it.
 var MemberExtraArgsRules = ExtraArgsRules{
 	Derived: []string{
+		// The disk tier's member half, rendered from members[].localDisk. Reserving them matters
+		// more here than on the leader, because of where a member's extraArgs lands in the
+		// precedence chain: a real flag beats a config key, and a config key beats the environment.
+		// These two are rendered as ENVIRONMENT, and extraArgs renders as a -D config key — so an
+		// entry here does not merely add a second source, it WINS. Left reachable, ssd_offload_path
+		// takes a host path that never went through the rules admission applies to the field
+		// (absolute, not root, no "..", clear of the RDMA device tree), and enable_ssd_offload
+		// switches the tier off while the leader goes on queueing offload work for it.
+		//
+		// The third key the renderer sets, the tier's size limit, needs no entry: the client's
+		// config object has no field of that name, so a -D would set a key nothing reads.
+		"enable_ssd_offload",
 		"global_segment_size",
 		"local_buffer_size",
 		"local_hostname",
 		"master_server_address",
 		"metadata_server",
 		"protocol",
+		"ssd_offload_path",
 	},
 }

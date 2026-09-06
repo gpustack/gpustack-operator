@@ -38,6 +38,11 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// the derived ones. A key that collides with a flag rendered from a field above is refused
 	// at admission, because two sources for one flag make the rendered command ambiguous.
 	ExtraArgs map[string]string `json:"extraArgs,omitempty"`
+	// Offload turns on writing evicted keys to the members' local disk tier. It is the leader's
+	// half of a pair: the other half is members[].localDisk, which says where on each node those
+	// bytes go, and admission refuses either half alone because the store degrades on both
+	// mismatches without reporting either.
+	Offload *KVCacheBackendLeaderOffloadApplyConfiguration `json:"offload,omitempty"`
 }
 
 // KVCacheBackendLeaderApplyConfiguration constructs a declarative configuration of the KVCacheBackendLeader type for use with
@@ -81,5 +86,13 @@ func (b *KVCacheBackendLeaderApplyConfiguration) WithExtraArgs(entries map[strin
 	for k, v := range entries {
 		b.ExtraArgs[k] = v
 	}
+	return b
+}
+
+// WithOffload sets the Offload field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Offload field is set to the value of the last call.
+func (b *KVCacheBackendLeaderApplyConfiguration) WithOffload(value *KVCacheBackendLeaderOffloadApplyConfiguration) *KVCacheBackendLeaderApplyConfiguration {
+	b.Offload = value
 	return b
 }

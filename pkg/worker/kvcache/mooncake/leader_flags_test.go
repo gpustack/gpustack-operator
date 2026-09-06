@@ -96,12 +96,15 @@ func TestRenderLeaderFlags(t *testing.T) {
 			},
 		},
 		{
+			// The keys here are offload TUNING knobs, which stay on the hatch. The tier's own
+			// switch became a field and is refused here at admission, so a case setting it would
+			// describe an object no API server would accept.
 			name: "extraArgs come last, in key order",
 			leader: workercore.KVCacheBackendLeader{
 				AllocationStrategy: "FreeRatioFirst",
 				ExtraArgs: map[string]string{
 					"offload_cap_ratio": "0.5",
-					"enable_offload":    "true",
+					"promotion_on_hit":  "true",
 					"client_ttl":        "30",
 				},
 			},
@@ -112,8 +115,74 @@ func TestRenderLeaderFlags(t *testing.T) {
 				"-pod_name=$(KUBERNETES_POD_NAME)",
 				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
 				"-client_ttl=30",
-				"-enable_offload=true",
 				"-offload_cap_ratio=0.5",
+				"-promotion_on_hit=true",
+			},
+		},
+		{
+			name: "the disk tier's leader half",
+			leader: workercore.KVCacheBackendLeader{
+				AllocationStrategy: "FreeRatioFirst",
+				Offload:            &workercore.KVCacheBackendLeaderOffload{Enabled: true},
+			},
+			want: []string{
+				"-rpc_port=50051",
+				"-metrics_port=9003",
+				"-allocation_strategy=free_ratio_first",
+				"-enable_offload=true",
+				"-pod_name=$(KUBERNETES_POD_NAME)",
+				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
+			},
+		},
+		{
+			name: "the disk tier deferring its writes to eviction time",
+			leader: workercore.KVCacheBackendLeader{
+				AllocationStrategy: "FreeRatioFirst",
+				Offload: &workercore.KVCacheBackendLeaderOffload{
+					Enabled: true,
+					OnEvict: true,
+				},
+			},
+			want: []string{
+				"-rpc_port=50051",
+				"-metrics_port=9003",
+				"-allocation_strategy=free_ratio_first",
+				"-enable_offload=true",
+				"-offload_on_evict=true",
+				"-pod_name=$(KUBERNETES_POD_NAME)",
+				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
+			},
+		},
+		{
+			// Admission refuses this pairing, and the renderer drops it too rather than emitting a
+			// flag the artifact ands away. Belt and braces on purpose: alone it would be accepted,
+			// echoed back in the startup log, and do nothing — the exact shape of a setting that
+			// reads as taken and is not.
+			name: "onEvict without its switch renders neither flag",
+			leader: workercore.KVCacheBackendLeader{
+				AllocationStrategy: "FreeRatioFirst",
+				Offload:            &workercore.KVCacheBackendLeaderOffload{OnEvict: true},
+			},
+			want: []string{
+				"-rpc_port=50051",
+				"-metrics_port=9003",
+				"-allocation_strategy=free_ratio_first",
+				"-pod_name=$(KUBERNETES_POD_NAME)",
+				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
+			},
+		},
+		{
+			name: "an offload block that asks for nothing renders nothing",
+			leader: workercore.KVCacheBackendLeader{
+				AllocationStrategy: "FreeRatioFirst",
+				Offload:            &workercore.KVCacheBackendLeaderOffload{},
+			},
+			want: []string{
+				"-rpc_port=50051",
+				"-metrics_port=9003",
+				"-allocation_strategy=free_ratio_first",
+				"-pod_name=$(KUBERNETES_POD_NAME)",
+				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
 			},
 		},
 	}
@@ -157,6 +226,11 @@ func TestRenderLeaderFlags_OmitsWhatThisScopeDoesNotRun(t *testing.T) {
 		"-http_metadata_server_port",
 		"-cluster_id",
 		"-port",
+		// The disk tier's two flags. A backend that never declared a tier must not carry them:
+		// -enable_offload alone makes the leader queue offload work for members that registered no
+		// local disk segment, which its own guard then drops with nothing on the object saying so.
+		"-enable_offload",
+		"-offload_on_evict",
 	}
 
 	got := strings.Join(RenderLeaderFlags(workercore.KVCacheBackendLeader{

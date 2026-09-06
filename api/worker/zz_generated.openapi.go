@@ -107,10 +107,13 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.KVCacheBackendEndpoint{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_KVCacheBackendEndpoint(ref),
 		v1alpha1.KVCacheBackendExternal{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_KVCacheBackendExternal(ref),
 		v1alpha1.KVCacheBackendLeader{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref),
+		v1alpha1.KVCacheBackendLeaderOffload{}.OpenAPIModelName():            schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderOffload(ref),
 		v1alpha1.KVCacheBackendList{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_KVCacheBackendList(ref),
 		v1alpha1.KVCacheBackendManaged{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_KVCacheBackendManaged(ref),
 		v1alpha1.KVCacheBackendMember{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref),
+		v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName():          schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberLocalDisk(ref),
 		v1alpha1.KVCacheBackendMemberStatus{}.OpenAPIModelName():             schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberStatus(ref),
+		v1alpha1.KVCacheBackendScaleIn{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_KVCacheBackendScaleIn(ref),
 		v1alpha1.KVCacheBackendSpec{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_KVCacheBackendSpec(ref),
 		v1alpha1.KVCacheBackendStatus{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_KVCacheBackendStatus(ref),
 		v1alpha1.KVCacheBackendTransport{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_KVCacheBackendTransport(ref),
@@ -5310,6 +5313,41 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref common.Referen
 							},
 						},
 					},
+					"offload": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Offload turns on writing evicted keys to the members' local disk tier. It is the leader's half of a pair: the other half is members[].localDisk, which says where on each node those bytes go, and admission refuses either half alone because the store degrades on both mismatches without reporting either.",
+							Ref:         ref(v1alpha1.KVCacheBackendLeaderOffload{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.KVCacheBackendLeaderOffload{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderOffload(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCacheBackendLeaderOffload turns the local disk tier on, leader side.\n\nBoth settings are the leader's, and Enabled gates the feature outright: the store ANDs its eviction-time and promotion behavior with it, and every offload entry point returns early without it. A tier configured on the member alone is inert, which is why admission requires the two halves together rather than letting one render on its own.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"enabled": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Enabled turns on offloading to the members' local disks.\n\nA plain bool, not a pointer, because unset and false mean the same thing: no offloading. Unset renders NO flag rather than an explicit false, so a backend that never asked for this runs the command line it ran before the field existed.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"onEvict": {
+						SchemaProps: spec.SchemaProps{
+							Description: "OnEvict defers the write to disk from the moment a key is stored to the moment it is evicted, so a key that is never evicted is never written to disk.\n\nIt REQUIRES Enabled. The store ANDs the two, so setting this alone is accepted, echoed back in the leader's own startup log, and then does nothing — which is why admission refuses it rather than rendering a flag that reads as taken.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
 				},
 			},
 		},
@@ -5386,8 +5424,9 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendManaged(ref common.Refere
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Members are the groups of store members. Each entry selects nodes and names the medium those nodes contribute, so a hot DRAM tier and a cold filesystem tier are expressible in the shape. This scope reconciles exactly one group and the webhook refuses a second, naming the tiering follow-on: a two-group manifest is schema-valid and admission-refused rather than half-reconciled.",
+							Description: "Members are the groups of store members. Each entry selects nodes, names the medium those nodes contribute, and may add a local disk tier on the same nodes.\n\nA group's POSITION in this list is its identity: the rendered DaemonSet's name and its immutable selector labels are derived from it, and so is the port that group's members serve their HTTP API on. Reordering entries, or removing one ahead of others, therefore redefines every position after it — the members there are rebuilt against a different group's spec, and their cache goes with them.\n\nThe cap of 32 is a SAFETY BOUND, not a statement about how many groups are useful. The port derivation would stay valid to 57455; what makes 32 the right place to stop is that the shapes this list is for — a hot and a cold tier, or one group per kind of hardware — are a handful, while an unbounded list can render a port outside the valid range with nothing reporting it.",
 							MinItems:    ptr.To[int64](1),
+							MaxItems:    ptr.To[int64](32),
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -5399,12 +5438,18 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendManaged(ref common.Refere
 							},
 						},
 					},
+					"scaleIn": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ScaleIn is what a member does on its way out. Left unset, a member is stopped the way any Pod is: it gets SIGTERM and the time its own shutdown needs, and nothing waits for the readers of what it held.",
+							Ref:         ref(v1alpha1.KVCacheBackendScaleIn{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"leader", "members"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.KVCacheBackendLeader{}.OpenAPIModelName(), v1alpha1.KVCacheBackendMember{}.OpenAPIModelName()},
+			v1alpha1.KVCacheBackendLeader{}.OpenAPIModelName(), v1alpha1.KVCacheBackendMember{}.OpenAPIModelName(), v1alpha1.KVCacheBackendScaleIn{}.OpenAPIModelName()},
 	}
 }
 
@@ -5433,7 +5478,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 					},
 					"medium": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Medium is what this member group physically contributes. DFS covers NFS and 3FS, which are media rather than backend implementations.\n\nThe enum carries all five because all five are media the store itself supports, and the shape a tiered backend will need must not change later. Only \"DRAM\" is RECONCILED here: the other four additionally need the leader's file or DAX flags and a mount on the member, and nothing renders those yet, so admission refuses them rather than starting a member that would quietly hold its segment in memory under a name that says otherwise.",
+							Description: "Medium is what the SEGMENT this member group mounts is made of. One value: host memory.\n\nIt is an identity rather than a choice, which is why the field survives with a single value exactly as spec.type does: the object states what the group contributes, so a second medium widens this enum instead of being inferred from a field that is not there.\n\nAn earlier shape offered five values, and four of them named things that are not member groups at all. A local disk is not a group of its own — the leader routes an offload task to the client holding the key's memory replica, so a group with no memory segment never receives one — and it is declared in the localDisk field below, on the group that does hold the memory. NVMe-oF is a target coordinate registered once, with no node affinity and no Pod. A DAX device and a distributed filesystem are configured on the leader's own process, not on any member. Each is reachable, and none of them through this field.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -5475,8 +5520,45 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 							Format:      "",
 						},
 					},
+					"localDisk": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LocalDisk declares a directory on the nodes this group already selects and points the store client's offload keys at it. Left unset, the group is memory only.\n\nWHAT IS AND IS NOT ESTABLISHED. Setting this is observed to make the leader accept a local disk segment from the member, publish the declared capacity, and run eviction — and THIS PROJECT HAS NOT OBSERVED DATA ACTUALLY REACHING THE TIER in any environment. Filling a member's memory segment under a low watermark, the leader reported objects \"deferred for disk offload\" while the tier stayed empty, in both configurations this API can render. The cause is not established and this is not a claim about the store in general.\n\nSo before relying on the tier, check the one figure that answers the question: the leader's own master_allocated_file_size_bytes is bytes actually written, and reads 0 for a tier that holds nothing while every other signal looks healthy. status.capacity reports the declared CAPACITY and will not show this.\n\nIt is a LAYER on this group rather than a group of its own, and that is the store's shape rather than a simplification here: the leader routes an offload task to the client that owns the key's memory replica, so a member holding no memory segment is never chosen. Such a member would still report its disk capacity to the leader, so the backend would show a cold tier of several terabytes that never takes a byte.",
+							Ref:         ref(v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"nodeSelector", "medium", "capacityPerMember"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberLocalDisk(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCacheBackendMemberLocalDisk is the local SSD tier this member group's nodes contribute.\n\nIt is the member's half of a pair; the leader's half is leader.offload, and admission refuses either half alone. Set on its own, the leader never enqueues an offload task and the disk stays empty while the member reports its capacity, which is a tier that reads as present and is not.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"path": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Path is the directory on each selected node that holds this tier. It is mounted into the member container from the host at the same location.\n\nIt is REQUIRED and has no default. The store defaults it to a path of its own, and choosing a host directory on somebody else's nodes is not a default this operator may pick: the wrong one fills a filesystem that nothing in Kubernetes accounts for.",
+							Default:     "",
+							MaxLength:   ptr.To[int64](4096),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"capacity": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Capacity caps what this tier stores. Left unset, the store's own ceiling applies and nothing is rendered, so a ceiling that moves upstream is a change to investigate rather than one this API silently restated.\n\nIt is NOT counted into the Pod's resource requests, unlike CapacityPerMember. The tier is a host directory, which is outside the kubelet's ephemeral-storage accounting entirely — a request against it would reserve a figure nothing polices and would then keep the member off the very node that has the disk. Watching that filesystem is the operator's, and the documentation says so.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"path"},
 			},
 		},
 		Dependencies: []string{
@@ -5529,6 +5611,28 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberStatus(ref common.R
 					},
 				},
 				Required: []string{"segmentName"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCacheBackendScaleIn(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCacheBackendScaleIn is what a member does on its way out.\n\nIt carries a duration and NOT a policy enum. The other policy a draft of this API carried — migrating a member's data before it leaves — needs the store's drain job API, which is stateful orchestration this scope does not enter and which silently covers only two of the store's five replica types. So a policy field would ship with one value, which is a knob nobody can turn. It arrives when there are two; widening an enum is not a breaking change.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"gracePeriodSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "GracePeriodSeconds is how long a departing member holds its local disk tier open after deregistering it with the leader, so offload reads already in flight finish there rather than failing.\n\nIt reaches ONLY the disk tier. The memory segment is still dropped rather than drained, and not for want of a verb: the member's own API takes a graceful unmount with a grace period, but it requires the segment ids, no route returns a client its own ids, and the name is not derivable because the leader appends a fresh port on every start.\n\nThe Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so the kubelet cannot kill the container in the middle of the wait this configures.\n\nA plain int32 and not a pointer: unset and zero mean the same thing here. Zero still deregisters the tier, it just does not wait afterwards, which is what a member with no grace configured should do.\n\nThe upper bound is the entrypoint's own. It refuses a larger value with HTTP 400, so a manifest above it would render a shutdown hook that fails every time it runs.\n\nSETTING THIS DOES NOT PROTECT THE SAME EDIT THAT SHRINKS THE GROUP. The value is rendered into the member's Pod, and a Pod runs the template it was CREATED from — so a departing member leaves with whatever grace it started with, and only its replacements carry the new one. An apply that raises the grace and narrows nodeSelector at once therefore drains nothing.\n\nTo make a grace apply to a shrink, do it in two steps: change only this field and wait for the members to be recreated with it (their pod-spec-hash annotation moves), then narrow the selector or remove the group.",
+							Minimum:     ptr.To[float64](0),
+							Maximum:     ptr.To[float64](3600),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
 			},
 		},
 	}

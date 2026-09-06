@@ -2362,6 +2362,21 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																	Description: "MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index\nbehind it. Off, every request falls into one default tenant and the index degrades to a plain\nkey hash, so two callers using different tenant names read each other's cache.\nIt is a FIELD rather than an extraArgs entry because another API validates against it: a\nKVCachePool is refused when its backend has no ledger to write quota into. A webhook reading\nan unschema'd string — \"true\", \"1\", \"True\" — would be judging a value domain that belongs to\nwhoever typed it.\nA plain bool, not a pointer, because unset and false mean the same thing here: no ledger.\nUnset renders NO flag rather than an explicit false, so a backend that never asked for this\nruns the command line it ran before the field existed.",
 																	Type:        "boolean",
 																},
+																"offload": {
+																	Description: "Offload turns on writing evicted keys to the members' local disk tier. It is the leader's\nhalf of a pair: the other half is members[].localDisk, which says where on each node those\nbytes go, and admission refuses either half alone because the store degrades on both\nmismatches without reporting either.",
+																	Type:        "object",
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"enabled": {
+																			Description: "Enabled turns on offloading to the members' local disks.\nA plain bool, not a pointer, because unset and false mean the same thing: no offloading.\nUnset renders NO flag rather than an explicit false, so a backend that never asked for this\nruns the command line it ran before the field existed.",
+																			Type:        "boolean",
+																		},
+																		"onEvict": {
+																			Description: "OnEvict defers the write to disk from the moment a key is stored to the moment it is\nevicted, so a key that is never evicted is never written to disk.\nIt REQUIRES Enabled. The store ANDs the two, so setting this alone is accepted, echoed back\nin the leader's own startup log, and then does nothing — which is why admission refuses it\nrather than rendering a flag that reads as taken.",
+																			Type:        "boolean",
+																		},
+																	},
+																	Nullable: true,
+																},
 																"replicas": {
 																	Description: "Replicas is how many leader processes run. One, and only one, in this scope: electing a\nleader among several needs a backend store this scope does not enter, and the webhook\nrefuses anything else while naming that follow-on rather than silently running one anyway.",
 																	Type:        "integer",
@@ -2375,8 +2390,9 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 															},
 														},
 														"members": {
-															Description: "Members are the groups of store members. Each entry selects nodes and names the medium\nthose nodes contribute, so a hot DRAM tier and a cold filesystem tier are expressible in\nthe shape. This scope reconciles exactly one group and the webhook refuses a second,\nnaming the tiering follow-on: a two-group manifest is schema-valid and admission-refused\nrather than half-reconciled.",
+															Description: "Members are the groups of store members. Each entry selects nodes, names the medium those\nnodes contribute, and may add a local disk tier on the same nodes.\nA group's POSITION in this list is its identity: the rendered DaemonSet's name and its\nimmutable selector labels are derived from it, and so is the port that group's members serve\ntheir HTTP API on. Reordering entries, or removing one ahead of others, therefore redefines\nevery position after it — the members there are rebuilt against a different group's spec, and\ntheir cache goes with them.\nThe cap of 32 is a SAFETY BOUND, not a statement about how many groups are useful. The port\nderivation would stay valid to 57455; what makes 32 the right place to stop is that the shapes\nthis list is for — a hot and a cold tier, or one group per kind of hardware — are a handful,\nwhile an unbounded list can render a port outside the valid range with nothing reporting it.",
 															Type:        "array",
+															MaxItems:    ptr.To[int64](32),
 															MinItems:    ptr.To[int64](1),
 															Items: &v1.JSONSchemaPropsOrArray{
 																Schema: &v1.JSONSchemaProps{
@@ -2429,24 +2445,40 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																			},
 																			XIntOrString: true,
 																		},
+																		"localDisk": {
+																			Description: "LocalDisk declares a directory on the nodes this group already selects and points the store\nclient's offload keys at it. Left unset, the group is memory only.\nWHAT IS AND IS NOT ESTABLISHED. Setting this is observed to make the leader accept a local\ndisk segment from the member, publish the declared capacity, and run eviction — and THIS\nPROJECT HAS NOT OBSERVED DATA ACTUALLY REACHING THE TIER in any environment. Filling a\nmember's memory segment under a low watermark, the leader reported objects \"deferred for disk\noffload\" while the tier stayed empty, in both configurations this API can render. The cause is\nnot established and this is not a claim about the store in general.\nSo before relying on the tier, check the one figure that answers the question: the leader's\nown master_allocated_file_size_bytes is bytes actually written, and reads 0 for a tier that\nholds nothing while every other signal looks healthy. status.capacity reports the declared\nCAPACITY and will not show this.\nIt is a LAYER on this group rather than a group of its own, and that is the store's shape\nrather than a simplification here: the leader routes an offload task to the client that owns\nthe key's memory replica, so a member holding no memory segment is never chosen. Such a\nmember would still report its disk capacity to the leader, so the backend would show a cold\ntier of several terabytes that never takes a byte.",
+																			Type:        "object",
+																			Required: []string{
+																				"path",
+																			},
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"capacity": {
+																					Description: "Capacity caps what this tier stores. Left unset, the store's own ceiling applies and nothing\nis rendered, so a ceiling that moves upstream is a change to investigate rather than one\nthis API silently restated.\nIt is NOT counted into the Pod's resource requests, unlike CapacityPerMember. The tier is a\nhost directory, which is outside the kubelet's ephemeral-storage accounting entirely — a\nrequest against it would reserve a figure nothing polices and would then keep the member off\nthe very node that has the disk. Watching that filesystem is the operator's, and the\ndocumentation says so.",
+																					Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																					AnyOf: []v1.JSONSchemaProps{
+																						{
+																							Type: "integer",
+																						},
+																						{
+																							Type: "string",
+																						},
+																					},
+																					XIntOrString: true,
+																				},
+																				"path": {
+																					Description: "Path is the directory on each selected node that holds this tier. It is mounted into the\nmember container from the host at the same location.\nIt is REQUIRED and has no default. The store defaults it to a path of its own, and choosing\na host directory on somebody else's nodes is not a default this operator may pick: the wrong\none fills a filesystem that nothing in Kubernetes accounts for.",
+																					Type:        "string",
+																					MaxLength:   ptr.To[int64](4096),
+																				},
+																			},
+																			Nullable: true,
+																		},
 																		"medium": {
-																			Description: "Medium is what this member group physically contributes. DFS covers NFS and 3FS, which\nare media rather than backend implementations.\nThe enum carries all five because all five are media the store itself supports, and the\nshape a tiered backend will need must not change later. Only \"DRAM\" is RECONCILED here:\nthe other four additionally need the leader's file or DAX flags and a mount on the member,\nand nothing renders those yet, so admission refuses them rather than starting a member that\nwould quietly hold its segment in memory under a name that says otherwise.",
+																			Description: "Medium is what the SEGMENT this member group mounts is made of. One value: host memory.\nIt is an identity rather than a choice, which is why the field survives with a single value\nexactly as spec.type does: the object states what the group contributes, so a second medium\nwidens this enum instead of being inferred from a field that is not there.\nAn earlier shape offered five values, and four of them named things that are not member\ngroups at all. A local disk is not a group of its own — the leader routes an offload task to\nthe client holding the key's memory replica, so a group with no memory segment never\nreceives one — and it is declared in the localDisk field below, on the group that does hold\nthe memory. NVMe-oF is a target coordinate registered once, with no node affinity and no\nPod. A DAX device and a distributed filesystem are configured on the leader's own process,\nnot on any member. Each is reachable, and none of them through this field.",
 																			Type:        "string",
 																			Enum: []v1.JSON{
 																				{
 																					Raw: []byte(`"DRAM"`),
-																				},
-																				{
-																					Raw: []byte(`"LocalDisk"`),
-																				},
-																				{
-																					Raw: []byte(`"NoF"`),
-																				},
-																				{
-																					Raw: []byte(`"CXL"`),
-																				},
-																				{
-																					Raw: []byte(`"DFS"`),
 																				},
 																			},
 																		},
@@ -2466,6 +2498,20 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 															},
 															Nullable:  true,
 															XListType: ptr.To[string]("atomic"),
+														},
+														"scaleIn": {
+															Description: "ScaleIn is what a member does on its way out. Left unset, a member is stopped the way any\nPod is: it gets SIGTERM and the time its own shutdown needs, and nothing waits for the\nreaders of what it held.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"gracePeriodSeconds": {
+																	Description: "GracePeriodSeconds is how long a departing member holds its local disk tier open after\nderegistering it with the leader, so offload reads already in flight finish there rather\nthan failing.\nIt reaches ONLY the disk tier. The memory segment is still dropped rather than drained, and\nnot for want of a verb: the member's own API takes a graceful unmount with a grace period,\nbut it requires the segment ids, no route returns a client its own ids, and the name is not\nderivable because the leader appends a fresh port on every start.\nThe Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so\nthe kubelet cannot kill the container in the middle of the wait this configures.\nA plain int32 and not a pointer: unset and zero mean the same thing here. Zero still\nderegisters the tier, it just does not wait afterwards, which is what a member with no grace\nconfigured should do.\nThe upper bound is the entrypoint's own. It refuses a larger value with HTTP 400, so a\nmanifest above it would render a shutdown hook that fails every time it runs.\nSETTING THIS DOES NOT PROTECT THE SAME EDIT THAT SHRINKS THE GROUP. The value is rendered into\nthe member's Pod, and a Pod runs the template it was CREATED from — so a departing member\nleaves with whatever grace it started with, and only its replacements carry the new one. An\napply that raises the grace and narrows nodeSelector at once therefore drains nothing.\nTo make a grace apply to a shrink, do it in two steps: change only this field and wait for the\nmembers to be recreated with it (their pod-spec-hash annotation moves), then narrow the\nselector or remove the group.",
+																	Type:        "integer",
+																	Format:      "int32",
+																	Maximum:     ptr.To[float64](3600),
+																	Minimum:     ptr.To[float64](0),
+																},
+															},
+															Nullable: true,
 														},
 													},
 													Nullable: true,

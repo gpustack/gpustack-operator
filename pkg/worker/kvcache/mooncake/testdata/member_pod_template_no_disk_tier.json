@@ -1,0 +1,74 @@
+{
+  "metadata": {
+    "labels": {
+      "app.kubernetes.io/component": "member-0",
+      "app.kubernetes.io/instance": "mooncake-dram",
+      "app.kubernetes.io/name": "kv-cache-backend",
+      "app.kubernetes.io/part-of": "gpustack-operator-worker"
+    },
+    "annotations": {
+      "kvcache.gpustack.ai/pod-spec-hash": "e4e1f6a566146eef79f1d75ad3d3b4a61c9fd02536034f722928b51af75c21fd"
+    }
+  },
+  "spec": {
+    "containers": [
+      {
+        "name": "member",
+        "image": "mooncake:v0.3.13",
+        "command": [
+          "mc_store_rest_server"
+        ],
+        "env": [
+          {
+            "name": "MOONCAKE_TE_META_DATA_SERVER",
+            "value": "P2PHANDSHAKE"
+          },
+          {
+            "name": "MOONCAKE_MASTER",
+            "value": "mooncake-dram-leader.gpustack-system.svc:50051"
+          },
+          {
+            "name": "MOONCAKE_PROTOCOL",
+            "value": "tcp"
+          },
+          {
+            "name": "MOONCAKE_LOCAL_HOSTNAME",
+            "valueFrom": {
+              "fieldRef": {
+                "fieldPath": "status.podIP"
+              }
+            }
+          },
+          {
+            "name": "MOONCAKE_GLOBAL_SEGMENT_SIZE",
+            "value": "536870912000"
+          },
+          {
+            "name": "MOONCAKE_LOCAL_BUFFER_SIZE",
+            "value": "4294967296"
+          }
+        ],
+        "resources": {
+          "requests": {
+            "memory": "504Gi"
+          }
+        },
+        "readinessProbe": {
+          "tcpSocket": {
+            "port": 8080
+          },
+          "periodSeconds": 5,
+          "failureThreshold": 3
+        },
+        "terminationMessagePolicy": "FallbackToLogsOnError",
+        "imagePullPolicy": "IfNotPresent"
+      }
+    ],
+    "terminationGracePeriodSeconds": 60,
+    "dnsPolicy": "ClusterFirst",
+    "nodeSelector": {
+      "kvcache-dram": "true"
+    },
+    "automountServiceAccountToken": false
+  }
+}

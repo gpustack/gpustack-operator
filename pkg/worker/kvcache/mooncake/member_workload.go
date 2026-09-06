@@ -32,29 +32,64 @@ const (
 	// handlers and its stop() closes the store, so it unmounts on SIGTERM by itself.
 	memberEntrypoint = "mc_store_rest_server"
 
-	// memberRESTPort is where the entrypoint serves its HTTP API. It is the entrypoint's own
-	// default and nothing here can move it: the renderer passes no --port, and an ExtraArgs entry
-	// renders as a -D config key, which is a different setting.
-	memberRESTPort int32 = 8080
+	// memberRESTPortBase is where the FIRST group's entrypoint serves its HTTP API, and it is the
+	// entrypoint's own default. Later groups offset from it; see memberRESTPort for why.
+	memberRESTPortBase int32 = 8080
 
-	// rdmaDevicePath is the device tree an RDMA member needs from its host.
-	rdmaDevicePath = "/dev/infiniband"
+	// RDMADevicePath is the device tree an RDMA member needs from its host.
+	//
+	// Exported because admission has to refuse a disk tier that would land on top of it: the two
+	// mounts are rendered into one container, and a collision there is resolved by the kubelet
+	// rather than reported by this operator.
+	RDMADevicePath = "/dev/infiniband"
 
 	// MemberPodSpecHashAnnotation carries the fingerprint of a member's pod template, minus its node
 	// selector. It rides on the template, so every Pod the DaemonSet creates inherits it and the
 	// reconciler can tell a Pod built from the current spec from one built before a change.
 	MemberPodSpecHashAnnotation = "kvcache." + systemname.LabelPrefix + "pod-spec-hash"
 
-	// memberTerminationGracePeriodSeconds is how long the kubelet waits after SIGTERM before it
-	// kills the member.
+	// memberShutdownSeconds is the time the entrypoint needs for its own shutdown: closing its
+	// store and letting the leader see the client go, rather than being cut off mid-shutdown and
+	// leaving the leader to time the client out after its client_ttl instead.
 	//
-	// It is NOT a drain window — nothing reachable from a Pod's shutdown can drain a segment
-	// (F10). It is the time the entrypoint needs to close its store and let the leader see the
-	// client go, rather than being cut off mid-shutdown and leaving the leader to time the client
-	// out after its client_ttl instead.
-	memberTerminationGracePeriodSeconds int64 = 60
+	// It is NOT a drain window for the memory segment. Nothing reachable from a Pod's shutdown can
+	// drain one: the member's own API takes a graceful unmount with a grace period, but it wants
+	// the segment ids and no route returns a client its own.
+	//
+	// A group with a local disk tier adds its scale-in grace ON TOP of this, rather than sharing
+	// it, which is what keeps the kubelet from killing the container in the middle of a wait the
+	// spec asked for. See memberTerminationGracePeriodSeconds.
+	memberShutdownSeconds int64 = 60
+
 	// rdmaDeviceVolumeName names that mount.
 	rdmaDeviceVolumeName = "rdma-devices"
+
+	// memberLocalDiskVolumeName names the host directory holding a group's disk tier.
+	memberLocalDiskVolumeName = "local-disk"
+
+	// memberUnmountLocalDiskPath is the entrypoint's own route for deregistering this store's SSD
+	// tier before the process goes away. The master stops naming this store as the owner of its
+	// offloaded keys, so a reader gets a clean miss instead of a peer that is about to disappear,
+	// and the call then holds for the grace so offload reads already in flight finish here.
+	//
+	// It is the one thing a shutdown CAN drain, and it needs no segment id, which is exactly why
+	// the memory segment's counterpart is unreachable.
+	memberUnmountLocalDiskPath = "/api/unmount_local_disk"
+
+	// MemberMaxGracePeriodSeconds is the entrypoint's own ceiling on that call. Above it the
+	// handler answers 400, so a larger value would render a hook that fails every time it runs.
+	//
+	// It is exported because admission is what refuses it, and the rule belongs beside the route
+	// it protects rather than restated as a number in another package.
+	MemberMaxGracePeriodSeconds = 3600
+
+	// memberHookTimeoutMarginSeconds is how much longer than the grace the shutdown hook waits
+	// before giving up on its own request.
+	//
+	// It is deliberately much smaller than memberShutdownSeconds. The Pod's termination budget
+	// covers the hook AND the entrypoint's shutdown, in that order, so every second the hook spends
+	// past the grace is a second taken from the close that follows it.
+	memberHookTimeoutMarginSeconds int64 = 10
 )
 
 // The member's environment. Every key the client reads has a real named variable, so the whole
@@ -73,6 +108,16 @@ const (
 	memberEnvLocalHostname     = "MOONCAKE_LOCAL_HOSTNAME"
 	memberEnvGlobalSegmentSize = "MOONCAKE_GLOBAL_SEGMENT_SIZE"
 	memberEnvLocalBufferSize   = "MOONCAKE_LOCAL_BUFFER_SIZE"
+
+	// The local disk tier's three keys. The first two are the client's own enable_ssd_offload and
+	// ssd_offload_path; without both, the client registers no local disk segment and the leader's
+	// offload queue has nowhere to send it.
+	memberEnvOffloadEnabled = "MOONCAKE_OFFLOAD_ENABLED"
+	memberEnvOffloadPath    = "MOONCAKE_OFFLOAD_FILE_STORAGE_PATH"
+	// memberEnvOffloadSizeLimit caps what the tier stores. Left unrendered, the client's own
+	// ceiling applies, so a ceiling that moves upstream shows up as a change to investigate rather
+	// than one this renderer silently restated.
+	memberEnvOffloadSizeLimit = "MOONCAKE_OFFLOAD_TOTAL_SIZE_LIMIT_BYTES"
 )
 
 // memberProtocols maps this API's spelling of a transport onto the artifact's.
@@ -196,7 +241,7 @@ func RenderMemberDaemonSet(
 					// The group's selector is what places the members; the DaemonSet runs one on
 					// each node it matches, and widening it adds members without touching the rest.
 					NodeSelector:                  member.NodeSelector,
-					TerminationGracePeriodSeconds: ptr.To(memberTerminationGracePeriodSeconds),
+					TerminationGracePeriodSeconds: ptr.To(memberTerminationGracePeriodSeconds(kvcb, member)),
 					// Rendered explicitly even though it is the server's own default, because the
 					// RDMA path changes it. A field this renderer sets on one path and leaves to
 					// the server on the other cannot be converged in both directions: switching a
@@ -208,7 +253,7 @@ func RenderMemberDaemonSet(
 					AutomountServiceAccountToken: ptr.To(false),
 					ImagePullSecrets:             kvcb.Spec.ImagePullSecrets,
 					Containers: []core.Container{
-						memberContainerSpec(kvcb, member, image),
+						memberContainerSpec(kvcb, member, group, image),
 					},
 				},
 			},
@@ -216,6 +261,7 @@ func RenderMemberDaemonSet(
 	}
 
 	applyMemberFabric(ds, MemberProtocol(kvcb))
+	applyMemberLocalDisk(ds, kvcb, member, group)
 
 	// Stamped last, over a template that is otherwise complete. The fingerprint therefore covers
 	// the fabric fields applied just above, and — because it is computed from a copy with the node
@@ -239,6 +285,7 @@ func RenderMemberDaemonSet(
 func memberContainerSpec(
 	kvcb *workercore.KVCacheBackend,
 	member workercore.KVCacheBackendMember,
+	group int,
 	image string,
 ) core.Container {
 	return core.Container{
@@ -249,7 +296,7 @@ func memberContainerSpec(
 		// linker on stderr, which the default policy does not read.
 		TerminationMessagePolicy: core.TerminationMessageFallbackToLogsOnError,
 		Command:                  []string{memberEntrypoint},
-		Args:                     renderMemberOverrides(member),
+		Args:                     renderMemberArgs(member, group),
 		Env:                      renderMemberEnv(kvcb, member),
 		// NO data-plane containerPort, on any path. The transfer engine binds its ports at
 		// random — one observed run took 15002 and 15995, a second client 16566 and 16655, none of
@@ -263,7 +310,7 @@ func memberContainerSpec(
 		// GET without a key or a side effect.
 		ReadinessProbe: &core.Probe{
 			ProbeHandler: core.ProbeHandler{
-				TCPSocket: &core.TCPSocketAction{Port: intstr.FromInt32(memberRESTPort)},
+				TCPSocket: &core.TCPSocketAction{Port: intstr.FromInt32(memberRESTPort(group))},
 			},
 			PeriodSeconds:    5,
 			FailureThreshold: 3,
@@ -322,43 +369,98 @@ func renderMemberEnv(
 		})
 	}
 
+	if disk := member.LocalDisk; disk != nil {
+		// Both keys or neither. The client registers a local disk segment only when offloading is
+		// enabled AND it has somewhere to put the bytes, so a path without the switch, or a switch
+		// without a path, is a member that comes up holding no tier while the object says it has
+		// one.
+		env = append(env,
+			core.EnvVar{Name: memberEnvOffloadEnabled, Value: "true"},
+			core.EnvVar{Name: memberEnvOffloadPath, Value: disk.Path})
+
+		if size := disk.Capacity.Value(); size > 0 {
+			env = append(env, core.EnvVar{
+				Name:  memberEnvOffloadSizeLimit,
+				Value: strconv.FormatInt(size, 10),
+			})
+		}
+	}
+
 	return env
 }
 
-// renderMemberOverrides renders extraArgs as the entrypoint's own per-key override.
+// renderMemberArgs builds the member's argv: the REST port when it has to move, then extraArgs as
+// the entrypoint's own per-key override.
 //
-// It is "-D key=value" here and "-key=value" on the leader, because the two binaries accept
-// different things. The entrypoint applies these AFTER the environment and they win over it, which
-// is what makes the hatch useful for a key the renderer derives from a node-specific fact.
+// The override is "-D key=value" here and "-key=value" on the leader, because the two binaries
+// accept different things. The entrypoint applies these AFTER the environment and they win over it,
+// which is what makes the hatch useful for a key the renderer derives from a node-specific fact.
 //
 // A key the client's config object does not carry is IGNORED SILENTLY — the entrypoint guards the
 // assignment with hasattr and warns only when the "=" is missing. So a typo here costs a
 // configuration that never applied and never said so.
-func renderMemberOverrides(member workercore.KVCacheBackendMember) []string {
-	if len(member.ExtraArgs) == 0 {
-		return nil
+//
+// --port is a real flag on this entrypoint's parser rather than a config key, so it cannot be
+// reached through extraArgs — a "-D port=..." would set a config key of that name and the server
+// would keep listening where it was.
+func renderMemberArgs(member workercore.KVCacheBackendMember, group int) []string {
+	var args []string
+
+	// Rendered only where it has to MOVE the port, and the first group is not that place: the base
+	// is the entrypoint's own default, so passing it there would add an argument to every member
+	// running today, move the fingerprint, and delete and recreate all of them to tell each one to
+	// keep doing what it was already doing.
+	if port := memberRESTPort(group); port != memberRESTPortBase {
+		args = append(args, "--port", strconv.Itoa(int(port)))
 	}
 
 	// Sorted, so two renders of one spec are byte-identical and the DaemonSet does not churn.
-	args := make([]string, 0, len(member.ExtraArgs)*2)
 	for _, key := range slices.Sorted(maps.Keys(member.ExtraArgs)) {
 		args = append(args, "-D", fmt.Sprintf("%s=%s", key, member.ExtraArgs[key]))
 	}
 	return args
 }
 
+// memberRESTPort is the port a group's entrypoint serves its HTTP API on, and it is the ONE place
+// that decides it: the argv, the readiness probe and the preStop hook all call this, so they cannot
+// drift into naming different ports for the same container.
+//
+// The port is derived from the group's position because on the RDMA path the member holds the host's
+// network namespace, and the API binds 0.0.0.0. Two groups whose node selectors overlap therefore
+// place two host-network Pods on one node, and a single fixed port would let only the first bind:
+// the second would run, never pass its readiness probe, and report nothing about why. Admission
+// cannot refuse that pair instead, because whether two selectors ever meet depends on node labels it
+// does not have — the collision is real only at placement time, so the fix has to be that there is
+// no collision to have.
+//
+// Deriving from the position rather than allocating is what makes it stable: the position already
+// identifies a group everywhere else (its DaemonSet name and its selector labels), so a group's port
+// is as durable as its identity, and no state has to be kept to remember which port went where.
+//
+// Why the collision was SILENT is worth keeping, because it is what makes this worth deriving rather
+// than documenting: nothing here declares a containerPort or a hostPort. A hostPort would have been
+// caught by the scheduler, which treats it as a node-level resource and leaves the second Pod
+// Pending with the conflict named. hostNetwork plus a port the manifest never mentions is invisible
+// to that check — the Pod is placed, the process fails to bind, and the only evidence is a container
+// log. So the port cannot be allowed to collide in the first place.
+func memberRESTPort(group int) int32 {
+	return memberRESTPortBase + int32(group)
+}
+
 // memberRequests declares the member's claim so capacity planning can see it. A member that does not
 // fit stays Pending and the backend reads Degraded, which is the honest outcome — the alternative is
 // a member that overcommits the node it landed on.
+//
+// The claim is MEMORY and only memory, whatever else the group carries. A disk tier adds a host
+// directory, which is outside the kubelet's ephemeral-storage accounting entirely — that covers the
+// container filesystem, emptyDir volumes and logs, never a hostPath. Requesting against it would
+// reserve a figure nothing polices and would then keep the member off the very node that has the
+// disk. Watching that filesystem is the operator's, and the documentation says so.
 func memberRequests(member workercore.KVCacheBackendMember) core.ResourceList {
 	claim := member.CapacityPerMember.DeepCopy()
 	claim.Add(member.LocalBufferSize)
 
-	name := core.ResourceMemory
-	if member.Medium == "LocalDisk" {
-		name = core.ResourceEphemeralStorage
-	}
-	return core.ResourceList{name: claim}
+	return core.ResourceList{core.ResourceMemory: claim}
 }
 
 // applyMemberFabric grants what a fabric needs, and only to the path that needs it.
@@ -382,14 +484,14 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
 	podSpec.Volumes = append(podSpec.Volumes, core.Volume{
 		Name: rdmaDeviceVolumeName,
 		VolumeSource: core.VolumeSource{
-			HostPath: &core.HostPathVolumeSource{Path: rdmaDevicePath},
+			HostPath: &core.HostPathVolumeSource{Path: RDMADevicePath},
 		},
 	})
 
 	container := &podSpec.Containers[0]
 	container.VolumeMounts = append(container.VolumeMounts, core.VolumeMount{
 		Name:      rdmaDeviceVolumeName,
-		MountPath: rdmaDevicePath,
+		MountPath: RDMADevicePath,
 	})
 	container.SecurityContext = &core.SecurityContext{
 		Capabilities: &core.Capabilities{
@@ -400,43 +502,125 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
 	}
 }
 
-// memberFileBackedMedia are the media whose capacity the leader reports through its FILE families
-// rather than its memory ones.
+// memberTerminationGracePeriodSeconds is how long the kubelet waits after SIGTERM before it kills
+// the member.
 //
-// The split is the leader's own, not a taxonomy invented here: it keeps two independent pairs of
-// gauges — master_total_capacity_bytes / master_allocated_bytes for segments it holds in memory, and
-// master_total_file_capacity_bytes / master_allocated_file_size_bytes for segments backed by a file
-// — and a group read from the wrong pair reports another group's figures or a zero.
+// It is DERIVED from the scale-in grace rather than set beside it, and that is the whole mechanism
+// behind "the window always holds the grace": two independent fields could be set so that the
+// kubelet kills the container in the middle of a wait the spec asked for, and no amount of
+// validation makes that relationship true — it only makes it checkable. Derived, it cannot be
+// violated.
 //
-// Only DRAM is exercised end to end. The rest are classified by the flags the leader documents
-// for them: LocalDisk and DFS are two of its three file backends, NoF is block storage reached the
-// same way, and CXL is a DAX device the leader treats as memory. A run on any of the four is what
-// would turn these from classified into measured.
-var memberFileBackedMedia = map[string]bool{
-	"LocalDisk": true,
-	"NoF":       true,
-	"DFS":       true,
+// A group with no disk tier has nothing to wait for, so it keeps the entrypoint's own shutdown
+// budget and its Pod template does not move.
+func memberTerminationGracePeriodSeconds(
+	kvcb *workercore.KVCacheBackend, member workercore.KVCacheBackendMember,
+) int64 {
+	if member.LocalDisk == nil {
+		return memberShutdownSeconds
+	}
+	return int64(memberScaleInGraceSeconds(kvcb)) + memberShutdownSeconds
 }
 
-// MemberMediumIsFileBacked reports which pair of the leader's capacity gauges a group is read from.
-func MemberMediumIsFileBacked(medium string) bool {
-	return memberFileBackedMedia[medium]
+// memberScaleInGraceSeconds is the grace a departing member holds its disk tier open for.
+func memberScaleInGraceSeconds(kvcb *workercore.KVCacheBackend) int32 {
+	managed := kvcb.Spec.Connection.Managed
+	if managed == nil || managed.ScaleIn == nil {
+		return 0
+	}
+	return managed.ScaleIn.GracePeriodSeconds
 }
 
-// MemberMediumDRAM is the one medium this scope renders end to end.
-const MemberMediumDRAM = "DRAM"
-
-// MemberMediumIsReconciled reports whether anything here actually CONFIGURES a medium, which is a
-// narrower question than whether the schema accepts it.
+// applyMemberLocalDisk grants the group's disk tier: the host directory it lives on, and the hook
+// that deregisters it before the member goes away.
 //
-// The two are deliberately different. The enum carries all five media the store supports so that
-// a tiered backend does not have to change the shape later, but a member group only becomes a
-// running segment of the medium it names if something renders that medium's configuration — the
-// leader's file or DAX flags, and a mount on the member. Nothing renders them yet, so every medium
-// but this one is refused at admission. Were it accepted instead, the member would come up holding
-// its segment in DRAM while status read the file gauges, and the two would disagree in silence.
-func MemberMediumIsReconciled(medium string) bool {
-	return medium == MemberMediumDRAM
+// A group without one is left exactly as rendered, which is what keeps an existing backend's Pod
+// template — and therefore its fingerprint, and therefore its running members — untouched by this
+// feature.
+func applyMemberLocalDisk(
+	ds *apps.DaemonSet,
+	kvcb *workercore.KVCacheBackend,
+	member workercore.KVCacheBackendMember,
+	group int,
+) {
+	if member.LocalDisk == nil {
+		return
+	}
+
+	podSpec := &ds.Spec.Template.Spec
+
+	// Directory and NOT DirectoryOrCreate, which is the more convenient one and does not work.
+	// Measured: a directory the kubelet creates is owned by root with mode 0755, while the store
+	// image runs as uid 65532 — so the member comes up, finds it cannot write, and retries its
+	// store setup until it gives up. Nothing this renderer can add fixes that from inside the Pod:
+	// fsGroup does not apply to hostPath (measured too, the directory stays root-owned), and the
+	// alternatives all mean granting a container root on the node to chown a host directory.
+	//
+	// So the directory is the node's to provide, which is also where it belongs — who owns a path
+	// on a host is not something an operator should rewrite on an administrator's behalf. Directory
+	// makes a missing one a FailedMount the Pod stops at, rather than a mount that silently cannot
+	// be written to. The documentation carries how to create it, for the uid the chosen image runs
+	// as.
+	//
+	// A hostPath and NOT an emptyDir, on two counts. An emptyDir dies with the Pod, so every
+	// restart would discard the tier whose entire value is surviving one; and an emptyDir the
+	// kubelet accounts for makes it evict the member when the tier fills, which is the opposite of
+	// what a cache tier should do when it reaches its own ceiling.
+	podSpec.Volumes = append(podSpec.Volumes, core.Volume{
+		Name: memberLocalDiskVolumeName,
+		VolumeSource: core.VolumeSource{
+			HostPath: &core.HostPathVolumeSource{
+				Path: member.LocalDisk.Path,
+				Type: ptr.To(core.HostPathDirectory),
+			},
+		},
+	})
+
+	container := &podSpec.Containers[0]
+	// Mounted at the path the client was told to write to, so one field says both where on the
+	// host the bytes live and where in the container they are addressed.
+	container.VolumeMounts = append(container.VolumeMounts, core.VolumeMount{
+		Name:      memberLocalDiskVolumeName,
+		MountPath: member.LocalDisk.Path,
+	})
+	container.Lifecycle = &core.Lifecycle{
+		PreStop: memberUnmountLocalDiskHook(memberScaleInGraceSeconds(kvcb), memberRESTPort(group)),
+	}
+}
+
+// memberUnmountLocalDiskHook builds the shutdown hook that deregisters this member's disk tier.
+//
+// It is an EXEC and not an httpGet, and that is a constraint rather than a preference: a
+// lifecycle httpGet sends no request body and cannot choose a method, while this route is a POST
+// whose handler decodes the body FIRST and answers 400 when there is none. An httpGet hook would
+// therefore fail on every single shutdown — and a failing preStop is recorded as an event and
+// otherwise ignored, so the hook would look configured while draining nothing.
+//
+// The interpreter is the image's own: this container's command is a Python console script, so an
+// image that cannot run python3 cannot run the member either. Only the standard library is used,
+// for the same reason — a curl the image may not carry would fail the same silent way.
+func memberUnmountLocalDiskHook(graceSeconds, restPort int32) *core.LifecycleHandler {
+	// The timeout is the grace plus a SMALL margin, and the smallness is the point.
+	//
+	// It has to exceed the grace, because the handler holds for exactly that long before answering
+	// and a shorter timeout would abandon the wait it asked for. But it must stay well under the
+	// Pod's whole termination budget, because that budget is NOT preStop's alone: the kubelet
+	// starts the countdown before running the hook and sends SIGTERM only once the hook returns, so
+	// a hook that ran to grace + memberShutdownSeconds would finish at the instant the container is
+	// force-killed, and the entrypoint would be SIGKILLed mid-close — the exact outcome
+	// memberShutdownSeconds exists to prevent.
+	script := fmt.Sprintf(
+		`import json,urllib.request;`+
+			`urllib.request.urlopen(urllib.request.Request(`+
+			`"http://127.0.0.1:%d%s",`+
+			`data=json.dumps({"grace_period_seconds":%d}).encode(),`+
+			`headers={"Content-Type":"application/json"},method="POST"),timeout=%d)`,
+		restPort, memberUnmountLocalDiskPath, graceSeconds,
+		int64(graceSeconds)+memberHookTimeoutMarginSeconds)
+
+	return &core.LifecycleHandler{
+		Exec: &core.ExecAction{Command: []string{"python3", "-c", script}},
+	}
 }
 
 // MemberPodSpecHash fingerprints everything in a member's pod template EXCEPT its node selector.

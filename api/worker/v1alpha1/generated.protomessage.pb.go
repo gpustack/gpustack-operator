@@ -116,13 +116,19 @@ func (*KVCacheBackendExternal) ProtoMessage() {}
 
 func (*KVCacheBackendLeader) ProtoMessage() {}
 
+func (*KVCacheBackendLeaderOffload) ProtoMessage() {}
+
 func (*KVCacheBackendList) ProtoMessage() {}
 
 func (*KVCacheBackendManaged) ProtoMessage() {}
 
 func (*KVCacheBackendMember) ProtoMessage() {}
 
+func (*KVCacheBackendMemberLocalDisk) ProtoMessage() {}
+
 func (*KVCacheBackendMemberStatus) ProtoMessage() {}
+
+func (*KVCacheBackendScaleIn) ProtoMessage() {}
 
 func (*KVCacheBackendSpec) ProtoMessage() {}
 
