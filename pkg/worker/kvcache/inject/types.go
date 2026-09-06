@@ -68,10 +68,10 @@ func ParseEngine(value string) (Engine, error) {
 	// is right: the accelerator decides the package, so the engine to name is the plain one.
 	if value == string(EngineVLLMAscend) {
 		return "", newRefusal(ReasonEngineUnknown,
-			"engine %q is not one this annotation takes: vllm_ascend is the package the runner "+
-				"installs when the accelerator backend is CANN, not an engine to pick. Set %q -- "+
-				"the operator renders the Ascend connector on its own for a pool whose accelerator "+
-				"is Ascend", value, EngineVLLM)
+			"engine %q is not one this annotation takes: it names the Python package vllm_ascend, "+
+				"which the runner installs when the accelerator backend is CANN, rather than an "+
+				"engine anybody picks. Set %q -- the operator renders the Ascend connector on its "+
+				"own for a pool whose accelerator is Ascend", value, EngineVLLM)
 	}
 
 	return "", newRefusal(ReasonEngineUnknown,
