@@ -129,7 +129,15 @@ type (
 		// PciClass is the PCI class of the device.
 		PciClass string `json:"pciClass" yaml:"pciClass" protobuf:"bytes,3,name=pciClass"`
 
-		// NumaAffinity is the NUMA node that the device is attached to.
+		// NumaAffinity is the NUMA node that the device is attached to. Empty means UNKNOWN and is
+		// never normalised to node 0 — that would report an affinity nobody read.
+		//
+		// THE PRODUCER DOES NOT HOLD THAT CONTRACT YET, and saying so here is the point: the bus
+		// helper behind this field answers "0" for node 0, for the kernel's -1 "no affinity"
+		// sentinel and for an unparseable reading alike, so an unknown affinity reaches a reader as
+		// node 0. The interface fields below DO map the sentinel to empty, which is why only this
+		// one carries the caveat. Tracked at
+		// https://github.com/gpustack/gpustack-operator/issues/182.
 		NumaAffinity string `json:"numaAffinity" yaml:"numaAffinity" protobuf:"bytes,4,name=numaAffinity"`
 
 		// CpuAffinity is the CPU cores that are close to the device.
