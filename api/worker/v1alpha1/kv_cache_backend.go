@@ -437,6 +437,26 @@ type KVCacheBackendMember struct {
 	// into the member Pod's own resource request, so a member that does not fit stays Pending
 	// instead of overcommitting the node.
 	//
+	// SEVERAL MEMBERS PER NODE IS DECIDED AND NOT DONE, and this field is named for the shape it
+	// would take rather than the one that ships. What is deferred is splitting a node's members by
+	// NUMA domain; today one selected node runs one member.
+	//
+	// The reason to reopen it is NOT memory locality, and reading it that way is how it gets
+	// dismissed a second time. This operator already discovers the NUMA affinity of NICs and their
+	// RDMA devices, and RDMA is this backend's fast transport, so several members per node is the
+	// only mechanism that could put a segment on the same NUMA node as the interface that serves
+	// it. Without it that discovered topology has no consumer on this path.
+	//
+	// The trigger is therefore decidable rather than a matter of taste: a two-socket node whose
+	// devices report RDMA interfaces on more than one NUMA node, AND that node's member observed
+	// transferring across the socket boundary. There is no such evidence today.
+	//
+	// One group per NUMA domain is NOT the shape it would take, and the obstacle is structural
+	// rather than a cost. A group selects nodes through nodeSelector, and NUMA is a property inside
+	// a node, not a label on one -- so "the NUMA 0 of this node" is not expressible by the mechanism
+	// groups are built on. It would also multiply groups by socket count against a list capped at
+	// 32, and every group's identity is its position.
+	//
 	// +required
 	CapacityPerMember resource.Quantity `json:"capacityPerMember" protobuf:"bytes,3,name=capacityPerMember"`
 

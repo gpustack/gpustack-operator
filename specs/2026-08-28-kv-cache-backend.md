@@ -2075,17 +2075,62 @@ not restated here, because a second copy of a measurement is the copy that goes 
   mode later, where a connection string with credentials would leak to anyone who can read the
   Deployment. Whether such flags should move to Secret-backed environment variables — for those flags
   only, keeping argv for the rest — is open.
-- **The member workload shape past one member per node.** A DaemonSet is chosen on semantics, and it
-  places exactly one member per selected node. Several members per node (one per NUMA domain) and
-  rollout control over a shrink both point at a different shape; which of the two forces the change
-  first is open, and `capacityPerMember` is named so it survives either.
+- ~~**The member workload shape past one member per node.**~~ **Decided: keep one member per
+  selected node.** Both halves of this question have since been answered, so it is recorded here as
+  a decision with its trigger rather than left reading as undecided.
+
+  Rollout control over a shrink was settled by the tiering-and-drain spec, which sends a grace
+  period and deliberately does **not** change the DaemonSet shape. That left NUMA splitting as the
+  only remaining candidate, and it is **not taken**, on evidence rather than on cost.
+
+  **The reason to reopen it is not memory locality.** That framing is what gets it dismissed, and it
+  undersells the case: this operator already discovers the NUMA affinity of NICs and their RDMA
+  devices, and RDMA is this backend's fast transport. Several members per node is the **only**
+  mechanism that could place a segment on the same NUMA node as the interface serving it, so without
+  it that discovered topology has no consumer on this path.
+
+  **Trigger, stated so it can be checked rather than argued:** a two-socket node whose `devices`
+  report RDMA interfaces on more than one NUMA node, **and** that node's member observed
+  transferring across the socket boundary. No such evidence exists today.
+
+  ⛔ **One group per NUMA domain is not the shape**, and the obstacle is structural rather than a
+  cost: a group selects nodes via `nodeSelector`, and NUMA is a property *inside* a node rather than
+  a label *on* one, so "the NUMA 0 of this node" is not expressible by the mechanism groups are
+  built on. It would also multiply groups by socket count against a list capped at 32, in which
+  every group's identity is its position.
+
+  `capacityPerMember` keeps its name, which is what lets this land later without an API rename.
+  Tracked at <https://github.com/gpustack/gpustack-operator/issues/219>.
 - **Whether `spec.type` should ever express "an existing RWX volume"** — a shared-filesystem backend
   nobody manages, where the engine's own `fs://` layer does the work. It is out of the enum, not
   reserved in it: it arrives as a value when something implements it, and widening an enum is not an
   API change.
-- **Whether this API should expose `-quota_bytes` at all, and under what name.** It is a global
-  storage-backend quota, distinct from the per-tenant quota a later spec owns, and any name that does
-  not say "global" will be read as the tenant one.
+- ~~**Whether this API should expose `-quota_bytes` at all, and under what name.**~~
+  **Decided: expose it, as `leader.storageQuota`.** Recorded here; the implementation is a separate
+  piece of work, tracked at <https://github.com/gpustack/gpustack-operator/issues/223>.
+
+  **The old rejection did not support the conclusion it was carrying.** Alternatives rejected
+  exposing it *as `spec.quota`* because that name collides with the per-tenant vocabulary. That
+  refuses a **name**, and naming is fixable by naming; it was being read as refusing **exposure**.
+
+  The rule this API already applies is "a field exists when a second reader validates against it" --
+  the reason `leader.multiTenancy` is a field rather than an `extraArgs` key. When this was first
+  deferred the confusable neighbour was hypothetical; `KVCachePoolBinding.spec.quotaCeiling` has
+  since landed, so the second reader now exists: nothing today compares the sum of a backend's
+  tenant ceilings against its global quota.
+
+  ⛔ **That comparison is NOT an admission refusal, and this is the part most likely to be
+  re-added by the next reader.** Two Bindings admitted concurrently each read a state that does not
+  include the other, so both pass — a webhook has no lock over the set it would be summing. Worse,
+  refusing is unfair in the direction that matters: a Binding that is itself entirely legal gets
+  rejected because someone else claimed the headroom first, which is neither its author's fault nor
+  something its author can fix. ⇒ The over-subscription is reported as an **observation on the
+  backend's status**, where it describes the cluster rather than blaming a request. The
+  second-reader rule still holds — the reader is a controller instead of a webhook.
+
+  **Name:** `leader.storageQuota`. It matches the artifact's own words (a storage-backend quota) and
+  is distinguishable at a glance from `quotaCeiling`, which is one tenant's request. ⛔ Not any name
+  that is a bare `quota`, and not `globalQuota` -- "global" carries other meanings in Kubernetes.
 - **Whether the master can serve its own metadata plane** with `-enable_http_metadata_server`, which
   is what the reserved `httpServer` mode would render. The flag is measured present; it is not
   measured sufficient, which is why the webhook refuses the value rather than shipping it.
