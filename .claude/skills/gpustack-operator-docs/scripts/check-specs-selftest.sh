@@ -204,14 +204,83 @@ else
 fi
 
 echo
-echo "=== go test -run: the exemption window has an edge ==="
-# Without a bound, one marker anywhere in a spec would exempt every command in it.
+echo "=== go test -run: the exemption window has an edge, at the checker's own constant ==="
+# Without a bound, one marker anywhere in a spec would exempt every command in it. The filler count
+# is READ OUT OF THE CHECKER rather than hard-coded: a hand-tuned 14 would keep passing if the
+# window were ever widened, and the case that tests the edge would quietly stop testing it.
+WINDOW=$(awk 'match($0, /k <= at \+ [0-9]+/) { s = substr($0, RSTART, RLENGTH); sub(/.*\+ /, "", s); print s; exit }' "$CHECK")
+if [ -z "$WINDOW" ]; then
+  fail "could not read the exemption window out of $CHECK — this case cannot test an edge it cannot locate"
+else
+  build
+  subst "$SPEC" "TestThingWorks" "TestThingWasDeletedByT12"
+  i=0
+  while [ "$i" -lt "$WINDOW" ]; do printf '%s\n' "filler prose here." >> "$SPEC"; i=$((i + 1)); done
+  printf '**THIS IS NOT RE-RUNNABLE, BY DESIGN.**\n' >> "$SPEC"
+  expect_hit "a marker just past the ${WINDOW}-line window does not reach the command" "selects no test in ./pkg/thing/"
+
+  build
+  subst "$SPEC" "TestThingWorks" "TestThingWasDeletedByT12"
+  i=1
+  while [ "$i" -lt "$WINDOW" ]; do printf '%s\n' "filler prose here." >> "$SPEC"; i=$((i + 1)); done
+  printf '**THIS IS NOT RE-RUNNABLE, BY DESIGN.**\n' >> "$SPEC"
+  run
+  if [ "$rc" -eq 0 ]; then
+    pass "a marker inside the ${WINDOW}-line window still exempts"
+  else
+    fail "the marker at the window boundary did not exempt: $out"
+  fi
+fi
+
+echo
+echo "=== go test -run: a package this check cannot resolve is reported, not assumed ==="
+# Falling back to "the whole tree" was a false-green path: a stale name that exists anywhere in the
+# repository would have passed.
 build
-subst "$SPEC" "TestThingWorks" "TestThingWasDeletedByT12"
-printf '\n%s\n' "filler" >> "$SPEC"
-for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do printf '%s\n' "more filler prose here." >> "$SPEC"; done
-printf '\n⛔ **THIS IS NOT RE-RUNNABLE, BY DESIGN.**\n' >> "$SPEC"
-expect_hit "a marker far below the command does not reach it" "selects no test in ./pkg/thing/"
+subst "$SPEC" "./pkg/thing/ " "github.com/org/repo/pkg/thing/ "
+expect_hit "a dotted import path is reported as unevaluable" "package arguments cannot be resolved"
+
+build
+subst "$SPEC" "./pkg/thing/ " ""
+expect_hit "a command naming no package is reported as unevaluable" "package arguments cannot be resolved"
+
+echo
+echo "=== no command is exempted by a marker the document does not contain ==="
+# The sharp form of the field-alignment bug. awk emits one row per command; `read` with a tab IFS
+# treats tab as IFS WHITESPACE, so an empty column collapses and every later field shifts left.
+# With an empty pkgs column the "unresolvable" flag landed in "exempt", and the checker excused the
+# command as NOT RE-RUNNABLE although nothing in the file says so. A silent false exemption is
+# worse than a false failure: it is a hole that reads as a pass.
+#
+# Asserting "the exemption still works" does NOT catch this -- under the bug the shifted field
+# happens to be 1, so that assertion passes either way, which is how it was caught here. What
+# discriminates is the ABSENCE of an exemption when the document carries no marker at all.
+build
+subst "$SPEC" "./pkg/thing/ " ""
+run
+if printf '%s' "$out" | grep -q 'exempt:'; then
+  fail "a command was exempted although the spec contains no NOT RE-RUNNABLE marker -- got: $out"
+else
+  pass "no marker in the file, no exemption"
+fi
+
+echo
+echo "=== Status: a 'Blocked on:' with nothing after it does not satisfy rule 2 ==="
+build
+setline "$BLOCKED" 4 "Blocked on:   "
+expect_hit "an empty condition is caught" "must be a 'Blocked on:' block"
+
+echo
+echo "=== the corpus reports a path that is not a file, rather than skipping it ==="
+build
+mkdir -p "$MINI/tree/docs"
+printf '# Doc\n' > "$MINI/tree/docs/a doc with spaces.md"
+run
+if printf '%s' "$out" | grep -q 'which is not a file'; then
+  pass "a space-containing path is reported, not silently skipped"
+else
+  fail "the split path was skipped silently -- got: $out"
+fi
 
 echo
 echo "=== go test -run: prose naming the flag is not a command ==="

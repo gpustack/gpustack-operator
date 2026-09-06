@@ -40,7 +40,10 @@ trap 'rm -rf "$WORK"' EXIT
 errors=0
 err() { printf '  %s\n' "$*"; errors=$((errors + 1)); }
 
-SPECS=$(find specs -name '*.md' | sort)
+SPECS=""
+if [ -d specs ]; then
+  SPECS=$(find specs -name '*.md' | sort)
+fi
 # Rule 3's corpus. Everything a reader might copy a command out of.
 CORPUS="README.md
 CLAUDE.md
@@ -86,8 +89,13 @@ for f in $SPECS; do
   fi
 
   # Rule 2. Anything other than Shipped is a promise, and a promise carries its condition.
+  #
+  # The condition has to have content: a bare "Blocked on:" satisfies a prefix test while saying
+  # nothing, which is the thing this rule exists to prevent, so the remainder is checked too.
   if [ "$word" != "Shipped" ]; then
-    if [ "$(sed -n '4p' "$f" | cut -c1-11)" != "Blocked on:" ]; then
+    line4=$(sed -n '4p' "$f")
+    condition=$(printf '%s\n' "${line4#Blocked on:}" | tr -d ' \t')
+    if [ "$(printf '%s' "$line4" | cut -c1-11)" != "Blocked on:" ] || [ -z "$condition" ]; then
       err "$f:3: Status is '$word', so line 4 must be a 'Blocked on:' block saying what lifts it. A spec only reaches main through a pull request, and the rule is that it reads 'Shipped' before that pull request is opened — so a spec on main that reads anything else is waiting on something, and what it waits on has to be legible without reading the whole document."
     fi
   fi
@@ -161,11 +169,27 @@ function emit(cmd, at,   j, pat, m, pkgs, n, t, k, nrun) {
   cmd = substr(cmd, 1, RSTART - 1) " " substr(cmd, RSTART + RLENGTH)
   if (pat == "") return
 
+  # Package arguments. Only "./"-relative paths can be resolved against the index built above, so
+  # anything else -- a dotted import path like github.com/org/repo/pkg/..., or no package at all --
+  # is reported as UNEVALUABLE rather than quietly falling back to "the whole tree". That fallback
+  # was a false-green path for exactly the defect this rule exists to catch: a stale test name that
+  # happens to exist somewhere else in the repository would have passed.
   pkgs = ""
+  unresolvable = 0
   n = split(cmd, t, /[ \t]+/)
   for (k = 1; k <= n; k++) {
-    if (substr(t[k], 1, 2) == "./") pkgs = pkgs (pkgs == "" ? "" : " ") t[k]
+    if (substr(t[k], 1, 2) == "./") {
+      pkgs = pkgs (pkgs == "" ? "" : " ") t[k]
+    } else if (index(t[k], "/") > 0 && substr(t[k], 1, 1) != "-") {
+      unresolvable = 1
+    }
   }
+  if (pkgs == "") unresolvable = 1
+  # A sentinel, never an empty field. `read` with a tab IFS treats the tab as IFS WHITESPACE, so it
+  # collapses runs and drops empty fields -- an empty pkgs would shift nrun into pkgs and exempt
+  # into nrun, silently losing an exemption and hiding a duplicate -run. Emitting a placeholder is
+  # what keeps the field count fixed.
+  if (pkgs == "") pkgs = "-"
 
   # The escape, and the only one. A command may name a test that no longer exists when the spec
   # SAYS SO -- issue 179 asks for exactly that where no replacement exists, because deleting the
@@ -179,7 +203,7 @@ function emit(cmd, at,   j, pat, m, pkgs, n, t, k, nrun) {
   for (k = at; k <= at + 12 && k <= FNR; k++) {
     if (index(lines[k], "NOT RE-RUNNABLE") > 0) exempt = 1
   }
-  printf "%d\t%s\t%s\t%d\t%d\n", at, pat, pkgs, nrun, exempt
+  printf "%d\t%s\t%s\t%d\t%d\t%d\n", at, pat, pkgs, nrun, exempt, unresolvable
 }
 { lines[FNR] = $0 }
 END {
@@ -227,14 +251,9 @@ END {
 }
 AWKX
 
-# The test names reachable from one `go test` package argument list, one per line. An empty list
-# means the command names no package, which `go test` reads as the current directory — from a repo
-# root that is a package with no tests, so the whole tree is the only reading that is not a trap.
+# The test names reachable from one `go test` package argument list, one per line. The caller has
+# already rejected a list this cannot resolve, so every path here is "./"-relative.
 candidates() {
-  if [ -z "$1" ]; then
-    cut -f2 "$WORK/index"
-    return
-  fi
   for p in $1; do
     base="${p#./}"
     case "$base" in
@@ -256,11 +275,18 @@ candidates() {
 checked=0
 exempted=0
 for f in $CORPUS; do
-  [ -f "$f" ] || continue
+  # A path that matches no file is REPORTED, not skipped. These lists are word-split, so a corpus
+  # path containing a space would arrive here as fragments -- and silently skipping them is a way
+  # for a file to escape rule 3 with the gate still green.
+  if [ ! -f "$f" ]; then
+    err "the corpus lists '$f', which is not a file — a path with a space in it splits into fragments and would otherwise be skipped silently"
+    continue
+  fi
   awk "$EXTRACT" "$f" > "$WORK/cmds"
-  while IFS="$(printf '\t')" read -r at pat pkgs nrun exempt; do
+  while IFS="$(printf '\t')" read -r at pat pkgs nrun exempt unresolvable; do
     [ -n "$pat" ] || continue
     checked=$((checked + 1))
+    [ "$pkgs" = "-" ] && pkgs=""
 
     if [ "${exempt:-0}" -eq 1 ]; then
       printf '  exempt: %s:%s: -run %s is marked NOT RE-RUNNABLE, so it is not required to select anything\n' \
@@ -279,6 +305,11 @@ for f in $CORPUS; do
       continue
     fi
 
+    if [ "${unresolvable:-0}" -eq 1 ]; then
+      err "$f:$at: this command's package arguments cannot be resolved (only ./-relative paths are), so whether -run '$pat' selects anything is unknown. Name the packages as ./-relative paths."
+      continue
+    fi
+
     # -run splits on "/" and matches each element against one nesting level; only the first
     # element decides whether any top-level test is selected at all.
     top="${pat%%/*}"
@@ -293,8 +324,11 @@ for f in $CORPUS; do
     set -e
     # grep exits 1 for "no match" and 2 or more for a bad pattern. Folding the second into the
     # first would report a pattern this checker cannot parse as a pattern that selects nothing.
+    # This check reads the pattern as a POSIX ERE while `go test` reads it as RE2. The two agree on
+    # the constructs this corpus uses -- literals and alternation, measured -- but diverge on \b,
+    # (?i) and some escapes, so the message says which engine judged it.
     if [ "$rc" -ge 2 ]; then
-      err "$f:$at: -run '$pat' is not a pattern this check can evaluate (grep -E rejected it)"
+      err "$f:$at: -run '$pat' is not a pattern this check can evaluate (grep -E, a POSIX ERE, rejected it; go test reads -run as RE2, so hand-check this one)"
       continue
     fi
     if [ "$rc" -eq 1 ]; then
