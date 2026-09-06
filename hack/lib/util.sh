@@ -185,15 +185,31 @@ function gpustack::util::go_module_version() {
 # gpustack::util::go_module_version_is reports whether a go-installed binary matches its pin.
 # Two pin forms are in use in hack/lib: a tag, which go stamps verbatim, and a commit, which go
 # stamps as the trailing field of a pseudo-version.
+#
+# THE TWO SIDES OF A COMMIT PIN ARE ABBREVIATED TO DIFFERENT LENGTHS, and that is the whole
+# subtlety here. `hack/lib/cgo.sh` pins full 40-character hashes while go stamps 12 characters
+# (`v0.0.0-20220810182948-cef5ec7833f3`), so neither equality nor a `-<pin>` suffix test can ever
+# hold. Comparing them as abbreviations of one another is what they actually are.
+#
+# Both sides must be at least 7 characters, which is git's own floor for an unambiguous
+# abbreviation -- without it a truncated or empty pin would prefix-match every commit.
 function gpustack::util::go_module_version_is() {
-  local installed="${1}" pin="${2}"
-  if [[ -z "${installed}" ]]; then
+  local installed="${1}" pin="${2}" commit
+  if [[ -z "${installed}" ]] || [[ -z "${pin}" ]]; then
     return 1
   fi
   if [[ "${installed}" == "${pin}" ]]; then
     return 0
   fi
-  if [[ "${installed}" == *"-${pin}" ]]; then
+
+  commit="${installed##*-}"
+  if [[ "${commit}" == "${installed}" ]]; then
+    return 1
+  fi
+  if [[ ${#commit} -lt 7 ]] || [[ ${#pin} -lt 7 ]]; then
+    return 1
+  fi
+  if [[ "${pin}" == "${commit}"* ]] || [[ "${commit}" == "${pin}"* ]]; then
     return 0
   fi
   return 1
