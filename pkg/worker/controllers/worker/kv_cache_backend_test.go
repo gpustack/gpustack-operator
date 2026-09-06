@@ -120,6 +120,76 @@ func reconcileKVCacheBackend(t *testing.T, cli ctrlcli.Client, name string) *wor
 	return got
 }
 
+// TestKVCacheBackend_LeaderReadinessIsAtLeastOne pins the comparison rather than the number, and the
+// case that matters is the one that looks wrong.
+//
+// With standbys, exactly one replica serves and the rest are deliberately not ready, so two ready
+// replicas read like a contradiction. They are a FAILOVER IN PROGRESS: the outgoing leader clears
+// its service plane in-process the moment it loses the lease, while the kubelet needs three failed
+// probe periods to withdraw it. Reporting a fault there would fire on every successful failover, so
+// the case is asserted as HEALTHY -- and it is the assertion that reddens if the predicate is ever
+// tightened to "exactly one".
+func TestKVCacheBackend_LeaderReadinessIsAtLeastOne(t *testing.T) {
+	cases := []struct {
+		name          string
+		deployment    bool
+		readyReplicas int32
+		want          bool
+		why           string
+	}{
+		{
+			name: "no deployment yet",
+			want: false,
+			why:  "a backend whose workload has not been created is starting, not broken",
+		},
+		{
+			name:       "deployment with nothing ready",
+			deployment: true,
+			want:       false,
+			why:        "no replica serves, so no leader exists",
+		},
+		{
+			name:          "the steady state under high availability",
+			deployment:    true,
+			readyReplicas: 1,
+			want:          true,
+			why:           "one serving leader is what N replicas look like when nothing is wrong",
+		},
+		{
+			name:          "mid-failover, both leaders briefly ready",
+			deployment:    true,
+			readyReplicas: 2,
+			want:          true,
+			why:           "the kubelet has not withdrawn the outgoing leader yet; this is not a fault",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			kvcb := newKVCacheBackendObject()
+
+			var objs []ctrlcli.Object
+			if c.deployment {
+				objs = append(objs, &apps.Deployment{
+					ObjectMeta: meta.ObjectMeta{
+						Name:      mooncake.LeaderObjectName(kvcb),
+						Namespace: kuberess.SystemNamespaceName,
+					},
+					Status: apps.DeploymentStatus{ReadyReplicas: c.readyReplicas},
+				})
+			}
+
+			cli := ctrlfake.NewClientBuilder().
+				WithScheme(scheme.Scheme).
+				WithObjects(objs...).
+				Build()
+			r := &KVCacheBackendReconciler{Client: cli}
+
+			assert.Equal(t, c.want, r.leaderPodIsReady(context.Background(), kvcb), c.why)
+		})
+	}
+}
+
 // TestKVCacheBackendReconciler_LocksAndReportsProvisioning pins the live path: the object is locked
 // so nothing it renders can be orphaned, and it reports Provisioning because nothing has been
 // observed SERVING yet. Rendering a leader and observing one are different things, and the three
