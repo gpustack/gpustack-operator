@@ -26,6 +26,13 @@
 
 CI (`hack/ci.sh`) runs `make generate && make deps && make lint && make build`.
 
+> **`make lint` writes.** It runs `goimports-reviser -output=file` and `golangci-lint --fix`, so it
+> edits the source rather than only reading it. Anything generated *before* it — `make generate`,
+> `make generate chart` — was produced from a version of the source that no longer exists, and
+> nothing downstream notices: the build passes, the tests pass, and `git status` is clean. Regenerate
+> after linting. `api.yml` and `chart.yml` both fail when the committed artifacts do not match a
+> fresh regeneration, which is what catches it when nobody remembers.
+
 ### Helm chart
 
 `generate`, `lint` and `test` take a `chart` argument, operating on `deploy/gpustack-operator/chart` via

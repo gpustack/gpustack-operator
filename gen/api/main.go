@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	klog "k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
@@ -13,11 +14,53 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
+// projectModule is this repository's module import path.
+//
+// One constant serves two uses, because a mismatch between them is silent:
+//   - the value the generators are configured with (builder.Config.Project);
+//   - the suffix the working directory must carry, since the output base is that
+//     directory with this trimmed off.
+const projectModule = "gpustack.ai/gpustack"
+
 func main() {
 	err := generate()
 	if err != nil {
 		klog.Fatalf("error generating: %v", err)
 	}
+}
+
+// resolveProjectDir returns the path the generators may write against, or refuses.
+//
+// The output base is this path with projectModule trimmed off, so a directory not ending
+// in it sends every generator one module path too shallow.
+//
+// WARNING: the failure is not clean. go-to-protobuf rewrites the generated files before
+// the bad path is noticed, so this must run above the first write.
+//
+// Three properties carry the check:
+//   - resolved first, since os.Getwd may return the logical $PWD and a symlink named
+//     after the module path would otherwise pass while the toolchain runs elsewhere;
+//   - the separator is part of the suffix, so "/tmp/mygpustack.ai/gpustack" is refused
+//     rather than trimmed to "/tmp/my";
+//   - the return value is slash-normalized, because the trim downstream is a plain
+//     string operation against a slash-delimited path.
+func resolveProjectDir(pwd string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(pwd)
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory %q: %w", pwd, err)
+	}
+
+	normalized := filepath.ToSlash(resolved)
+
+	if !strings.HasSuffix(normalized, "/"+projectModule) {
+		return "", fmt.Errorf(
+			"working directory %q does not end in the module import path %q: "+
+				"the generators derive their output base by trimming it off, so running here "+
+				"would write to the wrong tree; run from a checkout whose resolved path ends in %[2]q",
+			resolved, projectModule)
+	}
+
+	return normalized, nil
 }
 
 func generate() error {
@@ -27,6 +70,12 @@ func generate() error {
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
+	// REQUIRED: refuse above the first write; all later paths derive from the result.
+	pwd, err = resolveProjectDir(pwd)
+	if err != nil {
+		return err
+	}
+
 	header, err := os.ReadFile(filepath.Join(pwd, "/hack/boilerplate/go.txt"))
 	if err != nil {
 		return err
@@ -34,7 +83,7 @@ func generate() error {
 
 	cfg := builder.Config{
 		ProjectDir:    pwd,
-		Project:       "gpustack.ai/gpustack",
+		Project:       projectModule,
 		ClientsName:   "kubeclients",
 		ClientSetName: "kubernetes",
 		Header:        stringx.FromBytes(ptr.To(bytes.TrimSpace(header))),

@@ -52,6 +52,12 @@ the source types above and regenerate.
    git status --short
    ```
 
+   **Run the generator last.** `make lint` is an edit pass, not a check — `goimports-reviser
+   -output=file` and `golangci-lint --fix` both rewrite the source. Generating before it produces
+   artifacts for a source that no longer exists, and nothing downstream notices: the build passes,
+   the tests pass, `git status` is clean. So if you lint after generating, generate again.
+   `.github/workflows/api.yml` fails the PR when the committed artifacts do not match a fresh run.
+
 3. If generation fails, the error usually points at a malformed type marker or a missing
    `+kubebuilder`/`+k8s` comment in the edited source — fix the source `*.go` and rerun.
 
