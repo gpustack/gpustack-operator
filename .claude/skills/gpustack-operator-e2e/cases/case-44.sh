@@ -69,7 +69,14 @@ E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/
 NS="${1:?usage: case-44.sh <NS>}"
 IMAGE="${E2E_MOONCAKE_IMAGE:-docker.io/kvcacheai/mooncake:0.3.13}"
 
-SFX="$(tr -dc 'a-z0-9' </dev/urandom 2>/dev/null | head -c 5 || echo $$)"
+# LC_ALL=C and the disabled pipefail are both load-bearing: under a UTF-8 locale tr dies on
+# /dev/urandom, and with pipefail on the SIGPIPE from head turns a trailing `|| echo $$` into an
+# append, so LC_ALL=C alone yields random characters with the PID glued on. The measurements behind
+# both halves are recorded once, at the same idiom in _kvcache-inject-lib.sh.
+SFX="$(set +o pipefail; LC_ALL=C tr -dc 'a-z0-9' </dev/urandom 2>/dev/null | head -c 5)"
+# The names below are cluster-scoped, so a bare PID — small and reused across reboots — lets two runs
+# adopt each other's leftovers. The epoch makes a collision need the same PID in the same second.
+[ -n "$SFX" ] || SFX="$$$(date +%s)"
 BACKEND="kvcb-q-${SFX}"
 POOL="kvcp-q-${SFX}"
 NS_Q="kvc-q-${SFX}"
@@ -177,7 +184,13 @@ if ! wait_for kvcachebackends.worker.gpustack.ai "$BACKEND" '{.status.phase}' Re
   exit 1
 fi
 
-kubectl apply -f - >/dev/null 2>&1 <<YAML
+# TWO DOCUMENTS, AND THE OUTPUT IS COUNTED RATHER THAN DISCARDED. `kubectl apply` reports the pool
+# and the binding in ONE stream, so with the output thrown away a run that created the pool and had
+# the binding refused looks exactly like a clean one — and the grant check below would then report
+# effectiveQuota as absent, blaming the ledger for an object nobody made. A count also carries the
+# empty case for free: no output at all counts zero. `created` is the exact word because both names
+# carry this run's random suffix.
+apply_out="$(kubectl apply -f - 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: KVCachePool
 metadata:
@@ -195,6 +208,17 @@ spec:
   quotaCeiling: ${CEILING}
   domain: {name: ${DOMAIN}, blockSize: 16, dtype: bfloat16}
 YAML
+)"
+apply_created="$(printf '%s\n' "$apply_out" | grep -c ' created$' || true)"
+if [ "${apply_created:-0}" -ne 2 ]; then
+  record FAIL "the pool and its binding exist" \
+    "${apply_created:-0} of 2 objects were created, so nothing below has a subject: \
+$(printf '%s' "${apply_out:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
+  echo
+  echo "STATUS | CHECK | OBJECT"
+  for r in "${ROWS[@]}"; do echo "$r" | tr '|' ' '; done
+  exit 1
+fi
 
 wait_for kvcachepoolbindings.worker.gpustack.ai bind-q '{.status.phase}' Ready 180 "$NS_Q" >/dev/null || true
 

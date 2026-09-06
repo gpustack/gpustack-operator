@@ -71,9 +71,17 @@ func TestLoadCDISpecs(t *testing.T) {
 	cases := []struct {
 		name  string
 		files map[string]string
-		// unlistableDir is created and then stripped of read permission, which is the difference
+		// unlistablePath is one of CDISpecDirs made impossible to list, which is the difference
 		// between a directory that is not there and one whose contents cannot be established.
-		unlistableDir  string
+		//
+		// It is realized as a REGULAR FILE at that path, not as a directory with its read bit
+		// stripped. chmod 0o000 is what this used to do and root walks straight through it: the
+		// listing succeeds, Unreadable stays false, and the row fails -- so the verdict was decided
+		// by who ran the test rather than by the code, and any CI running tests as root reported a
+		// red about its own environment. ENOTDIR grants nobody an exemption, and it reaches the same
+		// branch, because that branch turns on ReadDir failing for any reason other than "not
+		// there" and this file is very much there.
+		unlistablePath string
 		want           []string
 		wantAbsent     []string
 		wantUnreadable bool
@@ -173,7 +181,7 @@ func TestLoadCDISpecs(t *testing.T) {
 			// includes whatever it may shadow from the directory before it.
 			name:           "a directory that cannot be listed is an unreadable view",
 			files:          map[string]string{"etc/cdi/nvidia.yaml": testCDISpecYAML},
-			unlistableDir:  "run/cdi",
+			unlistablePath: "run/cdi",
 			want:           []string{testCDIKind + "=" + testCDIUUID0},
 			wantUnreadable: true,
 		},
@@ -210,11 +218,10 @@ func TestLoadCDISpecs(t *testing.T) {
 			for rel, content := range c.files {
 				writeTestFile(t, filepath.Join(root, rel), content)
 			}
-			if c.unlistableDir != "" {
-				dir := filepath.Join(root, c.unlistableDir)
-				require.NoError(t, os.MkdirAll(dir, 0o755))
-				require.NoError(t, os.Chmod(dir, 0o000))
-				t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+			if c.unlistablePath != "" {
+				path := filepath.Join(root, c.unlistablePath)
+				require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+				require.NoError(t, os.WriteFile(path, []byte("not a directory\n"), 0o644))
 			}
 
 			got := LoadCDISpecs()

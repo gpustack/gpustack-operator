@@ -109,7 +109,12 @@ trap cleanup EXIT
 kubectl create namespace "$NS" >/dev/null 2>&1 || true
 
 echo "== deploying a worker with no chart behind it, at the OLD build (${OLD_IMAGE}) =="
-kubectl apply -f - <<EOF
+# FOUR DOCUMENTS, AND THE OUTPUT IS COUNTED. `kubectl apply` reports them in ONE stream, so a run
+# where the ServiceAccount or the binding was refused and the Deployment was not still reaches the
+# rollout check below — which then spends 1200s and names the old image as the suspect, a diagnosis
+# about something that was never wrong. A count also carries the empty case for free: no output at
+# all counts zero.
+worker_out="$(kubectl apply -f - 2>&1 <<EOF
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -219,6 +224,18 @@ spec:
             - name: KUBERNETES_SERVICE_NAME
               value: ${WORKER}
 EOF
+)"
+# `created` and nothing wider: $NS is this case's own namespace, made a few lines above, and the
+# ClusterRoleBinding carries the same per-case name, so an object under any of these names can only
+# be one this run just made.
+worker_created="$(printf '%s\n' "$worker_out" | grep -c ' created$' || true)"
+if [ "${worker_created:-0}" -ne 4 ]; then
+  record FAIL "the hand-rolled worker exists" \
+    "${worker_created:-0} of 4 objects were created, so the rollout below has no subject: \
+$(printf '%s' "${worker_out:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
+  report
+  exit 1
+fi
 
 # The old worker is ready only once its own install returned, so this waits out the whole of it.
 if ! kubectl -n "$NS" rollout status "deploy/${WORKER}" --timeout=1200s >/dev/null 2>&1; then

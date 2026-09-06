@@ -77,7 +77,15 @@ IMAGE="${E2E_MOONCAKE_IMAGE:-docker.io/kvcacheai/mooncake:0.3.13}"
 # Every name carries the same suffix. A reuse domain name is unique CLUSTER-WIDE — the webhook
 # enforces it across namespaces — so a fixed name would collide with an interrupted earlier run and
 # fail this case for a reason that is not about the operator.
-SFX="$(tr -dc 'a-z0-9' </dev/urandom 2>/dev/null | head -c 5 || echo $$)"
+#
+# LC_ALL=C and the disabled pipefail are both load-bearing: under a UTF-8 locale tr dies on
+# /dev/urandom, and with pipefail on the SIGPIPE from head turns a trailing `|| echo $$` into an
+# append, so LC_ALL=C alone yields random characters with the PID glued on. The measurements behind
+# both halves are recorded once, at the same idiom in _kvcache-inject-lib.sh.
+SFX="$(set +o pipefail; LC_ALL=C tr -dc 'a-z0-9' </dev/urandom 2>/dev/null | head -c 5)"
+# The names below are cluster-scoped, so a bare PID — small and reused across reboots — lets two runs
+# adopt each other's leftovers. The epoch makes a collision need the same PID in the same second.
+[ -n "$SFX" ] || SFX="$$$(date +%s)"
 BACKEND="kvcb-e2e-${SFX}"
 EMPTY_BACKEND="kvcb-empty-${SFX}"
 POOL="kvcp-e2e-${SFX}"
@@ -323,7 +331,12 @@ spec:
     total: ${ALLOC_MI}Mi
 YAML
 
-kubectl apply -f - >/dev/null 2>&1 <<YAML
+# TWO DOCUMENTS, AND THE OUTPUT IS COUNTED RATHER THAN DISCARDED. `kubectl apply` reports both
+# bindings in ONE stream, so a run where bind-a was created and bind-b refused is indistinguishable
+# from a clean one with the output thrown away — and the check right below would then wait 180s for an
+# object nobody made and report it as a binding that did not converge. A count also carries the empty
+# case for free: no output at all counts zero.
+bind_out="$(kubectl apply -f - 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: KVCachePoolBinding
 metadata: {name: bind-a, namespace: ${NS_A}}
@@ -340,6 +353,17 @@ spec:
   quotaCeiling: ${CEIL_B_MI}Mi
   domain: {name: ${DOM_B}, blockSize: 16, dtype: bfloat16}
 YAML
+)"
+# `created` is the exact word here, not one of created/configured/unchanged: both namespaces carry
+# this run's random suffix and are made a few lines above, so an object under either name can only be
+# one this run just made.
+bind_created="$(printf '%s\n' "$bind_out" | grep -c ' created$' || true)"
+if [ "${bind_created:-0}" -ne 2 ]; then
+  echo "[case-43] FATAL: ${bind_created:-0} of 2 bindings were created, so the convergence check" >&2
+  echo "                 below has no subject and would blame the operator for their absence:" >&2
+  printf '%s\n' "${bind_out:-<no output at all>}" >&2
+  exit 1
+fi
 
 ok=true
 for pair in "${NS_A} bind-a" "${NS_B} bind-b"; do
@@ -630,7 +654,11 @@ echo "== 9. a backend with nothing mounted is not a pool with an empty cache =="
 
 # The startup-ordering trap: every effective quota is zero and no write can succeed, while every
 # object still looks correctly configured. The member selector matches no node on purpose.
-kubectl apply -f - >/dev/null 2>&1 <<YAML
+# Counted for the same reason as the bindings above: the backend and the pool arrive in one stream,
+# and the only check in this section reads the POOL. Created the backend and refused the pool, and the
+# poll below would spend its whole window on an absent object and then report a missing condition as
+# the operator's silence — which is the exact substitution this section exists to rule out.
+empty_out="$(kubectl apply -f - 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: KVCacheBackend
 metadata:
@@ -656,6 +684,14 @@ spec:
   quota:
     total: 1Gi
 YAML
+)"
+empty_created="$(printf '%s\n' "$empty_out" | grep -c ' created$' || true)"
+if [ "${empty_created:-0}" -ne 2 ]; then
+  echo "[case-43] FATAL: ${empty_created:-0} of 2 objects were created, so the check below has no" >&2
+  echo "                 subject and would read an absence as a missing condition:" >&2
+  printf '%s\n' "${empty_out:-<no output at all>}" >&2
+  exit 1
+fi
 
 cap_reason=""
 for _ in $(seq 1 60); do
