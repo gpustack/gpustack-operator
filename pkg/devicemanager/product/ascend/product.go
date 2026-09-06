@@ -1,4 +1,4 @@
-// Package ascendproduct resolves which A5 product a node is: a super pod of one shape or another, a
+// Package ascend resolves which A5 product a node is: a super pod of one shape or another, a
 // server, or one of the two inference cards.
 //
 // It is the one Ascend fact both halves of the device manager need. The allocator names the HCCL
@@ -6,13 +6,14 @@
 // rank table this node belongs in -- and the rule that establishes it is the vendor's own two-step,
 // which must not exist in two places and drift.
 //
-// It is its own package for a linkage reason rather than a taxonomic one. The allocator imports
-// pkg/deviceplugin, which links Go's plugin package, and that is what makes cgo binding/dcmi abort at
-// dyld load in a darwin test binary; the detector links dcmi there quite happily. So neither package
-// can host the rule for the other: put it in the detector and the allocator drags dcmi in, put it in
-// the allocator and the detector drags plugin in, and each breaks the other's darwin build. Hence a
-// dcmi-free package that both compose, each over its own driver.
-package ascendproduct
+// Its PLACE under product/ is taxonomic — one manufacturer's product rule, beside whichever others
+// come to need one — but its being a SEPARATE package at all is a linkage constraint, not tidiness.
+// The allocator imports pkg/deviceplugin, which links Go's plugin package, and that is what makes cgo
+// binding/dcmi abort at dyld load in a darwin test binary; the detector links dcmi there quite
+// happily. So neither package can host the rule for the other: put it in the detector and the
+// allocator drags dcmi in, put it in the allocator and the detector drags plugin in, and each breaks
+// the other's darwin build. Hence a dcmi-free package that both compose, each over its own driver.
+package ascend
 
 import (
 	"fmt"
@@ -113,6 +114,12 @@ type Driver interface {
 // otherwise repeat them. Only an answer is remembered: a failed read leaves the resolver unresolved,
 // so a driver that was briefly unready is asked again rather than sinking the answer for the
 // lifetime of the process.
+//
+// Remembering the SHAPE does not stall the detector's periodic re-read of the fabric, and the two
+// are not the same fact. A node moved between super pods of one shape keeps that shape while its
+// domain id changes, and that is what the re-read is for. Changing the shape itself means re-cabling
+// the UB fabric and reloading the driver, which this process's dcmi handle does not survive: the
+// device manager restarts, and the resolver along with it.
 type Resolver struct {
 	driver Driver
 

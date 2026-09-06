@@ -9,7 +9,7 @@ import (
 
 	"gpustack.ai/gpustack/binding/dcmi"
 	"gpustack.ai/gpustack/pkg/device"
-	"gpustack.ai/gpustack/pkg/devicemanager/ascendproduct"
+	productascend "gpustack.ai/gpustack/pkg/devicemanager/product/ascend"
 )
 
 // A UB endpoint identifier's 16 bytes and the 32 lowercase hex characters they publish as. The
@@ -57,14 +57,14 @@ func TestNewFabric(t *testing.T) {
 	cases := []struct {
 		name      string
 		spod      *dcmi.SpodInfo
-		product   ascendproduct.Type
+		product   productascend.Type
 		endpoints []string
 		want      *device.Fabric
 	}{
 		{
 			name:      "every read answered",
 			spod:      spod,
-			product:   ascendproduct.TypePod2D,
+			product:   productascend.TypePod2D,
 			endpoints: []string{eidHex},
 			want: &device.Fabric{
 				Kind: "ub", ID: "7", Type: "pod-2d",
@@ -76,7 +76,7 @@ func TestNewFabric(t *testing.T) {
 			// A standalone inference card names its shape from its mainboard and need not sit in a
 			// super pod at all, so the endpoints still travel and the domain id is simply absent.
 			name:      "no super pod, shape and endpoints still published",
-			product:   ascendproduct.TypeCard4P,
+			product:   productascend.TypeCard4P,
 			endpoints: []string{eidHex},
 			want: &device.Fabric{
 				Kind: "ub", Type: "card-4p", Endpoints: []string{eidHex},
@@ -116,7 +116,7 @@ func TestNewFabric_ReadsTheSuperPodsOwnMembers(t *testing.T) {
 		Server_id:      4,
 		Chassis_id:     5,
 		Super_pod_type: 6,
-	}, ascendproduct.TypePod1D, nil)
+	}, productascend.TypePod1D, nil)
 
 	assert.Equal(t, "3", got.ID)
 	assert.Equal(t, uint32(2), got.MemberCount)

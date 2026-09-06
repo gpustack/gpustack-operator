@@ -15,8 +15,8 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
-	"gpustack.ai/gpustack/pkg/devicemanager/ascendproduct"
 	"gpustack.ai/gpustack/pkg/devicemanager/controllers"
+	productascend "gpustack.ai/gpustack/pkg/devicemanager/product/ascend"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/gox"
@@ -35,7 +35,7 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	share := newShareDriver(logger)
 	// The A5 product is a node-level fact every mode injects a topology file from alike, so one
 	// resolver is shared by all of them and the node is read once rather than once per server.
-	product := ascendproduct.NewResolver(newProductDriver(logger))
+	product := productascend.NewResolver(newProductDriver(logger))
 
 	servers := []deviceplugin.Server{
 		newServer(logger, workercore.DeviceAllocationModeExclusive, nil, product),
@@ -111,14 +111,14 @@ type server struct {
 
 	// product is the A5 shape this node is, which names the fabric topology file its accelerators
 	// describe themselves with. Every mode carries it, so unlike share it is never nil.
-	product *ascendproduct.Resolver
+	product *productascend.Resolver
 }
 
 func newServer(
 	logger klog.Logger,
 	mode workercore.DeviceAllocationMode,
 	share shareDriver,
-	product *ascendproduct.Resolver,
+	product *productascend.Resolver,
 ) deviceplugin.Server {
 	logger = logger.WithName(strings.ToLower(mode.String()))
 
@@ -266,7 +266,7 @@ func (s *server) getContainerAllocateResponse(
 // family950 is the A5 family, which is the generation serving the dcmi V2 API and the only one
 // whose visibility env is numbered differently. It is the shared package's constant, aliased here
 // because this file reads it on nearly every line.
-const family950 = ascendproduct.Family
+const family950 = productascend.Family
 
 // physicalIndex returns the dcmi physical id the detector recorded in an accelerator's
 // PhysicalIndexes, which is the number vcann-rt keys its quota config by, as the vendored dsmi patch
