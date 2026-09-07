@@ -344,12 +344,20 @@ the type is unreleased, so the only clusters that could hold one are this projec
 deleting the object is the fix. A released API would need a stored-version migration instead, and
 this note is here so the next narrowing does not inherit the reasoning without the premise.
 
-**Deleting the object is the fix only while a fix is still possible, which is what dates this
-acceptance.** The refusal lands on the write path (`rest.BeforeCreate` / `rest.BeforeUpdate`), so
-such an object reads back intact and every update is refused — including the controller removing its
-finalizer, which is what makes it undeletable rather than merely unwritable, the same shape as the
-Kueue upgrade finalizer deadlock. Before the first release that ships this type, either confirm no
-leftover objects exist, or write down a recovery procedure.
+**How permanent that wedge is depends on the cluster's version, and so does what closing this
+acceptance costs.** The refusal lands on the write path (`rest.BeforeCreate` / `rest.BeforeUpdate`),
+so such an object reads back intact and every update is refused — including the controller removing
+its finalizer, which is what makes it undeletable rather than merely unwritable, the same shape as
+the Kueue upgrade finalizer deadlock. That is the **pre-v1.30** behaviour.
+`CRDValidationRatcheting` defaults on from Kubernetes v1.30 and is locked on from v1.33, and where it
+is enabled the schema error on an **unchanged** field is demoted rather than raised, so a finalizer
+removal is admitted and the object deletes normally. This chart declares
+`kubeVersion: ">=1.23.0-0"` and CI exercises kind nodes from v1.23.17 to v1.35.5, so both sides of
+that boundary are in support and the deadlock has to be stated with its scope.
+
+Before the first release that ships this type, either confirm no leftover objects exist, or write
+down a recovery procedure. The recovery procedure is what a cluster below v1.30 needs; at or above
+it, deleting the object is already enough.
 
 **Gate two — every reader is accounted for, one line each.** Not "nothing seems to use it": each
 site below was opened and read for **which values it takes**, searched twice over `api/` and `pkg/`
