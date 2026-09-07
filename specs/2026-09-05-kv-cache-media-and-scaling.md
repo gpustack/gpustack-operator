@@ -344,20 +344,35 @@ the type is unreleased, so the only clusters that could hold one are this projec
 deleting the object is the fix. A released API would need a stored-version migration instead, and
 this note is here so the next narrowing does not inherit the reasoning without the premise.
 
-**How permanent that wedge is depends on the cluster's version, and so does what closing this
-acceptance costs.** The refusal lands on the write path (`rest.BeforeCreate` / `rest.BeforeUpdate`),
-so such an object reads back intact and every update is refused — including the controller removing
-its finalizer, which is what makes it undeletable rather than merely unwritable, the same shape as
-the Kueue upgrade finalizer deadlock. That is the **pre-v1.30** behaviour.
-`CRDValidationRatcheting` defaults on from Kubernetes v1.30 and is locked on from v1.33, and where it
-is enabled the schema error on an **unchanged** field is demoted rather than raised, so a finalizer
-removal is admitted and the object deletes normally. This chart declares
-`kubeVersion: ">=1.23.0-0"` and CI exercises kind nodes from v1.23.17 to v1.35.5, so both sides of
-that boundary are in support and the deadlock has to be stated with its scope.
+**How permanent that wedge is depends on whether `CRDValidationRatcheting` applies, and so does what
+closing this acceptance costs.** The refusal lands on the write path (`rest.BeforeCreate` /
+`rest.BeforeUpdate`), so such an object reads back intact and every update is refused — including the
+controller removing its finalizer, which is what makes it undeletable rather than merely unwritable,
+the same shape as the Kueue upgrade finalizer deadlock. That is the behaviour **without** ratcheting.
+Where it applies, the schema error on an **unchanged** field is demoted rather than raised, so a
+finalizer removal is admitted and the object deletes normally.
+
+The gate is unavailable before Kubernetes v1.28, off by default from v1.28, on by default from v1.30,
+and **locked on** from v1.33. A version therefore decides what the gate's state can be, not the state
+itself — and it is the API server's **effective** version that decides it, not the version of its
+binary: `featuregate` selects a feature's spec for the emulation version and checks `LockToDefault`
+on the spec it selected, so a server whose binary is past the lock but which emulates a version
+before it resolves to the older spec and can be running with ratcheting off. How far back a binary
+may emulate is bounded by the API server's own flag validation, which is why the range below is
+stated against the effective version and carries no claim about binary versions.
+
+Against this chart's `kubeVersion: ">=1.23.0-0"` and a CI matrix running kind nodes from v1.23.17 to
+v1.35.5, that is three ranges **by effective version**: the wedge is **unavoidable** below v1.28, a
+matter of **configuration** from v1.28 through v1.32, and **foreclosed** from v1.33. The first and
+third follow from the effective version by itself; only the middle one turns on how the cluster is
+configured. Emulation does not move those boundaries — what it changes is which side of them a given
+server sits on, which is why the acceptance below is written against the gate rather than against a
+number a reader would take from the binary.
 
 Before the first release that ships this type, either confirm no leftover objects exist, or write
-down a recovery procedure. The recovery procedure is what a cluster below v1.30 needs; at or above
-it, deleting the object is already enough.
+down a recovery procedure. The recovery procedure is what a cluster without ratcheting needs —
+whether because its version predates the gate or because the gate is switched off; where the gate is
+locked on, deleting the object is already enough.
 
 **Gate two — every reader is accounted for, one line each.** Not "nothing seems to use it": each
 site below was opened and read for **which values it takes**, searched twice over `api/` and `pkg/`

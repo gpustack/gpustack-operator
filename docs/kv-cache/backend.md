@@ -73,17 +73,26 @@ each is reached another way:
 > receive a single write. The object would say one thing, the running member another, and nothing
 > would report a fault.
 
-⛔ **Below Kubernetes v1.30, an object still carrying one of the other four values can never be
-updated again — including by the controller removing its finalizer, so it cannot be deleted.** CRD
-validation runs on the **write** path only (`rest.BeforeCreate` / `rest.BeforeUpdate`): the object
-still reads back, and every update is refused. It is the shape of the Kueue upgrade finalizer
-deadlock.
+⛔ **Without ratcheting, an object still carrying one of the other four values can never be updated
+again — including by the controller removing its finalizer, so it cannot be deleted.** CRD validation
+runs on the **write** path only (`rest.BeforeCreate` / `rest.BeforeUpdate`): the object still reads
+back, and every update is refused. It is the shape of the Kueue upgrade finalizer deadlock.
 
-**The cluster's version is what bounds that.** `CRDValidationRatcheting` defaults on from v1.30 and is
-locked on from v1.33, and where it is enabled an update whose invalid field is **unchanged** is
-admitted — so removing a finalizer still works. This chart declares `kubeVersion: ">=1.23.0-0"`, so
-both sides of that boundary are supported and the deadlock is a pre-v1.30 property rather than a
-universal one.
+**`CRDValidationRatcheting` is what decides that, and a version decides what the gate can be.** Where
+it is on, an update whose invalid field is **unchanged** is admitted, so removing a finalizer still
+works.
+
+The gate is unavailable before v1.28, off by default from v1.28, on by default from v1.30, and
+**locked on** from v1.33.
+
+⚠️ Those thresholds are read against the API server's **effective** version, not the version of its
+binary. `LockToDefault` is checked on the spec selected for the emulation version, so a newer server
+emulating an older one resolves to the older spec and can still be running with the gate off.
+
+By effective version, then, and against this chart's `kubeVersion: ">=1.23.0-0"`: the deadlock is
+**unavoidable** below v1.28, a matter of **configuration** from v1.28 through v1.32, and
+**foreclosed** from v1.33. Emulation does not move those boundaries — it is why the version printed
+by a server's binary does not tell you which of the three it is in.
 
 Reaching that state at all takes a cluster that installed the CRD, ran with **no webhook**, and
 created a non-DRAM member in that window — so it is a development cluster or nothing.
