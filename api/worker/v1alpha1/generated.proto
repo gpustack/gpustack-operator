@@ -1680,14 +1680,21 @@ message KVCacheBackendMemberStatus {
 // ship with one value, which is a knob nobody can turn. It arrives when there are two; widening an
 // enum is not a breaking change.
 message KVCacheBackendScaleIn {
-  // GracePeriodSeconds is how long a departing member holds its local disk tier open after
-  // deregistering it with the leader, so offload reads already in flight finish there rather
-  // than failing.
+  // GracePeriodSeconds is the wait the operator asks a departing member for, after that member
+  // deregisters its local disk tier. It renders into the preStop hook as the endpoint's
+  // grace_period_seconds and nothing else reads it.
   //
-  // It reaches ONLY the disk tier. The memory segment is still dropped rather than drained, and
-  // not for want of a verb: the member's own API takes a graceful unmount with a grace period,
-  // but it requires the segment ids, no route returns a client its own ids, and the name is not
-  // derivable because the leader appends a fresh port on every start.
+  // LIMITED: it does not hold the tier open, so sizing it to let in-flight peer reads of the tier
+  // finish sizes it against something that does not happen. Measured against Mooncake 0.3.13:
+  // deregistration takes effect at once and the process then waits the full value regardless, so a
+  // peer reading a disk-resident key gets a clean miss for the whole window rather than at the end
+  // of it. Another backend image may behave otherwise; what this operator guarantees is the value
+  // it sends.
+  //
+  // THE TIER IS THE ONLY THING DEREGISTERED ON THE WAY OUT. The memory segment is still dropped
+  // rather than drained, and not for want of a verb: the member's own API takes a graceful unmount
+  // with a grace period, but it requires the segment ids, no route returns a client its own ids,
+  // and the name is not derivable because the leader appends a fresh port on every start.
   //
   // So this is blocked on an upstream route, and one upstream route is the whole of what unblocks
   // it: a way for a client to read back its own segment ids. It is NOT blocked on the shutdown
