@@ -51,7 +51,8 @@ func withMemberDiskTier(kvcb *workercore.KVCacheBackend) {
 	kvcb.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
 }
 
-// withMemberScaleInGrace sets the grace a departing member holds its tier open for.
+// withMemberScaleInGrace sets the wait a departing member's process holds for after deregistering
+// its tier.
 func withMemberScaleInGrace(seconds int32) func(*workercore.KVCacheBackend) {
 	return func(kvcb *workercore.KVCacheBackend) {
 		kvcb.Spec.Connection.Managed.ScaleIn = &workercore.KVCacheBackendScaleIn{GracePeriodSeconds: seconds}

@@ -545,10 +545,22 @@ node, unmounts that member's segment **immediately** — there is no drain.
 > start. The `terminationGracePeriodSeconds` the operator sets lets the entrypoint finish its own
 > shutdown — it does not preserve the data.
 
-**`scaleIn.gracePeriodSeconds` reaches the disk tier only.** A member with a
+**`scaleIn.gracePeriodSeconds` holds the process, not the tier.** A member with a
 [local disk tier](#the-local-disk-tier) gets a `preStop` hook that deregisters the tier with the
-leader and then holds for the grace, so offload reads a peer already asked for finish there instead
-of failing. A group with no tier renders no hook and the setting is inert.
+leader and then waits out the grace. A group with no tier renders no hook and the setting is inert.
+
+**Measured against `mooncake` 0.3.13 on a two-node cluster**, deregistration takes effect **at once**:
+a peer reading a key that lives only on that tier gets a clean miss for the whole window rather than
+at the end of it. Sizing this value so that in-flight peer reads can finish sizes it against
+something that does not happen.
+
+The same measurement shows the wait is unconditional rather than a drain — the process holds for the
+full value even when nothing is still reading. What it buys is local time for the departing member to
+finish what it is doing.
+
+⚠️ Both readings are that image's behaviour, not this operator's guarantee. `spec.image` selects the
+backend, and another image may deregister later or wait differently; what the operator controls is
+the value it sends to the endpoint.
 
 ```yaml
 spec:
@@ -567,8 +579,8 @@ The upper bound of 3600 is the member endpoint's own; above it the call is refus
 larger value would render a hook that fails every time it runs.
 
 > **It does not make a shrink lossless.** The memory segment is still dropped, per the paragraph
-> above. What the grace covers is the tier's deregistration, so a reader gets a clean miss rather
-> than a peer that is about to disappear.
+> above, and the disk tier stops answering as soon as the hook runs. A reader gets a clean miss
+> either way, which is the contract rather than a consolation.
 
 Migrating a member's data before it leaves — the store's drain job API — is **not** offered here. It
 is stateful orchestration, and it reaches only the memory and NVMe-oF replicas: it cannot name the

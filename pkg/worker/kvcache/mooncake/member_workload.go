@@ -69,11 +69,13 @@ const (
 
 	// memberUnmountLocalDiskPath is the entrypoint's own route for deregistering this store's SSD
 	// tier before the process goes away. The master stops naming this store as the owner of its
-	// offloaded keys, so a reader gets a clean miss instead of a peer that is about to disappear,
-	// and the call then holds for the grace so offload reads already in flight finish here.
+	// offloaded keys, so a reader gets a clean miss instead of a peer that is about to disappear.
 	//
-	// It is the one thing a shutdown CAN drain, and it needs no segment id, which is exactly why
-	// the memory segment's counterpart is unreachable.
+	// The call then holds for the grace, and that wait keeps the PROCESS alive -- it does not keep
+	// the tier readable. Deregistration takes effect at once, so it drains nothing; the upstream
+	// docstring says otherwise and was refuted by measurement.
+	//
+	// It needs no segment id, which is exactly why the memory segment's counterpart is unreachable.
 	memberUnmountLocalDiskPath = "/api/unmount_local_disk"
 
 	// MemberMaxGracePeriodSeconds is the entrypoint's own ceiling on that call. Above it the
@@ -522,7 +524,8 @@ func memberTerminationGracePeriodSeconds(
 	return int64(memberScaleInGraceSeconds(kvcb)) + memberShutdownSeconds
 }
 
-// memberScaleInGraceSeconds is the grace a departing member holds its disk tier open for.
+// memberScaleInGraceSeconds is how long a departing member's process stays alive after it
+// deregisters its disk tier. The wait holds the process; the tier stops answering at once.
 func memberScaleInGraceSeconds(kvcb *workercore.KVCacheBackend) int32 {
 	managed := kvcb.Spec.Connection.Managed
 	if managed == nil || managed.ScaleIn == nil {

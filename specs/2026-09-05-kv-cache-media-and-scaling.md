@@ -451,6 +451,15 @@ exactly one mechanism, which is the only one the artifact offers to a Pod that i
   instead of a peer that is about to disappear, and the call then holds for the grace so offload
   reads already in flight finish here
   (`mooncake-wheel/mooncake/mooncake_store_service.py:628-636`).
+
+  **The second half of that docstring does not hold, measured on a two-node cluster against 0.3.13.**
+  The tier stops answering peers 3.8 ms after the call is issued, with the whole window still ahead
+  of it; 44909 subsequent reads were all clean 404s at ~0.7 ms. So the wait holds the **process**,
+  not the tier: the "clean miss" half is exact and the "reads already in flight finish here" half is
+  not. The quotation above is faithful — this is upstream's own sentence, not a transcription error
+  here — which is why the operator's own comments are the thing that got corrected. Filed as
+  [gpustack/gpustack-operator#259](https://github.com/gpustack/gpustack-operator/issues/259); the
+  upstream docstring is a separate report nobody has made yet.
 - **The hook is an `exec`, not an `httpGet`, and the reason is a hard constraint rather than a
   preference.** A Kubernetes `httpGet` lifecycle handler sends no request body and cannot set a
   method; this endpoint is a POST whose handler calls `request.json()` first and answers **400 on a
@@ -567,8 +576,9 @@ is routed to the owner of the memory replica**, with the consequence that a disk
 group and never a group of its own; the two fields that turn it on and the admission rule that keeps
 them paired; that the hostPath is **not** counted into any resource request and therefore that node
 disk pressure is the operator's to watch; that `status.capacity` is the sum of both tiers once a disk
-tier exists; the grace period, what it drains (the SSD tier's registration) and what it does not (the
-memory segment, still dropped); the watermark warning of F7; and the table of F2 saying where each
+tier exists; the grace period, what it holds (the departing member's process) and what it does not
+(the tier, deregistered at once, and the memory segment, still dropped); the watermark warning of F7;
+and the table of F2 saying where each
 removed `medium` value went. `docs/README.md`'s index is unchanged, since no page is added.
 
 ### Verification
@@ -781,6 +791,14 @@ docs/kv-cache/backend.md               # F8
 ```
 
 ### Code Style
+
+**SUPERSEDED, one block below: `KVCacheBackendScaleIn.GracePeriodSeconds`.** The comment shown for it
+says the grace *"is how long a departing member holds its local-disk tier open ... so offload reads
+already in flight finish there"*. **That sentence is false and the shipped comment no longer says
+it.** Measured against Mooncake 0.3.13, deregistration takes effect at once and the wait holds the
+**process**, not the tier — so no read finishes because of it. The rest of the block is unchanged and
+still current; it is kept as the snapshot of what was designed, per
+[gpustack/gpustack-operator#259](https://github.com/gpustack/gpustack-operator/issues/259).
 
 ```go
 // KVCacheBackendMemberLocalDisk is the local SSD tier this member group's nodes contribute.
