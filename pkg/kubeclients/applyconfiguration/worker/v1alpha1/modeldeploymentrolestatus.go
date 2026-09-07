@@ -33,9 +33,9 @@ type ModelDeploymentRoleStatusApplyConfiguration struct {
 	// role waiting for quota has no flavor, and reporting that as the empty string would read as an
 	// assignment to a flavor with no name.
 	//
-	// It is per role rather than per deployment because Kueue assigns a flavor per PodSet: two
-	// roles of one deployment can land on two accelerator models, which is what AcceleratorKey
-	// exists to ask for, and a single deployment-wide field could not say that.
+	// It is per role rather than per deployment because Kueue assigns a flavor per PodSet, so two
+	// roles of one deployment can be assigned different flavors and a single deployment-wide field
+	// could not report that.
 	//
 	// AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather than a
 	// gap in it. The answer is read through the same function the per-accelerator admission gate
