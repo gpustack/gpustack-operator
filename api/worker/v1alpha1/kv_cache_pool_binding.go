@@ -78,6 +78,12 @@ type KVCachePoolBindingSpec struct {
 	// when the sum of requests exceeds allocatable capacity, and Status.EffectiveQuota is what was
 	// actually granted.
 	//
+	// EXCEEDING IT EVICTS RATHER THAN REFUSES, which is the opposite of what the word suggests. A
+	// write past the ceiling is not rejected: the store frees room by dropping this namespace's own
+	// older objects and retries. So a ceiling set too low costs cache inside this namespace, not
+	// failed writes, and it costs it without any counter moving. Writes are refused only when
+	// eviction cannot free enough, which needs those older objects held by unexpired read leases.
+	//
 	// REQUIRED, because the state it would otherwise allow does not work. The storage layer has no
 	// default policy to fall back on: a tenant it holds no policy for is refused outright, with the
 	// same error a reuse domain that was never declared gets — measured on a real master, and stated
