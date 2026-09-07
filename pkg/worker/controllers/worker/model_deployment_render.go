@@ -15,7 +15,6 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
-	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
@@ -231,32 +230,10 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 		pod.Spec.RuntimeClassName = ptr.To(in.RuntimeClassName)
 	}
 
-	// The accelerator model this role asked for, as ONE nodeSelector entry and nothing else.
-	//
-	// It is what drives Kueue's per-PodSet flavor assignment: each PodSet forms its own assignment
-	// group, and a candidate flavor is evaluated per PodSet by matching this selector against that
-	// flavor's own nodeLabels -- which is how two roles of one deployment land on two accelerator
-	// models. An accelerated ResourceFlavor's nodeLabels carry exactly this key.
-	//
-	// A role naming no key gets NO entry, which is the single-role behavior: it takes whatever the
-	// pool assigns. Rendering an empty key instead would be a selector nothing satisfies.
-	//
-	// The key having to exist in the pool is admission's rule rather than this one's, and the reason
-	// is that an unknown key does not fail here -- Kueue keeps only those nodeSelector keys a
-	// candidate flavor pins and drops the rest, so a key no flavor offers stops being a constraint
-	// at all.
-	//
-	// IT MERGES RATHER THAN ASSIGNS. Nothing else writes NodeSelector on this path today, so the two
-	// are equivalent right now -- which is exactly the condition under which an assignment is written
-	// and then silently outgrown. A selector added anywhere earlier would be dropped with no error and
-	// no symptom until a replica landed on a node it was meant to avoid.
-	if role.AcceleratorKey != "" {
-		if pod.Spec.NodeSelector == nil {
-			pod.Spec.NodeSelector = make(map[string]string, 1)
-		}
-		pod.Spec.NodeSelector[nodefeature.AcceleratableFeatureLabelPrefix+role.AcceleratorKey] = "true"
-	}
-
+	// No nodeSelector entry is rendered for the accelerator model. A role takes whatever flavor its
+	// pool assigns, which is what every role did before per-role model selection existed and what
+	// they all do again now that it is gone: Kueue evaluates a candidate flavor per PodSet, and with
+	// no selector to match against there is nothing to narrow the choice within one pool.
 	systemmeta.NoteResource(pod, ModelDeploymentResourceType, map[string]string{
 		ModelDeploymentResourceNoteRole: role.Name,
 	})

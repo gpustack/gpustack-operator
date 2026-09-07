@@ -1,7 +1,6 @@
 package worker
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -13,13 +12,8 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
-	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
-	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
-	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
-	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
-	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
 // modelDeployment builds a valid single-role deployment for the given engine, which every case then
@@ -144,8 +138,10 @@ func TestValidateModelDeployment(t *testing.T) {
 		},
 		{
 			// One Workload carries one queue name, and the queue name comes from the instanceType.
-			// The refusal must point at acceleratorKey, because wanting different hardware is why a
-			// user reaches for a second instanceType and it is expressible inside one pool.
+			// The assertion is on the sentence that names the GAP, not on the one that says "pick one
+			// type": wanting different hardware is why a user reaches for a second instanceType, and
+			// there is no field for it any more — so a message that only says "pick one" would read
+			// as though the goal were reachable another way.
 			name: "role_instance_types_differ",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
 				role(func(r *workercore.ModelDeploymentRole) { r.Name = "prefill" }),
@@ -153,7 +149,7 @@ func TestValidateModelDeployment(t *testing.T) {
 					r.Name, r.InstanceType = "decode", "a100-8x"
 				}),
 			),
-			wantMessage: "roles[0].acceleratorKey",
+			wantMessage: "is not possible today",
 		},
 		{
 			// THE OUTLIER IS FIRST, which is the arrangement a roles[0]-anchored comparison reports
@@ -470,213 +466,6 @@ func errsContain(aggregate, want string) bool {
 	return strings.Contains(aggregate, want)
 }
 
-// acceleratedFlavor builds a ResourceFlavor pinning one accelerator key, the way NodeFlavorReconciler
-// writes one.
-func acceleratedFlavor(name, acceleratorKey string) *kueue.ResourceFlavor {
-	return &kueue.ResourceFlavor{
-		ObjectMeta: meta.ObjectMeta{Name: name},
-		Spec: kueue.ResourceFlavorSpec{
-			NodeLabels: map[string]string{
-				nodefeature.AcceleratableFeatureLabelPrefix + acceleratorKey: "true",
-				// The ".count" sibling is a node-batch pin and carries something other than "true",
-				// so it must not be read as a second key. Seeding it here is what makes that real.
-				nodefeature.AcceleratableFeatureLabelPrefix + acceleratorKey + ".count": "8",
-				"kubernetes.io/os": "linux",
-			},
-		},
-	}
-}
-
-// cpuFlavor builds the flavor a non-accelerated pool carries: real, and pinning no accelerator.
-func cpuFlavor(name string) *kueue.ResourceFlavor {
-	return &kueue.ResourceFlavor{
-		ObjectMeta: meta.ObjectMeta{Name: name},
-		Spec: kueue.ResourceFlavorSpec{
-			NodeLabels: map[string]string{"kubernetes.io/os": "linux"},
-		},
-	}
-}
-
-// clusterQueue builds the queue an InstanceType backs, referencing the named flavors. The queue's
-// name IS the InstanceType's, which is what lets the webhook resolve one from the other.
-func clusterQueue(name string, flavors ...string) *kueue.ClusterQueue {
-	quotas := make([]kueue.FlavorQuotas, 0, len(flavors))
-	for _, f := range flavors {
-		quotas = append(quotas, kueue.FlavorQuotas{Name: kueue.ResourceFlavorReference(f)})
-	}
-
-	return &kueue.ClusterQueue{
-		ObjectMeta: meta.ObjectMeta{Name: name},
-		Spec: kueue.ClusterQueueSpec{
-			ResourceGroups: []kueue.ResourceGroup{{Flavors: quotas}},
-		},
-	}
-}
-
-func newModelDeploymentWebhook(objs ...ctrlcli.Object) *ModelDeploymentWebhook {
-	cli := ctrlfake.NewClientBuilder().
-		WithScheme(scheme.Scheme).
-		WithObjects(objs...).
-		Build()
-
-	return &ModelDeploymentWebhook{Client: cli, APIReader: cli}
-}
-
-// TestValidateModelDeploymentAcceleratorKeys covers the one rule that asks the cluster.
-//
-// Its most important row is the empty one: a key is accepted when the pool has no flavors to compare
-// it against, because a fresh cluster passes through that state and a refusal there would report an
-// absence as a verdict. The row is separate from the CPU-pool row on purpose — the two look alike
-// from the key set alone and mean opposite things.
-func TestValidateModelDeploymentAcceleratorKeys(t *testing.T) {
-	withKeys := func(keys ...string) *workercore.ModelDeployment {
-		roles := make([]workercore.ModelDeploymentRole, 0, len(keys))
-		for i, key := range keys {
-			roles = append(roles, role(func(r *workercore.ModelDeploymentRole) {
-				r.Name, r.AcceleratorKey = fmt.Sprintf("role-%d", i), key
-			}))
-		}
-
-		return modelDeployment(workercore.ModelDeploymentEngineVLLM, roles...)
-	}
-
-	testCases := []struct {
-		name        string
-		objs        []ctrlcli.Object
-		md          *workercore.ModelDeployment
-		wantMessage string
-	}{
-		{
-			name: "key_offered_by_the_pool",
-			objs: []ctrlcli.Object{
-				clusterQueue("h20-8x", "h20-8"),
-				acceleratedFlavor("h20-8", "nvidia-h20"),
-			},
-			md: withKeys("nvidia-h20"),
-		},
-		{
-			name: "key_absent_from_the_pool",
-			objs: []ctrlcli.Object{
-				clusterQueue("h20-8x", "h20-8"),
-				acceleratedFlavor("h20-8", "nvidia-h20"),
-			},
-			md:          withKeys("nvidia-a100"),
-			wantMessage: `offers [nvidia-h20]`,
-		},
-		{
-			// Two models in one pool is the shape acceleratorKey exists for: each role names one,
-			// and Kueue assigns a ResourceFlavor per PodSet.
-			name: "two_keys_both_offered",
-			objs: []ctrlcli.Object{
-				clusterQueue("h20-8x", "h20-8", "a100-8"),
-				acceleratedFlavor("h20-8", "nvidia-h20"),
-				acceleratedFlavor("a100-8", "nvidia-a100"),
-			},
-			md: withKeys("nvidia-h20", "nvidia-a100"),
-		},
-		{
-			// An empty list is not evidence of absence while the pool is still being built, so this
-			// is accepted and left to the per-accelerator check, which reports a shortage as Retry.
-			name: "pool_has_no_flavors_yet",
-			objs: []ctrlcli.Object{clusterQueue("h20-8x")},
-			md:   withKeys("nvidia-h20"),
-		},
-		{
-			// The queue itself has not been created yet. Same reasoning, one step earlier.
-			name: "pool_queue_absent",
-			objs: nil,
-			md:   withKeys("nvidia-h20"),
-		},
-		{
-			// A referenced flavor that no longer exists is skipped AND does not count, so a pool
-			// mid-teardown reads as "no answer" rather than as "does not offer that".
-			name: "pool_flavor_already_deleted",
-			objs: []ctrlcli.Object{clusterQueue("h20-8x", "h20-8")},
-			md:   withKeys("nvidia-h20"),
-		},
-		{
-			// A CPU pool HAS answered: its flavor is real and pins no accelerator. That is the one
-			// empty key set which is a refusal, and it is why the flavor count is carried out of
-			// the read rather than inferred from the set being empty.
-			name: "pool_carries_no_accelerator",
-			objs: []ctrlcli.Object{
-				clusterQueue("h20-8x", "cpu-only"),
-				cpuFlavor("cpu-only"),
-			},
-			md:          withKeys("nvidia-h20"),
-			wantMessage: "carries no accelerator at all",
-		},
-		{
-			// No role asks for a key, so the cluster is never read at all — asserted by giving the
-			// webhook nothing to read.
-			name: "no_role_names_a_key",
-			objs: nil,
-			md:   modelDeployment(workercore.ModelDeploymentEngineVLLM),
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			wh := newModelDeploymentWebhook(tc.objs...)
-
-			errs := wh.validate(context.Background(), tc.md, nil)
-
-			if tc.wantMessage == "" {
-				assert.Empty(t, errs, "expected acceptance")
-
-				return
-			}
-
-			require.NotEmpty(t, errs, "expected a refusal")
-			assert.True(t, errsContain(errs.ToAggregate().Error(), tc.wantMessage),
-				"refusal must name %q, got: %s", tc.wantMessage, errs.ToAggregate().Error())
-		})
-	}
-}
-
-// TestValidateModelDeploymentAcceleratorKeys_ReadsThroughAColdCache covers the moment a flavor
-// exists at the API server and not yet in the informer.
-//
-// IT NEEDS TWO DIFFERENT CLIENTS, which is why it does not join the table above: that fixture hands
-// the same fake to Client and APIReader, so a cache miss and a deletion are indistinguishable in it
-// and this defect cannot be expressed. Here the cache is missing the flavor the queue already
-// references, and the reader has it.
-//
-// The failure it pins is a refusal rather than a crash: the cold flavor's keys would be dropped from
-// the offered set while the warm flavor still counted, leaving `read` non-zero -- so the rule speaks,
-// and refuses a key the pool genuinely offers.
-func TestValidateModelDeploymentAcceleratorKeys_ReadsThroughAColdCache(t *testing.T) {
-	cq := clusterQueue("h20-8x", "warm", "cold")
-	warm := acceleratedFlavor("warm", "nvidia-l40s")
-	cold := acceleratedFlavor("cold", "nvidia-h20")
-
-	cache := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
-		WithObjects(cq, warm).Build() // no `cold`: the informer has not caught up
-	reader := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
-		WithObjects(cq, warm, cold).Build()
-
-	wh := &ModelDeploymentWebhook{Client: cache, APIReader: reader}
-
-	// The key is pinned by `cold` alone, so `warm` being readable is what makes this a wrong refusal
-	// rather than the deliberate silence of a pool that answered nothing.
-	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
-		role(func(r *workercore.ModelDeploymentRole) {
-			r.Name, r.AcceleratorKey = "prefill", "nvidia-h20"
-		}))
-
-	errs := wh.validate(context.Background(), md, nil)
-
-	assert.Empty(t, errs,
-		"a key pinned by a flavor the cache has not seen yet must not be refused as unoffered")
-}
-
-// TestValidateModelDeploymentRoleServiceNames_ExemptsRolesTheObjectAlreadyHad covers the half of the
-// rule that keeps it from stranding an object.
-//
-// The Service-name rule arrived after objects could exist, and a deployment's own name is immutable.
-// Applied unconditionally on update, a stored role whose combined name is too long would make EVERY
-// later edit fail admission — including the edit that removes that role — with nothing the user could
-// do about it. So a role the object already carried is exempt, and one being added or renamed is not.
 func TestValidateModelDeploymentRoleServiceNames_ExemptsRolesTheObjectAlreadyHad(t *testing.T) {
 	tooLong := strings.Repeat("d", 55)
 

@@ -496,16 +496,28 @@ Acceptance:
 - The field is **not** expressible through `roles[].template`: a template carrying a nodeSelector is
   not possible (the type has no such field) and this spec does not add one.
 
-> **Whether the field survives is open.** On a pool derived the default way it has nothing to choose
-> between: an InstanceType's identity is model-level, so the queue offers flavors of one accelerator
-> model and the only key the field can legally carry is the one the pool would have assigned anyway.
-> It discriminates only inside a pool an administrator authored to span models.
+> **The field does not survive. It was withdrawn on 2026-09-07** — the field, its validator, the
+> nodeSelector entry it rendered, and the handler's client along with them, since resolving a key
+> against a pool's flavors was the only rule that read the cluster.
 >
-> If per-role queues land instead (the route recorded in the heterogeneous-P/D issue, which takes
-> `roles[*].instanceType` off its must-agree rule), the role's own `instanceType` carries the hardware
-> choice and this field has no remaining reader. Withdrawing it is free for exactly as long as
-> `ModelDeployment` stays unreleased, so the decision is **not urgent and should not be made by
-> default** — but it is open, and the field's presence is not evidence that it is load-bearing.
+> The reasoning above stands: on a pool derived the default way the field has nothing to choose
+> between, because an InstanceType's identity is model-level, so the queue offers flavors of one
+> accelerator model and the only key the field could legally carry is the one the pool would have
+> assigned anyway. It discriminated only inside a pool an administrator authored to span models.
+>
+> **Two things about the withdrawal are worth stating plainly, because this entry originally named a
+> different condition for it.**
+>
+> It happened **before** per-role queues landed, not after. This entry expected the field to lose its
+> last reader once `roles[*].instanceType` came off its must-agree rule
+> ([issue 199](https://github.com/gpustack/gpustack-operator/issues/199), still open); the decision
+> was taken ahead of that.
+>
+> And "withdrawing it is free" covered **compatibility only**. No stored object was stranded —
+> `ModelDeployment` appears in none of the 29 release tags, checked per tag rather than inferred from
+> when it merged. But there was a functional cost: per-role accelerator-model selection within one
+> pool has no replacement until issue 199 lands, so the refusal for roles on two `instanceType`s now
+> names that gap instead of naming this field as the way around it.
 
 #### F5 — `roles[].kind`, and the connector term it selects
 

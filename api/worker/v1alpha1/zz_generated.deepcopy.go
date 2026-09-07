@@ -2039,6 +2039,11 @@ func (in *ModelDeploymentRole) DeepCopyInto(out *ModelDeploymentRole) {
 		*out = new(ModelDeploymentTemplate)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Parallelism != nil {
+		in, out := &in.Parallelism, &out.Parallelism
+		*out = new(int32)
+		**out = **in
+	}
 	return
 }
 

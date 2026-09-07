@@ -92,37 +92,28 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// It defaults to Server, which is the shape a deployment written before disaggregation existed
 	// has, so such a deployment renders exactly as it did.
 	Kind *workerv1alpha1.ModelDeploymentRoleKind `json:"kind,omitempty"`
-	// AcceleratorKey is the accelerator device key ("<manufacturer>-<model>", e.g. "nvidia-h20")
-	// this role's Pods must land on. It renders as ONE nodeSelector entry,
-	// "acceleratable.feature.gpustack.ai/<key>: true", and nothing else; omitting it takes whatever
-	// the pool assigns, which is the single-role behavior and stays the default.
+	// Parallelism is the tensor parallel degree one replica of this role runs. Unset renders no
+	// parallelism argument, so a role written before this field existed runs the command line it ran
+	// before.
 	//
-	// ON A POOL DERIVED THE DEFAULT WAY THERE IS NOTHING FOR IT TO CHOOSE BETWEEN. An InstanceType's
-	// identity is model-level, so its ClusterQueue offers flavors of one accelerator model and the
-	// only key this field can legally carry is the one the pool would have assigned anyway. It
-	// discriminates only inside a pool an administrator authored to span models. Whether the field
-	// survives is an open decision recorded in the spec, not here.
+	// PER ROLE rather than per deployment, because prefill and decode can run different degrees
+	// while spec.engineVersion sits one level up.
 	//
-	// It is validated at admission against the keys the role's pool actually offers, and the reason
-	// is that an unknown key does not fail — it is IGNORED. Kueue's flavor assignment keeps only
-	// those nodeSelector keys a candidate flavor's own nodeLabels carry and drops the rest, so a key
-	// no flavor offers stops being a constraint: an arbitrary flavor is assigned, the Workload is
-	// admitted, and the Pod then sits Pending at the scheduler because the real node label does not
-	// match. The mistake would surface two gates downstream with nothing naming it.
+	// IT IS DECLARED RATHER THAN DERIVED FROM THE CARD COUNT. Under pipeline parallelism the card
+	// count is the product of two degrees, so a value derived from it is correct exactly where it
+	// does not matter and wrong on the deployments large enough to matter. The degree is also
+	// already changing behavior without a name: SGLang divides the configured KV segment size by it
+	// before passing it on.
 	//
-	// ITS SHAPE IS BOUNDED BY THE SCHEMA, INDEPENDENTLY OF THAT CHECK. This value becomes the NAME
-	// segment of a label key, and a label name stops at 63 characters over a restricted alphabet
-	// where an object name runs to 253 over a wider one. The pool check cannot stand in for the
-	// bound: it deliberately refuses NOTHING when the pool's flavors cannot be read, so a malformed
-	// key passes straight through it into a nodeSelector the API server then rejects on every Pod
-	// create — a permanent reconcile failure whose cause is a field two objects away.
+	// LIMITED: SETTING IT CHANGES NOTHING THE OPERATOR RENDERS YET. The degree still has to reach the
+	// engine through roles[].extraArgs, and this field is not yet the operator's source for that
+	// argument, so the two can disagree and nothing refuses the disagreement. Until the engine's own
+	// parallelism argument joins the operator-owned key set, keep the two in step by hand.
 	//
-	// TIGHTENING IT STRANDS NO STORED OBJECT, which is what makes this a permitted change rather than
-	// a compatibility break. No released version can hold a value it now refuses, because
-	// ModelDeployment is in no released version — checked per tag with
-	// `git cat-file -e "$t:api/worker/v1alpha1/model_deployment.go"`, absent from all 37, rather than
-	// inferred from when it merged.
-	AcceleratorKey *string `json:"acceleratorKey,omitempty"`
+	// LIMITED: the contiguous port window a disaggregated deployment claims is sized partly by this
+	// degree, and nothing validates that window yet. Setting this correctly does not make admission
+	// check it, and a window too narrow still fails at engine start rather than at admission.
+	Parallelism *int32 `json:"parallelism,omitempty"`
 }
 
 // ModelDeploymentRoleApplyConfiguration constructs a declarative configuration of the ModelDeploymentRole type for use with
@@ -202,10 +193,10 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithKind(value workerv1alpha1.Mo
 	return b
 }
 
-// WithAcceleratorKey sets the AcceleratorKey field in the declarative configuration to the given value
+// WithParallelism sets the Parallelism field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the AcceleratorKey field is set to the value of the last call.
-func (b *ModelDeploymentRoleApplyConfiguration) WithAcceleratorKey(value string) *ModelDeploymentRoleApplyConfiguration {
-	b.AcceleratorKey = &value
+// If called multiple times, the Parallelism field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithParallelism(value int32) *ModelDeploymentRoleApplyConfiguration {
+	b.Parallelism = &value
 	return b
 }
