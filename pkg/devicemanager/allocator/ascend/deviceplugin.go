@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -15,6 +16,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/devicemanager/controllers"
+	productascend "gpustack.ai/gpustack/pkg/devicemanager/product/ascend"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/gox"
@@ -31,18 +33,21 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	// container-share seam, so it is built once and shared by them. Exclusive gets nil: it owns
 	// whole accelerators and must not touch the flag.
 	share := newShareDriver(logger)
+	// The A5 product is a node-level fact every mode injects a topology file from alike, so one
+	// resolver is shared by all of them and the node is read once rather than once per server.
+	product := productascend.NewResolver(newProductDriver(logger))
 
 	servers := []deviceplugin.Server{
-		newServer(logger, workercore.DeviceAllocationModeExclusive, nil),
+		newServer(logger, workercore.DeviceAllocationModeExclusive, nil, product),
 	}
 	if !opts.NoShared {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeShared, share),
+			newServer(logger, workercore.DeviceAllocationModeShared, share, product),
 		)
 	}
 	if !opts.NoSliced {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeSliced, share),
+			newServer(logger, workercore.DeviceAllocationModeSliced, share, product),
 		)
 	}
 	// The visibility server co-allocates a container to the same physical NPU(s) its owner
@@ -51,7 +56,7 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	// wildcard — which is exactly what a device-cgroup grant needs (no vcann-rt
 	// logical-slicing artifacts).
 	servers = append(servers,
-		newServer(logger, workercore.DeviceAllocationModeVisibility, share),
+		newServer(logger, workercore.DeviceAllocationModeVisibility, share, product),
 	)
 
 	return &aggregated{
@@ -103,12 +108,17 @@ type server struct {
 	// share is the dcmi container-share seam the responder turns on for the accelerators it hands
 	// out. It is nil for exclusive alone, which owns whole accelerators and must not touch the flag.
 	share shareDriver
+
+	// product is the A5 shape this node is, which names the fabric topology file its accelerators
+	// describe themselves with. Every mode carries it, so unlike share it is never nil.
+	product *productascend.Resolver
 }
 
 func newServer(
 	logger klog.Logger,
 	mode workercore.DeviceAllocationMode,
 	share shareDriver,
+	product *productascend.Resolver,
 ) deviceplugin.Server {
 	logger = logger.WithName(strings.ToLower(mode.String()))
 
@@ -119,7 +129,8 @@ func newServer(
 			AllocationMode: mode,
 			Reconciler:     controllers.Get[*deviceplugin.DevicesReconciler](),
 		},
-		share: share,
+		share:   share,
+		product: product,
 	}
 	s.Responder = s
 
@@ -134,9 +145,71 @@ func (s *server) GetContainerAllocateResponse(
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
 	// The allocated accelerators, ordered the way the container numbers them.
-	// TODO: mount HCCL topo file for 950.
 	accelerators := deviceplugin.AllocatedAccelerators(devs, allocated)
 
+	resp, err := s.getContainerAllocateResponse(pod, ctr, accelerators)
+	if err != nil {
+		return nil, err
+	}
+	// Applied to whichever response the mode produced, because the topology file is a property of
+	// the node rather than of the injection: a sliced container on an A5 reads the same fabric a
+	// whole-accelerator one does.
+	s.setHcclTopoFilePath(resp, accelerators)
+
+	return resp, nil
+}
+
+// setHcclTopoFilePath names the file HCCL reads this node's fabric topology from, on the one
+// generation that has one.
+//
+// A topology hint that cannot be read is logged and left out rather than failing the allocation.
+// That is the vendor's own behavior -- its device plugin returns early on every error path of this
+// same computation -- and it is the right trade: a container that starts without the hint fails at
+// its own HCCL init with its own diagnosis, while an allocation refused here takes down workloads
+// that never touch the fabric.
+func (s *server) setHcclTopoFilePath(resp *deviceplugin.ContainerAllocateResponse, accels []deviceplugin.AllocatedAccelerator) {
+	i := slices.IndexFunc(accels, func(a deviceplugin.AllocatedAccelerator) bool {
+		return a.Group.Family == family950
+	})
+	if i < 0 {
+		return
+	}
+	// The Ascend detector records dcmi's own addressing in PhysicalIndexes as
+	// {physical id, card id, device id in card}.
+	accel := accels[i].Accel
+	if len(accel.PhysicalIndexes) < 3 {
+		s.Logger.Info("skipping the hccl topology file, the accelerator carries no dcmi card/device index",
+			"accelerator", accel.ID)
+		return
+	}
+	cardID, deviceID := int32(accel.PhysicalIndexes[1]), int32(accel.PhysicalIndexes[2])
+
+	product, err := s.product.Resolve(cardID, deviceID)
+	if err != nil {
+		s.Logger.Error(err, "skipping the hccl topology file", "accelerator", accel.ID)
+		return
+	}
+	// A product the vendor ships no file for is an answer rather than a failure, so the code is
+	// logged: an empty shape leaves a reader nothing to look up, and the number is what the driver
+	// actually said.
+	path := hcclTopoFilePaths[product.Type]
+	if path == "" {
+		s.Logger.Info("skipping the hccl topology file, this product has none",
+			"accelerator", accel.ID, "productType", product.Type, "productCode", product.Code)
+		return
+	}
+
+	if resp.Envs == nil {
+		resp.Envs = make(map[string]string, 1)
+	}
+	resp.Envs[hcclTopoFilePathEnv] = path
+}
+
+func (s *server) getContainerAllocateResponse(
+	pod *core.Pod,
+	ctr *core.Container,
+	accelerators []deviceplugin.AllocatedAccelerator,
+) (*deviceplugin.ContainerAllocateResponse, error) {
 	// Sliced containers get real logical-slicing isolation (vcann-rt preload + quota); every
 	// other mode returns the plain device-visibility response below, with only the
 	// container-share preflight in between.
@@ -174,6 +247,14 @@ func (s *server) GetContainerAllocateResponse(
 	// Delegate to container runtime for device injection,
 	// use the driver indexes as ASCEND_VISIBLE_DEVICES value,
 	// do not support Atlas200I for now.
+	//
+	// ASCEND_RUNTIME_OPTIONS is deliberately left out, though the vendor's own plugin always writes
+	// it beside the visibility env. Its only two values are NODRV and VIRTUAL, and every read is a
+	// strings.Contains over a lookup that answers "" for an absent key -- so omitting it and setting
+	// the empty string the vendor sets for every non-vNPU allocation are the same input. Neither
+	// value applies here anyway: NODRV suppresses the driver mounts this injection depends on, and
+	// VIRTUAL selects the vendor's vNPU split, which this allocator does not use -- it slices
+	// through vcann-rt -- and which A5 does not support at all.
 	ctrResp := &deviceplugin.ContainerAllocateResponse{
 		Envs: map[string]string{
 			"ASCEND_VISIBLE_DEVICES": visible,
@@ -182,32 +263,60 @@ func (s *server) GetContainerAllocateResponse(
 	return ctrResp, nil
 }
 
-// driverIndex returns the number the driver knows an accelerator by, which for Ascend is the dcmi
-// physical id the detector recorded in PhysicalIndexes.
+// family950 is the A5 family, which is the generation serving the dcmi V2 API and the only one
+// whose visibility env is numbered differently. It is the shared package's constant, aliased here
+// because this file reads it on nearly every line.
+const family950 = productascend.Family
+
+// physicalIndex returns the dcmi physical id the detector recorded in an accelerator's
+// PhysicalIndexes, which is the number vcann-rt keys its quota config by, as the vendored dsmi patch
+// under pack/ records from hardware.
 //
-// It is that number, not the operator's own logical index, that a vendor runtime resolves:
-// ascend-docker-runtime reads each visible device as a physical id and converts it to a logic id
-// itself before naming the /dev/davinci node the container gets, and vcann-rt keys its quota config
-// by the physical id too, as the vendored dsmi patch under pack/ records from hardware. The two
-// coincide only while every accelerator on the host was detected, the logical index counting the
-// ones that were, so an accelerator failing a probe leaves every later logical index below its
-// physical id.
+// It is that number, not the operator's own logical index. The two coincide only while every
+// accelerator on the host was detected, the logical index counting the ones that were, so an
+// accelerator failing a probe leaves every later logical index below its physical id.
 //
 // A record carrying no dcmi addressing is malformed rather than degraded, so it is rejected instead
 // of being allocated against a guessed number that would name another accelerator.
-func driverIndex(accel *workercore.Accelerator) (uint32, error) {
+func physicalIndex(accel *workercore.Accelerator) (uint32, error) {
 	if len(accel.PhysicalIndexes) == 0 {
 		return 0, fmt.Errorf("accelerator %q carries no dcmi physical index", accel.ID)
 	}
 	return accel.PhysicalIndexes[0], nil
 }
 
-// visibleDevices renders the ASCEND_VISIBLE_DEVICES value: every allocated accelerator's driver
-// index, comma-joined in the order the container numbers them.
+// visibleIndex returns the number a vendor runtime resolves one entry of ASCEND_VISIBLE_DEVICES by.
+//
+// Which of dcmi's two numbers that is depends on the generation, and they are different numbers:
+//
+//   - Everywhere but A5 it is the physical id. ascend-docker-runtime reads each visible device as a
+//     physical id and converts it to a logic id itself before naming the /dev/davinci node.
+//   - On A5 it is the dcmi device (logic) id, which the detector recorded in slot 1 — that
+//     generation has no card level, so cardId == devId == logicId. The vendor's own device plugin
+//     converts to it before emitting the env, and both of the runtime's injection paths (the legacy
+//     spec walk and the CDI one) then build /dev/davinci<N> from that value verbatim, with no
+//     conversion of their own. Sending the physical id there names another accelerator wherever the
+//     driver numbers the two differently.
+//
+// An A5 record carrying only its physical id is refused for the same reason a record carrying no
+// addressing at all is: there is no number here the runtime could resolve, and the physical id is
+// not one under another name.
+func visibleIndex(group *workercore.DevicesGroup, accel *workercore.Accelerator) (uint32, error) {
+	if group.Family != family950 {
+		return physicalIndex(accel)
+	}
+	if len(accel.PhysicalIndexes) < 2 {
+		return 0, fmt.Errorf("accelerator %q carries no dcmi device index", accel.ID)
+	}
+	return accel.PhysicalIndexes[1], nil
+}
+
+// visibleDevices renders the ASCEND_VISIBLE_DEVICES value: the number a vendor runtime resolves
+// each allocated accelerator by, comma-joined in the order the container numbers them.
 func visibleDevices(accels []deviceplugin.AllocatedAccelerator) (string, error) {
 	indexes := make([]string, 0, len(accels))
 	for i := range accels {
-		index, err := driverIndex(accels[i].Accel)
+		index, err := visibleIndex(accels[i].Group, accels[i].Accel)
 		if err != nil {
 			return "", err
 		}
@@ -252,8 +361,17 @@ func (s *server) getSlicedContainerAllocateResponse(
 	}
 
 	// vcann-rt is single-NPU; configure the first allocated accelerator.
+	//
+	// The two numbers below are read apart because they are not interchangeable: the runtime
+	// resolves the visibility env, while vcann-rt keys npu_info.config by the physical id. On A5
+	// they differ — see visibleIndex. Keeping the config on the physical id there is unverified on
+	// 950 hardware; the vendor ships no vcann-rt for that generation to read the answer off.
 	group, accel := accels[0].Group, accels[0].Accel
-	npuID, err := driverIndex(accel)
+	npuID, err := physicalIndex(accel)
+	if err != nil {
+		return nil, err
+	}
+	visible, err := visibleIndex(group, accel)
 	if err != nil {
 		return nil, err
 	}
@@ -296,9 +414,9 @@ func (s *server) getSlicedContainerAllocateResponse(
 		{ContainerPath: ctrDevShmPath, HostPath: ctrDevShmPath, ReadOnly: false},
 	}
 
-	// Single-NPU, so the visibility env names this one accelerator by its driver index.
+	// Single-NPU, so the visibility env names this one accelerator.
 	envs := map[string]string{
-		"ASCEND_VISIBLE_DEVICES": strconvx.FormatUint(npuID, 10),
+		"ASCEND_VISIBLE_DEVICES": strconvx.FormatUint(visible, 10),
 	}
 
 	// Quiet vcann-rt's per-call interception logging by default: its ENPU_LOG_LEVEL

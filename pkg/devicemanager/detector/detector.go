@@ -232,6 +232,19 @@ type _DeviceKey struct {
 	Unhealthy    bool
 }
 
+// detectEveryNMonitorRounds is how many monitor rounds pass before a detect is forced regardless of
+// what the monitor loop observed.
+//
+// It is a floor under an edge-triggered loop, not a poll: the two edges that loop watches cannot see
+// a fact only detection reads, and the fabric domain is one such fact. Counted in rounds rather than
+// wall time so the floor tracks whatever monitorPeriod the operator chose.
+//
+// Forty rounds is ten minutes at the default fifteen-second period. The facts it refreshes change
+// only when someone re-cables a machine or upgrades a driver, so minutes of staleness cost a
+// scheduler nothing, while a detect pass on every round would re-enumerate every accelerator's
+// endpoints forty times over for an answer that almost never differs.
+const detectEveryNMonitorRounds = 40
+
 // Start starts the detector to detect and monitor the devices periodically until the context is canceled.
 func (d *Detector) Start(ctx context.Context) error {
 	holdUntilFirstDetected := !d.noFastFailed && d.manufacturers.Len() == 1
@@ -293,6 +306,11 @@ func (d *Detector) Start(ctx context.Context) error {
 		}
 
 		// Monitor devices and update the monitor snapshot.
+		//
+		// rounds counts this monitor stretch, and is reset by construction: leaving the loop means
+		// detecting again, so the floor below measures time since the last detect rather than since
+		// the process started.
+		rounds := 0
 		_ = waitx.UntilContextCancel(ctx, d.monitorPeriod, true, func(ctx context.Context) error {
 			logger.V(3).Info("monitoring")
 
@@ -363,6 +381,26 @@ func (d *Detector) Start(ctx context.Context) error {
 			detected, detectedErr := DetectInterfaces()
 			if interfacesChanged(d.reportedInterfaces, d.reportedInterfacesKnown, detected, detectedErr) {
 				logger.Info("network interfaces changed, going to detect again")
+				return waitx.ErrCanceled
+			}
+
+			// Everything above is edge-triggered, and the two edges it watches are the only ones a
+			// monitor pass can see: an accelerator key, and the network record. Neither carries the
+			// scale-up fabric -- a node joining or leaving a super pod changes no accelerator id and
+			// no link -- and the monitor result has no fabric in it to compare, so a purely
+			// event-driven loop publishes `fabric.domain` on the round that detected it and then
+			// never revisits it. The withholding rule that takes the label back when a node leaves
+			// its domain would fire only if an accelerator happened to change at the same moment,
+			// which is the same defect the interface comparison above exists to fix.
+			//
+			// So the loop is given a floor: detect again on a period regardless of what was seen.
+			// This is the level-based half of an otherwise edge-triggered loop, and it covers every
+			// fact only a detect pass reads -- driver version and product shape as much as fabric --
+			// rather than just the one that prompted it. Counted in monitor rounds rather than held
+			// as a deadline so that it scales with monitorPeriod instead of drifting from it.
+			rounds++
+			if rounds >= detectEveryNMonitorRounds {
+				logger.V(1).Info("detect period elapsed, going to detect again")
 				return waitx.ErrCanceled
 			}
 			return nil
@@ -513,14 +551,16 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	// downstream can catch.
 	devsCli := lpCli.WorkerV1alpha1().Devices()
 	nodeGroups := eGroups
-	if aDevs, derr := devsCli.Get(ctx, ndName, meta.GetOptions{ResourceVersion: "0"}); derr != nil {
-		if !kerrors.IsNotFound(derr) {
-			logger.V(1).Info("could not read the node's Devices for the node-wide distance",
-				"node", ndName, "error", derr.Error(),
-				"consequence", "the distance is reduced over this pass's accelerators only")
-		}
-	} else {
+	aDevs, derr := devsCli.Get(ctx, ndName, meta.GetOptions{ResourceVersion: "0"})
+	syncNodeWide := nodeWideReadSynced(derr)
+	switch {
+	case derr == nil:
 		nodeGroups = nodeWideDeviceGroups(eGroups, aDevs.Spec.Groups, d.manufacturers)
+	case !syncNodeWide:
+		logger.V(1).Info("could not read the node's Devices for the node-wide reductions",
+			"node", ndName, "error", derr.Error(),
+			"consequence", "the distance is reduced over this pass's accelerators only, "+
+				"and the fabric labels are left as previously published")
 	}
 
 	// NodeFeature.
@@ -537,16 +577,8 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		},
 		Spec: func() nfd.NodeFeatureSpec {
 			nfs := nfd.NewNodeFeatureSpec()
-			nfs.Labels = nodefeature.ConstructAcceleratableNodeLabels(eGroups)
-			// Only when this pass enumerated. A failed read must leave whatever was published
-			// before it standing: emitting nothing here, combined with the stale-key removal
-			// below, would withhold the RDMA labels on the strength of a read that never
-			// happened — and withholding one of them stops a flavor selecting this node.
-			if eInterfacesErr == nil {
-				for k, v := range nodefeature.ConstructRDMANodeLabels(nodeGroups, eInterfaces) {
-					nfs.Labels[k] = v
-				}
-			}
+			nfs.Labels = nodeFeatureLabels(eGroups, nodeGroups, eInterfaces,
+				eInterfacesErr == nil, syncNodeWide)
 			return *nfs
 		}(),
 	}
@@ -555,6 +587,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		expected:       eNf,
 		node:           nd,
 		syncInterfaces: eInterfacesErr == nil,
+		syncFabric:     syncNodeWide,
 	}
 
 	aNf, err := kubeclientset.Create(ctx, nfCli, eNf,
@@ -618,6 +651,66 @@ func controlOnNodeWithoutBlock(obj kubemeta.MetaObject, nd *core.Node) {
 	kubemeta.ControlOnWithoutBlock(obj, nd, core.SchemeGroupVersion.WithKind("Node"))
 }
 
+// nodeWideReadSynced says whether a Devices read can support WITHHOLDING a node-wide label.
+//
+// NotFound is not a failure but the node's first pass: nothing is stored yet, so this pass's own
+// groups already are everything there is to see — the same reading nodeWideDeviceGroups gives an
+// empty stored record, and the label converges once the other DaemonSet has written. Any other error
+// means this pass cannot see the rest of the node, and a label withheld on that basis would be
+// REMOVED from the object on the strength of a read that never happened.
+//
+// It is a function so that reading can be checked without a cluster: the caller needs a client, and
+// the difference between the two error kinds is invisible in the object either produces.
+func nodeWideReadSynced(err error) bool {
+	return err == nil || kerrors.IsNotFound(err)
+}
+
+// nodeFeatureLabels reduces one detect pass into the feature labels it publishes.
+//
+// It is a function rather than the inline closure it replaced because WHICH GROUP SET each label is
+// reduced over is an acceptance criterion, and a criterion needs a seam to be checked at — the same
+// reason nodeFeatureAlignment below is a type. Reduced over the wrong set every label here still
+// computes, the object still looks healthy, and only a mixed-vendor node ever shows the difference.
+//
+// ownGroups are this pass's own accelerators; nodeGroups are those plus the other manufacturers'.
+// syncInterfaces and syncNodeWide report whether the read behind each node-wide set actually
+// happened, and a label withheld here is REMOVED from the object by nodeFeatureAlignment.
+func nodeFeatureLabels(
+	ownGroups, nodeGroups device.DevicesGroupList, interfaces []device.Interface,
+	syncInterfaces, syncNodeWide bool,
+) map[string]string {
+	// Accelerator labels describe what this pass detected, and each manufacturer's pass contributes
+	// its own keys, so they are reduced over this pass's groups alone.
+	labels := nodefeature.ConstructAcceleratableNodeLabels(ownGroups)
+
+	// The fabric domain is reduced over the node-wide set for the same reason the RDMA distance is:
+	// the key claims something about EVERY accelerator the node has, and one device-manager
+	// DaemonSet per manufacturer writes this one object. Over this pass's groups alone a
+	// mixed-vendor node publishes the Ascend pass's domain while its NVIDIA accelerators are in no
+	// such domain at all, so the key promises co-location the node does not offer — and the
+	// stale-key removal would then have the two writers deleting each other's key on every pass,
+	// forever.
+	//
+	// Only when that read succeeded. Withholding here REMOVES, and a read that did not happen
+	// cannot support removing a domain that is still true. Degrading to this pass's groups the way
+	// the distance does would be unsafe in the other direction: the distance is a MINIMUM, so a
+	// subset can only underclaim, while a domain reduced over a subset can find one where the whole
+	// node has none, which OVERCLAIMS.
+	if syncNodeWide {
+		maps.Copy(labels, nodefeature.ConstructFabricNodeLabels(nodeGroups))
+	}
+
+	// Only when this pass enumerated. A failed read must leave whatever was published before it
+	// standing: emitting nothing here, combined with the stale-key removal, would withhold the RDMA
+	// labels on the strength of a read that never happened — and withholding one of them stops a
+	// flavor selecting this node.
+	if syncInterfaces {
+		maps.Copy(labels, nodefeature.ConstructRDMANodeLabels(nodeGroups, interfaces))
+	}
+
+	return labels
+}
+
 // nodeFeatureAlignment reconciles an existing NodeFeature towards what this detect pass produced.
 //
 // It is a type with a method rather than the closure it replaced for the same reason
@@ -633,6 +726,10 @@ type nodeFeatureAlignment struct {
 	// because withholding one of them stops a flavor selecting this node, and a read that did not
 	// happen cannot support that.
 	syncInterfaces bool
+	// syncFabric is false when this pass could not read the node's other manufacturers' groups. The
+	// previously published fabric labels are then left untouched, for the same reason: the domain
+	// they name may still be true, and this pass cannot see enough of the node to say otherwise.
+	syncFabric bool
 }
 
 func (a nodeFeatureAlignment) apply(aNf *nfd.NodeFeature) (_ *nfd.NodeFeature, skip bool, err error) {
@@ -657,25 +754,27 @@ func (a nodeFeatureAlignment) apply(aNf *nfd.NodeFeature) (_ *nfd.NodeFeature, s
 			skip = false
 		}
 	}
-	// Remove the RDMA keys this pass did NOT report, and only those.
+	// Remove the keys this pass did NOT report, under the prefixes it speaks for and only those.
 	//
-	// Everything above adds and overwrites; nothing deletes. For the RDMA set that is not a
-	// tolerable gap but the difference between having a gate and not: withholding the capable key
-	// is HOW an unusable link stops a flavor selecting this node, and a key that is never removed
-	// is never withheld. The label would stay true for as long as the object lives, with the
-	// object's own inventory reporting the link as broken the whole time.
+	// Everything above adds and overwrites; nothing deletes. For these two sets that is not a
+	// tolerable gap but the difference between having a gate and not: withholding a key is HOW the
+	// node stops being selected, and a key that is never removed is never withheld. It would stay
+	// true for as long as the object lives, with the object's own inventory contradicting it the
+	// whole time — an unusable RDMA link still advertised as capable, a super pod still named after
+	// the node left it.
 	//
-	// Scoped to one prefix so it cannot touch a key this pass does not own — the accelerator keys
-	// beside it are left to their existing add-only behavior, which is not this change to fix.
-	if a.syncInterfaces {
-		for k := range aNf.Spec.Labels {
-			if strings.HasPrefix(k, nodefeature.RDMAFeatureLabelPrefix) {
-				if _, reported := a.expected.Spec.Labels[k]; !reported {
-					delete(aNf.Spec.Labels, k)
-					skip = false
-				}
-			}
-		}
+	// Each prefix is gated on ITS OWN read, because they fail independently: enumerating the
+	// network interfaces and reading the node's other manufacturers' groups are different calls,
+	// and one failing says nothing about the other. Scoped to these prefixes so neither can touch
+	// a key this pass does not own — the accelerator keys beside them keep their existing add-only
+	// behavior, which is not this change to fix.
+	if a.syncInterfaces &&
+		removeUnreported(aNf.Spec.Labels, a.expected.Spec.Labels, nodefeature.RDMAFeatureLabelPrefix) {
+		skip = false
+	}
+	if a.syncFabric &&
+		removeUnreported(aNf.Spec.Labels, a.expected.Spec.Labels, nodefeature.FabricFeatureLabelPrefix) {
+		skip = false
 	}
 	// Update owner reference.
 	if !kubemeta.IsControlledBy(aNf, a.node) {
@@ -683,6 +782,22 @@ func (a nodeFeatureAlignment) apply(aNf *nfd.NodeFeature) (_ *nfd.NodeFeature, s
 		skip = false
 	}
 	return aNf, skip, err
+}
+
+// removeUnreported deletes from stored every key under prefix that reported does not carry, and says
+// whether it deleted anything. Keys outside the prefix are never touched, so one caller's withheld
+// key cannot take another's label with it.
+func removeUnreported(stored, reported map[string]string, prefix string) (removed bool) {
+	for k := range stored {
+		if !strings.HasPrefix(k, prefix) {
+			continue
+		}
+		if _, ok := reported[k]; !ok {
+			delete(stored, k)
+			removed = true
+		}
+	}
+	return removed
 }
 
 // devicesAlignment reconciles an existing Devices object towards what this detect pass produced,

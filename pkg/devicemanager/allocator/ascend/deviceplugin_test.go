@@ -100,7 +100,8 @@ func newSlicedServerWithShare(share shareDriver) *server {
 			Manufacturer:   Manufacturer,
 			AllocationMode: workercore.DeviceAllocationModeSliced,
 		},
-		share: share,
+		share:   share,
+		product: newFakeProductResolver(),
 	}
 }
 
@@ -320,6 +321,99 @@ func TestGetContainerAllocateResponse_Visibility(t *testing.T) {
 	assert.Equal(t, "3", resp.Envs["ASCEND_VISIBLE_DEVICES"], "exact allocated accelerator, never `all`")
 	assert.Len(t, resp.Envs, 1, "visibility emits only ASCEND_VISIBLE_DEVICES")
 	assert.Empty(t, resp.Mounts, "no vcann-rt preload/lib mounts")
+}
+
+// Ascend numbers one accelerator two ways, and which number ASCEND_VISIBLE_DEVICES carries depends
+// on the generation: everywhere but A5 the vendor runtime resolves the physical id, while on A5 the
+// vendor's own device plugin converts to the dcmi device (logic) id before emitting the env, and
+// both of the runtime's injection paths then name /dev/davinci<N> from that value verbatim. The
+// accelerator is given distinct numbers in both slots, so a responder reading the wrong one cannot
+// pass.
+func TestGetContainerAllocateResponse_VisibleDevicesPerFamily(t *testing.T) {
+	cases := []struct {
+		name   string
+		family string
+		want   string
+	}{
+		{name: "910B renders the physical id", family: "910B", want: "7"},
+		{name: "950 renders the dcmi device id", family: "950", want: "3"},
+	}
+	modes := []workercore.DeviceAllocationMode{
+		workercore.DeviceAllocationModeExclusive,
+		workercore.DeviceAllocationModeShared,
+		workercore.DeviceAllocationModeVisibility,
+	}
+	for _, c := range cases {
+		for _, mode := range modes {
+			t.Run(c.name+"/"+mode.String(), func(t *testing.T) {
+				s := &server{
+					ResourceServer: deviceplugin.ResourceServer{
+						Logger:         logr.Discard(),
+						Manufacturer:   Manufacturer,
+						AllocationMode: mode,
+					},
+					share:   &fakeShareDriver{enabled: map[[2]int32]bool{{3, 0}: true}},
+					product: newFakeProductResolver(),
+				}
+				devs := ascendDevicesFixture()
+				devs.Spec.Groups[0].Family = c.family
+				devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = []uint32{7, 3, 0}
+
+				pod := &core.Pod{ObjectMeta: meta.ObjectMeta{UID: types.UID("uid-visible-" + c.family)}}
+				resp, err := s.GetContainerAllocateResponse(context.Background(), pod, nil, devs,
+					map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1})
+				require.NoError(t, err)
+
+				assert.Equal(t, c.want, resp.Envs["ASCEND_VISIBLE_DEVICES"])
+			})
+		}
+	}
+}
+
+// A sliced allocation carries both numbers at once, and they are not interchangeable: the env is
+// what the vendor runtime resolves, while npu_info.config's physical-npu-id is what vcann-rt keys
+// its quota by. On A5 only the first moves to the dcmi device id.
+func TestGetSlicedContainerAllocateResponse_A5EnvAndQuotaUseDifferentIDs(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	s := newSlicedServerWithShare(&fakeShareDriver{enabled: map[[2]int32]bool{{3, 0}: true}})
+
+	devs := ascendDevicesFixture()
+	devs.Spec.Groups[0].Family = "950"
+	devs.Spec.Groups[0].RuntimeVersion = "9.0"
+	devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = []uint32{7, 3, 0}
+
+	pod, ctr := slicedPod("uid-a5-sliced", "train", 10, 25)
+	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs,
+		map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1})
+	require.NoError(t, err)
+
+	assert.Equal(t, "3", resp.Envs["ASCEND_VISIBLE_DEVICES"], "the runtime resolves the dcmi device id on A5")
+
+	body, err := os.ReadFile(filepath.Join(
+		deviceplugin.PodWorkDir("uid-a5-sliced", "train"), "etc/enpu/vcann-rt/npu_info.config"))
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "physical-npu-id=7\n", "vcann-rt still keys its quota by the physical id")
+}
+
+// A 950 accelerator recording only its physical id carries no number the vendor runtime could
+// resolve, so the allocation is refused rather than served the physical id under another name.
+func TestGetContainerAllocateResponse_A5MissingDeviceIndexRejected(t *testing.T) {
+	s := &server{
+		ResourceServer: deviceplugin.ResourceServer{
+			Logger:         logr.Discard(),
+			Manufacturer:   Manufacturer,
+			AllocationMode: workercore.DeviceAllocationModeExclusive,
+		},
+	}
+	devs := ascendDevicesFixture()
+	devs.Spec.Groups[0].Family = "950"
+	devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = []uint32{7}
+
+	pod := &core.Pod{ObjectMeta: meta.ObjectMeta{UID: types.UID("uid-a5-noslot")}}
+	_, err := s.GetContainerAllocateResponse(context.Background(), pod, nil, devs,
+		map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "carries no dcmi device index")
 }
 
 // The detector always records dcmi's addressing, so an accelerator without it is malformed. Every

@@ -15,6 +15,7 @@ import (
 	"gpustack.ai/gpustack/binding"
 	"gpustack.ai/gpustack/binding/dcmi"
 	"gpustack.ai/gpustack/pkg/device"
+	productascend "gpustack.ai/gpustack/pkg/devicemanager/product/ascend"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/loggerx"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
@@ -42,17 +43,23 @@ func init() {
 }
 
 type ascend struct {
-	once   sync.Once
-	dcmi   *dcmi.DCMI
-	logger klog.Logger
+	once sync.Once
+	dcmi *dcmi.DCMI
+	// product is the A5 shape this node is, shared with the allocator's own copy of the rule. It is
+	// read once per process rather than once per pass: a node cannot change shape while the device
+	// manager runs.
+	product *productascend.Resolver
+	logger  klog.Logger
 }
 
 // New creates a new ascend device interface and initializes the DCMI library.
 func New(opts device.DetectorOptions) device.Detector {
 	logger := opts.Logger.WithName(Manufacturer)
+	lib := dcmi.New(binding.WithLogger(logger))
 	return &ascend{
-		dcmi:   dcmi.New(binding.WithLogger(logger)),
-		logger: logger,
+		dcmi:    lib,
+		product: productascend.NewResolver(productDriver{lib: lib}),
+		logger:  logger,
 	}
 }
 
@@ -184,6 +191,20 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 				logger.Error(ret, "failed to get device physical ID")
 				continue
 			}
+			// dcmi's own addressing for this accelerator, in the slot order every consumer reads
+			// it by:
+			//
+			//   0 -- the physical id, which vcann-rt keys its quota config by and which a vendor
+			//        runtime resolves on every generation but A5;
+			//   1 -- the dcmi card id, which on the V2 API is also the device (logic) id: that
+			//        generation has no card level and enumerates devices flat, so
+			//        cardId == devId == logicId (see binding/dcmi GetCardList). The allocator
+			//        names ASCEND_VISIBLE_DEVICES by this slot on A5 (family "950");
+			//   2 -- the device's index within the card, always 0 on V2.
+			//
+			// The allocator's container-share seam addresses a device by slots 1 and 2 together.
+			// All three are distinct numbers on real hardware, so a consumer reading the wrong
+			// slot names another accelerator rather than failing.
 			physicalIndexes := []uint32{phyId, uint32(card), uint32(i)}
 
 			grpIndex := slices.IndexFunc(grpList, func(grp device.DevicesGroup) bool {
@@ -219,6 +240,12 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 						Gateway:    gw.String(),
 					}
 				}
+			}
+
+			// The UB fabric is an A5 construct and every query behind this is V2-only, so an
+			// older generation is not asked: it would refuse once per accelerator per pass.
+			if grpList[grpIndex].Family == productascend.Family {
+				topo.Fabric = in.readFabric(dev, card, i, logger)
 			}
 
 			var status device.AcceleratorStatus

@@ -536,6 +536,98 @@ func (l Device) GetTopoInfo(device2 Device) (int32, Return) {
 	return topoInfo, ret
 }
 
+// GetSuperPodInfo retrieves the device's placement in its super pod: which pod and server it sits
+// in, and that pod's product type.
+//
+// The product type is what the A5 generation names its HCCL fabric topology file from, which is why
+// this is read; the rest of the struct comes along because the driver fills it whole.
+//
+// Both generations serve this through the generic device-info entry point, so deviceInfo takes the
+// branch. The struct carries no Go pointer, so handing its address to the driver is safe under the
+// runtime's pointer check.
+func (l Device) GetSuperPodInfo() (SpodInfo, Return) {
+	var info SpodInfo
+	size := uint32(unsafe.Sizeof(info))
+	if ret := l.deviceInfo(MAIN_CMD_CHIP_INF, CINF_SUB_CMD_GET_SPOD_INFO, unsafe.Pointer(&info), &size); !ret.IsSuccess() {
+		return SpodInfo{}, ret
+	}
+
+	return info, SUCCESS
+}
+
+// GetMainboardId retrieves the id of the mainboard the device is mounted on, which on the A5
+// generation tells the carrier boards of one chip apart -- a 1P inference card from a 4P one from a
+// training baseboard.
+//
+// V1 declares no such query. This passes through to the V2 entry point regardless, which on a V1
+// driver is a symbol the wrapper could not resolve and therefore refuses; no caller asks an older
+// generation for a number only A5 defines.
+func (l Device) GetMainboardId() (uint32, Return) {
+	devId, ret := l.devID()
+	if !ret.IsSuccess() {
+		return 0, ret
+	}
+
+	var mainboardId uint32
+	ret = Return(dcmiv2GetMainboardId(devId, &mainboardId))
+
+	return mainboardId, ret
+}
+
+// eidNumMax caps the endpoint identifiers one urma device can report, and is the buffer
+// GetEidList hands the driver. It is the vendor's own limit for the same call.
+const eidNumMax = 32
+
+// GetUrmaDeviceCount retrieves how many urma devices -- the UB fabric's function entities -- this
+// device exposes. It is the count GetEidList's index runs over.
+//
+// V2-only, like GetMainboardId: the UB fabric is an A5 construct and no older generation declares
+// the query.
+func (l Device) GetUrmaDeviceCount() (uint32, Return) {
+	devId, ret := l.devID()
+	if !ret.IsSuccess() {
+		return 0, ret
+	}
+
+	var count uint32
+	ret = Return(dcmiv2GetUrmaDeviceCnt(devId, &count))
+
+	return count, ret
+}
+
+// GetEidList retrieves the endpoint identifiers one urma device answers to, addressed by an index
+// below GetUrmaDeviceCount.
+//
+// An EID is this accelerator's address on the UB fabric, and its 16 bytes are the whole of it: the
+// function entity, the die, the port and whether the endpoint serves device-to-device traffic are
+// all bit fields inside them. So the bytes travel out unparsed -- a caller that needs any of those
+// derives it, rather than this binding tracking a vendor bit layout.
+//
+// The driver's count parameter is IN-OUT: it is handed the buffer's capacity and writes back how
+// many entries it filled. A count exceeding what was offered is refused rather than trusted, since
+// following it would read past the buffer.
+//
+// V2-only, like GetUrmaDeviceCount.
+func (l Device) GetEidList(devIndex uint32) ([]UrmaEidInfo, Return) {
+	devId, ret := l.devID()
+	if !ret.IsSuccess() {
+		return nil, ret
+	}
+
+	// UrmaEidInfo carries no Go pointer, so handing the array's address to the driver is safe under
+	// the runtime's pointer check.
+	var list [eidNumMax]UrmaEidInfo
+	count := uint32(len(list))
+	if ret := Return(dcmiv2GetEidListByUrmaDevIndex(devId, devIndex, &list[0], &count)); !ret.IsSuccess() {
+		return nil, ret
+	}
+	if count > uint32(len(list)) {
+		return nil, ERROR_INVALID_PARAMETER
+	}
+
+	return list[:count:count], SUCCESS
+}
+
 func (ipAddr IpAddr) String() string {
 	if ipAddr.Ip_type == IPADDR_TYPE_V4 {
 		return fmt.Sprintf("%d.%d.%d.%d", ipAddr.U_addr[0], ipAddr.U_addr[1], ipAddr.U_addr[2], ipAddr.U_addr[3])
