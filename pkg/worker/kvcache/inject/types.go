@@ -191,6 +191,11 @@ const (
 
 	// ReasonConnectionIncomplete is a Connection missing a value the engine cannot start without.
 	ReasonConnectionIncomplete Reason = "ConnectionIncomplete"
+
+	// ReasonTransportUnsupported is a pool transport the engine's store backend refuses. It is
+	// separate from ReasonConnectionIncomplete because the Connection is complete: every value is
+	// present and legal, and it is the PAIR that no container can run.
+	ReasonTransportUnsupported Reason = "TransportUnsupported"
 )
 
 // RefusalError is a rendering that was declined, carrying the reason a caller branches on and a

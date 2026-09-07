@@ -18,14 +18,33 @@ import (
 //
 // It carries a NON-EMPTY Domain on purpose: a case asserting which engines receive a tenant is only
 // worth anything if a domain was available to render.
+//
+// THE TRANSPORT FOLLOWS THE MANUFACTURER, and it has to: the accelerator is what makes this a
+// vLLM-Ascend render, and that engine's store backend accepts only the ascend transport. A fixture
+// pairing ascend hardware with tcp does not describe a weaker pool, it describes a pool whose
+// containers raise at startup -- so every case built on one would measure that refusal instead of the
+// keys, roles or tenants it names.
 func connectorInput(engine, manufacturer string) ModelDeploymentConnectorInput {
 	return ModelDeploymentConnectorInput{
 		Engine:              engine,
 		Manufacturer:        manufacturer,
 		Domain:              "team-a-shared",
 		MasterServerAddress: "shared-kv-master.gpustack-system.svc:50051",
-		Protocol:            "tcp",
+		Protocol:            connectorTransportFor(manufacturer),
 	}
+}
+
+// connectorTransportFor is the transport a pool must offer for a role on this accelerator.
+//
+// It is keyed on the MANUFACTURER rather than on the engine because that is the axis this API splits
+// on: `vllm` on Ascend hardware becomes a different renderer engine with a different store backend,
+// and the transport requirement travels with the backend.
+func connectorTransportFor(manufacturer string) string {
+	if manufacturer == nodefeature.ManufacturerAscend {
+		return "ascend"
+	}
+
+	return "tcp"
 }
 
 // clientConfigOf decodes the client JSON out of the annotation that carries it.
@@ -62,14 +81,22 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 	// The size values are float64 because that is what decoding a JSON number into `any` yields, not
 	// because anything renders a float. The contract these assertions hold is "a JSON number, never
 	// a string" -- and they still hold it: a rendered `"0"` would decode to a string and fail here.
-	wantFileConfig := map[string]any{
-		"master_server_address": "shared-kv-master.gpustack-system.svc:50051",
-		"metadata_server":       "P2PHANDSHAKE",
-		"protocol":              "tcp",
-		"device_name":           "",
-		"global_segment_size":   float64(0),
-		"local_buffer_size":     float64(134217728),
-		"mode":                  "standalone-store",
+	//
+	// It is a function of the accelerator for ONE key. The other six are identical across the family,
+	// which is the claim this shared golden makes; the transport is not, because the fixture has to
+	// offer a pool each engine's store backend accepts. What that key asserts here is a ROUND TRIP --
+	// the pool's transport reaches the file unchanged - and the rule that decides which transports are
+	// acceptable is pinned against literals in the inject package instead.
+	wantFileConfig := func(manufacturer string) map[string]any {
+		return map[string]any{
+			"master_server_address": "shared-kv-master.gpustack-system.svc:50051",
+			"metadata_server":       "P2PHANDSHAKE",
+			"protocol":              connectorTransportFor(manufacturer),
+			"device_name":           "",
+			"global_segment_size":   float64(0),
+			"local_buffer_size":     float64(134217728),
+			"mode":                  "standalone-store",
+		}
 	}
 
 	testCases := []struct {
@@ -93,7 +120,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 				{Name: "MOONCAKE_CONFIG_PATH", Value: "/etc/gpustack/kvcache/mooncake.json"},
 			},
 			wantDefaultedEnv: []core.EnvVar{{Name: "MC_TE_METRIC", Value: "1"}},
-			wantConfig:       wantFileConfig,
+			wantConfig:       wantFileConfig(nodefeature.ManufacturerNVIDIA),
 		},
 		{
 			// SAME ENGINE VALUE AS THE CASE ABOVE, different hardware. That is the whole point of
@@ -109,7 +136,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 				{Name: "MOONCAKE_CONFIG_PATH", Value: "/etc/gpustack/kvcache/mooncake.json"},
 			},
 			wantDefaultedEnv: []core.EnvVar{{Name: "MC_TE_METRIC", Value: "1"}},
-			wantConfig:       wantFileConfig,
+			wantConfig:       wantFileConfig(nodefeature.ManufacturerAscend),
 		},
 		{
 			// SGLang takes the environment, and every part of this case is load-bearing: no
@@ -313,6 +340,37 @@ func TestSynthesizeModelDeploymentConnector_DiscriminatorTravelsInAnOwnedKey(t *
 	assert.True(t, ModelDeploymentOwnsArg(workercore.ModelDeploymentEngineVLLM, carriers[0]),
 		"%s carries the role discriminator and must be owned, or a user could supply a second one "+
 			"and no rule would say which won", carriers[0])
+}
+
+// TestSynthesizeModelDeploymentConnector_TransportTheEngineCannotUse is the path #172 is about, and it
+// is the ONLY path that reaches it: the accelerator is what turns this API's single `vllm` value into
+// the vLLM-Ascend renderer, and that engine's store backend accepts one transport.
+//
+// The condition is not that an operator chose the wrong transport. KVCacheBackend.spec.transport
+// .protocol defaults to Auto, which resolves to tcp, so the failing pool is the one nobody configured
+// -- which is why the refusal has to happen here rather than being left to the container.
+//
+// The pair is what fails, and both positive rows say so: the same accelerator renders with the
+// transport it accepts, and the same transport renders on hardware that has no requirement. Without
+// them, a synthesis that refused every Ascend role -- or every tcp pool -- would pass.
+func TestSynthesizeModelDeploymentConnector_TransportTheEngineCannotUse(t *testing.T) {
+	onAscendWith := func(protocol string) ModelDeploymentConnectorInput {
+		in := connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend)
+		in.Protocol = protocol
+		return in
+	}
+
+	_, err := SynthesizeModelDeploymentConnector(onAscendWith("tcp"))
+	require.Error(t, err, "a default pool's transport on Ascend hardware renders a container that raises")
+	assert.ErrorContains(t, err, "ascend",
+		"the refusal names the transport that would work, or an operator has four to guess between")
+
+	_, err = SynthesizeModelDeploymentConnector(onAscendWith("ascend"))
+	require.NoError(t, err, "the same accelerator on a pool that offers what it accepts still renders")
+
+	_, err = SynthesizeModelDeploymentConnector(
+		connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA))
+	require.NoError(t, err, "and the transport that failed above is the ordinary one everywhere else")
 }
 
 // TestSynthesizeModelDeploymentConnector_RoleTheEngineCannotBeTold covers the two ways a kind fails

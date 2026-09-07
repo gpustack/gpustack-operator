@@ -478,6 +478,9 @@ func TestMemberWorkload_Protocol(t *testing.T) {
 		{requested: "TCP", rendered: "tcp", privileged: false},
 		{requested: "RDMA", rendered: "rdma", privileged: true},
 		{requested: "HIP", rendered: "hip", privileged: false},
+		// This spelling has a consumer outside this package: inject's engineTransportConstraint
+		// records that vLLM-Ascend's store backend accepts exactly this string, so renaming it here
+		// would refuse every Ascend pool that engine can use.
 		{requested: "Ascend", rendered: "ascend", privileged: false},
 	}
 

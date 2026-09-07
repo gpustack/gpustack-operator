@@ -55,7 +55,9 @@ func TestRender_VLLMFamilyVehicleIsAFile(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := Render(Input{Engine: tc.engine, Role: tc.role, Connection: testConnection()})
+			result, err := Render(Input{
+				Engine: tc.engine, Role: tc.role, Connection: testConnectionFor(tc.engine),
+			})
 			require.NoError(t, err)
 
 			assert.Equal(t, []core.EnvVar{
@@ -233,7 +235,9 @@ func TestRender_TenantGoesOnlyToAnEngineThatReadsOne(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(string(tc.engine), func(t *testing.T) {
-			result, err := Render(Input{Engine: tc.engine, Domain: domain, Connection: testConnection()})
+			result, err := Render(Input{
+				Engine: tc.engine, Domain: domain, Connection: testConnectionFor(tc.engine),
+			})
 			require.NoError(t, err)
 
 			rendered, err := json.Marshal(result)
@@ -261,7 +265,7 @@ func TestRender_TenantGoesOnlyToAnEngineThatReadsOne(t *testing.T) {
 				assert.NotContains(t, envNames(result.Env), "MOONCAKE_TENANT_ID",
 					"this engine reads no tenant, so a variable for it would be decoration")
 				assert.NotContains(t, renderedConfig(t, Input{
-					Engine: tc.engine, Domain: domain, Connection: testConnection(),
+					Engine: tc.engine, Domain: domain, Connection: testConnectionFor(tc.engine),
 				}), "tenant_id", "nor a key in its file")
 			}
 			_ = rendered
@@ -347,6 +351,13 @@ func TestRender_Refusals(t *testing.T) {
 			input: Input{Engine: EngineVLLM, Role: "both", Connection: testConnection()},
 			want:  ReasonRoleUnknown,
 		},
+		{
+			// The connection here is COMPLETE, which is why this reason is its own: every value is
+			// present and legal, and it is the pair that no container can run.
+			name:  "a transport the engine's store backend refuses",
+			input: Input{Engine: EngineVLLMAscend, Connection: testConnection()},
+			want:  ReasonTransportUnsupported,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -354,6 +365,52 @@ func TestRender_Refusals(t *testing.T) {
 			result, err := Render(tc.input)
 			assert.Nil(t, result, "a refusal renders nothing; a partial result would be applied")
 			assert.Equal(t, tc.want, reasonOf(t, err))
+		})
+	}
+}
+
+// TestRender_TransportIsCheckedAtTheFunnel is why the check lives in Render rather than at either
+// caller.
+//
+// TWO surfaces render a client and only one of them can name vLLM-Ascend today: the Pod admission
+// webhook takes the engine from an annotation, which ParseEngine restricts to the selectable set,
+// while the ModelDeployment reconciler DERIVES it from the role's accelerator. A check placed on the
+// caller that can reach the pair would leave the other admitting it the day its inputs widen, and a
+// check on both would be two implementations of one table. Render is the single point both pass
+// through, so this is where the pair is refused and where the refusal has to be pinned.
+//
+// The positive rows are the load-bearing half. With only the refusal, a Render that declined every
+// vLLM-Ascend input -- or every tcp one -- would pass, and both of those break a deployment that
+// works today.
+func TestRender_TransportIsCheckedAtTheFunnel(t *testing.T) {
+	testCases := []struct {
+		name     string
+		engine   Engine
+		protocol string
+		rendered bool
+	}{
+		// #172: nobody chose tcp. Auto is the schema's default and the backend resolves it, so a pool
+		// left alone is what hands this engine the value it refuses.
+		{name: "vllm-ascend on a default pool's transport", engine: EngineVLLMAscend, protocol: "tcp"},
+		{name: "vllm-ascend on ascend", engine: EngineVLLMAscend, protocol: "ascend", rendered: true},
+		{name: "vllm on a default pool's transport", engine: EngineVLLM, protocol: "tcp", rendered: true},
+		{name: "sglang on a default pool's transport", engine: EngineSGLang, protocol: "tcp", rendered: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := testConnection()
+			conn.Protocol = tc.protocol
+
+			result, err := Render(Input{Engine: tc.engine, Connection: conn})
+			if tc.rendered {
+				require.NoError(t, err)
+				assert.NotEmpty(t, result.Args, "an admitted pair renders the engine's argument")
+				return
+			}
+
+			assert.Nil(t, result, "a refusal renders nothing; a partial result would be applied")
+			assert.Equal(t, ReasonTransportUnsupported, reasonOf(t, err))
 		})
 	}
 }
@@ -374,7 +431,12 @@ func TestSupportsRole_AgreesWithRender(t *testing.T) {
 	for _, engine := range Engines() {
 		for label, role := range roles {
 			t.Run(string(engine)+"/"+label, func(t *testing.T) {
-				_, err := Render(Input{Engine: engine, Role: role, Connection: testConnection()})
+				// The connection follows the engine, so this measures the ROLE axis alone. With one
+				// transport for every engine, vLLM-Ascend would be refused on all three roles and
+				// this would report a role disagreement that is not there.
+				_, err := Render(Input{
+					Engine: engine, Role: role, Connection: testConnectionFor(engine),
+				})
 
 				assert.Equal(t, err == nil, SupportsRole(engine, role),
 					"the table and the renderer must answer alike for %q/%q", engine, role)

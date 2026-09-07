@@ -68,7 +68,7 @@ func renderedConfig(t *testing.T, in Input) map[string]any {
 func TestVLLMConfig_KeysAreOnesTheEngineReads(t *testing.T) {
 	for _, engine := range []Engine{EngineVLLM, EngineVLLMAscend} {
 		t.Run(string(engine), func(t *testing.T) {
-			config := renderedConfig(t, Input{Engine: engine, Connection: testConnection()})
+			config := renderedConfig(t, Input{Engine: engine, Connection: testConnectionFor(engine)})
 
 			rendered := sets.KeySet(config)
 			assert.Empty(t, rendered.Difference(vllmReadableKeys).UnsortedList(),

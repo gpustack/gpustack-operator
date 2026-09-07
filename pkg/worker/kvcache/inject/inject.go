@@ -86,6 +86,14 @@ func Render(in Input) (*Result, error) {
 			"the backend published no transport; it is written explicitly because the engines "+
 				"disagree on the default, so omitting it would pick one of them at random")
 	}
+	// Refused HERE rather than at either caller, because this is the one point both of them pass
+	// through: the Pod admission webhook renders from an annotation, the ModelDeployment reconciler
+	// from an accelerator it derived, and only one of the two can name vLLM-Ascend today. A check on
+	// the caller that can would leave the other admitting the pair, and a check on both would be two
+	// implementations of one table.
+	if err := checkTransport(in.Engine, in.Connection.Protocol); err != nil {
+		return nil, err
+	}
 
 	switch in.Engine {
 	case EngineVLLM, EngineVLLMAscend:
