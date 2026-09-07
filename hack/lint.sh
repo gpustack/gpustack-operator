@@ -60,6 +60,23 @@ function lint() {
   opts+=("./...")
   GOLANGCI_LINT_CACHE="$(go env GOCACHE)/golangci-lint" gpustack::lint::run "${opts[@]}"
 
+  # Comments, which golangci-lint does not read for this and which nothing reads for shell at all.
+  # The self-test runs first and is part of the gate, for the same reason it is in docs_lint: a
+  # check that has only ever been seen to pass cannot be told apart from one that cannot fail, and
+  # this one's whole design is a set of ranges it must NOT report.
+  if ! bash "${ROOT_DIR}/hack/check-symbols-selftest.sh" "${ROOT_DIR}"; then
+    gpustack::log::fatal "the decorative-symbol check is not trustworthy: its self-test failed"
+  fi
+  # Two failures, two messages. A check that could not run is not a finding about the sources, and
+  # reporting it as one sends the reader looking for a symbol that is not there.
+  local symbols_rc=0
+  bash "${ROOT_DIR}/hack/check-symbols.sh" "${ROOT_DIR}" || symbols_rc=$?
+  if [[ ${symbols_rc} -eq 1 ]]; then
+    gpustack::log::fatal "decorative symbols in commented sources"
+  elif [[ ${symbols_rc} -gt 1 ]]; then
+    gpustack::log::fatal "the decorative-symbol check could not run; its diagnostic is above"
+  fi
+
   # Three states, not two: the tree is clean, the tree is dirty, or git cannot answer
   # at all. Folding the last into "clean" is what made a build from a git worktree fail
   # — the checkout's .git is a file pointing outside the build context, so every git
