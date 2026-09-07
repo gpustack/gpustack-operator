@@ -41,7 +41,19 @@ func (r *KVCachePoolWebhook) SetupWebhook(_ context.Context, opts webhook.SetupO
 	return &workercore.KVCachePool{}, nil
 }
 
-var _ ctrladmission.Validator[runtime.Object] = (*KVCachePoolWebhook)(nil)
+var (
+	_ ctrladmission.Validator[runtime.Object] = (*KVCachePoolWebhook)(nil)
+	_ webhook.ReceiveDeletionUpdate           = (*KVCachePoolWebhook)(nil)
+)
+
+// ReceiveDeletionUpdate keeps this webhook validating updates to a pool that is being deleted. Its
+// finalizer holds while any Binding remains, so spec.backends stays frozen for the whole span in
+// which the pool still names the master its tenant quotas live on.
+//
+// Every rule ValidateUpdate reaches is answered from the two objects it is handed, which is what
+// makes opting out of the guard safe: nothing it reads can have gone away. The backend is read from
+// ValidateCreate alone, and ValidateUpdate's own comment gives that reason.
+func (r *KVCachePoolWebhook) ReceiveDeletionUpdate() {}
 
 func (r *KVCachePoolWebhook) ValidateCreate(
 	ctx context.Context, obj runtime.Object,

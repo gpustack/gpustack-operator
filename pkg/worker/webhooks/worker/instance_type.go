@@ -52,7 +52,18 @@ func (r *InstanceTypeWebhook) SetupWebhook(_ context.Context, opts webhook.Setup
 var (
 	_ ctrladmission.Validator[runtime.Object] = (*InstanceTypeWebhook)(nil)
 	_ ctrladmission.Defaulter[runtime.Object] = (*InstanceTypeWebhook)(nil)
+	_ webhook.ReceiveDeletionUpdate           = (*InstanceTypeWebhook)(nil)
 )
+
+// ReceiveDeletionUpdate keeps this webhook validating updates to an InstanceType that is being
+// deleted. validateInstanceTypeSpecImmutable is a masked equality on the two specs and reads nothing
+// else, so the spec stays frozen while the reconciler drains the type's ClusterQueue rather than only
+// while the type is live.
+//
+// One marker releases the mutating half as well, and here that refuses nothing: Default returns nil
+// on every path, and its registration is failurePolicy Fail on CREATE, so every stored InstanceType
+// has already been through it and re-deriving its labels is idempotent.
+func (r *InstanceTypeWebhook) ReceiveDeletionUpdate() {}
 
 func (r *InstanceTypeWebhook) ValidateCreate(_ context.Context, obj runtime.Object) (ctrladmission.Warnings, error) {
 	it := obj.(*workercore.InstanceType)

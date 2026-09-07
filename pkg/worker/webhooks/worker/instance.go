@@ -31,6 +31,18 @@ import (
 
 // InstanceWebhook hooks a v1alpha1.Instance object.
 //
+// It is the one handler in this package that KEEPS the shared deletion guard, and the reason is its
+// mutating half rather than its validation. Default reads the referenced InstanceType and refuses
+// when it is gone, its registration is failurePolicy Fail on UPDATE, and an Instance carries the
+// system finalizer — so an InstanceType deleted before the Instances of it would leave every running
+// one undeletable, its finalizer-clearing update refused by a read of an object that no longer
+// exists.
+//
+// FORBIDDEN: giving this handler webhook.ReceiveDeletionUpdate. That marker releases the defaulter
+// along with the validator, so it cannot buy the frozen fields without buying that deadlock. The
+// fields it would freeze are the weaker half of the trade: they are the ones only editable while the
+// Instance is stopped, and a stopped Instance is not the one draining.
+//
 // nolint: lll
 // +k8s:webhook-gen:validating:group="worker.gpustack.ai",version="v1alpha1",resource="instances",scope="Namespaced"
 // +k8s:webhook-gen:validating:operations=["CREATE","UPDATE"],failurePolicy="Fail",sideEffects="None",matchPolicy="Equivalent",timeoutSeconds=10

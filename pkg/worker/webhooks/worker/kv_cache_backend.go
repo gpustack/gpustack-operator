@@ -49,7 +49,21 @@ func (r *KVCacheBackendWebhook) SetupWebhook(_ context.Context, _ webhook.SetupO
 	return &workercore.KVCacheBackend{}, nil
 }
 
-var _ ctrladmission.Validator[runtime.Object] = (*KVCacheBackendWebhook)(nil)
+var (
+	_ ctrladmission.Validator[runtime.Object] = (*KVCacheBackendWebhook)(nil)
+	_ webhook.ReceiveDeletionUpdate           = (*KVCacheBackendWebhook)(nil)
+)
+
+// ReceiveDeletionUpdate keeps this webhook validating updates to a backend that is being deleted. Its
+// finalizer holds while status.usedBy is non-empty, so the branch choice and the disk tier stay
+// frozen for as long as anything still consumes the backend rather than only while it is live.
+//
+// FORBIDDEN: reading the fallback-image setting on an update that leaves spec.image where it was.
+// That setting is the only thing this handler reads beyond the two objects it is handed, and
+// validateKVCacheBackendSpec gates it on the image having moved for the reason the guard exists: the
+// reconciler removing this object's finalizer is an update, and refusing it would strand the object
+// undeletable after teardown had already removed every workload it ran.
+func (r *KVCacheBackendWebhook) ReceiveDeletionUpdate() {}
 
 func (r *KVCacheBackendWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (ctrladmission.Warnings, error) {
 	kvcb := obj.(*workercore.KVCacheBackend)

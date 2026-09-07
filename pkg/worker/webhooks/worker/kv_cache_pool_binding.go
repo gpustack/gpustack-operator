@@ -41,7 +41,25 @@ func (r *KVCachePoolBindingWebhook) SetupWebhook(
 	return &workercore.KVCachePoolBinding{}, nil
 }
 
-var _ ctrladmission.Validator[runtime.Object] = (*KVCachePoolBindingWebhook)(nil)
+var (
+	_ ctrladmission.Validator[runtime.Object] = (*KVCachePoolBindingWebhook)(nil)
+	_ webhook.ReceiveDeletionUpdate           = (*KVCachePoolBindingWebhook)(nil)
+)
+
+// ReceiveDeletionUpdate keeps this webhook validating updates to a Binding that is being deleted.
+//
+// The freeze is worth most in exactly that window. The finalizer holds while status.usedBy is
+// non-empty, so a Binding stays for as long as workloads run against it, and the pool publishes this
+// object's spec.domain as its authoritative registry entry the whole time. Skipped there, a blockSize
+// or dtype edit is admitted and then reported back as the truth about blocks written at the old
+// shape.
+//
+// FORBIDDEN: adding a rule to ValidateUpdate that reads another object unconditionally. The guard
+// this opts out of exists because update validation depending on state that may already be gone must
+// not be able to reject a finalizer-clearing update, and a pool deleted before its Bindings is the
+// ordinary teardown order. The one cross-object read here is gated on the ceiling having moved, which
+// the update that releases this object does not do.
+func (r *KVCachePoolBindingWebhook) ReceiveDeletionUpdate() {}
 
 func (r *KVCachePoolBindingWebhook) ValidateCreate(
 	ctx context.Context, obj runtime.Object,
