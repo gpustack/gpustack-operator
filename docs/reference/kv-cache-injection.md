@@ -181,11 +181,16 @@ workload rolls.
 > a running container, since the file at `/etc/gpustack/kvcache/mooncake.json` is a `downwardAPI`
 > projection of that annotation. Every other metadata edit is left alone, finalizers included.
 >
+> **The freeze covers a terminating Pod too**, which is where it matters most: a Pod keeps serving
+> through its termination grace period, and the kubelet keeps reprojecting that file, so a master
+> address swapped after the delete call would still reach the running container.
+>
 > That guard is a validating webhook on UPDATE with `failurePolicy: Ignore`, so it does **not** hold
 > while the webhook is unreachable. The direction is deliberate: it keeps a record honest, and it must
 > never be the reason a live Pod cannot be updated or finished — under `Fail` an unreachable webhook
 > would block finalizer removal on every opted-in Pod, and a pool's own teardown waits behind exactly
-> that.
+> that. Clearing a finalizer touches none of the three keys, so it is admitted whether the webhook is
+> reachable or not.
 
 ## The cluster needs a Binding whose domain is `default`
 

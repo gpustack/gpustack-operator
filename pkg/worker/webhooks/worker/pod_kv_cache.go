@@ -68,6 +68,14 @@ const (
 // INPUTS at CREATE, by checkAnnotationVocabulary and by the resolution path; this is that contract
 // held past admission.
 //
+// ReceiveDeletionUpdate is what makes "the Pod's life" include its termination. Without that marker
+// the shared setup wraps this validator in a guard that returns success as soon as the Pod carries a
+// deletion timestamp, and all three keys would be editable for the whole grace period - during which
+// the container is still running and the kubelet still reprojects the client configuration from the
+// annotation. That guard exists so validation depending on state which may already be gone cannot
+// block a finalizer-clearing update; this validator reads no state beyond the two objects it is
+// handed, and clearing a finalizer changes none of the three keys, so it is admitted either way.
+//
 // WHAT THE UPDATE PATH DOES NOT HOLD, each gap reachable rather than hypothetical:
 //
 //   - Its failurePolicy is Ignore, against Fail on the mutating half, so every edit it would refuse
@@ -116,7 +124,16 @@ func (r *PodKVCacheWebhook) SetupWebhook(_ context.Context, opts webhook.SetupOp
 var (
 	_ ctrladmission.Defaulter[runtime.Object] = (*PodKVCacheWebhook)(nil)
 	_ ctrladmission.Validator[runtime.Object] = (*PodKVCacheWebhook)(nil)
+	_ webhook.ReceiveDeletionUpdate           = (*PodKVCacheWebhook)(nil)
 )
+
+// ReceiveDeletionUpdate keeps this webhook receiving update validation for a Pod that is being
+// deleted. See the type comment: the freeze is worth least at exactly the moment the default guard
+// would drop it.
+//
+// It opts the mutating half out of the same guard, which changes nothing observable there. That half
+// is registered for CREATE alone, and a create never carries a deletion timestamp.
+func (r *PodKVCacheWebhook) ReceiveDeletionUpdate() {}
 
 func (r *PodKVCacheWebhook) Default(ctx context.Context, obj runtime.Object) error {
 	pod, ok := obj.(*core.Pod)

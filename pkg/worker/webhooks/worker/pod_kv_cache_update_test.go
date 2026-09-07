@@ -10,6 +10,7 @@ import (
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"gpustack.ai/gpustack/pkg/webhook"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
@@ -253,6 +254,48 @@ func TestPodKVCacheValidateUpdate_EveryRefusalNamesTheWayForward(t *testing.T) {
 					"works; \"delete this Pod\" is not it, since an owned Pod returns identical")
 		})
 	}
+}
+
+// TestPodKVCacheValidateUpdate_SurvivesTheDeletionGuard is the only assertion here that the table
+// above cannot make, and it is deliberately shaped differently.
+//
+// `ExecuteSetup` wraps every validator in a guard that returns success as soon as the new object
+// carries a deletion timestamp, UNLESS the handler implements `webhook.ReceiveDeletionUpdate`
+// (`pkg/webhook/helper.go:67-80`, `:123-128`). The decision is one type assertion on the handler, and
+// the first assertion below is that same expression - so this tests the input the framework branches
+// on, not a restatement of it.
+//
+// ⛔ The second assertion cannot stand alone. Calling ValidateUpdate directly bypasses the wrapper
+// entirely, so a handler that was being skipped in production would still refuse here: measured, this
+// call refuses identically for a live Pod and a terminating one. Every row of the table above shares
+// that blindness. Only the marker decides whether any of them describe production.
+func TestPodKVCacheValidateUpdate_SurvivesTheDeletionGuard(t *testing.T) {
+	var handler any = &PodKVCacheWebhook{}
+	_, keepsDeletionUpdate := handler.(webhook.ReceiveDeletionUpdate)
+	require.True(t, keepsDeletionUpdate,
+		"without this marker the shared guard skips update validation for a terminating Pod, and "+
+			"all three keys become editable for the whole grace period - while the container still "+
+			"runs and the kubelet still reprojects the client configuration from the annotation")
+
+	// A terminating Pod is where the freeze is worth most: the container is still serving through its
+	// grace period, and the projected file follows the annotation.
+	oldPod := injectedKVCachePod(t)
+	deletedAt := meta.NewTime(oldPod.CreationTimestamp.Time)
+	oldPod.DeletionTimestamp = &deletedAt
+	oldPod.Finalizers = []string{"kueue.x-k8s.io/managed"}
+
+	swapped := oldPod.DeepCopy()
+	swapped.Annotations[inject.ClientConfigAnnotationKey] = `{"master_server_address":"attacker:50051"}`
+	_, err := (&PodKVCacheWebhook{}).ValidateUpdate(context.Background(), oldPod, swapped)
+	require.Error(t, err, "the master address may not be swapped under a container that is still running")
+
+	// The control, on the same terminating Pod: the update that has to keep working while it drains.
+	drained := oldPod.DeepCopy()
+	drained.Finalizers = nil
+	_, err = (&PodKVCacheWebhook{}).ValidateUpdate(context.Background(), oldPod, drained)
+	require.NoError(t, err,
+		"clearing a finalizer touches none of the three keys, which is why opting out of the guard "+
+			"cannot strand a terminating Pod")
 }
 
 // validatingWebhookNamed finds one entry of the generated validating configuration.
