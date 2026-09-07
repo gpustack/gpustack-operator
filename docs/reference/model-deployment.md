@@ -232,6 +232,28 @@ Taking over the command line has a visible cost: the role reports
 `status.roles[].unmanaged: true` and `CacheAttached` moves to `Unknown`. The operator configured no
 cache client for that role, so it does not report on one it did not render.
 
+### A take-over role is outside the reuse-domain guarantee
+
+⚠️ **A role that owns its whole argv can name any reuse domain, and this operator does not stop it.**
+`MOONCAKE_TENANT_ID` is refused in `roles[].env` on the engines that own it — the table under
+[What the operator owns](#what-the-operator-owns) is the authority — but `template.command` is a
+program and its arguments, so the same value travels inside a shell assignment or inside the script
+the argv names, and admission has nothing to read either way.
+
+**This is a consequence of what the field is, not a protection waiting to be implemented.** Any check
+would have to recover intent from an argv the tier exists to let the user write however they like, so
+there is no version of the take-over tier that also bounds the domain.
+
+Where the operator *does* build the argv, that refusal is real enforcement — the user cannot interpose
+a shell, so the environment is the only path left. Why the key is owned at all is stated under
+[What the operator owns](#what-the-operator-owns).
+
+⛔ Do not read the above as the boundary of the exposure: a take-over role is one instance of the
+mechanism, not the mechanism. The boundary is stated once, under
+[What a Binding does not do](../kv-cache/pool.md#what-a-binding-does-not-do), and tracked at
+[#168](https://github.com/gpustack/gpustack-operator/issues/168) — whose own void conditions include a
+webhook-level one, so nothing here should be read as a claim about how that issue can be closed.
+
 ## What the operator owns
 
 Ownership is per **(engine, key)**: a key one engine owns is an ordinary user argument on another.
