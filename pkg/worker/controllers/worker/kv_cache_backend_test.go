@@ -419,6 +419,98 @@ func TestKVCacheBackendReconciler_DeletesTheWorkloadsBeforeReleasingTheLock(t *t
 		"and only then does the object itself go")
 }
 
+// TestKVCacheBackendReconciler_AHeldTeardownStillConvergesItsWorkloads is the third of the exits from
+// the deadlock issue 164 reports: putting the flag back has to be enough to recover.
+//
+// A backend whose deletion is HELD is still a serving backend — the refusal lasts for as long as
+// something consumes it — so its spec still governs what runs. Without this, an edit made after the
+// deletion timestamp lands is accepted by the API server and reaches nothing: the leader keeps the
+// args of the pass before, its pod never restarts, and the consumer whose own release depends on how
+// that master is configured has no way out.
+//
+// The last step is the half that makes the rest safe to assert: once nothing holds it, the teardown
+// DELETES those workloads rather than converging them. A render that ran on every deleting pass would
+// recreate what the pass before removed, and the backend would never go.
+func TestKVCacheBackendReconciler_AHeldTeardownStillConvergesItsWorkloads(t *testing.T) {
+	ctx := context.Background()
+	claim := workercore.KVCacheObjectReference{Kind: KVCachePoolKind, Name: "team-a-pool"}
+
+	// Multi-tenancy is OFF to begin with, which is the state an operator reaches this path in: the
+	// flag was withdrawn while a pool held the backend, and putting it back is the remedy.
+	kvcb := newKVCacheBackendObject(claim)
+	cli := newKVCacheBackendClient(append([]ctrlcli.Object{kvcb}, kvCachePoolsNamedBy(claim)...)...)
+
+	leaderArgs := func(t *testing.T) []string {
+		t.Helper()
+		deploy := new(apps.Deployment)
+		require.NoError(t, cli.Get(ctx, leaderObjectKey(kvcb), deploy))
+		return deploy.Spec.Template.Spec.Containers[0].Args
+	}
+
+	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+	require.NotContains(t, leaderArgs(t), "-enable_multi_tenants=true",
+		"the flag has to be absent first, or its arrival below would prove nothing")
+
+	// Deleted for real rather than stamped by hand, so the teardown meets the state the API server
+	// actually leaves: the lock holds the object and the claim holds the teardown.
+	live := new(workercore.KVCacheBackend)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, live))
+	require.NoError(t, cli.Delete(ctx, live))
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, live))
+	require.NotNil(t, live.DeletionTimestamp, "the finalizer must have held it")
+
+	// The remedy, applied to an object that is already Deleting.
+	live.Spec.Connection.Managed.Leader.MultiTenancy = true
+	require.NoError(t, cli.Update(ctx, live))
+
+	held := reconcileKVCacheBackend(t, cli, kvcb.Name)
+	require.NotNil(t, held, "a claimed backend is not released")
+	assert.True(t, KVCacheBackendConditionDeletable.IsFalse(held),
+		"and converging its workloads must not be mistaken for letting it go")
+	assert.Contains(t, leaderArgs(t), "-enable_multi_tenants=true",
+		"the edit an operator is told to make has to reach the process it is about")
+
+	// Nothing holds it any more, and the same pass that used to converge those workloads now removes
+	// them.
+	held.Status.UsedBy = nil
+	require.NoError(t, cli.Status().Update(ctx, held))
+	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name),
+		"the pass that deletes them does not release the lock")
+
+	assert.True(t, kerrors.IsNotFound(cli.Get(ctx, leaderObjectKey(kvcb), new(apps.Deployment))),
+		"an unheld teardown deletes the leader rather than re-rendering it")
+
+	require.Nil(t, reconcileKVCacheBackend(t, cli, kvcb.Name),
+		"and the next pass finds nothing left and lets the object go")
+}
+
+// TestKVCacheBackendReconciler_AHeldTeardownRendersNothingForABackendThatNeverDid is the bound on the
+// test above: converging a held backend's workloads is keeping what RUNS in line with the spec, not
+// starting it.
+//
+// A backend deleted before any pass rendered for it publishes no address, and there is nothing to
+// keep converged. Rendering there would create a Deployment, a Service and a member group for an
+// object on its way out — and the pass that follows would delete them again, which is churn a
+// deletion has no reason to produce.
+func TestKVCacheBackendReconciler_AHeldTeardownRendersNothingForABackendThatNeverDid(t *testing.T) {
+	ctx := context.Background()
+	claim := workercore.KVCacheObjectReference{Kind: KVCachePoolKind, Name: "team-a-pool"}
+
+	kvcb := newKVCacheBackendObject(claim)
+	systemmeta.Lock(kvcb)
+	kvcb.DeletionTimestamp = ptr.To(meta.Now())
+	require.Empty(t, kvcb.Status.Endpoints, "nothing has been rendered for it, and it says so")
+
+	cli := newKVCacheBackendClient(append([]ctrlcli.Object{kvcb}, kvCachePoolsNamedBy(claim)...)...)
+	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name), "the claim holds it")
+
+	assert.True(t, kerrors.IsNotFound(cli.Get(ctx, leaderObjectKey(kvcb), new(apps.Deployment))),
+		"a held teardown converges what is running and starts nothing")
+	daemons := new(apps.DaemonSetList)
+	require.NoError(t, cli.List(ctx, daemons, ctrlcli.InNamespace(kuberess.SystemNamespaceName)))
+	assert.Empty(t, daemons.Items, "and no member group either")
+}
+
 // TestKVCacheBackendReconciler_TeardownSparesObjectsItDidNotRender is the collision case, and it is
 // about a DELETE, which nothing undoes.
 //

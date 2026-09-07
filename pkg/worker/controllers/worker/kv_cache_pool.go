@@ -1866,8 +1866,13 @@ func (r *KVCachePoolReconciler) releaseQuotaPolicyOfPool(
 
 	// A listing that fails HOLDS the teardown rather than writing a document built from half of what
 	// the master holds, which is the same refusal deleteTenantQuotas makes for the same reason.
+	//
+	// A master with multi-tenancy OFF is the exception, on the same terms deleteTenantQuotas takes it:
+	// it holds no ledger, so there is no entry the listing could be hiding and the document is rendered
+	// from the desired tenants alone. Held here instead, this write is the one the pool's finalizer
+	// never completes — and the seed would go on carrying tenants of a pool that is gone.
 	observed, err := admin.ListTenantQuotas(ctx)
-	if err != nil {
+	if err != nil && !errors.Is(err, mooncake.ErrMultiTenancyDisabled) {
 		return fmt.Errorf("list tenant quotas before re-rendering the quota policy: %w", err)
 	}
 	for i := range observed {
@@ -1959,6 +1964,15 @@ func (r *KVCachePoolReconciler) deleteTenantQuotas(
 	// gate exists to prevent, so an unanswered question must not be taken as permission.
 	observed, err := admin.ListTenantQuotas(ctx)
 	if err != nil {
+		// A master running without multi-tenancy holds NO ledger, and an entry that cannot exist is
+		// one this teardown has nothing to remove: the answer is settled rather than unknown, so the
+		// pool is released instead of waiting for a read that will never come back differently while
+		// the backend stays as it is. Every other failure leaves open whether the entries are still
+		// there, and holds.
+		if errors.Is(err, mooncake.ErrMultiTenancyDisabled) {
+			logger.V(2).Info("tearing down a pool against a master that holds no tenant ledger")
+			return false
+		}
 		KVCachePoolConditionReleasable.False(holder, KVCachePoolReasonLedgerNotReleased,
 			fmt.Sprintf("deletion is held: the master's tenant ledger could not be read, so whether "+
 				"its entries are this operator's to remove is unknown: %v", err))

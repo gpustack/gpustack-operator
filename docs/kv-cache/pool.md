@@ -275,6 +275,10 @@ workload that was never removed.
 **A pool is held while a Binding still references it**, and a backend while a pool still claims it.
 Each layer names what to remove in its own condition message.
 
+**A claimed backend cannot have its multi-tenancy withdrawn**, which is refused on the backend itself
+— see [KV Cache Backend](backend.md#operating-notes) for the rule and the remedy. What it protects on
+this side is a pool's own exit: releasing a pool means releasing every quota it registered.
+
 **Read the grant, not the ceiling, when diagnosing.** `kubectl get kvcpb` prints both:
 
 ```
