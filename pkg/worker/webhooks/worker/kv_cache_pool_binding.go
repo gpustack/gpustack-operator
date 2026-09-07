@@ -220,9 +220,10 @@ func (r *KVCachePoolBindingWebhook) validateKVCachePoolBindingDomainIsUnclaimed(
 				"the two would share cache and overwrite each other's ceiling in its single "+
 				"ledger entry for this tenant. Served by two independent backends, they share "+
 				"nothing, and the refusal is this check's scope rather than a fault between them. "+
-				"Register a domain no other Binding holds. The one exception is \"default\", "+
-				"which the engines that forward no tenant write under, so renaming it moves the "+
-				"registration away from where those Pods write",
+				"Register a domain no other Binding holds. That does not rescue a needed "+
+				"\"default\" domain: the engines that forward no tenant write under that literal "+
+				"name, so a Binding registering anything else registers a domain those Pods never "+
+				"write to",
 			kvcpb.Spec.Domain.Name, holder.Namespace, holder.Name))}
 	}
 

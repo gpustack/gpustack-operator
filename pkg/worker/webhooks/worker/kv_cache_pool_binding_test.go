@@ -323,9 +323,12 @@ func TestKVCachePoolBindingWebhook_ADuplicateDomainIsTrueOfOneMasterAndOfTwo(t *
 		"the collision is stated WITH the condition that produces it, never on its own")
 	assert.Contains(t, msg, "Served by two independent backends, they share nothing",
 		"the case with no sharing at all is stated too, so nobody goes looking for a collision")
-	assert.Contains(t, msg, "which the engines that forward no tenant write under",
+	assert.Contains(t, msg, "does not rescue a needed",
 		"the advice to rename dead-ends on the one name an engine picks, so it says so: renaming "+
 			"is admitted and the Pods that made the domain necessary still write elsewhere")
+	assert.NotContains(t, msg, "exception",
+		"calling \"default\" an exception reads as an exemption from the uniqueness rule this "+
+			"very message is enforcing, which sends the reader back to retry the refused Binding")
 }
 
 // TestKVCachePoolBindingWebhook_DeleteIsTheFinalizersDecision states where the refusal lives: this
