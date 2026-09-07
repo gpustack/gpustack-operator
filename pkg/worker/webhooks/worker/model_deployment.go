@@ -41,7 +41,18 @@ func (r *ModelDeploymentWebhook) SetupWebhook(_ context.Context, _ webhook.Setup
 	return &workercore.ModelDeployment{}, nil
 }
 
-var _ ctrladmission.Validator[runtime.Object] = (*ModelDeploymentWebhook)(nil)
+var (
+	_ ctrladmission.Validator[runtime.Object] = (*ModelDeploymentWebhook)(nil)
+	_ webhook.ReceiveDeletionUpdate           = (*ModelDeploymentWebhook)(nil)
+)
+
+// ReceiveDeletionUpdate keeps this webhook validating updates to a deployment that is being deleted.
+// Its own finalizer releases the Binding it holds, so it stays for as long as that takes, and the
+// role rules are what keep an edit in that window from producing a shape nothing consumes.
+//
+// The guard buys nothing here in the first place: this handler holds no client and every rule is
+// answered from the object alone, so there is no state deletion could have taken away.
+func (r *ModelDeploymentWebhook) ReceiveDeletionUpdate() {}
 
 func (r *ModelDeploymentWebhook) ValidateCreate(
 	_ context.Context, obj runtime.Object,

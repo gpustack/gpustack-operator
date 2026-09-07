@@ -34,6 +34,17 @@ type (
 	// handler's Default and ValidateUpdate are skipped for an object that carries a
 	// deletion timestamp, so a finalizer-clearing update is never rejected; a handler
 	// that implements this marker keeps receiving those calls during deletion.
+	//
+	// REQUIRED before implementing it: every rule the handler's ValidateUpdate can reach
+	// on an update that leaves the spec where it was must be answerable from the two
+	// objects the handler is handed. A cross-object read is compatible with the marker
+	// only while it is gated on the field it answers for having moved, which the update
+	// that clears a finalizer does not do.
+	//
+	// LIMITED: it is ONE decision covering BOTH halves. There is no way to keep the guard
+	// on Default while opting ValidateUpdate out, so a handler whose defaulting reads
+	// another object and refuses when it is absent keeps the guard however pure its
+	// validation is — the alternative is an object its own teardown can never release.
 	ReceiveDeletionUpdate interface {
 		ReceiveDeletionUpdate()
 	}
