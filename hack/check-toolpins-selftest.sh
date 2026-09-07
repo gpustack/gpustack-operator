@@ -21,9 +21,11 @@
 #                 in hack/lib/ falls back to the bare tool name when .sbin has nothing, so on a
 #                 machine that carries the tool a plant that never landed still resolves - to the
 #                 host's copy. Each case therefore asserts the resolved path IS the planted one.
-#   WIRING        a validator can compare diligently against the wrong pin. Each one is required to
-#                 name the same pin variables its own installer names, so comparing against a
-#                 neighbour's pin fails here even though every verdict above stays unchanged.
+#   WIRING        a validator can compare diligently against the wrong pin. One that is declared to
+#                 compare is required to name the same pin variables its own installer names, so a
+#                 neighbour's pin fails here even though every verdict above stays unchanged; one
+#                 declared existence-only is required to name none, so the day it grows a
+#                 comparison its row has to say so.
 #
 # NEVER point ROOT_DIR at the real checkout: hack/lib/ is copied into a throwaway tree so the
 # planted files land in that tree's .sbin. Nothing in the real .sbin is read or written.
@@ -97,12 +99,19 @@ fi
 
 # ---------------------------------------------------------------------------- verdicts
 
-# verdict <validate-fn> <sbin-relative-path>
+# verdict <validate-fn> <sbin-relative-path> <plant-shape>
 #
-# Plants a file that is not any tool's pinned build - not a Go binary, and silent under every
-# version flag - then runs the real validator with its own installer stubbed out. What is measured
-# is the decision, not the network: a validator that reaches its installer has rejected what it was
-# handed.
+# Plants a file that is not any tool's pinned build, then runs the real validator with its own
+# installer stubbed out. What is measured is the decision, not the network: a validator that
+# reaches its installer has rejected what it was handed.
+#
+# Two shapes, and the second is the one with teeth. A SILENT plant answers every version flag with
+# nothing, which a validator comparing against its pin rejects - and so does a validator that has
+# regressed to accepting any non-empty output, because nothing is not non-empty. A SPEAKING plant
+# answers with a well-formed version line that is not any pin, which separates the two: the correct
+# validator still rejects, the regressed one accepts. Both shapes assert against the same want
+# column, so no per-tool fixture is needed and none of the seven output formats is written down
+# here, where it would go stale the day a tool changes its own.
 #
 # Prints exactly one of:
 #   accept        returned 0 without reaching the installer
@@ -112,13 +121,20 @@ fi
 #   broken        anything else, which is the default on purpose: a validator that was renamed,
 #                 deleted or died must not read as one that approved something
 function verdict() {
-  local validate_fn="$1" rel="$2"
+  local validate_fn="$1" rel="$2" shape="$3"
   local base="${validate_fn%::validate}"
   local out
 
   rm -rf "${MINI:?}/.sbin"
   mkdir -p "$(dirname "$MINI/.sbin/$rel")"
-  printf '#!/bin/sh\nexit 0\n' > "$MINI/.sbin/$rel"
+  if [ "$shape" = speaking ]; then
+    # Seven fields, so the validators that cut a field out of the line all read something, and none
+    # of them reads a pin. No "tag" either, which is the word goimports-reviser greps for.
+    printf '#!/bin/sh\necho "stale 0.0.0-not-any-pin built from 0000000 on 1970-01-01T00:00:00Z"\nexit 0\n' \
+      > "$MINI/.sbin/$rel"
+  else
+    printf '#!/bin/sh\nexit 0\n' > "$MINI/.sbin/$rel"
+  fi
   chmod +x "$MINI/.sbin/$rel"
 
   out="$(
@@ -153,18 +169,24 @@ echo
 echo "== a binary that is not the pin =="
 rejects=0
 accepts=0
-for row in "${CASES[@]}"; do
-  IFS='|' read -r validate_fn rel want why <<<"$row"
-  got="$(verdict "$validate_fn" "$rel")"
-  if [ "$got" = "$want" ]; then
-    pass "$rel: $got ($why)"
-  else
-    fail "$rel: want $want, got $got ($why)"
-  fi
-  case "$got" in
-    reject) rejects=$((rejects + 1)) ;;
-    accept) accepts=$((accepts + 1)) ;;
-  esac
+for shape in silent speaking; do
+  for row in "${CASES[@]}"; do
+    IFS='|' read -r validate_fn rel want why <<<"$row"
+    got="$(verdict "$validate_fn" "$rel" "$shape")"
+    if [ "$got" = "$want" ]; then
+      pass "$rel [$shape]: $got ($why)"
+    else
+      fail "$rel [$shape]: want $want, got $got ($why)"
+    fi
+    # The split is counted once, off the silent pass; the speaking pass asserts the same want and
+    # would double every number.
+    if [ "$shape" = silent ]; then
+      case "$got" in
+        reject) rejects=$((rejects + 1)) ;;
+        accept) accepts=$((accepts + 1)) ;;
+      esac
+    fi
+  done
 done
 
 # ---------------------------------------------------------------------------- wiring
@@ -173,10 +195,17 @@ done
 # other one, and every verdict above is unchanged by that - the planted file matches neither pin, so
 # it is rejected either way. What separates the two is which pin the comparison names, and the
 # answer has to agree with the pin the installer installs.
+#
+# Log messages are skipped, and that exclusion is what makes this layer say anything at all about
+# the existence-only validators. They name their pin once, in `installing X ${x_version}`, so a
+# rule that counted every mention passed them by accident and would have called the deletion of
+# that one message a wiring error. Outside the log messages the two classes are actually different:
+# a validator that compares names its pin, and one that does not name none.
 function pins_of() {
   awk -v fn="function $1() {" '
     index($0, fn) == 1 { inside = 1 }
     inside {
+      if ($0 ~ /gpustack::log::/) next
       s = $0
       while (match(s, /\$\{[a-z_][a-z_0-9]*_version[#}]/)) {
         print substr(s, RSTART + 2, RLENGTH - 3)
@@ -187,18 +216,43 @@ function pins_of() {
   ' "$ALL" | sort -u | tr '\n' ' '
 }
 
+# want_of <validate-fn>: the want column of that validator's row, empty when it has no row. A
+# validator with no row is already a coverage failure named above, and reporting it a second time
+# here would describe it as a wiring problem, which it is not.
+function want_of() {
+  local fn="$1" row
+  for row in "${CASES[@]}"; do
+    case "$row" in
+      "${fn}|"*) IFS='|' read -r _ _ w _ <<<"$row"; printf '%s' "$w"; return 0 ;;
+    esac
+  done
+}
+
 echo
 echo "== the pin each validator names is the pin its installer installs =="
 while read -r fn; do
   base="${fn%::validate}"
+  want="$(want_of "$fn")"
+  [ -n "$want" ] || continue
   vp="$(pins_of "${base}::validate")"
   ip="$(pins_of "${base}::install")"
-  if [ -z "$vp" ] && [ -z "$ip" ]; then
-    fail "${base}: neither function names a pin, so nothing here is being compared"
+  if [ "$want" = accept ]; then
+    # Declared existence-only. Both values carry information: no pin outside the log messages is
+    # the declaration holding, and a pin appearing there means the validator changed class and the
+    # row has to follow it.
+    if [ -n "$vp" ]; then
+      fail "${base}: declared existence-only, yet compares [${vp% }] -- its row needs to change with it"
+    elif [ -z "$ip" ]; then
+      fail "${base}: its installer names no pin, so there is no version for it to install"
+    else
+      pass "${base}: existence-only, and names no pin outside its log messages"
+    fi
+  elif [ -z "$vp" ]; then
+    fail "${base}: declared to compare a pin, yet names none outside its log messages"
   elif [ "$vp" = "$ip" ]; then
-    pass "${base}: ${vp% }"
+    pass "${base}: compares ${vp% }"
   else
-    fail "${base}: validate names [${vp% }] and install names [${ip% }]"
+    fail "${base}: compares [${vp% }] while its installer installs [${ip% }]"
   fi
 done <<<"$discovered"
 
@@ -251,9 +305,19 @@ fi
 # The split is read off the measured verdicts rather than written down: a second copy of a number
 # drifts from the first, and the coverage layer above is what keeps the denominator honest.
 echo "$(printf '%s\n' "$discovered" | wc -l | tr -d ' ') validators: ${rejects} compare a version, ${accepts} accept by existence"
-# What a green run establishes: every validator in hack/lib has a row, each one's verdict on a
-# binary that is not its pin came from the file this script planted, and each names its own pin.
-# It does NOT establish that a validator which OUGHT to compare a version does - the ought lives in
-# the want column, which is a declaration - nor that the flag-comparing validators accept a matching
-# binary, a path every `make lint` and `make generate` already runs.
+# What a green run establishes: every validator in hack/lib has a row; each one's verdict on a
+# binary that is not its pin, silent and speaking, came from the file this script planted; and each
+# compares the pin its own installer installs, or compares none and is declared that way.
+#
+# What it does NOT establish, both turning on the want column being a declaration and not a
+# measurement:
+#
+#   - that a validator which OUGHT to compare a version does. One declared existence-only that does
+#     not compare passes every layer here. Only the other direction is checked: declared
+#     existence-only while actually comparing fails the wiring layer.
+#   - that a flag-comparing validator ACCEPTS a matching binary. Asserting it needs a fixture per
+#     output format, and a fixture is a copy of a format - it stays green after the tool changes
+#     its own. That direction runs on every `make lint` and `make generate`, which is not the same
+#     as being gated by them: measured, with one validator regressed to accept any non-empty output
+#     and a stand-in reporting the wrong version, `make lint` exits 0 and reports nothing.
 echo "SELFTEST PASSED"
