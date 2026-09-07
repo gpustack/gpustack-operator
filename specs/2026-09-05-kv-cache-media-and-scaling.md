@@ -363,10 +363,11 @@ stated against the effective version and carries no claim about binary versions.
 
 Against this chart's `kubeVersion: ">=1.23.0-0"` and a CI matrix running kind nodes from v1.23.17 to
 v1.35.5, that is three ranges **by effective version**: the wedge is **unavoidable** below v1.28, a
-matter of **configuration** from v1.28 through v1.32, and **foreclosed** from v1.33 for as long as the
-server is not emulating below it. Only the first is a property of the version alone; the other two
-are properties of how the cluster is configured, which is why the acceptance below is written against
-the gate rather than against a number.
+matter of **configuration** from v1.28 through v1.32, and **foreclosed** from v1.33. The first and
+third follow from the effective version by itself; only the middle one turns on how the cluster is
+configured. Emulation does not move those boundaries — what it changes is which side of them a given
+server sits on, which is why the acceptance below is written against the gate rather than against a
+number a reader would take from the binary.
 
 Before the first release that ships this type, either confirm no leftover objects exist, or write
 down a recovery procedure. The recovery procedure is what a cluster without ratcheting needs —

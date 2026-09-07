@@ -91,7 +91,8 @@ emulating an older one resolves to the older spec and can still be running with 
 
 By effective version, then, and against this chart's `kubeVersion: ">=1.23.0-0"`: the deadlock is
 **unavoidable** below v1.28, a matter of **configuration** from v1.28 through v1.32, and
-**foreclosed** from v1.33 for as long as the server is not emulating below it.
+**foreclosed** from v1.33. Emulation does not move those boundaries — it is why the version printed
+by a server's binary does not tell you which of the three it is in.
 
 Reaching that state at all takes a cluster that installed the CRD, ran with **no webhook**, and
 created a non-DRAM member in that window — so it is a development cluster or nothing.
