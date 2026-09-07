@@ -344,23 +344,25 @@ the type is unreleased, so the only clusters that could hold one are this projec
 deleting the object is the fix. A released API would need a stored-version migration instead, and
 this note is here so the next narrowing does not inherit the reasoning without the premise.
 
-**How permanent that wedge is depends on whether `CRDValidationRatcheting` is enabled, and so does
-what closing this acceptance costs.** The refusal lands on the write path (`rest.BeforeCreate` /
+**How permanent that wedge is depends on whether `CRDValidationRatcheting` applies, and so does what
+closing this acceptance costs.** The refusal lands on the write path (`rest.BeforeCreate` /
 `rest.BeforeUpdate`), so such an object reads back intact and every update is refused — including the
 controller removing its finalizer, which is what makes it undeletable rather than merely unwritable,
-the same shape as the Kueue upgrade finalizer deadlock. That is the behaviour with the gate
-**disabled**. Where it is enabled the schema error on an **unchanged** field is demoted rather than
-raised, so a finalizer removal is admitted and the object deletes normally.
+the same shape as the Kueue upgrade finalizer deadlock. That is the behaviour **without** ratcheting.
+Where it applies, the schema error on an **unchanged** field is demoted rather than raised, so a
+finalizer removal is admitted and the object deletes normally.
 
-The gate is off by default in v1.28, on by default from Kubernetes v1.30, and **locked on from
-v1.33** — a version sets the default, not the capability, so any cluster below v1.33 may be running
-either way and only v1.33 forecloses the deadlock. This chart declares `kubeVersion: ">=1.23.0-0"`
-and CI exercises kind nodes from v1.23.17 to v1.35.5, so the consequence has to be stated against the
-gate's state rather than against a version.
+The gate is unavailable before Kubernetes v1.28, off by default from v1.28, on by default from v1.30,
+and **locked on** from v1.33. A version therefore decides what the gate's state can be, not the state
+itself. Against this chart's `kubeVersion: ">=1.23.0-0"` and a CI matrix running kind nodes from
+v1.23.17 to v1.35.5, that is three ranges: the wedge is **unavoidable** on v1.23 through v1.27, a
+matter of **configuration** on v1.28 through v1.32, and **foreclosed** from v1.33. Only the first and
+third are properties of a version; the middle range is a property of how the cluster is configured.
 
 Before the first release that ships this type, either confirm no leftover objects exist, or write
-down a recovery procedure. The recovery procedure is what a cluster with the gate disabled needs;
-where it is locked on, deleting the object is already enough.
+down a recovery procedure. The recovery procedure is what a cluster without ratcheting needs —
+whether because its version predates the gate or because the gate is switched off; where the gate is
+locked on, deleting the object is already enough.
 
 **Gate two — every reader is accounted for, one line each.** Not "nothing seems to use it": each
 site below was opened and read for **which values it takes**, searched twice over `api/` and `pkg/`

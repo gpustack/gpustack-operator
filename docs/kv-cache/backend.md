@@ -73,20 +73,19 @@ each is reached another way:
 > receive a single write. The object would say one thing, the running member another, and nothing
 > would report a fault.
 
-⛔ **Where `CRDValidationRatcheting` is disabled, an object still carrying one of the other four
-values can never be updated again — including by the controller removing its finalizer, so it cannot
-be deleted.** CRD validation runs on the **write** path only (`rest.BeforeCreate` /
-`rest.BeforeUpdate`): the object still reads back, and every update is refused. It is the shape of
-the Kueue upgrade finalizer deadlock.
+⛔ **Without ratcheting, an object still carrying one of the other four values can never be updated
+again — including by the controller removing its finalizer, so it cannot be deleted.** CRD validation
+runs on the **write** path only (`rest.BeforeCreate` / `rest.BeforeUpdate`): the object still reads
+back, and every update is refused. It is the shape of the Kueue upgrade finalizer deadlock.
 
-**The gate's state is what bounds that, and a version only sets its default.** Where the gate is
-enabled, an update whose invalid field is **unchanged** is admitted, so removing a finalizer still
+**`CRDValidationRatcheting` is what decides that, and a version decides what the gate can be.** Where
+it is on, an update whose invalid field is **unchanged** is admitted, so removing a finalizer still
 works.
 
-`CRDValidationRatcheting` is off by default in v1.28, on by default from v1.30, and **locked on from
-v1.33**. So any cluster below v1.33 may be running either way, and v1.33 is the first version where
-the deadlock cannot occur at all. This chart declares `kubeVersion: ">=1.23.0-0"`, so the deadlock is
-a property of the gate being off rather than of a version.
+The gate is unavailable before v1.28, off by default from v1.28, on by default from v1.30, and
+**locked on** from v1.33. Against this chart's `kubeVersion: ">=1.23.0-0"` that is three ranges: the
+deadlock is **unavoidable** on v1.23 through v1.27, a matter of **configuration** on v1.28 through
+v1.32, and **impossible** from v1.33.
 
 Reaching that state at all takes a cluster that installed the CRD, ran with **no webhook**, and
 created a non-DRAM member in that window — so it is a development cluster or nothing.
