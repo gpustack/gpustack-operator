@@ -36,6 +36,7 @@ func GetValidatingWebhookConfiguration(n string, c v1.WebhookClientConfig) *v1.V
 			vwh_pkg_worker_webhooks_worker_KVCachePoolBindingWebhook(c),
 			vwh_pkg_worker_webhooks_worker_KVCachePoolWebhook(c),
 			vwh_pkg_worker_webhooks_worker_ModelDeploymentWebhook(c),
+			vwh_pkg_worker_webhooks_worker_PodKVCacheWebhook(c),
 			vwh_pkg_worker_webhooks_worker_PodWebhook(c),
 		},
 	}
@@ -427,6 +428,63 @@ func vwh_pkg_worker_webhooks_worker_ModelDeploymentWebhook(c v1.WebhookClientCon
 		},
 		FailurePolicy:  ptr.To[v1.FailurePolicyType]("Fail"),
 		MatchPolicy:    ptr.To[v1.MatchPolicyType]("Equivalent"),
+		SideEffects:    ptr.To[v1.SideEffectClass]("None"),
+		TimeoutSeconds: ptr.To[int32](10),
+		AdmissionReviewVersions: []string{
+			"v1",
+		},
+	}
+}
+
+func (*PodKVCacheWebhook) ValidatePath() string {
+	return "/validate-gpustack-worker-kvcache-core-v1-pod"
+}
+
+func vwh_pkg_worker_webhooks_worker_PodKVCacheWebhook(c v1.WebhookClientConfig) v1.ValidatingWebhook {
+	path := "/validate-gpustack-worker-kvcache-core-v1-pod"
+
+	cc := c.DeepCopy()
+	if cc.Service != nil {
+		cc.Service.Path = &path
+	} else if c.URL != nil {
+		cc.URL = ptr.To(*c.URL + path)
+	}
+
+	return v1.ValidatingWebhook{
+		Name:         "validate.gpustack-worker-kvcache.core.v1.pod",
+		ClientConfig: *cc,
+		Rules: []v1.RuleWithOperations{
+			{
+				Rule: v1.Rule{
+					APIGroups: []string{
+						"",
+					},
+					APIVersions: []string{
+						"v1",
+					},
+					Resources: []string{
+						"pods",
+					},
+					Scope: ptr.To[v1.ScopeType]("Namespaced"),
+				},
+				Operations: []v1.OperationType{
+					"UPDATE",
+				},
+			},
+		},
+		FailurePolicy: ptr.To[v1.FailurePolicyType]("Ignore"),
+		MatchPolicy:   ptr.To[v1.MatchPolicyType]("Equivalent"),
+		ObjectSelector: ptr.To(metav1.LabelSelector{
+			MatchExpressions: []metav1.LabelSelectorRequirement{
+				{
+					Key:      "kvcache.gpustack.ai/inject",
+					Operator: metav1.LabelSelectorOperator("In"),
+					Values: []string{
+						"true",
+					},
+				},
+			},
+		}),
 		SideEffects:    ptr.To[v1.SideEffectClass]("None"),
 		TimeoutSeconds: ptr.To[int32](10),
 		AdmissionReviewVersions: []string{
