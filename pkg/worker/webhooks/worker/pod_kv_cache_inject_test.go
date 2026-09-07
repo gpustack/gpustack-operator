@@ -163,6 +163,11 @@ func TestPodKVCacheInject_RefusesAShellWrapper(t *testing.T) {
 		name          string
 		command, args []string
 		refuse        bool
+		// wantMsg is the phrase that identifies WHICH reason the refusal gave, and asserting it per
+		// row is what keeps the three apart. They lead to different next moves - rewrite the shell
+		// invocation, unpack the single argument, or look inside the script - so a test that only
+		// checked "some error" would let any one of them answer for another.
+		wantMsg string
 	}{
 		{name: "-c in command", command: []string{"/bin/sh", "-c"}, args: []string{"vllm serve"}, refuse: true},
 		{name: "-c in args", command: []string{"/bin/sh"}, args: []string{"-c", "vllm serve"}, refuse: true},
@@ -172,11 +177,25 @@ func TestPodKVCacheInject_RefusesAShellWrapper(t *testing.T) {
 		{name: "not a shell", command: []string{"myapp", "-c", "config.yaml"}, args: []string{"run"}},
 		{name: "engine directly", command: []string{"vllm"}, args: []string{"serve", "--model", "x"}},
 		{name: "long option", command: []string{"/bin/sh", "--config"}, args: []string{"x"}},
-		// A shell stops reading options at its first operand, so a -c AFTER the script file belongs to
-		// the script: `sh /app/run.sh -c config` sets the script's $1, and appending to args is safe.
-		// An earlier revision scanned the whole argv and refused these, which is a false refusal.
-		{name: "-c after the script operand", command: []string{"/bin/sh", "/app/run.sh"}, args: []string{"-c", "config"}},
-		{name: "options ended by --", command: []string{"/bin/sh", "--", "run.sh"}, args: []string{"-c", "x"}},
+		// A shell stops reading options at its first operand, so a -c AFTER the command file belongs
+		// to the file: `sh /app/run -c config` sets its $1, not the shell's command string. These
+		// must not carry the shell refusal - an earlier revision scanned the whole argv and did.
+		// The command file is deliberately not named *.sh here, so what these rows assert is where
+		// the scan STOPS; the pair below asserts what happens at the stop.
+		{name: "-c after the command file", command: []string{"/bin/sh", "/app/run"}, args: []string{"-c", "config"}},
+		{name: "options ended by --", command: []string{"/bin/sh", "--", "run"}, args: []string{"-c", "x"}},
+		// The same two spellings with a script as the command file. `sh /app/run.sh` hands the shell
+		// the same unreadable file `./run.sh` runs directly, and the appended flag becomes that
+		// script's $1 either way - so refusing one spelling and admitting the other would only
+		// publish the spelling that gets through.
+		{
+			name: "a script as the shell's command file", command: []string{"/bin/sh", "/app/run.sh"},
+			args: []string{"-c", "config"}, refuse: true, wantMsg: "forwards its arguments",
+		},
+		{
+			name: "a script after --", command: []string{"/bin/sh", "--", "run.sh"},
+			args: []string{"-c", "x"}, refuse: true, wantMsg: "forwards its arguments",
+		},
 		// -o and bash's -O take an option NAME as their operand, so the scan must not mistake it for
 		// the script file and stop there - the -c that follows is still the shell's. A bundle ending
 		// in o does the same, which is why the rule is on the last character rather than on "-o".
@@ -217,7 +236,11 @@ func TestPodKVCacheInject_RefusesAShellWrapper(t *testing.T) {
 		{name: "an operand letter is per launcher", command: []string{"/sbin/tini", "-C", "sh", "-c"}, args: []string{"vllm serve"}, refuse: true},
 		// Resolving the prefix must not turn a direct launch into a refusal.
 		{name: "env then the engine", command: []string{"/usr/bin/env", "vllm"}, args: []string{"serve", "--model", "x"}},
-		{name: "env then a script", command: []string{"env", "sh", "/app/run.sh"}, args: []string{"-c", "config"}},
+		{name: "env then a shell and its command file", command: []string{"env", "sh", "/app/run"}, args: []string{"-c", "config"}},
+		{
+			name: "env then a shell and a script", command: []string{"env", "sh", "/app/run.sh"},
+			args: []string{"-c", "config"}, refuse: true, wantMsg: "forwards its arguments",
+		},
 		{name: "env -C then the engine", command: []string{"env", "-C", "/work", "vllm"}, args: []string{"serve", "--model", "x"}},
 		// env -a/--argv0 sets the command's argv[0]; its operand is not the command.
 		{name: "env -a takes an argv0", command: []string{"env", "-a", "custom", "sh", "-c"}, args: []string{"vllm serve"}, refuse: true},
@@ -228,8 +251,8 @@ func TestPodKVCacheInject_RefusesAShellWrapper(t *testing.T) {
 		{name: "bash --rcfile takes a file", command: []string{"/bin/bash", "--rcfile", "/tmp/x", "-c"}, args: []string{"vllm serve"}, refuse: true},
 		{name: "bash --init-file takes a file", command: []string{"/bin/bash", "--init-file", "/tmp/x", "-c"}, args: []string{"vllm serve"}, refuse: true},
 		// An ordinary long flag still must not swallow the token after it: --norc is operand-free, so
-		// what follows is the script, and the -c after THAT belongs to the script.
-		{name: "operand-free long flag", command: []string{"/bin/bash", "--norc", "/app/run.sh"}, args: []string{"-c", "config"}},
+		// what follows is the command file, and the -c after THAT belongs to that file.
+		{name: "operand-free long flag", command: []string{"/bin/bash", "--norc", "/app/run"}, args: []string{"-c", "config"}},
 		// A multi-call binary names its applet in the first operand, so the shell is one token further
 		// along than argv[0]. Neither "busybox" nor "toybox" is a shell name, so an unresolved prefix
 		// here admits the launch outright.
@@ -244,6 +267,76 @@ func TestPodKVCacheInject_RefusesAShellWrapper(t *testing.T) {
 		// a command. An earlier revision admitted this, reasoning that "the shell fails on its own
 		// terms" - it does not, it runs the wrong thing, and the injection is what put it there.
 		{name: "trailing -c", command: []string{"/bin/sh", "-c"}, refuse: true},
+
+		// FAILING CLOSED: the two shapes this check used to admit because it could not read them.
+		// Neither is a launcher missing from the enumeration - both are launches whose behavior is
+		// not on the command line at all, which is why no entry would fix them.
+		//
+		// A script by path. Measured on lmsysorg/sglang, whose entrypoint is
+		// /opt/nvidia/nvidia_entrypoint.sh: whether an appended flag reaches the engine depends on
+		// whether that file forwards "$@", and admission cannot open the file.
+		{
+			name: "a script by path", command: []string{"/opt/nvidia/nvidia_entrypoint.sh"},
+			args: []string{"vllm", "serve"}, refuse: true, wantMsg: "forwards its arguments",
+		},
+		{
+			name:    "a script by path behind a launcher it knows",
+			command: []string{"tini", "--", "/app/entrypoint.sh"}, args: []string{"vllm", "serve"},
+			refuse: true, wantMsg: "forwards its arguments",
+		},
+		// The whole command line inside one token: env -S splits the string itself, so there is
+		// nothing on the argv to test. Every spelling of that option has to reach the refusal, and
+		// what makes a token opaque is the OPTION rather than where the argv happened to end - the
+		// trailing row below was admitted by a revision that counted the tokens left, resolving
+		// "trailing" as the program while the hidden shell ran.
+		{
+			name: "env -S hides the command line", command: []string{"env", "-S", "sh -c 'vllm serve'"},
+			refuse: true, wantMsg: "inside a single argument",
+		},
+		{
+			name:    "env --split-string hides it too",
+			command: []string{"env", "--split-string", "sh -c 'vllm serve'"},
+			refuse:  true, wantMsg: "inside a single argument",
+		},
+		{
+			name:    "env -S with a token after it",
+			command: []string{"env", "-S", "sh -c 'vllm serve'", "trailing"},
+			refuse:  true, wantMsg: "inside a single argument",
+		},
+		{
+			name:    "the -S operand inlined into the bundle",
+			command: []string{"env", "-Ssh -c 'vllm serve'"},
+			refuse:  true, wantMsg: "inside a single argument",
+		},
+		{
+			name:    "--split-string with an inline value",
+			command: []string{"env", "--split-string=sh -c 'vllm serve'"},
+			refuse:  true, wantMsg: "inside a single argument",
+		},
+
+		// AND THE SHAPES FAILING CLOSED MUST NOT TOUCH. A launcher whose options simply ended leaves
+		// the appended args AS the command, which is the appendable case: `tini --` plus args runs
+		// exactly those args. Refusing it would be the false refusal that makes fail-closed
+		// unusable, and it is the shape 56 of the 60 runner-image families ship.
+		{name: "tini with the command in args", command: []string{"tini", "--"}, args: []string{"vllm", "serve"}},
+		{name: "tini and nothing else", command: []string{"tini", "--"}},
+		// An operand-taking option with real tokens after it still resolves.
+		{name: "env -u then a program", command: []string{"env", "-u", "HOME", "vllm"}, args: []string{"serve"}},
+		// An operand-taking option left without its operand is not a hidden command line: env fails
+		// on its own terms and there is no token for a shell to be inside. Folding it in with -S
+		// refused it under a message describing a command line it does not have.
+		{name: "env -u with its operand missing", command: []string{"env", "-u"}},
+		// AND THE SAME HOLDS FOR THE OPAQUE OPTION ITSELF, which is where the first version of this
+		// fix stopped half way: -S was refused whether or not it had an operand, under the message
+		// about a command line hidden in one argument - the exact mis-classification the -u case
+		// above was changed to remove. An opaque option is opaque once it HAS its operand.
+		{name: "env -S with its operand missing", command: []string{"env", "-S"}},
+		{name: "env --split-string with its operand missing", command: []string{"env", "--split-string"}},
+		// An opaque letter is only opaque when it is the FIRST operand-taking letter of the bundle:
+		// -u has already consumed the rest, so this unsets the variable named S and runs vllm.
+		{name: "an opaque letter behind an operand letter", command: []string{"env", "-uS", "vllm"}, args: []string{"serve"}},
+		// A program that merely has a script-looking argument is not a script launch.
+		{name: "a program taking a script argument", command: []string{"vllm", "serve", "--x", "a.sh"}},
 	}
 
 	for _, tc := range testCases {
@@ -258,7 +351,11 @@ func TestPodKVCacheInject_RefusesAShellWrapper(t *testing.T) {
 				return
 			}
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "positional parameters",
+			want := tc.wantMsg
+			if want == "" {
+				want = "positional parameters"
+			}
+			assert.Contains(t, err.Error(), want,
 				"the message has to say WHY appending cannot work, or the fix is not obvious")
 		})
 	}
