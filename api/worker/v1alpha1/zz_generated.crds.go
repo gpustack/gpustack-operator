@@ -2378,12 +2378,13 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																	Nullable: true,
 																},
 																"replicas": {
-																	Description: "Replicas is how many leader processes run. One, and only one, in this scope: electing a\nleader among several needs a backend store this scope does not enter, and the webhook\nrefuses anything else while naming that follow-on rather than silently running one anyway.",
+																	Description: "Replicas is how many leader processes run. One, and only one, in this scope: electing a\nleader among several needs a backend store this scope does not enter, and the webhook\nrefuses anything else while naming that follow-on rather than silently running one anyway.\nREQUIRED: the ceiling is duplicated in the schema on purpose, because the two layers catch\ndifferent absences. The webhook's message explains; this one still holds when the webhook is\nnot installed, which is when a second leader would be rendered rather than refused. Raising\nit belongs with the field that configures the election, and widening a maximum is not a\nbreaking change.",
 																	Type:        "integer",
 																	Format:      "int32",
 																	Default: &v1.JSON{
 																		Raw: []byte(`1`),
 																	},
+																	Maximum:  ptr.To[float64](1),
 																	Minimum:  ptr.To[float64](1),
 																	Nullable: true,
 																},

@@ -1,6 +1,7 @@
 package mooncake
 
 import (
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -193,6 +194,103 @@ func TestLeaderWorkload_NeverSurgesASecondMaster(t *testing.T) {
 		"an unset strategy is RollingUpdate, which surges a second master past a single replica")
 	assert.Nil(t, deploy.Spec.Strategy.RollingUpdate,
 		"and the rolling fields go with the type, or they describe a strategy not in use")
+}
+
+// withLeaderReplicas sets how many leader processes the object asks for.
+func withLeaderReplicas(replicas int32) func(*workercore.KVCacheBackend) {
+	return func(kvcb *workercore.KVCacheBackend) {
+		kvcb.Spec.Connection.Managed.Leader.Replicas = ptr.To(replicas)
+	}
+}
+
+// TestLeaderWorkload_UpdateStrategyInvertsWithStandbys asserts the two update shapes ARE opposites,
+// not variations, and each case names the failure the other one produces.
+//
+// One replica has no election, so a surging second master is a split brain. Several replicas have an
+// election, so the surge is safe -- and now the danger is the reverse: exactly one replica is ever
+// ready, because the standbys deliberately are not, so any maxUnavailable below replicas-1 asks for
+// more available replicas than this workload ever has and the rollout never moves.
+func TestLeaderWorkload_UpdateStrategyInvertsWithStandbys(t *testing.T) {
+	cases := []struct {
+		name     string
+		replicas int32
+		// wantSurge and wantUnavailable are only read for the rolling case.
+		wantRolling     bool
+		wantSurge       int32
+		wantUnavailable int32
+		why             string
+	}{
+		{
+			name:     "one replica recreates",
+			replicas: 1,
+			why:      "without an election a surged second master is a split brain",
+		},
+		{
+			name:            "two replicas roll, tolerating the one standby",
+			replicas:        2,
+			wantRolling:     true,
+			wantSurge:       1,
+			wantUnavailable: 1,
+			why:             "one of the two is a standby and never ready",
+		},
+		{
+			name:            "five replicas tolerate four standbys",
+			replicas:        5,
+			wantRolling:     true,
+			wantSurge:       1,
+			wantUnavailable: 4,
+			why:             "maxUnavailable tracks replicas-1 rather than a fixed number",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			deploy := RenderLeaderDeployment(
+				testBackend(withLeaderReplicas(c.replicas)), "mooncake:v0.3.13")
+
+			require.NotNil(t, deploy.Spec.Replicas)
+			assert.Equal(t, c.replicas, *deploy.Spec.Replicas)
+
+			if !c.wantRolling {
+				assert.Equal(t, apps.RecreateDeploymentStrategyType, deploy.Spec.Strategy.Type, c.why)
+				assert.Nil(t, deploy.Spec.Strategy.RollingUpdate,
+					"the rolling fields go with the type, or they describe a strategy not in use")
+				assert.Nil(t, deploy.Spec.ProgressDeadlineSeconds,
+					"a single replica keeps the server's default deadline, which discriminates there")
+				return
+			}
+
+			assert.Equal(t, apps.RollingUpdateDeploymentStrategyType, deploy.Spec.Strategy.Type, c.why)
+			require.NotNil(t, deploy.Spec.Strategy.RollingUpdate)
+			require.NotNil(t, deploy.Spec.Strategy.RollingUpdate.MaxSurge)
+			require.NotNil(t, deploy.Spec.Strategy.RollingUpdate.MaxUnavailable)
+
+			assert.Equal(t, c.wantSurge,
+				deploy.Spec.Strategy.RollingUpdate.MaxSurge.IntVal,
+				"the lease admits one leader however many processes run, so surging is safe here")
+			assert.Equal(t, c.wantUnavailable,
+				deploy.Spec.Strategy.RollingUpdate.MaxUnavailable.IntVal,
+				"anything smaller stalls: only the leader is ever ready")
+		})
+	}
+}
+
+// TestLeaderWorkload_ProgressDeadlineIsDisabledOnlyWithStandbys pins the one field whose absence and
+// presence mean opposite things.
+//
+// With standbys the deadline cannot discriminate -- DeploymentComplete requires availableReplicas to
+// equal spec.replicas, which is permanently false, so "rolled out" and "the image will not pull"
+// both present as a stale Progressing timestamp. With one replica it discriminates normally and is
+// left to the server.
+func TestLeaderWorkload_ProgressDeadlineIsDisabledOnlyWithStandbys(t *testing.T) {
+	single := RenderLeaderDeployment(testBackend(withLeaderReplicas(1)), "mooncake:v0.3.13")
+	assert.Nil(t, single.Spec.ProgressDeadlineSeconds,
+		"one replica reaches availableReplicas == replicas, so the timeout still means something")
+
+	several := RenderLeaderDeployment(testBackend(withLeaderReplicas(3)), "mooncake:v0.3.13")
+	require.NotNil(t, several.Spec.ProgressDeadlineSeconds)
+	assert.Equal(t, int32(math.MaxInt32), *several.Spec.ProgressDeadlineSeconds,
+		"a deadline that fires on every healthy rollout is worse than none")
 }
 
 // TestLeaderWorkload_PullPolicyAndSecrets covers the two fields that decide whether the image can be

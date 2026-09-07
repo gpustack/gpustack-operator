@@ -344,11 +344,15 @@ func renderMemberEnv(
 			// there — measured on a two-node cluster, a client pod got ECONNREFUSED against both
 			// the node name and the node IP, and connected on the pod IP.
 			//
-			// It costs no stability to use the pod IP. The leader appends a port of its own choosing
-			// to build the segment name, and that port is fresh on every start — one restart moved a
-			// segment from <host>:13720 to <host>:14071 — so the name was never durable across one.
-			// On the RDMA path the pod holds the host's network namespace and this resolves to the
-			// node's own address anyway.
+			// It also becomes the segment's NAME, verbatim: the client keeps this string and neither
+			// it nor the leader ever rewrites it. The port that is fresh on every start — one
+			// restart moved a segment endpoint from <host>:13720 to <host>:14071 — belongs to
+			// te_endpoint, which the client derives on its own under the peer-to-peer metadata
+			// plane this scope ships. The name outlives a restart; the endpoint does not.
+			//
+			// LIMITED: the name is only as unique as this value is. On the RDMA path the pod holds
+			// the host's network namespace, so every member group on one node reports the same
+			// name — the collision the members-mounted condition reports rather than guesses at.
 			Name: memberEnvLocalHostname,
 			ValueFrom: &core.EnvVarSource{
 				FieldRef: &core.ObjectFieldSelector{FieldPath: "status.podIP"},

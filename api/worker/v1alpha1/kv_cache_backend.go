@@ -287,8 +287,15 @@ type KVCacheBackendLeader struct {
 	// leader among several needs a backend store this scope does not enter, and the webhook
 	// refuses anything else while naming that follow-on rather than silently running one anyway.
 	//
+	// REQUIRED: the ceiling is duplicated in the schema on purpose, because the two layers catch
+	// different absences. The webhook's message explains; this one still holds when the webhook is
+	// not installed, which is when a second leader would be rendered rather than refused. Raising
+	// it belongs with the field that configures the election, and widening a maximum is not a
+	// breaking change.
+	//
 	// +k8s:validation:default=1
 	// +k8s:validation:minimum=1
+	// +k8s:validation:maximum=1
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,1,opt,name=replicas"`
 
 	// AllocationStrategy is how the leader picks which member takes a new write. Random spreads

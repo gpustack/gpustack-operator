@@ -2,6 +2,7 @@ package mooncake
 
 import (
 	"fmt"
+	"math"
 
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
@@ -118,6 +119,69 @@ func LeaderEndpoints(kvcb *workercore.KVCacheBackend) []workercore.KVCacheBacken
 	}
 }
 
+// LeaderReplicas is how many leader processes the object asks for, defaulting to one.
+func LeaderReplicas(leader workercore.KVCacheBackendLeader) int32 {
+	if leader.Replicas != nil {
+		return *leader.Replicas
+	}
+
+	return 1
+}
+
+// leaderUpdateStrategy picks how the leader's Deployment is updated, and the two answers are
+// opposites rather than variations.
+//
+// SINGLE REPLICA: Recreate. A RollingUpdate's maxSurge defaults to 25%, which ROUNDS UP -- to one,
+// against one desired replica -- so the new master starts before the old one stops and the two run
+// at once. Without an election that is a split brain, on every image or flag change rather than
+// never. The cost is a gap with no master, which is the right trade: a member that loses its master
+// keeps its segment and re-registers, while two masters allocating against one pool cannot be
+// reconciled after the fact.
+//
+// SEVERAL REPLICAS: RollingUpdate, and both parameters invert.
+//   - maxSurge may exceed zero, because the lease admits one leader however many processes run.
+//     The surge that is a split brain above is safe here.
+//   - maxUnavailable is replicas-1, because exactly one replica is ever ready: the leader serves and
+//     the standbys deliberately do not. Anything smaller demands more available replicas than this
+//     workload ever has, and the rollout does not move at all.
+//
+// LIMITED: this reads the replica count rather than an HA field, which holds only because admission
+// refuses more than one replica without the leadership backend configured. The two are equivalent
+// there and nowhere else.
+func leaderUpdateStrategy(replicas int32) apps.DeploymentStrategy {
+	if replicas <= 1 {
+		return apps.DeploymentStrategy{Type: apps.RecreateDeploymentStrategyType}
+	}
+
+	return apps.DeploymentStrategy{
+		Type: apps.RollingUpdateDeploymentStrategyType,
+		RollingUpdate: &apps.RollingUpdateDeployment{
+			MaxSurge:       ptr.To(intstr.FromInt32(1)),
+			MaxUnavailable: ptr.To(intstr.FromInt32(replicas - 1)),
+		},
+	}
+}
+
+// leaderProgressDeadlineSeconds disables the rollout timeout once there are standbys, and leaves it
+// to the API server's default otherwise.
+//
+// The timeout cannot discriminate on this workload. DeploymentComplete requires availableReplicas to
+// equal spec.replicas, which is permanently false when only the leader is ready, so the Progressing
+// condition stops advancing as soon as the rollout finishes -- exactly as it would if the image
+// could not be pulled. Both outcomes present as a stale timestamp, and a check whose two answers are
+// identical is not a check.
+//
+// REQUIRED: whoever removes this has to bring the replacement with it. The predicate that does
+// discriminate is DeploymentComplete without its availableReplicas clause: updatedReplicas and
+// replicas both reach spec.replicas normally here.
+func leaderProgressDeadlineSeconds(replicas int32) *int32 {
+	if replicas <= 1 {
+		return nil
+	}
+
+	return ptr.To(int32(math.MaxInt32))
+}
+
 // leaderSelectorLabels is what the Deployment selects its Pods by and what the Service fronts.
 //
 // A Deployment's spec.selector is IMMUTABLE. An update carrying a different one is rejected, and
@@ -171,20 +235,10 @@ func RenderLeaderDeployment(kvcb *workercore.KVCacheBackend, image string) *apps
 			Labels:    leaderPodLabels(kvcb),
 		},
 		Spec: apps.DeploymentSpec{
-			// One, and only one. Admission refuses anything else, and a second replica here would
-			// be two masters with two views of the same segments rather than a spare.
-			Replicas: ptr.To[int32](1),
-			// Recreate, because the default would undo the line above during every update. A
-			// RollingUpdate's maxSurge defaults to 25%, which ROUNDS UP — to one, against one
-			// desired replica — so the new master is started before the old one is stopped and the
-			// two run at once. That is the split brain the replica count exists to prevent, and it
-			// would happen on every image or flag change rather than never.
-			//
-			// The cost is a gap with no master. It is the right trade: a member that loses its
-			// master keeps its segment and re-registers, while two masters allocating against one
-			// pool cannot be reconciled after the fact.
-			Strategy: apps.DeploymentStrategy{Type: apps.RecreateDeploymentStrategyType},
-			Selector: &meta.LabelSelector{MatchLabels: leaderSelectorLabels(kvcb)},
+			Replicas:                ptr.To(LeaderReplicas(leader)),
+			Strategy:                leaderUpdateStrategy(LeaderReplicas(leader)),
+			ProgressDeadlineSeconds: leaderProgressDeadlineSeconds(LeaderReplicas(leader)),
+			Selector:                &meta.LabelSelector{MatchLabels: leaderSelectorLabels(kvcb)},
 			Template: core.PodTemplateSpec{
 				ObjectMeta: meta.ObjectMeta{Labels: leaderPodLabels(kvcb)},
 				Spec: core.PodSpec{

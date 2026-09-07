@@ -512,6 +512,13 @@ func (r *KVCacheBackendReconciler) observeLeader(
 // own view rather than a probe of our own: the readiness probe already asks the leader a gated
 // route, so readyReplicas is the leader's readiness as Kubernetes settled it, and re-deciding it
 // here would be a second opinion that could disagree.
+//
+// REQUIRED: the comparison stays "at least one", never "exactly one", however many replicas run.
+// With standbys only the serving replica is ready, so a count above one looks like a contradiction
+// and is not one: a leader that loses its lease clears its service plane inside the process at once,
+// while the kubelet only withdraws it after the probe fails — three periods, so up to fifteen
+// seconds during which the old and new leaders are both ready. Every ORDINARY failover passes
+// through that window, so "exactly one" would report a fault each time one succeeded.
 func (r *KVCacheBackendReconciler) leaderPodIsReady(
 	ctx context.Context, kvcb *workercore.KVCacheBackend,
 ) bool {

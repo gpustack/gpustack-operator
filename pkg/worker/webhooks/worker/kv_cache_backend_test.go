@@ -5,8 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -125,6 +127,46 @@ func runKVCacheBackendCases(
 			require.Contains(t, err.Error(), c.wantMsg)
 		})
 	}
+}
+
+// TestKVCacheBackend_LeaderReplicaCeilingIsTheSameInBothLayers holds the webhook's threshold equal
+// to the schema's, because the ceiling is expressed twice in two different languages.
+//
+// It asserts EQUALITY, never the value 1. A test pinning both to 1 would be edited away by the same
+// change that raises the ceiling, which is exactly when this needs to fire; a test pinning them to
+// each other reddens when one moves without the other. The pairing it prevents is the worst one:
+// admission accepting a value the schema then rejects, which surfaces as an error against a field
+// the user did not get wrong.
+//
+// LIMITED: this reads the FIRST version carrying a schema. The CRD has one today, so the two are the
+// same thing; once it has several, a ceiling that drifted in any later version would not redden
+// here.
+func TestKVCacheBackend_LeaderReplicaCeilingIsTheSameInBothLayers(t *testing.T) {
+	crd, ok := workercore.GetCustomResourceDefinitions()["KVCacheBackend"]
+	require.True(t, ok, "the KVCacheBackend CRD is generated under this key")
+
+	var schema *apiext.JSONSchemaProps
+	for i := range crd.Spec.Versions {
+		if crd.Spec.Versions[i].Schema != nil && crd.Spec.Versions[i].Schema.OpenAPIV3Schema != nil {
+			schema = crd.Spec.Versions[i].Schema.OpenAPIV3Schema
+			break
+		}
+	}
+	require.NotNil(t, schema, "the CRD carries a structural schema")
+
+	// spec.connection.managed.leader.replicas, walked rather than matched as a string so that a
+	// field moving is a failure here instead of a silently skipped assertion.
+	node := schema
+	for _, step := range []string{"spec", "connection", "managed", "leader", "replicas"} {
+		next, found := node.Properties[step]
+		require.True(t, found, "the schema still has a %q under this path", step)
+		node = &next
+	}
+
+	require.NotNil(t, node.Maximum,
+		"the schema carries the ceiling too, so it still holds when the webhook is not installed")
+	assert.Equal(t, float64(MaxLeaderReplicas), *node.Maximum,
+		"the webhook and the schema must be raised together, or one admits what the other rejects")
 }
 
 // TestKVCacheBackendWebhook_ValidateCreate pins the rules a CRD schema cannot express. The enums and
