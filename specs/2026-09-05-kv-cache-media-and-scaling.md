@@ -356,8 +356,10 @@ The gate is unavailable before Kubernetes v1.28, off by default from v1.28, on b
 and **locked on** from v1.33. A version therefore decides what the gate's state can be, not the state
 itself — and it is the API server's **effective** version that decides it, not the version of its
 binary: `featuregate` selects a feature's spec for the emulation version and checks `LockToDefault`
-on the spec it selected, so a server emulating an older version resolves to the older spec and can be
-running with ratcheting off however new its binary is.
+on the spec it selected, so a server whose binary is past the lock but which emulates a version
+before it resolves to the older spec and can be running with ratcheting off. How far back a binary
+may emulate is bounded by the API server's own flag validation, which is why the range below is
+stated against the effective version and carries no claim about binary versions.
 
 Against this chart's `kubeVersion: ">=1.23.0-0"` and a CI matrix running kind nodes from v1.23.17 to
 v1.35.5, that is three ranges **by effective version**: the wedge is **unavoidable** below v1.28, a
