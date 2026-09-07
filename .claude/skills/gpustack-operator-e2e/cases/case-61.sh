@@ -96,26 +96,40 @@ replica_versions() {
     | sort | tr '\n' ' '
 }
 
-# One kind's resourceVersions, or a loud READ-FAILED line if the read itself failed.
+# One kind's resourceVersions, or a loud sentinel line when they could not be observed.
 #
-# The distinction is the whole reliability of the attribution below. `kubectl get` over a kind with
-# no objects prints nothing and exits 0; over a kind that cannot be read -- CRD absent, RBAC, a
-# transport failure the shim ran out of retries on -- it also prints nothing to stdout. Discarding
-# the failure would make an unreadable kind indistinguishable from an empty one, and that kind would
-# then drop silently out of both samples while the row went on claiming it.
+# THE SENTINEL IS NOT A VALUE THE ATTRIBUTION MAY COMPARE, and the guard below enforces that. This
+# helper exists because discarding a failed read would make an unreadable kind indistinguishable from
+# an empty one, so it would drop silently out of both samples while the row went on claiming it --
+# but emitting a sentinel only moves the problem unless the consumer refuses to compare it, because
+# two sentinels are equal to each other. See the attribution row.
+#
+# Two failures are told apart, because only one of them is a fault:
+#
+#   NOT-FOUND    the object is gone. A named `kubectl get` exits nonzero with empty stdout for this
+#                exactly as it does for an unreadable kind, so the error text is what separates them.
+#   READ-FAILED  the kind itself could not be read -- CRD absent, RBAC, or a transport failure the
+#                retrying shim ran out of attempts on.
+#
+# A LIST call over a kind with no objects is neither: it prints nothing and exits 0, which is an
+# observation of zero objects and is left as such.
 sample() {
-  local label="$1" out
+  local label="$1" out err
   shift
-  if out="$(kubectl "$@" 2>/dev/null)"; then
+  err="$(mktemp)"
+  if out="$(kubectl "$@" 2>"$err")"; then
     # Command substitution strips the trailing newline, so it is put back here rather than left to
     # glue this kind's last line onto the next kind's first one. A kind with no objects prints
     # nothing at all, which is why the empty case is skipped instead of emitting a blank line.
     if [ -n "$out" ]; then
       printf '%s\n' "$out"
     fi
+  elif command grep -qi 'not found' "$err"; then
+    printf '%s=NOT-FOUND\n' "$label"
   else
     printf '%s=READ-FAILED\n' "$label"
   fi
+  rm -f "$err"
 
   return 0
 }
@@ -264,19 +278,25 @@ done
 # Quiescence is a precondition of the attribution, not a nicety. While the replicas are still being
 # written the controller is being woken by its Pod watch several times a second, and a Service
 # deleted in that window comes back for a reason this case is not about.
+#
+# Skipped outright when no replica was ever observed: with nothing to sample this loop would compare
+# "" to "" for its full 40 rounds and then declare quiescence, spending two minutes to produce a
+# reading whose value is already decided. The attribution is disqualified either way below.
 quiet_for=0
 last="$(replica_versions)"
-for _ in $(seq 1 40); do
-  sleep 3
-  now="$(replica_versions)"
-  if [ "$now" = "$last" ]; then
-    quiet_for=$((quiet_for + 3))
-    [ "$quiet_for" -ge 9 ] && break
-  else
-    quiet_for=0
-  fi
-  last="$now"
-done
+if [ "$replicas_seen" = true ]; then
+  for _ in $(seq 1 40); do
+    sleep 3
+    now="$(replica_versions)"
+    if [ "$now" = "$last" ]; then
+      quiet_for=$((quiet_for + 3))
+      [ "$quiet_for" -ge 9 ] && break
+    else
+      quiet_for=0
+    fi
+    last="$now"
+  done
+fi
 echo "[case-61] replica(s) observed: ${replicas_seen}; unchanged for ${quiet_for}s: ${last:-<none>}"
 
 # Whether the attribution row can say anything, decided BEFORE the window and from the preconditions
@@ -336,7 +356,17 @@ fi
 # watches moved, which leaves the Service watch. Every failure mode is a SKIP rather than a FAIL --
 # a watched object being written in the window is not a defect in anything, it just means this run
 # cannot say which watch did the work, and the uid row above stands on its own either way.
-if [ "$attributable" != true ]; then
+# A SENTINEL IN EITHER SAMPLE DISQUALIFIES THE COMPARISON, and this guard is the point of the
+# sentinel existing. `sample` emits NOT-FOUND or READ-FAILED for a kind it could not observe, so that
+# such a kind cannot drop silently out of the sample -- but a kind that is unobservable for the whole
+# window emits the SAME sentinel on both sides, and `before = after` is then true. The row would
+# record PASS while naming a kind it never saw, which is the exact false pass the sentinel was added
+# to prevent, reintroduced one layer up. An equality test is always true when both sides are the
+# marker for "no data", so the marker has to be excluded before the test rather than compared by it.
+if printf '%s%s' "$before" "$after" | command grep -q 'NOT-FOUND\|READ-FAILED'; then
+  record SKIP "no other object this controller watches changed in the window" \
+    "at least one watched kind could not be observed across the window, so an unchanged sample would not mean it did not move: before=[${before}] after=[${after}]"
+elif [ "$attributable" != true ]; then
   record SKIP "no other object this controller watches changed in the window" \
     "the precondition failed, so the row above passes unattributed: ${attribution_note}"
 elif [ "$before" = "$after" ]; then

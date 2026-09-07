@@ -370,11 +370,15 @@ spec:
   domain: {name: ${DOM_B}, blockSize: 16, dtype: bfloat16}
 YAML
 )"
+# Split with parameter expansion rather than `set --`, which would clobber the script's own
+# positional parameters. Nothing reads them after this point today, so the difference is a footgun
+# rather than a bug -- but it is one a later wrapper passing arguments would step on silently.
 bind_missing=""
 for pair in "${NS_A} bind-a" "${NS_B} bind-b"; do
-  set -- $pair
-  kubectl -n "$1" get kvcachepoolbindings.worker.gpustack.ai "$2" -o name >/dev/null 2>&1 \
-    || bind_missing="${bind_missing} $1/$2"
+  bind_ns="${pair%% *}"
+  bind_name="${pair##* }"
+  kubectl -n "$bind_ns" get kvcachepoolbindings.worker.gpustack.ai "$bind_name" -o name >/dev/null 2>&1 \
+    || bind_missing="${bind_missing} ${bind_ns}/${bind_name}"
 done
 if [ -n "$bind_missing" ]; then
   echo "[case-43] FATAL: absent after the apply:${bind_missing} — the convergence check below has" >&2

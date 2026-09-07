@@ -231,14 +231,19 @@ spec:
               value: ${WORKER}
 EOF
 )"
+# Split with parameter expansion rather than `set --`, which would clobber the script's own
+# positional parameters. Nothing reads them after this point today, so the difference is a footgun
+# rather than a bug -- but it is one a later wrapper passing arguments would step on silently.
 worker_missing=""
 for spec in "serviceaccount ${NS}" "service ${NS}" "deployment ${NS}" "clusterrolebinding -"; do
-  set -- $spec
-  if [ "$2" = "-" ]; then
-    kubectl get "$1" "$WORKER" -o name >/dev/null 2>&1 || worker_missing="${worker_missing} $1/${WORKER}"
+  spec_kind="${spec%% *}"
+  spec_ns="${spec##* }"
+  if [ "$spec_ns" = "-" ]; then
+    kubectl get "$spec_kind" "$WORKER" -o name >/dev/null 2>&1 \
+      || worker_missing="${worker_missing} ${spec_kind}/${WORKER}"
   else
-    kubectl -n "$2" get "$1" "$WORKER" -o name >/dev/null 2>&1 \
-      || worker_missing="${worker_missing} $2/$1/${WORKER}"
+    kubectl -n "$spec_ns" get "$spec_kind" "$WORKER" -o name >/dev/null 2>&1 \
+      || worker_missing="${worker_missing} ${spec_ns}/${spec_kind}/${WORKER}"
   fi
 done
 if [ -n "$worker_missing" ]; then
