@@ -354,10 +354,17 @@ finalizer removal is admitted and the object deletes normally.
 
 The gate is unavailable before Kubernetes v1.28, off by default from v1.28, on by default from v1.30,
 and **locked on** from v1.33. A version therefore decides what the gate's state can be, not the state
-itself. Against this chart's `kubeVersion: ">=1.23.0-0"` and a CI matrix running kind nodes from
-v1.23.17 to v1.35.5, that is three ranges: the wedge is **unavoidable** on v1.23 through v1.27, a
-matter of **configuration** on v1.28 through v1.32, and **foreclosed** from v1.33. Only the first and
-third are properties of a version; the middle range is a property of how the cluster is configured.
+itself — and it is the API server's **effective** version that decides it, not the version of its
+binary: `featuregate` selects a feature's spec for the emulation version and checks `LockToDefault`
+on the spec it selected, so a server emulating an older version resolves to the older spec and can be
+running with ratcheting off however new its binary is.
+
+Against this chart's `kubeVersion: ">=1.23.0-0"` and a CI matrix running kind nodes from v1.23.17 to
+v1.35.5, that is three ranges **by effective version**: the wedge is **unavoidable** below v1.28, a
+matter of **configuration** from v1.28 through v1.32, and **foreclosed** from v1.33 for as long as the
+server is not emulating below it. Only the first is a property of the version alone; the other two
+are properties of how the cluster is configured, which is why the acceptance below is written against
+the gate rather than against a number.
 
 Before the first release that ships this type, either confirm no leftover objects exist, or write
 down a recovery procedure. The recovery procedure is what a cluster without ratcheting needs —
