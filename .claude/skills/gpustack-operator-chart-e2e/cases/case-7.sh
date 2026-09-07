@@ -109,7 +109,18 @@ trap cleanup EXIT
 kubectl create namespace "$NS" >/dev/null 2>&1 || true
 
 echo "== deploying a worker with no chart behind it, at the OLD build (${OLD_IMAGE}) =="
-kubectl apply -f - <<EOF
+# FOUR DOCUMENTS, AND ALL FOUR ARE READ BACK. `kubectl apply` reports them in ONE stream, so a run
+# where the ServiceAccount or the binding was refused and the Deployment was not still reaches the
+# rollout check below — which then spends 1200s and names the old image as the suspect, a diagnosis
+# about something that was never wrong.
+#
+# The gate is the objects' EXISTENCE, not the words the apply printed. Counting ` created` lines
+# instead makes the gate depend on how they came to be there: this case's namespace is created with
+# `|| true` a few lines above precisely so a crashed run can be re-run, and over a surviving
+# namespace apply reports `configured`/`unchanged`. The retrying kubectl shim does the same when an
+# apply lands but its response is lost. The output is still captured, because a refusal's text is the
+# only diagnosis of why an object is missing.
+worker_out="$(kubectl apply -f - 2>&1 <<EOF
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -219,6 +230,29 @@ spec:
             - name: KUBERNETES_SERVICE_NAME
               value: ${WORKER}
 EOF
+)"
+# Split with parameter expansion rather than `set --`, which would clobber the script's own
+# positional parameters. Nothing reads them after this point today, so the difference is a footgun
+# rather than a bug -- but it is one a later wrapper passing arguments would step on silently.
+worker_missing=""
+for spec in "serviceaccount ${NS}" "service ${NS}" "deployment ${NS}" "clusterrolebinding -"; do
+  spec_kind="${spec%% *}"
+  spec_ns="${spec##* }"
+  if [ "$spec_ns" = "-" ]; then
+    kubectl get "$spec_kind" "$WORKER" -o name >/dev/null 2>&1 \
+      || worker_missing="${worker_missing} ${spec_kind}/${WORKER}"
+  else
+    kubectl -n "$spec_ns" get "$spec_kind" "$WORKER" -o name >/dev/null 2>&1 \
+      || worker_missing="${worker_missing} ${spec_ns}/${spec_kind}/${WORKER}"
+  fi
+done
+if [ -n "$worker_missing" ]; then
+  record FAIL "the hand-rolled worker exists" \
+    "absent after the apply:${worker_missing} — so the rollout below has no subject. The apply said: \
+$(printf '%s' "${worker_out:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
+  report
+  exit 1
+fi
 
 # The old worker is ready only once its own install returned, so this waits out the whole of it.
 if ! kubectl -n "$NS" rollout status "deploy/${WORKER}" --timeout=1200s >/dev/null 2>&1; then

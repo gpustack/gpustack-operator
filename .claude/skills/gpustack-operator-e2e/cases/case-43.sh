@@ -77,7 +77,15 @@ IMAGE="${E2E_MOONCAKE_IMAGE:-docker.io/kvcacheai/mooncake:0.3.13}"
 # Every name carries the same suffix. A reuse domain name is unique CLUSTER-WIDE — the webhook
 # enforces it across namespaces — so a fixed name would collide with an interrupted earlier run and
 # fail this case for a reason that is not about the operator.
-SFX="$(tr -dc 'a-z0-9' </dev/urandom 2>/dev/null | head -c 5 || echo $$)"
+#
+# LC_ALL=C and the disabled pipefail are both load-bearing: under a UTF-8 locale tr dies on
+# /dev/urandom, and with pipefail on the SIGPIPE from head turns a trailing `|| echo $$` into an
+# append, so LC_ALL=C alone yields random characters with the PID glued on. The measurements behind
+# both halves are recorded once, at the same idiom in _kvcache-inject-lib.sh.
+SFX="$(set +o pipefail; LC_ALL=C tr -dc 'a-z0-9' </dev/urandom 2>/dev/null | head -c 5)"
+# The names below are cluster-scoped, so a bare PID — small and reused across reboots — lets two runs
+# adopt each other's leftovers. The epoch makes a collision need the same PID in the same second.
+[ -n "$SFX" ] || SFX="$$$(date +%s)"
 BACKEND="kvcb-e2e-${SFX}"
 EMPTY_BACKEND="kvcb-empty-${SFX}"
 POOL="kvcp-e2e-${SFX}"
@@ -312,7 +320,11 @@ echo "[case-43] ${MEMBERS} member(s); master reports ${ALLOC_MI}Mi allocatable; 
 kubectl create namespace "$NS_A" >/dev/null 2>&1 || true
 kubectl create namespace "$NS_B" >/dev/null 2>&1 || true
 
-kubectl apply -f - >/dev/null 2>&1 <<YAML
+# The pool is the subject of every check below and the two bindings both point at it, so its apply is
+# read back too. Refused with the output discarded, the binding gate a few lines down would still
+# pass — a Binding naming an absent pool is accepted — and the convergence wait after it would report
+# a binding that did not become Ready, which is true and blames the wrong object.
+pool_out="$(kubectl apply -f - 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: KVCachePool
 metadata:
@@ -322,8 +334,25 @@ spec:
   quota:
     total: ${ALLOC_MI}Mi
 YAML
+)"
+if ! kubectl get kvcachepools.worker.gpustack.ai "$POOL" -o name >/dev/null 2>&1; then
+  echo "[case-43] FATAL: no kvcachepool/${POOL} after the apply, so every check below has no" >&2
+  echo "                 subject. The apply said:" >&2
+  printf '%s\n' "${pool_out:-<no output at all>}" >&2
+  exit 1
+fi
 
-kubectl apply -f - >/dev/null 2>&1 <<YAML
+# TWO DOCUMENTS, AND BOTH BINDINGS ARE READ BACK RATHER THAN THE OUTPUT BEING DISCARDED. `kubectl
+# apply` reports both in ONE stream, so a run where bind-a was created and bind-b refused is
+# indistinguishable from a clean one with the output thrown away — and the check right below would
+# then wait 180s for an object nobody made and report it as a binding that did not converge.
+#
+# The gate is the objects' EXISTENCE, not the words the apply printed. Counting ` created` lines
+# instead makes the gate depend on how they came to be there: a re-run over a surviving namespace, or
+# the retrying kubectl shim resending an apply whose response was lost, both report
+# `configured`/`unchanged` for objects that are present and correct. The apply output is still
+# captured, because a refusal's text is the only diagnosis of why an object is missing.
+bind_out="$(kubectl apply -f - 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: KVCachePoolBinding
 metadata: {name: bind-a, namespace: ${NS_A}}
@@ -340,6 +369,23 @@ spec:
   quotaCeiling: ${CEIL_B_MI}Mi
   domain: {name: ${DOM_B}, blockSize: 16, dtype: bfloat16}
 YAML
+)"
+# Split with parameter expansion rather than `set --`, which would clobber the script's own
+# positional parameters. Nothing reads them after this point today, so the difference is a footgun
+# rather than a bug -- but it is one a later wrapper passing arguments would step on silently.
+bind_missing=""
+for pair in "${NS_A} bind-a" "${NS_B} bind-b"; do
+  bind_ns="${pair%% *}"
+  bind_name="${pair##* }"
+  kubectl -n "$bind_ns" get kvcachepoolbindings.worker.gpustack.ai "$bind_name" -o name >/dev/null 2>&1 \
+    || bind_missing="${bind_missing} ${bind_ns}/${bind_name}"
+done
+if [ -n "$bind_missing" ]; then
+  echo "[case-43] FATAL: absent after the apply:${bind_missing} — the convergence check below has" >&2
+  echo "                 no subject and would blame the operator for their absence. The apply said:" >&2
+  printf '%s\n' "${bind_out:-<no output at all>}" >&2
+  exit 1
+fi
 
 ok=true
 for pair in "${NS_A} bind-a" "${NS_B} bind-b"; do
@@ -630,7 +676,11 @@ echo "== 9. a backend with nothing mounted is not a pool with an empty cache =="
 
 # The startup-ordering trap: every effective quota is zero and no write can succeed, while every
 # object still looks correctly configured. The member selector matches no node on purpose.
-kubectl apply -f - >/dev/null 2>&1 <<YAML
+# Read back for the same reason as the bindings above: the backend and the pool arrive in one stream,
+# and the only check in this section reads the POOL. Created the backend and refused the pool, and the
+# poll below would spend its whole window on an absent object and then report a missing condition as
+# the operator's silence — which is the exact substitution this section exists to rule out.
+empty_out="$(kubectl apply -f - 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: KVCacheBackend
 metadata:
@@ -656,6 +706,18 @@ spec:
   quota:
     total: 1Gi
 YAML
+)"
+empty_missing=""
+kubectl get kvcachebackends.worker.gpustack.ai "$EMPTY_BACKEND" -o name >/dev/null 2>&1 \
+  || empty_missing="${empty_missing} kvcachebackend/${EMPTY_BACKEND}"
+kubectl get kvcachepools.worker.gpustack.ai "$EMPTY_POOL" -o name >/dev/null 2>&1 \
+  || empty_missing="${empty_missing} kvcachepool/${EMPTY_POOL}"
+if [ -n "$empty_missing" ]; then
+  echo "[case-43] FATAL: absent after the apply:${empty_missing} — the check below has no subject" >&2
+  echo "                 and would read an absence as a missing condition. The apply said:" >&2
+  printf '%s\n' "${empty_out:-<no output at all>}" >&2
+  exit 1
+fi
 
 cap_reason=""
 for _ in $(seq 1 60); do
