@@ -78,13 +78,12 @@ function lint() {
   fi
 
   # The tool pins, which nothing else asserts. hack/lib/ decides whether a binary already in .sbin
-  # may be reused: eleven of its fifteen validators compare a version against the pin and four
-  # accept by existence on purpose. Accepting by existence where a version is meant to be compared
-  # reuses whatever a pin bump replaced, and the generated tree is then compared against a baseline
-  # produced by a different tool. This hands every validator a binary that is not its pin and
-  # asserts the verdict, so a version check that goes away stops reading like one that was never
-  # there. It carries its own fixtures rather than checking the sources, so unlike the symbol check
-  # above there is nothing separate to self-test.
+  # may be reused, and accepting one by existence where a version is meant to be compared reuses
+  # whatever a pin bump replaced -- a committed artifact then comes out of a generator nobody chose.
+  # This hands every validator a binary that is not its pin and asserts the verdict, and it takes
+  # the set of validators from the tree rather than from a list it carries, so a tool added without
+  # a row fails here instead of going unmeasured. It carries its own fixtures rather than checking
+  # the sources, so unlike the symbol check above there is nothing separate to self-test.
   if ! bash "${ROOT_DIR}/hack/check-toolpins-selftest.sh" "${ROOT_DIR}"; then
     gpustack::log::fatal "the tool-pin validators in hack/lib are not trustworthy: their self-test failed"
   fi
