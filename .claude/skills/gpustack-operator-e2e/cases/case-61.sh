@@ -113,23 +113,34 @@ replica_versions() {
 #
 # A LIST call over a kind with no objects is neither: it prints nothing and exits 0, which is an
 # observation of zero objects and is left as such.
+#
+# STDERR IS KEPT SEPARATE RATHER THAN FOLDED IN WITH `2>&1`, which would be the way to avoid a
+# scratch file entirely. The retrying kubectl shim writes to stderr on a call that eventually
+# succeeds -- `kubectl-shim: transport failure, retrying ...` -- so folding it in would put that
+# notice into the sample as a line pretending to be a resourceVersion.
+#
+# One scratch file for the whole case, not one per call: this runs on every quiescence poll and twice
+# more for the attribution, so a per-call mktemp both multiplies its own failure path and leaks a
+# file per in-flight call if the runner kills the case. An empty SAMPLE_ERR means mktemp failed; the
+# redirect then goes to /dev/null and every failure classifies as READ-FAILED, which is the
+# conservative sentinel rather than a wrong one.
+SAMPLE_ERR="$(mktemp 2>/dev/null || true)"
+
 sample() {
-  local label="$1" out err
+  local label="$1" out
   shift
-  err="$(mktemp)"
-  if out="$(kubectl "$@" 2>"$err")"; then
+  if out="$(kubectl "$@" 2>"${SAMPLE_ERR:-/dev/null}")"; then
     # Command substitution strips the trailing newline, so it is put back here rather than left to
     # glue this kind's last line onto the next kind's first one. A kind with no objects prints
     # nothing at all, which is why the empty case is skipped instead of emitting a blank line.
     if [ -n "$out" ]; then
       printf '%s\n' "$out"
     fi
-  elif command grep -qi 'not found' "$err"; then
+  elif [ -n "$SAMPLE_ERR" ] && command grep -qi 'not found' "$SAMPLE_ERR"; then
     printf '%s=NOT-FOUND\n' "$label"
   else
     printf '%s=READ-FAILED\n' "$label"
   fi
-  rm -f "$err"
 
   return 0
 }
@@ -188,6 +199,7 @@ EOF
 cleanup() {
   echo
   echo "[case-61] cleanup"
+  [ -n "$SAMPLE_ERR" ] && rm -f "$SAMPLE_ERR"
   kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai "$MD" \
     --ignore-not-found --wait=false >/dev/null 2>&1
   # Retried rather than done once. force_release finds the Workload through the Pods it owns, so a
@@ -363,7 +375,7 @@ fi
 # record PASS while naming a kind it never saw, which is the exact false pass the sentinel was added
 # to prevent, reintroduced one layer up. An equality test is always true when both sides are the
 # marker for "no data", so the marker has to be excluded before the test rather than compared by it.
-if printf '%s%s' "$before" "$after" | command grep -q 'NOT-FOUND\|READ-FAILED'; then
+if printf '%s\n%s\n' "$before" "$after" | command grep -Eq '=(NOT-FOUND|READ-FAILED)( |$)'; then
   record SKIP "no other object this controller watches changed in the window" \
     "at least one watched kind could not be observed across the window, so an unchanged sample would not mean it did not move: before=[${before}] after=[${after}]"
 elif [ "$attributable" != true ]; then
