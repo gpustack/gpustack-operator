@@ -80,13 +80,12 @@ is refused. It is the shape of the Kueue upgrade finalizer deadlock.
 
 Reaching that state takes a cluster that installed the CRD, ran with **no webhook**, and created a
 non-DRAM member in that window — so it is a development cluster or nothing. `KVCacheBackend` is absent
-from the latest eight tags: no released version ever offered the wide enum.
+from every tag from `v0.7.3` through `v0.8.6`, so no cluster running a release can hold such an
+object.
 
-> **Why the narrowing was kept anyway** — that residual risk was weighed and accepted, not overlooked.
-> Widening the enum back would make the API claim four capabilities it does not have, and that cost
-> falls on every reader of the type; this one falls on a development cluster that can recreate the
-> object. **Before the first release that ships this type, either confirm no leftover objects exist,
-> or write down a recovery procedure.**
+The narrowing was kept knowingly. The risk that was accepted, and the condition that closes it, are
+recorded in
+[the spec](../../specs/2026-09-05-kv-cache-media-and-scaling.md#f2--the-medium-enum-collapses-to-what-runs-and-each-removed-value-is-placed).
 
 The object is **cluster-scoped**: it names nodes, claims host memory and host paths, and on the RDMA
 path needs `hostNetwork` and `/dev/infiniband`. Only a cluster administrator can legitimately declare
