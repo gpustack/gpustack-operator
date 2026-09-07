@@ -280,9 +280,10 @@ resource "nebius_mk8s_v1_node_group" "this" {
       # This buys INBOUND reach (SSH), not egress: the network's default route table carries a
       # 0.0.0.0/0 route through Nebius' default egress gateway, which NATs a node that has no
       # public address behind a dynamic one from a region-wide pool — so a private-only node still
-      # joins the cluster and pulls images. Each address is charged against the project's
-      # vpc.ipv4-address.public.count quota, which is small and counts allocations rather than
-      # running instances, so a group nothing logs in to must not take one.
+      # joins the cluster and pulls images. Each address is charged against the
+      # vpc.ipv4-address.public.count quota, which counts allocations rather than running instances
+      # and is charged per node, so a group nothing logs in to must not take one. That quota's
+      # allowance varies by region and is readable only on the tenant (see README).
       public_ip_address = each.value.public_ip ? {} : null
       security_groups   = [{ id = nebius_vpc_v1_security_group.this.id }]
     }]
