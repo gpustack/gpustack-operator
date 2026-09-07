@@ -75,9 +75,10 @@ variable "node_boot_disk_type" {
   }
 }
 
-# The (singular) CPU node group's shape, mirroring clusters/eks's cpu_instance_types. No
-# image_family: unlike a standalone compute VM (computes/nebius), the mk8s node template picks
-# its image from `os` alone for a driverless (CPU) platform.
+# The CPU node group's shape, mirroring clusters/eks's cpu_instance_types. There is exactly one CPU
+# group -- unlike gpu_instance_types, which is keyed by group name -- but it is not therefore one
+# node: cpu_node_count sizes it. No image_family: unlike a standalone compute VM (computes/nebius),
+# the mk8s node template picks its image from `os` alone for a driverless (CPU) platform.
 #
 # public_ip gives the node a public IPv4, which is what makes it reachable over SSH. It defaults
 # to false because the accelerator tests drive GPU nodes, not this one, and every address is
@@ -93,6 +94,22 @@ variable "cpu_instance_types" {
     public_ip = optional(bool, false)
   })
   default = { platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }
+}
+
+# How many nodes the CPU group runs. Every GPU group is one node, so this is the module's only
+# multi-node knob: a test that needs several plain nodes -- one that moves data between them, or
+# that adds a member to a running set -- gets them here rather than by buying accelerator capacity
+# it will not use. Combined with cpu_instance_types.public_ip, the quota cost is one address per
+# node rather than one for the group (see README).
+variable "cpu_node_count" {
+  description = "Number of nodes in the CPU node group (GPU groups are one node each)."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.cpu_node_count > 0 && var.cpu_node_count == floor(var.cpu_node_count)
+    error_message = "cpu_node_count must be a positive whole number."
+  }
 }
 
 # Keyed by group name so each GPU node group has a stable key (gpu-<name>), mirroring

@@ -11,8 +11,9 @@ node groups, and point your local kubeconfig at it.
 - Creates a security group (`nebius_vpc_v1_security_group`) with an SSH
   ingress rule (`TCP/22` from `0.0.0.0/0`) and an egress rule (allow all).
 - Creates a `nebius_mk8s_v1_cluster` with a public control-plane endpoint.
-- Creates a `cpu` `nebius_mk8s_v1_node_group` (shaped by `cpu_instance_types`),
-  plus one `gpu-<name>` group per `gpu_instance_types` key (every node gets
+- Creates a `cpu` `nebius_mk8s_v1_node_group` (shaped by `cpu_instance_types`,
+  `cpu_node_count` nodes in it), plus one `gpu-<name>` group per
+  `gpu_instance_types` key, one node each (every node gets
   cloud-init injecting an SSH user + key, same idiom as `computes/nebius`).
 - Gives each **GPU** group's nodes a public IPv4 so they can be reached over SSH
   (`public_ip`, default `true`); the CPU group takes none unless
@@ -113,9 +114,9 @@ leaving the group `tainted` in state. Raise the quota (Administration → Limits
 Quotas), release an address, or ask for fewer.
 
 The **flag** is per group; the **address, and so the quota unit, is per node**. A group of N nodes with
-`public_ip = true` takes N addresses. Every group this module creates carries `fixed_node_count = 1`, so
-today the two readings give the same number — but plan the quota per node, not per group, because that
-is what the provider charges. Only the groups that need an address take one:
+`public_ip = true` takes N addresses, so a CPU group that raises `cpu_node_count` and asks for an address
+takes one per node — against an allowance that is single digits by default. Plan the quota per node, not
+per group, because that is what the provider charges. Only the groups that need an address take one:
 
 - **GPU groups: `public_ip = true` (default).** A GPU node is driven from outside
   the cluster over SSH — the hardware-partition tests toggle MIG on the card that
@@ -191,8 +192,11 @@ The default `cpu_instance_types` (`cpu-e2`/`4vcpu-16gb`) and `gpu_instance_types
 one `gpu-h100` node. A GPU group needs only `platform` + `preset`; its `os` and
 `drivers_preset` are resolved automatically from the compatibility matrix for
 `release` (see below). Override `-var='cpu_instance_types={...}'` to reshape the
-CPU group, or `-var='gpu_instance_types={...}'` to change, add, or remove GPU
-groups; each `gpu_instance_types` map key becomes that group's `gpu-<key>` name.
+CPU group or `-var='cpu_node_count=N'` to size it, or `-var='gpu_instance_types={...}'`
+to change, add, or remove GPU groups; each `gpu_instance_types` map key becomes
+that group's `gpu-<key>` name. A multi-node cluster comes from `cpu_node_count`:
+GPU groups are one node each, so a second accelerator node is a second
+`gpu_instance_types` entry.
 
 A three-node cluster with one on-demand, MIG-capable H100 node, one preemptible
 L40S node (Intel host CPU, no MIG) and one CPU node:
@@ -229,6 +233,7 @@ source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
 | `node_boot_disk_size_gb` | Node boot disk size, in GiB, for every node group | `100` |
 | `node_boot_disk_type` | Node boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |
 | `cpu_instance_types` | Instance type for the CPU node group: `{platform, preset, os, public_ip (optional)}`. `public_ip` defaults to `false`; `true` gives the node an SSH-reachable public IPv4 at one public-address quota unit ([public addresses](#public-addresses)). | `{ platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }` |
+| `cpu_node_count` | Number of nodes in the CPU node group; GPU groups are one node each, so this is the module's only multi-node knob. With `cpu_instance_types.public_ip`, costs one public-address quota unit per node ([public addresses](#public-addresses)) | `1` |
 | `gpu_instance_types` | GPU node groups keyed by group name (each becomes `gpu-<name>`): `{platform, preset, os (optional), drivers_preset (optional), preemptible (optional), mig (optional), public_ip (optional)}`. `os`/`drivers_preset` default to the newest match from the compatibility matrix for `release`; `preemptible` defaults to `false` ([preemptible nodes](#preemptible-nodes)); `mig` defaults to whether the platform supports MIG ([groups that cannot be partitioned](#groups-that-cannot-be-partitioned)); `public_ip` defaults to `true`, so the node is SSH-reachable, at one public-address quota unit per node ([public addresses](#public-addresses)). | `{ h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" } }` |
 | `switch_kube_context` | Let `get-credentials` leave this cluster current; `false` restores the previous context | `true` |
 
