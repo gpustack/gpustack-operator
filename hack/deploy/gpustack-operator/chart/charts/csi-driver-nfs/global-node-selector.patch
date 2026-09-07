@@ -1,0 +1,29 @@
+--- a/templates/csi-nfs-controller.yaml
++++ b/templates/csi-nfs-controller.yaml
+@@ -47,10 +47,9 @@
+                 {{- end}}
+     {{- end }}
+       nodeSelector:
+-        kubernetes.io/os: linux
+-{{- with .Values.controller.nodeSelector }}
+-{{ toYaml . | indent 8 }}
+-{{- end }}
++{{- $placement := dict "kubernetes.io/os" "linux" }}
++{{- $selector := .Values.controller.nodeSelector | default (.Values.global | default dict).nodeSelector }}
++{{ merge $placement (deepCopy ($selector | default dict)) | toYaml | indent 8 }}
+       priorityClassName: {{ .Values.controller.priorityClassName }}
+       securityContext:
+         seccompProfile:
+--- a/templates/csi-snapshot-controller.yaml
++++ b/templates/csi-snapshot-controller.yaml
+@@ -46,7 +46,9 @@
+ {{ . | indent 8 }}
+       {{- end }}
+       nodeSelector:
+-        kubernetes.io/os: linux
++{{- $placement := dict "kubernetes.io/os" "linux" }}
++{{- $selector := .Values.controller.nodeSelector | default (.Values.global | default dict).nodeSelector }}
++{{ merge $placement (deepCopy ($selector | default dict)) | toYaml | indent 8 }}
+     # runOnControlPlane=true or runOnMaster=true only takes effect if affinity is not set
+     {{- if tpl "{{ .Values.controller.affinity }}" . | contains "nodeSelectorTerms" }}
+       {{- with .Values.controller.affinity }}

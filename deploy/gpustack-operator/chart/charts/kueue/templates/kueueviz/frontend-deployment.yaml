@@ -41,7 +41,7 @@ spec:
       {{- with  .Values.kueueViz.frontend.priorityClassName }}
       priorityClassName: {{ . }}
       {{- end }}
-      {{- with .Values.kueueViz.frontend.nodeSelector }}
+      {{- with (.Values.kueueViz.frontend.nodeSelector | default (.Values.global | default dict).nodeSelector) }}
       nodeSelector:
       {{- toYaml . | nindent 8 }}
       {{- end }}

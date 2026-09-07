@@ -2,6 +2,7 @@ package kuberess
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -464,6 +465,148 @@ func renderedOperatorImages(t *testing.T, release *helmrelease.Release, reposito
 	}
 
 	return images
+}
+
+// TestChartGlobalNodeSelectorConfinesWhatItCan pins the placement contract `global.nodeSelector`
+// documents: every workload this chart deploys is confined by it, except the ones that have to
+// cover the nodes they serve. The contract spans the parent chart, its hooks and three vendored
+// subcharts that each read `.Values.global` through a patch, so nothing local says whether a
+// template still honours it — only a render does. Written as "everything but this list" rather
+// than a list of the confined, so a workload added without the fallback fails here instead of
+// quietly escaping a selector meant to hold the whole release.
+func TestChartGlobalNodeSelectorConfinesWhatItCan(t *testing.T) {
+	const key = "gpustack.ai/test-pool"
+
+	// Confining these would defeat the selector rather than honour it: NFD's worker and topology
+	// updater label the nodes, and the CSI node plugins serve volumes on them. A pool selector
+	// would leave every node outside it unlabelled — including with the PCI-presence labels the
+	// device managers and a GPUStack worker select on.
+	perNode := sets.New[string](
+		"node-feature-discovery-worker",
+		"node-feature-discovery-topology-updater",
+		"csi-nfs-node",
+		"csi-s3-node",
+	)
+
+	selectors := workloadNodeSelectors(t, map[string]any{
+		"global": map[string]any{"nodeSelector": map[string]any{key: "yes"}},
+	})
+	for name, workload := range selectors {
+		switch {
+		case workload.hook:
+			// Helm runs a hook outside the window where this release's workloads exist, so it
+			// cannot depend on a label the release itself applies: a selector naming an NFD one
+			// would leave the pre-install hook Pending on the very DaemonSet it gates.
+			assert.NotContains(t, workload.nodeSelector, key,
+				"%s is a hook and has to be schedulable before the release exists", name)
+		case perNode.Has(name):
+			assert.NotContains(t, workload.nodeSelector, key,
+				"%s covers the nodes it serves and must not be confined", name)
+		default:
+			assert.Equal(t, "yes", workload.nodeSelector[key],
+				"%s is confined by global.nodeSelector", name)
+		}
+	}
+
+	require.NotEmpty(t, selectors["gpustack-operator-migrate-pre"].manifest,
+		"the render carries the pre-install hook this exempts")
+}
+
+// TestChartNodeSelectorRequirementsOutrankTheGlobalOne covers the two selectors that state a
+// requirement rather than a placement. They are rendered into the same map as the global one, so
+// a global key naming either would otherwise land as a duplicate YAML key whose later value wins:
+// on a device manager that inverts the hardware constraint, scheduling it onto the nodes that do
+// not carry the vendor.
+func TestChartNodeSelectorRequirementsOutrankTheGlobalOne(t *testing.T) {
+	// The label the device managers select on, spelled the way the chart spells it.
+	present := fmt.Sprintf("feature.node.kubernetes.io/pci-%s.present",
+		nodefeature.GetPciVendorID("nvidia"))
+
+	selectors := workloadNodeSelectors(t, map[string]any{
+		"global": map[string]any{"nodeSelector": map[string]any{
+			"kubernetes.io/os": "windows",
+			present:            "false",
+		}},
+	})
+
+	for _, name := range []string{"csi-nfs-controller", "csi-s3-controller"} {
+		assert.Equal(t, "linux", selectors[name].nodeSelector["kubernetes.io/os"],
+			"%s keeps its OS requirement", name)
+	}
+	assert.Equal(t, "true", selectors["gpustack-operator-device-manager-nvidia"].nodeSelector[present],
+		"the device manager keeps the PCI-presence requirement")
+}
+
+// TestChartComponentNodeSelectorReplacesTheGlobalOne pins the other half of the documented
+// semantics: a component that sets its own selector is placed by it alone, not by both merged.
+func TestChartComponentNodeSelectorReplacesTheGlobalOne(t *testing.T) {
+	selectors := workloadNodeSelectors(t, map[string]any{
+		"global": map[string]any{"nodeSelector": map[string]any{"pool": "infra"}},
+		"worker": map[string]any{"nodeSelector": map[string]any{"pool": "control"}},
+	})
+
+	assert.Equal(t, map[string]string{"pool": "control"}, selectors["gpustack-operator-worker"].nodeSelector,
+		"the worker's own selector replaces the global one")
+	assert.Equal(t, "infra", selectors["kueue-controller-manager"].nodeSelector["pool"],
+		"a component that sets none still falls back")
+}
+
+// renderedWorkload is one workload of a rendered chart, and whether Helm runs it as a hook —
+// which decides whether the placement contract covers it at all.
+type renderedWorkload struct {
+	nodeSelector map[string]string
+	manifest     string
+	hook         bool
+}
+
+// workloadNodeSelectors renders the chart and returns every workload by object name, hooks
+// included and marked as such: they are part of the contract by being exempt from it, so a
+// hook that starts honouring the selector has to fail a test rather than pass one.
+func workloadNodeSelectors(t *testing.T, values map[string]any) map[string]renderedWorkload {
+	t.Helper()
+
+	chart, err := helmloader.Load(chartDir)
+	require.NoError(t, err, "load the operator chart")
+
+	release := renderRelease(t, chart, values)
+	manifests := map[string]bool{release.Manifest: false}
+	for _, hook := range release.Hooks {
+		manifests[hook.Manifest] = true
+	}
+
+	selectors := make(map[string]renderedWorkload)
+	for manifest, isHook := range manifests {
+		for _, document := range releaseutil.SplitManifests(manifest) {
+			var object struct {
+				Kind     string `yaml:"kind"`
+				Metadata struct {
+					Name string `yaml:"name"`
+				} `yaml:"metadata"`
+				Spec struct {
+					Template struct {
+						Spec struct {
+							NodeSelector map[string]string `yaml:"nodeSelector"`
+						} `yaml:"spec"`
+					} `yaml:"template"`
+				} `yaml:"spec"`
+			}
+			require.NoError(t, yaml.Unmarshal([]byte(document), &object))
+			switch object.Kind {
+			case "Deployment", "DaemonSet", "StatefulSet", "Job":
+			default:
+				continue
+			}
+
+			selectors[object.Metadata.Name] = renderedWorkload{
+				nodeSelector: object.Spec.Template.Spec.NodeSelector,
+				manifest:     document,
+				hook:         isHook,
+			}
+		}
+	}
+	require.NotEmpty(t, selectors, "the render carries workloads")
+
+	return selectors
 }
 
 // renderedObject is one object of a rendered chart.

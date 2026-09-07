@@ -104,7 +104,7 @@ spec:
         {{- . | nindent 8 }}
       {{- end }}
       terminationGracePeriodSeconds: 10
-      {{- with .Values.controllerManager.nodeSelector }}
+      {{- with (.Values.controllerManager.nodeSelector | default (.Values.global | default dict).nodeSelector) }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
