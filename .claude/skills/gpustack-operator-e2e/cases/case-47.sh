@@ -180,19 +180,25 @@ spec:
 YAML
 }
 
-# WHY `created` ONLY HERE, WHERE case-45 ACCEPTS `configured` AND `unchanged` TOO. The difference is
-# the namespace, not an oversight. case-45 applies into a caller-supplied $NS that outlives the run,
-# so an object can survive a delete that timed out and a re-apply legitimately reports the one it
-# found. Everything here lives in TEST_NS="kvc-i-${SFX}", created and destroyed per run with a random
-# suffix, and the cluster-scoped objects carry that suffix in their names -- so an object under one of
-# these names can only be one this run made. `created` is therefore the exact assertion, and widening
-# it would accept a collision that should never happen.
+# THE GATE IS THE DEPLOYMENTS' EXISTENCE, NOT THE WORDS THE APPLY PRINTED. Counting ` created` lines
+# makes the gate depend on how the objects came to be there rather than on whether they are there,
+# and two ordinary situations then fire it with all three present and correct: a re-run over a
+# surviving TEST_NS, and the retrying kubectl shim resending an apply whose response was lost -- both
+# report `configured`/`unchanged`. Widening the accepted words would keep the gate reading the
+# apply's narration, and would also accept a refusal whose text happens to contain one of them.
+#
+# The output is still captured, because a refusal's text is the only diagnosis of why one is missing.
 deploy_out="$(deploy case47-a "$BINDING"; deploy case47-b "$BINDING"; deploy case47-c "$OTHER_BINDING")"
-deploy_created="$(printf '%s\n' "$deploy_out" | grep -c ' created$' || true)"
-if [ "${deploy_created:-0}" -ne 3 ]; then
+deploy_missing=""
+for md in case47-a case47-b case47-c; do
+  kubectl -n "$TEST_NS" get modeldeployments.worker.gpustack.ai "$md" -o name >/dev/null 2>&1 \
+    || deploy_missing="${deploy_missing} ${TEST_NS}/modeldeployment/${md}"
+done
+if [ -n "$deploy_missing" ]; then
   record SKIP "the three deployments are admitted" \
-    "${deploy_created:-0} of 3 were created, so every row below would report an absence produced by \
-the manifest rather than by the operator: $(echo "$deploy_out" | tr '\n' ' ' | cut -c1-220)"
+    "absent after the apply:${deploy_missing} — so every row below would report an absence produced \
+by the manifest rather than by the operator. The apply said: \
+$(printf '%s' "${deploy_out:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
   kvi_results "$CASE_ID"
   exit $?
 fi
