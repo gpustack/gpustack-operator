@@ -73,15 +73,22 @@ each is reached another way:
 > receive a single write. The object would say one thing, the running member another, and nothing
 > would report a fault.
 
-⛔ **An object still carrying one of the other four values can never be updated again — including by
-the controller removing its finalizer, so it cannot be deleted.** CRD validation runs on the **write**
-path only (`rest.BeforeCreate` / `rest.BeforeUpdate`): the object still reads back, and every update
-is refused. It is the shape of the Kueue upgrade finalizer deadlock.
+⛔ **Below Kubernetes v1.30, an object still carrying one of the other four values can never be
+updated again — including by the controller removing its finalizer, so it cannot be deleted.** CRD
+validation runs on the **write** path only (`rest.BeforeCreate` / `rest.BeforeUpdate`): the object
+still reads back, and every update is refused. It is the shape of the Kueue upgrade finalizer
+deadlock.
 
-Reaching that state takes a cluster that installed the CRD, ran with **no webhook**, and created a
-non-DRAM member in that window — so it is a development cluster or nothing. `KVCacheBackend` is absent
-from every tag from `v0.7.3` through `v0.8.6`, so no cluster running a release can hold such an
-object.
+**The cluster's version is what bounds that.** `CRDValidationRatcheting` defaults on from v1.30 and is
+locked on from v1.33, and where it is enabled an update whose invalid field is **unchanged** is
+admitted — so removing a finalizer still works. This chart declares `kubeVersion: ">=1.23.0-0"`, so
+both sides of that boundary are supported and the deadlock is a pre-v1.30 property rather than a
+universal one.
+
+Reaching that state at all takes a cluster that installed the CRD, ran with **no webhook**, and
+created a non-DRAM member in that window — so it is a development cluster or nothing.
+`KVCacheBackend` is absent from every tag from `v0.8.0` through `v0.8.6`, checked per tag, and the
+commit adding it landed after `v0.8.6`.
 
 The narrowing was kept knowingly. The risk that was accepted, and the condition that closes it, are
 recorded in
@@ -517,6 +524,15 @@ that keep them on different nodes.
 Two groups on one node do **not** collide by themselves. A `TCP` member advertises its own pod IP, so
 each segment carries a distinct name even though both Pods answer to the node's name; the collision is
 the `RDMA` case, where both Pods hold the host's network namespace and advertise the node's address.
+
+**`MembersMounted` reports two different failures here, and the reason names which.** The collision
+above is one: the listing could not be decoded. `AmbiguousMemberIdentity` is the other — raised over a
+listing that **did** decode, when the address a segment arrives on is answered by more than one ready
+member Pod, with the shared key and those Pods named in the message.
+
+The remedy is the same node selectors either way. Why the status reports the ambiguity instead of
+guessing an attribution is recorded in
+[the spec](../../specs/2026-09-05-kv-cache-media-and-scaling.md#alternatives).
 
 A failed listing scrape **keeps** the previous list and sets `MembersMounted=False`; a failed capacity
 scrape **clears** the figures. That asymmetry is deliberate: capacity is two pointers and has an
