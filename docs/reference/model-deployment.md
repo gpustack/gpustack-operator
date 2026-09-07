@@ -235,26 +235,24 @@ cache client for that role, so it does not report on one it did not render.
 ### A take-over role is outside the reuse-domain guarantee
 
 ⚠️ **A role that owns its whole argv can name any reuse domain, and this operator does not stop it.**
-`MOONCAKE_TENANT_ID` is refused in `roles[].env`, but `template.command` is a program and its
-arguments: the same value travels inside a shell assignment, or inside the script the argv names, and
-admission has nothing to read either way.
+`MOONCAKE_TENANT_ID` is refused in `roles[].env` on the engines that own it — the table under
+[What the operator owns](#what-the-operator-owns) is the authority — but `template.command` is a
+program and its arguments, so the same value travels inside a shell assignment or inside the script
+the argv names, and admission has nothing to read either way.
 
 **This is a consequence of what the field is, not a protection waiting to be implemented.** Any check
 would have to recover intent from an argv the tier exists to let the user write however they like, so
 there is no version of the take-over tier that also bounds the domain.
 
-Refusing the key in `roles[].env` is kept for the roles the operator *does* configure, and there it is
-real enforcement: the operator builds the argv, the user cannot interpose a shell, and the environment
-is the only path left.
+Where the operator *does* build the argv, that refusal is real enforcement — the user cannot interpose
+a shell, so the environment is the only path left. Why the key is owned at all is stated under
+[What the operator owns](#what-the-operator-owns).
 
-⛔ Do not read the above as the boundary of the exposure. Reaching a reuse domain by knowing its name
-is open to **any** client that can dial the store — a take-over role is one instance, not the
-mechanism.
-
-That is stated in full under
-[What a Binding does not do](../kv-cache/pool.md#what-a-binding-does-not-do) and tracked at
-[#168](https://github.com/gpustack/gpustack-operator/issues/168). Closing it needs the store to
-authenticate the tenant rather than accept it as sent, which no webhook here can do.
+⛔ Do not read the above as the boundary of the exposure: a take-over role is one instance of the
+mechanism, not the mechanism. The boundary is stated once, under
+[What a Binding does not do](../kv-cache/pool.md#what-a-binding-does-not-do), and tracked at
+[#168](https://github.com/gpustack/gpustack-operator/issues/168) — whose own void conditions include a
+webhook-level one, so nothing here should be read as a claim about how that issue can be closed.
 
 ## What the operator owns
 
