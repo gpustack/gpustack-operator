@@ -73,6 +73,20 @@ each is reached another way:
 > receive a single write. The object would say one thing, the running member another, and nothing
 > would report a fault.
 
+⛔ **An object still carrying one of the other four values can never be updated again — including by
+the controller removing its finalizer, so it cannot be deleted.** CRD validation runs on the **write**
+path only (`rest.BeforeCreate` / `rest.BeforeUpdate`): the object still reads back, and every update
+is refused. It is the shape of the Kueue upgrade finalizer deadlock.
+
+Reaching that state takes a cluster that installed the CRD, ran with **no webhook**, and created a
+non-DRAM member in that window — so it is a development cluster or nothing. `KVCacheBackend` is absent
+from every tag from `v0.7.3` through `v0.8.6`, so no cluster running a release can hold such an
+object.
+
+The narrowing was kept knowingly. The risk that was accepted, and the condition that closes it, are
+recorded in
+[the spec](../../specs/2026-09-05-kv-cache-media-and-scaling.md#f2--the-medium-enum-collapses-to-what-runs-and-each-removed-value-is-placed).
+
 The object is **cluster-scoped**: it names nodes, claims host memory and host paths, and on the RDMA
 path needs `hostNetwork` and `/dev/infiniband`. Only a cluster administrator can legitimately declare
 one.
@@ -275,10 +289,10 @@ hands to clients. Rules written for the data plane therefore target pod addresse
 
 > **Why not the node name** — the engine binds its data port inside the pod's network namespace.
 > Measured on a two-node cluster: advertising the node name, a client pod got `ECONNREFUSED` against
-> both that name and the node IP, and connected only on the pod IP. It costs no stability — the
-> leader appends a port of its own to build the segment name and that port is fresh on every start,
-> so the name never survived a restart anyway. On the RDMA path the pod holds the host's network
-> namespace and this is the node's address regardless.
+> both that name and the node IP, and connected only on the pod IP. It costs no stability — a
+> segment's identity is minted fresh on every mount, a new id and a transfer port bound at random, so
+> nothing here survived a restart anyway. On the RDMA path the pod holds the host's network namespace
+> and this is the node's address regardless.
 
 ## The local disk tier
 
@@ -494,16 +508,15 @@ counted in `MembersMounted`'s message instead. The two fields the listing cannot
 and medium — are joined in from the member Pod behind that segment, and left **empty** rather than
 guessed when nothing matches.
 
-⛔ **Two member Pods behind one address cannot be told apart, and the status reports that.** A segment
-is named by an address plus a transfer port bound at random, which no Pod carries, so a segment
-arriving on an address two **ready** members share traces to neither. `MembersMounted` goes `False`
-with `AmbiguousMemberIdentity`, naming the shared key and the Pods; the node and medium stay empty.
-Give the groups node selectors that keep them on different nodes.
+⛔ **Two member Pods that share an address take the whole listing down, not just their own rows.** A
+segment is named by the address its member advertises, so two members sharing one carry the same name,
+and a repeated name is what `DecodeSegmentListing` refuses the entire body over. `MembersMounted` goes
+`False`, every member's row goes stale, and the remedy is unchanged: give the groups node selectors
+that keep them on different nodes.
 
-Two groups on one node are **not** ambiguous by themselves. A `TCP` member advertises its own pod IP,
-so each segment carries a distinct address even though both Pods answer to the node's name; the
-condition is raised only for a shared address a segment actually arrives on, which is the `RDMA` case
-where both Pods hold the host's network namespace.
+Two groups on one node do **not** collide by themselves. A `TCP` member advertises its own pod IP, so
+each segment carries a distinct name even though both Pods answer to the node's name; the collision is
+the `RDMA` case, where both Pods hold the host's network namespace and advertise the node's address.
 
 A failed listing scrape **keeps** the previous list and sets `MembersMounted=False`; a failed capacity
 scrape **clears** the figures. That asymmetry is deliberate: capacity is two pointers and has an
@@ -540,9 +553,15 @@ belongs to the Pod template, not to that field.
 node, unmounts that member's segment **immediately** — there is no drain.
 
 > **Why it is not drained** — the member's own API does take a graceful unmount with a grace period,
-> but it requires the segment ids and **no route returns a client its own**. The name is not
-> derivable either: the leader appends a port of its own choosing and that port is fresh on every
-> start. The `terminationGracePeriodSeconds` the operator sets lets the entrypoint finish its own
+> but it requires the segment ids, and **the member serves no route that lists them**. The leader
+> does: `/get_segments_detail` carries a `segment_id` and a `client_id` on every segment, and this
+> operator already polls that route for status while decoding neither. Two things are missing here
+> and they are not the same kind of missing: **decoding those two fields is ours alone to do**, and
+> **a member has no supported way to learn its own `client_id`** — the coordinate it would match its
+> own segments on, since the members of an `RDMA` group share an address and therefore a segment
+> name. That shared name is also what `DecodeSegmentListing` refuses the whole listing over, so the
+> failure lands on the one coordinate that is not unique while the two that are sit ignored in the
+> same body. The `terminationGracePeriodSeconds` the operator sets lets the entrypoint finish its own
 > shutdown — it does not preserve the data.
 
 **`scaleIn.gracePeriodSeconds` holds the process, not the tier.** A member with a

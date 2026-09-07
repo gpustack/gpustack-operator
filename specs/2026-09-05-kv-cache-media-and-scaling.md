@@ -344,6 +344,13 @@ the type is unreleased, so the only clusters that could hold one are this projec
 deleting the object is the fix. A released API would need a stored-version migration instead, and
 this note is here so the next narrowing does not inherit the reasoning without the premise.
 
+**Deleting the object is the fix only while a fix is still possible, which is what dates this
+acceptance.** The refusal lands on the write path (`rest.BeforeCreate` / `rest.BeforeUpdate`), so
+such an object reads back intact and every update is refused — including the controller removing its
+finalizer, which is what makes it undeletable rather than merely unwritable, the same shape as the
+Kueue upgrade finalizer deadlock. Before the first release that ships this type, either confirm no
+leftover objects exist, or write down a recovery procedure.
+
 **Gate two — every reader is accounted for, one line each.** Not "nothing seems to use it": each
 site below was opened and read for **which values it takes**, searched twice over `api/` and `pkg/`
 — once for the `Medium` identifier and once for the four string literals, because a site that
