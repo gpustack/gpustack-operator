@@ -167,9 +167,10 @@ func validateKVCachePoolBindingDomain(
 
 // validateKVCachePoolBindingDomainIsUnclaimed refuses a domain another Binding already registered.
 //
-// Two Bindings on one domain would SHARE cache, which may well be what somebody wanted, and would
-// collide on one quota ledger, which never is: the master holds a single entry per tenant, so the two
-// ceilings become last-write-wins and each namespace sees a quota the other one set.
+// Two Bindings on one domain, WHERE ONE MASTER SERVES BOTH, would SHARE cache, which may well be what
+// somebody wanted, and would collide on one quota ledger, which never is: the master holds a single
+// entry per tenant, so the two ceilings become last-write-wins and each namespace sees a quota the
+// other one set.
 //
 // Uniqueness is CLUSTER-WIDE rather than per pool, because one master can serve several pools and the
 // tenant space is master-global. The check is one unscoped List through the manager's cache — it
@@ -179,9 +180,14 @@ func validateKVCachePoolBindingDomain(
 // pools" argues for uniqueness across THOSE pools, not across pools on a DIFFERENT master. With two
 // independent backends, a domain every no-tenant engine writes under — "default" — can be registered
 // only once cluster-wide, so injected Pods on the second backend are admitted and then fail every
-// write with TENANT_NOT_REGISTERED. Tracked as #166, which also records why the fix may never be
-// needed. Left as written rather than narrowed here: changing the scope is an admission-semantics
+// write with TENANT_NOT_REGISTERED. Tracked at
+// https://github.com/gpustack/gpustack-operator/issues/166, which also records why the fix may never
+// be needed. Left as written rather than narrowed here: changing the scope is an admission-semantics
 // change to a merged API, and it is on a mechanism that a planned opt-in tenant would remove.
+//
+// THE REFUSAL'S MESSAGE THEREFORE STATES BOTH CASES, and that is load-bearing rather than thorough:
+// an operator refused on two independent backends who is told the two would share cache goes looking
+// for a collision two separate ledgers cannot have.
 //
 // It races: two creates admitted against one cache state both pass. That is why F9's reconcile-time
 // refusal exists, and why this check is the one that produces a good message rather than the one that
@@ -209,9 +215,15 @@ func (r *KVCachePoolBindingWebhook) validateKVCachePoolBindingDomainIsUnclaimed(
 			continue
 		}
 		return field.ErrorList{field.Duplicate(namePath, fmt.Sprintf(
-			"reuse domain %q is already registered by %s/%s. Sharing one domain across "+
-				"namespaces is not supported here: the two would share cache but collide on one "+
-				"quota ledger, where each namespace's ceiling overwrites the other's",
+			"reuse domain %q is already registered by %s/%s. A domain is registered once "+
+				"cluster-wide, and this check reads neither Binding's pool. Served by one master, "+
+				"the two would share cache and overwrite each other's ceiling in its single "+
+				"ledger entry for this tenant. Served by two independent backends, they share "+
+				"nothing, and the refusal is this check's scope rather than a fault between them. "+
+				"Register a domain no other Binding holds. That does not rescue a needed "+
+				"\"default\" domain: the engines that forward no tenant write under that literal "+
+				"name, so a Binding registering anything else registers a domain those Pods never "+
+				"write to",
 			kvcpb.Spec.Domain.Name, holder.Namespace, holder.Name))}
 	}
 
