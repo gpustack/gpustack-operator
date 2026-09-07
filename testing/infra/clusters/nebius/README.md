@@ -130,9 +130,9 @@ Two properties of that query decide whether it answers the question at all:
 - **The quota is per region** — one record per region under the same name. Read
   the one whose `spec.region` is the project's region, not the first match.
 
-The stock allowance is single digits, but a region can be raised, so the two can
-differ by a lot: read on 2026-09-07, this tenant's `eu-north1` allowed 12 while
-most regions sat at the stock 3. Plan against the number the query returns.
+The stock allowance is single digits, but a region can be raised, and the two can
+differ by a large factor. Plan against the number the query returns, never
+against the stock one.
 
 The **flag** is per group; the **address, and so the quota unit, is per node**. A group of N nodes with
 `public_ip = true` takes N addresses, so a CPU group that raises `cpu_node_count` and asks for an address
