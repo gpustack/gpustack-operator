@@ -13,8 +13,7 @@
 #
 #                schema   — the role name's PodSetReference pattern, the closed `kind` enum, and
 #                           uniqueness, which `roles` gets from being a list-map keyed on `name`;
-#                webhook  — the count, one-instanceType, the kind combinations, and the
-#                           acceleratorKey resolved against the pool's live flavors;
+#                webhook  — the count, one-instanceType, and the kind combinations;
 #                controller — the group rebuild, which is a convergence rather than a refusal.
 #
 #              THE TRAP IS CASE 45'S, AND IT IS WORSE HERE. Every manifest below carries several
@@ -32,12 +31,9 @@
 #              KVCachePoolBinding has to exist: nothing here schedules a replica, and the Binding is
 #              only resolved by the controller.
 #
-#              THE acceleratorKey ROW READS THE POOL IT ACTUALLY FINDS. On a CPU-only cluster the
-#              pool's flavors pin no accelerator at all, and the operator's message says exactly
-#              that — which is a different sentence from "offers [nvidia-h20]" and a different rule
-#              from the empty-read exemption. The row asserts the fragment common to both, and the
-#              header says why: a case that hard-coded the accelerated wording would fail on the one
-#              cluster this file is meant to run on.
+#              NO ROW READS THE CLUSTER ANY MORE. Every rule this file asserts is answered from the
+#              submitted object, so no row's outcome depends on what a pool's flavors happen to pin
+#              or on whether a cache has caught up.
 #
 # Inputs:      All real, nothing mocked. `--dry-run=server` runs the schema and the webhook and
 #              persists nothing. The rebuild row creates one ModelDeployment and deletes it again.
@@ -186,8 +182,8 @@ refuses "two roles sharing a name are refused BY THE SCHEMA" \
 #
 # The second name is used when the cluster has one, because a row that refuses a real pair is the
 # stronger evidence; the synthetic name is the fallback rather than the default.
-refuses "two instanceTypes are refused, pointing at acceleratorKey" \
-  "acceleratorKey" \
+refuses "two instanceTypes are refused, and the message names the gap" \
+  "is not possible today" \
   "  - name: prefill
     instanceType: ${IT}
     replicas: 1
@@ -208,19 +204,6 @@ refuses "kind: server beside another kind is refused" \
 
 ENGINE=sglang refuses "a kind the engine cannot be told is refused NAMING THE ENGINE" \
   "has no rendering term for kind" "$(two_roles)"
-
-refuses "an acceleratorKey this pool does not offer is refused" \
-  "is not a constraint that fails" \
-  "  - name: prefill
-    kind: prefill
-    instanceType: ${IT}
-    acceleratorKey: nvidia-no-such-model
-    replicas: 1
-  - name: decode
-    kind: decode
-    instanceType: ${IT}
-    acceleratorKey: nvidia-no-such-model
-    replicas: 1"
 
 # --- the schema's rules, which run BEFORE the webhook and must not be confused with it ---
 
