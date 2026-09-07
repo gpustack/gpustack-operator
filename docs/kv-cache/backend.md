@@ -508,16 +508,15 @@ counted in `MembersMounted`'s message instead. The two fields the listing cannot
 and medium — are joined in from the member Pod behind that segment, and left **empty** rather than
 guessed when nothing matches.
 
-⛔ **Two member Pods behind one address cannot be told apart, and the status reports that.** A segment
-is named by an address plus a transfer port bound at random, which no Pod carries, so a segment
-arriving on an address two **ready** members share traces to neither. `MembersMounted` goes `False`
-with `AmbiguousMemberIdentity`, naming the shared key and the Pods; the node and medium stay empty.
-Give the groups node selectors that keep them on different nodes.
+⛔ **Two member Pods that share an address take the whole listing down, not just their own rows.** A
+segment is named by the address its member advertises, so two members sharing one carry the same name,
+and a repeated name is what `DecodeSegmentListing` refuses the entire body over. `MembersMounted` goes
+`False`, every member's row goes stale, and the remedy is unchanged: give the groups node selectors
+that keep them on different nodes.
 
-Two groups on one node are **not** ambiguous by themselves. A `TCP` member advertises its own pod IP,
-so each segment carries a distinct address even though both Pods answer to the node's name; the
-condition is raised only for a shared address a segment actually arrives on, which is the `RDMA` case
-where both Pods hold the host's network namespace.
+Two groups on one node do **not** collide by themselves. A `TCP` member advertises its own pod IP, so
+each segment carries a distinct name even though both Pods answer to the node's name; the collision is
+the `RDMA` case, where both Pods hold the host's network namespace and advertise the node's address.
 
 A failed listing scrape **keeps** the previous list and sets `MembersMounted=False`; a failed capacity
 scrape **clears** the figures. That asymmetry is deliberate: capacity is two pointers and has an
@@ -555,14 +554,15 @@ node, unmounts that member's segment **immediately** — there is no drain.
 
 > **Why it is not drained** — the member's own API does take a graceful unmount with a grace period,
 > but it requires the segment ids, and **the member serves no route that lists them**. The leader
-> does: `segment_id` is a field of `/get_segments_detail`, the same route this operator already polls
-> for status and whose decoder ignores that field. Against `mooncake` 0.3.13 the ids are therefore
-> **readable and simply unread** — what is missing on this path is the work, not the route. One part
-> of it is a real design question rather than unwritten code: a departing member would have to
-> recognise its own segments by the address they carry, and the members of an `RDMA` group share one,
-> which is the ambiguity [What status reports](#what-status-reports) already names. The
-> `terminationGracePeriodSeconds` the operator sets lets the entrypoint finish its own shutdown — it
-> does not preserve the data.
+> does: `/get_segments_detail` carries a `segment_id` and a `client_id` on every segment, and this
+> operator already polls that route for status while decoding neither. Two things are missing here
+> and they are not the same kind of missing: **decoding those two fields is ours alone to do**, and
+> **a member has no supported way to learn its own `client_id`** — the coordinate it would match its
+> own segments on, since the members of an `RDMA` group share an address and therefore a segment
+> name. That shared name is also what `DecodeSegmentListing` refuses the whole listing over, so the
+> failure lands on the one coordinate that is not unique while the two that are sit ignored in the
+> same body. The `terminationGracePeriodSeconds` the operator sets lets the entrypoint finish its own
+> shutdown — it does not preserve the data.
 
 **`scaleIn.gracePeriodSeconds` holds the process, not the tier.** A member with a
 [local disk tier](#the-local-disk-tier) gets a `preStop` hook that deregisters the tier with the
