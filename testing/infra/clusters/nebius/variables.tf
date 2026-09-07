@@ -75,9 +75,10 @@ variable "node_boot_disk_type" {
   }
 }
 
-# The (singular) CPU node group's shape, mirroring clusters/eks's cpu_instance_types. No
-# image_family: unlike a standalone compute VM (computes/nebius), the mk8s node template picks
-# its image from `os` alone for a driverless (CPU) platform.
+# The CPU node group's shape, mirroring clusters/eks's cpu_instance_types. There is exactly one CPU
+# group -- unlike gpu_instance_types, which is keyed by group name -- but it is not therefore one
+# node: cpu_node_count sizes it. No image_family: unlike a standalone compute VM (computes/nebius),
+# the mk8s node template picks its image from `os` alone for a driverless (CPU) platform.
 #
 # public_ip gives the node a public IPv4, which is what makes it reachable over SSH. It defaults
 # to false because the accelerator tests drive GPU nodes, not this one, and every address is
