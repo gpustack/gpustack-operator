@@ -40,7 +40,13 @@ type DeviceTopologyApplyConfiguration struct {
 	// by construction, so two consecutive reads of unchanged hardware are byte-identical.
 	PciSwitches []string `json:"pciSwitches,omitempty"`
 	// Fabric is the scale-up interconnect domain this device belongs to. Absent on a device
-	// whose generation has no such fabric, and on one whose driver could not be asked.
+	// whose generation has no such fabric, and on one whose driver has never answered any of
+	// these reads.
+	//
+	// Present does not mean every field was read in the pass that wrote this object. A domain
+	// that was read once is carried forward while the driver refuses the read, because the
+	// alternative is withdrawing a domain the node has not left — so a record here is the last
+	// answer each field had, and only an answer the driver gave replaces it.
 	Fabric *DeviceFabricApplyConfiguration `json:"fabric,omitempty"`
 }
 

@@ -2740,14 +2740,14 @@ func schema_gpustack_api_worker_v1alpha1_DeviceFabric(ref common.ReferenceCallba
 					},
 					"nodeIndex": {
 						SchemaProps: spec.SchemaProps{
-							Description: "NodeIndex is this worker's index within the domain, as the domain numbers its machines — not a Kubernetes node name and not comparable to one.\n\nAscend only, from the super pod's server id. Published under the same rule as ID: only for a shape that is in a super pod.",
+							Description: "NodeIndex is this worker's index within the domain, as the domain numbers its machines — not a Kubernetes node name and not comparable to one.\n\nAscend only, from the super pod's server id. Published under the rule ID is, and withheld on top of that where the driver marks this coordinate invalid: a machine can be in a domain that has not told it where.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"rackId": {
 						SchemaProps: spec.SchemaProps{
-							Description: "RackID is the rack this worker sits in, as the domain numbers its racks.\n\nAscend only, from the super pod's chassis id. Published under the same rule as ID: only for a shape that is in a super pod.",
+							Description: "RackID is the rack this worker sits in, as the domain numbers its racks.\n\nAscend only, from the super pod's chassis id. Published under the rule NodeIndex is, and withheld on the same terms.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -3131,7 +3131,7 @@ func schema_gpustack_api_worker_v1alpha1_DeviceTopology(ref common.ReferenceCall
 					},
 					"fabric": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Fabric is the scale-up interconnect domain this device belongs to. Absent on a device whose generation has no such fabric, and on one whose driver could not be asked.",
+							Description: "Fabric is the scale-up interconnect domain this device belongs to. Absent on a device whose generation has no such fabric, and on one whose driver has never answered any of these reads.\n\nPresent does not mean every field was read in the pass that wrote this object. A domain that was read once is carried forward while the driver refuses the read, because the alternative is withdrawing a domain the node has not left — so a record here is the last answer each field had, and only an answer the driver gave replaces it.",
 							Ref:         ref(v1alpha1.DeviceFabric{}.OpenAPIModelName()),
 						},
 					},
