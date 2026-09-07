@@ -73,13 +73,14 @@ type DeviceFabricApplyConfiguration struct {
 	// NodeIndex is this worker's index within the domain, as the domain numbers its machines —
 	// not a Kubernetes node name and not comparable to one.
 	//
-	// Ascend only, from the super pod's server id. Published under the same rule as ID: only for
-	// a shape that is in a super pod.
+	// Ascend only, from the super pod's server id. Published under the rule ID is, and withheld
+	// on top of that where the driver marks this coordinate invalid: a machine can be in a
+	// domain that has not told it where.
 	NodeIndex *string `json:"nodeIndex,omitempty"`
 	// RackID is the rack this worker sits in, as the domain numbers its racks.
 	//
-	// Ascend only, from the super pod's chassis id. Published under the same rule as ID: only for
-	// a shape that is in a super pod.
+	// Ascend only, from the super pod's chassis id. Published under the rule NodeIndex is, and
+	// withheld on the same terms.
 	RackID *string `json:"rackId,omitempty"`
 	// Endpoints are this device's own addresses on the fabric, in the manufacturer's own
 	// encoding.

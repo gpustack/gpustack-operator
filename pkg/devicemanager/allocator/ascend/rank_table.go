@@ -62,13 +62,18 @@ const rankTableVersion950 = "2.0"
 // bring HCCL up through rootInfo negotiation instead. A node with no ranktable is the healthy node,
 // so reporting absence as unavailable would fire on every correct host.
 //
-// That reading is LIMITED to where the host's own /etc was observed, which is why both the host root
-// and the directory under it are established before a missing file is believed. Two other states
-// reach the same os.ErrNotExist and neither is a healthy node: a pass with no host root configured,
-// whose joined path collapses onto the container's own /etc, and a host root that is configured but
-// not mounted, which carries no /etc at all. The runner stops on neither -- it downgrades such a
-// pass to a dry run and carries on -- so both are reached on real nodes, and reporting ok on either
-// would clear a host whose ranktable was never read.
+// That reading is LIMITED to where the host's own /etc was observed, and three states reach the same
+// os.ErrNotExist without being a healthy node. The runner stops on none of them -- it downgrades
+// such a pass to a dry run and carries on -- so each is reached on real nodes, and reporting ok on
+// any would clear a host whose ranktable was never read:
+//
+//   - A pass with no usable host root, whose path is withheld at construction. The runner hands one
+//     out only after it validates as a host root, since a directory carrying an etc and nothing else
+//     can be a mistaken path rather than a mount. See hostRankTablePath.
+//   - A host root whose own /etc is not a readable directory, which the marker validation does not
+//     separate from a file of that name. Established here before a missing file is believed.
+//   - A path that is a symbolic link, whose target this command resolves against its own root rather
+//     than the host's. Reported rather than followed, below.
 //
 // A file that cannot be read or parsed is reported unavailable rather than waved through: the
 // runtime mounts it whatever this code could make of it, so failing to read it is not being safe
@@ -90,6 +95,22 @@ func checkRankTable(path string) device.PreflightCheck {
 		c.Reason = fmt.Sprintf("this pass has no host root, so the host's %s was never looked for "+
 			"and whether it would break HCCL here is unknown. Mount the host's root filesystem, or "+
 			"read this row from a pass that has one", hcclRootInfoPath)
+		return c
+	}
+
+	// A symlink here is reported rather than followed, because following it is this command's kernel
+	// resolving it, not the host's. An absolute target is resolved against this container's own root,
+	// so a host whose /etc/hccl_rootinfo.json points at a file elsewhere reads as absent here -- the
+	// passing branch -- while ascend-docker-runtime on the host follows the same link to a table that
+	// is really there. A relative target does resolve inside the mounted root, but it can climb out
+	// of it with enough parent steps, and neither case is worth guessing at: the link itself is a
+	// fact about the host, and naming it sends an operator to the one place that settles it.
+	if target, err := os.Readlink(path); err == nil {
+		c.Reason = fmt.Sprintf("%s is a symbolic link to %s, which this command cannot follow the way "+
+			"the host does -- an absolute target resolves inside this container instead -- so whether "+
+			"the host carries a ranktable is unknown while the vendor runtime follows that link and "+
+			"mounts whatever it finds. Read the link's target on the host",
+			hcclRootInfoPath, target)
 		return c
 	}
 

@@ -160,13 +160,20 @@ func newFabric(spod *dcmi.SpodInfo, productType productascend.Type, endpoints []
 	// and which answers are the vendor's markers for "not in a super pod", is Type.InSuperPod.
 	if spod != nil && productType.InSuperPod(spod.Super_pod_id, spod.Scale_type) {
 		fabric.ID = strconvx.FormatUint(uint64(spod.Super_pod_id), 10)
-		fabric.NodeIndex = strconvx.FormatUint(uint64(spod.Server_id), 10)
-		fabric.RackID = strconvx.FormatUint(uint64(spod.Chassis_id), 10)
-		// A pod shape is in its domain whatever size it reports, so the size carries its own check:
-		// publishing the invalid marker would advertise a domain of four billion members, and zero
-		// is how the label construction already spells a size nobody reported.
+		// Each of the other three carries its own check, because membership is established by the id
+		// and says nothing about what else the driver managed to fill in. A pod shape is in its
+		// domain whatever size it reports; the size, the server index and the chassis are separate
+		// answers, and publishing the invalid marker for any of them advertises a domain of four
+		// billion members, or this machine as its four-billionth. Absent is how each of them is
+		// spelled when nobody reported it.
 		if spod.Scale_type != productascend.InvalidSuperPodSize {
 			fabric.MemberCount = spod.Scale_type
+		}
+		if spod.Server_id != productascend.InvalidSuperPodCoordinate {
+			fabric.NodeIndex = strconvx.FormatUint(uint64(spod.Server_id), 10)
+		}
+		if spod.Chassis_id != productascend.InvalidSuperPodCoordinate {
+			fabric.RackID = strconvx.FormatUint(uint64(spod.Chassis_id), 10)
 		}
 	}
 

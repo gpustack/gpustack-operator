@@ -70,12 +70,17 @@ func NewPreflighter(opts device.PreflighterOptions) device.AcceleratorPreflighte
 // hostRankTablePath is where this pass can read the host's ranktable, and empty when it has no host
 // root to read one through.
 //
-// The empty case is REQUIRED rather than defensive. A pass with no host root is a configuration the
-// runner supports -- it downgrades such a pass to a dry run and carries on -- and filepath.Join
-// drops an empty first element, so joining onto nothing yields /etc/hccl_rootinfo.json unchanged.
-// That path names the container's own /etc, which carries no ranktable on any node, so the check
-// would take its absent-is-healthy branch everywhere. Returning empty is what lets it report that it
-// never looked instead.
+// The empty case is REQUIRED rather than defensive. A pass with no usable host root is a
+// configuration the runner supports -- it downgrades such a pass to a dry run and carries on -- and
+// filepath.Join drops an empty first element, so joining onto nothing yields
+// /etc/hccl_rootinfo.json unchanged. That path names the container's own /etc, which carries no
+// ranktable on any node, so the check would take its absent-is-healthy branch everywhere. Returning
+// empty is what lets it report that it never looked instead.
+//
+// "No usable host root" is the runner's judgement, not merely an unset option: it hands out the
+// configured path only after that path validates as a host root, and empty otherwise. A path that
+// merely exists, or one carrying an etc and nothing else, is a mistaken root rather than a mount,
+// and a ranktable missing under it was never looked for. See PreflighterOptions.HostRoot.
 func hostRankTablePath(hostRoot string) string {
 	if hostRoot == "" {
 		return ""

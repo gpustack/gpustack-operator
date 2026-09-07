@@ -155,7 +155,13 @@ type (
 		PciSwitches []string `json:"pciSwitches,omitempty" yaml:"pciSwitches,omitempty" protobuf:"bytes,7,rep,name=pciSwitches"`
 
 		// Fabric is the scale-up interconnect domain this device belongs to. Absent on a device
-		// whose generation has no such fabric, and on one whose driver could not be asked.
+		// whose generation has no such fabric, and on one whose driver has never answered any of
+		// these reads.
+		//
+		// Present does not mean every field was read in the pass that wrote this object. A domain
+		// that was read once is carried forward while the driver refuses the read, because the
+		// alternative is withdrawing a domain the node has not left — so a record here is the last
+		// answer each field had, and only an answer the driver gave replaces it.
 		Fabric *DeviceFabric `json:"fabric,omitempty" yaml:"fabric,omitempty" protobuf:"bytes,8,opt,name=fabric"`
 	}
 
@@ -232,14 +238,15 @@ type (
 		// NodeIndex is this worker's index within the domain, as the domain numbers its machines —
 		// not a Kubernetes node name and not comparable to one.
 		//
-		// Ascend only, from the super pod's server id. Published under the same rule as ID: only for
-		// a shape that is in a super pod.
+		// Ascend only, from the super pod's server id. Published under the rule ID is, and withheld
+		// on top of that where the driver marks this coordinate invalid: a machine can be in a
+		// domain that has not told it where.
 		NodeIndex string `json:"nodeIndex,omitempty" yaml:"nodeIndex,omitempty" protobuf:"bytes,6,opt,name=nodeIndex"`
 
 		// RackID is the rack this worker sits in, as the domain numbers its racks.
 		//
-		// Ascend only, from the super pod's chassis id. Published under the same rule as ID: only for
-		// a shape that is in a super pod.
+		// Ascend only, from the super pod's chassis id. Published under the rule NodeIndex is, and
+		// withheld on the same terms.
 		RackID string `json:"rackId,omitempty" yaml:"rackId,omitempty" protobuf:"bytes,7,opt,name=rackId"`
 
 		// Endpoints are this device's own addresses on the fabric, in the manufacturer's own

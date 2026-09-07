@@ -163,6 +163,40 @@ func TestCheckRankTable_UnmountedHostRootIsNotAHealthyNode(t *testing.T) {
 	assert.Empty(t, unmounted.Detail)
 }
 
+// A symbolic link at this path is reported, not followed, because this command and the host resolve
+// it differently.
+//
+// The absolute case is the one that matters and the one no other case covers: the kernel resolves the
+// target against this container's own root, so a host that carries a ranktable behind a link reads as
+// absent here -- the passing branch -- while the vendor runtime on the host follows the same link and
+// mounts what is really there. Both link kinds are asserted, since a check that only rejected
+// absolute targets would still follow a relative one out of the mounted root.
+func TestCheckRankTable_SymlinkIsReportedNotFollowed(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "etc"), 0o750))
+	path := filepath.Join(root, hcclRootInfoPath)
+
+	// The control: the same directory, with a real 2.0 table in it, is ok. Without this the
+	// assertions below pass for a check that refuses every path under this root.
+	require.NoError(t, os.WriteFile(path, []byte(rankTableV20), 0o600))
+	require.Equal(t, device.PreflightStateOK, checkRankTable(path).State)
+	require.NoError(t, os.Remove(path))
+
+	for _, target := range []string{"/opt/hccl/rootinfo.json", "elsewhere/rootinfo.json"} {
+		require.NoError(t, os.Symlink(target, path))
+
+		got := checkRankTable(path)
+
+		assert.Equal(t, device.PreflightStateUnavailable, got.State, target)
+		assert.Contains(t, got.Reason, "symbolic link", target)
+		assert.Contains(t, got.Reason, target,
+			"the reason names the target, which is the one thing an operator can check on the host")
+		assert.Empty(t, got.Detail, target)
+
+		require.NoError(t, os.Remove(path))
+	}
+}
+
 // A pass with no host root configured at all reaches the healthy branch for a third reason, and the
 // guard above does not cover it.
 //

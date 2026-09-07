@@ -129,6 +129,36 @@ func TestNewFabric(t *testing.T) {
 			},
 		},
 		{
+			// Membership is established by the id, and says nothing about what else the driver
+			// managed to fill in. A member whose place in the pod was not reported publishes the
+			// domain and withholds the place, rather than sorting this machine as the pod's
+			// four-billionth member.
+			name: "an unreported place in the domain is not a place",
+			spod: &dcmi.SpodInfo{
+				Super_pod_id: 7,
+				Scale_type:   384,
+				Server_id:    productascend.InvalidSuperPodCoordinate,
+				Chassis_id:   productascend.InvalidSuperPodCoordinate,
+			},
+			product: productascend.TypePod2D,
+			want: &device.Fabric{
+				Kind: "ub", ID: "7", Type: "pod-2d", MemberCount: 384,
+			},
+		},
+		{
+			// Zero is a real server index and a real rack, not an absent answer.
+			name: "the first machine in the first rack",
+			spod: &dcmi.SpodInfo{
+				Super_pod_id: 7,
+				Scale_type:   384,
+			},
+			product: productascend.TypePod2D,
+			want: &device.Fabric{
+				Kind: "ub", ID: "7", Type: "pod-2d",
+				MemberCount: 384, NodeIndex: "0", RackID: "0",
+			},
+		},
+		{
 			// Same withholding for a shape this build has no word for: it cannot check that product
 			// against the shapes the vendor excludes, and a domain invented here is compared across
 			// workers.

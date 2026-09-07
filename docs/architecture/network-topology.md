@@ -186,10 +186,11 @@ rule is the vendor's own:
   machines with;
 - a `server-16p` or `server-32p` never is.
 
-`memberCount` needs a valid size on top of that, since a domain may be identified while its size is
-not, and `kind`, `type` and `endpoints` travel either way. Publishing an invalid marker would hand
-one domain to every unrelated machine carrying it, and `id` is compared across nodes — while reading
-the shape alone would cost a real super server the domain it is in.
+Membership is established by `id` alone, so each of the other three carries its own check on top of
+that: a domain can be identified while its size, this machine's index in it, or its rack are not.
+`kind`, `type` and `endpoints` travel either way. Publishing an invalid marker would hand one domain
+to every unrelated machine carrying it — or sort this one as the pod's four-billionth member — while
+reading the shape alone would cost a real super server the domain it is in.
 
 > **Why per accelerator, when a domain plainly spans machines** — because it also **cross-cuts** a
 > machine. NVIDIA reports a clique per GPU and one node can hold several; AMD's hive id is likewise

@@ -313,7 +313,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																					Type:        "string",
 																				},
 																				"fabric": {
-																					Description: "Fabric is the scale-up interconnect domain this device belongs to. Absent on a device\nwhose generation has no such fabric, and on one whose driver could not be asked.",
+																					Description: "Fabric is the scale-up interconnect domain this device belongs to. Absent on a device\nwhose generation has no such fabric, and on one whose driver has never answered any of\nthese reads.\nPresent does not mean every field was read in the pass that wrote this object. A domain\nthat was read once is carried forward while the driver refuses the read, because the\nalternative is withdrawing a domain the node has not left — so a record here is the last\nanswer each field had, and only an answer the driver gave replaces it.",
 																					Type:        "object",
 																					Required: []string{
 																						"kind",
@@ -349,11 +349,11 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																							Format:      "int64",
 																						},
 																						"nodeIndex": {
-																							Description: "NodeIndex is this worker's index within the domain, as the domain numbers its machines —\nnot a Kubernetes node name and not comparable to one.\nAscend only, from the super pod's server id. Published under the same rule as ID: only for\na shape that is in a super pod.",
+																							Description: "NodeIndex is this worker's index within the domain, as the domain numbers its machines —\nnot a Kubernetes node name and not comparable to one.\nAscend only, from the super pod's server id. Published under the rule ID is, and withheld\non top of that where the driver marks this coordinate invalid: a machine can be in a\ndomain that has not told it where.",
 																							Type:        "string",
 																						},
 																						"rackId": {
-																							Description: "RackID is the rack this worker sits in, as the domain numbers its racks.\nAscend only, from the super pod's chassis id. Published under the same rule as ID: only for\na shape that is in a super pod.",
+																							Description: "RackID is the rack this worker sits in, as the domain numbers its racks.\nAscend only, from the super pod's chassis id. Published under the rule NodeIndex is, and\nwithheld on the same terms.",
 																							Type:        "string",
 																						},
 																						"type": {

@@ -116,6 +116,16 @@ const (
 	InvalidSuperPodSize uint32 = 0xffffffff
 )
 
+// InvalidSuperPodCoordinate is the same all-ones value, read against the coordinates the vendor
+// names no marker for: the server index and the chassis.
+//
+// It is a bound on garbage rather than a documented rule, and the difference is worth stating. The
+// vendor's own rank table renders both of those fields unchecked, so a driver that always fills them
+// makes this check dead. What it costs to be wrong the other way is not symmetric: an index of four
+// billion published on the Devices object sorts this node as the last member of a super pod it may
+// be at the front of, and a consumer deriving rank placement from it has nothing to catch that.
+const InvalidSuperPodCoordinate = InvalidSuperPodID
+
 // A5 carrier board ids: the mainboard a 300I inference card is mounted on, in its 1P and 4P
 // variants. A5 mainboard ids are their own namespace -- the training baseboards are 0x44, 0x46 and
 // 0x48 -- and these two are only ever read on a node whose family is already 950, so a match here
