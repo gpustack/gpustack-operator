@@ -79,14 +79,14 @@ never arrive.
       kind: prefill                        # server (default) | prefill | decode
       replicas: 2
       instanceType: gpustack-nvidia-h20-linux-amd64
-      acceleratorKey: nvidia-h20           # which model inside the pool
+      parallelism: 2                       # tensor parallel degree, per role
       resources:
         accelerator: 2
     - name: decode
       kind: decode
       replicas: 2
       instanceType: gpustack-nvidia-h20-linux-amd64   # identical, and it must be
-      acceleratorKey: nvidia-h20
+      parallelism: 2
       resources:
         accelerator: 2
 ```
@@ -111,7 +111,7 @@ request to either are **not** here.
 | annotation `modeldeployment.gpustack.ai/role-replicas` | the role's own `replicas` | ours, not Kueue's, and the only entry here Kueue does not read. It is what makes the rebuild predicate see a **reshape**: moving prefill 2 / decode 2 to prefill 1 / decode 3 leaves the total at four, so a check reading the total alone would trim one replica and add another in the same pass |
 | label `kueue.x-k8s.io/queue-name` | the `status.entrance` **published by** the role's InstanceType | unchanged; Kueue refuses a group whose Pods disagree on it. Read from the type rather than re-derived from its name, so this operator and the reconcile that creates the LocalQueue cannot disagree about the queue |
 | label `app.kubernetes.io/component` | the role's `name` | unchanged; what a `Service` selects on and what `status.roles[]` is attributed by |
-| `spec.nodeSelector` | **only when the role sets `acceleratorKey`**: one entry, `acceleratable.feature.gpustack.ai/<acceleratorKey>: "true"` | what makes Kueue assign this PodSet that accelerator model's flavor. A role naming no key carries no entry and takes whatever the pool assigns |
+| `spec.nodeSelector` | nothing is added | a role takes whatever flavor its pool assigns. Kueue evaluates a candidate flavor per PodSet, and with no selector to match against there is nothing to narrow the choice within one pool |
 
 The `role-hash` annotation is load-bearing rather than cosmetic. Kueue takes it verbatim when present
 and otherwise derives a digest of the Pod spec's *shape*, so two roles that render identically would
@@ -131,21 +131,17 @@ on two `instanceType`s cannot be one group and cannot be admitted together at al
 same rule on the Pods, unretryably, so letting it through would trade a refusal for a group that never
 assembles.
 
-Different **hardware** per role is expressible inside one pool instead, because
-[Kueue assigns a ResourceFlavor per PodSet](../architecture/scheduling-chain.md#stage-4-the-kueue-chain):
-`acceleratorKey` is how a prefiller and a decoder land on two accelerator models of the same
-manufacturer. Across manufacturers stays impossible — a queue's accelerator quota is
-`credits.gpustack.ai/<manufacturer>`, one resource name per manufacturer.
+Different **hardware** per role is **not** expressible today, and the refusal above says so rather
+than only saying "pick one type".
 
-`acceleratorKey` is validated at admission against the flavors the role's pool actually offers, and
-that is not tidiness. It is the rule that compensates for
-[what flavor assignment does with a key no flavor pins](../architecture/scheduling-chain.md#stage-4-the-kueue-chain):
-without this check the deployment would be admitted onto an arbitrary model and its Pods would sit
-`Pending` at the scheduler, two gates downstream of the mistake with nothing naming it.
+[Kueue does assign a ResourceFlavor per
+PodSet](../architecture/scheduling-chain.md#stage-4-the-kueue-chain), so the mechanism exists; what
+is missing is a way for a role to ask for one model rather than another within its pool. Per-role
+queues are the route tracked at
+[issue 199](https://github.com/gpustack/gpustack-operator/issues/199).
 
-A pool with no flavors yet is not a refusal. An empty read is not evidence of absence while the pool is
-still being built, and a key that stays wrong is then the per-accelerator check's `Retry`. A pool whose
-flavors are real and carry no accelerator at all *is* a refusal: it has answered.
+Across manufacturers stays impossible for a different and permanent reason: a queue's accelerator
+quota is `credits.gpustack.ai/<manufacturer>`, one resource name per manufacturer.
 
 ### Addressing a role
 
@@ -494,11 +490,10 @@ so there is no mutating webhook.
 |---|---|
 | more than 10 roles | Kueue's 10-PodSet cap on `Workload.spec.podSets` as the cause, not merely the number |
 | two roles sharing a `name` | the duplicate — refused by the **schema**, since `roles` is a list keyed on `name`, so this one never reaches the webhook |
-| roles on different `instanceType`s | every type named, on `spec.roles` rather than on any one role — disagreement is a property of the set — plus the one-queue-name reason and `roles[].acceleratorKey` as the way to differentiate hardware within one pool |
+| roles on different `instanceType`s | every type named, on `spec.roles` rather than on any one role — disagreement is a property of the set — plus the one-queue-name reason, and that differentiating hardware within one pool is not possible today |
 | a role whose `<deployment>-<role>` is not a DNS-1035 label | the combined **Service** name, which is what the pair becomes; over 63 characters or carrying a dot from a subdomain-shaped deployment name. A role the object **already had** is exempt, so a rule added later cannot strand a stored object |
 | `kind: server` beside any other kind | that a server serves whole requests by itself, so the combination describes no arrangement |
 | a `kind` the engine has no term for | the engine and the kind — today, `prefill` or `decode` on SGLang |
-| an `acceleratorKey` the pool does not offer | the keys it does offer, and that Kueue would drop the unknown one rather than fail on it |
 | an owned key in `extraArgs` | the key, the engine, and `template.command` as the way to own it |
 | an owned name in `env` | the same three |
 | `template.resources` | `roles[].resources` and `roles[].instanceType` as where the request is decided |
@@ -507,11 +502,9 @@ so there is no mutating webhook.
 | a self-declared reuse domain | nothing — the field does not exist |
 | an EMPTY `poolRef.name` | the Binding as the authorization point, and that an empty reference names none |
 
-Every rule above except the `acceleratorKey` one is answered from the submitted object. That one asks
-the cluster, because "which accelerator models does this pool offer" is a question about the cluster:
-the webhook resolves the roles' shared `instanceType` to its ClusterQueue and reads the accelerator
-keys that queue's own ResourceFlavors pin. It runs only once the object's own shape holds, so a
-malformed deployment is never told what a pool offers alongside the reason it has no single pool.
+**Every rule above is answered from the submitted object.** The handler holds no client and reads
+nothing from the cluster, so admission cannot be delayed or made to fail by a cache that has not
+caught up.
 
 A manufacturer with no runner backend is still refused **at render time and not at admission**, and the
 reason is not the missing client. The rule needs the InstanceType's OBSERVED detail, and
