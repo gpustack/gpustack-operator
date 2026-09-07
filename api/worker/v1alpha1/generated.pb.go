@@ -4828,11 +4828,11 @@ func (m *ModelDeploymentRole) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	i -= len(m.AcceleratorKey)
-	copy(dAtA[i:], m.AcceleratorKey)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.AcceleratorKey)))
-	i--
-	dAtA[i] = 0x4a
+	if m.Parallelism != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.Parallelism))
+		i--
+		dAtA[i] = 0x48
+	}
 	i -= len(m.Kind)
 	copy(dAtA[i:], m.Kind)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Kind)))
@@ -6946,8 +6946,9 @@ func (m *ModelDeploymentRole) Size() (n int) {
 	}
 	l = len(m.Kind)
 	n += 1 + l + sovGenerated(uint64(l))
-	l = len(m.AcceleratorKey)
-	n += 1 + l + sovGenerated(uint64(l))
+	if m.Parallelism != nil {
+		n += 1 + sovGenerated(uint64(*m.Parallelism))
+	}
 	return n
 }
 
@@ -8435,7 +8436,7 @@ func (this *ModelDeploymentRole) String() string {
 		`Env:` + repeatedStringForEnv + `,`,
 		`Template:` + strings.Replace(this.Template.String(), "ModelDeploymentTemplate", "ModelDeploymentTemplate", 1) + `,`,
 		`Kind:` + fmt.Sprintf("%v", this.Kind) + `,`,
-		`AcceleratorKey:` + fmt.Sprintf("%v", this.AcceleratorKey) + `,`,
+		`Parallelism:` + valueToStringGenerated(this.Parallelism) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -23611,10 +23612,10 @@ func (m *ModelDeploymentRole) Unmarshal(dAtA []byte) error {
 			m.Kind = ModelDeploymentRoleKind(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		case 9:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AcceleratorKey", wireType)
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Parallelism", wireType)
 			}
-			var stringLen uint64
+			var v int32
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowGenerated
@@ -23624,24 +23625,12 @@ func (m *ModelDeploymentRole) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
+				v |= int32(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
 			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.AcceleratorKey = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
+			m.Parallelism = &v
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
