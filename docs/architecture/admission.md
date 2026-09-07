@@ -13,6 +13,7 @@
 - [Capability versus availability](#capability-versus-availability)
 - [The InstanceType and Instance webhooks](#the-instancetype-and-instance-webhooks)
 - [The KV cache injection webhook is not a gate](#the-kv-cache-injection-webhook-is-not-a-gate)
+- [Update validation while an object is deleted](#update-validation-while-an-object-is-deleted)
 - [Running-instance stop](#running-instance-stop)
 - [Known behavior: the deployed Kueue Configuration](#known-behavior-the-deployed-kueue-configuration)
 
@@ -237,6 +238,38 @@ A second mutating webhook on Pods writes the client configuration an inference e
 - Both entries live in the single `gpustack-worker-mutation` configuration, whose name sorts before
   Kueue's on purpose. Their order within it is immaterial, which a test asserts by running both over
   one Pod in both orders.
+
+## Update validation while an object is deleted
+
+An UPDATE is neither validated nor defaulted once its object carries a `metadata.deletionTimestamp`,
+unless the handler opts in. `ExecuteSetup` (`pkg/webhook/helper.go`) wraps each one in
+`deletionGuardedDefaulter` / `deletionGuardedValidator`, which return success without calling the
+handler. CREATE and DELETE validation are delegated unchanged in both states.
+
+> **Why** — an update that clears a finalizer is an UPDATE, so a rule reading another object and
+> refusing when it is absent can hold an object past its own teardown.
+
+A handler opts out of the guard by implementing `webhook.ReceiveDeletionUpdate`, and the criterion is
+**per rule rather than per handler**: can this rule reject an update whose only change is
+`metadata.finalizers`? A cross-object read is compatible with opting out while it is gated on the field
+it answers for having moved, which a finalizer edit does not do.
+
+| Handler | Validates an UPDATE while deleting | Because |
+|---|---|---|
+| `KVCachePoolBinding` | yes | its pool read is gated on the quota ceiling having moved |
+| `KVCacheBackend` | yes | it reads the fallback-image setting only when `spec.image` moved |
+| `KVCachePool`, `ModelDeployment`, `InstanceType` | yes | every rule is answered from the old and new objects alone |
+| `PodKVCache` | yes | a terminating Pod still serves, and the kubelet still reprojects its client configuration |
+| `Instance` | **no** | its **defaulting** reads the referenced `InstanceType` and refuses when it is gone |
+| `Pod` (accelerator) | not applicable | registered for CREATE only, and a create carries no deletion timestamp |
+
+`Instance` is the only handler that keeps the guard, and the reason is its mutating half rather than its
+validation: `ValidateUpdate` compares the two objects, but `Default` reads the `InstanceType` and is
+registered `failurePolicy: Fail` on UPDATE. An `InstanceType` deleted ahead of its Instances would
+leave each one undeletable.
+
+The marker is one decision covering both halves, which is why those frozen fields cannot be recovered
+without putting that read back in the path of every release.
 
 ## Running-instance stop
 
