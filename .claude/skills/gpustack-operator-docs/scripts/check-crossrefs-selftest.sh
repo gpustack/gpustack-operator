@@ -6,6 +6,12 @@
 # rule 2 has to exist -- and a later edit that quietly drops rule 2 would leave a checker that
 # reports green on exactly the case it was built for. These cases are what stops that.
 #
+# What these cases establish is that each rule CAN fail. That is not the same as either rule being
+# useful on specs/: rule 2 fires here on a constructed shape and has no true positive on the real
+# corpus, and the instance in the issue that asked for it is written as prose, which no rule here
+# reads. Both facts are in check-crossrefs.sh's header. A green self-test means the teeth exist,
+# not that they bite anything currently in the tree.
+#
 # Usage: bash .claude/skills/gpustack-operator-docs/scripts/check-crossrefs-selftest.sh [repo-root]
 set -euo pipefail
 
@@ -72,6 +78,16 @@ run() {
   set -o errexit
 }
 
+# Rule 2 is opt-in, so a case asserting on its findings has to ask for them. One that forgot would
+# pass for the wrong reason: the finding missing because nobody requested it reads exactly like the
+# finding missing because the rule stopped working.
+run_prompts() {
+  set +o errexit
+  out="$(CROSSREFS_QUANTITY_PROMPTS=1 bash "$CHECK" "$TREE" 2>&1)"
+  rc=$?
+  set -o errexit
+}
+
 echo "=== rule 1 fires on a pointer that leads nowhere ==="
 build
 run
@@ -95,7 +111,21 @@ else
 fi
 
 echo
+echo "=== rule 2 is counted but not listed unless asked ==="
+if printf '%s' "$out" | grep -qE '^  [0-9]+ finding\(s\), not listed'; then
+  pass "the default run states the count and withholds the list"
+else
+  fail "the default run did not state a withheld count -- got: $out"
+fi
+if printf '%s' "$out" | grep -q 'cites (F6) for a claim counting'; then
+  fail "rule 2 listed a finding without CROSSREFS_QUANTITY_PROMPTS -- got: $out"
+else
+  pass "no rule 2 finding is listed by default"
+fi
+
+echo
 echo "=== rule 2 fires on the known shape, and only on it ==="
+run_prompts
 if printf '%s' "$out" | grep -q 'figure.md:3: cites (F6) for a claim counting "five"'; then
   pass "a claim counting \"five\" against a section that never says it is reported"
 else
@@ -110,7 +140,7 @@ fi
 echo
 echo "=== rule 2 goes quiet when the section does state the figure ==="
 subst "$TREE/specs/figure.md" "two of the five replica" "two of the two replica"
-run
+run_prompts
 if printf '%s' "$out" | grep -q 'figure.md:3: cites (F6)'; then
   fail "still reported after the figure was changed to one the section states"
 else
@@ -121,7 +151,7 @@ echo
 echo "=== rule 2 reports, it does not gate ==="
 build
 rm "$TREE/specs/dangling.md"
-run
+run_prompts
 if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'cites (F6) for a claim counting "five"'; then
   pass "exit 0 with a prompt outstanding, and the summary says what green does not establish"
 else
@@ -227,7 +257,7 @@ Someone has to classify the media, and twofold growth is expected.
 
 #### F7 - something else
 EOF
-run
+run_prompts
 if printf '%s' "$out" | grep -q 'word.md:3: cites (F6) for a claim counting "one"'; then
   pass "\"someone\" does not satisfy a claim counting \"one\""
 else
@@ -249,7 +279,7 @@ Two independent problems.
 
 #### F7 - something else
 EOF
-run
+run_prompts
 if printf '%s' "$out" | grep -q 'bare.md:3: cites (F6) for a claim counting "five"'; then
   pass "a bare \"#### F6\" heading registers as the definition"
 else
@@ -271,11 +301,106 @@ Content.
 
 Content.
 EOF
-run
+run_prompts
 if printf '%s' "$out" | grep -q 'dupe.md.*(F6) is introduced by more than one heading'; then
   pass "the duplicate heading is reported"
 else
   fail "the duplicate was silently overwritten -- got: $out"
+fi
+
+echo
+echo "=== rule 1: a bare pointer after a connective is a pointer ==="
+build
+rm "$TREE/specs/dangling.md"
+printf '# Spec: Bare Pointer\n\nThe allocatable path is covered per Z9, which settles it.\n' \
+  > "$TREE/specs/barecite.md"
+run
+if printf '%s' "$out" | grep -q 'barecite.md:3: the bare pointer to Z9 appears on no other line'; then
+  pass "\"per Z9\" with no target is reported"
+else
+  fail "a bare pointer was not read as a pointer -- got: $out"
+fi
+
+echo
+echo "=== rule 1: a bare pointer that lands is quiet ==="
+build
+rm "$TREE/specs/dangling.md"
+cat > "$TREE/specs/barelands.md" <<'EOF'
+# Spec: Bare Lands
+
+The allocatable path is covered per Z9, which settles it.
+
+#### Z9 - the section it names
+
+Content.
+EOF
+run
+if printf '%s' "$out" | grep -q 'barelands.md.*Z9'; then
+  fail "a bare pointer with a heading target was reported -- got: $out"
+else
+  pass "\"per Z9\" is quiet when Z9 has a heading"
+fi
+
+echo
+echo "=== rule 1: \"in\" and \"by\" are NOT gated, by design ==="
+# Both precede labels that are not citations -- "in A100 mode", "by T13" naming a column -- so
+# they stay out of a gate. If a later change admits them, this case is the record of the choice.
+build
+rm "$TREE/specs/dangling.md"
+printf '# Spec: Loose\n\nThe key is set in Z9 and consumed by Y8.\n' > "$TREE/specs/loose.md"
+run
+if printf '%s' "$out" | grep -qE 'loose.md.*(Z9|Y8)'; then
+  fail "\"in Z9\" or \"by Y8\" was gated -- got: $out"
+else
+  pass "\"in\" and \"by\" do not make a pointer"
+fi
+
+echo
+echo "=== rule 1: \"Task 16\" is where \"T16\" is defined ==="
+# This corpus writes a task's definition in full and cites it by initial, so reading only the
+# short form reports a correct sentence as dangling.
+build
+rm "$TREE/specs/dangling.md"
+cat > "$TREE/specs/tasknum.md" <<'EOF'
+# Spec: Task Number
+
+- [x] **Task 16:** Preserve the admin-authored label so it reaches Node.Labels.
+
+The e2e asserts the label survives reconcile per T16.
+EOF
+run
+if printf '%s' "$out" | grep -q 'tasknum.md.*T16'; then
+  fail "\"per T16\" was reported although \"Task 16\" defines it -- got: $out"
+else
+  pass "\"Task 16\" registers as the target of \"T16\""
+fi
+
+echo
+echo "=== rule 1: a connective inside parens stays the paren rule's to judge ==="
+build
+rm "$TREE/specs/dangling.md"
+printf '# Spec: Parens\n\nThe budget is capped (measured in Z9) and holds.\n' > "$TREE/specs/inparen.md"
+run
+if printf '%s' "$out" | grep -q 'inparen.md.*the bare pointer to Z9'; then
+  fail "a parenthesised label was judged by the bare rule -- got: $out"
+else
+  pass "\"(measured in Z9)\" is not read by the bare rule"
+fi
+
+echo
+echo "=== rule 1: the known cost -- a model name after a connective, mentioned once ==="
+# "from A100" is lexically a bare pointer, and A100 is not a label. The four connectives were
+# chosen partly because this combination does not occur in specs/; this case records that the
+# checker WOULD report it, so the cost is written down rather than met later as a surprise.
+build
+rm "$TREE/specs/dangling.md"
+printf '# Spec: Model After Connective\n\nThe figure is taken from A100 datasheets.\n' \
+  > "$TREE/specs/modelconn.md"
+run
+if printf '%s' "$out" | grep -q 'modelconn.md.*the bare pointer to A100'; then
+  pass "reported -- the documented limit of keying on a connective alone"
+else
+  fail "expected the known false positive; if it is now handled, update this case -- got: $out"
 fi
 
 echo
@@ -297,4 +422,5 @@ if [ "$fails" -gt 0 ]; then
   echo "SELFTEST FAILED: $fails case(s)."
   exit 1
 fi
-echo "SELFTEST PASSED: rule 1 gates, rule 2 catches what rule 1 cannot, and neither claims the other's ground."
+echo "SELFTEST PASSED: rule 1 gates in both spellings, rule 2 can still fail on the shape it was"
+echo "                 built for, and neither claims the other's ground."
