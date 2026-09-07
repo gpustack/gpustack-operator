@@ -275,13 +275,9 @@ workload that was never removed.
 **A pool is held while a Binding still references it**, and a backend while a pool still claims it.
 Each layer names what to remove in its own condition message.
 
-**Multi-tenancy cannot be turned off on a backend a pool claims.** The webhook refuses the edit while
-the backend's `status.usedBy` names a consumer, and the refusal names them. A master running without
-multi-tenancy holds no tenant ledger, so a quota registered on it has nothing left to be released
-from: the flag guards the consumers' *deletion* as much as their isolation. Remove the pools first.
-
-> The refusal reads `status.usedBy` as it is written, not as it resolves. An entry naming a pool that
-> no longer exists refuses the edit too, and that list is where it is cleared.
+**A claimed backend cannot have its multi-tenancy withdrawn**, which is refused on the backend itself
+— see [KV Cache Backend](backend.md#operating-notes) for the rule and the remedy. What it protects on
+this side is a pool's own exit: releasing a pool means releasing every quota it registered.
 
 **Read the grant, not the ceiling, when diagnosing.** `kubectl get kvcpb` prints both:
 

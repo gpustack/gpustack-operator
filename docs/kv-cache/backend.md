@@ -637,6 +637,16 @@ exactly the near-miss that gets one of them typed into a template.
 the object stays at `phase: Deleting` with the claimant named in its message, and the workloads keep
 running. Clearing the last claim lets the teardown complete.
 
+**A backend in use also cannot have `leader.multiTenancy` turned off.** The webhook refuses the edit
+while `status.usedBy` names a consumer, and the refusal names them. Remove the consumers first — see
+[KV Cache Pool](pool.md#operating-notes) for what the withdrawal costs on their side.
+
+> **Why** — the flag decides whether the master keeps a per-tenant ledger, and a consumer's quota is
+> both written and released through that ledger. Withdrawing it under a live consumer therefore takes
+> away the way that consumer is unwound, and the cost only appears when something is deleted. The
+> refusal reads `status.usedBy` as it is written, not as it resolves: an entry naming an object that
+> no longer exists refuses the edit too, and that list is where it is cleared.
+
 **The teardown deletes the workloads first, and the object disappears last.** The leader Deployment,
 its Service and every member DaemonSet go before the finalizer comes off — and it waits for them to
 be **gone**, not merely for the deletes to be accepted, so the object going away means the backend is
