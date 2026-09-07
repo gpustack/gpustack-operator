@@ -192,25 +192,31 @@ spec:
   quotaCeiling: 256Mi
 YAML
 )"
-# WHY `created` ONLY HERE, WHERE case-45 ACCEPTS `configured` AND `unchanged` TOO. The difference is
-# the namespace, not an oversight. case-45 applies into a caller-supplied $NS that outlives the run,
-# so an object can survive a delete that timed out and a re-apply legitimately reports the one it
-# found. Everything here lives in TEST_NS="kvc-i-${SFX}", created and destroyed per run with a random
-# suffix, and the cluster-scoped objects carry that suffix in their names -- so an object under one of
-# these names can only be one this run made. `created` is therefore the exact assertion, and widening
-# it would accept a collision that should never happen.
-# THE CHECK COUNTS, IT DOES NOT MATCH A SUBSTRING, and over a multi-document manifest that is the
-# difference between a guard and a decoration. `kubectl apply` reports the three objects in ONE
-# stream, so a run where the backend was created and the pool was REFUSED still contains the word
-# "created" -- and every row below would then read a missing condition on an object nobody made,
-# which is the exact substitution the comment above says this guard prevents. Three objects, three
-# `created` lines, or nothing here has a subject.
-#   A count also carries the empty case for free: no output at all counts zero.
-dead_created="$(printf '%s\n' "$dead_out" | grep -c ' created$' || true)"
-if [ "${dead_created:-0}" -ne 3 ]; then
+# THREE DOCUMENTS, AND ALL THREE ARE READ BACK. `kubectl apply` reports them in ONE stream, so a run
+# where the backend was created and the pool was REFUSED still contains the word "created" -- and
+# every row below would then read a missing condition on an object nobody made, which is the exact
+# substitution this guard exists to prevent. Two of the three are CLUSTER-SCOPED, so each is asked
+# for where it actually lives.
+#
+# THE GATE IS THE OBJECTS' EXISTENCE, NOT THE WORDS THE APPLY PRINTED. Counting ` created` lines
+# makes the gate depend on how they came to be there rather than on whether they are there, and two
+# ordinary situations then fire it with all three present and correct: a re-run over a surviving
+# TEST_NS, and the retrying kubectl shim resending an apply whose response was lost -- both report
+# `configured`/`unchanged`. Widening the accepted words would keep the gate reading the apply's
+# narration, and would also accept a refusal whose text happens to contain one of them.
+#
+# The output is still captured, because a refusal's text is the only diagnosis of why one is missing.
+dead_missing=""
+kubectl get kvcachebackends.worker.gpustack.ai "$DEAD_BACKEND" -o name >/dev/null 2>&1 \
+  || dead_missing="${dead_missing} kvcachebackend/${DEAD_BACKEND}"
+kubectl get kvcachepools.worker.gpustack.ai "$DEAD_POOL" -o name >/dev/null 2>&1 \
+  || dead_missing="${dead_missing} kvcachepool/${DEAD_POOL}"
+kubectl -n "$TEST_NS" get kvcachepoolbindings.worker.gpustack.ai "$DEAD_BINDING" -o name >/dev/null 2>&1 \
+  || dead_missing="${dead_missing} ${TEST_NS}/kvcachepoolbinding/${DEAD_BINDING}"
+if [ -n "$dead_missing" ]; then
   record SKIP "the unreachable pool is admitted" \
-    "${dead_created:-0} of 3 objects were created, so nothing below has a broken subject to \
-observe: $(echo "${dead_out:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
+    "absent after the apply:${dead_missing} — so nothing below has a broken subject to observe. \
+The apply said: $(printf '%s' "${dead_out:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
   kvi_results "$CASE_ID"
   exit $?
 fi
@@ -272,15 +278,25 @@ spec:
 YAML
 }
 
-# Read one at a time. A combined capture would find "created" from whichever one succeeded and let
-# the other's refusal through as a missing condition on an object nobody made.
+# THE GATE IS THE DEPLOYMENTS' EXISTENCE, for the same reason as the unreachable pool's above:
+# requiring the word "created" in each apply's output makes the gate depend on how the objects came
+# to be there, and a re-run over a surviving TEST_NS or a shim retry both report
+# `configured`/`unchanged` for deployments that are present and correct.
+#
+# The two applies are still captured SEPARATELY rather than together, because the diagnosis is what
+# each capture is for: one stream would attribute a refusal to whichever name the reader guessed.
 u_out="$(deploy case48-unreachable "$DEAD_BINDING")"
 r_out="$(deploy case48-registered "$BINDING")"
-if [ -z "$u_out" ] || [ -n "${u_out##*created*}" ] || [ -z "$r_out" ] || [ -n "${r_out##*created*}" ]; then
+md_missing=""
+for md in case48-unreachable case48-registered; do
+  kubectl -n "$TEST_NS" get modeldeployments.worker.gpustack.ai "$md" -o name >/dev/null 2>&1 \
+    || md_missing="${md_missing} ${TEST_NS}/modeldeployment/${md}"
+done
+if [ -n "$md_missing" ]; then
   record SKIP "both deployments are admitted" \
-    "a ModelDeployment was not created, so every row below would report an absence produced by the \
-manifest rather than by the operator — case48-unreachable: ${u_out:-<no output>} / case48-registered: \
-${r_out:-<no output>}"
+    "absent after the apply:${md_missing} — so every row below would report an absence produced by \
+the manifest rather than by the operator. case48-unreachable said: ${u_out:-<no output>} / \
+case48-registered said: ${r_out:-<no output>}"
   kvi_results "$CASE_ID"
   exit $?
 fi
