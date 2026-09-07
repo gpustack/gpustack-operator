@@ -198,6 +198,10 @@ function gpustack::protoc::protoc_gen_validate::install() {
 }
 
 function gpustack::protoc::protoc_gen_validate::validate() {
+  # LIMITED: existence is the whole check here. The only function that validates and runs this
+  # plugin is gpustack::protoc::generate below, and nothing calls that function; the repository
+  # carries no *.pb.validate.go either, so a stale binary cannot reach a committed artifact.
+  # hack/check-toolpins-selftest.sh holds the row that pins this.
   # shellcheck disable=SC2046
   if [[ -n "$(command -v $(gpustack::protoc::protoc_gen_validate::bin))" ]]; then
     return 0

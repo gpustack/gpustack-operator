@@ -47,6 +47,9 @@ function gpustack::helm::helm::install() {
 }
 
 function gpustack::helm::helm::validate() {
+  # LIMITED: existence is the whole check here, deliberately. Unlike helm-docs and helm-schema
+  # below, the Helm CLI writes no committed artifact, so a stale one cannot move a generated
+  # baseline. hack/check-toolpins-selftest.sh holds the row that pins this.
   # shellcheck disable=SC2046
   if [[ -n "$(command -v $(gpustack::helm::helm::bin))" ]]; then
     return 0
@@ -77,9 +80,19 @@ function gpustack::helm::docs::install() {
 }
 
 function gpustack::helm::docs::validate() {
+  # helm-docs has no version flag that reports its module version, so the pin is compared against
+  # what `go install` stamped into the binary. Existence alone accepts a .sbin populated before a
+  # pin bump, and generate_chart would then write deploy/gpustack-operator/chart/README.md with the
+  # generator the bump replaced -- that README is committed, so the drift shows up as someone
+  # else's diff.
   # shellcheck disable=SC2046
   if [[ -n "$(command -v $(gpustack::helm::docs::bin))" ]]; then
-    return 0
+    # shellcheck disable=SC2046
+    if gpustack::util::go_module_version_is \
+      "$(gpustack::util::go_module_version $(gpustack::helm::docs::bin))" \
+      "${helm_docs_version}"; then
+      return 0
+    fi
   fi
 
   gpustack::log::info "installing helm-docs ${helm_docs_version}"
@@ -107,9 +120,16 @@ function gpustack::helm::schema::install() {
 }
 
 function gpustack::helm::schema::validate() {
+  # Same as helm-docs above, and the artifact is deploy/gpustack-operator/chart/values.schema.json.
+  # The pin is a Go pseudo-version, which is the form `go install` stamps verbatim.
   # shellcheck disable=SC2046
   if [[ -n "$(command -v $(gpustack::helm::schema::bin))" ]]; then
-    return 0
+    # shellcheck disable=SC2046
+    if gpustack::util::go_module_version_is \
+      "$(gpustack::util::go_module_version $(gpustack::helm::schema::bin))" \
+      "${helm_schema_version}"; then
+      return 0
+    fi
   fi
 
   gpustack::log::info "installing helm-schema ${helm_schema_version}"
