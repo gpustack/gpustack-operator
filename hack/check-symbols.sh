@@ -82,6 +82,12 @@ if ! git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 0
 fi
 
+# -I skips binary files, which is a correction to this check's scope rather than an exemption: a
+# binary has no comments, so it has nothing this gate is about. It also has no lines -- git reports
+# a match in one as `Binary file <path> matches`, with no line number, and counting output lines
+# then reads that as a finding it cannot locate. The two committed .so files under pack/ did
+# exactly that. Deliberately not a path exemption: the next binary would land somewhere else.
+#
 # --untracked so a file that exists but has not been staged is covered. Without it the scan reads
 # the index, and a new file escapes until the commit that adds it -- while the self-test, which
 # stages before every run, would keep reporting the check as working. Ignored files stay out.
@@ -90,7 +96,7 @@ fi
 # separated explicitly: `|| true` would fold a real failure into the same silent pass.
 found=""
 rc=0
-found="$(git -C "$ROOT" grep --untracked -nP "$CLASS" -- "${EXCLUDES[@]}")" || rc=$?
+found="$(git -C "$ROOT" grep -I --untracked -nP "$CLASS" -- "${EXCLUDES[@]}")" || rc=$?
 
 if [ "$rc" -gt 1 ]; then
   echo "FAIL: git grep exited $rc, so this check did not run. It needs a git built with PCRE (-P)."

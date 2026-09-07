@@ -133,6 +133,39 @@ else
 fi
 
 echo
+echo "=== a binary file, which has no comments to carry a symbol ==="
+# The leading NUL is what makes git classify the file as binary, the same classification the two
+# committed .so files under pack/ get. The bytes after it are a real no-entry sign, and the third
+# case is why that matters: without it, "the binary was not reported" would pass just as well if
+# the pattern matched nothing at all.
+build
+printf '\000// \342\233\224 matching bytes inside a binary\n' > "$TREE/pkg/thing/blob.bin"
+git -C "$TREE" add -A
+binout=""
+binrc=0
+binout="$(bash "$CHECK" "$TREE" 2>&1)" || binrc=$?
+if [ "$binrc" -eq 0 ]; then
+  pass "a binary carrying matching bytes is not reported"
+else
+  fail "a binary carrying matching bytes is not reported (exit $binrc)"
+fi
+# Asserted by the shape of the output, not only by the exit code. The defect this replaces printed
+# `Binary file <path> matches` -- a line with no line number, counted as a finding that nobody can
+# go and look at. The count and a real finding are indistinguishable; the wording is not.
+if printf '%s' "$binout" | grep -q 'Binary file'; then
+  fail "the output never says 'Binary file ... matches'"
+else
+  pass "the output never says 'Binary file ... matches'"
+fi
+printf '// \342\233\224 the same bytes, as text\n' > "$TREE/pkg/thing/blob_text.go"
+git -C "$TREE" add -A
+if bash "$CHECK" "$TREE" >/dev/null 2>&1; then
+  fail "the same bytes in a text file are still reported (so the case above has teeth)"
+else
+  pass "the same bytes in a text file are still reported"
+fi
+
+echo
 if [ "$fails" -gt 0 ]; then
   echo "SELFTEST FAILED: $fails case(s)."
   exit 1
