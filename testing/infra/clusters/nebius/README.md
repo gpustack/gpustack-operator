@@ -100,23 +100,44 @@ group and a preemptible L40S one.
 
 ## Public addresses
 
-A public IPv4 is a **quota'd** resource: it is charged against the project's
-`vpc.ipv4-address.public.count` quota, the allowance is small (single digits by
-default), and it counts **allocations, not running instances** — a *stopped* VM
-still holds its address and still consumes the quota. Exhaust it and node-group
-creation fails at apply time with
+A public IPv4 is a **quota'd** resource: it is charged against
+`vpc.ipv4-address.public.count`, and it counts **allocations, not running
+instances** — a *stopped* VM still holds its address and still consumes the
+quota. Exhaust it and node-group creation fails at apply time with
 
 ```
 code = ResourceExhausted desc = Quota limit exceeded ... quota vpc.ipv4-address.public.count
 ```
 
-leaving the group `tainted` in state. Raise the quota (Administration → Limits →
-Quotas), release an address, or ask for fewer.
+leaving the group `tainted` in state, which a re-run does not clear on its own.
+Raise the quota (Administration → Limits → Quotas), release an address, or ask
+for fewer.
+
+Read the allowance before an apply that asks for addresses:
+
+```bash
+# .metadata.parent_id is the tenant the quota lives on
+nebius iam project get --id "$NEBIUS_PROJECT_ID" --format json
+nebius quotas quota-allowance list --parent-id <tenant-id> --format json
+```
+
+Two properties of that query decide whether it answers the question at all:
+
+- **Ask the tenant, not the project.** A project-scoped list carries
+  `status.usage` and **no `limit` field on any record**, so it reports how many
+  addresses are in use while saying nothing about how many are allowed. The
+  `spec.limit` is on the tenant's record.
+- **The quota is per region** — one record per region under the same name. Read
+  the one whose `spec.region` is the project's region, not the first match.
+
+The stock allowance is single digits, but a region can be raised, and the two can
+differ by a large factor. Plan against the number the query returns, never
+against the stock one.
 
 The **flag** is per group; the **address, and so the quota unit, is per node**. A group of N nodes with
 `public_ip = true` takes N addresses, so a CPU group that raises `cpu_node_count` and asks for an address
-takes one per node — against an allowance that is single digits by default. Plan the quota per node, not
-per group, because that is what the provider charges. Only the groups that need an address take one:
+takes one per node. Plan the quota per node, not per group, because that is what the provider charges.
+Only the groups that need an address take one:
 
 - **GPU groups: `public_ip = true` (default).** A GPU node is driven from outside
   the cluster over SSH — the hardware-partition tests toggle MIG on the card that

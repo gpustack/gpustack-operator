@@ -20,7 +20,7 @@ go.work.*
 *.tfstate.*
 *.tfvars
 *.tfvars.*
-tfplan
+*.tfplan
 
 # Dirs
 /.idea
