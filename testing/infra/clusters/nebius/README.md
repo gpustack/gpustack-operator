@@ -118,10 +118,13 @@ Read the allowance before an apply that asks for addresses:
 ```bash
 # .metadata.parent_id is the tenant the quota lives on
 nebius iam project get --id "$NEBIUS_PROJECT_ID" --format json
-nebius quotas quota-allowance list --parent-id <tenant-id> --format json
+nebius quotas quota-allowance list --parent-id <tenant-id> --format json \
+  | jq -r '.items[]
+           | select(.metadata.name == "vpc.ipv4-address.public.count")
+           | "\(.spec.region) \(.spec.limit)"'
 ```
 
-Two properties of that query decide whether it answers the question at all:
+Three properties of that query decide whether it answers the question at all:
 
 - **Ask the tenant, not the project.** A project-scoped list carries
   `status.usage` and **no `limit` field on any record**, so it reports how many
@@ -129,10 +132,17 @@ Two properties of that query decide whether it answers the question at all:
   `spec.limit` is on the tenant's record.
 - **The quota is per region** — one record per region under the same name. Read
   the one whose `spec.region` is the project's region, not the first match.
+- **The name is on `.metadata.name`, not `.spec.name`.** A filter written against
+  `spec.name` matches no record and returns an empty list, which reads exactly
+  like a tenant that has no such quota at all.
 
-The stock allowance is single digits, but a region can be raised, and the two can
-differ by a large factor. Plan against the number the query returns, never
-against the stock one.
+There is no single stock number to plan against. Running the filter above on one
+tenant returned **3 in six of its nine regions and 12 in the other three** — a
+factor of four between two regions of the same account — and the record does not
+say which of those figures is untouched and which was already raised, so neither
+can be quoted as the stock one. Plan against the number the query returns for
+your project's region, and treat any number you merely remember, including the
+two in this paragraph, as an illustration of the spread rather than a value.
 
 The **flag** is per group; the **address, and so the quota unit, is per node**. A group of N nodes with
 `public_ip = true` takes N addresses, so a CPU group that raises `cpu_node_count` and asks for an address
@@ -151,9 +161,15 @@ Only the groups that need an address take one:
 Set `public_ip = false` on a GPU group nobody has to log in to (a scale-out node,
 a second flavour that only has to schedule) to bring the requirement down
 further. Do it **before** the group exists: the provider's `public_ip_address` is
-optional-and-computed, so flipping the flag on an already-created group plans no
-change at all and the node keeps its address — the group has to be replaced
-(`terraform taint`, or remove and re-add it) for the release to happen.
+optional-and-computed, so turning the flag **off** on an already-created group
+plans no change at all and the node keeps its address — the group has to be
+replaced (`terraform taint`, or remove and re-add it) for the release to happen.
+
+**Only that direction has been exercised.** Turning the flag **on** for a group
+created without an address is the opposite case — a value supplied, not a value
+withdrawn — and optional-and-computed says nothing about it, so do not read the
+sentence above as covering it. Run a plan and look at what it proposes before
+assuming that direction is either a no-op or a replacement.
 
 **Dropping the address does not cost the node its internet.** The network's
 default route table carries a `0.0.0.0/0` route whose next hop is Nebius' default
@@ -162,6 +178,13 @@ traffic behind a dynamic address from a pool shared across the region. A
 private-only node still joins the cluster, pulls images and installs packages.
 What it loses is *inbound* reachability — SSH — which is why the flag tracks who
 needs to log in and nothing else.
+
+That last paragraph is **documentation-level**, not a guarantee this module
+makes: the default route and its egress gateway arrive with the network Nebius
+hands out, and nothing here creates them, asserts them, or checks that they are
+still there. No `validate`, `plan` or `apply` in this directory fails if they are
+absent — a private-only node would simply have no egress, and the first symptom
+would be an image pull timing out.
 
 ## Prerequisites
 
