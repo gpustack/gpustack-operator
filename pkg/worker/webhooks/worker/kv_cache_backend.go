@@ -817,15 +817,21 @@ func validateKVCacheBackendMultiTenancyWithdrawal(
 		return nil
 	}
 
-	names := make([]string, 0, len(oldKvcb.Status.UsedBy))
-	for _, ref := range oldKvcb.Status.UsedBy {
+	// Narrowed BEFORE anything is built, so the cap bounds the work and not only the sentence: a
+	// list this admission path renders in full and then discards is one whose cost still scales with
+	// usedBy, which has no item bound. The remainder is counted off the original slice for the same
+	// reason. Same shape as the reconciler's own listBoundedNames.
+	sample := oldKvcb.Status.UsedBy
+	if len(sample) > kvCacheBackendMaxConsumerNames {
+		sample = sample[:kvCacheBackendMaxConsumerNames]
+	}
+	names := make([]string, 0, len(sample))
+	for _, ref := range sample {
 		names = append(names, ref.Kind+"/"+ref.Name)
 	}
 	consumers := strings.Join(names, ", ")
-	if len(names) > kvCacheBackendMaxConsumerNames {
-		consumers = fmt.Sprintf("%s and %d more",
-			strings.Join(names[:kvCacheBackendMaxConsumerNames], ", "),
-			len(names)-kvCacheBackendMaxConsumerNames)
+	if extra := len(oldKvcb.Status.UsedBy) - len(sample); extra > 0 {
+		consumers = fmt.Sprintf("%s and %d more", consumers, extra)
 	}
 
 	return field.ErrorList{field.Forbidden(

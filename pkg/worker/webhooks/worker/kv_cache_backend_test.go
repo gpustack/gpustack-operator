@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -698,26 +699,52 @@ func TestKVCacheBackendWebhook_MultiTenancyCannotBeWithdrawnFromAClaimedBackend(
 		// on is what the old object carries, and off what the new one asks for. Spelling both out is
 		// what lets the table hold the opposite direction next to the refused one.
 		was, now bool
-		claimed  bool
+		// claims is what status.usedBy names on BOTH objects. One entry is the ordinary case; the
+		// oversized one is what reaches the sampling branch.
+		claims []workercore.KVCacheObjectReference
+		// external replaces both specs with the branch that carries no leader at all, which is the
+		// only way to put a nil Managed in front of this rule.
+		external bool
 		mutate   func(*workercore.KVCacheBackend)
 
-		wantMsg string
+		wantMsg    string
+		wantNotMsg string
 	}{
 		{
-			name: "withdrawn from a backend a pool holds", was: true, claimed: true,
+			name: "withdrawn from a backend a pool holds", was: true,
+			claims:  []workercore.KVCacheObjectReference{claim},
 			wantMsg: "multi-tenancy cannot be turned off while KVCachePool/team-a-pool",
 		},
 		{
 			name: "withdrawn from a backend nothing holds", was: true,
 		},
 		{
-			name: "turned back on while a pool holds it", now: true, claimed: true,
+			name: "turned back on while a pool holds it", now: true,
+			claims: []workercore.KVCacheObjectReference{claim},
 		},
 		{
-			name: "left on while a pool holds it", was: true, now: true, claimed: true,
+			name: "left on while a pool holds it", was: true, now: true,
+			claims: []workercore.KVCacheObjectReference{claim},
 		},
 		{
-			name: "an unrelated edit to a claimed backend that never had it", claimed: true,
+			name:   "an unrelated edit to a claimed backend that never had it",
+			claims: []workercore.KVCacheObjectReference{claim},
+			mutate: func(k *workercore.KVCacheBackend) { k.Spec.Image = "example.com/mooncake:v1" },
+		},
+		// The refusal names its claimants, and usedBy has no item bound, so past the cap the message
+		// samples. Asserted from both ends: the last name that fits is there and the first one past
+		// it is not, which a message that simply stopped counting would fail.
+		{
+			name: "the refusal samples the claimants past the cap", was: true,
+			claims:     manyKVCachePoolClaims(kvCacheBackendMaxConsumerNames + 5),
+			wantMsg:    "KVCachePool/pool-20 and 5 more",
+			wantNotMsg: "KVCachePool/pool-21",
+		},
+		// The nil-Managed guard. An external backend has no leader block to carry the flag, so this
+		// rule has nothing to read — and without the guard it would not decline, it would panic.
+		{
+			name: "an external backend a pool holds is still updatable", external: true,
+			claims: []workercore.KVCacheObjectReference{claim},
 			mutate: func(k *workercore.KVCacheBackend) { k.Spec.Image = "example.com/mooncake:v1" },
 		},
 	}
@@ -726,15 +753,17 @@ func TestKVCacheBackendWebhook_MultiTenancyCannotBeWithdrawnFromAClaimedBackend(
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-			oldKvcb.Spec.Connection.Managed.Leader.MultiTenancy = tc.was
-			newKvcb.Spec.Connection.Managed.Leader.MultiTenancy = tc.now
-			if tc.claimed {
-				// On BOTH, because status is a subresource: an update to the spec carries whatever
-				// status the API server already holds, so a fixture that put the claim on only one of
-				// them would be describing a request no client can send.
-				oldKvcb.Status.UsedBy = []workercore.KVCacheObjectReference{claim}
-				newKvcb.Status.UsedBy = []workercore.KVCacheObjectReference{claim}
+			if tc.external {
+				oldKvcb.Spec, newKvcb.Spec = newExternalKVCacheBackendSpec(), newExternalKVCacheBackendSpec()
+			} else {
+				oldKvcb.Spec.Connection.Managed.Leader.MultiTenancy = tc.was
+				newKvcb.Spec.Connection.Managed.Leader.MultiTenancy = tc.now
 			}
+			// On BOTH, because status is a subresource: an update to the spec carries whatever status
+			// the API server already holds, so a fixture that put the claim on only one of them would
+			// be describing a request no client can send.
+			oldKvcb.Status.UsedBy = tc.claims
+			newKvcb.Status.UsedBy = tc.claims
 			if tc.mutate != nil {
 				tc.mutate(newKvcb)
 			}
@@ -747,8 +776,24 @@ func TestKVCacheBackendWebhook_MultiTenancyCannotBeWithdrawnFromAClaimedBackend(
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.wantMsg,
 				"an operator whose edit is refused needs to know what to go and remove")
+			if tc.wantNotMsg != "" {
+				require.NotContains(t, err.Error(), tc.wantNotMsg,
+					"past the cap the message samples rather than naming every claimant")
+			}
 		})
 	}
+}
+
+// manyKVCachePoolClaims builds n pool claims named pool-1 … pool-n, in the order status.usedBy holds
+// them, so a case can assert which of them the refusal names.
+func manyKVCachePoolClaims(n int) []workercore.KVCacheObjectReference {
+	refs := make([]workercore.KVCacheObjectReference, 0, n)
+	for i := 1; i <= n; i++ {
+		refs = append(refs, workercore.KVCacheObjectReference{
+			Kind: "KVCachePool", Name: fmt.Sprintf("pool-%d", i),
+		})
+	}
+	return refs
 }
 
 // TestKVCacheBackendWebhook_DiskTierIsFrozenExceptItsCapacity pins the three edits a group that
