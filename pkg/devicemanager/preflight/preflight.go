@@ -80,6 +80,10 @@ type Preflighter struct {
 	// hostRoot is where the host's root filesystem is bind-mounted, handed to each manufacturer's
 	// preflighter so that the host paths it reads resolve to the host's copy rather than ours.
 	hostRoot string
+	// hostRootErr is what the validation of hostRoot said, nil when it is a mounted host root. It is
+	// kept rather than acted on and discarded, because two different things depend on it: whether
+	// this pass may lock the node, and whether the paths handed to each manufacturer are the host's.
+	hostRootErr error
 	// runtime is the container runtime resolved on the host, nil when none was. It is resolved
 	// once per run rather than per manufacturer: the probe is a pair of host executions, and the
 	// answer is the same for every manufacturer on one host.
@@ -141,12 +145,22 @@ func (p *Preflighter) PreflightAccelerator(ctx context.Context) device.Preflight
 	// directory created eighteen entries under it, because staging makes the tree it is pointed at.
 	// Downgraded to a dry run instead: what a pass with no host root can still answer, it answers,
 	// and what it cannot hold the node for, it does not do.
+	//
+	// The validation itself runs on every pass, an explicit dry run included, and before anything
+	// reads a host path. It is four stats and no writes, and what it establishes is not only whether
+	// this pass may lock the node: it decides what every row that reads through the host root is
+	// entitled to claim. A dry run that skipped it would leave those rows answering out of this
+	// container's own filesystem -- see hostRootForManufacturers.
+	p.hostRootErr = p.host.Validate()
+	if p.hostRootErr != nil {
+		logger.Info("no usable host root, so every row that reads one reports that it never looked, "+
+			"and this pass is downgraded to a dry run: the node cannot be locked, and a mode toggle "+
+			"is a write that needs it",
+			"error", p.hostRootErr.Error())
+	}
 	if !p.dryRun {
-		if err := p.host.Validate(); err != nil {
+		if p.hostRootErr != nil {
 			p.dryRun = true
-			logger.Info("no host root, so this pass is downgraded to a dry run: "+
-				"the node cannot be locked, and a mode toggle is a write that needs it",
-				"error", err.Error())
 		} else {
 			release, err := lockHost(p.host.root)
 			if err != nil {
@@ -342,6 +356,23 @@ func anyLogicallySliceable(groups device.DevicesGroupList) bool {
 //
 // One row per accelerator rather than one for the manufacturer, because that is what Checks is --
 // and a reader filtering the report by accelerator would not find a manufacturer-wide row at all.
+// hostRootForManufacturers is the host root each manufacturer's preflighter is given: the configured
+// path when it validated as a host root, and empty when it did not.
+//
+// Empty is the contract PreflighterOptions.HostRoot states for "no usable host root", and handing the
+// configured path through regardless is what let a row answer out of this container's own
+// filesystem. This runner does not stop on a root that fails validation -- it downgrades the pass to
+// a dry run and carries on -- so a path that merely exists reaches every check that joins onto it,
+// and hostRootMarkers exists precisely because any single one of those directories can be there by
+// accident. A file missing under such a root is a file nobody looked for, not a host that carries
+// none, and only the check itself can say which of those its absent branch means.
+func hostRootForManufacturers(root string, validationErr error) string {
+	if validationErr != nil {
+		return ""
+	}
+	return root
+}
+
 func panickedChecks(groups device.DevicesGroupList, r any) []device.PreflightCheck {
 	reason := "this manufacturer's preflight panicked and was contained, so none of this " +
 		"accelerator's preconditions were established: " + fmt.Sprint(r)
@@ -399,7 +430,7 @@ func (p *Preflighter) preflight(
 	pf := creator(device.PreflighterOptions{
 		Logger:   logger.V(3),
 		DryRun:   p.dryRun,
-		HostRoot: p.hostRoot,
+		HostRoot: hostRootForManufacturers(p.hostRoot, p.hostRootErr),
 	})
 	read := pf.PreflightAccelerator(groups)
 	grp.Checks = read.Checks

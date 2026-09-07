@@ -457,21 +457,26 @@ and a report filtered by either still carries it.
 | Row | Reads | `ok` means | `unavailable` means |
 |---|---|---|---|
 | `ascend-docker-runtime` | the version the vendor runtime's installer recorded under `/usr/local/Ascend` | MindCluster 26.0.0 or newer, the release where A5 support landed | an older release, or a version that could not be read: an allocation on this accelerator fails at container creation |
-| `hccl-ranktable` | `/etc/hccl_rootinfo.json`, through the mounted host root | the host carries no such file, **or** carries one at version `2.0` | any other version, a file that could not be parsed, or a host root this command could not look in: multi-card jobs on this accelerator fail to initialise HCCL |
+| `hccl-ranktable` | `/etc/hccl_rootinfo.json`, through the mounted host root | the host carries no such file, **or** carries one at version `2.0` | any other version, a file that could not be parsed or is a symbolic link, or a host root this command could not look in: multi-card jobs on this accelerator fail to initialise HCCL |
 
 **Why each of those fails, and how to correct it, is in [Vendor
 Prerequisites](../vendor-prerequisites.md#ascend)** — the mechanism is stated there once, and the
 `reason` on the row itself carries it verbatim, so a report is readable without this page.
 
-Two things about these rows are worth reading off the table rather than inferring:
+Three things about these rows are worth reading off the table rather than inferring:
 
 - **An absent ranktable is `ok`, not a prerequisite nobody installed.** It is the healthy state,
   which is why that row treats an unreadable file the opposite way to the one above it.
 - **A host root this command could not look in is `unavailable`, not `ok`.** A missing
   `/etc/hccl_rootinfo.json` and an unmounted host root are the same absence to the filesystem, and
   only the first is a healthy node. A run with [no host root to
-  enter](#when-a-step-is-emitted-instead-of-run) does not stop — it carries on as a dry run — so this
-  row says the host was never looked at rather than clearing it.
+  enter](#when-a-step-is-emitted-instead-of-run) carries on as a dry run rather than stopping, so
+  this row says the host was never looked at. A path that merely resembles a host root counts as
+  none.
+- **A ranktable behind a symbolic link is `unavailable` too.** This command resolves an absolute
+  target against its own root rather than the host's, so following the link would read a file inside
+  the container while the vendor runtime follows the same link on the host. The row names the target
+  instead; read it there.
 
 ### The slice rows, and what the probe needs
 

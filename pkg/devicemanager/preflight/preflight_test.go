@@ -3,6 +3,7 @@ package preflight
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -677,4 +678,20 @@ func TestPreflightAccelerator_ReportsEveryManufacturer(t *testing.T) {
 		assert.False(t, grpList[i].Timestamp.IsZero(), "a reading is worth what its time claims")
 	}
 	assert.Equal(t, asked, reported)
+}
+
+// A host root that did not validate is handed to no manufacturer, and the configured one is handed
+// through when it did.
+//
+// The pair is the whole assertion: a check that reads a host path joins onto whatever arrives here,
+// and this runner does not stop on a root it could not validate -- it downgrades the pass to a dry
+// run and carries on. So a mistaken path reaching a manufacturer is a row answering out of this
+// container's own filesystem, and the marker validation exists because any single one of those
+// directories can be present by accident. Empty is what makes a check report that it never looked.
+func TestHostRootForManufacturers(t *testing.T) {
+	assert.Equal(t, DefaultHostRoot, hostRootForManufacturers(DefaultHostRoot, nil),
+		"a validated host root is handed through unchanged")
+	assert.Empty(t, hostRootForManufacturers(DefaultHostRoot, errors.New("carries no proc")),
+		"a root that did not validate is withheld, since a file missing under it was never looked for")
+	assert.Empty(t, hostRootForManufacturers("", errors.New("no host root configured")))
 }

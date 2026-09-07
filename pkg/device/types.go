@@ -516,6 +516,12 @@ type (
 		// -- are readable without it. Reading an unmounted path such as /etc without joining does not
 		// fail: it silently reads the container's copy, which for most of them means "absent", and a
 		// check whose absent branch is its passing branch then reports ok on every node.
+		//
+		// An empty value means this pass has no usable host root: either none was configured, or what
+		// was configured did not validate as one. A preflighter is then REQUIRED to read nothing
+		// through it and to report that it never looked. Joining onto the empty string is the one
+		// thing it must not do, since that yields the host path unchanged and reads this container's
+		// copy of it -- the exact silent failure above.
 		HostRoot string
 	}
 
