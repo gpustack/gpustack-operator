@@ -77,6 +77,9 @@ type Preflighter struct {
 	wantRuntime   string
 	detector      *detector.Detector
 	host          *hostExec
+	// hostRoot is where the host's root filesystem is bind-mounted, handed to each manufacturer's
+	// preflighter so that the host paths it reads resolve to the host's copy rather than ours.
+	hostRoot string
 	// runtime is the container runtime resolved on the host, nil when none was. It is resolved
 	// once per run rather than per manufacturer: the probe is a pair of host executions, and the
 	// answer is the same for every manufacturer on one host.
@@ -113,6 +116,7 @@ func New(c *Config) (*Preflighter, error) {
 		wantRuntime:   c.Runtime,
 		detector:      d,
 		host:          newHostExec(c.HostRoot),
+		hostRoot:      c.HostRoot,
 	}, nil
 }
 
@@ -393,8 +397,9 @@ func (p *Preflighter) preflight(
 	// The manufacturer's library is loaded here rather than at construction, so a host carrying one
 	// manufacturer's hardware never initializes another's driver to report that it has none.
 	pf := creator(device.PreflighterOptions{
-		Logger: logger.V(3),
-		DryRun: p.dryRun,
+		Logger:   logger.V(3),
+		DryRun:   p.dryRun,
+		HostRoot: p.hostRoot,
 	})
 	read := pf.PreflightAccelerator(groups)
 	grp.Checks = read.Checks

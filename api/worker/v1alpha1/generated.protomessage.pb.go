@@ -36,6 +36,8 @@ func (*AcceleratorStatus) ProtoMessage() {}
 
 func (*DeviceEthernet) ProtoMessage() {}
 
+func (*DeviceFabric) ProtoMessage() {}
+
 func (*DeviceInterface) ProtoMessage() {}
 
 func (*DeviceInterfaceLink) ProtoMessage() {}
