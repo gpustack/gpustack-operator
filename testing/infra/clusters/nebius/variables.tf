@@ -105,6 +105,11 @@ variable "cpu_node_count" {
   description = "Number of nodes in the CPU node group (GPU groups are one node each)."
   type        = number
   default     = 1
+
+  validation {
+    condition     = var.cpu_node_count > 0 && var.cpu_node_count == floor(var.cpu_node_count)
+    error_message = "cpu_node_count must be a positive whole number."
+  }
 }
 
 # Keyed by group name so each GPU node group has a stable key (gpu-<name>), mirroring
