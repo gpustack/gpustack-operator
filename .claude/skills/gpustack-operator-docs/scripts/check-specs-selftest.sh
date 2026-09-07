@@ -194,7 +194,7 @@ build
 subst "$SPEC" "TestThingWorks" "TestThingWasDeletedByT12"
 cat >> "$SPEC" <<'EOF'
 
-⛔ **THIS IS NOT RE-RUNNABLE, BY DESIGN.** The oracle was temporary and T12 deleted it.
+**THIS IS NOT RE-RUNNABLE, BY DESIGN.** The oracle was temporary and T12 deleted it.
 EOF
 run
 if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'exempt:.*TestThingWasDeletedByT12'; then

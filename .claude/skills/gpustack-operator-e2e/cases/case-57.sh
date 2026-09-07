@@ -337,7 +337,7 @@ fi
 # A CREATE-TIME INVARIANT DOES NOT PROTECT AGAINST A LATER EDIT, and F4b is the last link of that
 # degradation chain rather than a duplicate of the pool's own check.
 #
-# ── A Binding that exists but is being DELETED ────────────────────────────────────────────────────
+# A Binding that exists but is being DELETED
 # The refusal this covers is the one that needs no mistake: deleting a Binding is routine operations,
 # and a plain Pod is not in status.usedBy, so the finalizer protecting declared consumers cannot see
 # it. Injected against a Binding whose domain is leaving the ledger, the Pod starts, is stamped, and
@@ -346,7 +346,7 @@ fi
 # THE WINDOW IS HELD, NOT RACED. A test finalizer keeps the object in Deleting for exactly as long as
 # this check needs. Deleting and hoping to submit inside the operator's own window would be a bet: a
 # pass would be luck and a failure would be indistinguishable from a flake.
-# ⛔ Rejected alternative: scaling the Mooncake leader to zero so the operator's finalizer cannot
+# Rejected alternative: scaling the Mooncake leader to zero so the operator's finalizer cannot
 # converge. The leader is a Deployment this operator reconciles, so it comes straight back - the hold
 # would be fighting the controller rather than holding anything.
 #

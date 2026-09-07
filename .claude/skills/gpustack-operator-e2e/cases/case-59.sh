@@ -34,7 +34,7 @@
 #              unverified - one image present must not let the other half report green by omission.
 #
 #
-#              ⛔ PARKED 2026-09-04, AND WHAT DOES NOT COUNT AS FILLING IT. The engine half of this
+#              PARKED 2026-09-04, AND WHAT DOES NOT COUNT AS FILLING IT. The engine half of this
 #              suite is not being pursued on a machine with no accelerator, because the two questions
 #              it asks separate cleanly and only one of them is answerable here:
 #                - "is the name we render in that engine's registry" - ANSWERED, and answered more

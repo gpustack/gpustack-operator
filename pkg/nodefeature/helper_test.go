@@ -557,7 +557,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 }
 
 // TestConstructNodeCapacityLabels_ManualNodeManagement pins the node-management-manual
-// gate (switch ①): without it the managed label is auto-injected; with it the label
+// gate: without it the managed label is auto-injected; with it the label
 // is only present when the admin set it explicitly on the node.
 func TestConstructNodeCapacityLabels_ManualNodeManagement(t *testing.T) {
 	base := func(labels map[string]string) *core.Node {
