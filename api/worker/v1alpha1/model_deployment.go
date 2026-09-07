@@ -268,41 +268,6 @@ type ModelDeploymentRole struct {
 	// +k8s:validation:default="server"
 	// +k8s:validation:enum=["server","prefill","decode"]
 	Kind ModelDeploymentRoleKind `json:"kind,omitempty" protobuf:"bytes,8,opt,name=kind,casttype=ModelDeploymentRoleKind"`
-
-	// AcceleratorKey is the accelerator device key ("<manufacturer>-<model>", e.g. "nvidia-h20")
-	// this role's Pods must land on. It renders as ONE nodeSelector entry,
-	// "acceleratable.feature.gpustack.ai/<key>: true", and nothing else; omitting it takes whatever
-	// the pool assigns, which is the single-role behavior and stays the default.
-	//
-	// ON A POOL DERIVED THE DEFAULT WAY THERE IS NOTHING FOR IT TO CHOOSE BETWEEN. An InstanceType's
-	// identity is model-level, so its ClusterQueue offers flavors of one accelerator model and the
-	// only key this field can legally carry is the one the pool would have assigned anyway. It
-	// discriminates only inside a pool an administrator authored to span models. Whether the field
-	// survives is an open decision recorded in the spec, not here.
-	//
-	// It is validated at admission against the keys the role's pool actually offers, and the reason
-	// is that an unknown key does not fail — it is IGNORED. Kueue's flavor assignment keeps only
-	// those nodeSelector keys a candidate flavor's own nodeLabels carry and drops the rest, so a key
-	// no flavor offers stops being a constraint: an arbitrary flavor is assigned, the Workload is
-	// admitted, and the Pod then sits Pending at the scheduler because the real node label does not
-	// match. The mistake would surface two gates downstream with nothing naming it.
-	//
-	// ITS SHAPE IS BOUNDED BY THE SCHEMA, INDEPENDENTLY OF THAT CHECK. This value becomes the NAME
-	// segment of a label key, and a label name stops at 63 characters over a restricted alphabet
-	// where an object name runs to 253 over a wider one. The pool check cannot stand in for the
-	// bound: it deliberately refuses NOTHING when the pool's flavors cannot be read, so a malformed
-	// key passes straight through it into a nodeSelector the API server then rejects on every Pod
-	// create — a permanent reconcile failure whose cause is a field two objects away.
-	//
-	// TIGHTENING IT STRANDS NO STORED OBJECT, which is what makes this a permitted change rather than
-	// a compatibility break. No released version can hold a value it now refuses, because
-	// ModelDeployment is in no released version — checked per tag with
-	// `git cat-file -e "$t:api/worker/v1alpha1/model_deployment.go"`, absent from all 37, rather than
-	// inferred from when it merged.
-	//
-	// +k8s:validation:maxLength=63
-	// +k8s:validation:pattern="^[a-z0-9A-Z]([-_.a-z0-9A-Z]*[a-z0-9A-Z])?$"
-	AcceleratorKey string `json:"acceleratorKey,omitempty" protobuf:"bytes,9,opt,name=acceleratorKey"`
 }
 
 // ModelDeploymentRoleKind is what a role is told it is, in a prefill/decode disaggregated
@@ -520,9 +485,9 @@ type ModelDeploymentRoleStatus struct {
 	// role waiting for quota has no flavor, and reporting that as the empty string would read as an
 	// assignment to a flavor with no name.
 	//
-	// It is per role rather than per deployment because Kueue assigns a flavor per PodSet: two
-	// roles of one deployment can land on two accelerator models, which is what AcceleratorKey
-	// exists to ask for, and a single deployment-wide field could not say that.
+	// It is per role rather than per deployment because Kueue assigns a flavor per PodSet, so two
+	// roles of one deployment can be assigned different flavors and a single deployment-wide field
+	// could not report that.
 	//
 	// AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather than a
 	// gap in it. The answer is read through the same function the per-accelerator admission gate
