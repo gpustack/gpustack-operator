@@ -77,6 +77,18 @@ function lint() {
     gpustack::log::fatal "the decorative-symbol check could not run; its diagnostic is above"
   fi
 
+  # The tool pins, which nothing else asserts. hack/lib/ decides whether a binary already in .sbin
+  # may be reused: eleven of its fifteen validators compare a version against the pin and four
+  # accept by existence on purpose. Accepting by existence where a version is meant to be compared
+  # reuses whatever a pin bump replaced, and the generated tree is then compared against a baseline
+  # produced by a different tool. This hands every validator a binary that is not its pin and
+  # asserts the verdict, so a version check that goes away stops reading like one that was never
+  # there. It carries its own fixtures rather than checking the sources, so unlike the symbol check
+  # above there is nothing separate to self-test.
+  if ! bash "${ROOT_DIR}/hack/check-toolpins-selftest.sh" "${ROOT_DIR}"; then
+    gpustack::log::fatal "the tool-pin validators in hack/lib are not trustworthy: their self-test failed"
+  fi
+
   # Three states, not two: the tree is clean, the tree is dirty, or git cannot answer
   # at all. Folding the last into "clean" is what made a build from a git worktree fail
   # — the checkout's .git is a file pointing outside the build context, so every git
