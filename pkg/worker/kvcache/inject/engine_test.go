@@ -5,6 +5,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 )
 
 // TestEngines_AreAllKnown pins the enum against the table. An engine value the synthesis accepts but
@@ -47,6 +50,13 @@ func TestEngines_HaveMeasuredTransportConstraint(t *testing.T) {
 			assert.NotEmpty(t, facts.Source,
 				"the source line the answer was read at -- required even when Required is empty, "+
 					"since an unsourced empty is how 'refuses nothing' becomes 'nobody looked'")
+
+			// The two spellings travel together or not at all. A row carrying only the artifact one
+			// prints a blank where the remediation names a value to set, and a blank in that sentence
+			// reads as an instruction rather than as a missing field.
+			assert.Equal(t, facts.Required == "", facts.RequiredAPIValue == "",
+				"a required transport must be recorded in both spellings: artifact %q, API %q",
+				facts.Required, facts.RequiredAPIValue)
 		})
 
 		if facts.Required == "" {
@@ -114,16 +124,38 @@ func TestCheckTransport(t *testing.T) {
 // is a legal engine -- so a message naming only one of them sends its reader to change the wrong
 // object. It also has to name the value that WOULD work, since "unsupported" alone leaves a user
 // guessing between four transports.
+//
+// EACH SPELLING IS PINNED IN ITS OWN SENTENCE, not merely present somewhere in the message. The
+// remediation assertion carries the field name with the value, so it fails if the two ever drift
+// apart; a check that only asked whether the message contains either spelling would go green on the
+// message that names the artifact spelling in the sentence telling an operator what to set -- which
+// is what this message did until a review caught it. The value it named there is one the enum
+// rejects, so following the error produced a schema rejection: a refusal whose remediation cannot be
+// carried out is a worse outcome than a refusal with no remediation at all, because it reads as
+// actionable.
 func TestCheckTransport_MessageNamesThePair(t *testing.T) {
 	err := checkTransport(EngineVLLMAscend, "tcp")
 	require.Error(t, err)
+	message := err.Error()
 
-	assert.Contains(t, err.Error(), string(EngineVLLMAscend), "the engine half of the pair")
-	assert.Contains(t, err.Error(), `"tcp"`, "the transport half of the pair")
-	assert.Contains(t, err.Error(), `"ascend"`, "and the value that would work")
-	assert.Contains(t, err.Error(), "KVCacheBackend",
+	assert.Contains(t, message, string(EngineVLLMAscend), "the engine half of the pair")
+
+	// The pair is reported in the ARTIFACT's spelling, because that is the value the container was
+	// handed. Both halves in one substring, so the sentence cannot lose one of them.
+	assert.Contains(t, message, `accepts only the "ascend" transport and this pool offers "tcp"`,
+		"the pair is reported in the spelling the container actually saw")
+
+	// The remediation is in the API's spelling, because it names a field the schema validates. The
+	// field name is part of the assertion: that is what makes this positional rather than a presence
+	// check that any mention of the value would satisfy.
+	assert.Contains(t, message, `spec.transport.protocol to "Ascend"`,
+		"the remediation must name a value the enum accepts, next to the field it goes in")
+	assert.NotContains(t, message, `spec.transport.protocol to "ascend"`,
+		"the artifact spelling in that sentence is a schema rejection waiting to happen")
+
+	assert.Contains(t, message, "KVCacheBackend",
 		"the transport is the backend's, and a reader looking for it on the Binding finds nothing")
-	assert.Contains(t, err.Error(), "v0.19.1rc1",
+	assert.Contains(t, message, "v0.19.1rc1",
 		"the version behind the answer, so the refusal says why rather than only what")
 }
 
@@ -270,6 +302,52 @@ func TestRefusal_CarriesReasonNotProse(t *testing.T) {
 	assert.Equal(t, ReasonEngineUnknown, refusal.Reason)
 	assert.Contains(t, refusal.Error(), "vllm-turbo", "the message names the subject it refused")
 	assert.Contains(t, refusal.Error(), "vllm")
+}
+
+// TestEngineTransportConstraint_SpellingsAgreeWithTheBackend is the cross-package pin, and it exists
+// because the drift it catches is SILENT.
+//
+// The two spellings in one entry are joined by nothing but the fact that somebody read them off two
+// files. If mooncake's mapping is ever edited, the recorded API value stops producing the recorded
+// artifact value -- and the only symptom is a refusal message telling an operator to set a field to a
+// value that no longer maps, which no test asserting either spelling ALONE can see. One assertion has
+// to hold both ends.
+//
+// It reads the table rather than a hand-picked engine, so a row added without its API spelling
+// checked is covered on arrival. The negative row is what gives it teeth: without it, a
+// MemberProtocol that returned the required transport for every input would pass.
+func TestEngineTransportConstraint_SpellingsAgreeWithTheBackend(t *testing.T) {
+	backendWith := func(protocol string) *workercore.KVCacheBackend {
+		return &workercore.KVCacheBackend{
+			Spec: workercore.KVCacheBackendSpec{
+				Transport: workercore.KVCacheBackendTransport{Protocol: protocol},
+			},
+		}
+	}
+
+	var checked int
+	for _, engine := range Engines() {
+		facts := engineTransportConstraint[engine]
+		if facts.Required == "" {
+			continue
+		}
+		checked++
+
+		t.Run(string(engine), func(t *testing.T) {
+			assert.Equal(t, facts.Required, mooncake.MemberProtocol(backendWith(facts.RequiredAPIValue)),
+				"the API spelling this entry tells an operator to set must render the artifact "+
+					"spelling this entry compares against")
+
+			// The schema's own default must NOT satisfy the requirement, or the row describes a
+			// constraint that every pool already meets and the refusal could never fire.
+			assert.NotEqual(t, facts.Required, mooncake.MemberProtocol(backendWith(mooncake.MemberProtocolAuto)),
+				"a requirement the default transport already satisfies would make this table inert")
+		})
+	}
+
+	require.Positive(t, checked,
+		"no engine constrains a transport, so this pinned nothing; the table has lost its one "+
+			"constrained row")
 }
 
 // testConnectionFor is testConnection with a transport the engine's store backend accepts.

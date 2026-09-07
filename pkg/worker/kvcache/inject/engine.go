@@ -148,6 +148,25 @@ type transportFacts struct {
 	// distinction decides opposite outcomes -- an unmeasured engine has to be let through, an engine
 	// measured as requiring "ascend" must not be.
 	Required string
+
+	// RequiredAPIValue is that same transport in the API's spelling: the value an operator writes
+	// into KVCacheBackend.spec.transport.protocol.
+	//
+	// BOTH SPELLINGS ARE HERE because a refusal needs both, in different sentences. The pair it
+	// reports has to be in the artifact's spelling, since that is the value the container was
+	// actually handed; the remediation has to be a value the SCHEMA accepts, and the enum is
+	// case-sensitive. Naming the artifact spelling in the remediation sends an operator to a field
+	// that will reject it.
+	//
+	// IT IS RECORDED AND NOT DERIVED, and that is forced rather than preferred: mooncake's mapping is
+	// not injective, so it has no inverse. Both Auto and TCP render "tcp", so "which API value
+	// produces this artifact value" has two answers there and one here. A helper computing it would
+	// be correct for ascend and quietly wrong for the transport that has two -- the same shape of
+	// defect this table exists to remove.
+	//
+	// Empty exactly when Required is empty. A row carrying one without the other would print a blank
+	// where the remediation goes, which is why the pin below requires them together.
+	RequiredAPIValue string
 }
 
 // engineTransportConstraint is the measured answer per engine: which transport that engine's store
@@ -190,8 +209,9 @@ var engineTransportConstraint = map[Engine]transportFacts{
 		Version: "v0.25.1",
 		// protocol appears three times and is never compared: declared on the config class at :108,
 		// read out of the file at :132, handed to store.setup() at :1045. No branch reads its value.
-		Source:   "vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/worker.py:108,132,1045",
-		Required: "",
+		Source:           "vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/worker.py:108,132,1045",
+		Required:         "",
+		RequiredAPIValue: "",
 	},
 	EngineVLLMAscend: {
 		// REQUIRES ascend, and this is the entry the table exists for. MooncakeBackend's constructor
@@ -203,9 +223,12 @@ var engineTransportConstraint = map[Engine]transportFacts{
 		// here, because vllmClientConfig.Protocol carries no omitempty and renderVLLMClientConfig
 		// writes the field unconditionally -- so the value this project chose is always the one that
 		// reaches :34.
-		Version:  "v0.19.1rc1",
-		Source:   "vllm_ascend/.../ascend_store/backend/mooncake_backend.py:34,68-69 (v0.19.1rc1 is da421afa)",
-		Required: "ascend",
+		Version: "v0.19.1rc1",
+		Source:  "vllm_ascend/.../ascend_store/backend/mooncake_backend.py:34,68-69 (v0.19.1rc1 is da421afa)",
+		// The two spellings of one transport. The API enum is case-sensitive
+		// (KVCacheBackendTransport.Protocol), so the capitalized one is what a remediation may name.
+		Required:         "ascend",
+		RequiredAPIValue: "Ascend",
 	},
 	EngineSGLang: {
 		// Unconstrained, and the reason is worth recording because this file DOES compare protocol:
@@ -213,9 +236,10 @@ var engineTransportConstraint = map[Engine]transportFacts{
 		// transfer engine, and the else branch at :496-498 builds its own instead. Either way the
 		// value reaches store.setup() at :515 unexamined. That comparison is an optimization, not a
 		// requirement, and it is the reason step 2 above is worded the way it is.
-		Version:  "v0.5.18",
-		Source:   "python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_store.py:98,487,496-498,515",
-		Required: "",
+		Version:          "v0.5.18",
+		Source:           "python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_store.py:98,487,496-498,515",
+		Required:         "",
+		RequiredAPIValue: "",
 	},
 }
 
@@ -264,6 +288,12 @@ func TenantSupportSource(engine Engine) (version, source string) {
 // names WHERE the transport came from - a reader who goes looking for it on the Binding will not find
 // it, since the pool's KVCacheBackend is what carries it.
 //
+// TWO SPELLINGS APPEAR ON PURPOSE, in the two sentences that need them. What the pool OFFERS and what
+// the engine ACCEPTS are reported in the artifact's spelling, because that is the value handed to the
+// container. What to SET is the API's, because that sentence names a field the schema validates and
+// its enum is case-sensitive - naming the artifact spelling there produces a schema rejection, so the
+// operator's next step fails for a second, unrelated reason.
+//
 // It does not restate what an unset protocol resolves to. That mapping is mooncake.memberProtocols',
 // and a copy of it here would be a second implementation of one table.
 func checkTransport(engine Engine, protocol string) error {
@@ -276,8 +306,9 @@ func checkTransport(engine Engine, protocol string) error {
 		"engine %q accepts only the %q transport and this pool offers %q, so its store backend "+
 			"would raise at startup instead of using the cache (measured at %s, %s). The transport "+
 			"belongs to the KVCacheBackend the pool names, not to the Binding: set that backend's "+
-			"spec.transport.protocol to %[2]q, or point this workload at a pool that already offers "+
-			"it. An unset protocol is not neutral here: the field defaults to Auto, which the "+
-			"backend resolves to one concrete transport rather than to whatever an engine wants",
-		engine, facts.Required, protocol, facts.Version, facts.Source)
+			"spec.transport.protocol to %q, which is that same transport in the API's spelling, or "+
+			"point this workload at a pool that already offers it. An unset protocol is not neutral "+
+			"here: the field defaults to Auto, which the backend resolves to one concrete transport "+
+			"rather than to whatever an engine wants",
+		engine, facts.Required, protocol, facts.Version, facts.Source, facts.RequiredAPIValue)
 }

@@ -336,10 +336,20 @@ The engine's own file reader defaults `protocol` to `ascend`, so a file that sai
 worked. This project writes the key explicitly on every path — because vLLM and SGLang disagree about
 what an absent one means — and that explicit value overwrites a default that was already correct here.
 
-It is documented rather than refused. The failure is loud, immediate, and names its own cause in the
-container's logs, so refusing at admission would buy very little; and the constraint is one this
-project has only read on upstream `main`, so a rule built on it could reject a combination an older
-deployed build accepts. Pair vLLM-Ascend with an `ascend` backend.
+It is **refused, not left to the container**. The refusal lives in the renderer both injection paths
+share, so it surfaces as an admission rejection for an injected Pod and as a reconcile error on a
+`ModelDeployment` whose role derives this engine. The constraint is read at the release this project
+pins — `v0.19.1rc1`, commit `da421afa` — so it describes the build that ships rather than upstream
+`main`.
+
+**The transport has two spellings and the message uses both.** What the pool offers and what the
+engine accepts are reported as the artifact spells them, because that is the value the container was
+handed: `tcp` against `ascend`. The value to set is the API's, **`Ascend`** with a capital, because
+`spec.transport.protocol` is a case-sensitive enum.
+
+**The failing backend is not one somebody misconfigured.** `spec.transport.protocol` defaults to
+`Auto`, which resolves to `tcp` — so a backend left entirely at its defaults is precisely the one this
+engine cannot use. Pair vLLM-Ascend with a backend whose transport is `Ascend`.
 
 **The record says `tenantInjected`, never "isolated", and the difference matters.** Admission never
 inspects the image, so it cannot know the build — an SGLang build older than the one our table was
