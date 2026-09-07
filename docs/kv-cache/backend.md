@@ -290,10 +290,10 @@ hands to clients. Rules written for the data plane therefore target pod addresse
 
 > **Why not the node name** — the engine binds its data port inside the pod's network namespace.
 > Measured on a two-node cluster: advertising the node name, a client pod got `ECONNREFUSED` against
-> both that name and the node IP, and connected only on the pod IP. It costs no stability — the
-> leader appends a port of its own to build the segment name and that port is fresh on every start,
-> so the name never survived a restart anyway. On the RDMA path the pod holds the host's network
-> namespace and this is the node's address regardless.
+> both that name and the node IP, and connected only on the pod IP. It costs no stability — a
+> segment's identity is minted fresh on every mount, a new id and a transfer port bound at random, so
+> nothing here survived a restart anyway. On the RDMA path the pod holds the host's network namespace
+> and this is the node's address regardless.
 
 ## The local disk tier
 
@@ -555,10 +555,15 @@ belongs to the Pod template, not to that field.
 node, unmounts that member's segment **immediately** — there is no drain.
 
 > **Why it is not drained** — the member's own API does take a graceful unmount with a grace period,
-> but it requires the segment ids and **no route returns a client its own**. The name is not
-> derivable either: the leader appends a port of its own choosing and that port is fresh on every
-> start. The `terminationGracePeriodSeconds` the operator sets lets the entrypoint finish its own
-> shutdown — it does not preserve the data.
+> but it requires the segment ids, and **the member serves no route that lists them**. The leader
+> does: `segment_id` is a field of `/get_segments_detail`, the same route this operator already polls
+> for status and whose decoder ignores that field. Against `mooncake` 0.3.13 the ids are therefore
+> **readable and simply unread** — what is missing on this path is the work, not the route. One part
+> of it is a real design question rather than unwritten code: a departing member would have to
+> recognise its own segments by the address they carry, and the members of an `RDMA` group share one,
+> which is the ambiguity [What status reports](#what-status-reports) already names. The
+> `terminationGracePeriodSeconds` the operator sets lets the entrypoint finish its own shutdown — it
+> does not preserve the data.
 
 **`scaleIn.gracePeriodSeconds` holds the process, not the tier.** A member with a
 [local disk tier](#the-local-disk-tier) gets a `preStop` hook that deregisters the tier with the
