@@ -146,14 +146,17 @@ group and a candidate flavor is evaluated against that PodSet's own `nodeSelecto
 can serve two accelerator models at once: a Workload's PodSets may land on different flavors of the
 same pool.
 
-That is what lets a multi-role workload put each role on the model it asked for. The selector driving
-it is one `acceleratable.feature.gpustack.ai/<aKey>` entry — exactly the key an accelerated flavor pins
-in its `nodeLabels`.
+The selector that would drive it is one `acceleratable.feature.gpustack.ai/<aKey>` entry — exactly the
+key an accelerated flavor pins in its `nodeLabels`.
+
+**Nothing in this operator writes that selector today.** `ModelDeployment` stopped rendering it when
+`roles[].acceleratorKey` was withdrawn, so the per-PodSet mechanism above is available and unused: a
+multi-role workload takes whatever flavors its pool assigns.
 
 A key **no** candidate flavor pins is not a constraint that fails. `flavorSelector` keeps only the
 nodeSelector keys the flavor carries and drops the rest, so an unknown key is ignored and an arbitrary
-flavor is assigned — which is why anything writing such a selector validates it against the pool first;
-see [Model Deployment](../reference/model-deployment.md#prefill-and-decode).
+flavor is assigned. Whatever starts writing such a selector therefore has to validate it against the
+pool first — a wrong key surfaces two gates downstream, as a Pod left `Pending` at the scheduler.
 
 ## Naming and grouping
 
