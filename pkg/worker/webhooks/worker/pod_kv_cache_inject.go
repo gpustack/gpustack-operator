@@ -610,16 +610,21 @@ func stripLauncherOperands(argv []string, grammar launcherGrammar) (resolved []s
 		case strings.HasPrefix(arg, "--"):
 			name, _, inline := strings.Cut(arg, "=")
 			if slices.Contains(grammar.opaqueLong, name) {
-				return nil, true
+				return nil, inline || len(argv) > 1
 			}
 			takesNext = !inline && slices.Contains(grammar.operandLong, name)
 		case arg != "" && arg[0] == '-':
 			// A lone "-" carries no letters, so it reaches past nothing; env(1) reads it as -i.
-			var isOpaque bool
-			takesNext, isOpaque = bundleOperand(arg[1:], grammar)
+			separated, isOpaque := bundleOperand(arg[1:], grammar)
 			if isOpaque {
-				return nil, true
+				// An opaque option is only opaque once it HAS its operand. Attached - `-Ssh -c vllm`
+				// or `--split-string=...` - carries the command line inside this very token;
+				// separated carries it in the next one, if there is one. With the operand missing
+				// there is no command line at all, so this is the empty-and-admitted case rather
+				// than the hidden one, exactly as for an operand-taking option that ran out.
+				return nil, !separated || len(argv) > 1
 			}
+			takesNext = separated
 		case strings.Contains(arg, "="):
 			// A NAME=value assignment, which env(1) accepts before the command.
 		case positional > 0:
@@ -651,15 +656,19 @@ func stripLauncherOperands(argv []string, grammar launcherGrammar) (resolved []s
 // The FIRST operand-taking letter decides, because it consumes whatever remains of the bundle when
 // there is any - `-uNAME` unsets NAME - so only a bundle ENDING in such a letter takes the token that
 // follows. That is the same rule the shell scan applies to -o, and getting it wrong either way hides
-// a shell. An opaque letter is opaque wherever it sits: `-Ssh -c vllm` carries the command line
-// inside its own token, `-S 'sh -c vllm'` in the next one, and neither leaves a program to test.
+// a shell.
+//
+// takesNext is reported for an opaque letter too, and the caller needs it rather than just the flag:
+// `-Ssh -c vllm` carries the command line inside its own token, `-S 'sh -c vllm'` in the next one,
+// and `-S` with nothing after it carries none at all - which is a different answer from both.
 func bundleOperand(bundle string, grammar launcherGrammar) (takesNext, opaque bool) {
 	for i, letter := range bundle {
+		last := i == len(bundle)-1
 		switch {
 		case strings.ContainsRune(grammar.opaqueShort, letter):
-			return false, true
+			return last, true
 		case strings.ContainsRune(grammar.operandShort, letter):
-			return i == len(bundle)-1, false
+			return last, false
 		}
 	}
 

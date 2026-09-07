@@ -153,7 +153,7 @@ container that starts normally and does not use the cache — a result invisible
 | a container declaring **neither** `command` nor `args` | appending would not append: Kubernetes then reads `args` as the whole command line and discards the image's `CMD` | copy the image's launch arguments into **`args`**, leaving `command` unset |
 | a container launched through a shell's `-c` | an appended flag becomes the shell's `$0`, so it never reaches the engine and the Pod is stamped as injected anyway | launch the engine directly — its executable in `command`, its arguments in `args` — or add the connector flag to the script yourself |
 | a command line hidden inside one argument — `env -S "…"` and its `--split-string` spellings | there is nothing on the command line to test: the launcher splits that string itself, so admission cannot tell whether a shell is inside it | launch the engine directly, or add the connector flag inside that argument yourself |
-| the script a container runs, by name — `./run.sh`, and `sh /app/run.sh` alike | whether an appended argument reaches the engine depends on whether the script forwards `"$@"`, which is a file inside the image rather than a token on the command line | launch the engine directly, or add the connector flag inside the script yourself |
+| a program whose name ends in `.sh` — `./run.sh`, and `sh /app/run.sh` alike | whether an appended argument reaches the engine depends on whether the script forwards `"$@"`, which is a file inside the image rather than a token on the command line | launch the engine directly, or add the connector flag inside the script yourself |
 | the `role` annotation on an SGLang Pod | that engine has no prefill/decode equivalent, and accepting the role while ignoring it would leave the container looking configured and behaving otherwise | drop the annotation, or use a vLLM-family engine |
 | an unrecognised `kvcache.gpustack.ai/` key | a typo would otherwise be ignored, leaving the Pod configured differently from its manifest | fix the key |
 | `kvcache.gpustack.ai/client-config` or `.../injected` | these record what the webhook decided; a submitted value would be a record of a decision nobody made | remove them |
@@ -162,6 +162,12 @@ container that starts normally and does not use the cache — a result invisible
 > `ENTRYPOINT` as well, and on this project's accelerator images that entrypoint initializes the vendor
 > runtime. The resulting failure is further from its cause than the discarded `CMD` the refusal exists
 > to prevent.
+
+⚠️ The script refusal keys off the **`.sh` suffix**, which is a convention rather than a guarantee, so
+it is neither sound nor complete: a wrapper named `entrypoint` or `run` is admitted and carries the
+same uncertainty. Admission cannot open the file, and the suffix is the only signal on the command
+line. A suffix-less wrapper that does not forward `"$@"` therefore still yields a Pod that starts,
+records itself as injected, and never enables the connector.
 
 Two keys are **not** conflicts and are left alone: `MOONCAKE_TENANT_ID`, which the webhook does write
 for SGLang but never over a value you set yourself — declare it and yours stands, and the injection

@@ -326,6 +326,12 @@ func TestPodKVCacheInject_RefusesAShellWrapper(t *testing.T) {
 		// on its own terms and there is no token for a shell to be inside. Folding it in with -S
 		// refused it under a message describing a command line it does not have.
 		{name: "env -u with its operand missing", command: []string{"env", "-u"}},
+		// AND THE SAME HOLDS FOR THE OPAQUE OPTION ITSELF, which is where the first version of this
+		// fix stopped half way: -S was refused whether or not it had an operand, under the message
+		// about a command line hidden in one argument - the exact mis-classification the -u case
+		// above was changed to remove. An opaque option is opaque once it HAS its operand.
+		{name: "env -S with its operand missing", command: []string{"env", "-S"}},
+		{name: "env --split-string with its operand missing", command: []string{"env", "--split-string"}},
 		// An opaque letter is only opaque when it is the FIRST operand-taking letter of the bundle:
 		// -u has already consumed the rest, so this unsets the variable named S and runs vllm.
 		{name: "an opaque letter behind an operand letter", command: []string{"env", "-uS", "vllm"}, args: []string{"serve"}},
