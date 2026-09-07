@@ -125,7 +125,7 @@ kubectl get apiservices \
 #    release of the same name elsewhere carries the same release-name. The pair identifies exactly
 #    one release, which is the only thing that authorises deleting a CRD.
 #
-#    ⛔ NFD IS DELIBERATELY ABSENT, and its CRDs are left in place. Its subchart ships them under
+#    NFD IS DELIBERATELY ABSENT, and its CRDs are left in place. Its subchart ships them under
 #    crds/, which Helm installs verbatim and never annotates — so there is no ownership to read and
 #    no way to tell this install's from one the cluster already had. Deleting them on that basis
 #    would be a guess with a cluster-wide blast radius. Nothing hangs as a result: NFD's CRs carry no

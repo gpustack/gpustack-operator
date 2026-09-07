@@ -265,7 +265,7 @@ func TestPodKVCacheValidateUpdate_EveryRefusalNamesTheWayForward(t *testing.T) {
 // the first assertion below is that same expression - so this tests the input the framework branches
 // on, not a restatement of it.
 //
-// ⛔ The second assertion cannot stand alone. Calling ValidateUpdate directly bypasses the wrapper
+// The second assertion cannot stand alone. Calling ValidateUpdate directly bypasses the wrapper
 // entirely, so a handler that was being skipped in production would still refuse here: measured, this
 // call refuses identically for a live Pod and a terminating one. Every row of the table above shares
 // that blindness. Only the marker decides whether any of them describe production.

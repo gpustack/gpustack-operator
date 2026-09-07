@@ -38,7 +38,7 @@
 #                E2E_VLLM_ASCEND_IMAGE=quay.io/ascend/vllm-ascend:v0.19.1rc1
 #
 #
-#              ⛔ PARKED 2026-09-04, AND WHAT DOES NOT COUNT AS FILLING IT. The engine half of this
+#              PARKED 2026-09-04, AND WHAT DOES NOT COUNT AS FILLING IT. The engine half of this
 #              suite is not being pursued on a machine with no accelerator, because the two questions
 #              it asks separate cleanly and only one of them is answerable here:
 #                - "is the name we render in that engine's registry" - ANSWERED, and answered more
@@ -122,7 +122,7 @@
 #   vllm-ascend row FAIL at step 1, and NOT about the name: FACTORY_IMPORT_RAISED RuntimeError,
 #                   "Failed to load the backend extension: torch_npu".
 #
-# ⛔ WHY THAT ROW CANNOT PASS HERE, measured rather than guessed - and it is this webhook's own subject
+# WHY THAT ROW CANNOT PASS HERE, measured rather than guessed - and it is this webhook's own subject
 # matter. The vllm-ascend image prepares its environment in the image ENTRYPOINT, which sources three
 # Ascend set_env.sh scripts before exec'ing anything. TWO things bypass it: a Pod that sets `command`
 # discards the ENTRYPOINT entirely (the exact Kubernetes rule this webhook refuses over), and
@@ -139,7 +139,7 @@
 #   passing it at create time is the hard-coding this case exists to avoid. That tension is real and
 #   is a design decision, not an edit to make during a run.
 #
-# ⭐ What this run does NOT leave unverified: the registry contents themselves. Measured the same day
+# What this run does NOT leave unverified: the registry contents themselves. Measured the same day
 # by `docker run --rm quay.io/ascend/vllm-ascend:v0.19.1rc1` (ENTRYPOINT honored, no accelerator):
 # after load_general_plugins() the factory holds 19 names, AscendStoreConnector among them and
 # MooncakeStoreConnector absent. That is this row's subject; what is missing is only its delivery
