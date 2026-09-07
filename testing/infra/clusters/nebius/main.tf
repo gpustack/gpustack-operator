@@ -33,8 +33,9 @@ locals {
         # Defaults to false: the accelerator tests drive GPU nodes, not this one, and a public
         # address is a quota'd resource (vpc.ipv4-address.public.count). Turn it on for the one
         # workflow that needs inbound reach -- building images on the node itself.
-        public_ip = var.cpu_instance_types.public_ip
-        gpu       = null
+        public_ip  = var.cpu_instance_types.public_ip
+        node_count = var.cpu_node_count
+        gpu        = null
       }
     },
     {
@@ -53,7 +54,11 @@ locals {
         # guess it — and that inbound reach is what the public address buys. Turn it off per group
         # (`public_ip = false`) only for a GPU group nobody has to log in to.
         public_ip = cfg.public_ip
-        gpu       = { drivers_preset = coalesce(cfg.drivers_preset, data.external.gpu_compat[name].result.drivers_preset) }
+        # One node per GPU group. Accelerator capacity is bought a group at a time -- a second H100
+        # is a second entry in gpu_instance_types, which also gets its own platform and preset --
+        # and the tests that need several nodes need plain ones, which is what cpu_node_count buys.
+        node_count = 1
+        gpu        = { drivers_preset = coalesce(cfg.drivers_preset, data.external.gpu_compat[name].result.drivers_preset) }
       }
     },
   )
@@ -254,7 +259,7 @@ resource "nebius_mk8s_v1_node_group" "this" {
   parent_id = nebius_mk8s_v1_cluster.this.id
   name      = each.key
 
-  fixed_node_count = 1
+  fixed_node_count = each.value.node_count
 
   template = {
     resources = {

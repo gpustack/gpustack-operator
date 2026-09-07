@@ -95,6 +95,17 @@ variable "cpu_instance_types" {
   default = { platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }
 }
 
+# How many nodes the CPU group runs. Every GPU group is one node, so this is the module's only
+# multi-node knob: a test that needs several plain nodes -- one that moves data between them, or
+# that adds a member to a running set -- gets them here rather than by buying accelerator capacity
+# it will not use. Combined with cpu_instance_types.public_ip, the quota cost is one address per
+# node rather than one for the group (see README).
+variable "cpu_node_count" {
+  description = "Number of nodes in the CPU node group (GPU groups are one node each)."
+  type        = number
+  default     = 1
+}
+
 # Keyed by group name so each GPU node group has a stable key (gpu-<name>), mirroring
 # clusters/eks's gpu_instance_types map(list(string)) convention. Only platform + preset are
 # required per group: os and drivers_preset are auto-resolved from Nebius' live compatibility
