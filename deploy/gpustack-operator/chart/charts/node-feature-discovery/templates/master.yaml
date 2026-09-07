@@ -166,7 +166,7 @@ spec:
             items:
               - key: nfd-master.conf
                 path: nfd-master.conf
-    {{- with .Values.master.nodeSelector }}
+    {{- with (.Values.master.nodeSelector | default (.Values.global | default dict).nodeSelector) }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}

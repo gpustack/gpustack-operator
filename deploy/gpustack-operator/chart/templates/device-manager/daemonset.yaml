@@ -50,9 +50,15 @@ spec:
       # driver over host IPC; this pod is already privileged with /dev and /sys mounted.
       hostPID: true
       hostIPC: true
+      {{- /*
+        Rely on NFD to label nodes carrying this manufacturer's PCI vendor, and merge
+        `global.nodeSelector` under that entry rather than after it: the PCI label is a
+        requirement, so it takes precedence, and one map means a global key naming it
+        cannot land as a duplicate whose later value silently inverts the constraint.
+      */}}
+      {{- $placement := dict (printf "feature.node.kubernetes.io/pci-%s.present" $identity.pciVendorID) "true" }}
       nodeSelector:
-        # Rely on NFD to label nodes carrying this manufacturer's PCI vendor.
-        feature.node.kubernetes.io/pci-{{ $identity.pciVendorID }}.present: "true"
+        {{- merge $placement (deepCopy ($root.Values.global.nodeSelector | default dict)) | toYaml | nindent 8 }}
       serviceAccountName: {{ $name }}
       priorityClassName: system-cluster-critical
       {{- with $root.Values.deviceManager.tolerations }}

@@ -24,6 +24,14 @@ spec:
         {{- include "gpustack-operator.commonLabels" . | nindent 8 }}
     spec:
       restartPolicy: Never
+      {{- /*
+        No nodeSelector, deliberately, and `global.nodeSelector` is not inherited here.
+        Helm runs this Job outside the window where the release's own workloads exist —
+        before they are created, and after they are gone — so a selector naming a label
+        the release itself produces, an NFD one being the obvious case, would leave this
+        Job Pending with nothing able to satisfy it: the workload that would apply the
+        label is in the manifest this hook gates.
+      */}}
       serviceAccountName: {{ include "gpustack-operator.fullname" . }}-cleanup
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:

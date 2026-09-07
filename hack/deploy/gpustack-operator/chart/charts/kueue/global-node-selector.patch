@@ -1,0 +1,33 @@
+--- a/templates/manager/manager.yaml
++++ b/templates/manager/manager.yaml
+@@ -104,7 +104,7 @@
+         {{- . | nindent 8 }}
+       {{- end }}
+       terminationGracePeriodSeconds: 10
+-      {{- with .Values.controllerManager.nodeSelector }}
++      {{- with (.Values.controllerManager.nodeSelector | default (.Values.global | default dict).nodeSelector) }}
+       nodeSelector:
+         {{- toYaml . | nindent 8 }}
+       {{- end }}
+--- a/templates/kueueviz/backend-deployment.yaml
++++ b/templates/kueueviz/backend-deployment.yaml
+@@ -39,7 +39,7 @@
+       {{- with  .Values.kueueViz.backend.priorityClassName }}
+       priorityClassName: {{ . }}
+       {{- end }}
+-      {{- with .Values.kueueViz.backend.nodeSelector }}
++      {{- with (.Values.kueueViz.backend.nodeSelector | default (.Values.global | default dict).nodeSelector) }}
+       nodeSelector:
+       {{- toYaml . | nindent 8 }}
+       {{- end }}
+--- a/templates/kueueviz/frontend-deployment.yaml
++++ b/templates/kueueviz/frontend-deployment.yaml
+@@ -41,7 +41,7 @@
+       {{- with  .Values.kueueViz.frontend.priorityClassName }}
+       priorityClassName: {{ . }}
+       {{- end }}
+-      {{- with .Values.kueueViz.frontend.nodeSelector }}
++      {{- with (.Values.kueueViz.frontend.nodeSelector | default (.Values.global | default dict).nodeSelector) }}
+       nodeSelector:
+       {{- toYaml . | nindent 8 }}
+       {{- end }}

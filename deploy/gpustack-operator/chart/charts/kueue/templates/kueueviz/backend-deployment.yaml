@@ -39,7 +39,7 @@ spec:
       {{- with  .Values.kueueViz.backend.priorityClassName }}
       priorityClassName: {{ . }}
       {{- end }}
-      {{- with .Values.kueueViz.backend.nodeSelector }}
+      {{- with (.Values.kueueViz.backend.nodeSelector | default (.Values.global | default dict).nodeSelector) }}
       nodeSelector:
       {{- toYaml . | nindent 8 }}
       {{- end }}

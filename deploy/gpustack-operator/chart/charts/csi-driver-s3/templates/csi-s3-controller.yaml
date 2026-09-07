@@ -43,10 +43,9 @@ spec:
                 {{- end}}
     {{- end }}
       nodeSelector:
-        kubernetes.io/os: linux
-{{- with .Values.controller.nodeSelector }}
-{{ toYaml . | indent 8 }}
-{{- end }}
+{{- $placement := dict "kubernetes.io/os" "linux" }}
+{{- $selector := .Values.controller.nodeSelector | default (.Values.global | default dict).nodeSelector }}
+{{ merge $placement (deepCopy ($selector | default dict)) | toYaml | indent 8 }}
       priorityClassName: {{ .Values.controller.priorityClassName }}
       securityContext:
         seccompProfile:

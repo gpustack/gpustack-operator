@@ -45,7 +45,28 @@ global:
   imagePullPolicy: ""
   # -- Image pull secrets applied to all workloads.
   imagePullSecrets: []
-  # -- Node selector applied to all workloads when a component does not set its own.
+  # -- Node selector applied to every long-running workload this release deploys, when the
+  # component sets none of its own: the worker, the device managers, and the subcharts'
+  # control planes — Kueue's manager and its optional KueueViz, NFD's master and gc, the CSI
+  # controllers. A component-level `nodeSelector`, when non-empty, REPLACES this value
+  # entirely (no merging); the device managers and the CSI controllers merge it instead,
+  # since their own selectors state a requirement (a manufacturer's PCI vendor, an OS)
+  # rather than a placement.
+  #
+  # Two sets of workloads are deliberately left out.
+  #
+  # The ones that have to cover the nodes they serve: NFD's worker and topology updater, and
+  # the CSI node plugins. Confining NFD's worker would leave every node outside the selector
+  # unlabelled — including the `feature.node.kubernetes.io/pci-*.present` labels the device
+  # managers and a GPUStack worker select on — so a selector meant to confine this release
+  # would end up scheduling nothing at all.
+  #
+  # And the hook Jobs, which Helm runs outside the window where this release's workloads
+  # exist: before they are created, and after they are gone. A selector naming a label the
+  # release itself produces would leave the pre-install hook Pending with nothing able to
+  # satisfy it, because the workload that applies the label is in the manifest that hook
+  # gates. An NFD label is the obvious way to write "only GPU nodes" and would deadlock a
+  # fresh install, so the hooks stay schedulable wherever the cluster will take them.
   nodeSelector: {}
   # -- Configure cert-manager integration for every serving certificate this release needs: the
   # worker's webhook certificate and Kueue's. It lives under `global` because Kueue is a vendored

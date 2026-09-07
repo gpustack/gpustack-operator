@@ -1,0 +1,22 @@
+--- a/templates/master.yaml
++++ b/templates/master.yaml
+@@ -166,7 +166,7 @@
+             items:
+               - key: nfd-master.conf
+                 path: nfd-master.conf
+-    {{- with .Values.master.nodeSelector }}
++    {{- with (.Values.master.nodeSelector | default (.Values.global | default dict).nodeSelector) }}
+       nodeSelector:
+         {{- toYaml . | nindent 8 }}
+       {{- end }}
+--- a/templates/nfd-gc.yaml
++++ b/templates/nfd-gc.yaml
+@@ -115,7 +115,7 @@
+           - name: http
+             containerPort: {{ .Values.gc.port | default "8080"}}
+ 
+-    {{- with .Values.gc.nodeSelector }}
++    {{- with (.Values.gc.nodeSelector | default (.Values.global | default dict).nodeSelector) }}
+       nodeSelector:
+         {{- toYaml . | nindent 8 }}
+       {{- end }}
