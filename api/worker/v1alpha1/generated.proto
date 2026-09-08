@@ -2153,10 +2153,12 @@ message KVCachePoolBinding {
 message KVCachePoolBindingDomain {
   // Name is the domain, and it becomes the storage layer's tenant_id verbatim.
   //
-  // It must be claimed by no other Binding CLUSTER-WIDE, which the webhook enforces: two Bindings
-  // on one domain would share cache — possibly intended — but collide on one quota ledger, which
-  // never is. Uniqueness is cluster-wide rather than per pool because one master can serve several
-  // pools and the tenant space is master-global.
+  // It must be claimed by no other Binding ON A MASTER THAT SERVES THIS BINDING'S POOL, which the
+  // webhook enforces: two Bindings on one domain over one master would share cache — possibly
+  // intended — but collide on one quota ledger, which never is. Uniqueness is per master rather
+  // than per pool because one master can serve several pools and the tenant space is
+  // master-global, and it is not cluster-wide because two masters hold two ledgers: the same
+  // domain on a pool another backend serves collides with nothing.
   //
   // The accepted shape is a DNS-1123 label, checked by the webhook. That is strictly inside what
   // the master accepts as a tenant_id and is what a Kubernetes object name already looks like, so

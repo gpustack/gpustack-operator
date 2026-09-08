@@ -101,18 +101,20 @@ identity is what makes the rest follow. Everything below is about *registering* 
 somebody else registered is a separate question, answered in
 [What a Binding does not do](#what-a-binding-does-not-do).
 
-- **A domain name is claimed cluster-wide.** A second Binding naming a domain another Binding already
-  holds is **rejected at admission**, with a message naming the holder — anywhere in the cluster, not
-  just in that namespace.
+- **A domain name is claimed per master.** A second Binding naming a domain another Binding already
+  holds is **rejected at admission** when one backend serves both Bindings' pools — anywhere in the
+  cluster, not just in that namespace — with a message naming the holder and the shared backend. The
+  same name against a pool a *different* backend serves is admitted: two masters hold two ledgers,
+  so the claims collide with nothing.
 - **A workload may not *register* its own domain.** It necessarily sends a domain name at runtime —
   that is how the store is addressed — but on a multi-tenant master the name has to be one an admin
   already registered through a Binding. Every distinct registered name is a new tenant with its own
   ceiling, so a workload free to mint them would draw a fresh ceiling for each. Registration stays on
   the object an admin controls; sending an unregistered name gets `TENANT_NOT_REGISTERED`, not a new
   quota.
-- **Sharing a pool works; sharing a domain does not.** Two namespaces on one pool is the ordinary
-  case. Two Bindings on one domain would share cache — sometimes the intent — but collide on one
-  ledger, which never is.
+- **Sharing a pool works; sharing a domain on one master does not.** Two namespaces on one pool is
+  the ordinary case. Two Bindings on one domain over one master would share cache — sometimes the
+  intent — but collide on one ledger, which never is.
 
 `status.domains` on the pool lists the domains its Bindings registered, and
 `DomainExclusive` on the Binding reports whether this Binding still holds its own name, and

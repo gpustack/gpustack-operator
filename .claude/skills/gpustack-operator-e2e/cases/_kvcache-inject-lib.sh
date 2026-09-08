@@ -119,8 +119,8 @@ kvi_wait_for() {
 # CALLER CONTRACT: arm `trap kvi_teardown EXIT` BEFORE calling this. The cluster-scoped backend is
 # created on the first line and five of the returns below come after it, so a caller that arms the
 # trap on success leaks a whole fixture whenever readiness times out. The worst piece to leak is the
-# "default" Binding: its domain name is claimed cluster-wide, so it makes every later run of this
-# family fail in setup, on a different case, with no trace of who left it.
+# "default" Binding: its domain name is claimed per master, so on this backend it makes every later
+# run of this family fail in setup, on a different case, with no trace of who left it.
 #
 # One domain, deliberately: a second one on this backend would be the collision the Binding-side check
 # does not yet prevent, and no case in this family creates one.

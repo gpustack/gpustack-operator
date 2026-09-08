@@ -22,8 +22,11 @@
 #                    ledger, and a master that cannot persist its quota policy accepts no quota.
 # Neither may pass silently: each raises a named Condition and holds the pool away
 #                    from Ready.
-#                (4) THE EXCLUSIVE REUSE DOMAIN. A second Binding claiming a domain name already
-#                    registered is refused at admission, in another namespace, with the holder named.
+#                (4) THE EXCLUSIVE REUSE DOMAIN, PER MASTER. A second Binding claiming a domain
+#                    name already registered on the SAME master is refused at admission, in another
+#                    namespace, with the holder named — while the same name against a pool a
+#                    DIFFERENT backend serves is admitted, because two masters hold two ledgers
+#                    (#166).
 #
 # Two assumptions the unit tests cannot reach are asserted here rather than inherited:
 #              that the leader's image can actually run the init container's shell, and that a
@@ -49,7 +52,8 @@
 #              - each Binding's effectiveQuota is its share of the master's allocatable capacity;
 #              - the backend's own usedBy carries the pool's claim with an EMPTY namespace, exactly
 #                once after a second converging pass;
-#              - a third Binding reusing a registered domain name is refused by the API server;
+#              - a third Binding reusing a registered domain name on the same master is refused by
+#                the API server, and the same name on another master's pool is admitted;
 #              - a Binding whose usedBy is non-empty cannot be deleted, and the condition names the
 #                holder;
 #              - multi-tenancy turned off under the pool raises MultiTenancyDisabled;
@@ -74,9 +78,9 @@ E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/
 NS="${1:?usage: case-43.sh <NS>}"
 IMAGE="${E2E_MOONCAKE_IMAGE:-docker.io/kvcacheai/mooncake:0.3.13}"
 
-# Every name carries the same suffix. A reuse domain name is unique CLUSTER-WIDE — the webhook
-# enforces it across namespaces — so a fixed name would collide with an interrupted earlier run and
-# fail this case for a reason that is not about the operator.
+# Every name carries the same suffix. A reuse domain name is unique PER MASTER — the webhook
+# enforces it across every pool a backend serves — so a fixed name would collide with an
+# interrupted earlier run and fail this case for a reason that is not about the operator.
 #
 # LC_ALL=C and the disabled pipefail are both load-bearing: under a UTF-8 locale tr dies on
 # /dev/urandom, and with pipefail on the SIGPIPE from head turns a trailing `|| echo $$` into an
@@ -493,9 +497,10 @@ else
   record FAIL "a second pass writes no second claim" "was '${claim}', now '${claim_again}'"
 fi
 
-echo "== 5. a reuse domain belongs to one binding, cluster-wide =="
+echo "== 5. a reuse domain belongs to one binding per master =="
 
-# Applied into a THIRD namespace, so this proves the check is cluster-wide rather than per-namespace.
+# Applied into a THIRD namespace, so this proves the check is not per-namespace. The duplicate
+# points at the SAME pool, hence the same master: one ledger entry cannot carry two ceilings.
 dup_out="$(kubectl apply -f - 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: KVCachePoolBinding
@@ -507,12 +512,65 @@ spec:
 YAML
 )"
 if echo "$dup_out" | grep -q "already registered by ${NS_A}/bind-a"; then
-  record PASS "a duplicate reuse domain is refused, naming the holder" \
+  record PASS "a duplicate reuse domain on the same master is refused, naming the holder" \
     "admission names ${NS_A}/bind-a, which is what an operator needs to go and look at"
 else
-  record FAIL "a duplicate reuse domain is refused, naming the holder" \
+  record FAIL "a duplicate reuse domain on the same master is refused, naming the holder" \
     "apply said: $(echo "$dup_out" | tr '\n' ' ' | cut -c1-160)"
 fi
+
+# The #166 half: the same domain against a pool a DIFFERENT backend serves must be ADMITTED — two
+# masters hold two ledgers, and the refusal that used to fire here is what broke every second
+# backend's "default" domain. The second backend is never waited on: admission reads the pool's
+# spec.backends, and a master that has not mounted yet is still a different master.
+kubectl apply -f - >/dev/null 2>&1 <<YAML
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: KVCacheBackend
+metadata:
+  name: kvcb-other-${SFX}
+spec:
+  type: Mooncake
+  image: ${IMAGE}
+  connection:
+    managed:
+      leader:
+        multiTenancy: true
+      members:
+        - nodeSelector: {kubernetes.io/os: linux}
+          medium: DRAM
+          capacityPerMember: 1Gi
+---
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: KVCachePool
+metadata:
+  name: kvcp-other-${SFX}
+spec:
+  backends: [kvcb-other-${SFX}]
+  quota: {total: 1Gi}
+YAML
+other_out="$(kubectl apply -f - 2>&1 <<YAML
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: KVCachePoolBinding
+metadata: {name: bind-other, namespace: ${NS_B}}
+spec:
+  poolRef: {name: kvcp-other-${SFX}}
+  quotaCeiling: 1Gi
+  domain: {name: ${DOM_A}, blockSize: 16, dtype: bfloat16}
+YAML
+)"
+if echo "$other_out" | grep -q 'created\|configured'; then
+  record PASS "the same domain on a pool another master serves is admitted" \
+    "bind-other took ${DOM_A} against kvcb-other-${SFX} while ${NS_A}/bind-a holds it here"
+else
+  record FAIL "the same domain on a pool another master serves is admitted" \
+    "apply said: $(echo "$other_out" | tr '\n' ' ' | cut -c1-160)"
+fi
+kubectl -n "$NS_B" delete kvcachepoolbindings.worker.gpustack.ai bind-other \
+  --ignore-not-found --wait=false >/dev/null 2>&1 || true
+kubectl delete kvcachepools.worker.gpustack.ai "kvcp-other-${SFX}" \
+  --ignore-not-found --wait=false >/dev/null 2>&1 || true
+kubectl delete kvcachebackends.worker.gpustack.ai "kvcb-other-${SFX}" \
+  --ignore-not-found --wait=false >/dev/null 2>&1 || true
 
 echo "== 6. a binding a workload holds cannot be deleted =="
 
