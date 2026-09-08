@@ -20,8 +20,10 @@
 #                    operator's — see the note on criterion 2 below before reading a red run.
 #                (3) THE PRECONDITIONS FAIL LOUDLY. A master without multi-tenancy holds no tenant
 #                    ledger, and a master that cannot persist its quota policy accepts no quota.
-# Neither may pass silently: each raises a named Condition and holds the pool away
-#                    from Ready.
+#                    Neither may pass silently: the first is refused at ADMISSION since #245 (the
+#                    toggle names the consuming pool; the pool's own MultiTenancyDisabled Condition
+#                    remains as the net for paths admission cannot see), the second raises a named
+#                    Condition and holds the pool away from Ready.
 #                (4) THE EXCLUSIVE REUSE DOMAIN, PER MASTER. A second Binding claiming a domain
 #                    name already registered on the SAME master is refused at admission, in another
 #                    namespace, with the holder named — while the same name against a pool a
@@ -56,7 +58,8 @@
 #                the API server, and the same name on another master's pool is admitted;
 #              - a Binding whose usedBy is non-empty cannot be deleted, and the condition names the
 #                holder;
-#              - multi-tenancy turned off under the pool raises MultiTenancyDisabled;
+#              - multi-tenancy toggled off under a bound pool is refused at admission, naming the
+#                pool, and the refusal leaves the pool untouched;
 #              - a policy source the master cannot write raises QuotaPolicyNotWritable;
 #              - a pool over a backend with no mounted member is not Ready and says why.
 #
@@ -629,23 +632,31 @@ echo "== 7. a master without a tenant ledger fails loudly =="
 
 # Turned off UNDER the bound pool, never started that way: admission refuses a pool whose backend
 # runs without multi-tenancy, so a backend started that way would never acquire the pool that
-# reports the Condition. F5 calls this a runtime observation for exactly this reason.
-kubectl patch kvcachebackends.worker.gpustack.ai "$BACKEND" --type=merge \
-  -p '{"spec":{"connection":{"managed":{"leader":{"multiTenancy":false}}}}}' >/dev/null 2>&1
-
-mt_reason=""
-for _ in $(seq 1 40); do
-  mt_reason="$(kubectl get kvcachepools.worker.gpustack.ai "$POOL" \
-    -o jsonpath='{.status.conditions[?(@.type=="QuotaLedgerAvailable")].reason}' 2>/dev/null)"
-  [ "$mt_reason" = "MultiTenancyDisabled" ] && break
-  sleep 3
-done
-pool_phase="$(kubectl get kvcachepools.worker.gpustack.ai "$POOL" -o jsonpath='{.status.phase}' 2>/dev/null)"
-if [ "$mt_reason" = "MultiTenancyDisabled" ] && [ "$pool_phase" != "Ready" ]; then
-  record PASS "multi-tenancy off raises its own reason and holds the pool back" \
-    "QuotaLedgerAvailable=False MultiTenancyDisabled, phase=${pool_phase}"
+# reports the Condition. And since #245 the toggle itself is refused at admission too — the backend
+# webhook names the consuming pool rather than letting the ledger vanish under it — so the loud
+# failure this section asserts now has TWO layers: the refusal at admission, and the pool's own
+# Condition as the safety net for the paths admission cannot see. The pool staying Ready throughout
+# is part of the verdict: the ledger was never yanked.
+mt_patch_out="$(kubectl patch kvcachebackends.worker.gpustack.ai "$BACKEND" --type=merge \
+  -p '{"spec":{"connection":{"managed":{"leader":{"multiTenancy":false}}}}}' 2>&1)"
+if echo "$mt_patch_out" | grep -q "multi-tenancy cannot be turned off while KVCachePool/${POOL}"; then
+  record PASS "multi-tenancy off under a bound pool is refused at admission, naming the pool" \
+    "the refusal names KVCachePool/${POOL}, which is what an operator needs to go and look at"
 else
-  record FAIL "multi-tenancy off raises its own reason and holds the pool back" \
+  record FAIL "multi-tenancy off under a bound pool is refused at admission, naming the pool" \
+    "patch said: $(echo "$mt_patch_out" | tr '\n' ' ' | cut -c1-160)"
+fi
+
+# The toggle was refused, so the pool must be exactly as it was — a refusal that still perturbed
+# the ledger would be the refusal lying.
+pool_phase="$(kubectl get kvcachepools.worker.gpustack.ai "$POOL" -o jsonpath='{.status.phase}' 2>/dev/null)"
+mt_reason="$(kubectl get kvcachepools.worker.gpustack.ai "$POOL" \
+  -o jsonpath='{.status.conditions[?(@.type=="QuotaLedgerAvailable")].reason}' 2>/dev/null)"
+if [ "$pool_phase" = "Ready" ] && [ "$mt_reason" = "Available" ]; then
+  record PASS "the refused toggle leaves the pool untouched" \
+    "phase=Ready, QuotaLedgerAvailable=Available — the ledger was never yanked"
+else
+  record FAIL "the refused toggle leaves the pool untouched" \
     "reason='${mt_reason:-<none>}' phase='${pool_phase:-<none>}'"
 fi
 
