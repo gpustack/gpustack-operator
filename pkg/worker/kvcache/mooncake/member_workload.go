@@ -53,8 +53,10 @@ const (
 	// leaving the leader to time the client out after its client_ttl instead.
 	//
 	// It is NOT a drain window for the memory segment. Nothing reachable from a Pod's shutdown can
-	// drain one: the member's own API takes a graceful unmount with a grace period, but it wants
-	// the segment ids and no route returns a client its own.
+	// drain one: the member's own API takes a graceful unmount with a grace period, but it wants the
+	// segment ids, and a member cannot tell which of the leader's listed segments are its own. The
+	// listing carries the ids, but a member never reads its own client_id, which is the field that
+	// separates two members sharing an address.
 	//
 	// A group with a local disk tier adds its scale-in grace ON TOP of this, rather than sharing
 	// it, which is what keeps the kubelet from killing the container in the middle of a wait the
