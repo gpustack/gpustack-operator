@@ -186,6 +186,9 @@ kubectl uncordon <node>
 
 **See also** — [Installation Modes](../architecture/installation-modes.md) (these knobs need chart mode; image
 mode has no user-values channel) ·
-[Internals](../architecture/internals.md#worker-startup-order-matters) · [Settings](../settings.md)
+[Internals](../architecture/internals.md#worker-startup-order-matters) · [Settings](../settings.md) ·
+[KV Cache Backend](../kv-cache/backend.md#high-availability) — a `KVCacheBackend`'s leader elects the
+same way but is **not** a chart component: it is a custom resource, so its replica count is a field on
+the object rather than a value here
 
 **Next** → [NVIDIA MIG Operations](nvidia-mig.md).
