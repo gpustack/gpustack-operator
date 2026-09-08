@@ -36,6 +36,17 @@ variable "cpu_instance_types" {
   default     = ["c6a.4xlarge", "c7a.4xlarge"]
 }
 
+variable "cpu_node_count" {
+  description = "Number of nodes in the CPU node group (min = max = this)."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.cpu_node_count > 0 && var.cpu_node_count == floor(var.cpu_node_count)
+    error_message = "cpu_node_count must be a positive whole number."
+  }
+}
+
 variable "gpu_instance_types" {
   # Keyed by group name so each GPU node group has a stable key (gpu-<name>).
   # Adding a key is a +create only; editing a key's instance-type list replaces
@@ -78,6 +89,25 @@ variable "node_boot_disk_size_gb" {
   validation {
     condition     = var.node_boot_disk_size_gb > 0 && var.node_boot_disk_size_gb == floor(var.node_boot_disk_size_gb)
     error_message = "node_boot_disk_size_gb must be a positive whole number."
+  }
+}
+
+variable "node_instance_store_count" {
+  # This module's launch template maps xvda explicitly, which drops the AMI's
+  # default ephemeral mappings, so instance-store devices must be re-declared.
+  # The count applies to every node group and must not exceed the instance
+  # type's disk count, e.g. i7ie.xlarge has 1 (check with:
+  #   aws ec2 describe-instance-types --instance-types <type> \
+  #     --query 'InstanceTypes[0].InstanceStorageInfo.Disks').
+  # On Nitro instances the device_name in the mapping is ignored; the devices
+  # show up as /dev/nvme1n1 and onward.
+  description = "Number of instance-store (ephemeral NVMe) devices to map on every node group; 0 maps none."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.node_instance_store_count >= 0 && var.node_instance_store_count == floor(var.node_instance_store_count) && var.node_instance_store_count <= 24
+    error_message = "node_instance_store_count must be a whole number between 0 and 24."
   }
 }
 

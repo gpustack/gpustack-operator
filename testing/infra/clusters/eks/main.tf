@@ -36,6 +36,26 @@ locals {
     var.node_boot_disk_type.iops != null ? { iops = var.node_boot_disk_type.iops } : {},
     var.node_boot_disk_type.throughput != null ? { throughput = var.node_boot_disk_type.throughput } : {},
   )
+
+  # Instance-store devices take letters b..y (xvda is the boot volume).
+  node_instance_store_letters = ["b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y"]
+  node_instance_store_mappings = {
+    for i in range(var.node_instance_store_count) :
+    "ephemeral${i}" => {
+      device_name  = "/dev/xvd${local.node_instance_store_letters[i]}"
+      virtual_name = "ephemeral${i}"
+    }
+  }
+
+  node_block_device_mappings = merge(
+    {
+      xvda = {
+        device_name = "/dev/xvda"
+        ebs         = local.node_boot_disk_ebs
+      }
+    },
+    local.node_instance_store_mappings,
+  )
 }
 
 module "vpc" {
@@ -83,8 +103,9 @@ locals {
       cpu = {
         # https://docs.aws.amazon.com/eks/latest/APIReference/API_Nodegroup.html#AmazonEKS-Type-Nodegroup-amiType
         ami_type       = "AL2023_x86_64_STANDARD"
-        max_size       = 1
-        min_size       = 1
+        desired_size   = var.cpu_node_count
+        max_size       = var.cpu_node_count
+        min_size       = var.cpu_node_count
         instance_types = var.cpu_instance_types
         key_name       = aws_key_pair.accessor.key_name
         network_interfaces = [
@@ -92,12 +113,7 @@ locals {
             associate_public_ip_address = true
           }
         ]
-        block_device_mappings = {
-          xvda = {
-            device_name = "/dev/xvda"
-            ebs         = local.node_boot_disk_ebs
-          }
-        }
+        block_device_mappings = local.node_block_device_mappings
       }
     },
     {
@@ -113,12 +129,7 @@ locals {
             associate_public_ip_address = true
           }
         ]
-        block_device_mappings = {
-          xvda = {
-            device_name = "/dev/xvda"
-            ebs         = local.node_boot_disk_ebs
-          }
-        }
+        block_device_mappings = local.node_block_device_mappings
       }
     }
   )
