@@ -26,8 +26,12 @@
 #              or formatting that directory is the deployer's, deliberately: the operator does
 #              not create or chown it either, and a case that silently landed the tier on the
 #              root filesystem would be verifying the wrong disk. On an i7ie node the prep is:
-#              mkfs.xfs /dev/nvme1n1 && mount it at the path && chmod 0777. No GPU, no RDMA
-#              (members are DRAM over TCP). Needs the store image with the client bundled
+#              mkfs.xfs /dev/nvme1n1 && mount it at the path && chmod 0777 — and if the prep
+#              runs from a `kubectl debug` pod, the MOUNT must be made in the host's mount
+#              namespace (`chroot /host nsenter -t 1 -m -- mount …`): a mount made in the
+#              debug container's own namespace dies with the pod, and the hostPath then lands
+#              on the node's root filesystem while everything still looks prepared. No GPU, no
+#              RDMA (members are DRAM over TCP). Needs the store image with the client bundled
 #              (E2E_MOONCAKE_IMAGE; the default carries it).
 #
 # Inputs:      All real, nothing mocked. Two KVCacheBackends, same shape apart from the leader's
