@@ -214,7 +214,7 @@ print("SETUP-RC %d" % rc)
 if rc != 0:
     sys.exit(0)
 
-payload = (b"case65-localdisk!" * (4 * 1024 * 1024 // 17))[:4 * 1024 * 1024]
+payload = (b"case65-localdisk!" * (4 * 1024 * 1024 // 17 + 1))[:4 * 1024 * 1024]
 digest = hashlib.sha256(payload).hexdigest()
 
 # Under the memory segment: 4 x 4MiB against 256Mi per member. These must write cleanly and,
@@ -364,7 +364,7 @@ print("SETUP-RC %d" % rc)
 if rc != 0:
     sys.exit(0)
 
-payload = (b"case65-onevict!" * (4 * 1024 * 1024 // 16))[:4 * 1024 * 1024]
+payload = (b"case65-onevict!" * (4 * 1024 * 1024 // 15 + 1))[:4 * 1024 * 1024]
 digest = hashlib.sha256(payload).hexdigest()
 
 # The oldest keys: eviction must push these to the tier once memory runs out.
