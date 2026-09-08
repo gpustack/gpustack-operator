@@ -101,6 +101,18 @@ variable "node_instance_store_count" {
   #     --query 'InstanceTypes[0].InstanceStorageInfo.Disks').
   # On Nitro instances the device_name in the mapping is ignored; the devices
   # show up as /dev/nvme1n1 and onward.
+  #
+  # WARNING (observed 2026-09-08, i7ie.xlarge, EKS 1.34, AL2023): the mapping
+  # itself is fine — a standalone instance with the same explicit ephemeral
+  # mapping gets /dev/nvme1n1 at boot. But on EKS nodes the
+  # aws-ec2-local-instance-store-csi-driver addon (enabled by default in this
+  # module, see enable_instance_store_csi_driver) claims every instance-store
+  # controller and DELETES the pre-existing namespace (nvme1n1) to reclaim it
+  # into its own NVMeDevice pool, re-creating namespaces only when a PVC is
+  # provisioned through its StorageClass. With the addon installed there is no
+  # raw /dev/nvme1n1 for hostPath/local-device use. Disable the addon (and
+  # reboot the nodes so the namespace is re-created) when you need the raw
+  # device.
   description = "Number of instance-store (ephemeral NVMe) devices to map on every node group; 0 maps none."
   type        = number
   default     = 0
@@ -109,6 +121,20 @@ variable "node_instance_store_count" {
     condition     = var.node_instance_store_count >= 0 && var.node_instance_store_count == floor(var.node_instance_store_count) && var.node_instance_store_count <= 24
     error_message = "node_instance_store_count must be a whole number between 0 and 24."
   }
+}
+
+variable "enable_instance_store_csi_driver" {
+  # The aws-ec2-local-instance-store-csi-driver EKS addon takes ownership of
+  # every instance-store NVMe controller on each node: on startup it deletes
+  # any namespace it does not own (e.g. the default nvme1n1 that Nitro
+  # surfaces) and hands capacity out only through PVCs bound to its
+  # StorageClass. That conflicts with node_instance_store_count, whose point
+  # is exposing the raw /dev/nvmeNn1 devices for hostPath-style use, so this
+  # defaults to false. Enable it only when workloads consume instance store
+  # via the driver's CSI volumes.
+  description = "Install the aws-ec2-local-instance-store-csi-driver EKS addon (CSI-managed instance store; deletes unmanaged NVMe namespaces such as the raw nvme1n1)."
+  type        = bool
+  default     = false
 }
 
 variable "switch_kube_context" {

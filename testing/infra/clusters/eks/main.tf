@@ -98,6 +98,11 @@ resource "aws_key_pair" "accessor" {
 }
 
 locals {
+  # Scheduled sweeps terminate untagged instances; DO_NOT_DELETE keeps the
+  # nodes of a live verification cluster alive. Merged into every node group,
+  # which propagates to the launch template's instance/volume/ENI tag specs.
+  node_group_tags = { DO_NOT_DELETE = "true" }
+
   node_groups = merge(
     {
       cpu = {
@@ -108,6 +113,7 @@ locals {
         min_size       = var.cpu_node_count
         instance_types = var.cpu_instance_types
         key_name       = aws_key_pair.accessor.key_name
+        tags           = local.node_group_tags
         network_interfaces = [
           {
             associate_public_ip_address = true
@@ -124,6 +130,7 @@ locals {
         min_size       = 0
         instance_types = types
         key_name       = aws_key_pair.accessor.key_name
+        tags           = local.node_group_tags
         network_interfaces = [
           {
             associate_public_ip_address = true
@@ -182,27 +189,31 @@ module "eks" {
   name               = local.eks_name
   kubernetes_version = var.release
 
-  addons = {
-    cert-manager              = {}
-    coredns                   = {}
-    eks-node-monitoring-agent = {}
-    external-dns              = {}
-    kube-proxy                = {}
-    metrics-server            = {}
-    # aws-ebs-csi-driver = {
-    #   service_account_role_arn = module.ebs_csi_driver_irsa.arn
-    # }
-    # aws-efs-csi-driver = {
-    #   service_account_role_arn = module.efs_csi_driver_irsa.arn
-    # }
-    aws-ec2-local-instance-store-csi-driver = {}
-    eks-pod-identity-agent = {
-      before_compute = true
-    }
-    vpc-cni = {
-      before_compute = true
-    }
-  }
+  addons = merge(
+    {
+      cert-manager              = {}
+      coredns                   = {}
+      eks-node-monitoring-agent = {}
+      external-dns              = {}
+      kube-proxy                = {}
+      metrics-server            = {}
+      # aws-ebs-csi-driver = {
+      #   service_account_role_arn = module.ebs_csi_driver_irsa.arn
+      # }
+      # aws-efs-csi-driver = {
+      #   service_account_role_arn = module.efs_csi_driver_irsa.arn
+      # }
+      eks-pod-identity-agent = {
+        before_compute = true
+      }
+      vpc-cni = {
+        before_compute = true
+      }
+    },
+    var.enable_instance_store_csi_driver ? {
+      aws-ec2-local-instance-store-csi-driver = {}
+    } : {},
+  )
 
   endpoint_public_access                   = true
   enable_cluster_creator_admin_permissions = true
