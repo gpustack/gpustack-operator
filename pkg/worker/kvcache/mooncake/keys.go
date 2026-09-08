@@ -56,6 +56,15 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 		"enable_ha",
 		"ha_backend_connstring",
 		"ha_backend_type",
+		// The address the election ADVERTISES, and the interface the artifact would derive it
+		// from. Reserved for the same reason and in the same breath, even though only the first is
+		// rendered: the artifact folds rpc_address and rpc_port into the local_hostname it
+		// campaigns with, so that string is both the election's identity and the address a member
+		// following the Lease is handed. A passthrough here does not shade a setting -- it decides
+		// which host every member connects to, and gets no say in whether the Pod can be reached
+		// there.
+		"rpc_address",
+		"rpc_interface",
 		// Both halves of the disk tier's leader switch. They are derived from leader.offload, and
 		// reaching them through the hatch would put the tier's two sides out of step with the
 		// admission rule that keeps them paired — a leader offloading with no member declaring a
@@ -72,12 +81,6 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 		// seeds nor rewrites — every quota write would land somewhere nothing reads, and the pool
 		// would go on reporting Ready over it.
 		"tenant_quota_connector_uri",
-	},
-
-	// The artifact accepts an explicit RPC address or the interface to derive one from. Setting
-	// both leaves the address it binds decided by the artifact rather than by the manifest.
-	Exclusive: [][]string{
-		{"rpc_address", "rpc_interface"},
 	},
 
 	Forbidden: map[string]string{

@@ -2,6 +2,7 @@ package mooncake
 
 import (
 	"fmt"
+	"math"
 
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
@@ -30,6 +31,11 @@ const (
 	labelKeyComponent = "app.kubernetes.io/component"
 	labelValueName    = "kv-cache-backend"
 	labelValueLeader  = "leader"
+	// Outside the selector, and named here rather than written inline because the HA accounts
+	// carry it too and a second spelling is how the two sets of objects stop being findable
+	// together.
+	labelKeyPartOf   = "app.kubernetes.io/part-of"
+	labelValuePartOf = "gpustack-operator-worker"
 
 	// leaderRPCPortName and leaderAdminPortName name the two published ports. They are names
 	// rather than numbers on the Service so a consumer can ask for a role, and because the two
@@ -118,6 +124,120 @@ func LeaderEndpoints(kvcb *workercore.KVCacheBackend) []workercore.KVCacheBacken
 	}
 }
 
+// LeaderReplicas is how many leader processes the backend RUNS, which is spec.replicas only once
+// something elects between them.
+//
+// REQUIRED: the clamp is the split brain, not defensive tidiness. The schema's `maximum=5` caps the
+// value but cannot express a cross-field pairing, and the schema is the documented authority exactly
+// where the webhook is NOT installed -- so that cluster admits `replicas: 3` with no
+// `highAvailability`, and three masters with nothing electing between them each serve, each
+// allocating against one pool. One process is the only safe reading of that object, and the
+// divergence from spec.replicas is visible in `kubectl get deploy` rather than in a log line.
+//
+// Everything else the replica count decides -- the update strategy, the rollout deadline -- reads
+// this rather than the field, so the three cannot disagree about whether there is an election.
+func LeaderReplicas(leader workercore.KVCacheBackendLeader) int32 {
+	if !leaderNeedsAPIAccess(leader) {
+		return 1
+	}
+
+	if leader.Replicas != nil {
+		return *leader.Replicas
+	}
+
+	return 1
+}
+
+// leaderUpdateStrategy picks how the leader's Deployment is updated, and the two answers are
+// opposites rather than variations.
+//
+// SINGLE REPLICA: Recreate. A RollingUpdate's maxSurge defaults to 25%, which ROUNDS UP -- to one,
+// against one desired replica -- so the new master starts before the old one stops and the two run
+// at once. Without an election that is a split brain, on every image or flag change rather than
+// never. The cost is a gap with no master, which is the right trade: a member that loses its master
+// keeps its segment and re-registers, while two masters allocating against one pool cannot be
+// reconciled after the fact.
+//
+// SEVERAL REPLICAS: RollingUpdate, and both parameters invert.
+//   - maxSurge may exceed zero, because the lease admits one leader however many processes run.
+//     The surge that is a split brain above is safe here.
+//   - maxUnavailable is replicas, not replicas-1, and the difference is a permanent deadlock rather
+//     than a slow rollout. The controller scales the old ReplicaSet down only while
+//     `availablePodCount > replicas - maxUnavailable`; exactly one replica is ever available here,
+//     because the standbys deliberately are not ready, so replicas-1 makes that `1 > 1` and the old
+//     leader is never removed -- while the new replicas cannot become ready until it releases the
+//     Lease. Only maxUnavailable == replicas takes the floor to zero and lets the old leader go.
+//
+// The surge still earns its place at that setting: the new replicas are up and contending for the
+// Lease before the old leader is removed, so the gap is an election rather than a Pod start.
+func leaderUpdateStrategy(replicas int32) apps.DeploymentStrategy {
+	if replicas <= 1 {
+		return apps.DeploymentStrategy{Type: apps.RecreateDeploymentStrategyType}
+	}
+
+	return apps.DeploymentStrategy{
+		Type: apps.RollingUpdateDeploymentStrategyType,
+		RollingUpdate: &apps.RollingUpdateDeployment{
+			MaxSurge:       ptr.To(intstr.FromInt32(1)),
+			MaxUnavailable: ptr.To(intstr.FromInt32(replicas)),
+		},
+	}
+}
+
+// leaderProgressDeadlineSeconds disables the rollout timeout once there are standbys, and leaves it
+// to the API server's default otherwise.
+//
+// The timeout cannot discriminate on this workload. DeploymentComplete requires availableReplicas to
+// equal spec.replicas, which is permanently false when only the leader is ready, so the Progressing
+// condition stops advancing as soon as the rollout finishes -- exactly as it would if the image
+// could not be pulled. Both outcomes present as a stale timestamp, and a check whose two answers are
+// identical is not a check.
+//
+// REQUIRED: whoever removes this has to bring the replacement with it. The predicate that does
+// discriminate is DeploymentComplete without its availableReplicas clause: updatedReplicas and
+// replicas both reach spec.replicas normally here.
+func leaderProgressDeadlineSeconds(replicas int32) *int32 {
+	if replicas <= 1 {
+		return nil
+	}
+
+	return ptr.To(int32(math.MaxInt32))
+}
+
+// leaderEnv is every value the rendered argv refers to, and nothing else. A variable defined here
+// with no flag reading it would be dead weight; a flag referring to one not defined here reaches
+// the process as the literal "$(NAME)".
+//
+// The Pod IP is the one that comes and goes, because -rpc_address is rendered only under high
+// availability -- see the election group in leader_flags.go for what that address decides.
+func leaderEnv(kvcb *workercore.KVCacheBackend) []core.EnvVar {
+	env := []core.EnvVar{
+		{
+			Name: LeaderPodNameEnv,
+			ValueFrom: &core.EnvVarSource{
+				FieldRef: &core.ObjectFieldSelector{FieldPath: "metadata.name"},
+			},
+		},
+		{
+			Name: LeaderPodNamespaceEnv,
+			ValueFrom: &core.EnvVarSource{
+				FieldRef: &core.ObjectFieldSelector{FieldPath: "metadata.namespace"},
+			},
+		},
+	}
+
+	if leaderNeedsAPIAccess(kvcb.Spec.Connection.Managed.Leader) {
+		env = append(env, core.EnvVar{
+			Name: LeaderPodIPEnv,
+			ValueFrom: &core.EnvVarSource{
+				FieldRef: &core.ObjectFieldSelector{FieldPath: "status.podIP"},
+			},
+		})
+	}
+
+	return env
+}
+
 // leaderSelectorLabels is what the Deployment selects its Pods by and what the Service fronts.
 //
 // A Deployment's spec.selector is IMMUTABLE. An update carrying a different one is rejected, and
@@ -149,7 +269,7 @@ func LeaderPodBackendName(labels map[string]string) string {
 // forever, and this one is presentation.
 func leaderPodLabels(kvcb *workercore.KVCacheBackend) map[string]string {
 	labels := leaderSelectorLabels(kvcb)
-	labels["app.kubernetes.io/part-of"] = "gpustack-operator-worker"
+	labels[labelKeyPartOf] = labelValuePartOf
 	return labels
 }
 
@@ -171,31 +291,29 @@ func RenderLeaderDeployment(kvcb *workercore.KVCacheBackend, image string) *apps
 			Labels:    leaderPodLabels(kvcb),
 		},
 		Spec: apps.DeploymentSpec{
-			// One, and only one. Admission refuses anything else, and a second replica here would
-			// be two masters with two views of the same segments rather than a spare.
-			Replicas: ptr.To[int32](1),
-			// Recreate, because the default would undo the line above during every update. A
-			// RollingUpdate's maxSurge defaults to 25%, which ROUNDS UP — to one, against one
-			// desired replica — so the new master is started before the old one is stopped and the
-			// two run at once. That is the split brain the replica count exists to prevent, and it
-			// would happen on every image or flag change rather than never.
-			//
-			// The cost is a gap with no master. It is the right trade: a member that loses its
-			// master keeps its segment and re-registers, while two masters allocating against one
-			// pool cannot be reconciled after the fact.
-			Strategy: apps.DeploymentStrategy{Type: apps.RecreateDeploymentStrategyType},
-			Selector: &meta.LabelSelector{MatchLabels: leaderSelectorLabels(kvcb)},
+			Replicas:                ptr.To(LeaderReplicas(leader)),
+			Strategy:                leaderUpdateStrategy(LeaderReplicas(leader)),
+			ProgressDeadlineSeconds: leaderProgressDeadlineSeconds(LeaderReplicas(leader)),
+			Selector:                &meta.LabelSelector{MatchLabels: leaderSelectorLabels(kvcb)},
 			Template: core.PodTemplateSpec{
 				ObjectMeta: meta.ObjectMeta{Labels: leaderPodLabels(kvcb)},
 				Spec: core.PodSpec{
-					// Nothing in this workload talks to the API server — it is a third-party store
-					// binary — and the default is to mount a service-account token it never asked
-					// for into it. Rendered rather than left to the server, so the aligner converges
-					// it: a value the renderer omits is one the API server fills in as true.
-					AutomountServiceAccountToken: ptr.To(false),
+					// Without HA this workload does not talk to the API server — it is a third-party
+					// store binary — and the default is to mount a service-account token it never
+					// asked for into it. Rendered rather than left to the server, so the aligner
+					// converges it: a value the renderer omits is one the API server fills in as true.
+					//
+					// With HA it DOES talk to the API server: the leadership backend elects through a
+					// Lease and reads its credentials from the mounted token, falling back to a
+					// kubeconfig that does not exist in this image. Both this flag and the account
+					// below move together, because a named account with no token mounted fails exactly
+					// the same way as no account at all -- and that failure is silent, a leader that
+					// retries every second and never becomes ready.
+					AutomountServiceAccountToken: ptr.To(leaderNeedsAPIAccess(leader)),
+					ServiceAccountName:           leaderServiceAccountName(kvcb),
 					ImagePullSecrets:             kvcb.Spec.ImagePullSecrets,
 					Containers: []core.Container{
-						leaderContainerSpec(leader, image, kvcache.EffectivePullPolicy(kvcb, image)),
+						leaderContainerSpec(kvcb, image, kvcache.EffectivePullPolicy(kvcb, image)),
 					},
 				},
 			},
@@ -227,8 +345,10 @@ func RenderLeaderDeployment(kvcb *workercore.KVCacheBackend, image string) *apps
 // cache bytes — the members are the side that needs the host — so anything here would be a privilege
 // nobody asked for.
 func leaderContainerSpec(
-	leader workercore.KVCacheBackendLeader, image string, pullPolicy core.PullPolicy,
+	kvcb *workercore.KVCacheBackend, image string, pullPolicy core.PullPolicy,
 ) core.Container {
+	leader := kvcb.Spec.Connection.Managed.Leader
+
 	var volumeMounts []core.VolumeMount
 	if leader.MultiTenancy {
 		// Not read-only, and that is the point: the master writes a temp file into this directory
@@ -253,28 +373,15 @@ func leaderContainerSpec(
 		// `kubectl get deploy -o yaml` without entering the container — the same reason the flags
 		// are argv and not environment variables.
 		Command:      []string{"mooncake_master"},
-		Args:         RenderLeaderFlags(leader),
+		Args:         RenderLeaderFlags(kvcb),
 		VolumeMounts: volumeMounts,
 		Ports: []core.ContainerPort{
 			{Name: leaderRPCPortName, ContainerPort: LeaderRPCPort, Protocol: core.ProtocolTCP},
 			{Name: leaderAdminPortName, ContainerPort: LeaderMetricsPort, Protocol: core.ProtocolTCP},
 		},
-		// The rendered argv refers to both of these. Without them the flag reaches the process as
+		// The rendered argv refers to each of these. Without one the flag reaches the process as
 		// the literal "$(KUBERNETES_POD_NAME)" and the leader takes that for its own name.
-		Env: []core.EnvVar{
-			{
-				Name: LeaderPodNameEnv,
-				ValueFrom: &core.EnvVarSource{
-					FieldRef: &core.ObjectFieldSelector{FieldPath: "metadata.name"},
-				},
-			},
-			{
-				Name: LeaderPodNamespaceEnv,
-				ValueFrom: &core.EnvVarSource{
-					FieldRef: &core.ObjectFieldSelector{FieldPath: "metadata.namespace"},
-				},
-			},
-		},
+		Env: leaderEnv(kvcb),
 		ReadinessProbe: &core.Probe{
 			ProbeHandler: core.ProbeHandler{
 				HTTPGet: &core.HTTPGetAction{

@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
 const (
@@ -29,6 +30,9 @@ const (
 	// component here already spells them this way.
 	LeaderPodNameEnv      = "KUBERNETES_POD_NAME"
 	LeaderPodNamespaceEnv = "KUBERNETES_POD_NAMESPACE"
+	// LeaderPodIPEnv is the third, and it is defined only under high availability because only the
+	// election reads it. See the -rpc_address flag for what it decides.
+	LeaderPodIPEnv = "KUBERNETES_POD_IP"
 )
 
 // leaderAllocationStrategies maps this API's spelling of an allocation strategy onto the artifact's.
@@ -41,25 +45,61 @@ var leaderAllocationStrategies = map[string]string{
 	"FreeRatioFirst": "free_ratio_first",
 }
 
-// RenderLeaderFlags turns a leader spec into the argv its process runs.
+// RenderLeaderFlags turns a backend into the argv its leader process runs.
 //
 // It is a pure function with a deterministic order, so the whole flag surface is testable without a
 // cluster and a rendered Deployment diffs cleanly against the last one.
+//
+// It takes the whole object rather than just the leader spec because the election flags name the
+// Lease this backend elects through, and that name is the object's identity.
 //
 // What it does NOT render is as load-bearing as what it does:
 //
 //   - No metadata flag of any kind. The metadata plane is peer-to-peer, so there is no store to
 //     point at and -etcd_endpoints has nothing to say.
-//   - No -enable_ha, -ha_backend_type or -ha_backend_connstring. Those belong to the axis that
-//     elects a leader among several, which this scope refuses at admission.
 //   - No -port. It is deprecated in favor of -rpc_port.
 //   - No flag at the artifact's own default. A flag this spec does not address is absent, so a
 //     default that changes upstream shows up as a behavior change to investigate rather than as a
 //     value we silently re-asserted.
-func RenderLeaderFlags(leader workercore.KVCacheBackendLeader) []string {
+func RenderLeaderFlags(kvcb *workercore.KVCacheBackend) []string {
+	leader := kvcb.Spec.Connection.Managed.Leader
+
 	flags := []string{
 		fmt.Sprintf("-rpc_port=%d", LeaderRPCPort),
 		fmt.Sprintf("-metrics_port=%d", LeaderMetricsPort),
+	}
+
+	// The election, rendered as one group or not at all. Splitting it is what a partial render would
+	// do, and each half alone is a specific failure: -enable_ha without a connection string exits at
+	// startup, and a connection string without -enable_ha is accepted and ignored with a warning.
+	//
+	// -ha_backend_type is not a field. The image carries two leadership backends -- the Lease and
+	// Redis -- and only the Lease exists inside Kubernetes, so this operator has one value to render
+	// and a single-value enum in an API is a name, not a choice.
+	//
+	// -ha_backend_connstring is "namespace/lease-name", and both halves are derived: a backend is
+	// cluster-scoped, its objects live in one shared namespace, and LeaderObjectName is already what
+	// keeps two backends' objects apart there. Two backends sharing one Lease would elect one leader
+	// between them, which is the failure this whole subject exists to prevent.
+	//
+	// REQUIRED: -rpc_address belongs to this group even though it looks like a bind setting. The
+	// artifact folds it into "rpc_address:rpc_port" and campaigns with that string, which becomes
+	// BOTH the election's identity and the address written into the Lease for members to connect
+	// to. Left at its 0.0.0.0 default, every replica campaigns under one identity and every member
+	// following the Lease is handed 0.0.0.0 -- an address that resolves back to the member itself.
+	// The Pod IP is the only value that is unique per replica and reachable from another Pod, and
+	// it also binds correctly, because the artifact hands the same string to its RPC server.
+	if leader.HighAvailability != nil {
+		flags = append(flags,
+			"-enable_ha=true",
+			"-ha_backend_type=k8s",
+			fmt.Sprintf("-ha_backend_connstring=%s/%s",
+				kuberess.SystemNamespaceName, LeaderObjectName(kvcb)),
+			fmt.Sprintf("-rpc_address=$(%s)", LeaderPodIPEnv),
+			// The artifact's own default is a fixed string shared by every deployment, so leaving
+			// this alone is what would collide. It keys the store's own namespacing rather than the
+			// election, which is why it is derived from the identity rather than from the Lease.
+			"-cluster_id="+LeaderObjectName(kvcb))
 	}
 
 	// An unset strategy renders nothing rather than a guess: the CRD schema defaults this field, so
