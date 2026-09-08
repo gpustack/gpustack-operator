@@ -251,11 +251,23 @@ func RenderMemberDaemonSet(
 					// the server on the other cannot be converged in both directions: switching a
 					// backend from RDMA back to TCP would leave ClusterFirstWithHostNet behind.
 					DNSPolicy: core.DNSClusterFirst,
-					// The member talks to its leader and to nothing else; the API server's default
-					// would mount a service-account token into a third-party image that has no use
-					// for one, and on the RDMA path that image also holds two capabilities.
-					AutomountServiceAccountToken: ptr.To(false),
-					ImagePullSecrets:             kvcb.Spec.ImagePullSecrets,
+					// Without HA the member talks to its leader and to nothing else, and the API
+					// server's default would mount a service-account token into a third-party image
+					// that has no use for one -- on the RDMA path an image that also holds two
+					// capabilities.
+					//
+					// With HA it does talk to the API server, for one thing: MOONCAKE_MASTER becomes
+					// a k8s:// entry and the client reads the Lease to find the leader. That read is
+					// all this token buys, and its account grants nothing else. Both fields move
+					// together -- an account with no token mounted authenticates as nobody.
+					//
+					// The member's failure without it is LOUD, unlike the leader's: the client
+					// retries the read twenty times and then the entrypoint raises, so the Pod
+					// CrashLoopBackOffs rather than sitting not-ready forever.
+					AutomountServiceAccountToken: ptr.To(leaderNeedsAPIAccess(
+						kvcb.Spec.Connection.Managed.Leader)),
+					ServiceAccountName: memberServiceAccountName(kvcb),
+					ImagePullSecrets:   kvcb.Spec.ImagePullSecrets,
 					Containers: []core.Container{
 						memberContainerSpec(kvcb, member, group, image),
 					},
@@ -325,6 +337,30 @@ func memberContainerSpec(
 	}
 }
 
+// MemberMasterEntry is what a member is told to connect to, and it takes one of two forms.
+//
+// Without HA it is an address: the leader Service and the RPC port, byte-identical to what this
+// operator rendered before HA existed, and the client connects to it directly.
+//
+// With HA it is "<backend>://<connstring>", which the client reads as "discover the leader through
+// this backend instead" -- it splits on "://", validates the scheme against the same backend enum
+// the master uses, then reads the current holder and follows it. That is the whole of this
+// operator's part in failover: no Service selector moves, and nothing here watches an election.
+//
+// REQUIRED: a scheme without HA names a Lease no leader ever takes, so the two forms are not
+// interchangeable in that direction. The other direction is an OPEN QUESTION rather than a rule:
+// the Service publishes only ready endpoints and a standby is not ready, so the address does resolve
+// to the serving leader, and whether the client's reconnect follows the endpoint across an election
+// has not been measured. If it does, the scheme is an optimisation and the member's whole API
+// access goes away with it -- tracked at github.com/gpustack/gpustack-operator/issues/279.
+func MemberMasterEntry(kvcb *workercore.KVCacheBackend) string {
+	if leaderNeedsAPIAccess(kvcb.Spec.Connection.Managed.Leader) {
+		return fmt.Sprintf("k8s://%s/%s", kuberess.SystemNamespaceName, LeaderObjectName(kvcb))
+	}
+
+	return fmt.Sprintf("%s:%d", LeaderServiceHost(kvcb), LeaderRPCPort)
+}
+
 // renderMemberEnv builds the member's whole configuration.
 //
 // What is NOT set is deliberate. MOONCAKE_DEVICE is left unset so the client's device filter comes
@@ -338,7 +374,7 @@ func renderMemberEnv(
 		{Name: memberEnvMetadataServer, Value: memberMetadataServerValue},
 		{
 			Name:  memberEnvMaster,
-			Value: fmt.Sprintf("%s:%d", LeaderServiceHost(kvcb), LeaderRPCPort),
+			Value: MemberMasterEntry(kvcb),
 		},
 		{Name: memberEnvProtocol, Value: MemberProtocol(kvcb)},
 		{
@@ -348,11 +384,15 @@ func renderMemberEnv(
 			// there — measured on a two-node cluster, a client pod got ECONNREFUSED against both
 			// the node name and the node IP, and connected on the pod IP.
 			//
-			// It costs no stability to use the pod IP. The leader appends a port of its own choosing
-			// to build the segment name, and that port is fresh on every start — one restart moved a
-			// segment from <host>:13720 to <host>:14071 — so the name was never durable across one.
-			// On the RDMA path the pod holds the host's network namespace and this resolves to the
-			// node's own address anyway.
+			// It also becomes the segment's NAME, verbatim: the client keeps this string and neither
+			// it nor the leader ever rewrites it. The port that is fresh on every start — one
+			// restart moved a segment endpoint from <host>:13720 to <host>:14071 — belongs to
+			// te_endpoint, which the client derives on its own under the peer-to-peer metadata
+			// plane this scope ships. The name outlives a restart; the endpoint does not.
+			//
+			// LIMITED: the name is only as unique as this value is. On the RDMA path the pod holds
+			// the host's network namespace, so every member group on one node reports the same
+			// name — the collision the members-mounted condition reports rather than guesses at.
 			Name: memberEnvLocalHostname,
 			ValueFrom: &core.EnvVarSource{
 				FieldRef: &core.ObjectFieldSelector{FieldPath: "status.podIP"},

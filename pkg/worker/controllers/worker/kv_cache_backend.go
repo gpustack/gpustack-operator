@@ -13,6 +13,7 @@ import (
 
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
+	rbac "k8s.io/api/rbac/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -363,6 +364,11 @@ func (r *KVCacheBackendReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			if err = r.syncMemberWorkloads(ctx, kvcb, image); err != nil {
 				return ctrl.Result{}, err
 			}
+			// Last, and only when HA was turned off: every workload above has just been rendered
+			// without the account, so nothing is still using what this removes.
+			if err = r.pruneHARBAC(ctx, kvcb); err != nil {
+				return ctrl.Result{}, err
+			}
 			// Published only after both objects converged, so an address in status always names
 			// something that exists. Whether it yet ANSWERS is a different question, and the
 			// conditions are where that one is reported.
@@ -512,6 +518,13 @@ func (r *KVCacheBackendReconciler) observeLeader(
 // own view rather than a probe of our own: the readiness probe already asks the leader a gated
 // route, so readyReplicas is the leader's readiness as Kubernetes settled it, and re-deciding it
 // here would be a second opinion that could disagree.
+//
+// REQUIRED: the comparison stays "at least one", never "exactly one", however many replicas run.
+// With standbys only the serving replica is ready, so a count above one looks like a contradiction
+// and is not one: a leader that loses its lease clears its service plane inside the process at once,
+// while the kubelet only withdraws it after the probe fails — three periods, so up to fifteen
+// seconds during which the old and new leaders are both ready. Every ORDINARY failover passes
+// through that window, so "exactly one" would report a fault each time one succeeded.
 func (r *KVCacheBackendReconciler) leaderPodIsReady(
 	ctx context.Context, kvcb *workercore.KVCacheBackend,
 ) bool {
@@ -1329,6 +1342,15 @@ func (r *KVCacheBackendReconciler) syncLeaderWorkload(
 ) error {
 	logger := ctrllog.FromContext(ctx)
 
+	// GRANTING runs before the Deployment, because the Pod names the account: a Pod naming one that
+	// does not exist yet is admitted and then never gets a token, which is the silent standby again.
+	//
+	// REVOKING is not here, and that asymmetry is the point -- see pruneHARBAC, which the caller runs
+	// after every workload has stopped asking for the access.
+	if err := r.ensureHARBAC(ctx, kvcb); err != nil {
+		return err
+	}
+
 	eDeploy := mooncake.RenderLeaderDeployment(kvcb, image)
 	_, err := kubeclientset.CreateWithCtrlClient(ctx, r.Client, eDeploy,
 		kubeclientset.WithUpdateIfExisted(alignLeaderDeploymentFn(kvcb, eDeploy)))
@@ -1346,6 +1368,213 @@ func (r *KVCacheBackendReconciler) syncLeaderWorkload(
 	}
 
 	logger.V(2).Info("synced kv cache backend leader workload")
+	return nil
+}
+
+// ensureHARBAC creates or converges the access both roles need, and does nothing when HA is off.
+//
+// Both roles, and the member's is not optional under HA: its MOONCAKE_MASTER becomes a k8s:// entry,
+// so it reads the same Lease to find the leader. Rendered here rather than beside the DaemonSets
+// because there is one account for the whole backend -- every group reads one Lease.
+//
+// REQUIRED: "does nothing" is a RETURN, not an empty render handed to syncHARBAC. This runs BEFORE
+// the workloads; syncHARBAC reads an unwanted set as "delete these", so passing one through would
+// revoke the Lease here, ahead of the Pods that are still configured to use it -- which is the
+// ordering pruneHARBAC exists to avoid, leaving pruneHARBAC nothing left to do.
+func (r *KVCacheBackendReconciler) ensureHARBAC(
+	ctx context.Context, kvcb *workercore.KVCacheBackend,
+) error {
+	if !mooncake.RenderLeaderRBAC(kvcb).Wanted() {
+		return nil
+	}
+
+	if err := r.syncHARBAC(ctx, kvcb,
+		mooncake.LeaderObjectName(kvcb), mooncake.RenderLeaderRBAC(kvcb)); err != nil {
+		return err
+	}
+
+	return r.syncHARBAC(ctx, kvcb,
+		mooncake.MemberRBACObjectName(kvcb), mooncake.RenderMemberRBAC(kvcb))
+}
+
+// pruneHARBAC removes the access again when high availability is turned off, and runs AFTER every
+// workload has been re-rendered without it.
+//
+// REQUIRED: the ordering is the reverse of ensureHARBAC's, and it is not symmetry for its own sake.
+// Revoking first would take the Lease away from a leader that is still configured to renew it and
+// from members still configured to read it, so a failure in the workload update that follows leaves
+// the backend without a master until some later pass succeeds. Revoking last means the worst case is
+// a grant that outlives its use by one reconcile.
+//
+// It is also why the removal exists at all: the owner reference collects these when the BACKEND is
+// deleted, but a backend that merely drops `highAvailability` is not deleted, so without this it
+// keeps an account that can still take a Lease.
+func (r *KVCacheBackendReconciler) pruneHARBAC(
+	ctx context.Context, kvcb *workercore.KVCacheBackend,
+) error {
+	if mooncake.RenderLeaderRBAC(kvcb).Wanted() {
+		return nil
+	}
+
+	if err := r.syncHARBAC(ctx, kvcb, mooncake.LeaderObjectName(kvcb), mooncake.HARBAC{}); err != nil {
+		return err
+	}
+
+	return r.syncHARBAC(ctx, kvcb, mooncake.MemberRBACObjectName(kvcb), mooncake.HARBAC{})
+}
+
+// alignOwnedIdentity converges a live object's identity onto the rendered one and reports whether
+// anything moved: the labels it is found by, the resource note the teardown path reads, and the
+// owner reference that garbage-collects it.
+//
+// REQUIRED: it REFUSES an object of the rendered name that this operator did not create, rather
+// than taking it over. These three objects are created by name into a namespace this operator
+// shares with everything else it renders, so a collision is possible -- and claiming one is not a
+// reversible act: the note makes the teardown path willing to remove it, and the owner reference
+// hands it to garbage collection when the BACKEND is deleted. A third party's account would then be
+// destroyed by an unrelated object's lifecycle. Refusing costs the backend its election until
+// somebody renames the object, which is loud, bounded and undoable.
+//
+// The judge is the resource note alone, as everywhere else in this file -- see
+// renderedForKVCacheBackend for why the labels and the controller reference are not consulted.
+//
+// The labels are put BACK rather than replaced, so a key added by hand to an object this operator
+// DOES own survives the pass. Replacing the map wholesale would strip whatever else is on it,
+// including keys another controller finds it by.
+func alignOwnedIdentity(
+	actual, expected kubemeta.MetaObject, kvcb *workercore.KVCacheBackend,
+) (bool, error) {
+	if !renderedForKVCacheBackend(actual, kvcb) {
+		return false, fmt.Errorf(
+			"%T %q already exists and carries no note of this backend: rename or remove it, "+
+				"this operator will not take it over", actual, actual.GetName())
+	}
+
+	changed := restoreRenderedLabels(actual, expected)
+	if !systemmeta.EqualResourceTypeAndNotes(expected, actual) {
+		systemmeta.SyncResourceTypeAndNotes(expected, actual)
+		changed = true
+	}
+	if !kubemeta.IsControlledBy(actual, kvcb) {
+		kubemeta.ControlOnWithoutBlock(actual, kvcb,
+			workercore.SchemeGroupVersion.WithKind("KVCacheBackend"))
+		changed = true
+	}
+
+	return changed, nil
+}
+
+// syncHARBAC converges one role's three objects, or removes them.
+func (r *KVCacheBackendReconciler) syncHARBAC(
+	ctx context.Context, kvcb *workercore.KVCacheBackend, name string, wanted mooncake.HARBAC,
+) error {
+	logger := ctrllog.FromContext(ctx)
+	key := ctrlcli.ObjectKey{Namespace: kuberess.SystemNamespaceName, Name: name}
+
+	if !wanted.Wanted() {
+		// Binding first, then role, then account: dropped in the reverse of the order that grants
+		// them, so no window leaves a binding pointing at a role that is already gone.
+		for _, obj := range []ctrlcli.Object{
+			&rbac.RoleBinding{}, &rbac.Role{}, &core.ServiceAccount{},
+		} {
+			if _, err := r.deleteOwnedWorkload(ctx, kvcb, obj, key); err != nil {
+				logger.Error(err, "delete kv cache backend leader rbac", "object", fmt.Sprintf("%T", obj))
+				return err
+			}
+		}
+		return nil
+	}
+
+	eSA := wanted.ServiceAccount
+	_, err := kubeclientset.CreateWithCtrlClient(ctx, r.Client, eSA,
+		kubeclientset.WithUpdateIfExisted(
+			func(aSA *core.ServiceAccount) (*core.ServiceAccount, bool, error) {
+				// The account has no spec worth converging; what it has is IDENTITY. An account of
+				// this name that predates the backend is refused rather than claimed -- see
+				// alignOwnedIdentity.
+				changed, err := alignOwnedIdentity(aSA, eSA, kvcb)
+				return aSA, !changed, err
+			}))
+	if err != nil {
+		logger.Error(err, "sync kv cache backend ha service account")
+		return err
+	}
+
+	eRole := wanted.Role
+	_, err = kubeclientset.CreateWithCtrlClient(ctx, r.Client, eRole,
+		kubeclientset.WithUpdateIfExisted(func(aRole *rbac.Role) (*rbac.Role, bool, error) {
+			changed, err := alignOwnedIdentity(aRole, eRole, kvcb)
+			if err != nil {
+				return aRole, false, err
+			}
+			// The whole rule set, replaced rather than merged. A grant is the one thing where a
+			// hand edit must not survive reconciliation in either direction: widened, it is a
+			// privilege nobody reviewed; narrowed, it is the silent standby.
+			if !kubemeta.DeepEqual(aRole.Rules, eRole.Rules) {
+				aRole.Rules = eRole.Rules
+				changed = true
+			}
+			return aRole, !changed, nil
+		}))
+	if err != nil {
+		logger.Error(err, "sync kv cache backend ha role")
+		return err
+	}
+
+	// REQUIRED: the binding is checked for a roleRef mismatch BEFORE the create-or-update, and
+	// recreated rather than patched.
+	//
+	// roleRef is immutable, so an update carrying a different one is refused by the API server --
+	// but an update that never sets it is ACCEPTED, and that is the dangerous case: a pre-existing
+	// binding of this name pointing at, say, ClusterRole/cluster-admin would keep pointing there
+	// while this operator rewrote its subject to the store's account. The result is a third-party
+	// binary bound to a role nobody granted it, produced by a reconcile that reported success.
+	//
+	// REQUIRED: only a binding carrying this backend's note is recreated. It is the same rule
+	// alignOwnedIdentity applies to all three objects, checked a second time here because this
+	// delete runs BEFORE the create-or-update -- a foreign binding would otherwise be destroyed
+	// before anything looked at whose it was.
+	eBinding := wanted.RoleBinding
+	aBinding := new(rbac.RoleBinding)
+	switch err = r.Client.Get(ctx, key, aBinding); {
+	case err == nil:
+		if !kubemeta.DeepEqual(aBinding.RoleRef, eBinding.RoleRef) {
+			if !renderedForKVCacheBackend(aBinding, kvcb) {
+				return fmt.Errorf(
+					"role binding %q already exists, bound to %s/%s and carrying no note of this "+
+						"backend: rename or remove it, this operator will not delete it",
+					name, aBinding.RoleRef.Kind, aBinding.RoleRef.Name)
+			}
+			logger.Info("recreating a role binding whose roleRef does not match",
+				"name", name, "actual", aBinding.RoleRef.Name, "expected", eBinding.RoleRef.Name)
+			if err = r.Client.Delete(ctx, aBinding); err != nil && !kerrors.IsNotFound(err) {
+				logger.Error(err, "delete kv cache backend ha role binding")
+				return err
+			}
+		}
+	case !kerrors.IsNotFound(err):
+		logger.Error(err, "get kv cache backend ha role binding")
+		return err
+	}
+
+	_, err = kubeclientset.CreateWithCtrlClient(ctx, r.Client, eBinding,
+		kubeclientset.WithUpdateIfExisted(
+			func(aBinding *rbac.RoleBinding) (*rbac.RoleBinding, bool, error) {
+				changed, err := alignOwnedIdentity(aBinding, eBinding, kvcb)
+				if err != nil {
+					return aBinding, false, err
+				}
+				if !kubemeta.DeepEqual(aBinding.Subjects, eBinding.Subjects) {
+					aBinding.Subjects = eBinding.Subjects
+					changed = true
+				}
+				return aBinding, !changed, nil
+			}))
+	if err != nil {
+		logger.Error(err, "sync kv cache backend ha role binding")
+		return err
+	}
+
 	return nil
 }
 
@@ -1388,13 +1617,40 @@ func alignLeaderDeploymentFn(
 			skip = false
 		}
 
-		// The strategy is converged for the same reason the replica count is: both say there is
-		// exactly one master. An edit back to RollingUpdate would surge a second one on the next
-		// update, and the API server defaults that strategy's own fields on write — so only the
-		// TYPE is compared, and the fields underneath it are cleared with it rather than left to
-		// describe a strategy no longer in use.
-		if aDeploy.Spec.Strategy.Type != eDeploy.Spec.Strategy.Type {
+		// The strategy is converged for the same reason the replica count is: both say how many
+		// masters may exist at once, and an edit to either is a split brain or a stall.
+		//
+		// REQUIRED: the WHOLE strategy, not its type. Comparing only the type was correct while one
+		// replica was the only case — every rollout was `Recreate`, which has no fields — and it
+		// silently stops being correct as soon as the count can move: raising three replicas to five
+		// leaves `maxUnavailable` at its old value, which is below the four that a workload with one
+		// ready replica needs, and the rollout stalls with nothing saying why.
+		if !kubemeta.DeepEqual(aDeploy.Spec.Strategy, eDeploy.Spec.Strategy) {
 			aDeploy.Spec.Strategy = eDeploy.Spec.Strategy
+			skip = false
+		}
+
+		// The deadline travels with the strategy and for the same reason. The renderer disables it
+		// under standbys, because `DeploymentComplete` requires every replica available and that is
+		// permanently false here -- so a deadline left at the server's default eventually reports
+		// `ProgressDeadlineExceeded` on a workload that is working.
+		//
+		// REQUIRED: an expectation of nil means "whatever the API server defaults", NOT "clear it".
+		// The renderer leaves this unset at one replica, and the API server writes 600 -- comparing
+		// the two directly makes every pass see a difference, rewrite the field, and roll the
+		// leader forever. So nil is only ever restored when the live value is the disabled sentinel
+		// this renderer itself wrote, which is the one case where the server's default cannot come
+		// back on its own.
+		switch {
+		case eDeploy.Spec.ProgressDeadlineSeconds != nil:
+			if !kubemeta.DeepEqual(aDeploy.Spec.ProgressDeadlineSeconds,
+				eDeploy.Spec.ProgressDeadlineSeconds) {
+				aDeploy.Spec.ProgressDeadlineSeconds = eDeploy.Spec.ProgressDeadlineSeconds
+				skip = false
+			}
+		case aDeploy.Spec.ProgressDeadlineSeconds != nil &&
+			*aDeploy.Spec.ProgressDeadlineSeconds == math.MaxInt32:
+			aDeploy.Spec.ProgressDeadlineSeconds = nil
 			skip = false
 		}
 
@@ -1413,6 +1669,17 @@ func alignLeaderDeploymentFn(
 		if !kubemeta.DeepEqual(aDeploy.Spec.Template.Spec.AutomountServiceAccountToken,
 			eDeploy.Spec.Template.Spec.AutomountServiceAccountToken) {
 			aDeploy.Spec.Template.Spec.AutomountServiceAccountToken = eDeploy.Spec.Template.Spec.AutomountServiceAccountToken
+			skip = false
+		}
+		// REQUIRED: converged together with the mount above, in both directions. They are one
+		// setting expressed as two fields, and each half alone is silent -- an account with no token
+		// mounted authenticates as nobody, and a token mounted for no named account is the default
+		// account's. Neither logs anything; the leader simply retries its election forever. This is
+		// also the field that carries a backend that turned HA ON after its Deployment already
+		// existed, which is the case a renderer alone never reaches.
+		if aDeploy.Spec.Template.Spec.ServiceAccountName !=
+			eDeploy.Spec.Template.Spec.ServiceAccountName {
+			aDeploy.Spec.Template.Spec.ServiceAccountName = eDeploy.Spec.Template.Spec.ServiceAccountName
 			skip = false
 		}
 
@@ -1775,6 +2042,14 @@ func alignMemberDaemonSetFn(
 		}
 		if !kubemeta.DeepEqual(aPod.AutomountServiceAccountToken, ePod.AutomountServiceAccountToken) {
 			aPod.AutomountServiceAccountToken = ePod.AutomountServiceAccountToken
+			skip = false
+		}
+		// REQUIRED: converged together with the mount above, for the same reason it is on the
+		// leader's side. They are one setting in two fields and each half alone is silent. This is
+		// also the field that carries a member group whose backend turned HA on after the DaemonSet
+		// already existed, which the renderer alone never reaches.
+		if aPod.ServiceAccountName != ePod.ServiceAccountName {
+			aPod.ServiceAccountName = ePod.ServiceAccountName
 			skip = false
 		}
 		if !kubemeta.DeepEqual(aPod.Volumes, ePod.Volumes) {

@@ -2,16 +2,45 @@
 
 package v1alpha1
 
+import (
+	workerv1alpha1 "gpustack.ai/gpustack/api/worker/v1alpha1"
+)
+
 // KVCacheBackendLeaderApplyConfiguration represents a declarative configuration of the KVCacheBackendLeader type for use
 // with apply.
 //
 // KVCacheBackendLeader is the leader process: how many of it, how it places new writes, and the
 // escape hatch for flags this API does not enumerate.
 type KVCacheBackendLeaderApplyConfiguration struct {
-	// Replicas is how many leader processes run. One, and only one, in this scope: electing a
-	// leader among several needs a backend store this scope does not enter, and the webhook
-	// refuses anything else while naming that follow-on rather than silently running one anyway.
+	// Replicas is how many leader processes run. More than one requires HighAvailability: electing
+	// a leader among several needs a leadership record, and the webhook refuses the pair without
+	// one rather than silently running two leaders against the same members.
+	//
+	// Exactly one of them serves at a time. The rest are standbys -- they hold no data, answer no
+	// request, and exist to take over. Raising this adds no capacity, which members do; the ceiling
+	// is here to catch the reading that it does.
+	//
+	// REQUIRED: the ceiling is duplicated in the schema on purpose, because the two layers catch
+	// different absences. The webhook's message explains; this one still holds when the webhook is
+	// not installed, which is when a second leader would be rendered rather than refused. Raise
+	// both together, and widening a maximum is not a breaking change.
 	Replicas *int32 `json:"replicas,omitempty"`
+	// HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas
+	// above 1. Unset, the leader runs as a single process exactly as before: no election flag is
+	// rendered, no extra object is created, and the command line is the one it ran before this
+	// field existed.
+	//
+	// It carries no settings. The Lease is named after this backend, so there is no connection
+	// target for anyone to supply, and the API access the election needs is rendered beside the
+	// workload rather than asked for here.
+	//
+	// LIMITED: with MultiTenancy on, each replica seeds its tenant quota policy once at ITS OWN
+	// start, so a standby that took over after a quota was raised applies the older, lower ceiling
+	// for up to one KVCachePool reconcile interval -- and an over-quota write in this store is not
+	// refused, it EVICTS that tenant's own older objects, irreversibly and without moving any
+	// counter. The quota itself is not lost: the pool reconciler is the authority and writes back
+	// the difference on its next pass, so what the window costs is hit rate.
+	HighAvailability *workerv1alpha1.KVCacheBackendLeaderHighAvailability `json:"highAvailability,omitempty"`
 	// AllocationStrategy is how the leader picks which member takes a new write. Random spreads
 	// them; FreeRatioFirst biases toward the emptier member.
 	//
@@ -63,6 +92,14 @@ func KVCacheBackendLeader() *KVCacheBackendLeaderApplyConfiguration {
 // If called multiple times, the Replicas field is set to the value of the last call.
 func (b *KVCacheBackendLeaderApplyConfiguration) WithReplicas(value int32) *KVCacheBackendLeaderApplyConfiguration {
 	b.Replicas = &value
+	return b
+}
+
+// WithHighAvailability sets the HighAvailability field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the HighAvailability field is set to the value of the last call.
+func (b *KVCacheBackendLeaderApplyConfiguration) WithHighAvailability(value workerv1alpha1.KVCacheBackendLeaderHighAvailability) *KVCacheBackendLeaderApplyConfiguration {
+	b.HighAvailability = &value
 	return b
 }
 

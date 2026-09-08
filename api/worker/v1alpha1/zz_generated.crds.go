@@ -2409,6 +2409,11 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																	},
 																	Nullable: true,
 																},
+																"highAvailability": {
+																	Description: "HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas\nabove 1. Unset, the leader runs as a single process exactly as before: no election flag is\nrendered, no extra object is created, and the command line is the one it ran before this\nfield existed.\nIt carries no settings. The Lease is named after this backend, so there is no connection\ntarget for anyone to supply, and the API access the election needs is rendered beside the\nworkload rather than asked for here.\nLIMITED: with MultiTenancy on, each replica seeds its tenant quota policy once at ITS OWN\nstart, so a standby that took over after a quota was raised applies the older, lower ceiling\nfor up to one KVCachePool reconcile interval -- and an over-quota write in this store is not\nrefused, it EVICTS that tenant's own older objects, irreversibly and without moving any\ncounter. The quota itself is not lost: the pool reconciler is the authority and writes back\nthe difference on its next pass, so what the window costs is hit rate.",
+																	Type:        "object",
+																	Nullable:    true,
+																},
 																"multiTenancy": {
 																	Description: "MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index\nbehind it. Off, every request falls into one default tenant and the index degrades to a plain\nkey hash, so two callers using different tenant names read each other's cache.\nIt is a FIELD rather than an extraArgs entry because another API validates against it: a\nKVCachePool is refused when its backend has no ledger to write quota into. A webhook reading\nan unschema'd string — \"true\", \"1\", \"True\" — would be judging a value domain that belongs to\nwhoever typed it.\nA plain bool, not a pointer, because unset and false mean the same thing here: no ledger.\nUnset renders NO flag rather than an explicit false, so a backend that never asked for this\nruns the command line it ran before the field existed.",
 																	Type:        "boolean",
@@ -2429,12 +2434,13 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																	Nullable: true,
 																},
 																"replicas": {
-																	Description: "Replicas is how many leader processes run. One, and only one, in this scope: electing a\nleader among several needs a backend store this scope does not enter, and the webhook\nrefuses anything else while naming that follow-on rather than silently running one anyway.",
+																	Description: "Replicas is how many leader processes run. More than one requires HighAvailability: electing\na leader among several needs a leadership record, and the webhook refuses the pair without\none rather than silently running two leaders against the same members.\nExactly one of them serves at a time. The rest are standbys -- they hold no data, answer no\nrequest, and exist to take over. Raising this adds no capacity, which members do; the ceiling\nis here to catch the reading that it does.\nREQUIRED: the ceiling is duplicated in the schema on purpose, because the two layers catch\ndifferent absences. The webhook's message explains; this one still holds when the webhook is\nnot installed, which is when a second leader would be rendered rather than refused. Raise\nboth together, and widening a maximum is not a breaking change.",
 																	Type:        "integer",
 																	Format:      "int32",
 																	Default: &v1.JSON{
 																		Raw: []byte(`1`),
 																	},
+																	Maximum:  ptr.To[float64](5),
 																	Minimum:  ptr.To[float64](1),
 																	Nullable: true,
 																},

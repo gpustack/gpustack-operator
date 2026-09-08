@@ -19,6 +19,7 @@ on:
         required: true
         type: choice
         options:
+          - mirrored-mooncake
           - ssh-server
           - thead-ppu-devel
       tag:
@@ -80,6 +81,17 @@ jobs:
             exit 0
           fi
           HEAVY="false"
+          #
+          # Some images are heavy whatever changed, and for them the detection below cannot be the
+          # answer: it reads the TIP COMMIT ONLY, so an image whose Dockerfile landed a few commits
+          # earlier is dispatched onto standard runners for a build that never fits.
+          #
+          #   - mirrored-mooncake: compiles the store from source for two architectures, and the
+          #     parallelism is bounded by memory rather than by cores.
+          #
+          case "${INPUT_REPOSITORY}" in
+            mirrored-mooncake) HEAVY="true" ;;
+          esac
           CHANGED="$(git show --name-only --format='' HEAD)"
           if grep -qxF "pack/${INPUT_REPOSITORY}/Dockerfile" <<<"${CHANGED}"; then
             HEAVY="true"

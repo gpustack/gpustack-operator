@@ -147,10 +147,15 @@ cluster is legitimate — the master is a pure metadata service. A member on `as
 needs CANN (`libascendcl.so`) in its container, and a CANN-less image fails as a loader error whose
 own message reaches `status.phaseMessage`.
 
-Nothing has to be built to run this. `docker.io/kvcacheai/mooncake:0.3.13` is published for amd64 and
-arm64 and carries **both** `mooncake_master` and `mc_store_rest_server`, so one `spec.image` serves the
-leader and the members. It runs on a host with no GPU: its `libcuda.so.1` is a stub and its
-`libcudart.so.12` is the real library, and neither reaches a driver.
+Nothing has to be built to run this **without high availability**.
+`docker.io/kvcacheai/mooncake:0.3.13` is published for amd64 and arm64 and carries **both**
+`mooncake_master` and `mc_store_rest_server`, so one `spec.image` serves the leader and the members.
+It runs on a host with no GPU: its `libcuda.so.1` is a stub and its `libcudart.so.12` is the real
+library, and neither reaches a driver.
+
+⛔ **[High availability](#high-availability) needs a different image, and for both roles.** That
+section carries which build, why no published one will do, and what each role does when handed one
+that cannot.
 
 > **Why the stub/real split matters** — the stub alone is enough for the master, but the Python client
 > needs a versioned `cudaFreeHost` from a real runtime. An image carrying two stubs runs the master and
@@ -171,9 +176,10 @@ tag by the same rule the API server would have applied** — `Always` for `:late
 > **Why they are fields and not Settings** — the cluster-wide `image-pull-policy` and
 > `image-pull-secrets` Settings are values of the bundled-application chart install. They reach the
 > subcharts and nothing a controller renders, so a `KVCacheBackend` that inherited them would be the
-> only object in this API whose running workloads move when a chart value moves. Neither role runs
-> under a service account of ours carrying credentials either, so without these fields no image here
-> could come from a private registry at all.
+> only object in this API whose running workloads move when a chart value moves. The service accounts
+> [high availability](#high-availability) renders carry no registry credentials either — they grant
+> Lease access and nothing else — so without these fields no image here could come from a private
+> registry at all.
 
 ## The metadata plane
 
@@ -182,9 +188,9 @@ the literal `P2PHANDSHAKE`, unconditionally. A single-leader backend therefore h
 dependencies beyond its image** — no etcd, no Redis, nothing to deploy alongside it.
 
 Two axes get confused here, so both are stated. The metadata plane is how clients find one another.
-The **HA backend store** — `-enable_ha` with `-ha_backend_type` — is how several leader replicas elect
-one among them, and that is where a Kubernetes lease would live. It exists only at `replicas > 1`,
-which this scope refuses.
+The **HA backend store** — `-enable_ha` with `-ha_backend_type` — is how leader replicas elect one
+among them, and that is where the Kubernetes Lease lives. It is
+[`highAvailability`](#high-availability), and it moves nothing on this plane.
 
 ⛔ **A manifest that tries to configure the metadata plane is not refused with a helpful message.**
 There is no field, so there is nothing for a webhook to see:
@@ -199,20 +205,40 @@ against it: the metadata plane takes no configuration at all.
 
 ## The leader
 
-The leader is a one-replica Deployment plus a ClusterIP Service publishing two ports — `50051` for
-engine clients and `9003` for the admin surface, which serves the Prometheus exposition and the HTTP
-admin API on one port.
+The leader is a Deployment plus a ClusterIP Service publishing two ports — `50051` for engine clients
+and `9003` for the admin surface, which serves the Prometheus exposition and the HTTP admin API on one
+port.
 
-`replicas` defaults to `1` and anything larger is refused by the **webhook**, naming the leader
-high-availability follow-on. An enum would answer `Unsupported value: 2` and teach nothing.
+`replicas` defaults to `1`, and `5` is the ceiling in the **webhook** and in the schema alike: only
+one leader ever serves, so further replicas are spare processes rather than capacity. More than one
+requires [`highAvailability`](#high-availability) and is refused by the webhook without it, naming
+the field that is missing. An enum would answer `Unsupported value: 2` and teach nothing.
 
-**The Deployment uses `Recreate`, so an update stops the old master before starting the new one.**
-Expect a gap with no master on every image or flag change; members keep their segments across it and
+⛔ **Without `highAvailability` the Deployment runs one replica whatever `replicas` says.** The
+webhook refuses that combination, but a schema cannot express a cross-field rule — so where the
+webhook is not installed this clamp is what keeps unelected masters off one pool.
+
+**The update strategy follows the replica count, and the two cases are opposites.** At one replica
+the Deployment uses `Recreate`: an update stops the old master before starting the new one, so expect
+a gap with no master on every image or flag change. Members keep their segments across it and
 re-register.
 
 > **Why** — `RollingUpdate`'s `maxSurge` defaults to 25% and rounds *up*, which against one replica
 > is one: the default strategy would run two masters at once on every update, which is exactly what
 > the single replica exists to prevent.
+
+Above one replica it rolls instead — `maxSurge: 1`, `maxUnavailable: replicas` — because `Recreate`
+would take every standby down together with the leader and leave nothing to elect.
+
+> **Why `maxUnavailable` is not `replicas-1`** — the Deployment controller removes an old Pod only
+> while more replicas are available than `replicas - maxUnavailable`. Exactly one is ever available
+> here, so `replicas-1` makes that `1 > 1`: the old leader is never removed, the new replicas cannot
+> become ready until it releases the Lease, and the rollout stalls for good.
+
+⛔ **A rollout still has a window with no serving master**, and high availability shortens it rather
+than removing it. A floor of zero available replicas is what lets the old leader go, so it can go
+before a replacement has taken the Lease. The window is bounded by the lease expiry plus activation,
+not by a Pod start — the replacements are already running as standbys, contending for it.
 
 **The two probes deliberately take different paths**, and this is the one configuration detail on this
 page that must not be "simplified":
@@ -234,10 +260,90 @@ The health document has four fields that matter:
 ⛔ **`status` is a hard-coded constant.** It reads `"ok"` on a leader that is serving nothing.
 **`service_ready` is the only verdict in the document**, and every readiness decision rests on it.
 
-> **Scope note** — a single leader reports `service_ready: true` from its first answer, because the
-> non-HA path sets it unconditionally three lines after the admin server starts. The gate is what HA
-> will need and what keeps a starting leader's zeroed metrics from being published; it is not a phase
-> this scope will show anyone.
+A single leader reports `service_ready: true` from its first answer, because the non-HA path sets it
+unconditionally three lines after the admin server starts. Under high availability it is the standby
+marker, and the readiness gate above is what turns it into an endpoint decision.
+
+### High availability
+
+Set `leader.highAvailability` and the leader elects through a **Kubernetes Lease**. The field has no
+settings — the Lease carries the leader's own object name, `<backend>-leader`, in this operator's
+namespace — and its presence is the switch:
+
+```yaml
+spec:
+  connection:
+    managed:
+      leader:
+        replicas: 3
+        highAvailability: {}
+```
+
+⛔ **A published `kvcacheai/mooncake` image cannot do this, on either side.** Leadership backend
+availability is a compile-time switch and every option ships **off**:
+
+| role on a published image | what it does |
+|---|---|
+| leader | answers `UNAVAILABLE_IN_CURRENT_MODE`, runs as a permanent standby |
+| member | answers `Invalid HA backend entry`, exits, CrashLoopBackOffs |
+
+Use an image built from [`pack/mirrored-mooncake`](../../pack/mirrored-mooncake/Dockerfile) for
+`spec.image` **and for every `members[].image`**.
+
+⛔ **A member group on `RDMA`, `HIP` or `Ascend` cannot run under high availability today.** Those
+transports need a vendor runtime `mirrored-mooncake` does not carry, and the vendor build does not
+carry the leadership backend — the two axes are independent, so covering them means rebuilding each
+variant.
+
+Tracked at [issue #279](https://github.com/gpustack/gpustack-operator/issues/279), together with the
+alternative of leaving members on the leader Service address and letting readiness move the endpoint.
+
+⛔ **`enable_oplog` is refused in `leader.extraArgs`**, and not as a policy choice: the store's
+operation log requires the etcd backend, which cannot be compiled together with the Lease backend, so
+the flag produces a leader that refuses to start. Standbys rebuild from snapshot and remounts instead.
+
+⛔ **`rpc_address` and `rpc_interface` are refused there too**, because the election renders the
+first. The store folds it with the RPC port into the string it campaigns with, so that one value is
+both the election's identity and the address written into the Lease for members to dial. Each replica
+advertises **its own Pod IP**; a value supplied by hand would point every member at one host, chosen
+without knowing whether the Pod answers there.
+
+**The healthy steady state reads `N desired / 1 ready`.** Exactly one leader serves; the rest are
+standbys, and a standby is deliberately **not ready** — that is what keeps it out of the leader
+Service's endpoints, so an engine never connects to a process that cannot serve. To anyone who has
+not been told, `3/1` is what a broken Deployment looks like. It is not. `kubectl get deploy` during a
+healthy failover briefly shows `2` ready as the old leader steps down; both readings are normal.
+
+> **Why there is no "who is the leader" field** — the store labels its own Pod
+> `mooncake.io/store-role=leader` once it wins, so `kubectl get pod -l mooncake.io/store-role=leader`
+> answers it. This operator does not read the admin API to re-report it, because failover is the
+> client's business and a second opinion could disagree with the first.
+
+**Both roles get a ServiceAccount, and they are different accounts.** The operator renders a
+`ServiceAccount`, `Role` and `RoleBinding` per role in its own namespace, and names them on the Pods:
+
+| role | grant | why |
+|---|---|---|
+| leader | `leases`: `create`, `get`, `update`; `pods`: `patch` | takes the Lease, and labels its own Pod |
+| member | `leases`: `get` | finds the leader, and nothing more |
+
+The member's is narrower on purpose: a shared account would let any member take the Lease from the
+leader it is following.
+
+**A member's `MOONCAKE_MASTER` becomes `k8s://<namespace>/<lease>`** instead of the leader Service
+address, so the client reads the holder and follows it across an election without restarting. Without
+`highAvailability` the value is unchanged.
+
+**The Service address is not known to be wrong under HA** — a standby is not ready, so the Service
+already resolves to the serving leader. What is unmeasured is whether a member's reconnect follows
+the endpoint when an election moves it. The Lease is what this operator renders until that is
+measured; see #279 above.
+
+**A missing grant fails differently on each side, and one of them is silent.** A leader that cannot
+reach the Lease retries every second forever — liveness is ungated, so nothing restarts and the
+Deployment sits at `0/N` ready with no message naming the cause. A member that cannot read it gives
+up after twenty tries and CrashLoopBackOffs. Check both accounts exist before reading `0/N` as a
+store problem.
 
 ## The members
 

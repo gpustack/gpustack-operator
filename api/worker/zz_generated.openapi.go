@@ -108,6 +108,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.KVCacheBackendEndpoint{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_KVCacheBackendEndpoint(ref),
 		v1alpha1.KVCacheBackendExternal{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_KVCacheBackendExternal(ref),
 		v1alpha1.KVCacheBackendLeader{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref),
+		v1alpha1.KVCacheBackendLeaderHighAvailability{}.OpenAPIModelName():   schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderHighAvailability(ref),
 		v1alpha1.KVCacheBackendLeaderOffload{}.OpenAPIModelName():            schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderOffload(ref),
 		v1alpha1.KVCacheBackendList{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_KVCacheBackendList(ref),
 		v1alpha1.KVCacheBackendManaged{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_KVCacheBackendManaged(ref),
@@ -5369,10 +5370,17 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref common.Referen
 				Properties: map[string]spec.Schema{
 					"replicas": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Replicas is how many leader processes run. One, and only one, in this scope: electing a leader among several needs a backend store this scope does not enter, and the webhook refuses anything else while naming that follow-on rather than silently running one anyway.",
+							Description: "Replicas is how many leader processes run. More than one requires HighAvailability: electing a leader among several needs a leadership record, and the webhook refuses the pair without one rather than silently running two leaders against the same members.\n\nExactly one of them serves at a time. The rest are standbys -- they hold no data, answer no request, and exist to take over. Raising this adds no capacity, which members do; the ceiling is here to catch the reading that it does.\n\nREQUIRED: the ceiling is duplicated in the schema on purpose, because the two layers catch different absences. The webhook's message explains; this one still holds when the webhook is not installed, which is when a second leader would be rendered rather than refused. Raise both together, and widening a maximum is not a breaking change.",
 							Minimum:     ptr.To[float64](1),
+							Maximum:     ptr.To[float64](5),
 							Type:        []string{"integer"},
 							Format:      "int32",
+						},
+					},
+					"highAvailability": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas above 1. Unset, the leader runs as a single process exactly as before: no election flag is rendered, no extra object is created, and the command line is the one it ran before this field existed.\n\nIt carries no settings. The Lease is named after this backend, so there is no connection target for anyone to supply, and the API access the election needs is rendered beside the workload rather than asked for here.\n\nLIMITED: with MultiTenancy on, each replica seeds its tenant quota policy once at ITS OWN start, so a standby that took over after a quota was raised applies the older, lower ceiling for up to one KVCachePool reconcile interval -- and an over-quota write in this store is not refused, it EVICTS that tenant's own older objects, irreversibly and without moving any counter. The quota itself is not lost: the pool reconciler is the authority and writes back the difference on its next pass, so what the window costs is hit rate.",
+							Ref:         ref(v1alpha1.KVCacheBackendLeaderHighAvailability{}.OpenAPIModelName()),
 						},
 					},
 					"allocationStrategy": {
@@ -5415,7 +5423,18 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref common.Referen
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.KVCacheBackendLeaderOffload{}.OpenAPIModelName()},
+			v1alpha1.KVCacheBackendLeaderHighAvailability{}.OpenAPIModelName(), v1alpha1.KVCacheBackendLeaderOffload{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderHighAvailability(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCacheBackendLeaderHighAvailability turns leader election on, and carries nothing.\n\nIt is a STRUCT rather than a bool on purpose. A bool admits `enabled: false` beside `replicas: 3`, a third state admission would then have to adjudicate and every reader would have to remember. Presence has no such state. Lease tuning — duration, renew deadline — can be added here later without a breaking change, which is the other reason not to spend a bool on the switch.",
+				Type:        []string{"object"},
+			},
+		},
 	}
 }
 

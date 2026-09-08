@@ -27,6 +27,20 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
+// MaxLeaderReplicas is the most leader processes a backend runs, and it is exported because the
+// SCHEMA carries the same ceiling and a test holds the two equal.
+//
+// REQUIRED: raise both together. They catch different absences -- this one explains, the schema's
+// still holds when the webhook is not installed -- and raising one alone yields the worst pairing:
+// admission accepts what the schema then rejects, reporting an error against a field nobody got
+// wrong. The test asserts EQUALITY rather than the value, so it survives the ceiling moving.
+//
+// The value is a guard against a misreading, not a property of the election: a Lease admits any
+// number of candidates. Exactly one leader serves and the rest are standbys holding no data, so
+// raising this buys spare processes and no capacity -- and the reading it is here to catch is the
+// one where somebody sets it high expecting throughput.
+const MaxLeaderReplicas = 5
+
 // KVCacheBackendWebhook validates a v1alpha1.KVCacheBackend.
 //
 // It is validating only. Every default this API has — the backend type, the leader's replica count
@@ -68,7 +82,7 @@ func (r *KVCacheBackendWebhook) ReceiveDeletionUpdate() {}
 func (r *KVCacheBackendWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (ctrladmission.Warnings, error) {
 	kvcb := obj.(*workercore.KVCacheBackend)
 
-	if errs := validateKVCacheBackendSpec(ctx, kvcb, true); len(errs) > 0 {
+	if errs := validateKVCacheBackendSpec(ctx, kvcb, nil, true); len(errs) > 0 {
 		return nil, kerrors.NewInvalid(kvcb.GroupVersionKind().GroupKind(), kvcb.Name, errs)
 	}
 
@@ -80,7 +94,7 @@ func (r *KVCacheBackendWebhook) ValidateUpdate(
 ) (ctrladmission.Warnings, error) {
 	oldKvcb, newKvcb := oldObj.(*workercore.KVCacheBackend), newObj.(*workercore.KVCacheBackend)
 
-	errs := validateKVCacheBackendSpec(ctx, newKvcb, oldKvcb.Spec.Image != newKvcb.Spec.Image)
+	errs := validateKVCacheBackendSpec(ctx, newKvcb, oldKvcb, oldKvcb.Spec.Image != newKvcb.Spec.Image)
 	errs = append(errs, validateKVCacheBackendImmutable(oldKvcb, newKvcb)...)
 	errs = append(errs, validateKVCacheBackendMultiTenancyWithdrawal(oldKvcb, newKvcb)...)
 	if len(errs) > 0 {
@@ -101,6 +115,10 @@ func (r *KVCacheBackendWebhook) ValidateDelete(
 // validateKVCacheBackendSpec holds every rule that applies to a spec whether it arrived by create
 // or by update.
 //
+// old is the object as it was, and nil on create. It exists for the same reason checkFallback does:
+// a rule that re-judges something an update did not touch can strand an already-admitted object,
+// and not every update is the user's.
+//
 // checkFallback asks whether this call must also prove the cluster-wide fallback image is still
 // there. It is false for an update that leaves spec.image where it was.
 //
@@ -111,7 +129,7 @@ func (r *KVCacheBackendWebhook) ValidateDelete(
 // ran. Whether the object NAMES a usable image is still checked on every call; only the question
 // about external state is scoped to the updates that could have changed the answer.
 func validateKVCacheBackendSpec(
-	ctx context.Context, kvcb *workercore.KVCacheBackend, checkFallback bool,
+	ctx context.Context, kvcb, old *workercore.KVCacheBackend, checkFallback bool,
 ) field.ErrorList {
 	specPath := field.NewPath("spec")
 
@@ -119,7 +137,12 @@ func validateKVCacheBackendSpec(
 	errs = append(errs, validateKVCacheBackendImage(ctx, kvcb, checkFallback, specPath.Child("image"))...)
 	errs = append(errs, validateKVCacheBackendPullSecrets(
 		kvcb.Spec.ImagePullSecrets, specPath.Child("imagePullSecrets"))...)
-	errs = append(errs, validateKVCacheBackendConnection(&kvcb.Spec, specPath.Child("connection"))...)
+	var oldSpec *workercore.KVCacheBackendSpec
+	if old != nil {
+		oldSpec = &old.Spec
+	}
+	errs = append(errs, validateKVCacheBackendConnection(
+		&kvcb.Spec, oldSpec, specPath.Child("connection"))...)
 
 	return errs
 }
@@ -247,7 +270,7 @@ func validateKVCacheBackendImage(
 // validateKVCacheBackendConnection enforces the branch choice and everything inside the branch that
 // was taken.
 func validateKVCacheBackendConnection(
-	spec *workercore.KVCacheBackendSpec, fldPath *field.Path,
+	spec, oldSpec *workercore.KVCacheBackendSpec, fldPath *field.Path,
 ) field.ErrorList {
 	managed, external := spec.Connection.Managed, spec.Connection.External
 
@@ -261,7 +284,11 @@ func validateKVCacheBackendConnection(
 	case external != nil:
 		return validateKVCacheBackendExternal(external, fldPath.Child("external"))
 	default:
-		return validateKVCacheBackendManaged(managed, fldPath.Child("managed"))
+		var oldManaged *workercore.KVCacheBackendManaged
+		if oldSpec != nil {
+			oldManaged = oldSpec.Connection.Managed
+		}
+		return validateKVCacheBackendManaged(managed, oldManaged, fldPath.Child("managed"))
 	}
 }
 
@@ -380,22 +407,58 @@ func checkHostPort(address string) error {
 }
 
 // validateKVCacheBackendManaged enforces the two scope limits and the escape-hatch rules.
+//
+// oldManaged is nil on create. It is used for one thing: skipping the escape-hatch rules over a map
+// no update touched. See unchangedExtraArgs.
 func validateKVCacheBackendManaged(
-	managed *workercore.KVCacheBackendManaged, fldPath *field.Path,
+	managed, oldManaged *workercore.KVCacheBackendManaged, fldPath *field.Path,
 ) field.ErrorList {
 	var errs field.ErrorList
 
-	if replicas := managed.Leader.Replicas; replicas != nil && *replicas != 1 {
-		errs = append(errs, field.Invalid(fldPath.Child("leader", "replicas"), *replicas,
-			"only 1 is supported: electing a leader among several needs an HA backend store, "+
-				"which the leader high-availability subject owns"))
+	if replicas := managed.Leader.Replicas; replicas != nil {
+		if *replicas > MaxLeaderReplicas {
+			errs = append(errs, field.Invalid(fldPath.Child("leader", "replicas"), *replicas,
+				fmt.Sprintf("at most %d is supported: only one leader serves at a time and the rest "+
+					"are standbys, so more of them adds spare processes rather than capacity",
+					MaxLeaderReplicas)))
+		}
+
+		// The pairing rule, and it names the field that is MISSING rather than the one that is set.
+		// Several leaders with nothing electing between them is not a degraded configuration: each
+		// one serves, and the members register with whichever they were told about.
+		if *replicas > 1 && managed.Leader.HighAvailability == nil {
+			errs = append(errs, field.Invalid(fldPath.Child("leader", "replicas"), *replicas,
+				"more than one leader requires leader.highAvailability, which elects one of them "+
+					"through a Kubernetes Lease; without it every replica would serve"))
+		}
 	}
 
-	errs = append(errs, validateExtraArgs(managed.Leader.ExtraArgs,
-		mooncake.LeaderExtraArgsRules, fldPath.Child("leader", "extraArgs"))...)
+	// REQUIRED: an update that switches high availability on or off re-runs these rules even over a
+	// map it did not touch, and the exemption below is what makes that necessary. Turning the field
+	// on is what turns `enable_ha`, `ha_backend_type`, `ha_backend_connstring` and `cluster_id` into
+	// DERIVED flags; an object admitted before they were derived may carry one, and the renderer
+	// appends the escape hatch AFTER the derived flags, so `enable_ha=false` left in the map would
+	// win over the `-enable_ha=true` the election needs -- several unelected masters, admitted by a
+	// rule that only ever looked at whether the map moved.
+	var oldLeaderExtraArgs map[string]string
+	haUnchanged := true
+	if oldManaged != nil {
+		oldLeaderExtraArgs = oldManaged.Leader.ExtraArgs
+		haUnchanged = (oldManaged.Leader.HighAvailability == nil) ==
+			(managed.Leader.HighAvailability == nil)
+	}
+	if !haUnchanged ||
+		!unchangedExtraArgs(oldManaged != nil, oldLeaderExtraArgs, managed.Leader.ExtraArgs) {
+		errs = append(errs, validateExtraArgs(managed.Leader.ExtraArgs,
+			mooncake.LeaderExtraArgsRules, fldPath.Child("leader", "extraArgs"))...)
+	}
 
 	for i := range managed.Members {
-		errs = append(errs, validateKVCacheBackendMember(&managed.Members[i],
+		var oldMember *workercore.KVCacheBackendMember
+		if oldManaged != nil && i < len(oldManaged.Members) {
+			oldMember = &oldManaged.Members[i]
+		}
+		errs = append(errs, validateKVCacheBackendMember(&managed.Members[i], oldMember,
 			fldPath.Child("members").Index(i))...)
 	}
 
@@ -521,7 +584,7 @@ const quantityTooLarge = "must not exceed 9223372036854775807 (2^63-1) bytes: th
 // validateKVCacheBackendMember holds the per-group rules a schema cannot carry: a medium the schema
 // accepts but nothing renders, and two quantities whose schema type is a string.
 func validateKVCacheBackendMember(
-	member *workercore.KVCacheBackendMember, fldPath *field.Path,
+	member, oldMember *workercore.KVCacheBackendMember, fldPath *field.Path,
 ) field.ErrorList {
 	var errs field.ErrorList
 
@@ -579,8 +642,14 @@ func validateKVCacheBackendMember(
 		errs = append(errs, checkImageReference(member.Image, fldPath.Child("image"))...)
 	}
 
-	errs = append(errs, validateExtraArgs(member.ExtraArgs,
-		mooncake.MemberExtraArgsRules, fldPath.Child("extraArgs"))...)
+	var oldExtraArgs map[string]string
+	if oldMember != nil {
+		oldExtraArgs = oldMember.ExtraArgs
+	}
+	if !unchangedExtraArgs(oldMember != nil, oldExtraArgs, member.ExtraArgs) {
+		errs = append(errs, validateExtraArgs(member.ExtraArgs,
+			mooncake.MemberExtraArgsRules, fldPath.Child("extraArgs"))...)
+	}
 
 	return errs
 }
@@ -691,6 +760,23 @@ func hasParentDirComponent(path string) bool {
 		}
 	}
 	return false
+}
+
+// unchangedExtraArgs reports whether this call is an UPDATE that left an extraArgs map exactly as it
+// already was, in which case its escape-hatch rules are not re-run.
+//
+// REQUIRED: this is not leniency, it is the same scoping the fallback-image check needs, and for the
+// same failure. These rules grow -- `enable_oplog` was added to the leader's forbidden list by the
+// high-availability work -- and every addition retroactively refuses an object that was admitted
+// before it existed. Refusing it is not the problem; refusing it on EVERY update is, because not
+// every update is the user's: the reconciler removes this object's finalizer through one, and a
+// refusal there strands the object undeletable after teardown has already removed its workloads.
+//
+// A user who touches the map gets the rule. A user who touches anything else, and the controller
+// touching nothing, do not. The leader's caller adds one condition on top of this: an update that
+// moves `highAvailability` moves which keys are derived, so it re-runs the rules regardless.
+func unchangedExtraArgs(isUpdate bool, old, current map[string]string) bool {
+	return isUpdate && maps.Equal(old, current)
 }
 
 // validateExtraArgs enforces one side's escape-hatch rules. Each refusal says which KIND of problem

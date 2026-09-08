@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
+	rbac "k8s.io/api/rbac/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -118,6 +119,76 @@ func reconcileKVCacheBackend(t *testing.T, cli ctrlcli.Client, name string) *wor
 		return nil
 	}
 	return got
+}
+
+// TestKVCacheBackend_LeaderReadinessIsAtLeastOne pins the comparison rather than the number, and the
+// case that matters is the one that looks wrong.
+//
+// With standbys, exactly one replica serves and the rest are deliberately not ready, so two ready
+// replicas read like a contradiction. They are a FAILOVER IN PROGRESS: the outgoing leader clears
+// its service plane in-process the moment it loses the lease, while the kubelet needs three failed
+// probe periods to withdraw it. Reporting a fault there would fire on every successful failover, so
+// the case is asserted as HEALTHY -- and it is the assertion that reddens if the predicate is ever
+// tightened to "exactly one".
+func TestKVCacheBackend_LeaderReadinessIsAtLeastOne(t *testing.T) {
+	cases := []struct {
+		name          string
+		deployment    bool
+		readyReplicas int32
+		want          bool
+		why           string
+	}{
+		{
+			name: "no deployment yet",
+			want: false,
+			why:  "a backend whose workload has not been created is starting, not broken",
+		},
+		{
+			name:       "deployment with nothing ready",
+			deployment: true,
+			want:       false,
+			why:        "no replica serves, so no leader exists",
+		},
+		{
+			name:          "the steady state under high availability",
+			deployment:    true,
+			readyReplicas: 1,
+			want:          true,
+			why:           "one serving leader is what N replicas look like when nothing is wrong",
+		},
+		{
+			name:          "mid-failover, both leaders briefly ready",
+			deployment:    true,
+			readyReplicas: 2,
+			want:          true,
+			why:           "the kubelet has not withdrawn the outgoing leader yet; this is not a fault",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			kvcb := newKVCacheBackendObject()
+
+			var objs []ctrlcli.Object
+			if c.deployment {
+				objs = append(objs, &apps.Deployment{
+					ObjectMeta: meta.ObjectMeta{
+						Name:      mooncake.LeaderObjectName(kvcb),
+						Namespace: kuberess.SystemNamespaceName,
+					},
+					Status: apps.DeploymentStatus{ReadyReplicas: c.readyReplicas},
+				})
+			}
+
+			cli := ctrlfake.NewClientBuilder().
+				WithScheme(scheme.Scheme).
+				WithObjects(objs...).
+				Build()
+			r := &KVCacheBackendReconciler{Client: cli}
+
+			assert.Equal(t, c.want, r.leaderPodIsReady(context.Background(), kvcb), c.why)
+		})
+	}
 }
 
 // TestKVCacheBackendReconciler_LocksAndReportsProvisioning pins the live path: the object is locked
@@ -789,7 +860,7 @@ func TestKVCacheBackendReconciler_ConvergesADriftedLeader(t *testing.T) {
 	require.NoError(t, cli.Get(ctx, leaderObjectKey(kvcb), after))
 	assert.Equal(t, kvcb.Spec.Image, after.Spec.Template.Spec.Containers[0].Image,
 		"a hand-edited image is put back")
-	assert.Equal(t, mooncake.RenderLeaderFlags(kvcb.Spec.Connection.Managed.Leader),
+	assert.Equal(t, mooncake.RenderLeaderFlags(kvcb),
 		after.Spec.Template.Spec.Containers[0].Args,
 		"a hand-edited argv is put back; extraArgs is the supported way to change it")
 	assert.Equal(t, core.TerminationMessageFallbackToLogsOnError,
@@ -1072,6 +1143,426 @@ func TestKVCacheBackendReconciler_ConvergesAMultiTenancySwitch(t *testing.T) {
 	assert.Empty(t, back.InitContainers,
 		"and the seed container with them, rather than leaving one that runs on every start")
 	assert.NotContains(t, back.Containers[0].Args, "-enable_multi_tenants=true")
+}
+
+// TestKVCacheBackendReconciler_ConvergesAHighAvailabilitySwitch pins that the API access follows the
+// field in BOTH directions.
+//
+// The off-to-on half is the obvious one. The on-to-off half is the one with a reason worth writing
+// down: the owner reference collects these three when the BACKEND is deleted, and a backend that
+// merely drops highAvailability is not deleted -- so without an explicit removal it keeps a
+// ServiceAccount that can still take a Lease, bound to a leader with no election left. Nothing
+// reports that, which is why it is asserted rather than left to the garbage collector.
+func TestKVCacheBackendReconciler_ConvergesAHighAvailabilitySwitch(t *testing.T) {
+	kvcb := newKVCacheBackendObject()
+	cli := newKVCacheBackendClient(kvcb)
+	ctx := context.Background()
+
+	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+
+	setHA := func(on bool) {
+		got := new(workercore.KVCacheBackend)
+		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, got))
+		if on {
+			got.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+		} else {
+			got.Spec.Connection.Managed.Leader.HighAvailability = nil
+		}
+		require.NoError(t, cli.Update(ctx, got))
+		require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+	}
+
+	// Each of the three, for BOTH roles, by the same names their PodSpecs ask for. Reported as one
+	// set rather than an assertion per object, because a PARTIAL set is the failure mode here and a
+	// test that stops at the first missing one says less about it. Both roles, because the member
+	// reads the same Lease to find the leader and its grant is a separate, narrower account -- one
+	// that a test written only around the leader would never notice missing.
+	present := func(t *testing.T) map[string]bool {
+		t.Helper()
+		got := map[string]bool{}
+		for role, name := range map[string]string{
+			"leader": mooncake.LeaderObjectName(kvcb),
+			"member": mooncake.MemberRBACObjectName(kvcb),
+		} {
+			key := ctrlcli.ObjectKey{Namespace: leaderObjectKey(kvcb).Namespace, Name: name}
+			for kind, obj := range map[string]ctrlcli.Object{
+				"ServiceAccount": &core.ServiceAccount{},
+				"Role":           &rbac.Role{},
+				"RoleBinding":    &rbac.RoleBinding{},
+			} {
+				got[role+"/"+kind] = cli.Get(ctx, key, obj) == nil
+			}
+		}
+		return got
+	}
+
+	expect := func(v bool) map[string]bool {
+		return map[string]bool{
+			"leader/ServiceAccount": v, "leader/Role": v, "leader/RoleBinding": v,
+			"member/ServiceAccount": v, "member/Role": v, "member/RoleBinding": v,
+		}
+	}
+
+	leaderPod := func() core.PodSpec {
+		deploy := new(apps.Deployment)
+		require.NoError(t, cli.Get(ctx, leaderObjectKey(kvcb), deploy))
+		return deploy.Spec.Template.Spec
+	}
+
+	// The member side is asserted through the LIVE DaemonSet rather than the renderer, because the
+	// case that matters is a backend whose DaemonSet already existed when HA was turned on -- and
+	// what carries that is the aligner, which a renderer test cannot reach.
+	memberPod := func() core.PodSpec {
+		ds := new(apps.DaemonSet)
+		require.NoError(t, cli.Get(ctx, memberObjectKey(kvcb, 0), ds))
+		return ds.Spec.Template.Spec
+	}
+	memberMaster := func(pod core.PodSpec) string {
+		for _, e := range pod.Containers[0].Env {
+			if e.Name == "MOONCAKE_MASTER" {
+				return e.Value
+			}
+		}
+		return ""
+	}
+
+	assert.Equal(t, expect(false), present(t),
+		"a backend that never asked for HA gets no API access, on either side")
+	off, offMember := leaderPod(), memberPod()
+	require.NotNil(t, off.AutomountServiceAccountToken)
+	assert.False(t, *off.AutomountServiceAccountToken)
+	assert.Empty(t, off.ServiceAccountName)
+	require.NotNil(t, offMember.AutomountServiceAccountToken)
+	assert.False(t, *offMember.AutomountServiceAccountToken)
+	assert.Empty(t, offMember.ServiceAccountName)
+	assert.NotContains(t, memberMaster(offMember), "://",
+		"without HA a member is given an address, exactly as before HA existed")
+
+	setHA(true)
+	assert.Equal(t, expect(true), present(t),
+		"turning it on renders all six, or one of the two sides never reaches the Lease")
+	on := leaderPod()
+	require.NotNil(t, on.AutomountServiceAccountToken)
+	assert.True(t, *on.AutomountServiceAccountToken,
+		"and mounts the token, without which a named account grants exactly nothing")
+	assert.Equal(t, mooncake.LeaderObjectName(kvcb), on.ServiceAccountName)
+	assert.Contains(t, on.Containers[0].Args, "-enable_ha=true",
+		"and the flag, which is the whole reason the edit was made")
+
+	onMember := memberPod()
+	require.NotNil(t, onMember.AutomountServiceAccountToken)
+	assert.True(t, *onMember.AutomountServiceAccountToken,
+		"the member reads the same Lease, so it needs a token too")
+	assert.Equal(t, mooncake.MemberRBACObjectName(kvcb), onMember.ServiceAccountName,
+		"under its own account, which cannot take the Lease the way the leader's can")
+	// The invariant that ties the two sides together: the Lease a member is told to READ is the one
+	// the leader is told to TAKE. Read out of the leader's own rendered argv rather than restated as
+	// a literal, because two literals agree until one of the two derivations moves -- and a member
+	// following a Lease nobody holds looks exactly like a member waiting for a leader to come up.
+	var leaderConnstring string
+	for _, arg := range on.Containers[0].Args {
+		if entry, ok := strings.CutPrefix(arg, "-ha_backend_connstring="); ok {
+			leaderConnstring = entry
+		}
+	}
+	require.NotEmpty(t, leaderConnstring, "the leader was rendered with a connection string")
+	assert.Equal(t, "k8s://"+leaderConnstring, memberMaster(onMember),
+		"the member reads the same Lease the leader takes, through the scheme its client parses")
+
+	setHA(false)
+	assert.Equal(t, expect(false), present(t),
+		"turning it back off takes both grants away rather than leaving them behind")
+	back, backMember := leaderPod(), memberPod()
+	require.NotNil(t, back.AutomountServiceAccountToken)
+	assert.False(t, *back.AutomountServiceAccountToken)
+	assert.Empty(t, back.ServiceAccountName)
+	assert.NotContains(t, back.Containers[0].Args, "-enable_ha=true")
+	require.NotNil(t, backMember.AutomountServiceAccountToken)
+	assert.False(t, *backMember.AutomountServiceAccountToken)
+	assert.Empty(t, backMember.ServiceAccountName)
+	assert.Equal(t, memberMaster(offMember), memberMaster(backMember),
+		"and the member is back on the address it started with, byte for byte")
+}
+
+// TestKVCacheBackendReconciler_ConvergesTheRolloutShapeOnALiveDeployment pins the fields an
+// EXISTING Deployment has to acquire when the replica count moves.
+//
+// A renderer test cannot reach this. The renderer is correct for every count; what was wrong is that
+// the aligner compared only the strategy TYPE, which is invariant across every multi-replica count —
+// so raising three replicas to five left `maxUnavailable` at two, below the four a workload with one
+// ready replica needs, and the rollout stalls with nothing saying why.
+//
+// Asserted against the renderer's own output rather than against literals, so the test says "the
+// live object equals what would be rendered for it" instead of restating the arithmetic.
+func TestKVCacheBackendReconciler_ConvergesTheRolloutShapeOnALiveDeployment(t *testing.T) {
+	kvcb := newKVCacheBackendObject()
+	cli := newKVCacheBackendClient(kvcb)
+	ctx := context.Background()
+
+	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+
+	setReplicas := func(n int32) *workercore.KVCacheBackend {
+		got := new(workercore.KVCacheBackend)
+		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, got))
+		got.Spec.Connection.Managed.Leader.Replicas = ptr.To(n)
+		if n > 1 {
+			got.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+		} else {
+			got.Spec.Connection.Managed.Leader.HighAvailability = nil
+		}
+		require.NoError(t, cli.Update(ctx, got))
+		require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+		return got
+	}
+
+	assertShapeMatchesRender := func(t *testing.T, want *workercore.KVCacheBackend) {
+		t.Helper()
+		live := new(apps.Deployment)
+		require.NoError(t, cli.Get(ctx, leaderObjectKey(kvcb), live))
+		rendered := mooncake.RenderLeaderDeployment(want, "example.com/mooncake:v0")
+
+		assert.Equal(t, rendered.Spec.Replicas, live.Spec.Replicas)
+		assert.Equal(t, rendered.Spec.Strategy, live.Spec.Strategy,
+			"the whole strategy, not its type: maxUnavailable moves with the replica count")
+		assert.Equal(t, rendered.Spec.ProgressDeadlineSeconds, live.Spec.ProgressDeadlineSeconds,
+			"a deadline left at the server default reports ProgressDeadlineExceeded on a workload "+
+				"that is working, because every standby is permanently unavailable")
+	}
+
+	// One to three: the strategy TYPE changes here, so even the old comparison caught this step.
+	assertShapeMatchesRender(t, setReplicas(3))
+	// Three to five: the type does NOT change, which is the step that used to be missed.
+	assertShapeMatchesRender(t, setReplicas(5))
+	// And back to one, where the disabled deadline has to go or the single-replica path loses its
+	// only timeout.
+	assertShapeMatchesRender(t, setReplicas(1))
+}
+
+// turnOnHighAvailability edits the live object to ask for an election and runs one pass, handing
+// back whatever that pass returned. It is separate from reconcileKVCacheBackend because the cases
+// below are about a pass that must FAIL, which that helper asserts against.
+func turnOnHighAvailability(t *testing.T, cli ctrlcli.Client, name string) error {
+	t.Helper()
+
+	ctx := context.Background()
+	got := new(workercore.KVCacheBackend)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: name}, got))
+	got.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+	require.NoError(t, cli.Update(ctx, got))
+
+	r := &KVCacheBackendReconciler{
+		Client: cli,
+		AdminHTTP: &http.Client{Transport: &adminRoundTripper{byPath: map[string]adminResponse{
+			"/health": {err: errors.New("connect: connection refused")},
+		}}},
+	}
+	_, err := r.Reconcile(ctx, ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: name}})
+	return err
+}
+
+// TestKVCacheBackendReconciler_ARoleBindingPointingElsewhere pins the one RBAC drift an update
+// cannot repair, and the two answers it gets depending on WHOSE object is in the way.
+//
+// `roleRef` is immutable, so an update carrying a different one is refused — but an update that does
+// not set it is ACCEPTED, and that is the dangerous shape: a binding of this name pointing at a
+// broader role would keep pointing there while its subject is rewritten to the store's account, so
+// the reconcile reports success and the binary ends up bound to a role nobody granted it.
+//
+// Recreating repairs that for a binding this operator wrote. For one it did not, recreating is the
+// worse answer: the collision is then resolved by destroying a third party's object, silently and
+// with no way back. Every other delete in the reconciler consults the resource note first, and this
+// one now does too — it refuses, leaves the object exactly as it found it, and fails the pass.
+func TestKVCacheBackendReconciler_ARoleBindingPointingElsewhere(t *testing.T) {
+	ctx := context.Background()
+
+	foreign := func(namespace, name string) *rbac.RoleBinding {
+		return &rbac.RoleBinding{
+			ObjectMeta: meta.ObjectMeta{Namespace: namespace, Name: name},
+			RoleRef: rbac.RoleRef{
+				APIGroup: rbac.GroupName, Kind: "ClusterRole", Name: "cluster-admin",
+			},
+			Subjects: []rbac.Subject{{Kind: rbac.UserKind, Name: "someone-else"}},
+		}
+	}
+
+	t.Run("one this operator did not create is refused, not deleted", func(t *testing.T) {
+		kvcb := newKVCacheBackendObject()
+		cli := newKVCacheBackendClient(kvcb)
+		key := ctrlcli.ObjectKey{
+			Namespace: leaderObjectKey(kvcb).Namespace, Name: mooncake.LeaderObjectName(kvcb),
+		}
+		require.NoError(t, cli.Create(ctx, foreign(key.Namespace, key.Name)))
+
+		err := turnOnHighAvailability(t, cli, kvcb.Name)
+		require.Error(t, err, "a name collision this operator cannot resolve fails the pass")
+		assert.Contains(t, err.Error(), key.Name,
+			"and names the object, which is the only thing an administrator can act on")
+
+		live := new(rbac.RoleBinding)
+		require.NoError(t, cli.Get(ctx, key, live), "the object is still there")
+		assert.Equal(t, "cluster-admin", live.RoleRef.Name,
+			"pointing where it did: refusing means refusing to touch it, not deleting it")
+		require.Len(t, live.Subjects, 1)
+		assert.Equal(t, "someone-else", live.Subjects[0].Name,
+			"and its subject is not rewritten to the store's account either")
+	})
+
+	t.Run("its own is recreated", func(t *testing.T) {
+		kvcb := newKVCacheBackendObject()
+		cli := newKVCacheBackendClient(kvcb)
+		key := ctrlcli.ObjectKey{
+			Namespace: leaderObjectKey(kvcb).Namespace, Name: mooncake.LeaderObjectName(kvcb),
+		}
+
+		// The positive baseline: without it, a check that refused every mismatch would satisfy the
+		// case above just as well, and the repair this path exists for would be gone.
+		require.NoError(t, turnOnHighAvailability(t, cli, kvcb.Name))
+		live := new(rbac.RoleBinding)
+		require.NoError(t, cli.Get(ctx, key, live))
+		require.True(t, renderedForKVCacheBackend(live, kvcb), "this one is ours")
+
+		// Drift it the way an immutable field can only drift: by hand, on the live object.
+		live.RoleRef = rbac.RoleRef{
+			APIGroup: rbac.GroupName, Kind: "ClusterRole", Name: "cluster-admin",
+		}
+		require.NoError(t, cli.Update(ctx, live))
+		require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+
+		require.NoError(t, cli.Get(ctx, key, live))
+		assert.Equal(t, "Role", live.RoleRef.Kind,
+			"a binding pointing at a ClusterRole is replaced, not patched into a hybrid")
+		assert.Equal(t, key.Name, live.RoleRef.Name)
+		require.Len(t, live.Subjects, 1)
+		assert.Equal(t, key.Name, live.Subjects[0].Name)
+	})
+}
+
+// TestKVCacheBackendReconciler_WillNotClaimAnObjectItDidNotCreate pins the one rule the three RBAC
+// objects share, and the thing it must not cost.
+//
+// They are created BY NAME into a namespace shared with everything else this operator renders, so a
+// collision is possible — and claiming one is not reversible: the note makes the teardown path
+// willing to remove it and the owner reference hands it to garbage collection when the BACKEND is
+// deleted, so a third party's account would be destroyed by an unrelated object's lifecycle.
+//
+// The second case is the one that keeps the first honest. Refusing everything would satisfy it just
+// as well, and it would also throw away the key-by-key label merge — so an object this operator DOES
+// own is asserted to keep a label added to it by hand.
+func TestKVCacheBackendReconciler_WillNotClaimAnObjectItDidNotCreate(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a foreign account of the rendered name is refused and left alone", func(t *testing.T) {
+		kvcb := newKVCacheBackendObject()
+		cli := newKVCacheBackendClient(kvcb)
+		key := ctrlcli.ObjectKey{
+			Namespace: leaderObjectKey(kvcb).Namespace, Name: mooncake.LeaderObjectName(kvcb),
+		}
+		require.NoError(t, cli.Create(ctx, &core.ServiceAccount{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace: key.Namespace,
+				Name:      key.Name,
+				Labels:    map[string]string{"example.com/found-by": "someone-else"},
+			},
+		}))
+
+		err := turnOnHighAvailability(t, cli, kvcb.Name)
+		require.Error(t, err, "a name collision this operator cannot resolve fails the pass")
+		assert.Contains(t, err.Error(), key.Name, "and names the object to act on")
+
+		live := new(core.ServiceAccount)
+		require.NoError(t, cli.Get(ctx, key, live))
+		assert.False(t, renderedForKVCacheBackend(live, kvcb),
+			"no note was stamped, so the teardown path will not remove it later")
+		assert.Empty(t, live.OwnerReferences,
+			"and no owner reference, which is what would have handed it to garbage collection")
+		assert.Equal(t, map[string]string{"example.com/found-by": "someone-else"}, live.Labels,
+			"its labels are untouched: refusing means refusing to write to it at all")
+	})
+
+	t.Run("its own account keeps a label added by hand", func(t *testing.T) {
+		kvcb := newKVCacheBackendObject()
+		cli := newKVCacheBackendClient(kvcb)
+		key := ctrlcli.ObjectKey{
+			Namespace: leaderObjectKey(kvcb).Namespace, Name: mooncake.LeaderObjectName(kvcb),
+		}
+
+		require.NoError(t, turnOnHighAvailability(t, cli, kvcb.Name))
+		live := new(core.ServiceAccount)
+		require.NoError(t, cli.Get(ctx, key, live))
+		require.True(t, renderedForKVCacheBackend(live, kvcb), "this one is ours")
+
+		live.Labels["example.com/found-by"] = "another-controller"
+		require.NoError(t, cli.Update(ctx, live))
+		require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+
+		require.NoError(t, cli.Get(ctx, key, live))
+		assert.Equal(t, "another-controller", live.Labels["example.com/found-by"],
+			"a label this operator never rendered survives the pass")
+		assert.Equal(t, "kv-cache-backend", live.Labels["app.kubernetes.io/name"],
+			"and the rendered ones are still there, or the align did nothing at all")
+	})
+}
+
+// TestKVCacheBackendReconciler_KeepsTheGrantWhenTheWorkloadUpdateFails pins the ORDER in which a
+// grant is revoked, which is the half of the design that only shows up when something goes wrong.
+//
+// Turning high availability off re-renders both workloads without the account and only then drops
+// the account. Dropping it first would take the Lease away from a leader still configured to renew
+// it and from members still configured to read it — so a failure in the workload update that follows
+// leaves the backend with no master until some later pass succeeds. The failure is injected here
+// because a passing reconcile cannot tell the two orders apart: both end with the objects gone.
+func TestKVCacheBackendReconciler_KeepsTheGrantWhenTheWorkloadUpdateFails(t *testing.T) {
+	kvcb := newKVCacheBackendObject()
+	ctx := context.Background()
+
+	refuseLeaderUpdate := false
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithStatusSubresource(&workercore.KVCacheBackend{}).
+		WithObjects(kvcb).
+		WithInterceptorFuncs(ctrlinterceptor.Funcs{
+			Update: func(
+				ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object,
+				opts ...ctrlcli.UpdateOption,
+			) error {
+				if _, ok := obj.(*apps.Deployment); ok && refuseLeaderUpdate {
+					return errors.New("the api server refused the leader update")
+				}
+				return c.Update(ctx, obj, opts...)
+			},
+		}).
+		Build()
+
+	require.NoError(t, turnOnHighAvailability(t, cli, kvcb.Name))
+	key := ctrlcli.ObjectKey{
+		Namespace: leaderObjectKey(kvcb).Namespace, Name: mooncake.LeaderObjectName(kvcb),
+	}
+	require.NoError(t, cli.Get(ctx, key, new(rbac.RoleBinding)), "the grant is in place")
+
+	refuseLeaderUpdate = true
+	got := new(workercore.KVCacheBackend)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, got))
+	got.Spec.Connection.Managed.Leader.HighAvailability = nil
+	require.NoError(t, cli.Update(ctx, got))
+
+	r := &KVCacheBackendReconciler{
+		Client: cli,
+		AdminHTTP: &http.Client{Transport: &adminRoundTripper{byPath: map[string]adminResponse{
+			"/health": {err: errors.New("connect: connection refused")},
+		}}},
+	}
+	_, err := r.Reconcile(ctx, ctrlreconcile.Request{
+		NamespacedName: ctrlcli.ObjectKey{Name: kvcb.Name},
+	})
+	require.Error(t, err, "the pass that was supposed to re-render the workloads did not")
+
+	for _, obj := range []ctrlcli.Object{
+		&core.ServiceAccount{}, &rbac.Role{}, &rbac.RoleBinding{},
+	} {
+		assert.NoErrorf(t, cli.Get(ctx, key, obj),
+			"%T outlives a failed workload update by one pass, which costs a stale grant; "+
+				"revoking first would cost the master", obj)
+	}
 }
 
 // adminResponse is one canned reply. A nil err with a status and a body is a reply that arrived; a
@@ -4007,7 +4498,7 @@ func TestKVCacheBackendConverge_TakesBackWhatWasGrantedByHand(t *testing.T) {
 		core.ResourceMemory: resource.MustParse("64Mi"),
 	}
 	// And the token mount, which is the same shape once more: an edit to true is a privilege granted
-	// by hand to a third-party image that never calls the API server.
+	// by hand to a leader this object never asked to elect, so nothing it runs reads the token.
 	deploy.Spec.Template.Spec.AutomountServiceAccountToken = ptr.To(true)
 	require.NoError(t, cli.Update(ctx, deploy))
 

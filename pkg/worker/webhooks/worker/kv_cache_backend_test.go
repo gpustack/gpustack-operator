@@ -3,11 +3,14 @@ package worker
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -128,6 +131,46 @@ func runKVCacheBackendCases(
 	}
 }
 
+// TestKVCacheBackend_LeaderReplicaCeilingIsTheSameInBothLayers holds the webhook's threshold equal
+// to the schema's, because the ceiling is expressed twice in two different languages.
+//
+// It asserts EQUALITY, never the value 1. A test pinning both to 1 would be edited away by the same
+// change that raises the ceiling, which is exactly when this needs to fire; a test pinning them to
+// each other reddens when one moves without the other. The pairing it prevents is the worst one:
+// admission accepting a value the schema then rejects, which surfaces as an error against a field
+// the user did not get wrong.
+//
+// LIMITED: this reads the FIRST version carrying a schema. The CRD has one today, so the two are the
+// same thing; once it has several, a ceiling that drifted in any later version would not redden
+// here.
+func TestKVCacheBackend_LeaderReplicaCeilingIsTheSameInBothLayers(t *testing.T) {
+	crd, ok := workercore.GetCustomResourceDefinitions()["KVCacheBackend"]
+	require.True(t, ok, "the KVCacheBackend CRD is generated under this key")
+
+	var schema *apiext.JSONSchemaProps
+	for i := range crd.Spec.Versions {
+		if crd.Spec.Versions[i].Schema != nil && crd.Spec.Versions[i].Schema.OpenAPIV3Schema != nil {
+			schema = crd.Spec.Versions[i].Schema.OpenAPIV3Schema
+			break
+		}
+	}
+	require.NotNil(t, schema, "the CRD carries a structural schema")
+
+	// spec.connection.managed.leader.replicas, walked rather than matched as a string so that a
+	// field moving is a failure here instead of a silently skipped assertion.
+	node := schema
+	for _, step := range []string{"spec", "connection", "managed", "leader", "replicas"} {
+		next, found := node.Properties[step]
+		require.True(t, found, "the schema still has a %q under this path", step)
+		node = &next
+	}
+
+	require.NotNil(t, node.Maximum,
+		"the schema carries the ceiling too, so it still holds when the webhook is not installed")
+	assert.Equal(t, float64(MaxLeaderReplicas), *node.Maximum,
+		"the webhook and the schema must be raised together, or one admits what the other rejects")
+}
+
 // TestKVCacheBackendWebhook_ValidateCreate pins the rules a CRD schema cannot express. The enums and
 // defaults are deliberately absent from this table: structural schema validation runs in
 // rest.BeforeCreate and the validating admission chain runs after it, so a value outside an enum
@@ -151,9 +194,48 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 		{"replicas unset, which the schema defaults", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = nil
 		}, ""},
-		{"replicas 3 names the follow-on subject", func(k *workercore.KVCacheBackend) {
+		// The pairing rule, in both directions. Refusing the first without accepting the second
+		// would be a rule nobody can satisfy, and accepting the second without refusing the first
+		// is the configuration it exists to prevent: several leaders, each one serving.
+		{"replicas 3 without the field that elects", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
-		}, "leader high-availability subject"},
+		}, "requires leader.highAvailability"},
+		{"replicas 3 with it", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
+			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+		}, ""},
+		// The ceiling still applies WITH the field: HA lifts the pairing rule, not the bound.
+		{"replicas past the ceiling, even with the field", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](MaxLeaderReplicas + 1)
+			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+		}, "at most"},
+		// One replica with the field is accepted rather than refused as pointless. A Lease held by a
+		// single leader is what lets its replacement pick the same record up after a restart.
+		{"replicas 1 with the field", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
+			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+		}, ""},
+		// The oplog key: refused because the leader cannot START with it, not because this operator
+		// took a view on what it writes. The message says which backend is missing, because the flag
+		// itself is supported upstream and a message denying that sends the reader to the wrong
+		// project.
+		{"enable_oplog in the leader's extraArgs", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"enable_oplog": "true"}
+		}, "refuses to start"},
+		{"enable_oplog set to false is refused too", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"enable_oplog": "false"}
+		}, "refuses to start"},
+		// The election's four flags are rendered from the field, so reaching them through the hatch
+		// is the ambiguity every other derived key is refused for.
+		{"enable_ha through the escape hatch", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"enable_ha": "true"}
+		}, "derived from a field"},
+		{"ha_backend_connstring through the escape hatch", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"ha_backend_connstring": "other/lease"}
+		}, "derived from a field"},
+		{"cluster_id through the escape hatch", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"cluster_id": "shared"}
+		}, "derived from a field"},
 		// A second group is admitted. It used to be refused as "a second medium tier", which the
 		// tiering work has now answered — a tier is a layer on a group rather than a group of its
 		// own, so a second group is just more nodes and nothing here has to arbitrate between them.
@@ -405,15 +487,18 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 				"tenant_quota_connector_type": "etcd",
 			}
 		}, "a store nothing reads"},
-		{"leader extraArgs with both rpc_address and rpc_interface", func(k *workercore.KVCacheBackend) {
+		// Both halves of the advertised address, and neither is reachable any more. They were a
+		// mutually-exclusive pair until the election started rendering rpc_address: the artifact
+		// folds it into the string it campaigns with, so a value from here decides which host every
+		// member connects to — and cannot know whether the Pod answers there.
+		{"leader extraArgs with rpc_address", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{
-				"rpc_address":   "10.0.0.1:50051",
-				"rpc_interface": "eth0",
+				"rpc_address": "10.0.0.1:50051",
 			}
-		}, "mutually exclusive"},
-		{"leader extraArgs with only rpc_interface", func(k *workercore.KVCacheBackend) {
+		}, "derived from a field of this spec"},
+		{"leader extraArgs with rpc_interface", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"rpc_interface": "eth0"}
-		}, ""},
+		}, "derived from a field of this spec"},
 		// A key deliberately left reachable, and the one with the strongest reason: the renderer
 		// leaves MOONCAKE_DEVICE unset because one DaemonSet covers every node its group selects
 		// and an RDMA device is named per host, so no single name could be rendered for the group.
@@ -617,6 +702,100 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 	}, func(wh *KVCacheBackendWebhook, _, newKvcb *workercore.KVCacheBackend) error {
 		_, err := wh.ValidateCreate(context.Background(), newKvcb)
 		return err
+	})
+}
+
+// TestKVCacheBackendWebhook_AGrandfatheredExtraArgIsNotRefusedOnEveryUpdate pins that a forbidden
+// key already on an admitted object does not make that object un-updatable.
+//
+// The failure this prevents is not a lenient rule, it is a STRANDED OBJECT. This list grows --
+// `enable_oplog` joined it with the high-availability work -- and every addition retroactively
+// condemns objects admitted before it existed. Not every update is the user's: the reconciler
+// removes this object's finalizer through one, so a refusal there leaves an object that owns nothing
+// and cannot be deleted, after teardown has already removed its workloads.
+//
+// Three cases, because only the three together say where the line is: untouched is admitted, touched
+// is refused, and a create is refused whatever it carries.
+func TestKVCacheBackendWebhook_AGrandfatheredExtraArgIsNotRefusedOnEveryUpdate(t *testing.T) {
+	wh := &KVCacheBackendWebhook{}
+
+	withOplog := func(k *workercore.KVCacheBackend) {
+		k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"enable_oplog": "true"}
+	}
+
+	t.Run("an update that does not touch the map is admitted", func(t *testing.T) {
+		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+		withOplog(oldKvcb)
+		withOplog(newKvcb)
+		// An edit somewhere else entirely, which is what an ordinary update looks like.
+		newKvcb.Spec.Image = "example.com/mooncake:v1"
+
+		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+		require.NoError(t, err,
+			"a key admitted before the rule existed must not refuse every later update")
+	})
+
+	t.Run("an update that does not change anything is admitted", func(t *testing.T) {
+		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+		withOplog(oldKvcb)
+		withOplog(newKvcb)
+
+		// This is the reconciler removing the finalizer: the spec is untouched. Refusing it is what
+		// strands the object.
+		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+		require.NoError(t, err)
+	})
+
+	t.Run("an update that touches the map is refused", func(t *testing.T) {
+		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+		withOplog(oldKvcb)
+		newKvcb.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{
+			"enable_oplog": "false",
+		}
+
+		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+		require.Error(t, err, "editing the value is touching the map, so the rule applies")
+		require.Contains(t, err.Error(), "refuses to start")
+	})
+
+	t.Run("a create carrying it is refused", func(t *testing.T) {
+		kvcb := newKVCacheBackend()
+		withOplog(kvcb)
+
+		_, err := wh.ValidateCreate(context.Background(), kvcb)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "refuses to start")
+	})
+
+	// The exemption's own blind spot: switching high availability on is what MAKES these keys
+	// derived, so an update that moves the field has to re-read a map it did not touch. Left
+	// exempt, `enable_ha=false` grandfathered from before the key was derived reaches the renderer,
+	// which appends the escape hatch after the derived flags -- so it wins over the `-enable_ha=true`
+	// the election needs, and several unelected masters are admitted by a rule that only ever asked
+	// whether the map had moved.
+	t.Run("turning high availability on re-reads a map it did not touch", func(t *testing.T) {
+		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+		grandfathered := map[string]string{"enable_ha": "false"}
+		oldKvcb.Spec.Connection.Managed.Leader.ExtraArgs = grandfathered
+		newKvcb.Spec.Connection.Managed.Leader.ExtraArgs = maps.Clone(grandfathered)
+		newKvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+
+		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+		require.Error(t, err, "the field moved, so the keys it derives are read again")
+		require.Contains(t, err.Error(), "derived from a field of this spec")
+	})
+
+	t.Run("an unrelated update still leaves that same map alone", func(t *testing.T) {
+		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+		grandfathered := map[string]string{"enable_ha": "false"}
+		oldKvcb.Spec.Connection.Managed.Leader.ExtraArgs = grandfathered
+		newKvcb.Spec.Connection.Managed.Leader.ExtraArgs = maps.Clone(grandfathered)
+		newKvcb.Spec.Image = "example.com/mooncake:v1"
+
+		// The positive baseline for the case above: without it, a rule that refused every update
+		// would pass that assertion just as well, and this is the update the exemption exists for.
+		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+		require.NoError(t, err)
 	})
 }
 

@@ -83,8 +83,12 @@ var (
 	// runtime it links are compiled into its wheel. A backend on the Ascend transport, or a member
 	// group placed on other accelerator hardware, needs a build nothing here can guess at. Blank
 	// makes that an admission refusal naming both places to fix, where a default would make it a
-	// loader error at runtime. The one image measured end to end is also a third party's, unlike
-	// every other image Setting here, which points at something this project publishes.
+	// loader error at runtime.
+	//
+	// This project does publish one build, pack/mirrored-mooncake, and it is still not a default. It
+	// is the only image that can run leader.highAvailability -- no published upstream image carries
+	// a leadership backend at all -- but it is TCP over DRAM, so defaulting to it would hand a
+	// backend on a vendor fabric an image whose transport it cannot use.
 	KVCacheBackendImage = settings.NewEditable(
 		"kv-cache-backend-image",
 		"Indicates the image to run a KV cache backend, when the backend does not name one.",

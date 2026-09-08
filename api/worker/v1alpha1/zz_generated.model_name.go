@@ -276,6 +276,11 @@ func (in KVCacheBackendLeader) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackendLeaderHighAvailability) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackendLeaderHighAvailability"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in KVCacheBackendLeaderOffload) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.KVCacheBackendLeaderOffload"
 }

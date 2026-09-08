@@ -6,9 +6,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	core "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
 // TestRenderLeaderFlags asserts the whole argv element by element rather than probing it for
@@ -189,9 +191,115 @@ func TestRenderLeaderFlags(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			assert.Equal(t, c.want, RenderLeaderFlags(c.leader))
+			assert.Equal(t, c.want, RenderLeaderFlags(leaderBackend(c.leader)))
 		})
 	}
+}
+
+// leaderBackend puts a leader spec on the shared fixture, which is what carries the identity the
+// election flags are derived from. The fixture rather than a bare object, so a rename of the
+// backend or a change to LeaderObjectName reaches every case here.
+func leaderBackend(leader workercore.KVCacheBackendLeader) *workercore.KVCacheBackend {
+	return testBackend(func(kvcb *workercore.KVCacheBackend) {
+		kvcb.Spec.Connection.Managed.Leader = leader
+	})
+}
+
+// TestRenderLeaderFlags_HighAvailability asserts the election group, which is the one part of this
+// argv derived from the OBJECT rather than from the leader spec.
+//
+// The five flags are asserted as a contiguous group in order, not probed for individually: they are
+// rendered together or not at all, because -enable_ha without a connection string is a leader that
+// exits at startup and a connection string without -enable_ha is accepted and then ignored.
+//
+// -rpc_address is in the group for a reason that is not obvious from its name: the artifact folds it
+// with -rpc_port into the string it campaigns with, so it is the election's identity AND the address
+// the Lease hands to members. Its 0.0.0.0 default would give every replica one identity and send
+// every member to an address that resolves back to itself.
+func TestRenderLeaderFlags_HighAvailability(t *testing.T) {
+	kvcb := leaderBackend(workercore.KVCacheBackendLeader{
+		Replicas:           ptr.To[int32](3),
+		AllocationStrategy: "FreeRatioFirst",
+		HighAvailability:   &workercore.KVCacheBackendLeaderHighAvailability{},
+	})
+
+	assert.Equal(t, []string{
+		"-rpc_port=50051",
+		"-metrics_port=9003",
+		"-enable_ha=true",
+		"-ha_backend_type=k8s",
+		"-ha_backend_connstring=" + kuberess.SystemNamespaceName + "/mooncake-dram-leader",
+		"-rpc_address=$(KUBERNETES_POD_IP)",
+		"-cluster_id=mooncake-dram-leader",
+		"-allocation_strategy=free_ratio_first",
+		"-pod_name=$(KUBERNETES_POD_NAME)",
+		"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
+	}, RenderLeaderFlags(kvcb))
+}
+
+// TestRenderLeaderFlags_AdvertisedAddressIsPerReplica pins that the address the election campaigns
+// with is a REFERENCE the Pod resolves, and that it appears only where an election reads it.
+//
+// A literal here would be the defect this flag exists to prevent, and it would read perfectly in the
+// golden list above: every replica would advertise the same string. The assertion is therefore that
+// the value is unresolved argv, paired with the Deployment defining the variable it names.
+func TestRenderLeaderFlags_AdvertisedAddressIsPerReplica(t *testing.T) {
+	withHA := RenderLeaderFlags(testBackend(func(kvcb *workercore.KVCacheBackend) {
+		kvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+	}))
+	assert.Contains(t, withHA, "-rpc_address=$(KUBERNETES_POD_IP)",
+		"a value the Pod resolves, not one this operator could know when it renders")
+
+	deploy := RenderLeaderDeployment(haBackend(), "mooncake:v0.3.13")
+	var podIP *core.EnvVar
+	for i, e := range deploy.Spec.Template.Spec.Containers[0].Env {
+		if e.Name == LeaderPodIPEnv {
+			podIP = &deploy.Spec.Template.Spec.Containers[0].Env[i]
+		}
+	}
+	require.NotNil(t, podIP, "the flag names a variable the workload has to define")
+	require.NotNil(t, podIP.ValueFrom)
+	require.NotNil(t, podIP.ValueFrom.FieldRef)
+	assert.Equal(t, "status.podIP", podIP.ValueFrom.FieldRef.FieldPath,
+		"and it comes from the Pod's own address, which is the only per-replica value that another "+
+			"Pod can reach")
+
+	withoutHA := RenderLeaderFlags(testBackend())
+	for _, flag := range withoutHA {
+		assert.NotContains(t, flag, "-rpc_address=",
+			"without an election nothing reads it, and rendering it would move the bind address")
+	}
+	for _, e := range RenderLeaderDeployment(testBackend(), "mooncake:v0.3.13").
+		Spec.Template.Spec.Containers[0].Env {
+		assert.NotEqual(t, LeaderPodIPEnv, e.Name,
+			"and a variable no flag reads is dead weight in the manifest")
+	}
+}
+
+// TestRenderLeaderFlags_ElectionTargetsAreDistinctPerBackend pins that two backends never elect
+// through the same Lease or share a cluster_id.
+//
+// It compares two renders rather than asserting either against a literal, because the failure it
+// guards is SAMENESS: a connstring built from a constant, or from a field both objects share, reads
+// correctly in a single golden list and puts two stores in one election.
+func TestRenderLeaderFlags_ElectionTargetsAreDistinctPerBackend(t *testing.T) {
+	ha := &workercore.KVCacheBackendLeaderHighAvailability{}
+
+	render := func(name string) []string {
+		kvcb := testBackend(func(kvcb *workercore.KVCacheBackend) {
+			kvcb.Name = name
+			kvcb.Spec.Connection.Managed.Leader.HighAvailability = ha
+		})
+		return RenderLeaderFlags(kvcb)
+	}
+
+	first := strings.Join(render("alpha"), " ")
+	second := strings.Join(render("beta"), " ")
+
+	require.Contains(t, first, "-ha_backend_connstring="+kuberess.SystemNamespaceName+"/alpha-leader")
+	require.Contains(t, second, "-ha_backend_connstring="+kuberess.SystemNamespaceName+"/beta-leader")
+	assert.Contains(t, first, "-cluster_id=alpha-leader")
+	assert.Contains(t, second, "-cluster_id=beta-leader")
 }
 
 // TestRenderLeaderFlags_IsDeterministic pins that one spec renders identically every time. The
@@ -205,16 +313,20 @@ func TestRenderLeaderFlags_IsDeterministic(t *testing.T) {
 		},
 	}
 
-	first := RenderLeaderFlags(leader)
+	first := RenderLeaderFlags(leaderBackend(leader))
 	for range 20 {
-		assert.Equal(t, first, RenderLeaderFlags(leader))
+		assert.Equal(t, first, RenderLeaderFlags(leaderBackend(leader)))
 	}
 }
 
 // TestRenderLeaderFlags_OmitsWhatThisScopeDoesNotRun pins the absences. They are not an oversight:
-// the metadata plane is peer-to-peer so there is no store to point at, electing a leader among
-// several is a different subject, and -port is deprecated. A flag appearing here later would be a
-// behavior change nobody asked for, so the test names each one.
+// the metadata plane is peer-to-peer so there is no store to point at, and -port is deprecated. A
+// flag appearing here later would be a behavior change nobody asked for, so the test names each one.
+//
+// The four election flags are in this list for a DIFFERENT reason than the rest, and it is the one
+// worth keeping: a backend that does not set leader.highAvailability must render the argv it
+// rendered before that field existed. Every other entry is absent because nothing renders it at
+// all; these four are absent because the object did not ask.
 func TestRenderLeaderFlags_OmitsWhatThisScopeDoesNotRun(t *testing.T) {
 	absent := []string{
 		"-etcd_endpoints",
@@ -233,10 +345,10 @@ func TestRenderLeaderFlags_OmitsWhatThisScopeDoesNotRun(t *testing.T) {
 		"-offload_on_evict",
 	}
 
-	got := strings.Join(RenderLeaderFlags(workercore.KVCacheBackendLeader{
+	got := strings.Join(RenderLeaderFlags(leaderBackend(workercore.KVCacheBackendLeader{
 		Replicas:           ptr.To[int32](1),
 		AllocationStrategy: "FreeRatioFirst",
-	}), " ")
+	})), " ")
 
 	for _, flag := range absent {
 		assert.NotContains(t, got, flag+"=", "%s must not be rendered", flag)
