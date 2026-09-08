@@ -333,12 +333,18 @@ else
 fi
 rm -f "$TRAJ_FILE"
 
-FINAL_PHASE="$(kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" -o jsonpath='{.status.phase}' 2>/dev/null)"
-if [ "$FINAL_PHASE" = "Ready" ]; then
+# The new leader being Ready and every member having re-registered with it are different
+# events: members remount one at a time (observed: 0/3 segments listed right at the new
+# leader's readiness, 1/3 ten seconds later, full remount tens of seconds after that), and
+# the controller only re-reads the leader on its own cadence. Reading phase once, right at
+# readiness, races that remount and reports a mid-flight Degraded as a verdict. Assert
+# CONVERGENCE instead, through the suite's bounded-poll idiom -- a single snapshot cannot
+# distinguish mid-flight from stuck.
+if wait_for kvcachebackends.worker.gpustack.ai "$BACKEND" '{.status.phase}' Ready 300 >/dev/null; then
   record PASS "the backend is Ready after the failover" "phase=Ready"
 else
   record FAIL "the backend is Ready after the failover" \
-    "phase='${FINAL_PHASE:-<absent>}': $(kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" -o jsonpath='{.status.phaseMessage}' 2>/dev/null | cut -c1-160)"
+    "phase='$(kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" -o jsonpath='{.status.phase}' 2>/dev/null)' after a 300s settle window: $(kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" -o jsonpath='{.status.phaseMessage}' 2>/dev/null | cut -c1-160)"
 fi
 
 results
