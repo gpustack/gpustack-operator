@@ -48,9 +48,10 @@
 #              - leader SA: create/get/update leases=yes, patch pods=yes; watch/list/delete leases
 #                and get/update pods=no;
 #              - member SA: get leases=yes; update/create/delete leases and patch pods=no;
-#              - after deleting the serving Pod: the Lease's holder changes, a DIFFERENT replica
-#                becomes ready, every member Pod keeps its UID and restartCount, MembersMounted never
-#                reports False at any sample, and the backend's phase returns to Ready.
+#              - after deleting the serving Pod: the Lease's holder changes WITHIN THE FAILOVER
+#                BOUND (120s; graceful failovers here measure 43-44s), a DIFFERENT replica
+#                becomes ready, every member Pod keeps its UID and restartCount, MembersMounted
+#                never reports False at any sample, and the backend's phase returns to Ready.
 #
 # Cleanup:     Trap deletes the KVCacheBackend; owner references cascade to the Deployment, Service,
 #              Lease, both ServiceAccounts, both Roles and both RoleBindings. Nothing else is
@@ -294,6 +295,20 @@ if [ -n "$NEW_HOLDER" ] && [ "$NEW_HOLDER" != "$OLD_HOLDER" ]; then
 else
   record FAIL "the Lease moves to a different holder" \
     "240s after deleting ${OLD_READY}: holderIdentity='${NEW_HOLDER:-<empty>}' (was '${OLD_HOLDER}')"
+fi
+
+# A failover is a promise about SPEED, and a check that records the number without judging it
+# waves a three-minute election through. Graceful-delete failovers measure 43-44s on this
+# suite (termination grace + Lease expiry); 120s is a regression tripwire at ~2.5x that --
+# loose enough for scheduler noise, tight enough that a real slowdown cannot walk past.
+if [ -n "$NEW_HOLDER" ] && [ "$NEW_HOLDER" != "$OLD_HOLDER" ]; then
+  MOVED_SECS=$((HOLDER_MOVED_AT - DELETE_EPOCH))
+  if [ "$MOVED_SECS" -le 120 ]; then
+    record PASS "the Lease moves within the failover bound" "${MOVED_SECS}s <= 120s"
+  else
+    record FAIL "the Lease moves within the failover bound" \
+      "${MOVED_SECS}s > 120s -- the election still works but no longer meets the failover budget"
+  fi
 fi
 
 NEW_READY=""
