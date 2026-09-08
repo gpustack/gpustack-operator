@@ -31,8 +31,10 @@ package mooncake
 //     rendered result ambiguous.
 //   - Exclusive: the artifact accepts either flag but not both, and setting both leaves the outcome
 //     to the artifact rather than to the manifest.
-//   - Forbidden: the flag changes how every OTHER flag is read. Nothing collides by name, which is
-//     exactly why this class needs to exist.
+//   - Forbidden: the flag reaches the artifact intact and then costs more than the hatch is worth.
+//     Nothing collides by name, which is exactly why this class needs to exist. Each entry carries
+//     its own reason because they are not one kind of problem: one changes how every OTHER flag is
+//     read, another names a store nothing reads, another refuses to start the process at all.
 type ExtraArgsRules struct {
 	Derived   []string
 	Exclusive [][]string
@@ -44,6 +46,16 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 	// Keys are the flag's own name without its leading dash, which is how extraArgs is keyed.
 	Derived: []string{
 		"allocation_strategy",
+		// The four the election renders, reserved as one group because that is how they are
+		// rendered: together or not at all. Reserved UNCONDITIONALLY, like the offload pair below,
+		// even though nothing renders them for a backend without leader.highAvailability -- a
+		// passthrough enable_ha with no connection string beside it is a leader that exits at
+		// startup, and cluster_id reached this way would key the store's namespace off something
+		// the object does not say.
+		"cluster_id",
+		"enable_ha",
+		"ha_backend_connstring",
+		"ha_backend_type",
 		// Both halves of the disk tier's leader switch. They are derived from leader.offload, and
 		// reaching them through the hatch would put the tier's two sides out of step with the
 		// admission rule that keeps them paired — a leader offloading with no member declaring a
@@ -69,6 +81,19 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 	},
 
 	Forbidden: map[string]string{
+		// The artifact's own check is LOG(FATAL): enable_oplog with any ha_backend_type other than
+		// etcd refuses to start. The image this operator runs compiles the Kubernetes Lease backend,
+		// which upstream's build cannot combine with etcd, so the etcd backend is not reachable
+		// here and neither is the oplog.
+		//
+		// It is refused rather than passed through BECAUSE the failure is total and immediate. An
+		// earlier draft of this rule accepted the key and reported the consequence, reasoning that a
+		// trade-off belongs to whoever typed it -- that reasoning was about a plaintext-etcd
+		// exposure, and it does not survive the flag becoming a crash. There is nothing to trade.
+		"enable_oplog": "the leader refuses to start with it: the artifact requires the etcd " +
+			"leadership backend for the operation log, and the image this operator runs compiles " +
+			"the Kubernetes Lease backend, which upstream cannot build together with etcd",
+
 		// Measured in the artifact's source: main() loads the config file first and then calls
 		// LoadConfigFromCmdline(config, conf_set), which guards most of its assignments with
 		// "if (!conf_set)". A config file therefore makes the command line largely INERT — the
