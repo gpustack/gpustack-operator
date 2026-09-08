@@ -518,13 +518,17 @@ counter-argument stronger than expected — which is why it is written out rathe
   and does reach `unmount_and_free_segment` (`mooncake_store_service.py:593-607`). The backend
   spec's reason for calling this unreachable — that a fresh client would not know the segment id —
   does not apply to a `preStop`, which talks to the running process itself.
-- It is still unreachable, for a different reason: **`segment_ids` is required and there is no route
-  that returns them.** The entrypoint's route table (`mooncake_store_service.py:238-268`) has no GET
-  that lists this client's own segments, and the segment's name is not derivable — the leader
-  appends a port of its own choosing that is fresh on every start.
-- So the memory tier's graceful unmount is blocked on an upstream route that does not exist, and
-  **that, not the client-identity argument, is the thing that would have to change**. Recorded here
-  as an Open Question so the next reader tests the right claim.
+- It is still unreachable, for a different reason: **`segment_ids` is required and the member's own
+  entrypoint exposes no route that returns them.** That route table
+  (`mooncake_store_service.py:238-268`) has no GET that lists this client's own segments, and the
+  segment's name is not derivable — the leader appends a port of its own choosing that is fresh on
+  every start. The **leader**, however, does list the ids: `GET /get_segments_detail` returns
+  `segment_id` and `client_id` per segment, and this operator already polls that route.
+- So the memory tier's graceful unmount is blocked on something narrower than a missing route: a
+  member cannot learn its own `client_id`, so it cannot tell which of the leader's listed segments
+  are its own. **That, not the client-identity argument and not the absence of a route, is the
+  thing that would have to change**. Recorded here as an Open Question so the next reader tests the
+  right claim.
 
 - **Acceptance:** a group with `localDisk` and a 30-second grace renders a `preStop` httpGet-free
   exec or HTTP POST carrying exactly `{"grace_period_seconds": 30}` to the member's own REST port,
@@ -777,8 +781,8 @@ does publish side by side.
   deriving the window from the grace rather than letting the two be set independently.
 - **A reader concludes from `preStop` that a shrink is now lossless.** Mitigated by stating in the
   field's own doc comment, in F5 and in the documentation that the **memory segment is still
-  dropped**, and by recording why (no route returns a client's own segment ids) so the belief is
-  falsifiable rather than folkloric.
+  dropped**, and by recording why (a member cannot identify its own segments in the leader's
+  listing) so the belief is falsifiable rather than folkloric.
 - **Removing four enum values is read as removing four capabilities.** Mitigated by F2's table
   naming where each went, and by the fact that all four are refused at admission today, so nothing
   that ran stops running.
@@ -1158,9 +1162,11 @@ that sentence travels with the row so a later reader cannot mistake a green suit
   reads as a choice and is not.
 - **Drain the memory segment on `preStop` via `POST /api/unmount`.** Attractive — the route exists,
   takes a grace period, and reaches `unmount_and_free_segment`. Rejected because `segment_ids` is
-  required and no route returns a client its own segment ids, and the name is not derivable since
-  the leader appends a fresh port on every start. Recorded as an Open Question with the specific
-  upstream change that would unblock it, so the next attempt tests the right thing.
+  required and a member cannot tell which of the leader's listed segments are its own — the ids are
+  in that listing, but the `client_id` that separates two members sharing an address is not
+  something a member can read about itself. The name is not derivable either, since the leader
+  appends a fresh port on every start. Recorded as an Open Question with the specific upstream
+  change that would unblock it, so the next attempt tests the right thing.
 - **Count the disk tier into `resources.requests.ephemeral-storage`.** Rejected: a hostPath is
   outside the kubelet's ephemeral-storage accounting entirely, so the request would reserve a figure
   nothing polices, and would then keep the member off the node that has the disk.
@@ -1253,10 +1259,14 @@ that sentence travels with the row so a later reader cannot mistake a green suit
   a caveat is one that is not settled yet. It stays an Open Question rather than a defect because a
   single answer — should the switch exist, and which semantics — closes it.
 - **Whether the memory segment can ever be gracefully unmounted from a `preStop`.** It needs an
-  upstream route returning a client its own segment ids — `POST /api/unmount` already accepts a
-  grace period, so the id is the only missing input. Whether to ask upstream for it, or to derive it
-  by having the reconciler read `/get_segments_detail` and pass the id into the hook at render time,
-  is open. The second is expressible today but binds a Pod template to an observation, which is a
+  upstream change, but not the one first recorded here. The ids are already in the leader's listing
+  — `GET /get_segments_detail` returns `segment_id` and `client_id` per segment — and
+  `POST /api/unmount` already accepts a grace period, so a missing route is not what blocks it.
+  What blocks it is that a member cannot read its own `client_id`, and so cannot tell which of the
+  listed segments are its own. Whether to ask upstream for a way to read it, or to derive the
+  attribution in the reconciler and pass the id into the hook at render time, is open. The second is
+  expressible only where no two members share an address — which the RDMA path, holding the host
+  network namespace, does not guarantee — and it binds a Pod template to an observation, which is a
   shape nothing here has.
 - **Whether `NoF` deserves an object of its own.** Its registration carries a target coordinate and
   no node affinity, so it is not a member group; whether it is a leader field, a list on the backend,

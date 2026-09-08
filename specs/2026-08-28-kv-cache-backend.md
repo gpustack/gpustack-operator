@@ -975,11 +975,14 @@ it restarts on **what changed** rather than on **that the template changed**.
     reason this spec originally gave.** The original reason — that a fresh client would not know the
     segment id the running process holds — is **wrong, and is corrected here rather than deleted
     because it was load-bearing**: a `preStop` hook runs against the *same* process that mounted the
-    segments, so client identity was never the obstacle. The real obstacle is upstream and narrower:
-    `segment_ids` is required, **no route returns a client its own ids**, and the name is not
-    derivable because the leader appends a fresh port on every start. One upstream route — a way to
-    read back your own segment ids — is the whole of what unblocks this, which is what a later
-    attempt should test rather than re-testing the client-identity claim.
+    segments, so client identity was never the obstacle. **That correction has itself been
+    superseded, and is corrected in place for the same reason it was.** What replaced the original
+    reason — `segment_ids` is required and no route returns a client its own ids — is contradicted
+    by this spec's own admin route table (F6): `/get_segments_detail` returns `segment_id` **and**
+    `client_id` per segment, and this operator already polls that route. What is actually missing is
+    narrower still. A member cannot learn its own `client_id` — it lives only inside the C++
+    `Client` and in one startup log line — so it cannot tell which of the listed segments are its
+    own. That, and not the absence of a route, is what a later attempt should test.
   - What the master DOES offer is `POST /api/v1/drain_jobs`, which **migrates** a segment's data to
     named target segments rather than unmounting it. That is a different and stronger operation than
     a graceful unmount, it needs the remaining members to have room, and it is a stateful
