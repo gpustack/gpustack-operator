@@ -11,6 +11,10 @@ awk '
   capture { print }
 ' "$CASE_DIR/case-63.sh" >"$WORK/parser.py"
 test -s "$WORK/parser.py"
+# shellcheck disable=SC2016
+grep -Fq 'if [ -z "$OLD_READY" ]; then' "$CASE_DIR/case-63.sh"
+# shellcheck disable=SC2016
+grep -Fq 'if DELETE_OUT="$(kubectl' "$CASE_DIR/case-63.sh"
 
 printf '99.000 10.0.0.1\n' >"$WORK/endpoints.log"
 

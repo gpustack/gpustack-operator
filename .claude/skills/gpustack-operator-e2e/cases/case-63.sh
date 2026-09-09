@@ -316,8 +316,18 @@ BASE_A="$(grep -c '^PUT t=.* rc=0$' "$LOG_A" 2>/dev/null || true)"
 BASE_B="$(grep -c '^PUT t=.* rc=0$' "$LOG_B" 2>/dev/null || true)"
 
 OLD_READY="$(ready_leader_pod)"
+if [ -z "$OLD_READY" ]; then
+  record FAIL "a serving Pod exists to delete" "no ready leader Pod was found immediately before the delete"
+  results; exit 1
+fi
 T0="$(python3 -c 'import time; print("%.3f" % time.time())')"
-kubectl -n "$NS" delete pod "$OLD_READY" --wait=false >/dev/null 2>&1
+if DELETE_OUT="$(kubectl -n "$NS" delete pod "$OLD_READY" --wait=false 2>&1)"; then
+  record PASS "the serving Pod deletion is accepted" "$OLD_READY"
+else
+  record FAIL "the serving Pod deletion is accepted" \
+    "delete of ${OLD_READY} failed: $(echo "$DELETE_OUT" | tr '\n' ' ' | cut -c1-200)"
+  results; exit 1
+fi
 
 # Wait for both probes to finish on their own deadline; a converged path ends at ${DEADLINE}s, an
 # unconverged one at the same deadline with no post-T0 success. The logs are the record either way.

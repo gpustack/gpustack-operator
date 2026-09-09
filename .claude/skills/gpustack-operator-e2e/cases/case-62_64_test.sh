@@ -33,5 +33,10 @@ for case_name in case-62 case-64; do
   grep -Fq 'OLD_HOLDER_POD_UID="$(holder_pod_uid "$OLD_HOLDER")"' "$case_file"
   # shellcheck disable=SC2016
   grep -Fq '[ "$OLD_HOLDER_POD_UID" != "$OLD_READY_UID" ]' "$case_file"
-  echo "PASS: ${case_name} maps holders only to live Pods and checks the delete target"
+  grep -Fq 'for ((i = 0; i < 10; i++)); do' "$case_file"
+  # shellcheck disable=SC2016
+  grep -Fq '[ "$NEW_HOLDER_POD_UID" = "$NEW_READY_UID" ]' "$case_file"
+  # shellcheck disable=SC2016
+  grep -Fq 'if DELETE_OUT="$(kubectl' "$case_file"
+  echo "PASS: ${case_name} uses stable identities and checks the delete and handoff"
 done

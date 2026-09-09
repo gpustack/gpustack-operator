@@ -291,21 +291,24 @@ if [ -z "$MEMBERS_BEFORE" ]; then
   results; exit 1
 fi
 
-OLD_READY="$(ready_leader_pod)"
-if [ -z "$OLD_READY" ]; then
-  record FAIL "a serving Pod exists to delete" "no ready leader Pod was found immediately before the delete"
-  results; exit 1
-fi
-OLD_READY_UID="$(kubectl -n "$NS" get pod "$OLD_READY" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
-if [ -z "$OLD_READY_UID" ]; then
-  record FAIL "the serving Pod has an identity to compare" "Pod ${OLD_READY} has no readable UID"
-  results; exit 1
-fi
-OLD_HOLDER="$(lease_holder)"
-OLD_HOLDER_POD_UID="$(holder_pod_uid "$OLD_HOLDER")"
-if [ "$OLD_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
+OLD_READY=""
+OLD_READY_UID=""
+OLD_HOLDER=""
+OLD_HOLDER_POD_UID=""
+for ((i = 0; i < 10; i++)); do
+  OLD_READY="$(ready_leader_pod)"
+  OLD_READY_UID=""
+  if [ -n "$OLD_READY" ]; then
+    OLD_READY_UID="$(kubectl -n "$NS" get pod "$OLD_READY" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
+  fi
+  OLD_HOLDER="$(lease_holder)"
+  OLD_HOLDER_POD_UID="$(holder_pod_uid "$OLD_HOLDER")"
+  [ -n "$OLD_READY_UID" ] && [ "$OLD_HOLDER_POD_UID" = "$OLD_READY_UID" ] && break
+  sleep 1
+done
+if [ -z "$OLD_READY_UID" ] || [ "$OLD_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
   record FAIL "the Lease holder is the serving Pod immediately before the delete" \
-    "holderIdentity='${OLD_HOLDER:-<empty>}' maps to '${OLD_HOLDER_POD_UID:-<none>}', ready Pod ${OLD_READY} has UID ${OLD_READY_UID}"
+    "holderIdentity='${OLD_HOLDER:-<empty>}' maps to '${OLD_HOLDER_POD_UID:-<none>}', ready Pod '${OLD_READY:-<none>}' has UID '${OLD_READY_UID:-<none>}'"
   results; exit 1
 fi
 
@@ -313,34 +316,52 @@ fi
 # a phase read only before and after would miss a health rule that fires mid-failover and clears.
 TRAJ_FILE="$(mktemp)"
 DELETE_EPOCH="$(date +%s)"
-kubectl -n "$NS" delete pod "$OLD_READY" --wait=false >/dev/null 2>&1
+if DELETE_OUT="$(kubectl -n "$NS" delete pod "$OLD_READY" --wait=false 2>&1)"; then
+  record PASS "the serving Pod deletion is accepted" "${OLD_READY} (${OLD_READY_UID})"
+else
+  record FAIL "the serving Pod deletion is accepted" \
+    "delete of ${OLD_READY} (${OLD_READY_UID}) failed: $(echo "$DELETE_OUT" | tr '\n' ' ' | cut -c1-200)"
+  results; exit 1
+fi
 
 NEW_HOLDER=""
 NEW_HOLDER_POD_UID=""
+NEW_READY=""
+NEW_READY_UID=""
+HANDOFF_OBSERVED=0
 for ((i = 0; i < 240; i += 2)); do
   kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" \
     -o jsonpath='{.status.phase}{"|"}{.conditions[?(@.type=="MembersMounted")].status}{"\n"}' \
     2>/dev/null >>"$TRAJ_FILE"
   NEW_HOLDER="$(lease_holder)"
   NEW_HOLDER_POD_UID="$(holder_pod_uid "$NEW_HOLDER")"
-  [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ] && break
+  NEW_READY="$(ready_leader_pod)"
+  NEW_READY_UID=""
+  if [ -n "$NEW_READY" ]; then
+    NEW_READY_UID="$(kubectl -n "$NS" get pod "$NEW_READY" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
+  fi
+  if [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ] \
+    && [ "$NEW_HOLDER_POD_UID" = "$NEW_READY_UID" ]; then
+    HANDOFF_OBSERVED=1
+    break
+  fi
   sleep 2
 done
 HOLDER_MOVED_AT="$(date +%s)"
 
-if [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
+if [ "$HANDOFF_OBSERVED" = "1" ]; then
   record PASS "the Lease moves to a different holder" \
-    "holder Pod UID ${OLD_READY_UID} -> ${NEW_HOLDER_POD_UID}, $((HOLDER_MOVED_AT - DELETE_EPOCH))s after the delete; holderIdentity=${NEW_HOLDER}"
+    "holder Pod UID ${OLD_READY_UID} -> ${NEW_HOLDER_POD_UID}, $((HOLDER_MOVED_AT - DELETE_EPOCH))s after the delete; ready Pod=${NEW_READY}, holderIdentity=${NEW_HOLDER}"
 else
   record FAIL "the Lease moves to a different holder" \
-    "240s after deleting ${OLD_READY} (${OLD_READY_UID}): holderIdentity='${NEW_HOLDER:-<empty>}', mapped Pod UID='${NEW_HOLDER_POD_UID:-<none>}'"
+    "240s after deleting ${OLD_READY} (${OLD_READY_UID}): holderIdentity='${NEW_HOLDER:-<empty>}', mapped Pod UID='${NEW_HOLDER_POD_UID:-<none>}', ready Pod UID='${NEW_READY_UID:-<none>}'"
 fi
 
 # A failover is a promise about SPEED, and a check that records the number without judging it
 # waves a three-minute election through. Graceful-delete failovers measure 43-44s on this
 # suite (termination grace + Lease expiry); 120s is a regression tripwire at ~2.5x that --
 # loose enough for scheduler noise, tight enough that a real slowdown cannot walk past.
-if [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
+if [ "$HANDOFF_OBSERVED" = "1" ]; then
   MOVED_SECS=$((HOLDER_MOVED_AT - DELETE_EPOCH))
   if [ "$MOVED_SECS" -le 120 ]; then
     record PASS "the Lease moves within the failover bound" "${MOVED_SECS}s <= 120s"
