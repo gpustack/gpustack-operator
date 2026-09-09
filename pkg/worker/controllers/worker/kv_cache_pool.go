@@ -40,10 +40,10 @@ const (
 
 	// IndexingKVCachePoolByBackend indexes each KVCachePool by the backends it draws from.
 	//
-	// It exists because the tenant ledger and the policy file converge per MASTER and not per pool
-	// (F7): several pools may sit on one backend, and a pass that wrote only its own pool's tenants
-	// would erase the others' on every reconcile. Finding those sibling pools has to be one query
-	// for the same reason above — it happens on every pass, on both of them.
+	// It exists because the tenant ledger and the policy file converge per MASTER and not per pool:
+	// several pools may sit on one backend, and a pass that wrote only its own pool's tenants would
+	// erase the others' on every reconcile. Finding those sibling pools has to be one query for the
+	// same reason above — it happens on every pass, on both of them.
 	IndexingKVCachePoolByBackend = "kvcachepools.worker.gpustack.ai/backend"
 )
 
@@ -1118,8 +1118,8 @@ func (r *KVCachePoolReconciler) reportTenantLedgerFailure(
 // observeKVCachePoolUsage sums what THIS pool's own tenants hold, out of the one scrape the pass
 // already took.
 //
-// Never the master's whole ledger. A backend serves several pools (F7), and its exposition carries
-// every tenant on it — publishing that here would make a pool's usage grow because somebody else's
+// Never the master's whole ledger. A backend serves several pools, and its exposition carries every
+// tenant on it — publishing that here would make a pool's usage grow because somebody else's
 // namespace wrote, which is the one reading this figure must never support.
 //
 // ABSENT when the scrape did not answer, and absent is not zero: a total serialized as 0 says the
@@ -1934,8 +1934,8 @@ func kvCachePoolRegisteredBy(master *kvCachePoolMaster, domain, pool string) boo
 // deleteTenantQuotas removes the named entries and reports whether any of them held.
 //
 // The names are always a list this pool REGISTERED, never everything the master holds: one master
-// serves several pools (F7) and its ledger says nothing about whose an entry is, so deleting by
-// anything wider would take a sibling pool's tenants with it.
+// serves several pools and its ledger says nothing about whose an entry is, so deleting by anything
+// wider would take a sibling pool's tenants with it.
 //
 // A domain that still holds objects is the third meaning of 409 and gets its own sentence: it is not
 // a fault, the entry goes once the domain has drained, and reading it as the multi-tenancy refusal

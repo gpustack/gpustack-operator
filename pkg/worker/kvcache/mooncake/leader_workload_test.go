@@ -410,8 +410,8 @@ func TestLeaderWorkload_PodIdentityEnv(t *testing.T) {
 
 // TestLeaderWorkload_ClaimsNoHost pins the absences. The leader is a metadata service: it
 // holds no cache bytes, so it needs neither the host's network namespace nor any device. The member
-// is the side that needs those (F9), and a leader that acquired them would be a privilege nobody
-// asked for.
+// is the side that needs those, and a leader that acquired them would be a privilege nobody asked
+// for.
 func TestLeaderWorkload_ClaimsNoHost(t *testing.T) {
 	deploy := RenderLeaderDeployment(testBackend(), "mooncake:v0.3.13")
 	podSpec := deploy.Spec.Template.Spec

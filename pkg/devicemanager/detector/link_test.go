@@ -184,7 +184,7 @@ func TestCheckRDMALink(t *testing.T) {
 //
 // The reason is part of the published record, so two reads of unchanged hardware must produce the
 // same bytes. If port order leaked into it, every pass would compare unequal and rewrite the object
-// forever with correct data in it the whole time (P8).
+// forever with correct data in it the whole time.
 func TestCheckRDMALinkReasonIsDeterministic(t *testing.T) {
 	f := newSysfsFixture(t)
 	rdmaRel := "devices/pci0000:00/0000:00:01.0/0000:01:00.0/infiniband/mlx5_0"

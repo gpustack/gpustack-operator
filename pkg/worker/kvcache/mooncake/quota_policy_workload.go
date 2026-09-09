@@ -56,7 +56,7 @@ func QuotaPolicyObjectName(kvcb *workercore.KVCacheBackend) string {
 // policy source is seeded from.
 //
 // The document is rendered WHOLE on every pass, never patched: it is the desired state, and the
-// master rewrites its own copy on every admin-API change (F6). Re-rendering is what makes those two
+// master rewrites its own copy on every admin-API change. Re-rendering is what makes those two
 // converge rather than fight — a pass that merged into what was there would be merging into the
 // master's own rewrite.
 //

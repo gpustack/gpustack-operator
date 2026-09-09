@@ -1146,13 +1146,13 @@ func TestInstanceTypeReconciler_StatusFreshOnLedgerChange(t *testing.T) {
 		"free restores the exclusive view to 8")
 }
 
-// TestInstanceTypeReconciler_ComputesDetail pins the observed Status.Detail backfill (T8): an
-// accelerated type gains its hardware descriptor (manufacturer/product/family + per-card
-// memory/cores + the pool-aggregated SlicedDetail) from the matched ResourceFlavor's notes and
-// the Devices ledger, the DisplayName defaults to the observed Product, and the Detail is
-// recomputed every reconcile (it lives in computeStatus, so a second pass never erases it). A
-// CPU-manufacturer-agnostic collapsed pool has no representative flavor, so its Detail stays empty
-// and its DisplayName defaults to the "CPU-only" sentinel — its queue still activates.
+// TestInstanceTypeReconciler_ComputesDetail pins the observed Status.Detail backfill: an accelerated
+// type gains its hardware descriptor (manufacturer/product/family + per-card memory/cores + the
+// pool-aggregated SlicedDetail) from the matched ResourceFlavor's notes and the Devices ledger, the
+// DisplayName defaults to the observed Product, and the Detail is recomputed every reconcile (it
+// lives in computeStatus, so a second pass never erases it). A CPU-manufacturer-agnostic collapsed
+// pool has no representative flavor, so its Detail stays empty and its DisplayName defaults to the
+// "CPU-only" sentinel — its queue still activates.
 func TestInstanceTypeReconciler_ComputesDetail(t *testing.T) {
 	t.Run("accelerated type gains accelerator Detail and it persists across reconciles", func(t *testing.T) {
 		key := "nvidia-a10g"
