@@ -67,10 +67,13 @@ const (
 	// rdmaDeviceVolumeName names that mount.
 	rdmaDeviceVolumeName = "rdma-devices"
 
-	// efaLibHostPath is where AWS's EFA installer puts the libfabric build that matches the host's
+	// EFALibHostPath is where AWS's EFA installer puts the libfabric build that matches the host's
 	// EFA driver. The member image carries a distro libfabric only so the binary LOADS; on an EFA
 	// node this tree is mounted in and its lib/ outranks the image copy through LD_LIBRARY_PATH.
-	efaLibHostPath = "/opt/amazon/efa"
+	//
+	// Exported for the same reason as RDMADevicePath: admission has to refuse a disk tier that
+	// would land on top of it.
+	EFALibHostPath = "/opt/amazon/efa"
 
 	// efaLibVolumeName names that mount.
 	efaLibVolumeName = "efa-libfabric"
@@ -573,14 +576,19 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
 		Name: efaLibVolumeName,
 		VolumeSource: core.VolumeSource{
 			HostPath: &core.HostPathVolumeSource{
-				Path: efaLibHostPath,
+				Path: EFALibHostPath,
 				Type: ptr.To(core.HostPathDirectory),
 			},
 		},
 	})
 	container.VolumeMounts = append(container.VolumeMounts, core.VolumeMount{
 		Name:      efaLibVolumeName,
-		MountPath: efaLibHostPath,
+		MountPath: EFALibHostPath,
+		// Read-only: the container only LOADS the host's libfabric out of this tree, and a
+		// writable mount of a host install prefix would let a store process edit the node's
+		// EFA driver installation. The RDMA device tree cannot take the same treatment —
+		// libfabric ioctls its device nodes, which a read-only mount blocks.
+		ReadOnly: true,
 	})
 	// Appended here and not in renderMemberEnv, which is fabric-blind by construction: an
 	// LD_LIBRARY_PATH rendered for every member would put a host path on TCP members that never
@@ -589,7 +597,7 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
 	// libfabric loads instead of the image's distro copy whenever this mount is present.
 	container.Env = append(container.Env, core.EnvVar{
 		Name:  "LD_LIBRARY_PATH",
-		Value: efaLibHostPath + "/lib",
+		Value: EFALibHostPath + "/lib",
 	})
 }
 

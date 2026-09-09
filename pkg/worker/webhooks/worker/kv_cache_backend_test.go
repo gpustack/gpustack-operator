@@ -333,6 +333,24 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 			"must not overlap /dev/infiniband",
 		},
 		{
+			"a disk path that is the EFA libfabric tree", withDiskPath("/opt/amazon/efa"),
+			"must not overlap /dev/infiniband or /opt/amazon/efa",
+		},
+		{
+			"a disk path inside the EFA libfabric tree", withDiskPath("/opt/amazon/efa/tier"),
+			"must not overlap /dev/infiniband or /opt/amazon/efa",
+		},
+		{
+			"a disk path that CONTAINS the EFA libfabric tree", withDiskPath("/opt/amazon"),
+			"must not overlap /dev/infiniband or /opt/amazon/efa",
+		},
+		{
+			// Same shape as the infiniband sibling below: a name that shares a prefix is not an
+			// overlap.
+			"a disk path that is a sibling of the EFA libfabric tree",
+			withDiskPath("/opt/amazon/efa-backup"), "",
+		},
+		{
 			// A sibling whose name merely starts with the same letters is not an overlap. A plain
 			// string-prefix test would refuse this one.
 			"a disk path that is a sibling of the RDMA device tree",

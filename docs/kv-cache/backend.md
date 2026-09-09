@@ -399,9 +399,10 @@ not a per-node probe that promotes itself.
 > comes with it — which is those three things and **not** `privileged`. A `TCP` group sets none of
 > them.
 
-An `EFA` group takes everything `RDMA` takes, plus the host's `/opt/amazon/efa` tree — mounted as
-`Directory`, so a node without the AWS EFA driver stops at `FailedMount` — with `LD_LIBRARY_PATH`
-putting its `lib/` ahead of the distro libfabric the image carries only so the binary loads.
+An `EFA` group takes everything `RDMA` takes, plus the host's `/opt/amazon/efa` tree — mounted
+**read-only** as `Directory`, so a node without the AWS EFA driver stops at `FailedMount` — with
+`LD_LIBRARY_PATH` putting its `lib/` ahead of the distro libfabric the image carries only so the
+binary loads.
 
 `EFA` is measured as compiled into `mirrored-mooncake`, not run on EFA hardware end to end — the same
 bar `RDMA`, `HIP` and `Ascend` stand at. Storage-optimized families such as `i7ie` are not
@@ -524,16 +525,16 @@ Five rules the path has to satisfy, all enforced at apply time:
 
 - It must be **absolute**.
 - It must not be the **root directory**.
-- It **may not overlap `/dev/infiniband`** — equal to it, inside it, or containing it. A sibling such
-  as `/dev/infiniband-cache` is fine.
+- It **may not overlap `/dev/infiniband` or `/opt/amazon/efa`** — equal to either, inside either, or
+  containing either. A sibling such as `/dev/infiniband-cache` is fine.
 - It **may not contain a `..` component**.
 - It **may not begin or end with whitespace**, spaces and tabs alike.
 
 > **Why** — the root directory would mount the node's whole filesystem into a third-party container.
-> The RDMA and EFA transports mount `/dev/infiniband` into this same container, and two mounts on one
-> path are resolved by the kubelet with one shadowing the other, which nothing on the object would
-> record; that rule holds whatever `spec.transport.protocol` says today, because the field is
-> editable. The
+> The RDMA and EFA transports mount `/dev/infiniband` into this same container, and the EFA transport
+> also mounts `/opt/amazon/efa`; two mounts on one path are resolved by the kubelet with one
+> shadowing the other, which nothing on the object would record. That rule holds whatever
+> `spec.transport.protocol` says today, because the field is editable. The
 > `..` rule mirrors the store's own, which refuses such a path before checking whether the directory
 > exists. The whitespace rule exists because the path is mounted exactly as written, so a trailing
 > space produces a different directory than the one an operator read on the screen.

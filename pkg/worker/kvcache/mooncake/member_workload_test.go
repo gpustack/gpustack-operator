@@ -583,6 +583,10 @@ func TestMemberWorkload_EFAContext(t *testing.T) {
 			"directory the kubelet created")
 	require.Len(t, container.VolumeMounts, 2)
 	assert.Equal(t, "/opt/amazon/efa", container.VolumeMounts[1].MountPath)
+	assert.True(t, container.VolumeMounts[1].ReadOnly,
+		"the container only LOADS the host's libfabric; a writable mount would let it edit the "+
+			"node's EFA driver installation. The device tree at [0] stays writable because "+
+			"libfabric ioctls its device nodes")
 
 	env := map[string]string{}
 	for _, e := range container.Env {
