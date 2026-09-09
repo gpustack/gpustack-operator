@@ -20,10 +20,15 @@
 #                    operator's — see the note on criterion 2 below before reading a red run.
 #                (3) THE PRECONDITIONS FAIL LOUDLY. A master without multi-tenancy holds no tenant
 #                    ledger, and a master that cannot persist its quota policy accepts no quota.
-#                    Neither may pass silently: the first is refused at ADMISSION since #245 (the
-#                    toggle names the consuming pool; the pool's own MultiTenancyDisabled Condition
-#                    remains as the net for paths admission cannot see), the second raises a named
-#                    Condition and holds the pool away from Ready.
+#                    Neither may pass silently: the first is refused at ADMISSION since #245, which
+#                    names the consuming pool, and the second raises a named Condition and holds
+#                    the pool away from Ready.
+#                    WHAT SECTION 7 DOES NOT COVER, and must not be read as covering: the pool's
+#                    own MultiTenancyDisabled Condition. That Condition is the net for the paths
+#                    admission cannot see, and the admission refusal returns early while
+#                    status.usedBy is EMPTY -- so the very state the Condition exists for is the
+#                    one this section can no longer reach, now that the reachable half is refused
+#                    before it takes effect. Unit tests are the Condition's only coverage.
 #                (4) THE EXCLUSIVE REUSE DOMAIN, PER MASTER. A second Binding claiming a domain
 #                    name already registered on the SAME master is refused at admission, in another
 #                    namespace, with the holder named — while the same name against a pool a
@@ -146,9 +151,16 @@ restore() {
   done
 
   kubectl delete namespace "$NS_A" "$NS_B" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  kubectl delete kvcachepools.worker.gpustack.ai "$POOL" "$EMPTY_POOL" \
+
+  # The -other names belong to criterion 4's second-master fixture, created in section 5. Its
+  # Binding lives in NS_B and goes with the namespace above, but the pool and the backend are
+  # CLUSTER-SCOPED: an exit anywhere between their creation and section 5's own delete would
+  # otherwise leave a KVCacheBackend behind that keeps scheduling a member Pod on every linux
+  # node. Listed here rather than trapped separately so one cleanup owns every cluster-scoped
+  # name this case creates; --ignore-not-found makes it a no-op on the runs that never got there.
+  kubectl delete kvcachepools.worker.gpustack.ai "$POOL" "$EMPTY_POOL" "kvcp-other-${SFX}" \
     --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  kubectl delete kvcachebackends.worker.gpustack.ai "$BACKEND" "$EMPTY_BACKEND" \
+  kubectl delete kvcachebackends.worker.gpustack.ai "$BACKEND" "$EMPTY_BACKEND" "kvcb-other-${SFX}" \
     --ignore-not-found --wait=false >/dev/null 2>&1 || true
 }
 trap restore EXIT
@@ -526,6 +538,11 @@ fi
 # masters hold two ledgers, and the refusal that used to fire here is what broke every second
 # backend's "default" domain. The second backend is never waited on: admission reads the pool's
 # spec.backends, and a master that has not mounted yet is still a different master.
+#
+# Its member selector matches NO node on purpose, the same way the empty-backend fixture below
+# does. What this section needs from the backend is that it EXISTS and is named by a second pool;
+# a selector matching every linux node would put a real member Pod on each one for the length of
+# a check that only reads spec.backends, and the delete below does not wait for them to go.
 kubectl apply -f - >/dev/null 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: KVCacheBackend
@@ -539,7 +556,7 @@ spec:
       leader:
         multiTenancy: true
       members:
-        - nodeSelector: {kubernetes.io/os: linux}
+        - nodeSelector: {gpustack.ai/kvc-e2e-absent: "true"}
           medium: DRAM
           capacityPerMember: 1Gi
 ---
