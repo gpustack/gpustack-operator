@@ -108,10 +108,9 @@ fi
 # Two shapes, and the second is the one with teeth. A SILENT plant answers every version flag with
 # nothing, which a validator comparing against its pin rejects - and so does a validator that has
 # regressed to accepting any non-empty output, because nothing is not non-empty. A SPEAKING plant
-# answers with a well-formed version line that is not any pin, which separates the two: the correct
-# validator still rejects, the regressed one accepts. Both shapes assert against the same want
-# column, so no per-tool fixture is needed and none of the seven output formats is written down
-# here, where it would go stale the day a tool changes its own.
+# is a Go executable with a non-pin module version and prints a non-pin `tag` version. Those are the
+# two formats the seven parsers that cannot read a generic shell response need. The assertion below
+# confirms each parser reads its intended non-pin value before its row is judged.
 #
 # Prints exactly one of:
 #   accept        returned 0 without reaching the installer
@@ -119,23 +118,63 @@ fi
 #   unattributed  its bin() resolved to something other than the planted file, so whatever it
 #                 decided, it did not decide it about this plant
 #   broken        anything else, which is the default on purpose: a validator that was renamed,
-#                 deleted or died must not read as one that approved something
+#                 deleted or died, or a speaking fixture/parser precondition failed, must not read
+#                 as one that approved something
+function prepare_speaking_fixture() {
+  if [ -x "$MINI/speaking-bin" ]; then
+    return 0
+  fi
+  if ! command -v go > /dev/null; then
+    echo "SPEAKING-FIXTURE-FAILED:go is unavailable" >&2
+    return 1
+  fi
+
+  mkdir -p "$MINI/cmd/speaking"
+  printf 'module example.com/speaking\n' > "$MINI/go.mod"
+  printf '%s\n' \
+    'package main' \
+    '' \
+    'import (' \
+    '  "fmt"' \
+    '  "os"' \
+    ')' \
+    '' \
+    'func main() {' \
+    '  for _, arg := range os.Args[1:] {' \
+    '    if arg == "-version" {' \
+    '      fmt.Println("tag v0.0.0-not-any-pin")' \
+    '      return' \
+    '    }' \
+    '  }' \
+    '  fmt.Println("stale 0.0.0-not-any-pin built from 0000000 on 1970-01-01T00:00:00Z")' \
+    '}' > "$MINI/cmd/speaking/main.go"
+  if ! (cd "$MINI" && go build -o "$MINI/speaking-bin" ./cmd/speaking); then
+    echo "SPEAKING-FIXTURE-FAILED:go build" >&2
+    return 1
+  fi
+}
+
 function verdict() {
-  local validate_fn="$1" rel="$2" shape="$3"
+  local validate_fn="$1" rel="$2" shape="$3" why="$4"
   local base="${validate_fn%::validate}"
   local out
 
   rm -rf "${MINI:?}/.sbin"
   mkdir -p "$(dirname "$MINI/.sbin/$rel")"
   if [ "$shape" = speaking ]; then
-    # Seven fields, so the validators that cut a field out of the line all read something, and none
-    # of them reads a pin. No "tag" either, which is the word goimports-reviser greps for.
-    printf '#!/bin/sh\necho "stale 0.0.0-not-any-pin built from 0000000 on 1970-01-01T00:00:00Z"\nexit 0\n' \
-      > "$MINI/.sbin/$rel"
+    if ! prepare_speaking_fixture; then
+      echo "broken"
+      return 0
+    fi
+    if ! cp "$MINI/speaking-bin" "$MINI/.sbin/$rel"; then
+      echo "SPEAKING-FIXTURE-FAILED:copy" >&2
+      echo "broken"
+      return 0
+    fi
   else
     printf '#!/bin/sh\nexit 0\n' > "$MINI/.sbin/$rel"
+    chmod +x "$MINI/.sbin/$rel"
   fi
-  chmod +x "$MINI/.sbin/$rel"
 
   out="$(
     # shellcheck disable=SC1090,SC1091
@@ -150,6 +189,21 @@ function verdict() {
     if [ "$resolved" != "$MINI/.sbin/$rel" ]; then
       echo "UNATTRIBUTED:${resolved:-<nothing>}"
       exit 0
+    fi
+
+    if [ "$shape" = speaking ]; then
+      case "$why" in
+        "go version -m"*)
+          parsed="$(gpustack::util::go_module_version "$("${base}"::bin)")"
+          [ "$parsed" = "(devel)" ] || { echo "SPEAKING-PARSE-FAILED:${parsed:-<empty>}"; exit 0; }
+          ;;
+        "-version")
+          # REQUIRED: mirror the parser in gpustack::lint::goimports_reviser::validate so this
+          # assertion proves the validator receives the speaking value it will compare.
+          parsed="$("$("${base}"::bin)" -version | grep tag | cut -d " " -f 2 2>&1 | head -n 1)"
+          [ "$parsed" = "v0.0.0-not-any-pin" ] || { echo "SPEAKING-PARSE-FAILED:${parsed:-<empty>}"; exit 0; }
+          ;;
+      esac
     fi
 
     eval "${base}::install() { echo 'REACHED-INSTALL'; return 0; }"
@@ -172,7 +226,7 @@ accepts=0
 for shape in silent speaking; do
   for row in "${CASES[@]}"; do
     IFS='|' read -r validate_fn rel want why <<<"$row"
-    got="$(verdict "$validate_fn" "$rel" "$shape")"
+    got="$(verdict "$validate_fn" "$rel" "$shape" "$why")"
     if [ "$got" = "$want" ]; then
       pass "$rel [$shape]: $got ($why)"
     else
