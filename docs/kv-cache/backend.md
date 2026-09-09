@@ -299,9 +299,10 @@ carry the leadership backend — the two axes are independent, so covering them 
 variant.
 
 `EFA` is the one fabric not on that list: it needs no vendor runtime, only libfabric, so
-`mirrored-mooncake` compiles it in — the image build asserts the EFA transport is installed by
-reaching `EfaTransport`'s own "No EFA devices found" on a device-less build machine. An `EFA` member
-group runs under high availability, on nodes that have the AWS EFA driver installed.
+`mirrored-mooncake` compiles it in — the image build proves the transport installed by running a
+target-mode bench told `--protocol=efa` and refusing the transport map's "Invalid protocol": the
+device-less builder's "No EFA devices found" and an EFA-capable builder's clean run both pass. An
+`EFA` member group runs under high availability, on nodes that have the AWS EFA driver installed.
 
 Tracked at [issue #279](https://github.com/gpustack/gpustack-operator/issues/279), together with the
 alternative of leaving members on the leader Service address and letting readiness move the endpoint.
