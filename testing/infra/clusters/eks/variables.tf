@@ -36,6 +36,17 @@ variable "cpu_instance_types" {
   default     = ["c6a.4xlarge", "c7a.4xlarge"]
 }
 
+variable "cpu_node_count" {
+  description = "Number of nodes in the CPU node group (min = max = this)."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.cpu_node_count > 0 && var.cpu_node_count == floor(var.cpu_node_count)
+    error_message = "cpu_node_count must be a positive whole number."
+  }
+}
+
 variable "gpu_instance_types" {
   # Keyed by group name so each GPU node group has a stable key (gpu-<name>).
   # Adding a key is a +create only; editing a key's instance-type list replaces
@@ -79,6 +90,72 @@ variable "node_boot_disk_size_gb" {
     condition     = var.node_boot_disk_size_gb > 0 && var.node_boot_disk_size_gb == floor(var.node_boot_disk_size_gb)
     error_message = "node_boot_disk_size_gb must be a positive whole number."
   }
+}
+
+variable "node_instance_store_count" {
+  # This module's launch template maps xvda explicitly, which drops the AMI's
+  # default ephemeral mappings, so instance-store devices must be re-declared.
+  # The count applies to every node group and must not exceed the instance
+  # type's disk count, e.g. i7ie.xlarge has 1 (check with:
+  #   aws ec2 describe-instance-types --instance-types <type> \
+  #     --query 'InstanceTypes[0].InstanceStorageInfo.Disks').
+  # On Nitro instances the device_name in the mapping is ignored; the devices
+  # show up as /dev/nvme1n1 and onward.
+  #
+  # WARNING (observed 2026-09-08, i7ie.xlarge, EKS 1.34, AL2023): the mapping
+  # itself is fine — a standalone instance with the same explicit ephemeral
+  # mapping gets /dev/nvme1n1 at boot. But on EKS nodes the
+  # aws-ec2-local-instance-store-csi-driver addon (OFF by default in this
+  # module, see enable_instance_store_csi_driver) claims every instance-store
+  # controller and DELETES the pre-existing namespace (nvme1n1) to reclaim it
+  # into its own NVMeDevice pool, re-creating namespaces only when a PVC is
+  # provisioned through its StorageClass. With the addon installed there is no
+  # raw /dev/nvme1n1 for hostPath/local-device use.
+  #
+  # ONCE THE DRIVER HAS RUN ON A NODE, TURNING IT OFF DOES NOT BRING THE
+  # NAMESPACE BACK, AND NEITHER DOES A REBOOT. Recreate it with `nvme create-ns`
+  # plus `nvme attach-ns`, or replace the node. Observed 2026-09-08 on
+  # i7ie.xlarge with driver v1.0.5; the README's variable table states the same.
+  # An earlier version of this comment said a reboot re-creates it, and said the
+  # addon was enabled by default -- both were true of the module before the
+  # addon became opt-in, and neither was true of the behaviour.
+  description = "Number of instance-store (ephemeral NVMe) devices to map on every node group; 0 maps none."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.node_instance_store_count >= 0 && var.node_instance_store_count == floor(var.node_instance_store_count) && var.node_instance_store_count <= 24
+    error_message = "node_instance_store_count must be a whole number between 0 and 24."
+  }
+}
+
+variable "enable_instance_store_csi_driver" {
+  # The aws-ec2-local-instance-store-csi-driver EKS addon takes ownership of
+  # every instance-store NVMe controller on each node: on startup it deletes
+  # any namespace it does not own (e.g. the default nvme1n1 that Nitro
+  # surfaces) and hands capacity out only through PVCs bound to its
+  # StorageClass. That conflicts with node_instance_store_count, whose point
+  # is exposing the raw /dev/nvmeNn1 devices for hostPath-style use, so this
+  # defaults to false. Enable it only when workloads consume instance store
+  # via the driver's CSI volumes.
+  #
+  # THE DEFAULT IS A BREAKING CHANGE FOR A CLUSTER THAT PREDATES THIS VARIABLE.
+  # The addon used to be installed unconditionally, so a plain `terraform apply`
+  # over such a cluster REMOVES it and any PVC bound to its StorageClass loses
+  # its provisioner. Pass -var="enable_instance_store_csi_driver=true" to keep
+  # it. It is not defaulted to true instead, because the default that preserved
+  # the addon is the one that broke node_instance_store_count, and the whole
+  # point of the variable is that the two cannot both hold.
+  #
+  # NOTHING ENFORCES THE CONFLICT AT PLAN TIME. Setting this true together with
+  # node_instance_store_count > 0 is accepted and fails later, at node boot,
+  # when the driver deletes the namespace the mapping exists to expose. A
+  # cross-variable validation would catch it, and every validation in this
+  # module today reads only its own variable -- referring to another needs
+  # terraform >= 1.9, which this module does not yet declare a floor for.
+  description = "Install the aws-ec2-local-instance-store-csi-driver EKS addon (CSI-managed instance store; deletes unmanaged NVMe namespaces such as the raw nvme1n1). Removing it from a cluster that predates this variable also removes any PVC's provisioner bound to its StorageClass."
+  type        = bool
+  default     = false
 }
 
 variable "switch_kube_context" {

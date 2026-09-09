@@ -8,12 +8,14 @@ local kubeconfig at it.
 - Creates a VPC (public/private subnets, single NAT gateway) and an EKS cluster
   (default version `1.34`).
 - Creates two kinds of managed node groups:
-  - `cpu`: a CPU node group (`min = max = 1`).
+  - `cpu`: a CPU node group (`min = max = cpu_node_count`, default 1).
   - `gpu-<name>`: one GPU node group per key in `gpu_instance_types`, using
     the `AL2023_x86_64_NVIDIA` AMI and `min = 0` (scaled to zero by default,
     brought up on demand).
 - Installs common addons (`coredns`, `kube-proxy`, `vpc-cni`, `metrics-server`,
   `cert-manager`, `external-dns`, ...).
+- Tags every node group's instances/volumes/ENIs `DO_NOT_DELETE=true` so the
+  scheduled sweep does not terminate the nodes of a live cluster.
 - After apply, runs `aws eks update-kubeconfig` to merge the cluster into
   `~/.kube/config` as a new context, which becomes the current one (unless
   `switch_kube_context=false`); on destroy it removes that
@@ -75,9 +77,12 @@ terraform destroy
 | `name_prefix` | Cluster name prefix (a random suffix is appended) | `gpustack-eks` |
 | `release` | EKS version | `1.34` |
 | `cpu_instance_types` | Instance types for the CPU node group | `["c6a.4xlarge","c7a.4xlarge"]` |
+| `cpu_node_count` | Number of nodes in the CPU node group | `1` |
 | `gpu_instance_types` | GPU node groups as a `map(list(string))` keyed by group name | `{ g4dn = ["g4dn.xlarge","g4dn.12xlarge"] }` |
 | `node_boot_disk_type` | Node root volume EBS type/performance (`volume_type`, optional `iops`/`throughput`) | `{ volume_type = "gp3", iops = 3000, throughput = 125 }` |
 | `node_boot_disk_size_gb` | Node root (boot) volume size, in GiB | `100` |
+| `node_instance_store_count` | Instance-store (ephemeral NVMe) devices mapped on every node group; must not exceed each instance type's disk count (e.g. `i7ie.xlarge` has 1). The devices surface as `/dev/nvme1n1` and onward | `0` |
+| `enable_instance_store_csi_driver` | Install the `aws-ec2-local-instance-store-csi-driver` addon. ⚠️ The driver takes over every instance-store NVMe controller and **deletes unmanaged namespaces such as the raw `/dev/nvme1n1`** (observed 2026-09-08, i7ie.xlarge, driver v1.0.5), handing capacity out only via PVCs on its StorageClass. Keep it `false` when you need the raw device; if the driver already ran on a node, rebooting does NOT restore the namespace — recreate it with `nvme create-ns` + `nvme attach-ns` (or replace the node) | `false` |
 | `switch_kube_context` | Let `update-kubeconfig` leave this cluster current; `false` restores the previous context | `true` |
 
 ## Outputs

@@ -36,6 +36,26 @@ locals {
     var.node_boot_disk_type.iops != null ? { iops = var.node_boot_disk_type.iops } : {},
     var.node_boot_disk_type.throughput != null ? { throughput = var.node_boot_disk_type.throughput } : {},
   )
+
+  # Instance-store devices take letters b..y (xvda is the boot volume).
+  node_instance_store_letters = ["b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y"]
+  node_instance_store_mappings = {
+    for i in range(var.node_instance_store_count) :
+    "ephemeral${i}" => {
+      device_name  = "/dev/xvd${local.node_instance_store_letters[i]}"
+      virtual_name = "ephemeral${i}"
+    }
+  }
+
+  node_block_device_mappings = merge(
+    {
+      xvda = {
+        device_name = "/dev/xvda"
+        ebs         = local.node_boot_disk_ebs
+      }
+    },
+    local.node_instance_store_mappings,
+  )
 }
 
 module "vpc" {
@@ -78,26 +98,28 @@ resource "aws_key_pair" "accessor" {
 }
 
 locals {
+  # Scheduled sweeps terminate untagged instances; DO_NOT_DELETE keeps the
+  # nodes of a live verification cluster alive. Merged into every node group,
+  # which propagates to the launch template's instance/volume/ENI tag specs.
+  node_group_tags = { DO_NOT_DELETE = "true" }
+
   node_groups = merge(
     {
       cpu = {
         # https://docs.aws.amazon.com/eks/latest/APIReference/API_Nodegroup.html#AmazonEKS-Type-Nodegroup-amiType
         ami_type       = "AL2023_x86_64_STANDARD"
-        max_size       = 1
-        min_size       = 1
+        desired_size   = var.cpu_node_count
+        max_size       = var.cpu_node_count
+        min_size       = var.cpu_node_count
         instance_types = var.cpu_instance_types
         key_name       = aws_key_pair.accessor.key_name
+        tags           = local.node_group_tags
         network_interfaces = [
           {
             associate_public_ip_address = true
           }
         ]
-        block_device_mappings = {
-          xvda = {
-            device_name = "/dev/xvda"
-            ebs         = local.node_boot_disk_ebs
-          }
-        }
+        block_device_mappings = local.node_block_device_mappings
       }
     },
     {
@@ -108,17 +130,13 @@ locals {
         min_size       = 0
         instance_types = types
         key_name       = aws_key_pair.accessor.key_name
+        tags           = local.node_group_tags
         network_interfaces = [
           {
             associate_public_ip_address = true
           }
         ]
-        block_device_mappings = {
-          xvda = {
-            device_name = "/dev/xvda"
-            ebs         = local.node_boot_disk_ebs
-          }
-        }
+        block_device_mappings = local.node_block_device_mappings
       }
     }
   )
@@ -171,27 +189,31 @@ module "eks" {
   name               = local.eks_name
   kubernetes_version = var.release
 
-  addons = {
-    cert-manager              = {}
-    coredns                   = {}
-    eks-node-monitoring-agent = {}
-    external-dns              = {}
-    kube-proxy                = {}
-    metrics-server            = {}
-    # aws-ebs-csi-driver = {
-    #   service_account_role_arn = module.ebs_csi_driver_irsa.arn
-    # }
-    # aws-efs-csi-driver = {
-    #   service_account_role_arn = module.efs_csi_driver_irsa.arn
-    # }
-    aws-ec2-local-instance-store-csi-driver = {}
-    eks-pod-identity-agent = {
-      before_compute = true
-    }
-    vpc-cni = {
-      before_compute = true
-    }
-  }
+  addons = merge(
+    {
+      cert-manager              = {}
+      coredns                   = {}
+      eks-node-monitoring-agent = {}
+      external-dns              = {}
+      kube-proxy                = {}
+      metrics-server            = {}
+      # aws-ebs-csi-driver = {
+      #   service_account_role_arn = module.ebs_csi_driver_irsa.arn
+      # }
+      # aws-efs-csi-driver = {
+      #   service_account_role_arn = module.efs_csi_driver_irsa.arn
+      # }
+      eks-pod-identity-agent = {
+        before_compute = true
+      }
+      vpc-cni = {
+        before_compute = true
+      }
+    },
+    var.enable_instance_store_csi_driver ? {
+      aws-ec2-local-instance-store-csi-driver = {}
+    } : {},
+  )
 
   endpoint_public_access                   = true
   enable_cluster_creator_admin_permissions = true
