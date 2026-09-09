@@ -37,6 +37,19 @@ for case_name in case-62 case-64; do
   # shellcheck disable=SC2016
   grep -Fq '[ "$NEW_HOLDER_POD_UID" = "$NEW_READY_UID" ]' "$case_file"
   # shellcheck disable=SC2016
+  grep -Fq '[ -n "$HOLDER_MOVED_AT" ] && [ -n "$NEW_HOLDER_POD_UID" ]' "$case_file"
+  # shellcheck disable=SC2016
+  grep -Fq '[ "$NEW_HOLDER" != "$OLD_HOLDER" ]' "$case_file"
+  # shellcheck disable=SC2016
+  grep -Fq '[ "$NEW_RENEW_TIME" != "$REUSED_HOLDER_RENEW_TIME" ]' "$case_file"
+  # shellcheck disable=SC2016
+  grep -Fq 'HANDOFF_DEADLINE=$((DELETE_EPOCH + 240))' "$case_file"
+  grep -Fq 'the new Lease holder is the Ready replica' "$case_file"
+  if grep -Fq '"240s after' "$case_file"; then
+    echo "FAIL: ${case_name} still reports the loop counter as wall time" >&2
+    exit 1
+  fi
+  # shellcheck disable=SC2016
   grep -Fq 'if DELETE_OUT="$(kubectl' "$case_file"
-  echo "PASS: ${case_name} uses stable identities and checks the delete and handoff"
+  echo "PASS: ${case_name} separates Lease movement from readiness and uses a wall-clock deadline"
 done

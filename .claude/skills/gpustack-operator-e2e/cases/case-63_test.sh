@@ -12,7 +12,10 @@ awk '
 ' "$CASE_DIR/case-63.sh" >"$WORK/parser.py"
 test -s "$WORK/parser.py"
 # shellcheck disable=SC2016
-grep -Fq 'if [ -z "$OLD_READY" ]; then' "$CASE_DIR/case-63.sh"
+grep -Fq 'OLD_HOLDER_POD_UID="$(holder_pod_uid "$OLD_HOLDER")"' "$CASE_DIR/case-63.sh"
+# shellcheck disable=SC2016
+grep -Fq '[ "$OLD_HOLDER_POD_UID" != "$OLD_READY_UID" ]' "$CASE_DIR/case-63.sh"
+grep -Fq 'for ((i = 0; i < 10; i++)); do' "$CASE_DIR/case-63.sh"
 # shellcheck disable=SC2016
 grep -Fq 'if DELETE_OUT="$(kubectl' "$CASE_DIR/case-63.sh"
 

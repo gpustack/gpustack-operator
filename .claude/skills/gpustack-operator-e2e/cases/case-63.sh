@@ -140,6 +140,33 @@ ready_leader_pod() {
     2>/dev/null | head -1
 }
 
+lease_holder() {
+  kubectl -n "$NS" get leases.coordination.k8s.io "$LEADER" \
+    -o jsonpath='{.spec.holderIdentity}' 2>/dev/null
+}
+
+holder_pod_uid() {
+  local holder="$1" holder_ip pod_uid pod_ip deleting phase
+  case "$holder" in
+    \[*\]:*)
+      holder_ip="${holder#\[}"
+      holder_ip="${holder_ip%%\]*}"
+      ;;
+    *:*) holder_ip="${holder%:*}" ;;
+    *) holder_ip="$holder" ;;
+  esac
+  while IFS='|' read -r pod_uid pod_ip deleting phase; do
+    if [ "$phase" != "Running" ] || [ -n "$deleting" ] || [ -z "$pod_ip" ] \
+      || [ "$pod_ip" != "$holder_ip" ]; then
+      continue
+    fi
+    echo "$pod_uid"
+    return 0
+  done < <(kubectl -n "$NS" get pod -l "$LEADER_SEL" \
+    -o jsonpath='{range .items[*]}{.metadata.uid}{"|"}{.status.podIP}{"|"}{.metadata.deletionTimestamp}{"|"}{.status.phase}{"\n"}{end}' \
+    2>/dev/null)
+}
+
 # The probe loop. The master address arrives as argv[1] so the quoting of "k8s://..." never passes
 # through the shell twice; argv[2] is the loop's own deadline. One put every 0.3s, epoch-stamped:
 # the timestamps are the measurement, so they are printed whether the put works, errors, or raises.
@@ -315,17 +342,32 @@ sleep 4
 BASE_A="$(grep -c '^PUT t=.* rc=0$' "$LOG_A" 2>/dev/null || true)"
 BASE_B="$(grep -c '^PUT t=.* rc=0$' "$LOG_B" 2>/dev/null || true)"
 
-OLD_READY="$(ready_leader_pod)"
-if [ -z "$OLD_READY" ]; then
-  record FAIL "a serving Pod exists to delete" "no ready leader Pod was found immediately before the delete"
+OLD_READY=""
+OLD_READY_UID=""
+OLD_HOLDER=""
+OLD_HOLDER_POD_UID=""
+for ((i = 0; i < 10; i++)); do
+  OLD_READY="$(ready_leader_pod)"
+  OLD_READY_UID=""
+  if [ -n "$OLD_READY" ]; then
+    OLD_READY_UID="$(kubectl -n "$NS" get pod "$OLD_READY" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
+  fi
+  OLD_HOLDER="$(lease_holder)"
+  OLD_HOLDER_POD_UID="$(holder_pod_uid "$OLD_HOLDER")"
+  [ -n "$OLD_READY_UID" ] && [ "$OLD_HOLDER_POD_UID" = "$OLD_READY_UID" ] && break
+  sleep 1
+done
+if [ -z "$OLD_READY_UID" ] || [ "$OLD_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
+  record FAIL "the Lease holder is the serving Pod immediately before the delete" \
+    "holderIdentity='${OLD_HOLDER:-<empty>}' maps to '${OLD_HOLDER_POD_UID:-<none>}', ready Pod '${OLD_READY:-<none>}' has UID '${OLD_READY_UID:-<none>}'"
   results; exit 1
 fi
 T0="$(python3 -c 'import time; print("%.3f" % time.time())')"
 if DELETE_OUT="$(kubectl -n "$NS" delete pod "$OLD_READY" --wait=false 2>&1)"; then
-  record PASS "the serving Pod deletion is accepted" "$OLD_READY"
+  record PASS "the serving Pod deletion is accepted" "${OLD_READY} (${OLD_READY_UID})"
 else
   record FAIL "the serving Pod deletion is accepted" \
-    "delete of ${OLD_READY} failed: $(echo "$DELETE_OUT" | tr '\n' ' ' | cut -c1-200)"
+    "delete of ${OLD_READY} (${OLD_READY_UID}) failed: $(echo "$DELETE_OUT" | tr '\n' ' ' | cut -c1-200)"
   results; exit 1
 fi
 
