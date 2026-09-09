@@ -70,7 +70,7 @@ jobs:
         uses: actions/cache@v4
         with:
           # Cache the go-installed helm-docs/helm-schema binaries.
-          key: chart-toolbox-${{ runner.os }}
+          key: chart-toolbox-${{ runner.os }}-${{ hashFiles('hack/lib/**') }}
           path: |-
             ${{ github.workspace }}/.sbin
       - name: Generate Kind Config
