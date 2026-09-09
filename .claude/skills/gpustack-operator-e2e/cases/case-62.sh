@@ -67,6 +67,7 @@ E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/
 NS="${1:?usage: case-62.sh <NS>}"
 CASE_ID=62
 IMAGE="${E2E_MOONCAKE_IMAGE:-gpustack/mirrored-mooncake:0.3.13.post1-cpu}"
+FAILOVER_BOUND_SECS=120
 
 # The suffix keeps two runs of this case apart: the backend's name is cluster-scoped, and every
 # object it renders -- the Lease included -- derives from it.
@@ -157,6 +158,50 @@ holder_pod_uid() {
   done < <(kubectl -n "$NS" get pod -l "$LEADER_SEL" \
     -o jsonpath='{range .items[*]}{.metadata.uid}{"|"}{.status.podIP}{"|"}{.metadata.deletionTimestamp}{"|"}{.status.phase}{"\n"}{end}' \
     2>/dev/null)
+}
+
+observe_handoff_snapshot() {
+  local observed_at="$1"
+  if [ -z "$HOLDER_MOVED_AT" ] && [ -n "$NEW_HOLDER_POD_UID" ] \
+    && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
+    if [ "$NEW_HOLDER" != "$OLD_HOLDER" ]; then
+      HOLDER_MOVED_AT="$observed_at"
+      MOVED_HOLDER="$NEW_HOLDER"
+      MOVED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
+      MOVE_EVIDENCE="holderIdentity changed"
+    elif [ -n "$NEW_RENEW_TIME" ]; then
+      if [ "$REUSED_HOLDER_POD_UID" != "$NEW_HOLDER_POD_UID" ] \
+        || [ -z "$REUSED_HOLDER_RENEW_TIME" ]; then
+        REUSED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
+        REUSED_HOLDER_RENEW_TIME="$NEW_RENEW_TIME"
+      elif [ "$NEW_RENEW_TIME" != "$REUSED_HOLDER_RENEW_TIME" ]; then
+        HOLDER_MOVED_AT="$observed_at"
+        MOVED_HOLDER="$NEW_HOLDER"
+        MOVED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
+        MOVE_EVIDENCE="replacement renewed the reused holderIdentity"
+      fi
+    fi
+  fi
+  if [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ] \
+    && [ "$NEW_HOLDER_POD_UID" = "$NEW_READY_UID" ]; then
+    HANDOFF_OBSERVED=1
+    if [ -z "$HOLDER_MOVED_AT" ]; then
+      HOLDER_MOVED_AT="$observed_at"
+      MOVED_HOLDER="$NEW_HOLDER"
+      MOVED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
+      MOVE_EVIDENCE="Ready replacement confirmed the reused holderIdentity"
+    fi
+  fi
+}
+
+record_failover_bound() {
+  local moved_secs=$((HOLDER_MOVED_AT - DELETE_EPOCH))
+  if [ "$moved_secs" -le "$FAILOVER_BOUND_SECS" ]; then
+    record PASS "the Lease moves within the failover bound" "${moved_secs}s <= ${FAILOVER_BOUND_SECS}s"
+  else
+    record FAIL "the Lease moves within the failover bound" \
+      "${moved_secs}s > ${FAILOVER_BOUND_SECS}s -- the election still works but no longer meets the failover budget"
+  fi
 }
 
 # can_i asks the API server's authorizer -- not a rendered Role -- and prints the answer word.
@@ -340,58 +385,28 @@ HOLDER_MOVED_AT=""
 MOVED_HOLDER=""
 MOVED_HOLDER_POD_UID=""
 MOVE_EVIDENCE=""
-MOVE_TIMING_OBSERVED=0
 HANDOFF_OBSERVED=0
 HANDOFF_DEADLINE=$((DELETE_EPOCH + 240))
-# A changed identity timestamps the move directly. If the replacement reuses the same IP, a later
-# renewTime change after that Pod appears proves the new process has taken ownership.
+# A changed identity or renewTime timestamps the move directly. A Ready holder is an upper bound:
+# the Lease must have moved no later than the serving replacement became observable.
 while [ "$(date +%s)" -lt "$HANDOFF_DEADLINE" ]; do
   kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" \
     -o jsonpath='{.status.phase}{"|"}{.conditions[?(@.type=="MembersMounted")].status}{"\n"}' \
     2>/dev/null >>"$TRAJ_FILE"
   NEW_HOLDER="$(lease_holder)"
   NEW_HOLDER_POD_UID="$(holder_pod_uid "$NEW_HOLDER")"
-  if [ -z "$HOLDER_MOVED_AT" ] && [ -n "$NEW_HOLDER_POD_UID" ] \
-    && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
-    if [ "$NEW_HOLDER" != "$OLD_HOLDER" ]; then
-      HOLDER_MOVED_AT="$(date +%s)"
-      MOVED_HOLDER="$NEW_HOLDER"
-      MOVED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
-      MOVE_EVIDENCE="holderIdentity changed"
-      MOVE_TIMING_OBSERVED=1
-    else
-      NEW_RENEW_TIME="$(lease_renew_time)"
-      if [ -n "$NEW_RENEW_TIME" ]; then
-        if [ "$REUSED_HOLDER_POD_UID" != "$NEW_HOLDER_POD_UID" ] \
-          || [ -z "$REUSED_HOLDER_RENEW_TIME" ]; then
-          REUSED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
-          REUSED_HOLDER_RENEW_TIME="$NEW_RENEW_TIME"
-        elif [ "$NEW_RENEW_TIME" != "$REUSED_HOLDER_RENEW_TIME" ]; then
-          HOLDER_MOVED_AT="$(date +%s)"
-          MOVED_HOLDER="$NEW_HOLDER"
-          MOVED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
-          MOVE_EVIDENCE="replacement renewed the reused holderIdentity"
-          MOVE_TIMING_OBSERVED=1
-        fi
-      fi
-    fi
+  NEW_RENEW_TIME=""
+  if [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ] \
+    && [ "$NEW_HOLDER" = "$OLD_HOLDER" ]; then
+    NEW_RENEW_TIME="$(lease_renew_time)"
   fi
   NEW_READY="$(ready_leader_pod)"
   NEW_READY_UID=""
   if [ -n "$NEW_READY" ]; then
     NEW_READY_UID="$(kubectl -n "$NS" get pod "$NEW_READY" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
   fi
-  if [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ] \
-    && [ "$NEW_HOLDER_POD_UID" = "$NEW_READY_UID" ]; then
-    HANDOFF_OBSERVED=1
-    if [ -z "$HOLDER_MOVED_AT" ]; then
-      HOLDER_MOVED_AT="$(date +%s)"
-      MOVED_HOLDER="$NEW_HOLDER"
-      MOVED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
-      MOVE_EVIDENCE="Ready replacement confirmed the reused holderIdentity"
-    fi
-    break
-  fi
+  observe_handoff_snapshot "$(date +%s)"
+  [ "$HANDOFF_OBSERVED" = "1" ] && break
   sleep 2
 done
 HANDOFF_FINISHED_AT="$(date +%s)"
@@ -417,17 +432,8 @@ fi
 # waves a three-minute election through. Graceful-delete failovers measure 43-44s on this
 # suite (termination grace + Lease expiry); 120s is a regression tripwire at ~2.5x that --
 # loose enough for scheduler noise, tight enough that a real slowdown cannot walk past.
-if [ "$MOVE_TIMING_OBSERVED" = "1" ]; then
-  MOVED_SECS=$((HOLDER_MOVED_AT - DELETE_EPOCH))
-  if [ "$MOVED_SECS" -le 120 ]; then
-    record PASS "the Lease moves within the failover bound" "${MOVED_SECS}s <= 120s"
-  else
-    record FAIL "the Lease moves within the failover bound" \
-      "${MOVED_SECS}s > 120s -- the election still works but no longer meets the failover budget"
-  fi
-elif [ "$HANDOFF_OBSERVED" = "1" ]; then
-  record SKIP "the Lease moves within the failover bound" \
-    "the Ready replacement proved ownership, but no separate Lease movement timestamp was observed"
+if [ -n "$HOLDER_MOVED_AT" ]; then
+  record_failover_bound
 fi
 
 NEW_READY=""
