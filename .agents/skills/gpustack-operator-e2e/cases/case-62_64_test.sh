@@ -94,6 +94,23 @@ for case_name in case-62 case-64; do
     reset_observation
     NEW_HOLDER='10.0.0.2:50051'
     NEW_READY_UID=new-uid
+    observe_handoff_snapshot 120
+    test "$HOLDER_MOVED_AT" = 120
+    test "$MOVE_EVIDENCE" = 'holderIdentity changed'
+    record_failover_bound
+    test "$CAPTURED_STATUS" = PASS
+    test "$CAPTURED_OBJECT" = '120s <= 120s; holderIdentity changed'
+
+    reset_observation
+    HOLDER_MOVED_AT=1
+    MOVE_EVIDENCE=unrecognized
+    record_failover_bound
+    test "$CAPTURED_STATUS" = FAIL
+    test "$CAPTURED_OBJECT" = 'unrecognized move evidence: unrecognized'
+
+    reset_observation
+    NEW_HOLDER='10.0.0.2:50051'
+    NEW_READY_UID=new-uid
     observe_handoff_snapshot 121
     test "$HOLDER_MOVED_AT" = 121
     test "$MOVE_EVIDENCE" = 'holderIdentity changed'
