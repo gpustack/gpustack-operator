@@ -1,7 +1,6 @@
 ---
 name: gpustack-operator-overview
 description: "Use when you need a guided tour of the GPUStack Operator codebase — its architecture, where things live (key directories), and naming conventions. Examples: \"Give me an overview of this repo\", \"How is this project structured?\", \"Where does X live?\", onboarding to the scheduling chain."
-model: haiku
 ---
 
 # GPUStack Operator — Code Overview
