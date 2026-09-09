@@ -32,7 +32,8 @@
 # and store.so all carry a DT_NEEDED on libfabric.so.1, and upstream's build_wheel.sh excludes
 # libfabric from the repaired wheel unconditionally -- so the runtime stage installs the distro
 # libfabric1 as the load-time fallback that keeps TCP members starting anywhere. On an EFA node
-# the operator mounts the host's /opt/amazon/efa and prepends its lib/ to LD_LIBRARY_PATH, which
+# the operator mounts the host's /opt/amazon/efa and sets LD_LIBRARY_PATH to its lib/ -- a
+# replacement, deliberate because this image defines no LD_LIBRARY_PATH of its own -- which
 # outranks the default search path, so the AWS build of libfabric -- matched to the host's EFA
 # driver -- is the one that loads. One process, one libfabric, either way.
 #
@@ -273,7 +274,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 # engine consumer (see the builder stage's flag comment). It is NOT the libfabric an EFA member
 # runs on: there the operator mounts the host's /opt/amazon/efa and LD_LIBRARY_PATH puts its lib/
 # first, so the AWS build matched to the node's driver wins. This copy exists so that a member on
-# any other protocol still starts on a node that has no EFA installation at all.
+# any other protocol still starts on a node that has no EFA installation at all. When the host
+# lib wins it also resolves its provider plugins from its own install prefix, so the arrangement
+# relies on the AWS installer shipping those providers under /opt/amazon/efa/lib -- a distro
+# provider paired with the host core library is the mixed state this avoids.
 RUN <<EOF
     set -exo pipefail
     apt-get update -y
@@ -325,21 +329,35 @@ RUN <<EOF
     # wrong-ABI extension actually surfaces.
     mc_store_rest_server --help >/dev/null
 
-    # The EFA transport is compiled IN, asserted on a build machine that has no EFA device. A
-    # target-mode bench told protocol=efa fails inside EfaTransport's own install path with "No
-    # EFA devices found" -- a message only an installed transport can produce. Were the transport
-    # absent, the protocol lookup would fail instead ("Invalid protocol" from the transport map),
-    # so the two failure modes do not overlap and this grep separates them.
+    # The EFA transport is compiled IN, asserted by what this run must NOT print. A target-mode
+    # bench told protocol=efa has three outcomes. On a device-less build machine it fails inside
+    # EfaTransport's own install path with "No EFA devices found" -- a message only an installed
+    # transport can produce. On an EFA-capable builder it inits and serves until the timeout
+    # kills it, and that is a pass too. The failure this test exists to catch is the third: the
+    # transport map's "Invalid protocol", which is what an image WITHOUT the transport prints. A
+    # loader error is refused alongside it, because the bench doubles as the regression half of
+    # the libfabric story: it is a transfer engine consumer, so it starts only if the DT_NEEDED
+    # on libfabric.so.1 resolved against the distro libfabric1 installed above -- the same
+    # resolution a TCP member depends on.
     #
-    # The bench also doubles as the regression half of the libfabric story: it is a transfer
-    # engine consumer, so it starts only if the DT_NEEDED on libfabric.so.1 resolved against the
-    # distro libfabric1 installed above -- the same resolution a TCP member depends on.
+    # The timeout must outlast the device-less error path; if this check ever flakes, that is the
+    # knob to revisit. docs/kv-cache/backend.md quotes "No EFA devices found" in its HA section,
+    # so an upstream rewording of that message must be reflected in both places.
     command -v transfer_engine_bench
+    rc=0
     timeout -k 5 25 transfer_engine_bench \
         --mode=target --protocol=efa --metadata_server=P2PHANDSHAKE \
-        >/tmp/efa.log 2>&1 || true
+        >/tmp/efa.log 2>&1 || rc=$?
     cat /tmp/efa.log
-    grep -q "No EFA devices found" /tmp/efa.log
+    # Written as an if and NOT as `! grep ...`: a pipeline inverted with ! is exempt from
+    # set -e, so the negated form would never stop the build.
+    if grep -qE "Invalid protocol|error while loading shared libraries" /tmp/efa.log; then
+        echo "[ERROR] EFA transport is not compiled in, or libfabric failed to load." >&2
+        exit 1
+    fi
+    # Device-less: the transport's own install path must be what stopped it. EFA-capable: the
+    # bench kept running until the timeout -- 124, or 137 when the SIGKILL had to deliver it.
+    grep -q "No EFA devices found" /tmp/efa.log || [[ $rc -eq 124 || $rc -eq 137 ]]
     rm -f /tmp/efa.log
 EOF
 
