@@ -170,11 +170,11 @@ const kvCacheBackendMaxMembers = 5000
 
 // kvCacheBackendMaxMembersBytes bounds the identifiers that listing may carry, in total.
 //
-// The entry COUNT alone is not a bound. Every string in a segment — its name, its state, its
-// protocol, its endpoint — is chosen by the admin endpoint rather than by this operator, and for an
-// external backend that endpoint is somebody else's. A handful of entries carrying long identifiers
-// outweighs thousands of ordinary ones, so a count-only guard admits a listing that cannot be
-// written and then fails on every retry, including the retry that would have reported it.
+// The entry COUNT alone is not a bound. Every string in a segment is chosen by the admin endpoint
+// rather than by this operator, and for an external backend that endpoint is somebody else's. A
+// handful of entries carrying long identifiers outweighs thousands of ordinary ones, so a
+// count-only guard admits a listing that cannot be written and then fails on every retry, including
+// the retry that would have reported it.
 //
 // Well under the ~1.5 MiB an object may occupy: status also carries conditions, endpoints and
 // capacity, and the object carries its spec and its managed-fields history beside all of that.
@@ -185,7 +185,8 @@ const kvCacheBackendMaxMembersBytes = 512 << 10
 func segmentListingSize(segments []mooncake.SegmentDetail) int {
 	var n int
 	for i := range segments {
-		n += encodedStringSize(segments[i].Name) + encodedStringSize(segments[i].State) +
+		n += encodedStringSize(segments[i].ID) + encodedStringSize(segments[i].ClientID) +
+			encodedStringSize(segments[i].Name) + encodedStringSize(segments[i].State) +
 			encodedStringSize(segments[i].Protocol) + encodedStringSize(segments[i].TEEndpoint)
 	}
 	return n
@@ -435,7 +436,7 @@ func (r *KVCacheBackendReconciler) observeLeader(
 		reason, message := "NoAdminEndpoint", "the backend publishes no admin endpoint to read"
 		KVCacheBackendConditionLeaderAvailable.False(holder, reason, message)
 		KVCacheBackendConditionCapacityObserved.False(holder, reason, message)
-		KVCacheBackendConditionMembersMounted.False(holder, reason, message)
+		setMembersObservationFailed(holder, reason, message)
 		return
 	}
 
@@ -483,9 +484,10 @@ func (r *KVCacheBackendReconciler) observeLeader(
 		}
 		KVCacheBackendConditionLeaderAvailable.False(holder, reason, message)
 		KVCacheBackendConditionCapacityObserved.False(holder, reason, message)
-		// Membership keeps its last value: an empty list would read as "every member is gone",
-		// which is a claim this pass cannot make.
-		KVCacheBackendConditionMembersMounted.False(holder, reason, message)
+		// Membership keeps its last schema-valid value: an empty list would read as "every member is
+		// gone", which is a claim this pass cannot make. Rows written under the former schema are the
+		// exception; the helper omits them because the API server cannot accept them on this update.
+		setMembersObservationFailed(holder, reason, message)
 		return
 	}
 
@@ -499,7 +501,7 @@ func (r *KVCacheBackendReconciler) observeLeader(
 		KVCacheBackendConditionLeaderAvailable.False(holder, reason, message)
 		KVCacheBackendConditionCapacityObserved.False(holder, reason,
 			"the leader is up but its service plane is not active, so it holds no capacity to report")
-		KVCacheBackendConditionMembersMounted.False(holder, reason,
+		setMembersObservationFailed(holder, reason,
 			"the leader is up but its service plane is not active, so it lists no segment")
 		return
 	}
@@ -743,13 +745,15 @@ func (r *KVCacheBackendReconciler) observeMembers(
 
 	segments, err := adminRead(ctx, client.Segments)
 	if err != nil {
-		// The previous listing is KEPT, which is the opposite of what a failed capacity scrape
-		// does, and the difference is in the types. Capacity is two pointers, so it has an "absent"
-		// meaning "not observed" and it uses it. A list has no such state: an empty list is a
-		// legible value meaning "the leader lists no segment", so clearing it here would publish a
-		// falsehood. The stale list plus a False condition says what actually happened.
+		// The previous schema-valid listing is KEPT, which is the opposite of what a failed capacity
+		// scrape does, and the difference is in the types. Capacity is two pointers, so it has an
+		// "absent" meaning "not observed" and it uses it. A list has no such state: an empty list is
+		// a legible value meaning "the leader lists no segment", so clearing it here would publish a
+		// falsehood. The stale list plus a False condition says what actually happened. A listing from
+		// before the current required identities is omitted by the helper because retaining it would
+		// make this status update invalid.
 		logger.V(2).Info("kv cache backend segment listing unreadable", "error", err.Error())
-		KVCacheBackendConditionMembersMounted.False(holder, "ListingFailed",
+		setMembersObservationFailed(holder, "ListingFailed",
 			fmt.Sprintf("the leader's segment listing could not be read, so membership is as of "+
 				"the last successful read: %v", err))
 		return
@@ -757,9 +761,10 @@ func (r *KVCacheBackendReconciler) observeMembers(
 
 	if size := segmentListingSize(segments); len(segments) > kvCacheBackendMaxMembers ||
 		size > kvCacheBackendMaxMembersBytes {
-		// Withheld rather than truncated, and the previous listing is kept for the same reason a
-		// failed read keeps it: a silently shortened list reads as a backend that lost members.
-		KVCacheBackendConditionMembersMounted.False(holder, "ListingTooLarge",
+		// Withheld rather than truncated, and the previous schema-valid listing is kept for the same
+		// reason a failed read keeps it: a silently shortened list reads as a backend that lost
+		// members. A former-schema listing cannot be kept on a current-schema status update.
+		setMembersObservationFailed(holder, "ListingTooLarge",
 			fmt.Sprintf("the leader lists %d segment(s) carrying %d byte(s) of identifiers, past "+
 				"the %d entries or %d bytes this status can hold; publishing them would push the "+
 				"object past the size the api server accepts, and every status write would fail "+
@@ -786,11 +791,14 @@ func (r *KVCacheBackendReconciler) observeMembers(
 	// Judging the index instead of the listing would move that healthy backend to Degraded and tell
 	// the operator to split two groups that never collided.
 	ambiguous := map[string][]string{}
+	ambiguousSegments := 0
 
 	members := make([]workercore.KVCacheBackendMemberStatus, 0, len(segments))
 	accounted := make(map[string]struct{}, len(segments))
 	for _, segment := range segments {
 		member := workercore.KVCacheBackendMemberStatus{
+			SegmentID:   segment.ID,
+			ClientID:    segment.ClientID,
 			SegmentName: segment.Name,
 			Protocol:    segment.Protocol,
 			State:       mooncake.SegmentState(segment.State),
@@ -799,6 +807,7 @@ func (r *KVCacheBackendReconciler) observeMembers(
 		switch candidates := readyMemberPods(pods[host]); {
 		case len(candidates) > 1:
 			ambiguous[host] = memberPodNames(candidates)
+			ambiguousSegments++
 		case len(candidates) == 1:
 			member.NodeName = candidates[0].nodeName
 			member.Medium = candidates[0].medium
@@ -814,10 +823,10 @@ func (r *KVCacheBackendReconciler) observeMembers(
 		members = append(members, member)
 	}
 
-	// Sorted by the one field that identifies a segment, so two passes over one listing produce
+	// Sorted by the field that uniquely identifies a segment, so two passes over one listing produce
 	// byte-identical status and the DeepEqual guard holds. The leader's own order is not promised.
 	slices.SortFunc(members, func(a, b workercore.KVCacheBackendMemberStatus) int {
-		return strings.Compare(a.SegmentName, b.SegmentName)
+		return strings.Compare(a.SegmentID, b.SegmentID)
 	})
 	holder.Status.Members = members
 
@@ -872,11 +881,11 @@ func (r *KVCacheBackendReconciler) observeMembers(
 		// stop sharing it — a nodeSelector that keeps the two groups off one node — and that step
 		// is only obvious if the message says which groups and which node.
 		KVCacheBackendConditionMembersMounted.False(holder, "AmbiguousMemberIdentity",
-			fmt.Sprintf("the leader lists %d segment(s), and %s, so no segment can be traced to a "+
-				"member: the leader reports a segment by address and both of its fields carry a "+
-				"transfer port bound at random, which no pod carries. Give the groups node "+
+			fmt.Sprintf("%d of %d segment(s) cannot be traced to a member because %s: "+
+				"co-located host-network members advertise the same address, and no pod "+
+				"carries the client id that distinguishes their segments. Give the groups node "+
 				"selectors that keep them on different nodes to make each member addressable",
-				len(members), describeAmbiguousKeys(ambiguous)))
+				ambiguousSegments, len(members), describeAmbiguousKeys(ambiguous)))
 	case len(short) > 0:
 		KVCacheBackendConditionMembersMounted.False(holder, "SegmentsShort",
 			fmt.Sprintf("the leader lists %d segment(s), and %d of %d ready member pod(s) match "+
@@ -1008,12 +1017,10 @@ func memberPodStuck(pod *core.Pod) (memberPodFault, bool) {
 // two member groups can select one node, and then both of their Pods answer to that node's name; on
 // the RDMA path both also hold the host's network namespace, so both answer to its address too.
 //
-// When more than one READY Pod answers to the key a segment arrived on, the identity cannot be
-// recovered, and that is a property of the data rather than of this code: the leader reports a
-// segment as "<host>:<transfer port>", and BOTH of the fields it offers — segment_name and
-// te_endpoint — are that shape. The transfer port is bound at random and is not a fact any Pod
-// carries (four observed values, none configured: 15002, 15995, 16566, 16655), so the join must
-// strip it. Two Pods behind one host are therefore indistinguishable in every observable field.
+// When more than one READY Pod answers to the key a segment arrived on, the Pod attribution cannot
+// be recovered. The leader preserves a distinct segment id and client id for each member, but the
+// Pods expose neither. Co-located host-network members advertise the same address, so no listing
+// field can map one of those distinct segments back to one of the Pods.
 //
 // So no assignment is attempted there. Three earlier versions of this tried — credit the surviving
 // Pod, credit the whole set, credit by multiplicity — and each had a defect the next review found,
@@ -2459,6 +2466,8 @@ func renderedForKVCacheBackend(obj ctrlcli.Object, kvcb *workercore.KVCacheBacke
 func (r *KVCacheBackendReconciler) syncStatus(
 	ctx context.Context, kvcb *workercore.KVCacheBackend, desired workercore.KVCacheBackendStatus,
 ) error {
+	omitLegacyMemberListing(&desired)
+
 	if kubemeta.DeepEqual(desired, kvcb.Status) {
 		return nil
 	}
@@ -2472,6 +2481,64 @@ func (r *KVCacheBackendReconciler) syncStatus(
 	}
 	logger.V(2).Info("refreshed kv cache backend status", "phase", desired.Phase)
 	return nil
+}
+
+// omitLegacyMemberListing keeps a status written under the former schema from making every later
+// status update invalid after segmentID and clientID become required. There is no truthful value to
+// synthesize for either identity, so the whole stale listing is omitted until a successful leader
+// read replaces it. Keeping only the rows that happen to have identities would publish a partial
+// listing, and copying segmentName into segmentID would turn an address into a false identifier.
+func omitLegacyMemberListing(status *workercore.KVCacheBackendStatus) {
+	legacy := slices.ContainsFunc(status.Members, func(member workercore.KVCacheBackendMemberStatus) bool {
+		return member.SegmentID == "" || member.ClientID == ""
+	})
+	if !legacy {
+		return
+	}
+
+	status.Members = nil
+	holder := &workercore.KVCacheBackend{Status: *status}
+	message := legacyMemberStatusExplanation
+	if KVCacheBackendConditionMembersMounted.IsFalse(holder) {
+		message = withLegacyMemberStatus(KVCacheBackendConditionMembersMounted.GetMessage(holder))
+	}
+	KVCacheBackendConditionMembersMounted.False(holder, legacyMemberStatusReason, message)
+	if holder.Status.Phase == KVCacheBackendPhaseReady {
+		holder.Status.Phase = KVCacheBackendPhaseDegraded
+		holder.Status.PhaseMessage = message
+	}
+	*status = holder.Status
+}
+
+const legacyMemberStatusReason = "LegacyMemberStatus"
+
+const legacyMemberStatusExplanation = "the prior member listing predates the required segment and " +
+	"client identities and was omitted until a successful read replaces it"
+
+// setMembersObservationFailed preserves the migration explanation across repeated read failures.
+// A successful listing replaces the rows and uses the ordinary condition paths below, which clears
+// the explanation without requiring a durable migration field in the API.
+func setMembersObservationFailed(holder *workercore.KVCacheBackend, reason, message string) {
+	legacy := slices.ContainsFunc(holder.Status.Members,
+		func(member workercore.KVCacheBackendMemberStatus) bool {
+			return member.SegmentID == "" || member.ClientID == ""
+		}) || KVCacheBackendConditionMembersMounted.GetReason(holder) == legacyMemberStatusReason
+	if legacy {
+		holder.Status.Members = nil
+		message = withLegacyMemberStatus(message)
+		reason = legacyMemberStatusReason
+	}
+	KVCacheBackendConditionMembersMounted.False(holder, reason, message)
+}
+
+func withLegacyMemberStatus(message string) string {
+	if strings.Contains(message, legacyMemberStatusExplanation) {
+		return message
+	}
+	if message == "" {
+		return legacyMemberStatusExplanation
+	}
+	return message + "; " + legacyMemberStatusExplanation
 }
 
 // computeStatus builds the whole status from what is observed.

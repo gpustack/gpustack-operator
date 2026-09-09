@@ -817,10 +817,11 @@ Mooncake already implements — surfaced, not reimplemented:
 
   The engine binds inside the pod's network namespace, so the node name named a port nothing listens
   on there. With `status.podIP` the same client connected to the advertised endpoint directly.
-  - **It costs no stability.** The master appends a port of its own to build the segment name, and
-    that port is fresh on every start — one restart moved a segment from `<host>:13720` to
-    `<host>:14071` — so "the node name keeps the segment name durable" was never true. On the RDMA
-    path the pod holds the host's network namespace and this resolves to the node's address anyway.
+  - **Corrected after shipping.** The master keeps the client's `local_hostname` verbatim as the
+    segment name and puts the freshly bound transfer port only in `te_endpoint`; the segment ID is
+    minted again on every mount. The node name therefore adds no durable identity. On the RDMA path
+    the pod holds the host's network namespace and the advertised address resolves to the node's
+    address anyway.
   - ⛔ **No acceptance item in T12 would have caught this**: all six stop at Ready, endpoint
     reachability, the capacity families, growth, deletion refusal and schema pruning. **None moves a
     byte through the data plane.** That gap is the finding, not just the address.
@@ -965,24 +966,20 @@ it restarts on **what changed** rather than on **that the template changed**.
   `allocationStrategy` — `FreeRatioFirst` biases new writes toward the emptier member, `Random` does
   not. This is documented on the architecture page, not left to be discovered.
 - ⛔ **Shrinking a member group discards that member's cache.** The unmount is not graceful and this
-  scope does not make it so, because nothing reachable from a Pod's shutdown can make it graceful:
+  scope does not render a memory-unmount hook. The shutdown paths it does use are immediate:
   - `mc_store_rest_server` handles `SIGTERM` and calls `store.close()`, which reaches `tearDownAll()`
     — a path that takes **no grace period at all**.
   - The Python binding that does take one, `unmount_segment(segment_ids, grace_period_seconds=0)`,
     defaults to zero, and a zero goes straight to the immediate unmount rather than to
     `GracefulUnmountSegment`.
-  - No shipped console script can issue that RPC. **A `preStop` is blocked too, but not for the
-    reason this spec originally gave.** The original reason — that a fresh client would not know the
-    segment id the running process holds — is **wrong, and is corrected here rather than deleted
-    because it was load-bearing**: a `preStop` hook runs against the *same* process that mounted the
-    segments, so client identity was never the obstacle. **That correction has itself been
-    superseded, and is corrected in place for the same reason it was.** What replaced the original
-    reason — `segment_ids` is required and no route returns a client its own ids — is contradicted
-    by this spec's own admin route table (F6): `/get_segments_detail` returns `segment_id` **and**
-    `client_id` per segment, and this operator already polls that route. What is actually missing is
-    narrower still. A member cannot learn its own `client_id` — it lives only inside the C++
-    `Client` and in one startup log line — so it cannot tell which of the listed segments are its
-    own. That, and not the absence of a route, is what a later attempt should test.
+  - No shipped console script can issue that RPC. **Corrected after shipping.** Earlier versions of
+    this section gave two false blockers: a `preStop` would be a fresh client, then the leader returned
+    no segment ids and made the segment name from a fresh port. A `preStop` reaches the same process
+    that mounted the segment, and `/get_segments_detail` returns `segment_id` and `client_id`. The
+    segment name is the Pod IP on non-host-network paths, so later operator work can match those
+    members. Host-network members on one node share that name and address; supporting them without an
+    ambiguous match additionally requires the member's own `client_id`, which upstream keeps inside
+    the C++ `Client` and one startup log line. This shipped design renders no memory-unmount hook.
   - What the master DOES offer is `POST /api/v1/drain_jobs`, which **migrates** a segment's data to
     named target segments rather than unmounting it. That is a different and stronger operation than
     a graceful unmount, it needs the remaining members to have room, and it is a stateful
@@ -1756,10 +1753,11 @@ after T10 (status is fully observed); after T12 (every acceptance item is met).
       placement adds the new node's Pod — while an image, argv, environment, resource or fabric
       change moves it and every member is deleted so the DaemonSet recreates it. The rendered master
       Deployment is byte-identical across a widening either way.
-      Shrinking is NOT drained: the unmount is immediate, and F10 records why nothing reachable from
-      a Pod's shutdown can make it graceful. `terminationGracePeriodSeconds` is set so the entrypoint
-      finishes its own shutdown rather than being cut short, and T13 states in the documentation that
-      shrinking a group drops the cache that member held.
+      **Corrected after shipping.** Shrinking is NOT drained: no memory-unmount hook is rendered, and
+      F10 records the immediate shutdown paths and the remaining host-network identity gap.
+      `terminationGracePeriodSeconds` is set so the entrypoint finishes its own shutdown rather than
+      being cut short, and T13 states in the documentation that shrinking a group drops the cache that
+      member held.
       Verify: `go test ./pkg/worker/controllers/worker/ -run KVCacheBackendScale` — a widening that
       deletes no Pod, an image change that deletes every Pod, an assertion that the fingerprint is
       **insensitive to the node selector and sensitive to each of the other fields**, and a

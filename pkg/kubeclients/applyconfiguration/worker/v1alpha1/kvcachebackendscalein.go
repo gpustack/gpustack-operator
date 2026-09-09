@@ -28,15 +28,18 @@ type KVCacheBackendScaleInApplyConfiguration struct {
 	//
 	// THE TIER IS THE ONLY THING DEREGISTERED ON THE WAY OUT. The memory segment is still dropped
 	// rather than drained, and not for want of a verb: the member's own API takes a graceful unmount
-	// with a grace period, but it requires the segment ids, no route returns a client its own ids,
-	// and the name is not derivable because the leader appends a fresh port on every start.
+	// with a grace period, but it requires the segment ids. The leader's segment listing returns each
+	// segment's id and client id, and this operator records both in status. A non-host-network member
+	// can be matched by its Pod IP, which is also its segment name. Host-network members placed on one
+	// node share that name and address, while their client ids remain distinct; selecting safely from
+	// inside one of those members requires its own client id, which its supported interfaces do not
+	// expose.
 	//
-	// So this is blocked on an upstream route, and one upstream route is the whole of what unblocks
-	// it: a way for a client to read back its own segment ids. It is NOT blocked on the shutdown
-	// hook talking to a fresh process that has forgotten them — a preStop runs against the same
-	// process that mounted the segments, so anything reasoning from client identity is testing the
-	// wrong claim. Until that route exists, shrinking a group drops the memory it held, and for a
-	// cache that is a cost rather than a fault: the data is recomputable.
+	// So graceful unmount for every supported transport needs upstream to expose the running member's
+	// own client id and a hook that uses it. It is NOT blocked on the shutdown hook talking to a fresh
+	// process that has forgotten its identity — a preStop runs against the same process that mounted
+	// the segments. No memory-unmount hook is rendered today, so shrinking any group drops the memory
+	// it held. That is a cost rather than a fault for a cache because the data is recomputable.
 	//
 	// The Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so
 	// the kubelet cannot kill the container in the middle of the wait this configures.

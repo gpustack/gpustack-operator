@@ -2215,6 +2215,7 @@ func (r *KVCachePoolReconciler) syncKVCacheBackendClaim(
 	// A conflict is left to the queue rather than retried in place. The backend's reconciler writes
 	// this status too, so the losing side's whole view of the backend is stale by then — retrying just
 	// the list would write a claim derived from an object that has since moved.
+	omitLegacyMemberListing(&kvcb.Status)
 	return r.Client.Status().Update(ctx, kvcb)
 }
 

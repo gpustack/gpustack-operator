@@ -7,7 +7,13 @@ package v1alpha1
 //
 // KVCacheBackendMemberStatus is one observed store member.
 type KVCacheBackendMemberStatusApplyConfiguration struct {
-	// SegmentName is the member's segment as the leader knows it, derived from the node.
+	// SegmentID is the segment's unique identifier as the leader reports it.
+	SegmentID *string `json:"segmentID,omitempty"`
+	// ClientID is the identifier the member process minted when it started. Unlike the advertised
+	// address, it remains distinct when several host-network members run on one node.
+	ClientID *string `json:"clientID,omitempty"`
+	// SegmentName is the member's advertised address as the leader reports it. It is not unique:
+	// host-network members placed on one node advertise the same address.
 	SegmentName *string `json:"segmentName,omitempty"`
 	// NodeName is the node contributing this member's medium.
 	NodeName *string `json:"nodeName,omitempty"`
@@ -43,6 +49,22 @@ type KVCacheBackendMemberStatusApplyConfiguration struct {
 // apply.
 func KVCacheBackendMemberStatus() *KVCacheBackendMemberStatusApplyConfiguration {
 	return &KVCacheBackendMemberStatusApplyConfiguration{}
+}
+
+// WithSegmentID sets the SegmentID field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the SegmentID field is set to the value of the last call.
+func (b *KVCacheBackendMemberStatusApplyConfiguration) WithSegmentID(value string) *KVCacheBackendMemberStatusApplyConfiguration {
+	b.SegmentID = &value
+	return b
+}
+
+// WithClientID sets the ClientID field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ClientID field is set to the value of the last call.
+func (b *KVCacheBackendMemberStatusApplyConfiguration) WithClientID(value string) *KVCacheBackendMemberStatusApplyConfiguration {
+	b.ClientID = &value
+	return b
 }
 
 // WithSegmentName sets the SegmentName field in the declarative configuration to the given value

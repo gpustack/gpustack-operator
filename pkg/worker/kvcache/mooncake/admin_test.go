@@ -262,13 +262,13 @@ func TestAdminDecodeCapacity_ANumberThatIsNotAByteCountIsMalformed(t *testing.T)
 }
 
 func TestAdminDecodeSegments(t *testing.T) {
-	t.Run("four fields are read and the allocator counts left behind", func(t *testing.T) {
+	t.Run("identity and status fields are read and the allocator counts left behind", func(t *testing.T) {
 		got, err := DecodeSegmentListing(fixture(t, "segments-detail.json"))
 		require.NoError(t, err)
 
 		assert.Equal(t, []SegmentDetail{
-			{Name: "n7-dram", State: "OK", Protocol: "tcp", TEEndpoint: "10.42.0.11:15002"},
-			{Name: "n8-dram", State: "OK", Protocol: "rdma", TEEndpoint: "10.42.0.12:15002"},
+			{ID: "6e1f...", ClientID: "a1b2...", Name: "n7-dram", State: "OK", Protocol: "tcp", TEEndpoint: "10.42.0.11:15002"},
+			{ID: "7c2a...", ClientID: "b3c4...", Name: "n8-dram", State: "OK", Protocol: "rdma", TEEndpoint: "10.42.0.12:15002"},
 		}, got, "the fixture carries twelve fields per entry; nothing in this scope reads the rest")
 	})
 
@@ -319,32 +319,59 @@ func TestAdminDecodeSegments(t *testing.T) {
 	})
 }
 
-// TestAdminDecodeSegments_ANameThatCannotBeAKeyIsMalformed guards the boundary status depends on.
-//
-// status.members is a list-map keyed on segmentName, so a blank or repeated name makes the whole
-// status update fail schema validation — including the condition the caller would have written to
-// report the trouble. Refused here, the caller reports a listing it could not read, which it can
-// actually publish.
-func TestAdminDecodeSegments_ANameThatCannotBeAKeyIsMalformed(t *testing.T) {
+// TestAdminDecodeSegments_RequiresPublishableIdentity guards the boundary status depends on.
+func TestAdminDecodeSegments_RequiresPublishableIdentity(t *testing.T) {
+	t.Run("a segment with no id", func(t *testing.T) {
+		_, err := DecodeSegmentListing([]byte(
+			`{"total_segments":1,"segments":[{"client_id":"client-1","segment_name":"n7","te_endpoint":"n7:1","status":"OK"}]}`))
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrMalformedBody)
+		assert.Contains(t, err.Error(), "carries no id")
+	})
+
+	t.Run("a segment with no client id", func(t *testing.T) {
+		_, err := DecodeSegmentListing([]byte(
+			`{"total_segments":1,"segments":[{"segment_id":"segment-1","segment_name":"n7","te_endpoint":"n7:1","status":"OK"}]}`))
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrMalformedBody)
+		assert.Contains(t, err.Error(), "carries no client id")
+	})
+
 	t.Run("a segment with no name", func(t *testing.T) {
 		_, err := DecodeSegmentListing([]byte(
-			`{"total_segments":1,"segments":[{"segment_name":"","te_endpoint":"n7:1","status":"OK"}]}`))
+			`{"total_segments":1,"segments":[{"segment_id":"segment-1","client_id":"client-1","segment_name":"","te_endpoint":"n7:1","status":"OK"}]}`))
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrMalformedBody)
 		assert.Contains(t, err.Error(), "carries no name")
 	})
 
-	t.Run("two segments with one name", func(t *testing.T) {
+	t.Run("two segments with one id", func(t *testing.T) {
 		_, err := DecodeSegmentListing([]byte(
 			`{"total_segments":2,"segments":[` +
-				`{"segment_name":"n7:13775","te_endpoint":"n7:15380","status":"OK"},` +
-				`{"segment_name":"n7:13775","te_endpoint":"n7:15381","status":"OK"}]}`))
+				`{"segment_id":"segment-1","client_id":"client-1","segment_name":"n7","te_endpoint":"n7:15380","status":"OK"},` +
+				`{"segment_id":"segment-1","client_id":"client-2","segment_name":"n7","te_endpoint":"n7:15381","status":"OK"}]}`))
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrMalformedBody)
-		assert.Contains(t, err.Error(), `two segments are named "n7:13775"`)
+		assert.Contains(t, err.Error(), `two segments carry id "segment-1"`)
 	})
+}
+
+func TestAdminDecodeSegments_DuplicateNamesAreValid(t *testing.T) {
+	got, err := DecodeSegmentListing([]byte(
+		`{"total_segments":2,"segments":[` +
+			`{"segment_id":"segment-1","client_id":"client-1","segment_name":"10.42.0.11","te_endpoint":"10.42.0.11:15380","status":"OK"},` +
+			`{"segment_id":"segment-2","client_id":"client-2","segment_name":"10.42.0.11","te_endpoint":"10.42.0.11:15381","status":"OK"}]}`))
+
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "10.42.0.11", got[0].Name)
+	assert.Equal(t, "10.42.0.11", got[1].Name)
+	assert.NotEqual(t, got[0].ID, got[1].ID)
+	assert.NotEqual(t, got[0].ClientID, got[1].ClientID)
 }
 
 func TestAdminDecodeSegments_Malformed(t *testing.T) {
@@ -423,14 +450,14 @@ func TestAdminClient_BoundsWhatItReadsAndWhatItQuotes(t *testing.T) {
 
 		listing := fmt.Sprintf(
 			`{"total_segments":2,"segments":[`+
-				`{"segment_name":%q,"te_endpoint":"a:1","protocol":"tcp","status":"OK"},`+
-				`{"segment_name":%q,"te_endpoint":"a:2","protocol":"tcp","status":"OK"}]}`,
+				`{"segment_id":%q,"client_id":"client-1","segment_name":"a","te_endpoint":"a:1","protocol":"tcp","status":"OK"},`+
+				`{"segment_id":%q,"client_id":"client-2","segment_name":"a","te_endpoint":"a:2","protocol":"tcp","status":"OK"}]}`,
 			huge, huge)
 
 		_, err = DecodeSegmentListing([]byte(listing))
 		require.Error(t, err)
 		assert.Less(t, utf8.RuneCountInString(err.Error()), 32768,
-			"a duplicate segment name is quoted back, and the name came off the wire")
+			"a duplicate segment id is quoted back, and the id came off the wire")
 		assert.Contains(t, err.Error(), "(truncated)")
 	})
 }
