@@ -84,6 +84,25 @@ NS="${1:?usage: case-65.sh <NS>}"
 CASE_ID=65
 IMAGE="${E2E_MOONCAKE_IMAGE:-gpustack/mirrored-mooncake:0.3.13.post1-cpu}"
 HOST_PATH="${E2E_LOCALDISK_HOST_PATH:-/mnt/kvcache-localdisk}"
+HOST_PATH="${HOST_PATH%/}"
+
+# REQUIRED, and it REFUSES rather than skipping. The teardown empties this directory on EVERY node
+# with rm -rf, and a hostPath of type Directory mounts "/" as readily as anything else -- so a
+# stray, truncated or top-level value turns cleanup into deleting the node's filesystem. A SKIP
+# would hide that behind the same exit code as an unprepared cluster, and a dangerous value is a
+# mistake to correct rather than an environment this case cannot verify. Trailing slashes are
+# stripped first so "/mnt/" is judged as the top-level directory it names.
+case "$HOST_PATH" in
+  *..*)
+    echo "[case-65] REFUSE: E2E_LOCALDISK_HOST_PATH=\"$HOST_PATH\" contains \"..\"; the wipe target must be unambiguous" >&2
+    exit 1
+    ;;
+  /*/*) ;;
+  *)
+    echo "[case-65] REFUSE: E2E_LOCALDISK_HOST_PATH=\"$HOST_PATH\" must be an absolute path at least two segments deep, such as /mnt/kvcache-localdisk. A root or top-level directory would be emptied by this case's teardown on every node" >&2
+    exit 1
+    ;;
+esac
 
 SFX="$(set +o pipefail; LC_ALL=C tr -dc 'a-z0-9' </dev/urandom 2>/dev/null | head -c 5)"
 [ -n "$SFX" ] || SFX="$$$(date +%s)"

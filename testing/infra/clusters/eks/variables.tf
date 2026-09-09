@@ -105,14 +105,20 @@ variable "node_instance_store_count" {
   # WARNING (observed 2026-09-08, i7ie.xlarge, EKS 1.34, AL2023): the mapping
   # itself is fine — a standalone instance with the same explicit ephemeral
   # mapping gets /dev/nvme1n1 at boot. But on EKS nodes the
-  # aws-ec2-local-instance-store-csi-driver addon (enabled by default in this
+  # aws-ec2-local-instance-store-csi-driver addon (OFF by default in this
   # module, see enable_instance_store_csi_driver) claims every instance-store
   # controller and DELETES the pre-existing namespace (nvme1n1) to reclaim it
   # into its own NVMeDevice pool, re-creating namespaces only when a PVC is
   # provisioned through its StorageClass. With the addon installed there is no
-  # raw /dev/nvme1n1 for hostPath/local-device use. Disable the addon (and
-  # reboot the nodes so the namespace is re-created) when you need the raw
-  # device.
+  # raw /dev/nvme1n1 for hostPath/local-device use.
+  #
+  # ONCE THE DRIVER HAS RUN ON A NODE, TURNING IT OFF DOES NOT BRING THE
+  # NAMESPACE BACK, AND NEITHER DOES A REBOOT. Recreate it with `nvme create-ns`
+  # plus `nvme attach-ns`, or replace the node. Observed 2026-09-08 on
+  # i7ie.xlarge with driver v1.0.5; the README's variable table states the same.
+  # An earlier version of this comment said a reboot re-creates it, and said the
+  # addon was enabled by default -- both were true of the module before the
+  # addon became opt-in, and neither was true of the behaviour.
   description = "Number of instance-store (ephemeral NVMe) devices to map on every node group; 0 maps none."
   type        = number
   default     = 0
