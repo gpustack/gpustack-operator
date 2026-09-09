@@ -119,7 +119,9 @@ results() {
 }
 
 ready_nodes() {
-  kubectl get nodes --no-headers 2>/dev/null | awk '$2=="Ready" {print $1}'
+  kubectl get nodes \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{range .status.conditions[?(@.type=="Ready")]}{.status}{end}{"\n"}{end}' \
+    2>/dev/null | awk -F'|' '$2=="True" {print $1}'
 }
 
 running_member_count() {

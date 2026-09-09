@@ -6,6 +6,21 @@ CASE_FILE="$CASE_DIR/case-65.sh"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+awk '
+  /^ready_nodes\(\) \{/ { capture=1 }
+  capture { print }
+  capture && /^}$/ { exit }
+' "$CASE_FILE" >"$WORK/ready_nodes.sh"
+test -s "$WORK/ready_nodes.sh"
+(
+  # shellcheck disable=SC2317
+  kubectl() { printf 'schedulable|True\ncordoned|True\nunready|False\n'; }
+  # shellcheck source=/dev/null
+  source "$WORK/ready_nodes.sh"
+  test "$(ready_nodes)" = $'schedulable\ncordoned'
+)
+echo "PASS: Ready-node discovery includes cordoned nodes"
+
 test "$(grep -Fc 'path: ${RUN_HOST_PATH}' "$CASE_FILE")" -eq 2
 grep -Fq 'for node in $(ready_nodes); do' "$CASE_FILE"
 grep -Fq 'chmod 0777 /tier/' "$CASE_FILE"
