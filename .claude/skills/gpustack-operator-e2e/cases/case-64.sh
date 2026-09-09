@@ -109,6 +109,77 @@ lease_holder() {
     -o jsonpath='{.spec.holderIdentity}' 2>/dev/null
 }
 
+lease_renew_time() {
+  kubectl -n "$NS" get leases.coordination.k8s.io "$LEADER" \
+    -o jsonpath='{.spec.renewTime}' 2>/dev/null
+}
+
+holder_pod_uid() {
+  local holder="$1" holder_ip pod_uid pod_ip deleting phase
+  case "$holder" in
+    \[*\]:*)
+      holder_ip="${holder#\[}"
+      holder_ip="${holder_ip%%\]*}"
+      ;;
+    *:*) holder_ip="${holder%:*}" ;;
+    *) holder_ip="$holder" ;;
+  esac
+  while IFS='|' read -r pod_uid pod_ip deleting phase; do
+    if [ "$phase" != "Running" ] || [ -n "$deleting" ] || [ -z "$pod_ip" ] \
+      || [ "$pod_ip" != "$holder_ip" ]; then
+      continue
+    fi
+    echo "$pod_uid"
+    return 0
+  done < <(kubectl -n "$NS" get pod -l "$LEADER_SEL" \
+    -o jsonpath='{range .items[*]}{.metadata.uid}{"|"}{.status.podIP}{"|"}{.metadata.deletionTimestamp}{"|"}{.status.phase}{"\n"}{end}' \
+    2>/dev/null)
+}
+
+observe_handoff_snapshot() {
+  local observed_at="$1"
+  if [ -z "$HOLDER_MOVED_AT" ] && [ -n "$NEW_HOLDER_POD_UID" ] \
+    && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
+    if [ "$NEW_HOLDER" != "$OLD_HOLDER" ]; then
+      HOLDER_MOVED_AT="$observed_at"
+      MOVED_HOLDER="$NEW_HOLDER"
+      MOVED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
+      MOVE_EVIDENCE="holderIdentity changed"
+    elif [ -n "$NEW_RENEW_TIME" ]; then
+      if [ "$REUSED_HOLDER_POD_UID" != "$NEW_HOLDER_POD_UID" ] \
+        || [ -z "$REUSED_HOLDER_RENEW_TIME" ]; then
+        REUSED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
+        REUSED_HOLDER_RENEW_TIME="$NEW_RENEW_TIME"
+      elif [ "$NEW_RENEW_TIME" != "$REUSED_HOLDER_RENEW_TIME" ]; then
+        HOLDER_MOVED_AT="$observed_at"
+        MOVED_HOLDER="$NEW_HOLDER"
+        MOVED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
+        MOVE_EVIDENCE="replacement renewed the reused holderIdentity"
+      fi
+    fi
+  fi
+  if [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ] \
+    && [ "$NEW_HOLDER_POD_UID" = "$NEW_READY_UID" ]; then
+    HANDOFF_OBSERVED=1
+    if [ -z "$HOLDER_MOVED_AT" ]; then
+      HOLDER_MOVED_AT="$observed_at"
+      MOVED_HOLDER="$NEW_HOLDER"
+      MOVED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
+      MOVE_EVIDENCE="Ready replacement confirmed the reused holderIdentity"
+    fi
+  fi
+}
+
+record_failover_bound() {
+  local moved_secs=$((HOLDER_MOVED_AT - DELETE_EPOCH))
+  if [ "$moved_secs" -le "$FAILOVER_BOUND_SECS" ]; then
+    record PASS "the Lease moves within the failover bound" "${moved_secs}s <= ${FAILOVER_BOUND_SECS}s"
+  else
+    record FAIL "the Lease moves within the failover bound" \
+      "${moved_secs}s > ${FAILOVER_BOUND_SECS}s -- the election still works but no longer meets the failover budget"
+  fi
+}
+
 # ---------------------------------------------------------------- setup
 
 kubectl apply -f - <<YAML >/dev/null
@@ -150,11 +221,24 @@ else
   results; exit 1
 fi
 
-OLD_HOLDER="$(lease_holder)"
-OLD_READY="$(ready_leader_pod)"
-if [ -z "$OLD_HOLDER" ] || [ -z "$OLD_READY" ]; then
-  record FAIL "the Lease names the serving Pod before the kill" \
-    "holderIdentity='${OLD_HOLDER:-<empty>}', ready Pod='${OLD_READY:-<none>}'"
+OLD_HOLDER=""
+OLD_READY=""
+OLD_READY_UID=""
+OLD_HOLDER_POD_UID=""
+for ((i = 0; i < 10; i++)); do
+  OLD_READY="$(ready_leader_pod)"
+  OLD_READY_UID=""
+  if [ -n "$OLD_READY" ]; then
+    OLD_READY_UID="$(kubectl -n "$NS" get pod "$OLD_READY" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
+  fi
+  OLD_HOLDER="$(lease_holder)"
+  OLD_HOLDER_POD_UID="$(holder_pod_uid "$OLD_HOLDER")"
+  [ -n "$OLD_READY_UID" ] && [ "$OLD_HOLDER_POD_UID" = "$OLD_READY_UID" ] && break
+  sleep 1
+done
+if [ -z "$OLD_READY_UID" ] || [ "$OLD_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
+  record FAIL "the Lease holder is the serving Pod immediately before the kill" \
+    "holderIdentity='${OLD_HOLDER:-<empty>}' maps to '${OLD_HOLDER_POD_UID:-<none>}', ready Pod '${OLD_READY:-<none>}' has UID '${OLD_READY_UID:-<none>}'"
   results; exit 1
 fi
 
@@ -179,35 +263,70 @@ fi
 # the two paths fail differently.
 TRAJ_FILE="$(mktemp)"
 DELETE_EPOCH="$(date +%s)"
-kubectl -n "$NS" delete pod "$OLD_READY" --force --grace-period=0 --wait=false >/dev/null 2>&1
+if DELETE_OUT="$(kubectl -n "$NS" delete pod "$OLD_READY" --force --grace-period=0 --wait=false 2>&1)"; then
+  record PASS "the serving Pod deletion is accepted" "${OLD_READY} (${OLD_READY_UID}), forced with no grace period"
+else
+  record FAIL "the serving Pod deletion is accepted" \
+    "forced delete of ${OLD_READY} (${OLD_READY_UID}) failed: $(echo "$DELETE_OUT" | tr '\n' ' ' | cut -c1-200)"
+  results; exit 1
+fi
 
 NEW_HOLDER=""
-for ((i = 0; i < 240; i += 2)); do
+NEW_HOLDER_POD_UID=""
+NEW_READY=""
+NEW_READY_UID=""
+NEW_RENEW_TIME=""
+REUSED_HOLDER_POD_UID=""
+REUSED_HOLDER_RENEW_TIME=""
+HOLDER_MOVED_AT=""
+MOVED_HOLDER=""
+MOVED_HOLDER_POD_UID=""
+MOVE_EVIDENCE=""
+HANDOFF_OBSERVED=0
+HANDOFF_DEADLINE=$((DELETE_EPOCH + 240))
+# A changed identity or renewTime timestamps the move directly. A Ready holder is an upper bound:
+# the Lease must have moved no later than the serving replacement became observable.
+while [ "$(date +%s)" -lt "$HANDOFF_DEADLINE" ]; do
   kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" \
     -o jsonpath='{.status.phase}{"|"}{.conditions[?(@.type=="MembersMounted")].status}{"\n"}' \
     2>/dev/null >>"$TRAJ_FILE"
   NEW_HOLDER="$(lease_holder)"
-  [ -n "$NEW_HOLDER" ] && [ "$NEW_HOLDER" != "$OLD_HOLDER" ] && break
+  NEW_HOLDER_POD_UID="$(holder_pod_uid "$NEW_HOLDER")"
+  NEW_RENEW_TIME=""
+  if [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ] \
+    && [ "$NEW_HOLDER" = "$OLD_HOLDER" ]; then
+    NEW_RENEW_TIME="$(lease_renew_time)"
+  fi
+  NEW_READY="$(ready_leader_pod)"
+  NEW_READY_UID=""
+  if [ -n "$NEW_READY" ]; then
+    NEW_READY_UID="$(kubectl -n "$NS" get pod "$NEW_READY" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
+  fi
+  observe_handoff_snapshot "$(date +%s)"
+  [ "$HANDOFF_OBSERVED" = "1" ] && break
   sleep 2
 done
-HOLDER_MOVED_AT="$(date +%s)"
+HANDOFF_FINISHED_AT="$(date +%s)"
+HANDOFF_WAIT_SECS=$((HANDOFF_FINISHED_AT - DELETE_EPOCH))
 
-if [ -n "$NEW_HOLDER" ] && [ "$NEW_HOLDER" != "$OLD_HOLDER" ]; then
+if [ -n "$HOLDER_MOVED_AT" ]; then
   record PASS "the Lease moves off the dead holder" \
-    "holderIdentity ${OLD_HOLDER} -> ${NEW_HOLDER}, $((HOLDER_MOVED_AT - DELETE_EPOCH))s after the hard kill"
+    "holder Pod UID ${OLD_READY_UID} -> ${MOVED_HOLDER_POD_UID}, $((HOLDER_MOVED_AT - DELETE_EPOCH))s after the hard kill; ${MOVE_EVIDENCE}, holderIdentity=${MOVED_HOLDER}"
 else
   record FAIL "the Lease moves off the dead holder" \
-    "240s after force-deleting ${OLD_READY}: holderIdentity='${NEW_HOLDER:-<empty>}' (was '${OLD_HOLDER}')"
+    "${HANDOFF_WAIT_SECS}s after force-deleting ${OLD_READY} (${OLD_READY_UID}): holderIdentity='${NEW_HOLDER:-<empty>}', mapped Pod UID='${NEW_HOLDER_POD_UID:-<none>}'"
 fi
 
-if [ -n "$NEW_HOLDER" ] && [ "$NEW_HOLDER" != "$OLD_HOLDER" ]; then
-  MOVED_SECS=$((HOLDER_MOVED_AT - DELETE_EPOCH))
-  if [ "$MOVED_SECS" -le "$FAILOVER_BOUND_SECS" ]; then
-    record PASS "the Lease moves within the failover bound" "${MOVED_SECS}s <= ${FAILOVER_BOUND_SECS}s"
-  else
-    record FAIL "the Lease moves within the failover bound" \
-      "${MOVED_SECS}s > ${FAILOVER_BOUND_SECS}s -- the election still works but no longer meets the failover budget"
-  fi
+if [ "$HANDOFF_OBSERVED" = "1" ]; then
+  record PASS "the new Lease holder is the Ready replica" \
+    "ready Pod ${NEW_READY} has holder Pod UID ${NEW_HOLDER_POD_UID}"
+else
+  record FAIL "the new Lease holder is the Ready replica" \
+    "${HANDOFF_WAIT_SECS}s after the hard kill: holder Pod UID='${NEW_HOLDER_POD_UID:-<none>}', ready Pod UID='${NEW_READY_UID:-<none>}'"
+fi
+
+if [ -n "$HOLDER_MOVED_AT" ]; then
+  record_failover_bound
 fi
 
 NEW_READY=""

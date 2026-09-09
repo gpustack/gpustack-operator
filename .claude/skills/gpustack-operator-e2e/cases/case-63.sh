@@ -23,10 +23,10 @@
 #              serve.
 #
 #              This case MEASURES both paths instead of arguing them: delete the serving leader
-#              Pod, and record the interval from that moment until a store operation completes
-#              again. A completed put is the endpoint because it requires the whole chain -- client
-#              reaches the new master AND a member has re-registered its segment there; "no error
-#              in the log" proves neither.
+#              Pod, observe an error window, and record the interval from the delete until the first
+#              later store operation completes. A completed put is the endpoint because it requires
+#              the whole chain -- client reaches the new master AND a member has re-registered its
+#              segment there; "no error in the log" proves neither.
 #
 # Environment: Any cluster; no GPU, no RDMA (the member is DRAM over TCP). NEEDS a store image
 #              built with the Kubernetes Lease leadership backend (E2E_MOONCAKE_IMAGE; the default
@@ -44,10 +44,11 @@
 #
 # Expected:    - both probes complete a put BEFORE the failover (preflight; a failure here voids
 #                the measurement rather than recording a zero);
-#              - after the serving leader Pod is deleted, each path completes a put again within
-#                the 300s deadline -- the two intervals are REPORTED, and Path B failing to converge
-#                at all is itself the answer the decision needs (then Path B does not work and the
-#                vendor-image work it would avoid is unavoidable);
+#              - after the serving leader Pod is deleted, each path reports an error and then
+#                completes a put again within the 300s deadline -- the two delete-to-recovery
+#                intervals are REPORTED, and Path B failing to converge at all is itself the answer
+#                the decision needs (then Path B does not work and the vendor-image work it would
+#                avoid is unavoidable);
 #              - the leader Service's endpoint set is sampled through the transition, so Path B's
 #                interval can be read against the propagation delay it pays;
 #              - the backend is Ready after both measurements.
@@ -137,6 +138,33 @@ ready_leader_pod() {
   kubectl -n "$NS" get pod -l "$LEADER_SEL" \
     -o jsonpath='{range .items[?(@.status.containerStatuses[0].ready==true)]}{.metadata.name}{"\n"}{end}' \
     2>/dev/null | head -1
+}
+
+lease_holder() {
+  kubectl -n "$NS" get leases.coordination.k8s.io "$LEADER" \
+    -o jsonpath='{.spec.holderIdentity}' 2>/dev/null
+}
+
+holder_pod_uid() {
+  local holder="$1" holder_ip pod_uid pod_ip deleting phase
+  case "$holder" in
+    \[*\]:*)
+      holder_ip="${holder#\[}"
+      holder_ip="${holder_ip%%\]*}"
+      ;;
+    *:*) holder_ip="${holder%:*}" ;;
+    *) holder_ip="$holder" ;;
+  esac
+  while IFS='|' read -r pod_uid pod_ip deleting phase; do
+    if [ "$phase" != "Running" ] || [ -n "$deleting" ] || [ -z "$pod_ip" ] \
+      || [ "$pod_ip" != "$holder_ip" ]; then
+      continue
+    fi
+    echo "$pod_uid"
+    return 0
+  done < <(kubectl -n "$NS" get pod -l "$LEADER_SEL" \
+    -o jsonpath='{range .items[*]}{.metadata.uid}{"|"}{.status.podIP}{"|"}{.metadata.deletionTimestamp}{"|"}{.status.phase}{"\n"}{end}' \
+    2>/dev/null)
 }
 
 # The probe loop. The master address arrives as argv[1] so the quoting of "k8s://..." never passes
@@ -311,12 +339,37 @@ kubectl -n "$TEST_NS" exec "$PROBE_B" -c probe -- python3 -c "$PROBE_PY" "$MASTE
 # A baseline of successful puts on both paths before anything is deleted -- the loop prints one PUT
 # line per attempt, so four seconds is a dozen samples per path.
 sleep 4
-BASE_A="$(grep -c 'rc=0' "$LOG_A" 2>/dev/null || true)"
-BASE_B="$(grep -c 'rc=0' "$LOG_B" 2>/dev/null || true)"
+BASE_A="$(grep -c '^PUT t=.* rc=0$' "$LOG_A" 2>/dev/null || true)"
+BASE_B="$(grep -c '^PUT t=.* rc=0$' "$LOG_B" 2>/dev/null || true)"
 
-OLD_READY="$(ready_leader_pod)"
+OLD_READY=""
+OLD_READY_UID=""
+OLD_HOLDER=""
+OLD_HOLDER_POD_UID=""
+for ((i = 0; i < 10; i++)); do
+  OLD_READY="$(ready_leader_pod)"
+  OLD_READY_UID=""
+  if [ -n "$OLD_READY" ]; then
+    OLD_READY_UID="$(kubectl -n "$NS" get pod "$OLD_READY" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
+  fi
+  OLD_HOLDER="$(lease_holder)"
+  OLD_HOLDER_POD_UID="$(holder_pod_uid "$OLD_HOLDER")"
+  [ -n "$OLD_READY_UID" ] && [ "$OLD_HOLDER_POD_UID" = "$OLD_READY_UID" ] && break
+  sleep 1
+done
+if [ -z "$OLD_READY_UID" ] || [ "$OLD_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
+  record FAIL "the Lease holder is the serving Pod immediately before the delete" \
+    "holderIdentity='${OLD_HOLDER:-<empty>}' maps to '${OLD_HOLDER_POD_UID:-<none>}', ready Pod '${OLD_READY:-<none>}' has UID '${OLD_READY_UID:-<none>}'"
+  results; exit 1
+fi
 T0="$(python3 -c 'import time; print("%.3f" % time.time())')"
-kubectl -n "$NS" delete pod "$OLD_READY" --wait=false >/dev/null 2>&1
+if DELETE_OUT="$(kubectl -n "$NS" delete pod "$OLD_READY" --wait=false 2>&1)"; then
+  record PASS "the serving Pod deletion is accepted" "${OLD_READY} (${OLD_READY_UID})"
+else
+  record FAIL "the serving Pod deletion is accepted" \
+    "delete of ${OLD_READY} (${OLD_READY_UID}) failed: $(echo "$DELETE_OUT" | tr '\n' ' ' | cut -c1-200)"
+  results; exit 1
+fi
 
 # Wait for both probes to finish on their own deadline; a converged path ends at ${DEADLINE}s, an
 # unconverged one at the same deadline with no post-T0 success. The logs are the record either way.
@@ -329,17 +382,25 @@ print("delete at t0=%.3f" % t0)
 for label, path in (("Path A (k8s://lease)", sys.argv[2]), ("Path B (service dns)", sys.argv[3])):
     puts = []
     for line in open(path):
-        m = re.match(r"PUT t=([\d.]+) rc=(-?\d+)", line)
+        m = re.match(r"PUT t=([\d.]+) (?:rc=(-?\d+)|exc=.*)", line)
         if m:
-            puts.append((float(m.group(1)), int(m.group(2))))
+            rc = int(m.group(2)) if m.group(2) is not None else None
+            puts.append((float(m.group(1)), rc))
     ok_after = [t for t, rc in puts if rc == 0 and t > t0]
     ok_before = [t for t, rc in puts if rc == 0 and t <= t0]
     bad_after = [t for t, rc in puts if rc != 0 and t > t0]
+    recovered_after = [t for t, rc in puts if rc == 0 and bad_after and t > bad_after[0]]
+    if recovered_after:
+        convergence = "%.3fs" % (recovered_after[0] - t0)
+    elif bad_after:
+        convergence = "DID_NOT_RECOVER"
+    else:
+        convergence = "NO_ERROR_WINDOW"
     print("%s: puts total=%d ok-before-t0=%d first-error-after-t0=%s first-ok-after-t0=%s convergence=%s"
           % (label, len(puts), len(ok_before),
              ("%.3f" % (bad_after[0] - t0)) if bad_after else "none",
              ("%.3f" % (ok_after[0] - t0)) if ok_after else "NEVER",
-             ("%.3fs" % (ok_after[0] - t0)) if ok_after else "DID NOT CONVERGE"))
+             convergence))
 eps = []
 for line in open(sys.argv[4]):
     parts = line.split()
@@ -362,9 +423,15 @@ case "$CONV_A" in
     record PASS "Path A (member reads the Lease) converges after failover" \
       "put succeeds again ${CONV_A} after the leader delete; baseline ${BASE_A:-0} puts ok before it; \
 detail: $(grep '^Path A' "$WORK/summary.txt")" ;;
+  NO_ERROR_WINDOW)
+    record FAIL "Path A (member reads the Lease) converges after failover" \
+      "no failed put was observed after the delete, so recovery was not measured; detail: $(grep '^Path A' "$WORK/summary.txt"); log: $LOG_A" ;;
+  DID_NOT_RECOVER)
+    record FAIL "Path A (member reads the Lease) converges after failover" \
+      "no successful put followed the first failure within ${DEADLINE}s of the delete; detail: $(grep '^Path A' "$WORK/summary.txt"); log: $LOG_A" ;;
   *)
     record FAIL "Path A (member reads the Lease) converges after failover" \
-      "no successful put within ${DEADLINE}s of the delete; detail: $(grep '^Path A' "$WORK/summary.txt"); log: $LOG_A" ;;
+      "the measurement produced no convergence verdict; detail: $(grep '^Path A' "$WORK/summary.txt"); log: $LOG_A" ;;
 esac
 
 case "$CONV_B" in
@@ -372,13 +439,19 @@ case "$CONV_B" in
     record PASS "Path B (member keeps the Service address) converges after failover" \
       "put succeeds again ${CONV_B} after the leader delete; baseline ${BASE_B:-0} puts ok before it; \
 detail: $(grep '^Path B' "$WORK/summary.txt"); $(grep '^endpoints' "$WORK/summary.txt")" ;;
-  *)
+  NO_ERROR_WINDOW)
+    record FAIL "Path B (member keeps the Service address) converges after failover" \
+      "no failed put was observed after the delete, so recovery was not measured; detail: $(grep '^Path B' "$WORK/summary.txt"); $(grep '^endpoints' "$WORK/summary.txt"); log: $LOG_B" ;;
+  DID_NOT_RECOVER)
     # This is the answer the issue exists for, and it is a FAIL of the check, not of the run: Path B
     # not converging means the member's Lease read is load-bearing and the vendor-image rebuild work
     # cannot be avoided.
     record FAIL "Path B (member keeps the Service address) converges after failover" \
-      "no successful put within ${DEADLINE}s of the delete -- Path B DOES NOT WORK as read from \
+      "no successful put followed the first failure within ${DEADLINE}s of the delete -- Path B DOES NOT WORK as read from \
 upstream's source; detail: $(grep '^Path B' "$WORK/summary.txt"); $(grep '^endpoints' "$WORK/summary.txt"); log: $LOG_B" ;;
+  *)
+    record FAIL "Path B (member keeps the Service address) converges after failover" \
+      "the measurement produced no convergence verdict; detail: $(grep '^Path B' "$WORK/summary.txt"); $(grep '^endpoints' "$WORK/summary.txt"); log: $LOG_B" ;;
 esac
 
 FINAL_PHASE="$(kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" -o jsonpath='{.status.phase}' 2>/dev/null)"
