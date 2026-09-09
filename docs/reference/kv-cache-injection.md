@@ -344,12 +344,11 @@ registry, and vLLM's name is absent from that release's — and forwards nothing
 serving only SGLang workloads needs no such Binding: each Pod writes under its own domain, which its
 own Binding already registered.
 
-> **Known limitation — one `default` Binding per cluster, not per backend.** A Binding's reuse domain
-> is unique **cluster-wide**, while a tenant ledger belongs to **one master**. On a cluster running two
-> independent `KVCacheBackend`s, only one of them can hold the `default` Binding this section requires.
-> Injected `vllm` and `vllm-ascend` Pods on the others are **admitted** and then fail every write with
-> `TENANT_NOT_REGISTERED` — the Pod starts, stays Ready, and the cache never works. Tracked as
-> [#166](https://github.com/gpustack/gpustack-operator/issues/166).
+The `default` Binding is needed **per backend**, and that is what
+[One Binding, one reuse domain](../kv-cache/pool.md#one-binding-one-reuse-domain) allows: every
+`KVCacheBackend` holds its own. ([#166](https://github.com/gpustack/gpustack-operator/issues/166):
+the claim used to be cluster-wide, and a second backend's injected Pods then failed every write
+with `TENANT_NOT_REGISTERED`.)
 
 ### vLLM-Ascend and a non-`ascend` transport
 

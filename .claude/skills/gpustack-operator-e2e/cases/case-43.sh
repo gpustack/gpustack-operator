@@ -20,10 +20,20 @@
 #                    operator's — see the note on criterion 2 below before reading a red run.
 #                (3) THE PRECONDITIONS FAIL LOUDLY. A master without multi-tenancy holds no tenant
 #                    ledger, and a master that cannot persist its quota policy accepts no quota.
-# Neither may pass silently: each raises a named Condition and holds the pool away
-#                    from Ready.
-#                (4) THE EXCLUSIVE REUSE DOMAIN. A second Binding claiming a domain name already
-#                    registered is refused at admission, in another namespace, with the holder named.
+#                    Neither may pass silently: the first is refused at ADMISSION since #245, which
+#                    names the consuming pool, and the second raises a named Condition and holds
+#                    the pool away from Ready.
+#                    WHAT SECTION 7 DOES NOT COVER, and must not be read as covering: the pool's
+#                    own MultiTenancyDisabled Condition. That Condition is the net for the paths
+#                    admission cannot see, and the admission refusal returns early while
+#                    status.usedBy is EMPTY -- so the very state the Condition exists for is the
+#                    one this section can no longer reach, now that the reachable half is refused
+#                    before it takes effect. Unit tests are the Condition's only coverage.
+#                (4) THE EXCLUSIVE REUSE DOMAIN, PER MASTER. A second Binding claiming a domain
+#                    name already registered on the SAME master is refused at admission, in another
+#                    namespace, with the holder named — while the same name against a pool a
+#                    DIFFERENT backend serves is admitted, because two masters hold two ledgers
+#                    (#166).
 #
 # Two assumptions the unit tests cannot reach are asserted here rather than inherited:
 #              that the leader's image can actually run the init container's shell, and that a
@@ -49,10 +59,12 @@
 #              - each Binding's effectiveQuota is its share of the master's allocatable capacity;
 #              - the backend's own usedBy carries the pool's claim with an EMPTY namespace, exactly
 #                once after a second converging pass;
-#              - a third Binding reusing a registered domain name is refused by the API server;
+#              - a third Binding reusing a registered domain name on the same master is refused by
+#                the API server, and the same name on another master's pool is admitted;
 #              - a Binding whose usedBy is non-empty cannot be deleted, and the condition names the
 #                holder;
-#              - multi-tenancy turned off under the pool raises MultiTenancyDisabled;
+#              - multi-tenancy toggled off under a bound pool is refused at admission, naming the
+#                pool, and the refusal leaves the pool untouched;
 #              - a policy source the master cannot write raises QuotaPolicyNotWritable;
 #              - a pool over a backend with no mounted member is not Ready and says why.
 #
@@ -74,9 +86,9 @@ E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/
 NS="${1:?usage: case-43.sh <NS>}"
 IMAGE="${E2E_MOONCAKE_IMAGE:-docker.io/kvcacheai/mooncake:0.3.13}"
 
-# Every name carries the same suffix. A reuse domain name is unique CLUSTER-WIDE — the webhook
-# enforces it across namespaces — so a fixed name would collide with an interrupted earlier run and
-# fail this case for a reason that is not about the operator.
+# Every name carries the same suffix. A reuse domain name is unique PER MASTER — the webhook
+# enforces it across every pool a backend serves — so a fixed name would collide with an
+# interrupted earlier run and fail this case for a reason that is not about the operator.
 #
 # LC_ALL=C and the disabled pipefail are both load-bearing: under a UTF-8 locale tr dies on
 # /dev/urandom, and with pipefail on the SIGPIPE from head turns a trailing `|| echo $$` into an
@@ -139,9 +151,16 @@ restore() {
   done
 
   kubectl delete namespace "$NS_A" "$NS_B" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  kubectl delete kvcachepools.worker.gpustack.ai "$POOL" "$EMPTY_POOL" \
+
+  # The -other names belong to criterion 4's second-master fixture, created in section 5. Its
+  # Binding lives in NS_B and goes with the namespace above, but the pool and the backend are
+  # CLUSTER-SCOPED: an exit anywhere between their creation and section 5's own delete would
+  # otherwise leave a KVCacheBackend behind that keeps scheduling a member Pod on every linux
+  # node. Listed here rather than trapped separately so one cleanup owns every cluster-scoped
+  # name this case creates; --ignore-not-found makes it a no-op on the runs that never got there.
+  kubectl delete kvcachepools.worker.gpustack.ai "$POOL" "$EMPTY_POOL" "kvcp-other-${SFX}" \
     --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  kubectl delete kvcachebackends.worker.gpustack.ai "$BACKEND" "$EMPTY_BACKEND" \
+  kubectl delete kvcachebackends.worker.gpustack.ai "$BACKEND" "$EMPTY_BACKEND" "kvcb-other-${SFX}" \
     --ignore-not-found --wait=false >/dev/null 2>&1 || true
 }
 trap restore EXIT
@@ -493,9 +512,10 @@ else
   record FAIL "a second pass writes no second claim" "was '${claim}', now '${claim_again}'"
 fi
 
-echo "== 5. a reuse domain belongs to one binding, cluster-wide =="
+echo "== 5. a reuse domain belongs to one binding per master =="
 
-# Applied into a THIRD namespace, so this proves the check is cluster-wide rather than per-namespace.
+# Applied into a THIRD namespace, so this proves the check is not per-namespace. The duplicate
+# points at the SAME pool, hence the same master: one ledger entry cannot carry two ceilings.
 dup_out="$(kubectl apply -f - 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: KVCachePoolBinding
@@ -507,12 +527,70 @@ spec:
 YAML
 )"
 if echo "$dup_out" | grep -q "already registered by ${NS_A}/bind-a"; then
-  record PASS "a duplicate reuse domain is refused, naming the holder" \
+  record PASS "a duplicate reuse domain on the same master is refused, naming the holder" \
     "admission names ${NS_A}/bind-a, which is what an operator needs to go and look at"
 else
-  record FAIL "a duplicate reuse domain is refused, naming the holder" \
+  record FAIL "a duplicate reuse domain on the same master is refused, naming the holder" \
     "apply said: $(echo "$dup_out" | tr '\n' ' ' | cut -c1-160)"
 fi
+
+# The #166 half: the same domain against a pool a DIFFERENT backend serves must be ADMITTED — two
+# masters hold two ledgers, and the refusal that used to fire here is what broke every second
+# backend's "default" domain. The second backend is never waited on: admission reads the pool's
+# spec.backends, and a master that has not mounted yet is still a different master.
+#
+# Its member selector matches NO node on purpose, the same way the empty-backend fixture below
+# does. What this section needs from the backend is that it EXISTS and is named by a second pool;
+# a selector matching every linux node would put a real member Pod on each one for the length of
+# a check that only reads spec.backends, and the delete below does not wait for them to go.
+kubectl apply -f - >/dev/null 2>&1 <<YAML
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: KVCacheBackend
+metadata:
+  name: kvcb-other-${SFX}
+spec:
+  type: Mooncake
+  image: ${IMAGE}
+  connection:
+    managed:
+      leader:
+        multiTenancy: true
+      members:
+        - nodeSelector: {gpustack.ai/kvc-e2e-absent: "true"}
+          medium: DRAM
+          capacityPerMember: 1Gi
+---
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: KVCachePool
+metadata:
+  name: kvcp-other-${SFX}
+spec:
+  backends: [kvcb-other-${SFX}]
+  quota: {total: 1Gi}
+YAML
+other_out="$(kubectl apply -f - 2>&1 <<YAML
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: KVCachePoolBinding
+metadata: {name: bind-other, namespace: ${NS_B}}
+spec:
+  poolRef: {name: kvcp-other-${SFX}}
+  quotaCeiling: 1Gi
+  domain: {name: ${DOM_A}, blockSize: 16, dtype: bfloat16}
+YAML
+)"
+if echo "$other_out" | grep -qE 'created|configured'; then
+  record PASS "the same domain on a pool another master serves is admitted" \
+    "bind-other took ${DOM_A} against kvcb-other-${SFX} while ${NS_A}/bind-a holds it here"
+else
+  record FAIL "the same domain on a pool another master serves is admitted" \
+    "apply said: $(echo "$other_out" | tr '\n' ' ' | cut -c1-160)"
+fi
+kubectl -n "$NS_B" delete kvcachepoolbindings.worker.gpustack.ai bind-other \
+  --ignore-not-found --wait=false >/dev/null 2>&1 || true
+kubectl delete kvcachepools.worker.gpustack.ai "kvcp-other-${SFX}" \
+  --ignore-not-found --wait=false >/dev/null 2>&1 || true
+kubectl delete kvcachebackends.worker.gpustack.ai "kvcb-other-${SFX}" \
+  --ignore-not-found --wait=false >/dev/null 2>&1 || true
 
 echo "== 6. a binding a workload holds cannot be deleted =="
 
@@ -571,23 +649,31 @@ echo "== 7. a master without a tenant ledger fails loudly =="
 
 # Turned off UNDER the bound pool, never started that way: admission refuses a pool whose backend
 # runs without multi-tenancy, so a backend started that way would never acquire the pool that
-# reports the Condition. F5 calls this a runtime observation for exactly this reason.
-kubectl patch kvcachebackends.worker.gpustack.ai "$BACKEND" --type=merge \
-  -p '{"spec":{"connection":{"managed":{"leader":{"multiTenancy":false}}}}}' >/dev/null 2>&1
-
-mt_reason=""
-for _ in $(seq 1 40); do
-  mt_reason="$(kubectl get kvcachepools.worker.gpustack.ai "$POOL" \
-    -o jsonpath='{.status.conditions[?(@.type=="QuotaLedgerAvailable")].reason}' 2>/dev/null)"
-  [ "$mt_reason" = "MultiTenancyDisabled" ] && break
-  sleep 3
-done
-pool_phase="$(kubectl get kvcachepools.worker.gpustack.ai "$POOL" -o jsonpath='{.status.phase}' 2>/dev/null)"
-if [ "$mt_reason" = "MultiTenancyDisabled" ] && [ "$pool_phase" != "Ready" ]; then
-  record PASS "multi-tenancy off raises its own reason and holds the pool back" \
-    "QuotaLedgerAvailable=False MultiTenancyDisabled, phase=${pool_phase}"
+# reports the Condition. And since #245 the toggle itself is refused at admission too — the backend
+# webhook names the consuming pool rather than letting the ledger vanish under it — so the loud
+# failure this section asserts now has TWO layers: the refusal at admission, and the pool's own
+# Condition as the safety net for the paths admission cannot see. The pool staying Ready throughout
+# is part of the verdict: the ledger was never yanked.
+mt_patch_out="$(kubectl patch kvcachebackends.worker.gpustack.ai "$BACKEND" --type=merge \
+  -p '{"spec":{"connection":{"managed":{"leader":{"multiTenancy":false}}}}}' 2>&1)"
+if echo "$mt_patch_out" | grep -q "multi-tenancy cannot be turned off while KVCachePool/${POOL}"; then
+  record PASS "multi-tenancy off under a bound pool is refused at admission, naming the pool" \
+    "the refusal names KVCachePool/${POOL}, which is what an operator needs to go and look at"
 else
-  record FAIL "multi-tenancy off raises its own reason and holds the pool back" \
+  record FAIL "multi-tenancy off under a bound pool is refused at admission, naming the pool" \
+    "patch said: $(echo "$mt_patch_out" | tr '\n' ' ' | cut -c1-160)"
+fi
+
+# The toggle was refused, so the pool must be exactly as it was — a refusal that still perturbed
+# the ledger would be the refusal lying.
+pool_phase="$(kubectl get kvcachepools.worker.gpustack.ai "$POOL" -o jsonpath='{.status.phase}' 2>/dev/null)"
+mt_reason="$(kubectl get kvcachepools.worker.gpustack.ai "$POOL" \
+  -o jsonpath='{.status.conditions[?(@.type=="QuotaLedgerAvailable")].reason}' 2>/dev/null)"
+if [ "$pool_phase" = "Ready" ] && [ "$mt_reason" = "Available" ]; then
+  record PASS "the refused toggle leaves the pool untouched" \
+    "phase=Ready, QuotaLedgerAvailable=Available — the ledger was never yanked"
+else
+  record FAIL "the refused toggle leaves the pool untouched" \
     "reason='${mt_reason:-<none>}' phase='${pool_phase:-<none>}'"
 fi
 

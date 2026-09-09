@@ -180,9 +180,9 @@ func TestKVCachePoolBindingWebhook_ValidateCreate(t *testing.T) {
 			wantMsg: "must not exceed the pool's own ceiling of 100Ti",
 		},
 
-		// The domain registry, cluster-wide.
+		// The domain registry, per master: one backend serving both pools refuses, two do not.
 		{
-			name:    "a domain another namespace already registered",
+			name:    "a domain another namespace already registered on the same master",
 			objs:    []ctrlcli.Object{newKVCachePool(), otherKVCachePoolBinding("team-a-chat")},
 			mutate:  func(*workercore.KVCachePoolBinding) {},
 			wantMsg: `already registered by team-b/batch`,
@@ -300,15 +300,15 @@ func TestKVCachePoolBindingWebhook_ADomainIsNotClaimedByTheObjectUnderAdmission(
 	require.NoError(t, err)
 }
 
-// TestKVCachePoolBindingWebhook_ADuplicateDomainIsTrueOfOneMasterAndOfTwo pins the refusal's message
-// against the one way it can be wrong while naming the right objects.
+// TestKVCachePoolBindingWebhook_ADuplicateDomainIsTrueOfOneMasterOnly pins both halves of the
+// per-master scope: refused where one master serves both Bindings, admitted where the colliding
+// claim lives on a master that serves neither the same pool nor the same backend.
 //
-// The refusal holds whether or not the two Bindings are served by the same master, and its REASON does
-// not: on one master the two would share cache and one ledger entry, on two independent backends they
-// share neither. A message stating only the first sends an operator on two backends to investigate a
-// collision that cannot occur between two ledgers, which is worse than a vague message — it is a
-// correct object with a wrong causality.
-func TestKVCachePoolBindingWebhook_ADuplicateDomainIsTrueOfOneMasterAndOfTwo(t *testing.T) {
+// The message is pinned clause by clause for the reason its predecessor was: a refusal that names
+// the right objects with the wrong causality sends the operator investigating a collision that
+// cannot occur. Naming the shared backend is the load-bearing part — the check read both pools to
+// decide, and the message is the only place that reading surfaces.
+func TestKVCachePoolBindingWebhook_ADuplicateDomainIsTrueOfOneMasterOnly(t *testing.T) {
 	wh := newKVCachePoolBindingWebhook(newKVCachePool(), otherKVCachePoolBinding("team-a-chat"))
 
 	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
@@ -317,18 +317,84 @@ func TestKVCachePoolBindingWebhook_ADuplicateDomainIsTrueOfOneMasterAndOfTwo(t *
 	msg := err.Error()
 	assert.Contains(t, msg, "team-b/batch",
 		"the refusal names the Binding holding the domain, which is where the operator looks first")
-	assert.Contains(t, msg, "registered once cluster-wide",
-		"the scope of the registry is what the refusal actually turns on")
-	assert.Contains(t, msg, "Served by one master, the two would share cache",
-		"the collision is stated WITH the condition that produces it, never on its own")
-	assert.Contains(t, msg, "Served by two independent backends, they share nothing",
-		"the case with no sharing at all is stated too, so nobody goes looking for a collision")
+	assert.Contains(t, msg, "both Bindings' pools name mooncake-dram",
+		"the shared backend is the fact the refusal turns on, so it is stated, not implied")
+	assert.NotContains(t, msg, "pools are served by",
+		"the intersection establishes that both pools NAME the backend; a pool naming several is "+
+			"served by none of them, so \"served by\" would assert what was never read")
+	assert.Contains(t, msg, "Two masters hold two ledgers",
+		"the admitted case is stated too, so nobody reads the refusal as cluster-wide")
 	assert.Contains(t, msg, "does not rescue a needed",
 		"the advice to rename dead-ends on the one name an engine picks, so it says so: renaming "+
 			"is admitted and the Pods that made the domain necessary still write elsewhere")
 	assert.NotContains(t, msg, "exception",
 		"calling \"default\" an exception reads as an exemption from the uniqueness rule this "+
 			"very message is enforcing, which sends the reader back to retry the refused Binding")
+}
+
+// TestKVCachePoolBindingWebhook_TheSameDomainOnAnotherMasterIsAdmitted is the #166 case: two
+// independent backends, each holding the one domain a no-tenant engine writes under. The second
+// claim must be ADMITTED — the two masters hold two ledgers, and the refusal would be this check's
+// own scope error rather than a fault between the Bindings.
+func TestKVCachePoolBindingWebhook_TheSameDomainOnAnotherMasterIsAdmitted(t *testing.T) {
+	otherPool := newKVCachePool()
+	otherPool.Name = "other-pool"
+	otherPool.Spec.Backends = []string{"mooncake-other"}
+
+	holder := otherKVCachePoolBinding("default")
+	holder.Spec.PoolRef.Name = "other-pool"
+
+	candidate := newKVCachePoolBinding()
+	candidate.Spec.Domain.Name = "default"
+
+	wh := newKVCachePoolBindingWebhook(newKVCachePool(), otherPool, holder)
+	_, err := wh.ValidateCreate(context.Background(), candidate)
+	require.NoError(t, err,
+		"a domain held on a DIFFERENT master collides with nothing: two ledgers, two key spaces")
+}
+
+// TestKVCachePoolBindingWebhook_APoolNamingNoBackendCollidesWithNothing pins the verdict when the
+// holder's pool names NO master: an explicitly empty spec.backends, which the API server accepts
+// because the field is required but carries no minItems. No master serves the holder, so its claim
+// contests nothing and the candidate is admitted.
+//
+// This is a POSITIVE BASELINE, not a new rule. The verdict was already this before poolBackends
+// normalized an empty list to nil — reached by intersecting against an empty set, one pool read
+// later.
+//
+// WHAT IT DOES AND DOES NOT CATCH, measured by removing the normalization and re-running: it stays
+// GREEN, because the normalization changes which path produces the verdict and not the verdict. So
+// it fails on a regression that turns an empty list into a collision, and on one that dereferences
+// it, and NOT on the normalization being dropped. Nothing here guards that; it is an efficiency
+// and a readable equivalence, and it is documented as such rather than tested.
+func TestKVCachePoolBindingWebhook_APoolNamingNoBackendCollidesWithNothing(t *testing.T) {
+	emptyPool := newKVCachePool()
+	emptyPool.Name = "empty-pool"
+	emptyPool.Spec.Backends = []string{}
+
+	holder := otherKVCachePoolBinding("default")
+	holder.Spec.PoolRef.Name = "empty-pool"
+
+	candidate := newKVCachePoolBinding()
+	candidate.Spec.Domain.Name = "default"
+
+	wh := newKVCachePoolBindingWebhook(newKVCachePool(), emptyPool, holder)
+	_, err := wh.ValidateCreate(context.Background(), candidate)
+	require.NoError(t, err,
+		"a holder whose pool names no backend is served by no master, so it holds the domain "+
+			"against nothing this candidate could collide with")
+}
+
+// TestKVCachePoolBindingWebhook_AClaimWhosePoolIsGoneCollidesWithNothing covers the holder whose
+// pool no longer exists: no master serves it, so its registry entry bars nobody. The reconciler's
+// per-master contested set agrees — it only ever sees Bindings through pools on its backend.
+func TestKVCachePoolBindingWebhook_AClaimWhosePoolIsGoneCollidesWithNothing(t *testing.T) {
+	holder := otherKVCachePoolBinding("team-a-chat")
+	holder.Spec.PoolRef.Name = "deleted-pool"
+
+	wh := newKVCachePoolBindingWebhook(newKVCachePool(), holder)
+	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
+	require.NoError(t, err)
 }
 
 // TestKVCachePoolBindingWebhook_DeleteIsTheFinalizersDecision states where the refusal lives: this

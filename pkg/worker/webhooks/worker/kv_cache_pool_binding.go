@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -21,7 +22,7 @@ import (
 // KVCachePoolBindingWebhook validates a v1alpha1.KVCachePoolBinding.
 //
 // It is validating only. What it holds is what a schema cannot: a shape rule on a name, a cross-object
-// read for the ceiling this Binding may ask for, a cluster-wide uniqueness check on the reuse domain,
+// read for the ceiling this Binding may ask for, a per-master uniqueness check on the reuse domain,
 // and the immutability that keeps a warm cache from being reinterpreted underneath itself.
 //
 // nolint: lll
@@ -183,29 +184,37 @@ func validateKVCachePoolBindingDomain(
 	return errs
 }
 
-// validateKVCachePoolBindingDomainIsUnclaimed refuses a domain another Binding already registered.
+// validateKVCachePoolBindingDomainIsUnclaimed refuses a domain another Binding already registered
+// ON A MASTER THAT ALSO SERVES THIS ONE.
 //
 // Two Bindings on one domain, WHERE ONE MASTER SERVES BOTH, would SHARE cache, which may well be what
 // somebody wanted, and would collide on one quota ledger, which never is: the master holds a single
 // entry per tenant, so the two ceilings become last-write-wins and each namespace sees a quota the
 // other one set.
 //
-// Uniqueness is CLUSTER-WIDE rather than per pool, because one master can serve several pools and the
-// tenant space is master-global. The check is one unscoped List through the manager's cache — it
-// walks no namespaces itself, and the cache is already holding every Binding for the reconciler.
+// Uniqueness is therefore PER MASTER — wider than per pool, because one master can serve several
+// pools and the tenant space is master-global, and narrower than cluster-wide, because two masters
+// hold two ledgers and two key spaces. The cluster-wide form of this check is what #166 measured: on
+// two independent backends only one could ever register the "default" domain that no-tenant engines
+// write under, so the other backend's injected Pods were admitted and then failed every write with
+// TENANT_NOT_REGISTERED. "One master can serve several pools" argues for uniqueness across THOSE
+// pools; it never argued for uniqueness across pools on a DIFFERENT master, and the check now reads
+// both pools' backends and refuses only on a shared one.
 //
-// THAT REASON DOES NOT COVER SEVERAL MASTERS, and the gap is real: "one master can serve several
-// pools" argues for uniqueness across THOSE pools, not across pools on a DIFFERENT master. With two
-// independent backends, a domain every no-tenant engine writes under — "default" — can be registered
-// only once cluster-wide, so injected Pods on the second backend are admitted and then fail every
-// write with TENANT_NOT_REGISTERED. Tracked at
-// https://github.com/gpustack/gpustack-operator/issues/166, which also records why the fix may never
-// be needed. Left as written rather than narrowed here: changing the scope is an admission-semantics
-// change to a merged API, and it is on a mechanism that a planned opt-in tenant would remove.
+// THE REFUSAL'S MESSAGE NAMES THE SHARED BACKENDS, and that is load-bearing rather than thorough:
+// the check reads neither Binding's pool until it finds a name collision, so the message is the only
+// place the operator learns which backend makes the two Bindings collide.
 //
-// THE REFUSAL'S MESSAGE THEREFORE STATES BOTH CASES, and that is load-bearing rather than thorough:
-// an operator refused on two independent backends who is told the two would share cache goes looking
-// for a collision two separate ledgers cannot have.
+// It says the pools NAME the backend rather than that they are SERVED BY it, and the difference is
+// what this check actually read. A pool naming several backends is served by NONE of them — that is
+// the reconciler's BackendNotSingular refusal — so on that shape "served by" would assert something
+// the intersection never established. What the refusal claims is therefore exactly what was
+// computed, and the consequence keeps its condition: served by one master, the two collide.
+//
+// The wording is also independent of HOW MANY are shared, and no clause is inflected. Several is
+// reachable, because BackendNotSingular is reported in status rather than kept out of the spec, so
+// admission does see such a pool. A singular subject would be ungrammatical there, and a plural
+// branch would be a second code path with no test that could fail on it.
 //
 // It races: two creates admitted against one cache state both pass. That is why F9's reconcile-time
 // refusal exists, and why this check is the one that produces a good message rather than the one that
@@ -223,6 +232,9 @@ func (r *KVCachePoolBindingWebhook) validateKVCachePoolBindingDomainIsUnclaimed(
 		}
 	}
 
+	var ownBackends []string
+	ownBackendsRead := false
+
 	for i := range list.Items {
 		holder := &list.Items[i]
 		if holder.Spec.Domain.Name != kvcpb.Spec.Domain.Name {
@@ -232,20 +244,113 @@ func (r *KVCachePoolBindingWebhook) validateKVCachePoolBindingDomainIsUnclaimed(
 		if holder.Namespace == kvcpb.Namespace && holder.Name == kvcpb.Name {
 			continue
 		}
+
+		shared, err := r.poolsSharedMasters(ctx, kvcpb.Spec.PoolRef.Name, holder.Spec.PoolRef.Name,
+			&ownBackends, &ownBackendsRead)
+		if err != nil {
+			return field.ErrorList{field.InternalError(namePath, err)}
+		}
+		if len(shared) == 0 {
+			continue
+		}
+
 		return field.ErrorList{field.Duplicate(namePath, fmt.Sprintf(
-			"reuse domain %q is already registered by %s/%s. A domain is registered once "+
-				"cluster-wide, and this check reads neither Binding's pool. Served by one master, "+
-				"the two would share cache and overwrite each other's ceiling in its single "+
-				"ledger entry for this tenant. Served by two independent backends, they share "+
-				"nothing, and the refusal is this check's scope rather than a fault between them. "+
-				"Register a domain no other Binding holds. That does not rescue a needed "+
-				"\"default\" domain: the engines that forward no tenant write under that literal "+
-				"name, so a Binding registering anything else registers a domain those Pods never "+
-				"write to",
-			kvcpb.Spec.Domain.Name, holder.Namespace, holder.Name))}
+			"reuse domain %q is already registered by %s/%s, and both Bindings' pools name %s: "+
+				"served by one master, the two would share cache and overwrite each other's "+
+				"ceiling in the single ledger entry it keeps per tenant. Two masters hold two "+
+				"ledgers, so a "+
+				"Binding claiming this domain against a pool on another backend is fine — register "+
+				"a domain no other Binding on a shared master holds. That does not rescue a needed "+
+				"\"default\" domain here: the engines that forward no tenant write under that "+
+				"literal name, so a Binding registering anything else registers a domain those "+
+				"Pods never write to",
+			kvcpb.Spec.Domain.Name, holder.Namespace, holder.Name,
+			strings.Join(shared, " and ")))}
 	}
 
 	return nil
+}
+
+// poolsSharedMasters returns the backends serving BOTH pools two Bindings name, which is the only
+// configuration in which their claims on one domain collide: a master holds one ledger entry per
+// tenant, so two Bindings on one domain over one master overwrite each other's ceiling, while two
+// masters hold two ledgers and collide on nothing. A pool's masters are its spec.backends, so the
+// answer is an intersection; a pool naming several is served by NONE of them (the reconciler's
+// BackendNotSingular refusal), but the intersection is still the safe answer — admission refuses
+// rather than reasoning about a shape its sibling webhook is already reporting.
+//
+// A pool with no masters is answered as sharing NOTHING, and that covers a pool which cannot be
+// read as well as one which names no backend, including an explicitly empty list — poolBackends
+// normalizes all of them to nil. For this Binding's own pool the
+// refusal is the ceiling check's to make, one call later, and a domain verdict computed against a
+// missing pool would be noise ahead of it; for the holder's, a gone pool means no master serves the
+// holder, so its claim collides with nothing — the reconciler's per-master contested set agrees.
+// ownBackends caches this Binding's own pool across claimants, so a cluster holding N Bindings on
+// one domain costs N+1 pool reads, not 2N.
+func (r *KVCachePoolBindingWebhook) poolsSharedMasters(
+	ctx context.Context, ownPool, holderPool string,
+	ownBackends *[]string, ownBackendsRead *bool,
+) ([]string, error) {
+	if !*ownBackendsRead {
+		backends, err := r.poolBackends(ctx, ownPool)
+		if err != nil {
+			return nil, err
+		}
+		*ownBackends = backends
+		*ownBackendsRead = true
+	}
+	if *ownBackends == nil {
+		return nil, nil
+	}
+
+	holderBackends, err := r.poolBackends(ctx, holderPool)
+	if err != nil {
+		return nil, err
+	}
+	if holderBackends == nil {
+		return nil, nil
+	}
+
+	var shared []string
+	for _, b := range *ownBackends {
+		if slices.Contains(holderBackends, b) {
+			shared = append(shared, b)
+		}
+	}
+	return shared, nil
+}
+
+// poolBackends answers WHICH MASTERS SERVE ONE POOL. A nil slice with no error means NONE DO, and
+// every way that happens is normalized to it: the pool is gone, or it exists carrying no backend.
+//
+// The normalization is load-bearing rather than tidy. spec.backends is required but carries no
+// minItems, so an explicit empty list is a shape the API server accepts, and returning it verbatim
+// would make the caller's `== nil` early return a NEAR equivalence instead of a real one — the
+// verdict would still come out right, by way of an intersection against an empty set, after a
+// second pool read that answers nothing.
+//
+// The read falls back to the API server for the reason the ceiling check's does: a Binding created
+// in the same breath as its pool is ordinary, and a cache miss must not become a wrong scope verdict.
+func (r *KVCachePoolBindingWebhook) poolBackends(
+	ctx context.Context, name string,
+) ([]string, error) {
+	kvcp := &workercore.KVCachePool{}
+	key := ctrlcli.ObjectKey{Name: name}
+	if err := r.Client.Get(ctx, key, kvcp); err != nil {
+		if !kerrors.IsNotFound(err) {
+			return nil, fmt.Errorf("get kv cache pool %q: %w", name, err)
+		}
+		if err = r.APIReader.Get(ctx, key, kvcp, ctrlclix.WithoutQuorum); err != nil {
+			if !kerrors.IsNotFound(err) {
+				return nil, fmt.Errorf("get kv cache pool %q: %w", name, err)
+			}
+			return nil, nil
+		}
+	}
+	if len(kvcp.Spec.Backends) == 0 {
+		return nil, nil
+	}
+	return kvcp.Spec.Backends, nil
 }
 
 // validateKVCachePoolBindingCeilingFitsPool refuses a request the pool could not have granted.

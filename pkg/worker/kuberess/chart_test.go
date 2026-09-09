@@ -471,13 +471,13 @@ func renderedOperatorImages(t *testing.T, release *helmrelease.Release, reposito
 // documents: every workload this chart deploys is confined by it, except the ones that have to
 // cover the nodes they serve. The contract spans the parent chart, its hooks and three vendored
 // subcharts that each read `.Values.global` through a patch, so nothing local says whether a
-// template still honours it — only a render does. Written as "everything but this list" rather
+// template still honors it — only a render does. Written as "everything but this list" rather
 // than a list of the confined, so a workload added without the fallback fails here instead of
 // quietly escaping a selector meant to hold the whole release.
 func TestChartGlobalNodeSelectorConfinesWhatItCan(t *testing.T) {
 	const key = "gpustack.ai/test-pool"
 
-	// Confining these would defeat the selector rather than honour it: NFD's worker and topology
+	// Confining these would defeat the selector rather than honor it: NFD's worker and topology
 	// updater label the nodes, and the CSI node plugins serve volumes on them. A pool selector
 	// would leave every node outside it unlabelled — including with the PCI-presence labels the
 	// device managers and a GPUStack worker select on.
@@ -561,7 +561,7 @@ type renderedWorkload struct {
 
 // workloadNodeSelectors renders the chart and returns every workload by object name, hooks
 // included and marked as such: they are part of the contract by being exempt from it, so a
-// hook that starts honouring the selector has to fail a test rather than pass one.
+// hook that starts honoring the selector has to fail a test rather than pass one.
 func workloadNodeSelectors(t *testing.T, values map[string]any) map[string]renderedWorkload {
 	t.Helper()
 
