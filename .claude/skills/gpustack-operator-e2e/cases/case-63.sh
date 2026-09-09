@@ -23,10 +23,10 @@
 #              serve.
 #
 #              This case MEASURES both paths instead of arguing them: delete the serving leader
-#              Pod, and record the interval from that moment until a store operation completes
-#              again. A completed put is the endpoint because it requires the whole chain -- client
-#              reaches the new master AND a member has re-registered its segment there; "no error
-#              in the log" proves neither.
+#              Pod, observe an error window, and record the interval from the delete until the first
+#              later store operation completes. A completed put is the endpoint because it requires
+#              the whole chain -- client reaches the new master AND a member has re-registered its
+#              segment there; "no error in the log" proves neither.
 #
 # Environment: Any cluster; no GPU, no RDMA (the member is DRAM over TCP). NEEDS a store image
 #              built with the Kubernetes Lease leadership backend (E2E_MOONCAKE_IMAGE; the default
@@ -44,10 +44,11 @@
 #
 # Expected:    - both probes complete a put BEFORE the failover (preflight; a failure here voids
 #                the measurement rather than recording a zero);
-#              - after the serving leader Pod is deleted, each path completes a put again within
-#                the 300s deadline -- the two intervals are REPORTED, and Path B failing to converge
-#                at all is itself the answer the decision needs (then Path B does not work and the
-#                vendor-image work it would avoid is unavoidable);
+#              - after the serving leader Pod is deleted, each path reports an error and then
+#                completes a put again within the 300s deadline -- the two delete-to-recovery
+#                intervals are REPORTED, and Path B failing to converge at all is itself the answer
+#                the decision needs (then Path B does not work and the vendor-image work it would
+#                avoid is unavoidable);
 #              - the leader Service's endpoint set is sampled through the transition, so Path B's
 #                interval can be read against the propagation delay it pays;
 #              - the backend is Ready after both measurements.
@@ -311,8 +312,8 @@ kubectl -n "$TEST_NS" exec "$PROBE_B" -c probe -- python3 -c "$PROBE_PY" "$MASTE
 # A baseline of successful puts on both paths before anything is deleted -- the loop prints one PUT
 # line per attempt, so four seconds is a dozen samples per path.
 sleep 4
-BASE_A="$(grep -c 'rc=0' "$LOG_A" 2>/dev/null || true)"
-BASE_B="$(grep -c 'rc=0' "$LOG_B" 2>/dev/null || true)"
+BASE_A="$(grep -c '^PUT t=.* rc=0$' "$LOG_A" 2>/dev/null || true)"
+BASE_B="$(grep -c '^PUT t=.* rc=0$' "$LOG_B" 2>/dev/null || true)"
 
 OLD_READY="$(ready_leader_pod)"
 T0="$(python3 -c 'import time; print("%.3f" % time.time())')"
@@ -329,17 +330,19 @@ print("delete at t0=%.3f" % t0)
 for label, path in (("Path A (k8s://lease)", sys.argv[2]), ("Path B (service dns)", sys.argv[3])):
     puts = []
     for line in open(path):
-        m = re.match(r"PUT t=([\d.]+) rc=(-?\d+)", line)
+        m = re.match(r"PUT t=([\d.]+) (?:rc=(-?\d+)|exc=.*)", line)
         if m:
-            puts.append((float(m.group(1)), int(m.group(2))))
+            rc = int(m.group(2)) if m.group(2) is not None else None
+            puts.append((float(m.group(1)), rc))
     ok_after = [t for t, rc in puts if rc == 0 and t > t0]
     ok_before = [t for t, rc in puts if rc == 0 and t <= t0]
     bad_after = [t for t, rc in puts if rc != 0 and t > t0]
+    recovered_after = [t for t, rc in puts if rc == 0 and bad_after and t > bad_after[0]]
     print("%s: puts total=%d ok-before-t0=%d first-error-after-t0=%s first-ok-after-t0=%s convergence=%s"
           % (label, len(puts), len(ok_before),
              ("%.3f" % (bad_after[0] - t0)) if bad_after else "none",
              ("%.3f" % (ok_after[0] - t0)) if ok_after else "NEVER",
-             ("%.3fs" % (ok_after[0] - t0)) if ok_after else "DID NOT CONVERGE"))
+             ("%.3fs" % (recovered_after[0] - t0)) if recovered_after else "DID NOT CONVERGE"))
 eps = []
 for line in open(sys.argv[4]):
     parts = line.split()

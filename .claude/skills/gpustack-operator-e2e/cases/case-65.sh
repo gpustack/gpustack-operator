@@ -62,16 +62,10 @@
 #              which write path the fix has to reach.
 #
 # Cleanup:     Trap deletes both KVCacheBackends (owner references cascade) and every probe Pod,
-#              and empties the host directory on each node. The directory itself — mount and all
-#              — is the deployer's and is left exactly as found. Idempotent, runs on pass AND
-#              fail, safe to re-run.
-#              THE WIPE IS NOT SCOPED TO THIS RUN'S WRITES, and cannot be: the store names its
-#              own files and this case's whole verdict is that it writes none, so there is no
-#              pattern to match on. THE PATH MUST THEREFORE BE EXCLUSIVE TO ONE case-65 RUN. Two
-#              concurrent runs against one directory, or any other tenant of the default path,
-#              lose their files to each other's teardown. There is no lock enforcing this.
-#              A second limit of the same shape: the node list is captured once, at start. A node
-#              that becomes Ready mid-run gets a member Pod writing to the tier and no wipe.
+#              then removes this run's subdirectory from every node that is Ready at teardown.
+#              The prepared parent directory and other runs' contents are untouched. Removing the
+#              subdirectory whole includes dotfiles. Idempotent, runs on pass AND fail, safe to
+#              re-run and safe beside another case-65 run using the same parent directory.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on
@@ -86,20 +80,19 @@ IMAGE="${E2E_MOONCAKE_IMAGE:-gpustack/mirrored-mooncake:0.3.13.post1-cpu}"
 HOST_PATH="${E2E_LOCALDISK_HOST_PATH:-/mnt/kvcache-localdisk}"
 HOST_PATH="${HOST_PATH%/}"
 
-# REQUIRED, and it REFUSES rather than skipping. The teardown empties this directory on EVERY node
-# with rm -rf, and a hostPath of type Directory mounts "/" as readily as anything else -- so a
-# stray, truncated or top-level value turns cleanup into deleting the node's filesystem. A SKIP
-# would hide that behind the same exit code as an unprepared cluster, and a dangerous value is a
-# mistake to correct rather than an environment this case cannot verify. Trailing slashes are
-# stripped first so "/mnt/" is judged as the top-level directory it names.
+# REQUIRED, and it REFUSES rather than skipping. The case creates its run directory below this
+# prepared parent, and a root or top-level path is not the dedicated tier shape this case claims to
+# verify. A SKIP would hide a dangerous value behind the same exit code as an unprepared cluster,
+# while that value is a mistake to correct. Trailing slashes are stripped first so "/mnt/" is
+# judged as the top-level directory it names.
 case "$HOST_PATH" in
   *..*)
-    echo "[case-65] REFUSE: E2E_LOCALDISK_HOST_PATH=\"$HOST_PATH\" contains \"..\"; the wipe target must be unambiguous" >&2
+    echo "[case-65] REFUSE: E2E_LOCALDISK_HOST_PATH=\"$HOST_PATH\" contains \"..\"; the run directory parent must be unambiguous" >&2
     exit 1
     ;;
   /*/*) ;;
   *)
-    echo "[case-65] REFUSE: E2E_LOCALDISK_HOST_PATH=\"$HOST_PATH\" must be an absolute path at least two segments deep, such as /mnt/kvcache-localdisk. A root or top-level directory would be emptied by this case's teardown on every node" >&2
+    echo "[case-65] REFUSE: E2E_LOCALDISK_HOST_PATH=\"$HOST_PATH\" must be an absolute path at least two segments deep, such as /mnt/kvcache-localdisk" >&2
     exit 1
     ;;
 esac
@@ -108,6 +101,8 @@ SFX="$(set +o pipefail; LC_ALL=C tr -dc 'a-z0-9' </dev/urandom 2>/dev/null | hea
 [ -n "$SFX" ] || SFX="$$$(date +%s)"
 BACKEND="kvcb-ld-${SFX}"
 BACKEND2="kvcb-oe-${SFX}"
+RUN_DIR="case-65-${SFX}"
+RUN_HOST_PATH="${HOST_PATH}/${RUN_DIR}"
 
 FAILS=0
 SKIPS=0
@@ -123,7 +118,19 @@ results() {
   return 0
 }
 
-NODES="$(kubectl get nodes --no-headers 2>/dev/null | awk '$2=="Ready" {print $1}')"
+ready_nodes() {
+  kubectl get nodes --no-headers 2>/dev/null | awk '$2=="Ready" {print $1}'
+}
+
+running_member_count() {
+  local backend="$1"
+  kubectl -n "$NS" get pod \
+    -l "app.kubernetes.io/name=kv-cache-backend,app.kubernetes.io/instance=${backend},app.kubernetes.io/component=member-0" \
+    -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}' \
+    2>/dev/null | awk 'NF {n++} END {print n+0}'
+}
+
+NODES="$(ready_nodes)"
 
 # A probe Pod is named after the node it pins to, so the tag must be UNIQUE PER NODE. A slice of
 # the node name is not: chars 12-17 of ip-10-0-1-123.ec2.internal and of ip-10-0-2-123.ec2.internal
@@ -141,10 +148,11 @@ teardown() {
   echo "[case-65] cleanup"
   kubectl delete kvcachebackends.worker.gpustack.ai "$BACKEND" "$BACKEND2" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   kubectl -n "$NS" delete pod -l "gpustack-e2e-case=65-${SFX}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  # The directory is the deployer's; the files the store wrote into it are this case's.
-  for node in $NODES; do
+  # The parent is the deployer's; this run owns only its named child. Re-read the nodes so one that
+  # became Ready during the case is cleaned too.
+  for node in $(ready_nodes); do
     kubectl -n "$NS" run "case65-wipe-${SFX}-$(node_tag "$node")" --restart=Never --rm -i --quiet \
-      --image=busybox:1.36 --overrides='{"spec":{"nodeName":"'"$node"'","containers":[{"name":"wipe","image":"busybox:1.36","command":["sh","-c","rm -rf /tier/* 2>/dev/null; true"],"volumeMounts":[{"name":"tier","mountPath":"/tier"}]}],"volumes":[{"name":"tier","hostPath":{"path":"'"$HOST_PATH"'","type":"Directory"}}]}}' \
+      --image=busybox:1.36 --overrides='{"spec":{"nodeName":"'"$node"'","containers":[{"name":"wipe","image":"busybox:1.36","command":["sh","-c","rm -rf /tier/'"$RUN_DIR"' 2>/dev/null; true"],"volumeMounts":[{"name":"tier","mountPath":"/tier"}]}],"volumes":[{"name":"tier","hostPath":{"path":"'"$HOST_PATH"'","type":"Directory"}}]}}' \
       >/dev/null 2>&1 || true
   done
 }
@@ -173,7 +181,7 @@ PREP_OK=1
 for node in $NODES; do
   short="$(node_tag "$node")"
   out="$(kubectl -n "$NS" run "case65-pre-${SFX}-${short}" --restart=Never --rm -i --quiet \
-    --image=busybox:1.36 --overrides='{"spec":{"nodeName":"'"$node"'","containers":[{"name":"pre","image":"busybox:1.36","command":["sh","-c","touch /tier/.case65-probe && rm /tier/.case65-probe && echo WRITABLE"],"volumeMounts":[{"name":"tier","mountPath":"/tier"}]}],"volumes":[{"name":"tier","hostPath":{"path":"'"$HOST_PATH"'","type":"Directory"}}]}}' \
+    --image=busybox:1.36 --overrides='{"spec":{"nodeName":"'"$node"'","containers":[{"name":"pre","image":"busybox:1.36","command":["sh","-c","mkdir -p /tier/'"$RUN_DIR"' && touch /tier/'"$RUN_DIR"'/.hidden && echo WRITABLE"],"volumeMounts":[{"name":"tier","mountPath":"/tier"}]}],"volumes":[{"name":"tier","hostPath":{"path":"'"$HOST_PATH"'","type":"Directory"}}]}}' \
     2>/dev/null)"
   if [ "$out" != "WRITABLE" ]; then
     PREP_OK=0
@@ -183,7 +191,7 @@ for node in $NODES; do
   fi
 done
 [ "$PREP_OK" = "1" ] || exit 0
-record PASS "the host directory is writable on every Ready node" "$(echo $NODES | wc -w | tr -d ' ') node(s) at $HOST_PATH"
+record PASS "the run directory is prepared on every Ready node" "$(echo $NODES | wc -w | tr -d ' ') node(s) at $RUN_HOST_PATH"
 
 # ------------------------------------------------- 1. the backend with a disk tier
 
@@ -206,7 +214,7 @@ spec:
           medium: DRAM
           capacityPerMember: 256Mi
           localDisk:
-            path: ${HOST_PATH}
+            path: ${RUN_HOST_PATH}
             capacity: 4Gi
 YAML
 
@@ -216,6 +224,16 @@ if ! wait_for kvcachebackends.worker.gpustack.ai "$BACKEND" '{.status.phase}' Re
   results; exit 1
 fi
 record PASS "the backend with a disk tier reaches Ready" "phase=Ready for ${BACKEND}"
+
+MEMBER_COUNT="$(running_member_count "$BACKEND")"
+if [ "$MEMBER_COUNT" -le 0 ] 2>/dev/null; then
+  record FAIL "running members exist to size the write set" "no Running member Pod belongs to ${BACKEND}"
+  results; exit 1
+fi
+# Preserve the measured three-member set of 132 objects while keeping one member below its 256Mi
+# capacity: 44 objects of 4MiB per running member, four warm keys and the rest fill keys.
+PHASE_A_TOTAL=$((MEMBER_COUNT * 44))
+PHASE_A_FILL=$((PHASE_A_TOTAL - 4))
 
 # The managed workloads live in the OPERATOR's namespace, not necessarily $NS — the only
 # trustworthy address is the one the controller published in status.endpoints.
@@ -263,16 +281,15 @@ digest = hashlib.sha256(payload).hexdigest()
 for i in range(4):
     print("PUT warm-%d rc=%d" % (i, store.put("warm-%d" % i, payload)))
 
-# Within aggregate memory, past one member's share: another 128 x 4MiB = 512Mi of distinct keys.
-# The three members hold 768Mi between them, so this fits in DRAM — with write-through offload
+# Within aggregate memory for the members that are actually running. With write-through offload
 # every put should reach the tier regardless; no eviction is forced or claimed.
-for i in range(128):
+for i in range(${PHASE_A_FILL}):
     rc = store.put("fill-%d" % i, payload)
     if rc != 0:
         print("PUT fill-%d rc=%d (first failure)" % (i, rc))
         break
 else:
-    print("PUT fill all 128 rc=0")
+    print("PUT fill all ${PHASE_A_FILL} rc=0")
 
 # The verdict read: warm-0 is the oldest key still expected to be served (from memory or tier).
 got = store.get("warm-0")
@@ -287,8 +304,9 @@ grep -q 'SETUP-RC 0' "$PROBE_LOG" \
   && record PASS "the probe's client set up against the leader" "$(grep 'SETUP-RC' "$PROBE_LOG")" \
   || record FAIL "the probe's client set up against the leader" "$(grep -E 'SETUP|IMPORT-FAIL|Error|error' "$PROBE_LOG" | head -3 | tr '\n' ' ')"
 
-if grep -q 'PUT fill all 128 rc=0' "$PROBE_LOG" && ! grep -qE 'PUT warm-[0-9] rc=-?[1-9]' "$PROBE_LOG"; then
-  record PASS "writes succeed within aggregate memory" "$(grep -c 'rc=0' "$PROBE_LOG") puts rc=0, fill complete"
+if grep -q "PUT fill all ${PHASE_A_FILL} rc=0" "$PROBE_LOG" && ! grep -qE 'PUT warm-[0-9] rc=-?[1-9]' "$PROBE_LOG"; then
+  record PASS "writes succeed within aggregate memory" \
+    "${PHASE_A_TOTAL} objects for ${MEMBER_COUNT} running member(s), all puts rc=0"
 else
   record FAIL "writes succeed within aggregate memory" "$(grep 'PUT' "$PROBE_LOG" | tail -3 | tr '\n' ' ')"
 fi
@@ -325,7 +343,7 @@ FOUND=""
 for node in $NODES; do
   short="$(node_tag "$node")"
   out="$(kubectl -n "$NS" run "case65-ls-${SFX}-${short}" --restart=Never --rm -i --quiet \
-    --image=busybox:1.36 --overrides='{"spec":{"nodeName":"'"$node"'","containers":[{"name":"ls","image":"busybox:1.36","command":["sh","-c","ls /tier | head -5; ls /tier | wc -l"],"volumeMounts":[{"name":"tier","mountPath":"/tier"}]}],"volumes":[{"name":"tier","hostPath":{"path":"'"$HOST_PATH"'","type":"Directory"}}]}}' \
+    --image=busybox:1.36 --overrides='{"spec":{"nodeName":"'"$node"'","containers":[{"name":"ls","image":"busybox:1.36","command":["sh","-c","ls /tier | head -5; ls /tier | wc -l"],"volumeMounts":[{"name":"tier","mountPath":"/tier"}]}],"volumes":[{"name":"tier","hostPath":{"path":"'"$RUN_HOST_PATH"'","type":"Directory"}}]}}' \
     2>/dev/null)"
   n="$(echo "$out" | tail -1)"
   [ "${n:-0}" -gt 0 ] 2>/dev/null && FOUND="$FOUND $node:${n}files"
@@ -334,17 +352,17 @@ if [ -n "$FOUND" ]; then
   record PASS "offloaded objects exist as files in the host directory" "$(echo $FOUND)"
 else
   record FAIL "offloaded objects exist as files in the host directory" \
-    "no files under $HOST_PATH on any node -- the metric and the directory disagree with the writes"
+    "no files under $RUN_HOST_PATH on any node -- the metric and the directory disagree with the writes"
 fi
 
 # ------------------------------------------------- 5. phase B: the on-evict discriminator
 
 # Phase A's zero cannot say WHICH write path is broken — the store has two: write-through at put
 # time (above), and eviction-time (leader.offload.onEvict=true). This phase reruns the same
-# backend shape with onEvict set and pushes past aggregate memory — 4 + 256 objects of 4MiB =
-# 1040Mi against 768Mi of DRAM — so eviction is forced, not hoped for. The warm keys go in first,
-# so they are what eviction must push to the tier; reading one back exercises the disk tier's
-# serve path, not just its write path.
+# backend shape with onEvict set and pushes one member's capacity past the aggregate memory of the
+# members actually running, so eviction is forced, not hoped for. The warm keys go in first, so
+# they are what eviction must push to the tier; reading one back exercises the disk tier's serve
+# path, not just its write path.
 kubectl apply -f - <<YAML >/dev/null
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: KVCacheBackend
@@ -364,7 +382,7 @@ spec:
           medium: DRAM
           capacityPerMember: 256Mi
           localDisk:
-            path: ${HOST_PATH}
+            path: ${RUN_HOST_PATH}
             capacity: 4Gi
 YAML
 
@@ -374,6 +392,16 @@ if ! wait_for kvcachebackends.worker.gpustack.ai "$BACKEND2" '{.status.phase}' R
   results; exit 1
 fi
 record PASS "the on-evict backend reaches Ready" "phase=Ready for ${BACKEND2}"
+
+MEMBER_COUNT2="$(running_member_count "$BACKEND2")"
+if [ "$MEMBER_COUNT2" -le 0 ] 2>/dev/null; then
+  record FAIL "running members exist to force eviction" "no Running member Pod belongs to ${BACKEND2}"
+  results; exit 1
+fi
+# Each member holds 64 objects of 4MiB. Add one member's worth of fill keys beyond the aggregate;
+# the four warm keys make the oldest objects the eviction candidates.
+PHASE_B_FILL=$((MEMBER_COUNT2 * 64 + 64))
+PHASE_B_TOTAL=$((PHASE_B_FILL + 4))
 
 CLIENT_ADDR2="$(kubectl get kvcachebackends.worker.gpustack.ai "$BACKEND2" -o jsonpath='{.status.endpoints[?(@.name=="Client")].address}' 2>/dev/null)"
 ADMIN_ADDR2="$(kubectl get kvcachebackends.worker.gpustack.ai "$BACKEND2" -o jsonpath='{.status.endpoints[?(@.name=="Admin")].address}' 2>/dev/null)"
@@ -412,15 +440,15 @@ digest = hashlib.sha256(payload).hexdigest()
 for i in range(4):
     print("PUT warm-%d rc=%d" % (i, store.put("warm-%d" % i, payload)))
 
-# Past aggregate memory: 4 + 256 objects of 4MiB = 1040Mi against 768Mi of DRAM, so eviction
-# is forced. With onEvict the disk write happens exactly here, at eviction time.
-for i in range(256):
+# Past aggregate memory by one member's capacity. With onEvict the disk write happens exactly here,
+# at eviction time.
+for i in range(${PHASE_B_FILL}):
     rc = store.put("fill-%d" % i, payload)
     if rc != 0:
         print("PUT fill-%d rc=%d (first failure)" % (i, rc))
         break
 else:
-    print("PUT fill all 256 rc=0")
+    print("PUT fill all ${PHASE_B_FILL} rc=0")
 
 # warm-0 predates the fill by the whole run; served from the tier or not at all.
 got = store.get("warm-0")
@@ -435,8 +463,9 @@ grep -q 'SETUP-RC 0' "$PROBE_LOG2" \
   && record PASS "the on-evict probe's client set up against the leader" "$(grep 'SETUP-RC' "$PROBE_LOG2")" \
   || record FAIL "the on-evict probe's client set up against the leader" "$(grep -E 'SETUP|IMPORT-FAIL|Error|error' "$PROBE_LOG2" | head -3 | tr '\n' ' ')"
 
-if grep -q 'PUT fill all 256 rc=0' "$PROBE_LOG2" && ! grep -qE 'PUT warm-[0-9] rc=-?[1-9]' "$PROBE_LOG2"; then
-  record PASS "on-evict writes succeed past aggregate memory" "$(grep -c 'rc=0' "$PROBE_LOG2") puts rc=0, fill complete (eviction forced)"
+if grep -q "PUT fill all ${PHASE_B_FILL} rc=0" "$PROBE_LOG2" && ! grep -qE 'PUT warm-[0-9] rc=-?[1-9]' "$PROBE_LOG2"; then
+  record PASS "on-evict writes succeed past aggregate memory" \
+    "${PHASE_B_TOTAL} objects for ${MEMBER_COUNT2} running member(s), all puts rc=0 (eviction forced)"
 else
   record FAIL "on-evict writes succeed past aggregate memory" "$(grep 'PUT' "$PROBE_LOG2" | tail -3 | tr '\n' ' ')"
 fi

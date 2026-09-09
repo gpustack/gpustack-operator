@@ -132,6 +132,25 @@ lease_holder() {
     -o jsonpath='{.spec.holderIdentity}' 2>/dev/null
 }
 
+holder_pod_uid() {
+  local holder="$1" holder_ip pod_uid pod_ip
+  case "$holder" in
+    \[*\]:*)
+      holder_ip="${holder#\[}"
+      holder_ip="${holder_ip%%\]*}"
+      ;;
+    *:*) holder_ip="${holder%:*}" ;;
+    *) holder_ip="$holder" ;;
+  esac
+  while IFS='|' read -r pod_uid pod_ip; do
+    [ -n "$pod_ip" ] && [ "$pod_ip" = "$holder_ip" ] || continue
+    echo "$pod_uid"
+    return 0
+  done < <(kubectl -n "$NS" get pod -l "$LEADER_SEL" \
+    -o jsonpath='{range .items[*]}{.metadata.uid}{"|"}{.status.podIP}{"\n"}{end}' \
+    2>/dev/null)
+}
+
 # can_i asks the API server's authorizer -- not a rendered Role -- and prints the answer word.
 # `auth` is not one of the shim's retried verbs, so the answer is the server's, once.
 can_i() {
@@ -269,8 +288,16 @@ if [ -z "$MEMBERS_BEFORE" ]; then
   results; exit 1
 fi
 
-OLD_HOLDER="$HOLDER"
 OLD_READY="$(ready_leader_pod)"
+if [ -z "$OLD_READY" ]; then
+  record FAIL "a serving Pod exists to delete" "no ready leader Pod was found immediately before the delete"
+  results; exit 1
+fi
+OLD_READY_UID="$(kubectl -n "$NS" get pod "$OLD_READY" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
+if [ -z "$OLD_READY_UID" ]; then
+  record FAIL "the serving Pod has an identity to compare" "Pod ${OLD_READY} has no readable UID"
+  results; exit 1
+fi
 
 # Sampling the backend's own report THROUGH the transition is what "no fault throughout" means:
 # a phase read only before and after would miss a health rule that fires mid-failover and clears.
@@ -279,29 +306,31 @@ DELETE_EPOCH="$(date +%s)"
 kubectl -n "$NS" delete pod "$OLD_READY" --wait=false >/dev/null 2>&1
 
 NEW_HOLDER=""
+NEW_HOLDER_POD_UID=""
 for ((i = 0; i < 240; i += 2)); do
   kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" \
     -o jsonpath='{.status.phase}{"|"}{.conditions[?(@.type=="MembersMounted")].status}{"\n"}' \
     2>/dev/null >>"$TRAJ_FILE"
   NEW_HOLDER="$(lease_holder)"
-  [ -n "$NEW_HOLDER" ] && [ "$NEW_HOLDER" != "$OLD_HOLDER" ] && break
+  NEW_HOLDER_POD_UID="$(holder_pod_uid "$NEW_HOLDER")"
+  [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ] && break
   sleep 2
 done
 HOLDER_MOVED_AT="$(date +%s)"
 
-if [ -n "$NEW_HOLDER" ] && [ "$NEW_HOLDER" != "$OLD_HOLDER" ]; then
+if [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
   record PASS "the Lease moves to a different holder" \
-    "holderIdentity ${OLD_HOLDER} -> ${NEW_HOLDER}, $((HOLDER_MOVED_AT - DELETE_EPOCH))s after the delete"
+    "holder Pod UID ${OLD_READY_UID} -> ${NEW_HOLDER_POD_UID}, $((HOLDER_MOVED_AT - DELETE_EPOCH))s after the delete; holderIdentity=${NEW_HOLDER}"
 else
   record FAIL "the Lease moves to a different holder" \
-    "240s after deleting ${OLD_READY}: holderIdentity='${NEW_HOLDER:-<empty>}' (was '${OLD_HOLDER}')"
+    "240s after deleting ${OLD_READY} (${OLD_READY_UID}): holderIdentity='${NEW_HOLDER:-<empty>}', mapped Pod UID='${NEW_HOLDER_POD_UID:-<none>}'"
 fi
 
 # A failover is a promise about SPEED, and a check that records the number without judging it
 # waves a three-minute election through. Graceful-delete failovers measure 43-44s on this
 # suite (termination grace + Lease expiry); 120s is a regression tripwire at ~2.5x that --
 # loose enough for scheduler noise, tight enough that a real slowdown cannot walk past.
-if [ -n "$NEW_HOLDER" ] && [ "$NEW_HOLDER" != "$OLD_HOLDER" ]; then
+if [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
   MOVED_SECS=$((HOLDER_MOVED_AT - DELETE_EPOCH))
   if [ "$MOVED_SECS" -le 120 ]; then
     record PASS "the Lease moves within the failover bound" "${MOVED_SECS}s <= 120s"

@@ -109,6 +109,25 @@ lease_holder() {
     -o jsonpath='{.spec.holderIdentity}' 2>/dev/null
 }
 
+holder_pod_uid() {
+  local holder="$1" holder_ip pod_uid pod_ip
+  case "$holder" in
+    \[*\]:*)
+      holder_ip="${holder#\[}"
+      holder_ip="${holder_ip%%\]*}"
+      ;;
+    *:*) holder_ip="${holder%:*}" ;;
+    *) holder_ip="$holder" ;;
+  esac
+  while IFS='|' read -r pod_uid pod_ip; do
+    [ -n "$pod_ip" ] && [ "$pod_ip" = "$holder_ip" ] || continue
+    echo "$pod_uid"
+    return 0
+  done < <(kubectl -n "$NS" get pod -l "$LEADER_SEL" \
+    -o jsonpath='{range .items[*]}{.metadata.uid}{"|"}{.status.podIP}{"\n"}{end}' \
+    2>/dev/null)
+}
+
 # ---------------------------------------------------------------- setup
 
 kubectl apply -f - <<YAML >/dev/null
@@ -157,6 +176,11 @@ if [ -z "$OLD_HOLDER" ] || [ -z "$OLD_READY" ]; then
     "holderIdentity='${OLD_HOLDER:-<empty>}', ready Pod='${OLD_READY:-<none>}'"
   results; exit 1
 fi
+OLD_READY_UID="$(kubectl -n "$NS" get pod "$OLD_READY" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
+if [ -z "$OLD_READY_UID" ]; then
+  record FAIL "the serving Pod has an identity to compare" "Pod ${OLD_READY} has no readable UID"
+  results; exit 1
+fi
 
 # ------------------------------------------------- induce the HARD failure
 
@@ -182,25 +206,27 @@ DELETE_EPOCH="$(date +%s)"
 kubectl -n "$NS" delete pod "$OLD_READY" --force --grace-period=0 --wait=false >/dev/null 2>&1
 
 NEW_HOLDER=""
+NEW_HOLDER_POD_UID=""
 for ((i = 0; i < 240; i += 2)); do
   kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" \
     -o jsonpath='{.status.phase}{"|"}{.conditions[?(@.type=="MembersMounted")].status}{"\n"}' \
     2>/dev/null >>"$TRAJ_FILE"
   NEW_HOLDER="$(lease_holder)"
-  [ -n "$NEW_HOLDER" ] && [ "$NEW_HOLDER" != "$OLD_HOLDER" ] && break
+  NEW_HOLDER_POD_UID="$(holder_pod_uid "$NEW_HOLDER")"
+  [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ] && break
   sleep 2
 done
 HOLDER_MOVED_AT="$(date +%s)"
 
-if [ -n "$NEW_HOLDER" ] && [ "$NEW_HOLDER" != "$OLD_HOLDER" ]; then
+if [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
   record PASS "the Lease moves off the dead holder" \
-    "holderIdentity ${OLD_HOLDER} -> ${NEW_HOLDER}, $((HOLDER_MOVED_AT - DELETE_EPOCH))s after the hard kill"
+    "holder Pod UID ${OLD_READY_UID} -> ${NEW_HOLDER_POD_UID}, $((HOLDER_MOVED_AT - DELETE_EPOCH))s after the hard kill; holderIdentity=${NEW_HOLDER}"
 else
   record FAIL "the Lease moves off the dead holder" \
-    "240s after force-deleting ${OLD_READY}: holderIdentity='${NEW_HOLDER:-<empty>}' (was '${OLD_HOLDER}')"
+    "240s after force-deleting ${OLD_READY} (${OLD_READY_UID}): holderIdentity='${NEW_HOLDER:-<empty>}', mapped Pod UID='${NEW_HOLDER_POD_UID:-<none>}'"
 fi
 
-if [ -n "$NEW_HOLDER" ] && [ "$NEW_HOLDER" != "$OLD_HOLDER" ]; then
+if [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
   MOVED_SECS=$((HOLDER_MOVED_AT - DELETE_EPOCH))
   if [ "$MOVED_SECS" -le "$FAILOVER_BOUND_SECS" ]; then
     record PASS "the Lease moves within the failover bound" "${MOVED_SECS}s <= ${FAILOVER_BOUND_SECS}s"
