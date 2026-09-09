@@ -578,7 +578,7 @@ spec:
   domain: {name: ${DOM_A}, blockSize: 16, dtype: bfloat16}
 YAML
 )"
-if echo "$other_out" | grep -q 'created\|configured'; then
+if echo "$other_out" | grep -qE 'created|configured'; then
   record PASS "the same domain on a pool another master serves is admitted" \
     "bind-other took ${DOM_A} against kvcb-other-${SFX} while ${NS_A}/bind-a holds it here"
 else
