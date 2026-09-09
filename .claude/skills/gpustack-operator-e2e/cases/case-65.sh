@@ -181,7 +181,7 @@ PREP_OK=1
 for node in $NODES; do
   short="$(node_tag "$node")"
   out="$(kubectl -n "$NS" run "case65-pre-${SFX}-${short}" --restart=Never --rm -i --quiet \
-    --image=busybox:1.36 --overrides='{"spec":{"nodeName":"'"$node"'","containers":[{"name":"pre","image":"busybox:1.36","command":["sh","-c","mkdir -p /tier/'"$RUN_DIR"' && touch /tier/'"$RUN_DIR"'/.hidden && echo WRITABLE"],"volumeMounts":[{"name":"tier","mountPath":"/tier"}]}],"volumes":[{"name":"tier","hostPath":{"path":"'"$HOST_PATH"'","type":"Directory"}}]}}' \
+    --image=busybox:1.36 --overrides='{"spec":{"nodeName":"'"$node"'","containers":[{"name":"pre","image":"busybox:1.36","command":["sh","-c","mkdir -p /tier/'"$RUN_DIR"' && chmod 0777 /tier/'"$RUN_DIR"' && touch /tier/'"$RUN_DIR"'/.hidden && echo WRITABLE"],"volumeMounts":[{"name":"tier","mountPath":"/tier"}]}],"volumes":[{"name":"tier","hostPath":{"path":"'"$HOST_PATH"'","type":"Directory"}}]}}' \
     2>/dev/null)"
   if [ "$out" != "WRITABLE" ]; then
     PREP_OK=0

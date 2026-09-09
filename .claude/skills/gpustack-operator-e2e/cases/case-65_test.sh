@@ -8,6 +8,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 test "$(grep -Fc 'path: ${RUN_HOST_PATH}' "$CASE_FILE")" -eq 2
 grep -Fq 'for node in $(ready_nodes); do' "$CASE_FILE"
+grep -Fq 'chmod 0777 /tier/' "$CASE_FILE"
 grep -Fq 'rm -rf /tier/' "$CASE_FILE"
 if grep -Fq 'rm -rf /tier/*' "$CASE_FILE"; then
   echo "FAIL: teardown still wipes the shared parent" >&2
