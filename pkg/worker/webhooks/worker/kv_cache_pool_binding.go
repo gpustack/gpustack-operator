@@ -340,7 +340,7 @@ func (r *KVCachePoolBindingWebhook) poolBackends(
 		if !kerrors.IsNotFound(err) {
 			return nil, fmt.Errorf("get kv cache pool %q: %w", name, err)
 		}
-		if err = r.APIReader.Get(ctx, key, kvcp, ctrlclix.WithoutQuorum); err != nil {
+		if err = r.APIReader.Get(ctx, key, kvcp); err != nil {
 			if !kerrors.IsNotFound(err) {
 				return nil, fmt.Errorf("get kv cache pool %q: %w", name, err)
 			}
@@ -377,7 +377,7 @@ func (r *KVCachePoolBindingWebhook) validateKVCachePoolBindingCeilingFitsPool(
 		// Only a NotFound from that read is the refusal, for the reason the pool webhook gives: under
 		// failurePolicy Fail, reporting a timeout or an RBAC denial as "pool not found" sends the
 		// author looking for a typo in a name that is correct.
-		if err = r.APIReader.Get(ctx, key, kvcp, ctrlclix.WithoutQuorum); err != nil {
+		if err = r.APIReader.Get(ctx, key, kvcp); err != nil {
 			if !kerrors.IsNotFound(err) {
 				return field.ErrorList{field.InternalError(poolPath,
 					fmt.Errorf("get kv cache pool: %w", err))}

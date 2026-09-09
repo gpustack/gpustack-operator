@@ -6,8 +6,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -21,6 +23,22 @@ func newKVCachePoolBindingWebhook(objs ...ctrlcli.Object) *KVCachePoolBindingWeb
 		WithObjects(objs...).
 		Build()
 	return &KVCachePoolBindingWebhook{Client: cli, APIReader: cli}
+}
+
+type staleKVCachePoolReader struct {
+	ctrlcli.Reader
+}
+
+func (r staleKVCachePoolReader) Get(
+	ctx context.Context, key ctrlcli.ObjectKey, obj ctrlcli.Object, opts ...ctrlcli.GetOption,
+) error {
+	getOpts := (&ctrlcli.GetOptions{}).ApplyOptions(opts)
+	if getOpts.Raw != nil && getOpts.Raw.ResourceVersion == "0" {
+		return kerrors.NewNotFound(schema.GroupResource{
+			Group: workercore.GroupVersion.Group, Resource: "kvcachepools",
+		}, key.Name)
+	}
+	return r.Reader.Get(ctx, key, obj, opts...)
 }
 
 // newKVCachePoolBinding builds a Binding that passes every rule against the fixture pool.
@@ -330,6 +348,31 @@ func TestKVCachePoolBindingWebhook_ADuplicateDomainIsTrueOfOneMasterOnly(t *test
 	assert.NotContains(t, msg, "exception",
 		"calling \"default\" an exception reads as an exemption from the uniqueness rule this "+
 			"very message is enforcing, which sends the reader back to retry the refused Binding")
+}
+
+func TestKVCachePoolBindingWebhook_AStalePoolMissDoesNotAdmitADuplicateDomain(t *testing.T) {
+	holderPool := newKVCachePool()
+	holderPool.Name = "other-pool"
+
+	holder := otherKVCachePoolBinding("team-a-chat")
+	holder.Spec.PoolRef.Name = holderPool.Name
+
+	cached := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(newKVCachePool(), holder).
+		Build()
+	apiReader := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(holderPool).
+		Build()
+	wh := &KVCachePoolBindingWebhook{
+		Client:    cached,
+		APIReader: staleKVCachePoolReader{Reader: apiReader},
+	}
+
+	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already registered by team-b/batch")
 }
 
 // TestKVCachePoolBindingWebhook_TheSameDomainOnAnotherMasterIsAdmitted is the #166 case: two
