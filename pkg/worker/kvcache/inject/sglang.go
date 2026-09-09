@@ -130,13 +130,8 @@ func renderSGLang(in Input) (*Result, error) {
 			},
 		}...),
 		TenantInjected: tenantInjected,
-		// Named only when a tenant was actually emitted. The field's contract is "empty when it
-		// travels in the file instead, or when none was produced", and naming a variable this render
-		// never wrote breaks the second half: a caller applying the documented rule - non-empty name
-		// plus the variable absent from the container means the precedence rule dropped it - would
-		// report a dropped tenant for a render that produced none. The current caller narrows
-		// tenantApplied to false and never raises it, so it is unaffected either way; the contract is
-		// what the next caller reads.
+		// Named only when a tenant was actually emitted. Callers use the name to overwrite every
+		// workload declaration of this environment variable with the Binding's resolved tenant.
 		TenantEnvName: tenantEnvName,
 		Args:          []string{sglangBackendArg, sglangBackendValue},
 	}, nil

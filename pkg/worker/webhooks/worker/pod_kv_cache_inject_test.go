@@ -361,27 +361,32 @@ func TestPodKVCacheInject_RefusesAShellWrapper(t *testing.T) {
 	}
 }
 
-// TestPodKVCacheInject_StampFollowsWhatLandedNotWhatWasRendered covers the third appearance of one
-// shape: a field reporting an action, computed from something that is not the action.
-//
-// First it was computed from the input condition rather than the emission, so a renderer that stopped
-// emitting still reported true. That was fixed inside the renderer. Then the caller turned out to
-// have its own veto - this repository's rule that an injection never overrules a variable the
-// workload declared - and for the environment vehicle the tenant is exactly such a variable. The
-// renderer's answer was honest about what it produced and wrong about what the container got.
-//
-// So the assertion is on the admitted Pod: the container keeps the workload's own value, and the
-// stamp says no tenant was injected.
-func TestPodKVCacheInject_StampFollowsWhatLandedNotWhatWasRendered(t *testing.T) {
+// TestPodKVCacheInject_TenantFromBindingOverwritesWorkloadValue ensures the tenant identity reaches
+// the container exactly as the Binding resolved it.
+func TestPodKVCacheInject_TenantFromBindingOverwritesWorkloadValue(t *testing.T) {
 	pod := kvCachePod()
 	pod.Annotations[KVCacheEngineAnnotationKey] = "sglang"
 	pod.Spec.Containers[0].Env = []core.EnvVar{{Name: "MOONCAKE_TENANT_ID", Value: "mine"}}
-	require.NoError(t, admit(t, pod), "a declared variable is precedence, never a refusal")
+	require.NoError(t, admit(t, pod))
 
-	assert.Equal(t, "mine", containerEnv(&pod.Spec.Containers[0])["MOONCAKE_TENANT_ID"],
-		"the workload's own value stands")
-	assert.False(t, stampOf(t, pod).TenantInjected,
-		"the record describes the container, so it cannot claim a tenant this webhook did not apply")
+	assert.Equal(t, "team-a-chat", containerEnv(&pod.Spec.Containers[0])["MOONCAKE_TENANT_ID"])
+	assert.True(t, stampOf(t, pod).TenantInjected)
+}
+
+func TestPodKVCacheInject_TenantFromBindingOverwritesDuplicateWorkloadValues(t *testing.T) {
+	pod := kvCachePod()
+	pod.Annotations[KVCacheEngineAnnotationKey] = "sglang"
+	pod.Spec.Containers[0].Env = []core.EnvVar{
+		{Name: "MOONCAKE_TENANT_ID", Value: "mine"},
+		{Name: "MOONCAKE_TENANT_ID", Value: "team-other"},
+	}
+	require.NoError(t, admit(t, pod))
+
+	for _, env := range pod.Spec.Containers[0].Env {
+		if env.Name == "MOONCAKE_TENANT_ID" {
+			assert.Equal(t, "team-a-chat", env.Value)
+		}
+	}
 }
 
 // TestPodKVCacheInject_StampVehicleFollowsTheEngine. The vehicle is on the stamp because it turns the
@@ -592,16 +597,13 @@ func TestPodKVCacheInject_ConflictRefusals(t *testing.T) {
 	}
 }
 
-// TestPodKVCacheInject_UserTenantIDIsNotAConflict. This webhook does not write the key, and refusing a
-// Pod over one it does not write would block the single workaround available to somebody running a
-// patched engine that does forward a tenant.
-func TestPodKVCacheInject_UserTenantIDIsNotAConflict(t *testing.T) {
+func TestPodKVCacheInject_TenantFromBindingOverridesAnotherRegisteredDomain(t *testing.T) {
 	pod := kvCachePod()
-	pod.Spec.Containers[0].Env = []core.EnvVar{{Name: "MOONCAKE_TENANT_ID", Value: "team-a-chat"}}
+	pod.Annotations[KVCacheEngineAnnotationKey] = "sglang"
+	pod.Spec.Containers[0].Env = []core.EnvVar{{Name: "MOONCAKE_TENANT_ID", Value: "team-other"}}
 
 	require.NoError(t, admit(t, pod))
-	assert.Equal(t, "team-a-chat", containerEnv(&pod.Spec.Containers[0])["MOONCAKE_TENANT_ID"],
-		"left exactly as the author wrote it")
+	assert.Equal(t, "team-a-chat", containerEnv(&pod.Spec.Containers[0])["MOONCAKE_TENANT_ID"])
 }
 
 // TestPodKVCacheInject_SGLangConfigPathIsNotAConflict. The webhook stopped writing this key with the

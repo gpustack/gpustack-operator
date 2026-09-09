@@ -13,11 +13,9 @@ import (
 type Result struct {
 	// Env is the variables the target container needs, as DESIRED values.
 	//
-	// A caller that finds the container already declaring a variable of one of these names leaves the
-	// container's own value in place: an injection does not overrule what a workload declared for
-	// itself. This repository already has that rule and a helper for it,
-	// `deviceplugin.ContainerEnvDeclared`, and this package expects its callers to use it rather than
-	// to invent a second precedence.
+	// A caller leaves a container-declared value in place, except TenantEnvName. That value comes from
+	// the resolved Binding and must overwrite every duplicate declaration so the workload cannot choose
+	// another reuse domain.
 	Env []core.EnvVar
 
 	// Args is appended to the target container's args, in order.
@@ -43,17 +41,13 @@ type Result struct {
 	// outcome: whether the engine build honors the value is not knowable here, so nothing downstream
 	// may turn it into a claim about isolation.
 	//
-	// It is not, on its own, whether a tenant reached the container. A caller applies Env under this
-	// repository's precedence rule, so a variable the workload already declared is left alone - and
-	// for the environment vehicle that is exactly the tenant. The renderer cannot see that happen,
-	// which is why TenantEnvName exists: the caller has to complete this answer, and a stamp built
-	// from this field alone would claim a tenant the container does not carry.
+	// For TenantEnvName, callers overwrite every workload declaration, so a true value means the
+	// resolved tenant was written to the container. TenantEnvName identifies that exception.
 	TenantInjected bool
 
 	// TenantEnvName is the variable the tenant travels in, empty when it travels in the file instead
-	// (or when none was produced). It exists so a caller can tell whether its own precedence rule
-	// silently dropped the tenant: the file vehicle is written wholesale and cannot be overridden
-	// that way, the environment one can.
+	// (or when none was produced). Callers use it to apply the Binding's tenant value over any
+	// workload declaration of the same environment variable.
 	TenantEnvName string
 }
 
