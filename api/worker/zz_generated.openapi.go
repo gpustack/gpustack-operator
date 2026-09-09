@@ -5684,9 +5684,25 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberStatus(ref common.R
 				Description: "KVCacheBackendMemberStatus is one observed store member.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
+					"segmentID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SegmentID is the segment's unique identifier as the leader reports it.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"clientID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ClientID is the identifier the member process minted when it started. Unlike the advertised address, it remains distinct when several host-network members run on one node.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 					"segmentName": {
 						SchemaProps: spec.SchemaProps{
-							Description: "SegmentName is the member's segment as the leader knows it, derived from the node.",
+							Description: "SegmentName is the member's advertised address as the leader reports it. It is not unique: host-network members placed on one node advertise the same address.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -5721,7 +5737,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberStatus(ref common.R
 						},
 					},
 				},
-				Required: []string{"segmentName"},
+				Required: []string{"segmentID", "clientID", "segmentName"},
 			},
 		},
 	}
@@ -5736,7 +5752,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendScaleIn(ref common.Refere
 				Properties: map[string]spec.Schema{
 					"gracePeriodSeconds": {
 						SchemaProps: spec.SchemaProps{
-							Description: "GracePeriodSeconds is the wait the operator asks a departing member for, after that member deregisters its local disk tier. It renders into the preStop hook as the endpoint's grace_period_seconds and nothing else reads it.\n\nLIMITED: it does not hold the tier open, so sizing it to let in-flight peer reads of the tier finish sizes it against something that does not happen. Measured against Mooncake 0.3.13: deregistration takes effect at once and the process then waits the full value regardless, so a peer reading a disk-resident key gets a clean miss for the whole window rather than at the end of it. Another backend image may behave otherwise; what this operator guarantees is the value it sends.\n\nTHE TIER IS THE ONLY THING DEREGISTERED ON THE WAY OUT. The memory segment is still dropped rather than drained, and not for want of a verb: the member's own API takes a graceful unmount with a grace period, but it requires the segment ids, no route returns a client its own ids, and the name is not derivable because the leader appends a fresh port on every start.\n\nSo this is blocked on an upstream route, and one upstream route is the whole of what unblocks it: a way for a client to read back its own segment ids. It is NOT blocked on the shutdown hook talking to a fresh process that has forgotten them — a preStop runs against the same process that mounted the segments, so anything reasoning from client identity is testing the wrong claim. Until that route exists, shrinking a group drops the memory it held, and for a cache that is a cost rather than a fault: the data is recomputable.\n\nThe Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so the kubelet cannot kill the container in the middle of the wait this configures.\n\nA plain int32 and not a pointer: unset and zero mean the same thing here. Zero still deregisters the tier, it just does not wait afterwards, which is what a member with no grace configured should do.\n\nThe upper bound is the entrypoint's own. It refuses a larger value with HTTP 400, so a manifest above it would render a shutdown hook that fails every time it runs.\n\nSETTING THIS DOES NOT PROTECT THE SAME EDIT THAT SHRINKS THE GROUP. The value is rendered into the member's Pod, and a Pod runs the template it was CREATED from — so a departing member leaves with whatever grace it started with, and only its replacements carry the new one. An apply that raises the grace and narrows nodeSelector at once therefore drains nothing.\n\nTo make a grace apply to a shrink, do it in two steps: change only this field and wait for the members to be recreated with it (their pod-spec-hash annotation moves), then narrow the selector or remove the group.",
+							Description: "GracePeriodSeconds is the wait the operator asks a departing member for, after that member deregisters its local disk tier. It renders into the preStop hook as the endpoint's grace_period_seconds and nothing else reads it.\n\nLIMITED: it does not hold the tier open, so sizing it to let in-flight peer reads of the tier finish sizes it against something that does not happen. Measured against Mooncake 0.3.13: deregistration takes effect at once and the process then waits the full value regardless, so a peer reading a disk-resident key gets a clean miss for the whole window rather than at the end of it. Another backend image may behave otherwise; what this operator guarantees is the value it sends.\n\nTHE TIER IS THE ONLY THING DEREGISTERED ON THE WAY OUT. The memory segment is still dropped rather than drained, and not for want of a verb: the member's own API takes a graceful unmount with a grace period, but it requires the segment ids. The leader's segment listing returns each segment's id and client id, and this operator records both in status. A non-host-network member can be matched by its Pod IP, which is also its segment name. Host-network members placed on one node share that name and address, while their client ids remain distinct; selecting safely from inside one of those members requires its own client id, which its supported interfaces do not expose.\n\nSo graceful unmount for every supported transport needs upstream to expose the running member's own client id and a hook that uses it. It is NOT blocked on the shutdown hook talking to a fresh process that has forgotten its identity — a preStop runs against the same process that mounted the segments. No memory-unmount hook is rendered today, so shrinking any group drops the memory it held. That is a cost rather than a fault for a cache because the data is recomputable.\n\nThe Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so the kubelet cannot kill the container in the middle of the wait this configures.\n\nA plain int32 and not a pointer: unset and zero mean the same thing here. Zero still deregisters the tier, it just does not wait afterwards, which is what a member with no grace configured should do.\n\nThe upper bound is the entrypoint's own. It refuses a larger value with HTTP 400, so a manifest above it would render a shutdown hook that fails every time it runs.\n\nSETTING THIS DOES NOT PROTECT THE SAME EDIT THAT SHRINKS THE GROUP. The value is rendered into the member's Pod, and a Pod runs the template it was CREATED from — so a departing member leaves with whatever grace it started with, and only its replacements carry the new one. An apply that raises the grace and narrows nodeSelector at once therefore drains nothing.\n\nTo make a grace apply to a shrink, do it in two steps: change only this field and wait for the members to be recreated with it (their pod-spec-hash annotation moves), then narrow the selector or remove the group.",
 							Minimum:     ptr.To[float64](0),
 							Maximum:     ptr.To[float64](3600),
 							Type:        []string{"integer"},
@@ -5899,7 +5915,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendStatus(ref common.Referen
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{
 								"x-kubernetes-list-map-keys": []interface{}{
-									"segmentName",
+									"segmentID",
 								},
 								"x-kubernetes-list-type": "map",
 							},

@@ -518,17 +518,15 @@ counter-argument stronger than expected — which is why it is written out rathe
   and does reach `unmount_and_free_segment` (`mooncake_store_service.py:593-607`). The backend
   spec's reason for calling this unreachable — that a fresh client would not know the segment id —
   does not apply to a `preStop`, which talks to the running process itself.
-- It is still unreachable, for a different reason: **`segment_ids` is required and the member's own
-  entrypoint exposes no route that returns them.** That route table
-  (`mooncake_store_service.py:238-268`) has no GET that lists this client's own segments, and the
-  segment's name is not derivable — the leader appends a port of its own choosing that is fresh on
-  every start. The **leader**, however, does list the ids: `GET /get_segments_detail` returns
-  `segment_id` and `client_id` per segment, and this operator already polls that route.
-- So the memory tier's graceful unmount is blocked on something narrower than a missing route: a
-  member cannot learn its own `client_id`, so it cannot tell which of the leader's listed segments
-  are its own. **That, not the client-identity argument and not the absence of a route, is the
-  thing that would have to change**. Recorded here as an Open Question so the next reader tests the
-  right claim.
+- **Corrected after shipping.** This section formerly said the member's missing listing route and a
+  leader-chosen port made the segment ids unreachable. The **leader** lists `segment_id` and
+  `client_id` at `GET /get_segments_detail`, and the segment name is the client's `local_hostname`;
+  the fresh port lives only in `te_endpoint`. On non-host-network paths that name is the Pod IP, so
+  later operator work can identify the member. Host-network members placed on one node share the name
+  and address; a collision-safe match there additionally requires the member's own `client_id`, which
+  the member has no supported way to read. This shipped design renders no memory-unmount hook, so
+  every scale-in still drops the segment. The upstream gap applies to supporting every transport, not
+  to identifying every member.
 
 - **Acceptance:** a group with `localDisk` and a 30-second grace renders a `preStop` httpGet-free
   exec or HTTP POST carrying exactly `{"grace_period_seconds": 30}` to the member's own REST port,
@@ -781,8 +779,9 @@ does publish side by side.
   deriving the window from the grace rather than letting the two be set independently.
 - **A reader concludes from `preStop` that a shrink is now lossless.** Mitigated by stating in the
   field's own doc comment, in F5 and in the documentation that the **memory segment is still
-  dropped**, and by recording why (a member cannot identify its own segments in the leader's
-  listing) so the belief is falsifiable rather than folkloric.
+  dropped**. **Corrected after shipping.** The leader's listing identifies non-host-network members
+  by their Pod IP-based names; no memory-unmount hook is rendered, and a co-located host-network
+  member still cannot read the client id needed to select its own rows.
 - **Removing four enum values is read as removing four capabilities.** Mitigated by F2's table
   naming where each went, and by the fact that all four are refused at admission today, so nothing
   that ran stops running.
@@ -888,8 +887,10 @@ type KVCacheBackendScaleIn struct {
 	// GracePeriodSeconds is how long a departing member holds its local-disk tier open after
 	// deregistering it, so offload reads already in flight finish there rather than failing.
 	//
-	// It reaches only the disk tier: the memory segment is still dropped, not drained, because no
-	// route returns a client its own segment ids and the segment name is not derivable.
+	// Corrected after shipping. It reaches only the disk tier: no memory-unmount hook is rendered.
+	// The leader listing distinguishes a non-host-network member by its Pod IP-based segment name.
+	// Host-network members placed on one node additionally need their own client id to distinguish
+	// them, which the member's supported interfaces do not expose.
 	//
 	// The Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so
 	// the kubelet cannot kill the container in the middle of the wait this configures.
@@ -1161,12 +1162,15 @@ that sentence travels with the row so a later reader cannot mistake a green suit
   later: widening an enum is not a breaking change, while shipping a one-valued one is a field that
   reads as a choice and is not.
 - **Drain the memory segment on `preStop` via `POST /api/unmount`.** Attractive — the route exists,
-  takes a grace period, and reaches `unmount_and_free_segment`. Rejected because `segment_ids` is
-  required and a member cannot tell which of the leader's listed segments are its own — the ids are
-  in that listing, but the `client_id` that separates two members sharing an address is not
-  something a member can read about itself. The name is not derivable either, since the leader
-  appends a fresh port on every start. Recorded as an Open Question with the specific upstream
-  change that would unblock it, so the next attempt tests the right thing.
+  takes a grace period, and reaches `unmount_and_free_segment`. **Corrected after shipping.** This
+  alternative originally treated missing segment ids and client identity as a universal blocker. The
+  leader listing carries both ids, so a later implementation can select a non-host-network member by
+  its Pod IP-based segment name. Host-network members placed on one node share the name and address;
+  distinguishing them additionally requires the member's own `client_id`, which its supported
+  interfaces do not expose. The fresh port is carried separately in `te_endpoint` and does not
+  distinguish the name. This shipped design renders no memory-unmount hook. Recorded as an Open
+  Question with the upstream change required for a transport-independent implementation, so the next
+  attempt tests the right thing.
 - **Count the disk tier into `resources.requests.ephemeral-storage`.** Rejected: a hostPath is
   outside the kubelet's ephemeral-storage accounting entirely, so the request would reserve a figure
   nothing polices, and would then keep the member off the node that has the disk.
@@ -1209,18 +1213,14 @@ that sentence travels with the row so a later reader cannot mistake a green suit
   which is the worse direction, because a member that really is missing then reads as healthy.
   Crediting as many of a key's Pods as that key produced segments credited one Pod twice across its
   two keys, and made a Pod collide with itself on a cluster whose node names are addresses. The
-  correct rule is a bipartite matching over segments and Pods — and it would still be a guess. The
-  leader reports a segment as `<host>:<transfer port>` in **both** of the fields it offers, the
-  transfer port is bound at random, and it is not a fact any Pod carries (the members section of
-  [`docs/kv-cache/backend.md`](../docs/kv-cache/backend.md) records four observed values, none of
-  them configured). Two Pods behind one host are therefore indistinguishable in every observable
-  field: the input does not determine the output, so every version was producing an approximation,
-  and an approximation has an unbounded supply of holes — which is why each round found a new one
-  rather than the last one again. What ships instead reports the ambiguity itself, as
-  `MembersMounted=False` with reason `AmbiguousMemberIdentity`, naming the shared key and the Pods
-  sharing it. **This is not a deferred feature and not a known limitation**: in that configuration
-  the information an attribution needs does not exist, and the status says so rather than publishing
-  a number.
+  correct rule is a bipartite matching over segments and Pods — and it would still be a guess.
+  **Corrected after shipping.** The leader keeps `segment_name` as the member's advertised address
+  and puts the randomly bound transfer port only in `te_endpoint`. It also reports distinct
+  `segment_id` and `client_id` values, but this historical status design neither decoded those fields
+  nor keyed rows by them. Under the real duplicate-name response, the listing was therefore rejected
+  before the intended ambiguity verdict could be published. A later spec supersedes that status
+  design; the attribution conclusion remains: no Pod exposes either id, so assigning a shared-host
+  row to one of the Pods would still be a guess.
   Two qualifiers make the rule narrow enough to be true, and both were learned by getting them wrong.
   Only **ready** Pods are candidates, because only a ready member can hold a segment — a key shared by
   one ready and one starting Pod has exactly one candidate and resolves normally. And the ambiguity is
@@ -1258,16 +1258,14 @@ that sentence travels with the row so a later reader cannot mistake a green suit
   `chmod 0777` opens the directory to every process on the node. A design where either choice needs
   a caveat is one that is not settled yet. It stays an Open Question rather than a defect because a
   single answer — should the switch exist, and which semantics — closes it.
-- **Whether the memory segment can ever be gracefully unmounted from a `preStop`.** It needs an
-  upstream change, but not the one first recorded here. The ids are already in the leader's listing
-  — `GET /get_segments_detail` returns `segment_id` and `client_id` per segment — and
-  `POST /api/unmount` already accepts a grace period, so a missing route is not what blocks it.
-  What blocks it is that a member cannot read its own `client_id`, and so cannot tell which of the
-  listed segments are its own. Whether to ask upstream for a way to read it, or to derive the
-  attribution in the reconciler and pass the id into the hook at render time, is open. The second is
-  expressible only where no two members share an address — which the RDMA path, holding the host
-  network namespace, does not guarantee — and it binds a Pod template to an observation, which is a
-  shape nothing here has.
+- **Whether the memory segment can ever be gracefully unmounted from a `preStop`.** **Corrected after
+  shipping.** This question formerly treated an upstream change as necessary for every member. The
+  leader's `GET /get_segments_detail` returns `segment_id` and `client_id`, and `POST /api/unmount`
+  already accepts a grace period. A later implementation can match a non-host-network member by its
+  Pod IP-based segment name. A transport-independent implementation additionally needs host-network
+  members placed on one node to report their own `client_id`, because they share a name and address.
+  Whether to implement the non-host-network case first or ask upstream for that identity is open; this
+  shipped design renders no memory-unmount hook.
 - **Whether `NoF` deserves an object of its own.** Its registration carries a target coordinate and
   no node affinity, so it is not a member group; whether it is a leader field, a list on the backend,
   or a separate CR is undecided, and nothing needs it yet.

@@ -3,11 +3,12 @@
 > **Purpose** — every command you need to build, lint, test and regenerate the operator, plus how the
 > vendored subcharts and patched dependencies work.
 > **Audience** contributors · **Prerequisites** none (read [Architecture](architecture.md) before
-> changing behavior) · **Read time** ~5 min
+> changing behavior) · **Read time** ~6 min
 
 ## Contents
 
 - [Commands](#commands)
+- [Shipped specification corrections](#shipped-specification-corrections)
 - [Runtime log verbosity](#runtime-log-verbosity)
 - [API groups & code generation](#api-groups--code-generation)
 - [Vendored / patched dependencies](#vendored--patched-dependencies)
@@ -107,6 +108,17 @@ lands there, not in this document. Verify a rule change before committing: `npx 
 GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/nodefeature/...
 GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race -run TestExtractGeneralNodeKey ./pkg/nodefeature/
 ```
+
+## Shipped specification corrections
+
+Shipped specifications are historical design records. A later design change MUST be recorded in a new
+specification whose header names the earlier sections it supersedes; leave those sections unchanged.
+
+An in-place edit is ALLOWED only when evidence proves a factual claim or its supporting reason wrong
+while the shipped design and conclusion remain unchanged. Mark prose `**Corrected after shipping.**`, or
+use `Corrected after shipping.` inside a preserved code block. Retain enough of the former claim to
+explain the correction, and state the replacement evidence at the same location. Keep the edit to that
+correction; terminology, formatting and later design belong elsewhere.
 
 ## Runtime log verbosity
 

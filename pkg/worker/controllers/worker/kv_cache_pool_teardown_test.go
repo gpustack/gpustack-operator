@@ -121,6 +121,36 @@ func TestKVCachePoolTeardown_BothLevelsOfUsedBy(t *testing.T) {
 	})
 }
 
+// TestKVCachePoolClaim_OmitsLegacyBackendMembers covers the second controller that writes a
+// KVCacheBackend status. Updating usedBy must not carry pre-identity member rows into the current
+// schema before the backend reconciler gets its own turn to refresh them.
+func TestKVCachePoolClaim_OmitsLegacyBackendMembers(t *testing.T) {
+	kvcb := newReconcileBackend("mooncake-dram", "mc.example:9003")
+	kvcb.Status.Members = []workercore.KVCacheBackendMemberStatus{{
+		SegmentName: "10.42.0.11",
+		NodeName:    "n7",
+		Medium:      "DRAM",
+		Protocol:    "tcp",
+		State:       "OK",
+	}}
+	kvcb.Status.Phase = KVCacheBackendPhaseReady
+	kvcp := newTestKVCachePool("shared", kvcb.Name)
+	r, cli := newReconciler(kvcb, kvcp)
+
+	stored := readBackend(t, cli, kvcb.Name)
+	require.NoError(t, r.claimKVCacheBackend(context.Background(), stored, kvcp))
+
+	got := readBackend(t, cli, kvcb.Name)
+	assert.Empty(t, got.Status.Members)
+	assert.Equal(t, legacyMemberStatusReason, KVCacheBackendConditionMembersMounted.GetReason(got))
+	assert.Equal(t, KVCacheBackendPhaseDegraded, got.Status.Phase,
+		"a claim writer that omits the legacy rows must not leave the backend Ready")
+	assert.Contains(t, got.Status.PhaseMessage, "predates the required segment and client identities")
+	assert.Equal(t, []workercore.KVCacheObjectReference{{
+		Kind: KVCachePoolKind, Namespace: "", Name: kvcp.Name,
+	}}, got.Status.UsedBy, "the claim and the compatibility cleanup land in one status write")
+}
+
 // TestKVCachePoolTeardown_ABindingHeldByAWorkloadIsNotReleased is criterion 5's unit half.
 func TestKVCachePoolTeardown_ABindingHeldByAWorkloadIsNotReleased(t *testing.T) {
 	master := newFakeMaster()

@@ -30,6 +30,39 @@ func memberSchema(t *testing.T) extension.JSONSchemaProps {
 	return *schema.Items.Schema
 }
 
+// memberStatusListSchema returns status.members as the generated CRD carries it.
+func memberStatusListSchema(t *testing.T) extension.JSONSchemaProps {
+	t.Helper()
+
+	crd := GetCustomResourceDefinitions()["KVCacheBackend"]
+	require.NotNil(t, crd, "KVCacheBackend is not registered")
+	require.Len(t, crd.Spec.Versions, 1)
+
+	schema := crd.Spec.Versions[0].Schema.OpenAPIV3Schema
+	for _, level := range []string{"status", "members"} {
+		next, ok := schema.Properties[level]
+		require.True(t, ok, "the schema has no %q under the path to status members", level)
+		schema = &next
+	}
+	require.NotNil(t, schema.Items)
+	require.NotNil(t, schema.Items.Schema)
+
+	return *schema
+}
+
+// TestKVCacheBackendMembersAreKeyedBySegmentID guards the wire shape that host-network members
+// expose. Several members on one node legitimately share segmentName, while segmentID remains unique;
+// keying this list by the name makes the API server reject the status update that reports them.
+func TestKVCacheBackendMembersAreKeyedBySegmentID(t *testing.T) {
+	members := memberStatusListSchema(t)
+
+	require.NotNil(t, members.XListType)
+	assert.Equal(t, "map", *members.XListType)
+	assert.Equal(t, []string{"segmentID"}, members.XListMapKeys)
+	assert.ElementsMatch(t, []string{"segmentID", "clientID", "segmentName"},
+		members.Items.Schema.Required)
+}
+
 // TestKVCacheBackendMediumEnumCarriesOnlyWhatRuns is the only automated guard on the narrowed enum,
 // and it guards a claim nothing else can reach: the four removed values are refused by the SCHEMA,
 // in rest.BeforeCreate, before any webhook runs — so no admission test can cover them, and the

@@ -62,7 +62,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [Walkthrough](walkthrough.md) | A recorded end-to-end run: every object, before/after each operation | everyone | ~12 min |
 | [Settings & Environment Variables](settings.md) | Online-adjustable settings, every `GPUSTACK_*` env, per-manufacturer overrides, toolkit paths | operators | ~8 min |
 | [Vendor Prerequisites](vendor-prerequisites.md) | What to install per manufacturer before GPUStack, and which vendor GPU Operator components to keep or disable | operators | ~10 min |
-| [Development](development.md) | Build, lint, test, code generation, vendored subcharts and dependencies | contributors | ~5 min |
+| [Development](development.md) | Build, lint, test, code generation, vendored subcharts and dependencies | contributors | ~6 min |
 | [High Availability Operations](operation/high-availability.md) | Which knob to raise per control-plane component, and the one topology that cannot be redundant | operators | ~4 min |
 | [NVIDIA MIG Operations](operation/nvidia-mig.md) | Enabling/disabling MIG, reboot recovery, and a recorded three-configuration walkthrough | operators | ~21 min |
 | [T-Head MIG Operations](operation/thead-mig.md) | Enabling/disabling T-Head's own MIG-named partitioning, the busy-mode-change prerequisite, and reboot recovery | operators | ~10 min |

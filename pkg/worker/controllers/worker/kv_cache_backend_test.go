@@ -2297,48 +2297,56 @@ func TestKVCacheBackendScale_ASelectorIsNotOwnership(t *testing.T) {
 }
 
 const (
-	// These carry the shape a REAL leader reports, recorded from a live cluster rather than assumed.
-	// A segment's te_endpoint host is the member's POD IP, because the renderer sets
-	// MOONCAKE_LOCAL_HOSTNAME from the downward API's status.podIP — and the name the leader builds
-	// appends a port of its own, which is why segment_name and te_endpoint carry different ones.
+	// These carry the shape the leader defines. A segment's name is the member's local hostname
+	// verbatim, while only te_endpoint adds the randomly bound transfer port. The renderer sets that
+	// hostname from the downward API's status.podIP.
 	//
 	// The IPs match what runningMemberPod gives its Pods, so these join through the address key the
 	// way a real listing does. A fixture on the node name would exercise only the compatibility
 	// path — see segmentsOneOKLegacyNodeName — and quietly leave the live one uncovered.
 	segmentsTwoOK = `{"total_segments":2,"segments":[
-		{"segment_name":"10.42.0.11:13775","te_endpoint":"10.42.0.11:15380","protocol":"tcp","status":"OK"},
-		{"segment_name":"10.42.0.12:13887","te_endpoint":"10.42.0.12:16006","protocol":"rdma","status":"OK"}]}`
+		{"segment_id":"segment-1","client_id":"client-1","segment_name":"10.42.0.11","te_endpoint":"10.42.0.11:15380","protocol":"tcp","status":"OK"},
+		{"segment_id":"segment-2","client_id":"client-2","segment_name":"10.42.0.12","te_endpoint":"10.42.0.12:16006","protocol":"rdma","status":"OK"}]}`
+	segmentsTwoOKReversed = `{"total_segments":2,"segments":[
+		{"segment_id":"segment-2","client_id":"client-2","segment_name":"10.42.0.12","te_endpoint":"10.42.0.12:16006","protocol":"rdma","status":"OK"},
+		{"segment_id":"segment-1","client_id":"client-1","segment_name":"10.42.0.11","te_endpoint":"10.42.0.11:15380","protocol":"tcp","status":"OK"}]}`
 	segmentsOneOK = `{"total_segments":1,"segments":[
-		{"segment_name":"10.42.0.11:13775","te_endpoint":"10.42.0.11:15380","protocol":"tcp","status":"OK"}]}`
+		{"segment_id":"segment-1","client_id":"client-1","segment_name":"10.42.0.11","te_endpoint":"10.42.0.11:15380","protocol":"tcp","status":"OK"}]}`
 	// The shape a member rendered before the address moved still reports. The join keeps a node-name
 	// key for exactly this, and without a fixture nothing would notice its removal.
 	segmentsOneOKLegacyNodeName = `{"total_segments":1,"segments":[
-		{"segment_name":"n7:13775","te_endpoint":"n7:15380","protocol":"tcp","status":"OK"}]}`
+		{"segment_id":"segment-1","client_id":"client-1","segment_name":"n7","te_endpoint":"n7:15380","protocol":"tcp","status":"OK"}]}`
 	segmentsDraining = `{"total_segments":1,"segments":[
-		{"segment_name":"10.42.0.12:13887","te_endpoint":"10.42.0.12:16006","protocol":"tcp","status":"DRAINING"}]}`
+		{"segment_id":"segment-2","client_id":"client-2","segment_name":"10.42.0.12","te_endpoint":"10.42.0.12:16006","protocol":"tcp","status":"DRAINING"}]}`
 	segmentsUnknownState = `{"total_segments":1,"segments":[
-		{"segment_name":"10.42.0.13:13991","te_endpoint":"10.42.0.13:16112","protocol":"tcp","status":"QUIESCING"}]}`
+		{"segment_id":"segment-3","client_id":"client-3","segment_name":"10.42.0.13","te_endpoint":"10.42.0.13:16112","protocol":"tcp","status":"QUIESCING"}]}`
 	segmentsEmpty = `{"total_segments":0,"segments":[]}`
 	// What a member whose local_hostname was overridden through extraArgs produces: an address
 	// where the rendered default would have put a node name. Both have to join.
 	segmentsByAddress = `{"total_segments":1,"segments":[
-		{"segment_name":"overridden","te_endpoint":"10.42.0.11:15002","protocol":"tcp","status":"OK"}]}`
+		{"segment_id":"segment-1","client_id":"client-1","segment_name":"overridden","te_endpoint":"10.42.0.11:15002","protocol":"tcp","status":"OK"}]}`
 	// What two member groups that both selected ONE node produce on the RDMA path: each Pod holds
-	// the host's network namespace, so both segments carry the node's own address and differ only
-	// in the transfer port — which is exactly the part the join strips before looking a Pod up.
+	// the host's network namespace, so both segments carry the node's own address. Their segment ids,
+	// client ids and transfer ports remain distinct, but no Pod exposes any of those for attribution.
 	segmentsSharedHost = `{"total_segments":2,"segments":[
-		{"segment_name":"10.42.0.11:13720","te_endpoint":"10.42.0.11:15002","protocol":"rdma","status":"OK"},
-		{"segment_name":"10.42.0.11:14071","te_endpoint":"10.42.0.11:16566","protocol":"rdma","status":"OK"}]}`
+		{"segment_id":"segment-1","client_id":"client-1","segment_name":"10.42.0.11","te_endpoint":"10.42.0.11:15002","protocol":"rdma","status":"OK"},
+		{"segment_id":"segment-2","client_id":"client-2","segment_name":"10.42.0.11","te_endpoint":"10.42.0.11:16566","protocol":"rdma","status":"OK"}]}`
+	// A mixed listing: two host-network segments cannot be attributed, while the third segment has
+	// one address and one Pod and must retain that attribution.
+	segmentsSharedHostAndUnique = `{"total_segments":3,"segments":[
+		{"segment_id":"segment-1","client_id":"client-1","segment_name":"10.42.0.11","te_endpoint":"10.42.0.11:15002","protocol":"rdma","status":"OK"},
+		{"segment_id":"segment-2","client_id":"client-2","segment_name":"10.42.0.11","te_endpoint":"10.42.0.11:16566","protocol":"rdma","status":"OK"},
+		{"segment_id":"segment-3","client_id":"client-3","segment_name":"10.42.0.12","te_endpoint":"10.42.0.12:16112","protocol":"tcp","status":"OK"}]}`
 	// The same shared address with ONE segment on it: two members are ready and only one of them
 	// mounted. This is the case that separates counting from flagging.
 	segmentsSharedHostOne = `{"total_segments":1,"segments":[
-		{"segment_name":"10.42.0.11:13720","te_endpoint":"10.42.0.11:15002","protocol":"rdma","status":"OK"}]}`
+		{"segment_id":"segment-1","client_id":"client-1","segment_name":"10.42.0.11","te_endpoint":"10.42.0.11:15002","protocol":"rdma","status":"OK"}]}`
 	// What two TCP groups on ONE node produce: each member has its own pod IP and advertises it, so
 	// the two segments carry different addresses even though both Pods answer to the node's name.
 	// The shared key exists and no segment uses it.
 	segmentsTwoAddressesOneNode = `{"total_segments":2,"segments":[
-		{"segment_name":"10.42.0.11:13720","te_endpoint":"10.42.0.11:15002","protocol":"tcp","status":"OK"},
-		{"segment_name":"10.42.0.12:14071","te_endpoint":"10.42.0.12:16566","protocol":"tcp","status":"OK"}]}`
+		{"segment_id":"segment-1","client_id":"client-1","segment_name":"10.42.0.11","te_endpoint":"10.42.0.11:15002","protocol":"tcp","status":"OK"},
+		{"segment_id":"segment-2","client_id":"client-2","segment_name":"10.42.0.12","te_endpoint":"10.42.0.12:16566","protocol":"tcp","status":"OK"}]}`
 )
 
 // memberPodOfGroup is runningMemberPod for a backend with several groups: labels, owner and name all
@@ -2449,8 +2457,8 @@ func TestKVCacheBackendStatus_MembersComeFromTheListing(t *testing.T) {
 		runningMemberPod(t, kvcb, "n8", "10.42.0.12"))
 
 	assert.Equal(t, []workercore.KVCacheBackendMemberStatus{
-		{SegmentName: "10.42.0.11:13775", NodeName: "n7", Medium: "DRAM", Protocol: "tcp", State: "OK"},
-		{SegmentName: "10.42.0.12:13887", NodeName: "n8", Medium: "DRAM", Protocol: "rdma", State: "OK"},
+		{SegmentID: "segment-1", ClientID: "client-1", SegmentName: "10.42.0.11", NodeName: "n7", Medium: "DRAM", Protocol: "tcp", State: "OK"},
+		{SegmentID: "segment-2", ClientID: "client-2", SegmentName: "10.42.0.12", NodeName: "n8", Medium: "DRAM", Protocol: "rdma", State: "OK"},
 	}, got.Status.Members)
 
 	assert.Equal(t, KVCacheBackendPhaseReady, got.Status.Phase)
@@ -2608,7 +2616,7 @@ func TestKVCacheBackendStatus_JoinsWhatItCanAndLeavesTheRest(t *testing.T) {
 	})
 
 	require.Len(t, got.Status.Members, 1)
-	assert.Equal(t, "10.42.0.12:13887", got.Status.Members[0].SegmentName)
+	assert.Equal(t, "10.42.0.12", got.Status.Members[0].SegmentName)
 	assert.Empty(t, got.Status.Members[0].NodeName,
 		"no pod carries that address, so the node is unknown and says so")
 	assert.Empty(t, got.Status.Members[0].Medium)
@@ -2740,9 +2748,9 @@ func reconcileTwoGroups(
 // TestKVCacheBackendStatus_SharedIdentityIsReportedNotGuessed pins what the status does when two
 // ready member Pods answer to one key — and what it must NOT do.
 //
-// The identity is unrecoverable, and that is a property of the data: the leader reports a segment by
-// address, both of the fields it offers carry a transfer port bound at random, and no Pod carries
-// that port. Two Pods behind one host are indistinguishable in every observable field.
+// The Pod attribution is unrecoverable from the data available to the controller. The leader gives
+// the co-located members distinct segment and client ids, but no Pod exposes either id; both Pods
+// advertise the same host address.
 //
 // Three earlier versions of this code assigned anyway — credit the surviving Pod, credit the whole
 // set, credit by multiplicity — and each had a defect the next review found. The assertions below
@@ -2766,6 +2774,12 @@ func TestKVCacheBackendStatus_SharedIdentityIsReportedNotGuessed(t *testing.T) {
 	// The heart of it: nothing was guessed. A segment on an ambiguous key is published as read, with
 	// no node and no medium attached, rather than attributed to whichever Pod a map happened to keep.
 	require.Len(t, got.Status.Members, 2)
+	assert.Equal(t, []string{"segment-1", "segment-2"}, []string{
+		got.Status.Members[0].SegmentID, got.Status.Members[1].SegmentID,
+	})
+	assert.Equal(t, got.Status.Members[0].SegmentName, got.Status.Members[1].SegmentName,
+		"duplicate advertised names are valid and both uniquely keyed rows must be published")
+	assert.NotEqual(t, got.Status.Members[0].ClientID, got.Status.Members[1].ClientID)
 	for _, member := range got.Status.Members {
 		assert.Empty(t, member.NodeName,
 			"segment %s must carry no node: which pod produced it cannot be known", member.SegmentName)
@@ -2776,6 +2790,29 @@ func TestKVCacheBackendStatus_SharedIdentityIsReportedNotGuessed(t *testing.T) {
 	assert.NotContains(t, message, "match none of them",
 		"and it is not reported as a shortfall: the pods are unaccounted for by construction here, "+
 			"so a count of them would describe this index rather than the cluster")
+}
+
+// TestKVCacheBackendStatus_AMixedListingScopesTheAmbiguityToItsSharedAddress keeps a collision on
+// one node from erasing or denying the attribution that the rest of the listing determines.
+func TestKVCacheBackendStatus_AMixedListingScopesTheAmbiguityToItsSharedAddress(t *testing.T) {
+	kvcb := twoGroupBackend(t)
+	got := reconcileTwoGroups(t, kvcb, segmentsSharedHostAndUnique,
+		memberPodOfGroup(t, kvcb, 0, "n7", "10.42.0.11"),
+		memberPodOfGroup(t, kvcb, 1, "n7", "10.42.0.11"),
+		memberPodOfGroup(t, kvcb, 0, "n8", "10.42.0.12"))
+
+	assert.Equal(t, "AmbiguousMemberIdentity",
+		KVCacheBackendConditionMembersMounted.GetReason(got))
+	assert.Contains(t, KVCacheBackendConditionMembersMounted.GetMessage(got),
+		"2 of 3 segment(s) cannot be traced to a member",
+		"the verdict must scope the ambiguity to the segments on the shared address")
+
+	require.Len(t, got.Status.Members, 3)
+	assert.Empty(t, got.Status.Members[0].NodeName)
+	assert.Empty(t, got.Status.Members[1].NodeName)
+	assert.Equal(t, "n8", got.Status.Members[2].NodeName,
+		"a collision elsewhere does not make this segment's unique Pod attribution unknowable")
+	assert.Equal(t, "DRAM", got.Status.Members[2].Medium)
 }
 
 // TestKVCacheBackendStatus_SharedIdentityIsNotReportedHealthy is the other direction, and it is the
@@ -3100,8 +3137,8 @@ func TestKVCacheBackendStatus_AListingTooLargeToPublishIsWithheld(t *testing.T) 
 	entries := make([]string, 0, kvCacheBackendMaxMembers+1)
 	for i := range kvCacheBackendMaxMembers + 1 {
 		entries = append(entries, fmt.Sprintf(
-			`{"segment_name":"n%d-dram","te_endpoint":"10.42.%d.%d:15002","protocol":"tcp","status":"OK"}`,
-			i, i/256, i%256))
+			`{"segment_id":"segment-%d","client_id":"client-%d","segment_name":"n%d-dram","te_endpoint":"10.42.%d.%d:15002","protocol":"tcp","status":"OK"}`,
+			i, i, i, i/256, i%256))
 	}
 	oversized := fmt.Sprintf(`{"total_segments":%d,"segments":[%s]}`,
 		len(entries), strings.Join(entries, ","))
@@ -3110,10 +3147,10 @@ func TestKVCacheBackendStatus_AListingTooLargeToPublishIsWithheld(t *testing.T) 
 	// admin endpoint chooses these strings, and for an external backend it is somebody else's.
 	long := strings.Repeat("s", kvCacheBackendMaxMembersBytes/4)
 	heavy := fmt.Sprintf(`{"total_segments":4,"segments":[%s]}`, strings.Join([]string{
-		fmt.Sprintf(`{"segment_name":%q,"te_endpoint":"10.42.0.1:1","protocol":"tcp","status":"OK"}`, long+"1"),
-		fmt.Sprintf(`{"segment_name":%q,"te_endpoint":"10.42.0.2:1","protocol":"tcp","status":"OK"}`, long+"2"),
-		fmt.Sprintf(`{"segment_name":%q,"te_endpoint":"10.42.0.3:1","protocol":"tcp","status":"OK"}`, long+"3"),
-		fmt.Sprintf(`{"segment_name":%q,"te_endpoint":"10.42.0.4:1","protocol":"tcp","status":"OK"}`, long+"4"),
+		fmt.Sprintf(`{"segment_id":"segment-1","client_id":"client-1","segment_name":%q,"te_endpoint":"10.42.0.1:1","protocol":"tcp","status":"OK"}`, long+"1"),
+		fmt.Sprintf(`{"segment_id":"segment-2","client_id":"client-2","segment_name":%q,"te_endpoint":"10.42.0.2:1","protocol":"tcp","status":"OK"}`, long+"2"),
+		fmt.Sprintf(`{"segment_id":"segment-3","client_id":"client-3","segment_name":%q,"te_endpoint":"10.42.0.3:1","protocol":"tcp","status":"OK"}`, long+"3"),
+		fmt.Sprintf(`{"segment_id":"segment-4","client_id":"client-4","segment_name":%q,"te_endpoint":"10.42.0.4:1","protocol":"tcp","status":"OK"}`, long+"4"),
 	}, ","))
 
 	// Under the budget as bytes in memory, over it as bytes on the wire. JSON escapes `<` as
@@ -3122,10 +3159,10 @@ func TestKVCacheBackendStatus_AListingTooLargeToPublishIsWithheld(t *testing.T) 
 	// 120000 raw against a 524288 budget, 720008 once encoded.
 	escaping := strings.Repeat("<", 30000)
 	inflating := fmt.Sprintf(`{"total_segments":4,"segments":[%s]}`, strings.Join([]string{
-		fmt.Sprintf(`{"segment_name":"%s1","te_endpoint":"10.42.0.1:1","protocol":"tcp","status":"OK"}`, escaping),
-		fmt.Sprintf(`{"segment_name":"%s2","te_endpoint":"10.42.0.2:1","protocol":"tcp","status":"OK"}`, escaping),
-		fmt.Sprintf(`{"segment_name":"%s3","te_endpoint":"10.42.0.3:1","protocol":"tcp","status":"OK"}`, escaping),
-		fmt.Sprintf(`{"segment_name":"%s4","te_endpoint":"10.42.0.4:1","protocol":"tcp","status":"OK"}`, escaping),
+		fmt.Sprintf(`{"segment_id":"segment-1","client_id":"client-1","segment_name":"%s1","te_endpoint":"10.42.0.1:1","protocol":"tcp","status":"OK"}`, escaping),
+		fmt.Sprintf(`{"segment_id":"segment-2","client_id":"client-2","segment_name":"%s2","te_endpoint":"10.42.0.2:1","protocol":"tcp","status":"OK"}`, escaping),
+		fmt.Sprintf(`{"segment_id":"segment-3","client_id":"client-3","segment_name":"%s3","te_endpoint":"10.42.0.3:1","protocol":"tcp","status":"OK"}`, escaping),
+		fmt.Sprintf(`{"segment_id":"segment-4","client_id":"client-4","segment_name":"%s4","te_endpoint":"10.42.0.4:1","protocol":"tcp","status":"OK"}`, escaping),
 	}, ","))
 	require.Less(t, 4*len(escaping), kvCacheBackendMaxMembersBytes,
 		"the fixture has to be admissible by the byte count it is meant to defeat")
@@ -3384,6 +3421,87 @@ func TestKVCacheBackendStatus_KeepsTheLastListingOnAFailedRead(t *testing.T) {
 		"and the condition says the view is stale, which is what makes the stale list readable")
 }
 
+// TestKVCacheBackendStatus_OmitsALegacyListingThatTheCurrentSchemaCannotWrite covers development
+// clusters that stored member rows before segmentID and clientID became required. Keeping those rows
+// on a failed read makes the entire condition update fail validation on API servers without CRD
+// validation ratcheting; omitting them is the only writable representation until the leader answers.
+func TestKVCacheBackendStatus_OmitsALegacyListingThatTheCurrentSchemaCannotWrite(t *testing.T) {
+	kvcb := newKVCacheBackendObject()
+	kvcb.Status.Members = []workercore.KVCacheBackendMemberStatus{{
+		SegmentName: "10.42.0.11",
+		NodeName:    "n7",
+		Medium:      "DRAM",
+		Protocol:    "tcp",
+		State:       "OK",
+	}}
+	KVCacheBackendConditionMembersMounted.True(kvcb, "Mounted", "the leader lists 1 segment(s)")
+
+	got := reconcileWithAdminAndPods(t, kvcb, map[string]adminResponse{
+		"/health":              {body: healthServing},
+		"/metrics":             {body: metricsPopulated},
+		"/get_segments_detail": {status: http.StatusServiceUnavailable, body: "service plane is not active"},
+	}, runningMemberPod(t, kvcb, "n7", "10.42.0.11"))
+
+	assert.Empty(t, got.Status.Members,
+		"a row without the current list key cannot be carried into a schema-valid status update")
+	assert.True(t, KVCacheBackendConditionMembersMounted.IsFalse(got))
+	assert.Equal(t, legacyMemberStatusReason,
+		KVCacheBackendConditionMembersMounted.GetReason(got))
+	assert.Contains(t, KVCacheBackendConditionMembersMounted.GetMessage(got),
+		"predates the required segment and client identities")
+
+	again := reconcileWithAdminAndPods(t, got, map[string]adminResponse{
+		"/health":              {body: healthServing},
+		"/metrics":             {body: metricsPopulated},
+		"/get_segments_detail": {status: http.StatusServiceUnavailable, body: "service plane is not active"},
+	}, runningMemberPod(t, got, "n7", "10.42.0.11"))
+	assert.Contains(t, KVCacheBackendConditionMembersMounted.GetMessage(again),
+		"predates the required segment and client identities",
+		"the explanation persists until a successful listing replaces the legacy rows")
+	assert.Equal(t, legacyMemberStatusReason,
+		KVCacheBackendConditionMembersMounted.GetReason(again))
+
+	refreshed := reconcileWithAdminAndPods(t, again, map[string]adminResponse{
+		"/health":              {body: healthServing},
+		"/metrics":             {body: metricsPopulated},
+		"/get_segments_detail": {body: segmentsOneOK},
+	}, runningMemberPod(t, again, "n7", "10.42.0.11"))
+	require.Len(t, refreshed.Status.Members, 1)
+	assert.Equal(t, "segment-1", refreshed.Status.Members[0].SegmentID)
+	assert.Equal(t, "Mounted", KVCacheBackendConditionMembersMounted.GetReason(refreshed),
+		"a successful listing ends the one-way migration state")
+}
+
+// TestKVCacheBackendStatus_ExternalFailureTextCannotImpersonateMigration pins that only
+// controller-owned state can request compatibility cleanup. An external admin endpoint owns its
+// response body and may return any text at all.
+func TestKVCacheBackendStatus_ExternalFailureTextCannotImpersonateMigration(t *testing.T) {
+	kvcb := newKVCacheBackendObject()
+	kvcb.Status.Members = []workercore.KVCacheBackendMemberStatus{{
+		SegmentID:   "segment-1",
+		ClientID:    "client-1",
+		SegmentName: "10.42.0.11",
+		NodeName:    "n7",
+		Medium:      "DRAM",
+		Protocol:    "tcp",
+		State:       "OK",
+	}}
+	KVCacheBackendConditionMembersMounted.True(kvcb, "Mounted", "the leader lists 1 segment(s)")
+
+	got := reconcileWithAdminAndPods(t, kvcb, map[string]adminResponse{
+		"/health":  {body: healthServing},
+		"/metrics": {body: metricsPopulated},
+		"/get_segments_detail": {
+			status: http.StatusServiceUnavailable,
+			body:   legacyMemberStatusExplanation,
+		},
+	}, runningMemberPod(t, kvcb, "n7", "10.42.0.11"))
+
+	assert.Equal(t, kvcb.Status.Members, got.Status.Members,
+		"far-end text cannot make a current listing look like a legacy one")
+	assert.Equal(t, "ListingFailed", KVCacheBackendConditionMembersMounted.GetReason(got))
+}
+
 // TestKVCacheBackendStatus_Phases walks the five phases over the documents that produce them.
 func TestKVCacheBackendStatus_Phases(t *testing.T) {
 	cases := []struct {
@@ -3468,13 +3586,14 @@ func TestKVCacheBackendStatus_IsIdempotent(t *testing.T) {
 		runningMemberPod(t, kvcb, "n8", "10.42.0.12"))
 	ctx := context.Background()
 
+	rt := &adminRoundTripper{byPath: map[string]adminResponse{
+		"/health":              {body: healthServing},
+		"/metrics":             {body: metricsPopulated},
+		"/get_segments_detail": {body: segmentsTwoOK},
+	}}
 	r := &KVCacheBackendReconciler{
-		Client: cli,
-		AdminHTTP: &http.Client{Transport: &adminRoundTripper{byPath: map[string]adminResponse{
-			"/health":              {body: healthServing},
-			"/metrics":             {body: metricsPopulated},
-			"/get_segments_detail": {body: segmentsTwoOK},
-		}}},
+		Client:    cli,
+		AdminHTTP: &http.Client{Transport: rt},
 	}
 	reconcile := func() *workercore.KVCacheBackend {
 		_, err := r.Reconcile(ctx, ctrlreconcile.Request{
@@ -3490,6 +3609,7 @@ func TestKVCacheBackendStatus_IsIdempotent(t *testing.T) {
 	require.Equal(t, KVCacheBackendPhaseReady, first.Status.Phase,
 		"the first pass must reach a fully observed state, or this proves nothing")
 
+	rt.byPath["/get_segments_detail"] = adminResponse{body: segmentsTwoOKReversed}
 	second := reconcile()
 	assert.Equal(t, first.ResourceVersion, second.ResourceVersion,
 		"a fully observed backend produces no status write on the next pass")
@@ -3620,8 +3740,8 @@ func TestKVCacheBackendExternal_ObservesTheSameWayAManagedOneDoes(t *testing.T) 
 	require.NotNil(t, got)
 
 	assert.Equal(t, []workercore.KVCacheBackendMemberStatus{
-		{SegmentName: "10.42.0.11:13775", Protocol: "tcp", State: "OK"},
-		{SegmentName: "10.42.0.12:13887", Protocol: "rdma", State: "OK"},
+		{SegmentID: "segment-1", ClientID: "client-1", SegmentName: "10.42.0.11", Protocol: "tcp", State: "OK"},
+		{SegmentID: "segment-2", ClientID: "client-2", SegmentName: "10.42.0.12", Protocol: "rdma", State: "OK"},
 	}, got.Status.Members, "no node and no medium are guessed at for members this operator does not run")
 
 	assert.Equal(t, KVCacheBackendPhaseReady, got.Status.Phase)

@@ -645,35 +645,39 @@ that is up but not serving answers 200 with a well-formed exposition whose gauge
 zero is indistinguishable at the parser from a genuinely empty cache. Publishing is therefore gated on
 `service_ready`, not on the scrape succeeding.
 
-`status.members[]` is read from the leader's segment listing, one entry per **listed** segment. The
-leader is what allocation goes through, so a running member Pod it does not list holds nothing and is
-counted in `MembersMounted`'s message instead. The two fields the listing cannot supply — node name
-and medium — are joined in from the member Pod behind that segment, and left **empty** rather than
-guessed when nothing matches.
+`status.members[]` is read from the leader's segment listing, one entry per **listed** segment. Each
+row carries the leader's `segmentID`, `clientID` and advertised `segmentName`; the list is keyed by the
+unique segment ID because several members may legitimately share a name.
 
-⛔ **Two member Pods that share an address take the whole listing down, not just their own rows.** A
-segment is named by the address its member advertises, so two members sharing one carry the same name,
-and a repeated name is what `DecodeSegmentListing` refuses the entire body over. `MembersMounted` goes
-`False`, every member's row goes stale, and the remedy is unchanged: give the groups node selectors
-that keep them on different nodes.
+The leader is what allocation goes through, so a running member Pod it does not list holds nothing
+and is counted in `MembersMounted`'s message instead. The two fields the listing cannot supply — node
+name and medium — are joined in from the member Pod behind that segment, and left **empty** rather
+than guessed when nothing matches.
+
+⛔ **Two ready host-network member Pods that share an address make Pod attribution ambiguous.** Their
+rows remain publishable because their segment and client IDs are distinct, but neither Pod exposes
+the ID that maps a row back to it. `MembersMounted` goes `False` with reason
+`AmbiguousMemberIdentity`; the rows keep empty node names and media, and the remedy is to give the
+groups node selectors that keep them on different nodes.
 
 Two groups on one node do **not** collide by themselves. A `TCP` member advertises its own pod IP, so
 each segment carries a distinct name even though both Pods answer to the node's name; the collision is
-the `RDMA` case, where both Pods hold the host's network namespace and advertise the node's address.
+on host-network paths (`RDMA` and `EFA`), where both Pods hold the host's network namespace and
+advertise the node's address.
 
-**`MembersMounted` reports two different failures here, and the reason names which.** The collision
-above is one: the listing could not be decoded. `AmbiguousMemberIdentity` is the other — raised over a
-listing that **did** decode, when the address a segment arrives on is answered by more than one ready
-member Pod, with the shared key and those Pods named in the message.
-
-The remedy is the same node selectors either way. Why the status reports the ambiguity instead of
-guessing an attribution is recorded in
-[the spec](../../specs/2026-09-05-kv-cache-media-and-scaling.md#alternatives).
+The remedy is to give the groups node selectors that keep them on different nodes. Why the status
+reports the ambiguity instead of guessing an attribution is recorded in
+[the segment identity spec](../../specs/2026-09-09-kv-cache-segment-identity-status.md).
 
 A failed listing scrape **keeps** the previous list and sets `MembersMounted=False`; a failed capacity
 scrape **clears** the figures. That asymmetry is deliberate: capacity is two pointers and has an
 "absent" that means *not observed*, while an empty list is a legible value meaning *no segments*, so
 clearing it would publish a falsehood.
+
+The only exception is a development object whose stored member rows predate the required segment and
+client IDs. Such rows cannot be written under the current list schema, so the operator omits the
+whole legacy listing, explains that migration in `MembersMounted`, and replaces it on the next
+successful leader read. No released version contained the former CRD shape.
 
 ## Growing and shrinking a group
 
@@ -707,14 +711,12 @@ node, unmounts that member's segment **immediately** — there is no drain.
 > **Why it is not drained** — the member's own API does take a graceful unmount with a grace period,
 > but it requires the segment ids, and **the member serves no route that lists them**. The leader
 > does: `/get_segments_detail` carries a `segment_id` and a `client_id` on every segment, and this
-> operator already polls that route for status while decoding neither. Two things are missing here
-> and they are not the same kind of missing: **decoding those two fields is ours alone to do**, and
-> **a member has no supported way to learn its own `client_id`** — the coordinate it would match its
-> own segments on, since the members of an `RDMA` group share an address and therefore a segment
-> name. That shared name is also what `DecodeSegmentListing` refuses the whole listing over, so the
-> failure lands on the one coordinate that is not unique while the two that are sit ignored in the
-> same body. The `terminationGracePeriodSeconds` the operator sets lets the entrypoint finish its own
-> shutdown — it does not preserve the data.
+> operator records both in status. A non-host-network member can therefore be matched by its Pod
+> IP-based segment name, but no memory-unmount hook is rendered. A transport-independent hook has an
+> additional upstream dependency: **a member has no supported way to learn its own `client_id`** —
+> the coordinate that distinguishes its rows when several host-network members share an address and
+> segment name. The `terminationGracePeriodSeconds` the operator sets lets the entrypoint finish its
+> own shutdown — it does not preserve the data.
 
 **`scaleIn.gracePeriodSeconds` holds the process, not the tier.** A member with a
 [local disk tier](#the-local-disk-tier) gets a `preStop` hook that deregisters the tier with the

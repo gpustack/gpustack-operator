@@ -226,10 +226,15 @@ func DecodeLeaderCapacity(body []byte) (LeaderCapacity, error) {
 
 // SegmentDetail is one entry of the leader's segment listing.
 //
-// Four fields out of the twelve the listing carries. The allocator byte counts are deliberately left
+// Six fields out of the twelve the listing carries. The allocator byte counts are deliberately left
 // behind: nothing in this scope reads a per-member capacity, and a field with no reader is one that
 // goes stale without anybody noticing.
 type SegmentDetail struct {
+	// ID is the segment's UUID and is unique within the listing.
+	ID string
+	// ClientID is minted once by the member process, so it distinguishes members even when they
+	// advertise the same address.
+	ClientID string
 	// Name is the segment as the leader knows it.
 	Name string
 	// State is the leader's own segment state, passed through unchanged. It is NOT mapped to a
@@ -253,6 +258,8 @@ type segmentListingBody struct {
 	// as an empty listing it would clear membership and report NoSegments, which points an operator
 	// at the store instead of at the address.
 	Segments *[]struct {
+		SegmentID   string `json:"segment_id"`
+		ClientID    string `json:"client_id"`
 		SegmentName string `json:"segment_name"`
 		Status      string `json:"status"`
 		Protocol    string `json:"protocol"`
@@ -276,11 +283,6 @@ func DecodeSegmentListing(body []byte) ([]SegmentDetail, error) {
 		return nil, fmt.Errorf("%w: %s: %w", ErrMalformedBody, adminPathSegments, err)
 	}
 
-	// A segment's name is its IDENTITY, and this is the boundary where that has to hold. status
-	// publishes the listing as a list-map keyed on it, so a blank or repeated name makes the whole
-	// status update fail schema validation — including the condition the caller would have written
-	// to report the trouble. Refusing the body here means the caller reports a listing it could not
-	// read, which it can publish, instead of silently losing every field on the status.
 	// Absent, so this is not a segment listing at all.
 	if wire.Segments == nil {
 		return nil, fmt.Errorf("%w: %s: no segments field", ErrMalformedBody, adminPathSegments)
@@ -289,17 +291,26 @@ func DecodeSegmentListing(body []byte) ([]SegmentDetail, error) {
 	segments := make([]SegmentDetail, 0, len(*wire.Segments))
 	seen := make(map[string]struct{}, len(*wire.Segments))
 	for _, s := range *wire.Segments {
+		if s.SegmentID == "" {
+			return nil, fmt.Errorf("%w: %s: a segment carries no id",
+				ErrMalformedBody, adminPathSegments)
+		}
+		if _, dup := seen[s.SegmentID]; dup {
+			return nil, fmt.Errorf("%w: %s: two segments carry id %q",
+				ErrMalformedBody, adminPathSegments, quoteExternal(s.SegmentID))
+		}
+		seen[s.SegmentID] = struct{}{}
+		if s.ClientID == "" {
+			return nil, fmt.Errorf("%w: %s: a segment carries no client id",
+				ErrMalformedBody, adminPathSegments)
+		}
 		if s.SegmentName == "" {
 			return nil, fmt.Errorf("%w: %s: a segment carries no name",
 				ErrMalformedBody, adminPathSegments)
 		}
-		if _, dup := seen[s.SegmentName]; dup {
-			return nil, fmt.Errorf("%w: %s: two segments are named %q",
-				ErrMalformedBody, adminPathSegments, quoteExternal(s.SegmentName))
-		}
-		seen[s.SegmentName] = struct{}{}
-
 		segments = append(segments, SegmentDetail{
+			ID:         s.SegmentID,
+			ClientID:   s.ClientID,
 			Name:       s.SegmentName,
 			State:      s.Status,
 			Protocol:   s.Protocol,

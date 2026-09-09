@@ -2561,7 +2561,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 															Type:        "object",
 															Properties: map[string]v1.JSONSchemaProps{
 																"gracePeriodSeconds": {
-																	Description: "GracePeriodSeconds is the wait the operator asks a departing member for, after that member\nderegisters its local disk tier. It renders into the preStop hook as the endpoint's\ngrace_period_seconds and nothing else reads it.\nLIMITED: it does not hold the tier open, so sizing it to let in-flight peer reads of the tier\nfinish sizes it against something that does not happen. Measured against Mooncake 0.3.13:\nderegistration takes effect at once and the process then waits the full value regardless, so a\npeer reading a disk-resident key gets a clean miss for the whole window rather than at the end\nof it. Another backend image may behave otherwise; what this operator guarantees is the value\nit sends.\nTHE TIER IS THE ONLY THING DEREGISTERED ON THE WAY OUT. The memory segment is still dropped\nrather than drained, and not for want of a verb: the member's own API takes a graceful unmount\nwith a grace period, but it requires the segment ids, no route returns a client its own ids,\nand the name is not derivable because the leader appends a fresh port on every start.\nSo this is blocked on an upstream route, and one upstream route is the whole of what unblocks\nit: a way for a client to read back its own segment ids. It is NOT blocked on the shutdown\nhook talking to a fresh process that has forgotten them — a preStop runs against the same\nprocess that mounted the segments, so anything reasoning from client identity is testing the\nwrong claim. Until that route exists, shrinking a group drops the memory it held, and for a\ncache that is a cost rather than a fault: the data is recomputable.\nThe Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so\nthe kubelet cannot kill the container in the middle of the wait this configures.\nA plain int32 and not a pointer: unset and zero mean the same thing here. Zero still\nderegisters the tier, it just does not wait afterwards, which is what a member with no grace\nconfigured should do.\nThe upper bound is the entrypoint's own. It refuses a larger value with HTTP 400, so a\nmanifest above it would render a shutdown hook that fails every time it runs.\nSETTING THIS DOES NOT PROTECT THE SAME EDIT THAT SHRINKS THE GROUP. The value is rendered into\nthe member's Pod, and a Pod runs the template it was CREATED from — so a departing member\nleaves with whatever grace it started with, and only its replacements carry the new one. An\napply that raises the grace and narrows nodeSelector at once therefore drains nothing.\nTo make a grace apply to a shrink, do it in two steps: change only this field and wait for the\nmembers to be recreated with it (their pod-spec-hash annotation moves), then narrow the\nselector or remove the group.",
+																	Description: "GracePeriodSeconds is the wait the operator asks a departing member for, after that member\nderegisters its local disk tier. It renders into the preStop hook as the endpoint's\ngrace_period_seconds and nothing else reads it.\nLIMITED: it does not hold the tier open, so sizing it to let in-flight peer reads of the tier\nfinish sizes it against something that does not happen. Measured against Mooncake 0.3.13:\nderegistration takes effect at once and the process then waits the full value regardless, so a\npeer reading a disk-resident key gets a clean miss for the whole window rather than at the end\nof it. Another backend image may behave otherwise; what this operator guarantees is the value\nit sends.\nTHE TIER IS THE ONLY THING DEREGISTERED ON THE WAY OUT. The memory segment is still dropped\nrather than drained, and not for want of a verb: the member's own API takes a graceful unmount\nwith a grace period, but it requires the segment ids. The leader's segment listing returns each\nsegment's id and client id, and this operator records both in status. A non-host-network member\ncan be matched by its Pod IP, which is also its segment name. Host-network members placed on one\nnode share that name and address, while their client ids remain distinct; selecting safely from\ninside one of those members requires its own client id, which its supported interfaces do not\nexpose.\nSo graceful unmount for every supported transport needs upstream to expose the running member's\nown client id and a hook that uses it. It is NOT blocked on the shutdown hook talking to a fresh\nprocess that has forgotten its identity — a preStop runs against the same process that mounted\nthe segments. No memory-unmount hook is rendered today, so shrinking any group drops the memory\nit held. That is a cost rather than a fault for a cache because the data is recomputable.\nThe Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so\nthe kubelet cannot kill the container in the middle of the wait this configures.\nA plain int32 and not a pointer: unset and zero mean the same thing here. Zero still\nderegisters the tier, it just does not wait afterwards, which is what a member with no grace\nconfigured should do.\nThe upper bound is the entrypoint's own. It refuses a larger value with HTTP 400, so a\nmanifest above it would render a shutdown hook that fails every time it runs.\nSETTING THIS DOES NOT PROTECT THE SAME EDIT THAT SHRINKS THE GROUP. The value is rendered into\nthe member's Pod, and a Pod runs the template it was CREATED from — so a departing member\nleaves with whatever grace it started with, and only its replacements carry the new one. An\napply that raises the grace and narrows nodeSelector at once therefore drains nothing.\nTo make a grace apply to a shrink, do it in two steps: change only this field and wait for the\nmembers to be recreated with it (their pod-spec-hash annotation moves), then narrow the\nselector or remove the group.",
 																	Type:        "integer",
 																	Format:      "int32",
 																	Maximum:     ptr.To[float64](3600),
@@ -2810,9 +2810,15 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 												Schema: &v1.JSONSchemaProps{
 													Type: "object",
 													Required: []string{
+														"segmentID",
+														"clientID",
 														"segmentName",
 													},
 													Properties: map[string]v1.JSONSchemaProps{
+														"clientID": {
+															Description: "ClientID is the identifier the member process minted when it started. Unlike the advertised\naddress, it remains distinct when several host-network members run on one node.",
+															Type:        "string",
+														},
 														"medium": {
 															Description: "Medium is what this member contributes, echoed from the group that selected its node.",
 															Type:        "string",
@@ -2825,8 +2831,12 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 															Description: "Protocol is the transport the LEADER reports this member came up on.\nIt is an OBSERVATION throughout, never an echo of spec.transport.protocol, and the two can\ndisagree: a member handed an RDMA request on a node whose device is missing comes up on TCP.\nRead it as what the data plane is doing, and the spec field as what was asked for.",
 															Type:        "string",
 														},
+														"segmentID": {
+															Description: "SegmentID is the segment's unique identifier as the leader reports it.",
+															Type:        "string",
+														},
 														"segmentName": {
-															Description: "SegmentName is the member's segment as the leader knows it, derived from the node.",
+															Description: "SegmentName is the member's advertised address as the leader reports it. It is not unique:\nhost-network members placed on one node advertise the same address.",
 															Type:        "string",
 														},
 														"state": {
@@ -2838,7 +2848,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 											},
 											Nullable: true,
 											XListMapKeys: []string{
-												"segmentName",
+												"segmentID",
 											},
 											XListType: ptr.To[string]("map"),
 										},
