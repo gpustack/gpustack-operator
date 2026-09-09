@@ -380,7 +380,7 @@ func TestEnumerateInterfacesNestsVirtualFunctions(t *testing.T) {
 }
 
 // TestEnumerateInterfacesSRIOVIsSeparateFromVFCount pins that "a PF with zero VFs configured" and
-// "not a PF at all" stay different facts (P10).
+// "not a PF at all" stay different facts.
 func TestEnumerateInterfacesSRIOVIsSeparateFromVFCount(t *testing.T) {
 	f := newSysfsFixture(t)
 	f.physicalNIC("eth0", "0000:01:00.0")

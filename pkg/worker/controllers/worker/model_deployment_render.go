@@ -75,7 +75,7 @@ type ModelDeploymentRenderInput struct {
 	// There is NO ConfigMap name here, and there is no object to name: the client configuration
 	// travels in Connector.PodAnnotations and reaches the container as a downwardAPI projection of
 	// it. The field this struct used to carry was never filled by anything, so the mount it guarded
-	// was dead code -- see T14 in the spec for why the carrier is the annotation.
+	// was dead code; Connector.PodAnnotations is the carrier.
 	// RuntimeClassName is the runtime class an accelerated replica needs. The reconciler resolves it,
 	// because deciding it requires reading whether the class exists on the cluster.
 	RuntimeClassName string
