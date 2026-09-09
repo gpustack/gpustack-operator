@@ -338,11 +338,17 @@ for label, path in (("Path A (k8s://lease)", sys.argv[2]), ("Path B (service dns
     ok_before = [t for t, rc in puts if rc == 0 and t <= t0]
     bad_after = [t for t, rc in puts if rc != 0 and t > t0]
     recovered_after = [t for t, rc in puts if rc == 0 and bad_after and t > bad_after[0]]
+    if recovered_after:
+        convergence = "%.3fs" % (recovered_after[0] - t0)
+    elif bad_after:
+        convergence = "DID_NOT_RECOVER"
+    else:
+        convergence = "NO_ERROR_WINDOW"
     print("%s: puts total=%d ok-before-t0=%d first-error-after-t0=%s first-ok-after-t0=%s convergence=%s"
           % (label, len(puts), len(ok_before),
              ("%.3f" % (bad_after[0] - t0)) if bad_after else "none",
              ("%.3f" % (ok_after[0] - t0)) if ok_after else "NEVER",
-             ("%.3fs" % (recovered_after[0] - t0)) if recovered_after else "DID NOT CONVERGE"))
+             convergence))
 eps = []
 for line in open(sys.argv[4]):
     parts = line.split()
@@ -365,9 +371,15 @@ case "$CONV_A" in
     record PASS "Path A (member reads the Lease) converges after failover" \
       "put succeeds again ${CONV_A} after the leader delete; baseline ${BASE_A:-0} puts ok before it; \
 detail: $(grep '^Path A' "$WORK/summary.txt")" ;;
+  NO_ERROR_WINDOW)
+    record FAIL "Path A (member reads the Lease) converges after failover" \
+      "no failed put was observed after the delete, so recovery was not measured; detail: $(grep '^Path A' "$WORK/summary.txt"); log: $LOG_A" ;;
+  DID_NOT_RECOVER)
+    record FAIL "Path A (member reads the Lease) converges after failover" \
+      "no successful put followed the first failure within ${DEADLINE}s of the delete; detail: $(grep '^Path A' "$WORK/summary.txt"); log: $LOG_A" ;;
   *)
     record FAIL "Path A (member reads the Lease) converges after failover" \
-      "no successful put within ${DEADLINE}s of the delete; detail: $(grep '^Path A' "$WORK/summary.txt"); log: $LOG_A" ;;
+      "the measurement produced no convergence verdict; detail: $(grep '^Path A' "$WORK/summary.txt"); log: $LOG_A" ;;
 esac
 
 case "$CONV_B" in
@@ -375,13 +387,19 @@ case "$CONV_B" in
     record PASS "Path B (member keeps the Service address) converges after failover" \
       "put succeeds again ${CONV_B} after the leader delete; baseline ${BASE_B:-0} puts ok before it; \
 detail: $(grep '^Path B' "$WORK/summary.txt"); $(grep '^endpoints' "$WORK/summary.txt")" ;;
-  *)
+  NO_ERROR_WINDOW)
+    record FAIL "Path B (member keeps the Service address) converges after failover" \
+      "no failed put was observed after the delete, so recovery was not measured; detail: $(grep '^Path B' "$WORK/summary.txt"); $(grep '^endpoints' "$WORK/summary.txt"); log: $LOG_B" ;;
+  DID_NOT_RECOVER)
     # This is the answer the issue exists for, and it is a FAIL of the check, not of the run: Path B
     # not converging means the member's Lease read is load-bearing and the vendor-image rebuild work
     # cannot be avoided.
     record FAIL "Path B (member keeps the Service address) converges after failover" \
-      "no successful put within ${DEADLINE}s of the delete -- Path B DOES NOT WORK as read from \
+      "no successful put followed the first failure within ${DEADLINE}s of the delete -- Path B DOES NOT WORK as read from \
 upstream's source; detail: $(grep '^Path B' "$WORK/summary.txt"); $(grep '^endpoints' "$WORK/summary.txt"); log: $LOG_B" ;;
+  *)
+    record FAIL "Path B (member keeps the Service address) converges after failover" \
+      "the measurement produced no convergence verdict; detail: $(grep '^Path B' "$WORK/summary.txt"); $(grep '^endpoints' "$WORK/summary.txt"); log: $LOG_B" ;;
 esac
 
 FINAL_PHASE="$(kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" -o jsonpath='{.status.phase}' 2>/dev/null)"

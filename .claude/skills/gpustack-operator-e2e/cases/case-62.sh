@@ -133,7 +133,7 @@ lease_holder() {
 }
 
 holder_pod_uid() {
-  local holder="$1" holder_ip pod_uid pod_ip
+  local holder="$1" holder_ip pod_uid pod_ip deleting phase
   case "$holder" in
     \[*\]:*)
       holder_ip="${holder#\[}"
@@ -142,12 +142,15 @@ holder_pod_uid() {
     *:*) holder_ip="${holder%:*}" ;;
     *) holder_ip="$holder" ;;
   esac
-  while IFS='|' read -r pod_uid pod_ip; do
-    [ -n "$pod_ip" ] && [ "$pod_ip" = "$holder_ip" ] || continue
+  while IFS='|' read -r pod_uid pod_ip deleting phase; do
+    if [ "$phase" != "Running" ] || [ -n "$deleting" ] || [ -z "$pod_ip" ] \
+      || [ "$pod_ip" != "$holder_ip" ]; then
+      continue
+    fi
     echo "$pod_uid"
     return 0
   done < <(kubectl -n "$NS" get pod -l "$LEADER_SEL" \
-    -o jsonpath='{range .items[*]}{.metadata.uid}{"|"}{.status.podIP}{"\n"}{end}' \
+    -o jsonpath='{range .items[*]}{.metadata.uid}{"|"}{.status.podIP}{"|"}{.metadata.deletionTimestamp}{"|"}{.status.phase}{"\n"}{end}' \
     2>/dev/null)
 }
 
@@ -296,6 +299,13 @@ fi
 OLD_READY_UID="$(kubectl -n "$NS" get pod "$OLD_READY" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
 if [ -z "$OLD_READY_UID" ]; then
   record FAIL "the serving Pod has an identity to compare" "Pod ${OLD_READY} has no readable UID"
+  results; exit 1
+fi
+OLD_HOLDER="$(lease_holder)"
+OLD_HOLDER_POD_UID="$(holder_pod_uid "$OLD_HOLDER")"
+if [ "$OLD_HOLDER_POD_UID" != "$OLD_READY_UID" ]; then
+  record FAIL "the Lease holder is the serving Pod immediately before the delete" \
+    "holderIdentity='${OLD_HOLDER:-<empty>}' maps to '${OLD_HOLDER_POD_UID:-<none>}', ready Pod ${OLD_READY} has UID ${OLD_READY_UID}"
   results; exit 1
 fi
 

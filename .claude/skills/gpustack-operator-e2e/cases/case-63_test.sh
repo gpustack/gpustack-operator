@@ -47,8 +47,9 @@ PUT t=101.000 rc=0
 PUT t=104.000 rc=0
 EOF
 run_parser "$WORK/noop.log" "$WORK/noop.summary"
-grep -q '^Path A .*puts total=3 .*first-error-after-t0=none .*first-ok-after-t0=1.000 convergence=DID NOT CONVERGE$' "$WORK/noop.summary"
+grep -q '^Path A .*puts total=3 .*first-error-after-t0=none .*first-ok-after-t0=1.000 convergence=NO_ERROR_WINDOW$' "$WORK/noop.summary"
 test "$(verdict "$WORK/noop.summary")" = FAIL
+grep -Fq 'no failed put was observed after the delete, so recovery was not measured' "$CASE_DIR/case-63.sh"
 echo "PASS: a no-op deletion with no error window fails"
 
 cat >"$WORK/exception.log" <<'EOF'
@@ -58,6 +59,7 @@ PUT t=101.000 rc=0
 PUT t=102.000 exc=TimeoutError('leader unavailable')
 EOF
 run_parser "$WORK/exception.log" "$WORK/exception.summary"
-grep -q '^Path A .*puts total=3 .*first-error-after-t0=2.000 .*first-ok-after-t0=1.000 convergence=DID NOT CONVERGE$' "$WORK/exception.summary"
+grep -q '^Path A .*puts total=3 .*first-error-after-t0=2.000 .*first-ok-after-t0=1.000 convergence=DID_NOT_RECOVER$' "$WORK/exception.summary"
 test "$(verdict "$WORK/exception.summary")" = FAIL
+grep -Fq "no successful put followed the first failure within \${DEADLINE}s" "$CASE_DIR/case-63.sh"
 echo "PASS: exception-only failure lines are counted and fail without recovery"
