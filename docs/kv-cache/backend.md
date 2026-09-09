@@ -104,8 +104,8 @@ recorded in
 [the spec](../../specs/2026-09-05-kv-cache-media-and-scaling.md#f2--the-medium-enum-collapses-to-what-runs-and-each-removed-value-is-placed).
 
 The object is **cluster-scoped**: it names nodes, claims host memory and host paths, and on the RDMA
-path needs `hostNetwork` and `/dev/infiniband`. Only a cluster administrator can legitimately declare
-one.
+and EFA paths needs `hostNetwork` and `/dev/infiniband`. Only a cluster administrator can
+legitimately declare one.
 
 Tenant isolation is a different axis, handled one layer up — exactly as Kueue separates `ClusterQueue`
 from `LocalQueue` (<https://kueue.sigs.k8s.io/docs/concepts/>). One backend can be referenced by
@@ -146,6 +146,9 @@ uses.** That is the sentence whoever picks an image needs. An `-npu`-built maste
 cluster is legitimate — the master is a pure metadata service. A member on `ascend`, by contrast,
 needs CANN (`libascendcl.so`) in its container, and a CANN-less image fails as a loader error whose
 own message reaches `status.phaseMessage`.
+
+A member on `efa` needs libfabric — and the build of it that matches the node's EFA driver, which is
+the host's own under `/opt/amazon/efa`, mounted into the member on that path.
 
 Nothing has to be built to run this **without high availability**.
 `docker.io/kvcacheai/mooncake:0.3.13` is published for amd64 and arm64 and carries **both**
@@ -295,6 +298,11 @@ transports need a vendor runtime `mirrored-mooncake` does not carry, and the ven
 carry the leadership backend — the two axes are independent, so covering them means rebuilding each
 variant.
 
+`EFA` is the one fabric not on that list: it needs no vendor runtime, only libfabric, so
+`mirrored-mooncake` compiles it in — the image build asserts the EFA transport is installed by
+reaching `EfaTransport`'s own "No EFA devices found" on a device-less build machine. An `EFA` member
+group runs under high availability, on nodes that have the AWS EFA driver installed.
+
 Tracked at [issue #279](https://github.com/gpustack/gpustack-operator/issues/279), together with the
 alternative of leaving members on the leader Service address and letting readiness move the endpoint.
 
@@ -381,14 +389,23 @@ leader, as `-key=value`.
 rendered into the container's argv, readable again from the Pod and from the DaemonSet or Deployment
 carrying it. **Do not put a credential in `extraArgs`.** Nothing refuses one at admission.
 
-`spec.transport.protocol` accepts `Auto`, `TCP`, `RDMA`, `HIP` and `Ascend`, and defaults to `Auto`
-whether or not the `transport` block is written at all. **`Auto` resolves to `TCP`** — it is not a
-per-node probe that promotes itself.
+`spec.transport.protocol` accepts `Auto`, `TCP`, `RDMA`, `EFA`, `HIP` and `Ascend`, and defaults to
+`Auto` whether or not the `transport` block is written at all. **`Auto` resolves to `TCP`** — it is
+not a per-node probe that promotes itself.
 
 > **Why** — one group is one Pod template, which cannot express a per-node transport; and promoting to
-> RDMA would mean granting `hostNetwork` plus `IPC_LOCK` and `SYS_RESOURCE`. A privilege is requested,
-> never inferred. Naming `RDMA` is also what accepts the security context that comes with it — which
-> is those three things and **not** `privileged`. A `TCP` group sets none of them.
+> a host fabric would mean granting `hostNetwork` plus `IPC_LOCK` and `SYS_RESOURCE`. A privilege is
+> requested, never inferred. Naming `RDMA` or `EFA` is also what accepts the security context that
+> comes with it — which is those three things and **not** `privileged`. A `TCP` group sets none of
+> them.
+
+An `EFA` group takes everything `RDMA` takes, plus the host's `/opt/amazon/efa` tree — mounted as
+`Directory`, so a node without the AWS EFA driver stops at `FailedMount` — with `LD_LIBRARY_PATH`
+putting its `lib/` ahead of the distro libfabric the image carries only so the binary loads.
+
+`EFA` is measured as compiled into `mirrored-mooncake`, not run on EFA hardware end to end — the same
+bar `RDMA`, `HIP` and `Ascend` stand at. Storage-optimized families such as `i7ie` are not
+EFA-capable; check `fi_info -p efa` on the node before selecting one.
 
 **Reachability is a port range, never a list.** The transfer engine picks its data ports at random —
 one observed run bound `15002` and `15995`, a second client `16566` and `16655`, none of them
@@ -396,14 +413,15 @@ configured — and the peer-to-peer plane is what binds them. Write firewall and
 between member nodes, and from engine clients, as a **range**. The rendered Pod declares no fixed
 data-plane `containerPort`, because a fixed list would be a false statement.
 
-**The management port is fixed, and on `RDMA` it lands on the node.** A member serves its HTTP API on
-`8080 + <group index>` — the first group on `8080`, a second group on `8081`. A `TCP` group holds that
-port inside its own pod network namespace, but an `RDMA` group holds the host's, so on every node an
-RDMA group selects that port must be free. Reserve one port from `8080` upward per member group.
+**The management port is fixed, and on a host fabric it lands on the node.** A member serves its HTTP
+API on `8080 + <group index>` — the first group on `8080`, a second group on `8081`. A `TCP` group
+holds that port inside its own pod network namespace, but an `RDMA` or `EFA` group holds the host's,
+so on every node such a group selects that port must be free. Reserve one port from `8080` upward per
+member group.
 
-> **Why it moves per group** — two RDMA groups whose node selectors both match one node place two
-> host-network Pods on it. On a single fixed port only the first binds; the second runs, never passes
-> readiness, and reports nothing about why.
+> **Why it moves per group** — two host-network groups whose node selectors both match one node place
+> two host-network Pods on it. On a single fixed port only the first binds; the second runs, never
+> passes readiness, and reports nothing about why.
 
 **A member advertises its POD IP, and that is what a client dials.** The address becomes the host
 half of the segment's `te_endpoint`, which `status.members[]` is joined against and which the engine
@@ -413,8 +431,8 @@ hands to clients. Rules written for the data plane therefore target pod addresse
 > Measured on a two-node cluster: advertising the node name, a client pod got `ECONNREFUSED` against
 > both that name and the node IP, and connected only on the pod IP. It costs no stability — a
 > segment's identity is minted fresh on every mount, a new id and a transfer port bound at random, so
-> nothing here survived a restart anyway. On the RDMA path the pod holds the host's network namespace
-> and this is the node's address regardless.
+> nothing here survived a restart anyway. On the host-fabric paths the pod holds the host's network
+> namespace and this is the node's address regardless.
 
 ## The local disk tier
 
@@ -512,9 +530,10 @@ Five rules the path has to satisfy, all enforced at apply time:
 - It **may not begin or end with whitespace**, spaces and tabs alike.
 
 > **Why** — the root directory would mount the node's whole filesystem into a third-party container.
-> The RDMA transport mounts `/dev/infiniband` into this same container, and two mounts on one path
-> are resolved by the kubelet with one shadowing the other, which nothing on the object would record;
-> that rule holds whatever `spec.transport.protocol` says today, because the field is editable. The
+> The RDMA and EFA transports mount `/dev/infiniband` into this same container, and two mounts on one
+> path are resolved by the kubelet with one shadowing the other, which nothing on the object would
+> record; that rule holds whatever `spec.transport.protocol` says today, because the field is
+> editable. The
 > `..` rule mirrors the store's own, which refuses such a path before checking whether the directory
 > exists. The whitespace rule exists because the path is mounted exactly as written, so a trailing
 > space produces a different directory than the one an operator read on the screen.

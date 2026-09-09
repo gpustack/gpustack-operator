@@ -714,11 +714,11 @@ func validateKVCacheBackendLocalDisk(
 		// than reported here — one mount shadows the other, and which one wins is not something
 		// this object records. Refused whatever the transport is today, because the transport is
 		// editable: a tier that merely does not collide yet would start colliding the moment
-		// someone switched the backend to RDMA.
+		// someone switched the backend to a host fabric.
 		errs = append(errs, field.Invalid(pathPath, disk.Path, fmt.Sprintf(
-			"must not overlap %s, which the RDMA transport mounts into the same container: one "+
-				"mount would shadow the other, and the transport can be switched to RDMA after "+
-				"this path is set", mooncake.RDMADevicePath)))
+			"must not overlap %s, which the RDMA and EFA transports mount into the same "+
+				"container: one mount would shadow the other, and the transport can be switched "+
+				"to one after this path is set", mooncake.RDMADevicePath)))
 	}
 
 	// The capacity is a resource.Quantity, so it is a string in the schema and no marker can bound
