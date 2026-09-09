@@ -37,6 +37,5 @@ go.work.*
 /certs
 .terraform
 .claude/*
-!.claude/hooks/
-!.claude/skills/
+!.claude/skills
 !.claude/settings.json

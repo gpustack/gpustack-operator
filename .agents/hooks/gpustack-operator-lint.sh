@@ -8,7 +8,11 @@
 
 set -o pipefail
 
-cd "${CLAUDE_PROJECT_DIR:-.}" || exit 0
+project_dir="${CLAUDE_PROJECT_DIR:-}"
+if [[ -z "${project_dir}" ]]; then
+  project_dir="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+fi
+cd "${project_dir}" || exit 0
 
 dirty="$(git status --porcelain --untracked-files=all 2>/dev/null)"
 

@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(git rev-parse --show-toplevel)/.agents/hooks/gpustack-operator-lint.sh\"",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}
