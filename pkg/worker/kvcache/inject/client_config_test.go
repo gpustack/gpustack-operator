@@ -133,7 +133,7 @@ func TestVLLMConfig_CarriesTheResolvedConnection(t *testing.T) {
 // is. The engines disagree on the default for an absent protocol - vLLM assumes rdma, SGLang tcp - so
 // omitting it would pick one of them by accident.
 func TestVLLMConfig_ProtocolIsWrittenOnEveryTransport(t *testing.T) {
-	for _, protocol := range []string{"tcp", "rdma", "ascend"} {
+	for _, protocol := range []string{"tcp", "rdma", "efa", "ascend"} {
 		t.Run(protocol, func(t *testing.T) {
 			config := renderedConfig(t, Input{
 				Engine:     EngineVLLM,

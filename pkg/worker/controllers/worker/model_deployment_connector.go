@@ -71,7 +71,7 @@ type ModelDeploymentConnectorInput struct {
 	// it resolves Auto, and it falls back to Auto for an empty value.
 	//
 	// A mapping used to live in this file and was deleted rather than kept. It agreed with
-	// mooncake's table on all five enum values -- so feeding one into the other was harmless and
+	// mooncake's table on every enum value -- so feeding one into the other was harmless and
 	// also pointless, and a third implementation of one table is a place for the next transport to
 	// be added in two of three.
 	Protocol string
@@ -429,7 +429,7 @@ func ModelDeploymentEngineCommand(engine, model string) ([]string, error) {
 // both a valid producer and a valid consumer, which is what replicas sharing one store need.
 
 // The protocol mapping this file used to hold is `mooncake.MemberProtocol`'s, which belongs to the
-// package that owns the backend. The two agreed on all five enum values, so the deletion changes no
+// package that owns the backend. The two agreed on every enum value, so the deletion changes no
 // rendered document -- with one difference worth stating: this one lowercased an UNRECOGNIZED value
 // and passed it through, reasoning that the client warns and carries on. The surviving one returns
 // empty for a value outside the enum, and `inject.Render` refuses an empty protocol. An object that

@@ -114,10 +114,16 @@ and which keys their readers know.
 > `local_buffer_size` holds that much staging. Neither appears in the container's `resources`, and
 > the symptom is an OOM pointing at no field anybody wrote.
 
-`device_name` is empty on **every** path, RDMA included. Empty means "use every device found", which is
-the only value correct for every host in one pool — a device is named per host, `mlx5_0` on one and
-`erdma_0` on the next. The documented string `auto-discovery` is not special-cased anywhere in the
-client: it is parsed as a filter naming a device no host has.
+`device_name` is empty on **every** path, RDMA and EFA included. Empty means "use every device found",
+which is the only value correct for every host in one pool — a device is named per host, `mlx5_0` on
+one and `erdma_0` on the next. The documented string `auto-discovery` is not special-cased anywhere in
+the client: it is parsed as a filter naming a device no host has.
+
+Nothing injected here grants the engine Pod the fabric itself. These values **name** a transport; the
+`hostNetwork`, the device tree and — on EFA — the host's libfabric mount that a fabric needs are
+rendered on the backend's member Pods only. On `TCP` that distinction costs nothing; on `RDMA` or
+`EFA`, an engine that is to move bytes over the fabric needs the same access on its own Pod, which
+this operator does not render today.
 
 Two observability variables, `MC_TE_METRIC` and `MC_STORE_CLIENT_METRIC_BANDWIDTH`, are set to `1`
 when the container has not spoken about them. A value you set yourself is left alone.

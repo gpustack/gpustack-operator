@@ -36,7 +36,8 @@ const (
 	// entrypoint's own default. Later groups offset from it; see memberRESTPort for why.
 	memberRESTPortBase int32 = 8080
 
-	// RDMADevicePath is the device tree an RDMA member needs from its host.
+	// RDMADevicePath is the device tree a host-fabric member needs from its host: EFA devices
+	// surface here too, next to the RDMA ones.
 	//
 	// Exported because admission has to refuse a disk tier that would land on top of it: the two
 	// mounts are rendered into one container, and a collision there is resolved by the kubelet
@@ -65,6 +66,17 @@ const (
 
 	// rdmaDeviceVolumeName names that mount.
 	rdmaDeviceVolumeName = "rdma-devices"
+
+	// EFALibHostPath is where AWS's EFA installer puts the libfabric build that matches the host's
+	// EFA driver. The member image carries a distro libfabric only so the binary LOADS; on an EFA
+	// node this tree is mounted in and its lib/ outranks the image copy through LD_LIBRARY_PATH.
+	//
+	// Exported for the same reason as RDMADevicePath: admission has to refuse a disk tier that
+	// would land on top of it.
+	EFALibHostPath = "/opt/amazon/efa"
+
+	// efaLibVolumeName names that mount.
+	efaLibVolumeName = "efa-libfabric"
 
 	// memberLocalDiskVolumeName names the host directory holding a group's disk tier.
 	memberLocalDiskVolumeName = "local-disk"
@@ -139,6 +151,7 @@ var memberProtocols = map[string]string{
 	MemberProtocolAuto: "tcp",
 	"TCP":              "tcp",
 	"RDMA":             "rdma",
+	"EFA":              "efa",
 	"HIP":              "hip",
 	"Ascend":           "ascend",
 }
@@ -204,8 +217,8 @@ func MemberProtocol(kvcb *workercore.KVCacheBackend) string {
 // RenderMemberDaemonSet renders one member group into a DaemonSet.
 //
 // A DaemonSet rather than a Deployment because a member contributes A NODE's medium: it claims that
-// node's memory or disk, and on the RDMA path that node's devices, so its identity IS the node. A
-// Deployment with anti-affinity only approximates that.
+// node's memory or disk, and on the host-fabric paths that node's devices, so its identity IS the
+// node. A Deployment with anti-affinity only approximates that.
 //
 // The image is a parameter for the same reason the leader's is, and the group's own image wins over
 // it — a group selects its own nodes, so two groups can sit on different accelerator hardware and
@@ -246,15 +259,16 @@ func RenderMemberDaemonSet(
 					// each node it matches, and widening it adds members without touching the rest.
 					NodeSelector:                  member.NodeSelector,
 					TerminationGracePeriodSeconds: ptr.To(memberTerminationGracePeriodSeconds(kvcb, member)),
-					// Rendered explicitly even though it is the server's own default, because the
-					// RDMA path changes it. A field this renderer sets on one path and leaves to
-					// the server on the other cannot be converged in both directions: switching a
-					// backend from RDMA back to TCP would leave ClusterFirstWithHostNet behind.
+					// Rendered explicitly even though it is the server's own default, because
+					// the host-fabric paths change it. A field this renderer sets on one path and
+					// leaves to the server on the other cannot be converged in both directions:
+					// switching a backend from a host fabric back to TCP would leave
+					// ClusterFirstWithHostNet behind.
 					DNSPolicy: core.DNSClusterFirst,
 					// Without HA the member talks to its leader and to nothing else, and the API
 					// server's default would mount a service-account token into a third-party image
-					// that has no use for one -- on the RDMA path an image that also holds two
-					// capabilities.
+					// that has no use for one -- on the host-fabric paths an image that also holds
+					// two capabilities.
 					//
 					// With HA it does talk to the API server, for one thing: MOONCAKE_MASTER becomes
 					// a k8s:// entry and the client reads the Lease to find the leader. That read is
@@ -390,9 +404,10 @@ func renderMemberEnv(
 			// te_endpoint, which the client derives on its own under the peer-to-peer metadata
 			// plane this scope ships. The name outlives a restart; the endpoint does not.
 			//
-			// LIMITED: the name is only as unique as this value is. On the RDMA path the pod holds
-			// the host's network namespace, so every member group on one node reports the same
-			// name — the collision the members-mounted condition reports rather than guesses at.
+			// LIMITED: the name is only as unique as this value is. On the host-fabric paths the
+			// pod holds the host's network namespace, so every member group on one node reports
+			// the same name — the collision the members-mounted condition reports rather than
+			// guesses at.
 			Name: memberEnvLocalHostname,
 			ValueFrom: &core.EnvVarSource{
 				FieldRef: &core.ObjectFieldSelector{FieldPath: "status.podIP"},
@@ -469,9 +484,10 @@ func renderMemberArgs(member workercore.KVCacheBackendMember, group int) []strin
 // that decides it: the argv, the readiness probe and the preStop hook all call this, so they cannot
 // drift into naming different ports for the same container.
 //
-// The port is derived from the group's position because on the RDMA path the member holds the host's
-// network namespace, and the API binds 0.0.0.0. Two groups whose node selectors overlap therefore
-// place two host-network Pods on one node, and a single fixed port would let only the first bind:
+// The port is derived from the group's position because on the host-fabric paths the member holds
+// the host's network namespace, and the API binds 0.0.0.0. Two groups whose node selectors overlap
+// therefore place two host-network Pods on one node, and a single fixed port would let only the
+// first bind:
 // the second would run, never pass its readiness probe, and report nothing about why. Admission
 // cannot refuse that pair instead, because whether two selectors ever meet depends on node labels it
 // does not have — the collision is real only at placement time, so the fix has to be that there is
@@ -509,12 +525,15 @@ func memberRequests(member workercore.KVCacheBackendMember) core.ResourceList {
 
 // applyMemberFabric grants what a fabric needs, and only to the path that needs it.
 //
-// The RDMA path takes hostNetwork, the device tree and two capabilities — and NEVER privileged,
-// which would hand the member its whole node for the sake of two operations. Every other path,
-// including the Auto that resolved to TCP, is left exactly as rendered: no security context at all
-// rather than an empty one, since an empty struct is an invitation to add a capability to it.
+// RDMA and EFA share the host-fabric base: hostNetwork, the device tree and two capabilities —
+// and NEVER privileged, which would hand the member its whole node for the sake of two
+// operations. EFA adds the host's libfabric tree and the environment that puts it first, because
+// the distro libfabric inside the image is only a load-time fallback and the AWS build is the one
+// matched to the node's driver. Every other path, including the Auto that resolved to TCP, is
+// left exactly as rendered: no security context at all rather than an empty one, since an empty
+// struct is an invitation to add a capability to it.
 func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
-	if protocol != "rdma" {
+	if protocol != "rdma" && protocol != "efa" {
 		return
 	}
 
@@ -544,6 +563,42 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
 			Add: []core.Capability{"IPC_LOCK", "SYS_RESOURCE"},
 		},
 	}
+
+	if protocol != "efa" {
+		return
+	}
+
+	// Directory and NOT DirectoryOrCreate, for the same reason as the disk tier: a node running an
+	// EFA member is expected to have the EFA driver installed, and creating an empty stand-in
+	// would let the Pod start against a libfabric that finds no provider — a later, quieter
+	// failure than a FailedMount that names what is missing.
+	podSpec.Volumes = append(podSpec.Volumes, core.Volume{
+		Name: efaLibVolumeName,
+		VolumeSource: core.VolumeSource{
+			HostPath: &core.HostPathVolumeSource{
+				Path: EFALibHostPath,
+				Type: ptr.To(core.HostPathDirectory),
+			},
+		},
+	})
+	container.VolumeMounts = append(container.VolumeMounts, core.VolumeMount{
+		Name:      efaLibVolumeName,
+		MountPath: EFALibHostPath,
+		// Read-only: the container only LOADS the host's libfabric out of this tree, and a
+		// writable mount of a host install prefix would let a store process edit the node's
+		// EFA driver installation. The RDMA device tree cannot take the same treatment —
+		// libfabric ioctls its device nodes, which a read-only mount blocks.
+		ReadOnly: true,
+	})
+	// Appended here and not in renderMemberEnv, which is fabric-blind by construction: an
+	// LD_LIBRARY_PATH rendered for every member would put a host path on TCP members that never
+	// mount it, and a variable whose value is a lie on four paths out of five is worse than one
+	// rendered where it is true. LD_LIBRARY_PATH outranks the default search path, so the host's
+	// libfabric loads instead of the image's distro copy whenever this mount is present.
+	container.Env = append(container.Env, core.EnvVar{
+		Name:  "LD_LIBRARY_PATH",
+		Value: EFALibHostPath + "/lib",
+	})
 }
 
 // memberTerminationGracePeriodSeconds is how long the kubelet waits after SIGTERM before it kills

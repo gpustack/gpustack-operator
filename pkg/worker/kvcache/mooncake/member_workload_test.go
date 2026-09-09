@@ -478,6 +478,7 @@ func TestMemberWorkload_Protocol(t *testing.T) {
 		{requested: "Auto", rendered: "tcp", privileged: false},
 		{requested: "TCP", rendered: "tcp", privileged: false},
 		{requested: "RDMA", rendered: "rdma", privileged: true},
+		{requested: "EFA", rendered: "efa", privileged: true},
 		{requested: "HIP", rendered: "hip", privileged: false},
 		// This spelling has a consumer outside this package: inject's engineTransportConstraint
 		// records that vLLM-Ascend's store backend accepts exactly this string, so renaming it here
@@ -556,6 +557,55 @@ func TestMemberWorkload_RDMAContext(t *testing.T) {
 		"never privileged: the two capabilities are what the fabric needs, and nothing more")
 }
 
+// TestMemberWorkload_EFAContext pins what the EFA path takes over the host-fabric base it shares
+// with RDMA: the host's libfabric tree, mounted so a node without the EFA driver fails the mount
+// rather than starting against a stand-in, and the one environment variable that makes the AWS
+// build of libfabric win over the image's load-time fallback.
+func TestMemberWorkload_EFAContext(t *testing.T) {
+	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Transport.Protocol = "EFA"
+	})
+	ds := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13")
+	podSpec := ds.Spec.Template.Spec
+	container := podSpec.Containers[0]
+
+	assert.True(t, podSpec.HostNetwork)
+	assert.Equal(t, core.DNSClusterFirstWithHostNet, podSpec.DNSPolicy)
+
+	require.Len(t, podSpec.Volumes, 2, "the device tree, then the host's libfabric")
+	require.NotNil(t, podSpec.Volumes[0].HostPath)
+	assert.Equal(t, "/dev/infiniband", podSpec.Volumes[0].HostPath.Path)
+	require.NotNil(t, podSpec.Volumes[1].HostPath)
+	assert.Equal(t, "/opt/amazon/efa", podSpec.Volumes[1].HostPath.Path)
+	require.NotNil(t, podSpec.Volumes[1].HostPath.Type)
+	assert.Equal(t, core.HostPathDirectory, *podSpec.Volumes[1].HostPath.Type,
+		"a node without the EFA driver is a FailedMount that names what is missing, not an empty "+
+			"directory the kubelet created")
+	require.Len(t, container.VolumeMounts, 2)
+	assert.Equal(t, "/opt/amazon/efa", container.VolumeMounts[1].MountPath)
+	assert.True(t, container.VolumeMounts[1].ReadOnly,
+		"the container only LOADS the host's libfabric; a writable mount would let it edit the "+
+			"node's EFA driver installation. The device tree at [0] stays writable because "+
+			"libfabric ioctls its device nodes")
+
+	env := map[string]string{}
+	for _, e := range container.Env {
+		env[e.Name] = e.Value
+	}
+	assert.Equal(t, "/opt/amazon/efa/lib", env["LD_LIBRARY_PATH"],
+		"LD_LIBRARY_PATH outranks the default search path, so the host's libfabric — matched to "+
+			"the node's EFA driver — loads instead of the image's distro copy")
+
+	require.NotNil(t, container.SecurityContext)
+	require.NotNil(t, container.SecurityContext.Capabilities)
+	assert.ElementsMatch(t,
+		[]core.Capability{"IPC_LOCK", "SYS_RESOURCE"},
+		container.SecurityContext.Capabilities.Add,
+		"the EFA provider pins registered memory exactly like the verbs one does")
+	assert.Nil(t, container.SecurityContext.Privileged,
+		"never privileged: the two capabilities are what the fabric needs, and nothing more")
+}
+
 // TestMemberWorkload_TCPClaimsNoHost is the counterpart, and it asserts the absences as a
 // whole rather than one at a time — a path that granted one of the three silently is exactly what
 // this is here to catch.
@@ -584,7 +634,7 @@ func TestMemberWorkload_TCPClaimsNoHost(t *testing.T) {
 // took 15002 and 15995, a second client 16566 and 16655, none of them configured — so a fixed
 // containerPort would be a false statement about which ports the process uses.
 func TestMemberWorkload_DeclaresNoDataPlanePort(t *testing.T) {
-	for _, protocol := range []string{"Auto", "TCP", "RDMA"} {
+	for _, protocol := range []string{"Auto", "TCP", "RDMA", "EFA"} {
 		t.Run(protocol, func(t *testing.T) {
 			kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 				k.Spec.Transport.Protocol = protocol

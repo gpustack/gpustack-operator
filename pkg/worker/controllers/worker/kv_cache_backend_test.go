@@ -1077,6 +1077,61 @@ func TestKVCacheBackendReconciler_ConvergesAFabricSwitch(t *testing.T) {
 		"and drops the capabilities entirely, rather than leaving an empty context behind")
 }
 
+// TestKVCacheBackendReconciler_ConvergesAnEFASwitch is the EFA half of the same contract, with
+// one extra thing to take back off: the host's libfabric mount and the LD_LIBRARY_PATH that goes
+// with it. It also crosses EFA with RDMA directly, because the two share the host-fabric base and
+// a renderer that keyed everything on "host fabric, whichever" would leave the libfabric mount
+// behind on that switch.
+func TestKVCacheBackendReconciler_ConvergesAnEFASwitch(t *testing.T) {
+	kvcb := newKVCacheBackendObject()
+	kvcb.Spec.Transport.Protocol = "TCP"
+	cli := newKVCacheBackendClient(kvcb)
+	ctx := context.Background()
+
+	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+
+	setProtocol := func(protocol string) {
+		got := new(workercore.KVCacheBackend)
+		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, got))
+		got.Spec.Transport.Protocol = protocol
+		require.NoError(t, cli.Update(ctx, got))
+		require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+	}
+
+	memberPod := func() core.PodSpec {
+		ds := new(apps.DaemonSet)
+		require.NoError(t, cli.Get(ctx, memberObjectKey(kvcb, 0), ds))
+		return ds.Spec.Template.Spec
+	}
+	hasLDLibraryPath := func(pod core.PodSpec) bool {
+		for _, e := range pod.Containers[0].Env {
+			if e.Name == "LD_LIBRARY_PATH" {
+				return true
+			}
+		}
+		return false
+	}
+
+	setProtocol("EFA")
+	efa := memberPod()
+	assert.True(t, efa.HostNetwork, "switching to EFA takes the host network")
+	require.Len(t, efa.Volumes, 2, "the device tree and the host's libfabric")
+	assert.True(t, hasLDLibraryPath(efa))
+
+	setProtocol("RDMA")
+	rdma := memberPod()
+	require.Len(t, rdma.Volumes, 1, "RDMA shares the base but not the libfabric mount")
+	assert.False(t, hasLDLibraryPath(rdma),
+		"nor the environment that points at it — both come back off on the same render")
+
+	setProtocol("TCP")
+	tcp := memberPod()
+	assert.False(t, tcp.HostNetwork, "switching back gives the host network up")
+	assert.Empty(t, tcp.Volumes)
+	assert.False(t, hasLDLibraryPath(tcp))
+	assert.Nil(t, tcp.Containers[0].SecurityContext)
+}
+
 // TestKVCacheBackendReconciler_ConvergesAMultiTenancySwitch pins the edit an operator is TOLD to
 // make: the pool webhook refuses a pool whose backend runs without multi-tenancy and names the field
 // to set, so turning it on for a backend that already has a leader is the ordinary path, not a

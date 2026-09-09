@@ -2036,20 +2036,22 @@ message KVCacheBackendTransport {
   // operator with no opinion, and because it is where node-level fabric discovery would attach
   // later without an API change.
   //
-  // TCP is the universal fallback. RDMA, HIP and Ascend are peers of one another — each is a
+  // TCP is the universal fallback. RDMA, EFA, HIP and Ascend are peers of one another — each is a
   // fabric- or vendor-specific fast path, not a spelling of TCP: the ROCm build compiles a HIP
-  // transport in, and the NPU build ships a separate Ascend transport library linking the CANN
-  // runtime.
+  // transport in, the NPU build ships a separate Ascend transport library linking the CANN
+  // runtime, and EFA is AWS's fabric, reached through libfabric's SRD provider rather than
+  // ibverbs — EFA has no RC queue pairs, so the RDMA transport cannot drive it.
   //
   // The bar for membership here is "measured as compiled into a published artifact", which is
   // what excludes the other ten strings that artifact's config parser accepts. It is NOT
-  // "measured to move bytes": only TCP has been exercised end to end, and RDMA, HIP and Ascend
-  // each await a run on that hardware. A member also needs the runtime its transport links —
-  // Ascend needs CANN in the member image — and the webhook cannot see inside an image, so
-  // that pairing is the operator's to get right.
+  // "measured to move bytes": only TCP has been exercised end to end, and RDMA, EFA, HIP and
+  // Ascend each await a run on that hardware. A member also needs the runtime its transport
+  // links — Ascend needs CANN in the member image, EFA needs the host's EFA driver and libfabric
+  // under /opt/amazon/efa, which the member Pod mounts — and the webhook cannot see inside an
+  // image or onto a node, so that pairing is the operator's to get right.
   //
   // +k8s:validation:default="Auto"
-  // +k8s:validation:enum=["Auto","TCP","RDMA","HIP","Ascend"]
+  // +k8s:validation:enum=["Auto","TCP","RDMA","EFA","HIP","Ascend"]
   optional string protocol = 1;
 }
 
