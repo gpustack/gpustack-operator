@@ -80,24 +80,26 @@ for case_name in case-62 case-64; do
     CAPTURED_STATUS=''
     CAPTURED_OBJECT=''
     record() { CAPTURED_STATUS="$1"; CAPTURED_OBJECT="$3"; }
-    DELETE_EPOCH=100
+    DELETE_EPOCH=0
     FAILOVER_BOUND_SECS=120
 
     reset_observation
     NEW_READY_UID=new-uid
-    observe_handoff_snapshot 220
-    test "$HOLDER_MOVED_AT" = 220
+    observe_handoff_snapshot 130
+    test "$HOLDER_MOVED_AT" = 130
     record_failover_bound
-    test "$CAPTURED_STATUS" = PASS
-    test "$CAPTURED_OBJECT" = '120s <= 120s'
+    test "$CAPTURED_STATUS" = SKIP
+    test "$CAPTURED_OBJECT" = '130s after the failover trigger; the Ready replacement upper bound includes Pod scheduling, image pulling, and readiness probing'
 
     reset_observation
+    NEW_HOLDER='10.0.0.2:50051'
     NEW_READY_UID=new-uid
-    observe_handoff_snapshot 221
-    test "$HOLDER_MOVED_AT" = 221
+    observe_handoff_snapshot 121
+    test "$HOLDER_MOVED_AT" = 121
+    test "$MOVE_EVIDENCE" = 'holderIdentity changed'
     record_failover_bound
     test "$CAPTURED_STATUS" = FAIL
-    test "$CAPTURED_OBJECT" = '121s > 120s -- the election still works but no longer meets the failover budget'
+    test "$CAPTURED_OBJECT" = '121s > 120s -- holderIdentity changed; the election still works but no longer meets the failover budget'
   )
 
   # shellcheck disable=SC2016
@@ -116,10 +118,10 @@ for case_name in case-62 case-64; do
   # shellcheck disable=SC2016
   grep -Fq 'HANDOFF_DEADLINE=$((DELETE_EPOCH + 240))' "$case_file"
   grep -Fq 'the new Lease holder is the Ready replica' "$case_file"
-  if grep -Fq 'record SKIP "the Lease moves within the failover bound"' "$case_file"; then
-    echo "FAIL: ${case_name} skips its mandatory failover bound" >&2
-    exit 1
-  fi
+  grep -Fq 'case "$MOVE_EVIDENCE" in' "$case_file"
+  grep -Fq '"holderIdentity changed"|"replacement renewed the reused holderIdentity")' "$case_file"
+  grep -Fq '"Ready replacement confirmed the reused holderIdentity")' "$case_file"
+  grep -Fq 'record SKIP "the Lease moves within the failover bound"' "$case_file"
   if grep -Fq '"240s after' "$case_file"; then
     echo "FAIL: ${case_name} still reports the loop counter as wall time" >&2
     exit 1

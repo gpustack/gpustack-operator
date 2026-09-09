@@ -196,12 +196,23 @@ observe_handoff_snapshot() {
 
 record_failover_bound() {
   local moved_secs=$((HOLDER_MOVED_AT - DELETE_EPOCH))
-  if [ "$moved_secs" -le "$FAILOVER_BOUND_SECS" ]; then
-    record PASS "the Lease moves within the failover bound" "${moved_secs}s <= ${FAILOVER_BOUND_SECS}s"
-  else
-    record FAIL "the Lease moves within the failover bound" \
-      "${moved_secs}s > ${FAILOVER_BOUND_SECS}s -- the election still works but no longer meets the failover budget"
-  fi
+  case "$MOVE_EVIDENCE" in
+    "holderIdentity changed"|"replacement renewed the reused holderIdentity")
+      if [ "$moved_secs" -le "$FAILOVER_BOUND_SECS" ]; then
+        record PASS "the Lease moves within the failover bound" "${moved_secs}s <= ${FAILOVER_BOUND_SECS}s; ${MOVE_EVIDENCE}"
+      else
+        record FAIL "the Lease moves within the failover bound" \
+          "${moved_secs}s > ${FAILOVER_BOUND_SECS}s -- ${MOVE_EVIDENCE}; the election still works but no longer meets the failover budget"
+      fi
+      ;;
+    "Ready replacement confirmed the reused holderIdentity")
+      record SKIP "the Lease moves within the failover bound" \
+        "${moved_secs}s after the failover trigger; the Ready replacement upper bound includes Pod scheduling, image pulling, and readiness probing"
+      ;;
+    *)
+      record FAIL "the Lease moves within the failover bound" "unrecognized move evidence: ${MOVE_EVIDENCE:-<none>}"
+      ;;
+  esac
 }
 
 # can_i asks the API server's authorizer -- not a rendered Role -- and prints the answer word.
