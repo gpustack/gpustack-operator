@@ -62,8 +62,7 @@ func (r *PodKVCacheWebhook) resolve(ctx context.Context, pod *core.Pod) (*resolu
 		return nil, fmt.Errorf("annotation %q is not accepted: the reuse domain comes from the "+
 			"KVCachePoolBinding and only from there, so that every domain this operator provisions has "+
 			"an object accounting for it. This is the shape of the declarative contract, not an "+
-			"enforcement boundary - a container setting MOONCAKE_TENANT_ID itself keeps that value, so "+
-			"it can already name any domain some Binding has registered. What a Binding decides is "+
+			"enforcement boundary. What a Binding decides is "+
 			"which names EXIST: the multi-tenant master this webhook injects against refuses a name "+
 			"absent from its ledger. Remove it; a namespace needing two reuse boundaries gets two "+
 			"Bindings", KVCacheDomainAnnotationKey)
@@ -126,8 +125,9 @@ func (r *PodKVCacheWebhook) resolve(ctx context.Context, pod *core.Pod) (*resolu
 // honoring a namespaced value would let a Pod draw on another namespace's grant by naming it.
 //
 // Provisioned and accounted, NOT enforced. The store is reached over a Service any Pod can dial, and
-// nothing derives a credential from this object - so a workload that knows another domain's name can
-// still reach it, and a container setting MOONCAKE_TENANT_ID itself keeps that value. Calling a
+// nothing derives a credential from this object. The injection path overwrites its tenant environment
+// variable from the Binding, but a workload that reaches the store without that path can still name a
+// domain it knows. Calling a
 // Binding an authorization point would claim a boundary this stack does not have. What it does bound
 // is which names exist at all: a multi-tenant master refuses one absent from its ledger, so an
 // unregistered name is not a way around a ceiling. Tracked as #168.

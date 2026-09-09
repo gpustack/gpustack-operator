@@ -87,17 +87,15 @@ type injectionRecord struct {
 	// instead - a Mooncake too old to accept the argument raises rather than dropping it, so the Pod
 	// stops rather than losing isolation quietly.
 	//
-	// Reading it, FALSE: this webhook wrote no tenant, and that has TWO causes which need different
-	// Bindings. Both must be checked, because acting on the first one alone registers a name the Pod
-	// never sends:
+	// Reading it, FALSE: this webhook wrote no tenant, and that has one of two causes which need
+	// different Bindings. Both must be checked, because acting on the first one alone registers a
+	// name the Pod never sends:
 	//   - Nothing rendered one - the engine forwards no tenant on the path we configure, or the
 	//     Binding declared no domain. Writes land on the store's own default tenant, so the pool
 	//     needs a Binding registering the literal name "default" or nothing can be written at all.
-	//   - The container already declared the tenant variable itself, and the precedence rule in
-	//     injectPod left it alone. Writes land on THAT name, not on "default", and the pool needs a
-	//     Binding registering it. Read the container's own environment to find which.
-	// Domain above says what the Binding declared, which in the second case is not what the
-	// container sends - so it does not separate them either.
+	//   - The environment vehicle is not used. Its tenant comes from the Binding even if the
+	//     container declared the same variable, so a missing rendered tenant means this engine does
+	//     not forward one.
 	TenantInjected bool `json:"tenantInjected"`
 }
 
@@ -118,21 +116,26 @@ func (r *PodKVCacheWebhook) injectPod(pod *core.Pod, res *resolution, out *injec
 		return err
 	}
 
-	// tenantApplied starts from what the renderer produced and is narrowed by what actually lands.
-	// The precedence rule below can drop any rendered variable, and for the environment vehicle the
-	// tenant is one of them - so a stamp built from the renderer's answer alone would claim a tenant
-	// while the container ran under the workload's own. The record has to describe the container.
-	tenantApplied := out.TenantInjected
 	for i := range out.Env {
-		// An injection never overrules a variable the workload declared for itself. This is the
-		// repository's existing rule and its existing helper; a second precedence invented here would
-		// mean two answers to one question.
-		if !deviceplugin.ContainerEnvDeclared(ctr, out.Env[i].Name) {
-			ctr.Env = append(ctr.Env, out.Env[i])
+		if out.TenantEnvName != "" && out.Env[i].Name == out.TenantEnvName {
+			found := false
+			for j := range ctr.Env {
+				if ctr.Env[j].Name == out.Env[i].Name {
+					ctr.Env[j] = out.Env[i]
+					found = true
+				}
+			}
+			if !found {
+				ctr.Env = append(ctr.Env, out.Env[i])
+			}
 			continue
 		}
-		if out.TenantEnvName != "" && out.Env[i].Name == out.TenantEnvName {
-			tenantApplied = false
+
+		// An injection never overrules a variable the workload declared for itself, except the tenant
+		// identity. The Binding is the source of that value, so yielding to the container would let it
+		// select a different reuse domain.
+		if !deviceplugin.ContainerEnvDeclared(ctr, out.Env[i].Name) {
+			ctr.Env = append(ctr.Env, out.Env[i])
 		}
 	}
 	for _, name := range []string{observabilityMetricsEnv, observabilityBandwidthEnv} {
@@ -157,14 +160,12 @@ func (r *PodKVCacheWebhook) injectPod(pod *core.Pod, res *resolution, out *injec
 		vehicle = "file"
 	}
 	record, err := json.Marshal(injectionRecord{
-		Binding:       pod.Annotations[KVCacheBindingAnnotationKey],
-		Engine:        string(res.Input.Engine),
-		EngineVersion: res.Isolation.EngineVersion,
-		Vehicle:       vehicle,
-		Domain:        res.Isolation.Domain,
-		// From what was applied, not from what was rendered. The two differ exactly when the
-		// workload declared the tenant variable itself and the precedence rule above left it alone.
-		TenantInjected: tenantApplied,
+		Binding:        pod.Annotations[KVCacheBindingAnnotationKey],
+		Engine:         string(res.Input.Engine),
+		EngineVersion:  res.Isolation.EngineVersion,
+		Vehicle:        vehicle,
+		Domain:         res.Isolation.Domain,
+		TenantInjected: out.TenantInjected,
 	})
 	if err != nil {
 		// UNREACHABLE, and left in rather than dropped because dropping it would mean ignoring an
