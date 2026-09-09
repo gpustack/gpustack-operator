@@ -317,8 +317,11 @@ func TestKVCachePoolBindingWebhook_ADuplicateDomainIsTrueOfOneMasterOnly(t *test
 	msg := err.Error()
 	assert.Contains(t, msg, "team-b/batch",
 		"the refusal names the Binding holding the domain, which is where the operator looks first")
-	assert.Contains(t, msg, "both Bindings' pools are served by mooncake-dram",
+	assert.Contains(t, msg, "both Bindings' pools name mooncake-dram",
 		"the shared backend is the fact the refusal turns on, so it is stated, not implied")
+	assert.NotContains(t, msg, "pools are served by",
+		"the intersection establishes that both pools NAME the backend; a pool naming several is "+
+			"served by none of them, so \"served by\" would assert what was never read")
 	assert.Contains(t, msg, "Two masters hold two ledgers",
 		"the admitted case is stated too, so nobody reads the refusal as cluster-wide")
 	assert.Contains(t, msg, "does not rescue a needed",
@@ -348,6 +351,38 @@ func TestKVCachePoolBindingWebhook_TheSameDomainOnAnotherMasterIsAdmitted(t *tes
 	_, err := wh.ValidateCreate(context.Background(), candidate)
 	require.NoError(t, err,
 		"a domain held on a DIFFERENT master collides with nothing: two ledgers, two key spaces")
+}
+
+// TestKVCachePoolBindingWebhook_APoolNamingNoBackendCollidesWithNothing pins the verdict when the
+// holder's pool names NO master: an explicitly empty spec.backends, which the API server accepts
+// because the field is required but carries no minItems. No master serves the holder, so its claim
+// contests nothing and the candidate is admitted.
+//
+// This is a POSITIVE BASELINE, not a new rule. The verdict was already this before poolBackends
+// normalized an empty list to nil — reached by intersecting against an empty set, one pool read
+// later.
+//
+// WHAT IT DOES AND DOES NOT CATCH, measured by removing the normalization and re-running: it stays
+// GREEN, because the normalization changes which path produces the verdict and not the verdict. So
+// it fails on a regression that turns an empty list into a collision, and on one that dereferences
+// it, and NOT on the normalization being dropped. Nothing here guards that; it is an efficiency
+// and a readable equivalence, and it is documented as such rather than tested.
+func TestKVCachePoolBindingWebhook_APoolNamingNoBackendCollidesWithNothing(t *testing.T) {
+	emptyPool := newKVCachePool()
+	emptyPool.Name = "empty-pool"
+	emptyPool.Spec.Backends = []string{}
+
+	holder := otherKVCachePoolBinding("default")
+	holder.Spec.PoolRef.Name = "empty-pool"
+
+	candidate := newKVCachePoolBinding()
+	candidate.Spec.Domain.Name = "default"
+
+	wh := newKVCachePoolBindingWebhook(newKVCachePool(), emptyPool, holder)
+	_, err := wh.ValidateCreate(context.Background(), candidate)
+	require.NoError(t, err,
+		"a holder whose pool names no backend is served by no master, so it holds the domain "+
+			"against nothing this candidate could collide with")
 }
 
 // TestKVCachePoolBindingWebhook_AClaimWhosePoolIsGoneCollidesWithNothing covers the holder whose
