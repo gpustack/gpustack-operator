@@ -36,6 +36,7 @@
 /certs
 .terraform
 !.claude
+!.agents
 .claude/settings.local.json
-.claude/skills/generated
-.claude/skills/gitnexus
+.agents/skills/generated
+.agents/skills/gitnexus
