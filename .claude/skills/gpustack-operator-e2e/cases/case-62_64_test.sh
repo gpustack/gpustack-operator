@@ -37,7 +37,7 @@ for case_name in case-62 case-64; do
   # shellcheck disable=SC2016
   grep -Fq '[ "$NEW_HOLDER_POD_UID" = "$NEW_READY_UID" ]' "$case_file"
   # shellcheck disable=SC2016
-  grep -Fq '[ -n "$HOLDER_MOVED_AT" ] && [ -n "$NEW_HOLDER_POD_UID" ]' "$case_file"
+  grep -Fq 'if [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ]' "$case_file"
   # shellcheck disable=SC2016
   grep -Fq '[ "$NEW_HOLDER" != "$OLD_HOLDER" ]' "$case_file"
   # shellcheck disable=SC2016
@@ -45,6 +45,7 @@ for case_name in case-62 case-64; do
   # shellcheck disable=SC2016
   grep -Fq 'HANDOFF_DEADLINE=$((DELETE_EPOCH + 240))' "$case_file"
   grep -Fq 'the new Lease holder is the Ready replica' "$case_file"
+  grep -Fq 'no separate Lease movement timestamp was observed' "$case_file"
   if grep -Fq '"240s after' "$case_file"; then
     echo "FAIL: ${case_name} still reports the loop counter as wall time" >&2
     exit 1

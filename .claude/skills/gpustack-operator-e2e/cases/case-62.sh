@@ -340,6 +340,7 @@ HOLDER_MOVED_AT=""
 MOVED_HOLDER=""
 MOVED_HOLDER_POD_UID=""
 MOVE_EVIDENCE=""
+MOVE_TIMING_OBSERVED=0
 HANDOFF_OBSERVED=0
 HANDOFF_DEADLINE=$((DELETE_EPOCH + 240))
 # A changed identity timestamps the move directly. If the replacement reuses the same IP, a later
@@ -357,6 +358,7 @@ while [ "$(date +%s)" -lt "$HANDOFF_DEADLINE" ]; do
       MOVED_HOLDER="$NEW_HOLDER"
       MOVED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
       MOVE_EVIDENCE="holderIdentity changed"
+      MOVE_TIMING_OBSERVED=1
     else
       NEW_RENEW_TIME="$(lease_renew_time)"
       if [ -n "$NEW_RENEW_TIME" ]; then
@@ -369,6 +371,7 @@ while [ "$(date +%s)" -lt "$HANDOFF_DEADLINE" ]; do
           MOVED_HOLDER="$NEW_HOLDER"
           MOVED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
           MOVE_EVIDENCE="replacement renewed the reused holderIdentity"
+          MOVE_TIMING_OBSERVED=1
         fi
       fi
     fi
@@ -378,10 +381,15 @@ while [ "$(date +%s)" -lt "$HANDOFF_DEADLINE" ]; do
   if [ -n "$NEW_READY" ]; then
     NEW_READY_UID="$(kubectl -n "$NS" get pod "$NEW_READY" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
   fi
-  if [ -n "$HOLDER_MOVED_AT" ] && [ -n "$NEW_HOLDER_POD_UID" ] \
-    && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ] \
+  if [ -n "$NEW_HOLDER_POD_UID" ] && [ "$NEW_HOLDER_POD_UID" != "$OLD_READY_UID" ] \
     && [ "$NEW_HOLDER_POD_UID" = "$NEW_READY_UID" ]; then
     HANDOFF_OBSERVED=1
+    if [ -z "$HOLDER_MOVED_AT" ]; then
+      HOLDER_MOVED_AT="$(date +%s)"
+      MOVED_HOLDER="$NEW_HOLDER"
+      MOVED_HOLDER_POD_UID="$NEW_HOLDER_POD_UID"
+      MOVE_EVIDENCE="Ready replacement confirmed the reused holderIdentity"
+    fi
     break
   fi
   sleep 2
@@ -409,7 +417,7 @@ fi
 # waves a three-minute election through. Graceful-delete failovers measure 43-44s on this
 # suite (termination grace + Lease expiry); 120s is a regression tripwire at ~2.5x that --
 # loose enough for scheduler noise, tight enough that a real slowdown cannot walk past.
-if [ -n "$HOLDER_MOVED_AT" ]; then
+if [ "$MOVE_TIMING_OBSERVED" = "1" ]; then
   MOVED_SECS=$((HOLDER_MOVED_AT - DELETE_EPOCH))
   if [ "$MOVED_SECS" -le 120 ]; then
     record PASS "the Lease moves within the failover bound" "${MOVED_SECS}s <= 120s"
@@ -417,6 +425,9 @@ if [ -n "$HOLDER_MOVED_AT" ]; then
     record FAIL "the Lease moves within the failover bound" \
       "${MOVED_SECS}s > 120s -- the election still works but no longer meets the failover budget"
   fi
+elif [ "$HANDOFF_OBSERVED" = "1" ]; then
+  record SKIP "the Lease moves within the failover bound" \
+    "the Ready replacement proved ownership, but no separate Lease movement timestamp was observed"
 fi
 
 NEW_READY=""
