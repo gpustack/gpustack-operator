@@ -132,7 +132,22 @@ variable "enable_instance_store_csi_driver" {
   # is exposing the raw /dev/nvmeNn1 devices for hostPath-style use, so this
   # defaults to false. Enable it only when workloads consume instance store
   # via the driver's CSI volumes.
-  description = "Install the aws-ec2-local-instance-store-csi-driver EKS addon (CSI-managed instance store; deletes unmanaged NVMe namespaces such as the raw nvme1n1)."
+  #
+  # THE DEFAULT IS A BREAKING CHANGE FOR A CLUSTER THAT PREDATES THIS VARIABLE.
+  # The addon used to be installed unconditionally, so a plain `terraform apply`
+  # over such a cluster REMOVES it and any PVC bound to its StorageClass loses
+  # its provisioner. Pass -var="enable_instance_store_csi_driver=true" to keep
+  # it. It is not defaulted to true instead, because the default that preserved
+  # the addon is the one that broke node_instance_store_count, and the whole
+  # point of the variable is that the two cannot both hold.
+  #
+  # NOTHING ENFORCES THE CONFLICT AT PLAN TIME. Setting this true together with
+  # node_instance_store_count > 0 is accepted and fails later, at node boot,
+  # when the driver deletes the namespace the mapping exists to expose. A
+  # cross-variable validation would catch it, and every validation in this
+  # module today reads only its own variable -- referring to another needs
+  # terraform >= 1.9, which this module does not yet declare a floor for.
+  description = "Install the aws-ec2-local-instance-store-csi-driver EKS addon (CSI-managed instance store; deletes unmanaged NVMe namespaces such as the raw nvme1n1). Removing it from a cluster that predates this variable also removes any PVC's provisioner bound to its StorageClass."
   type        = bool
   default     = false
 }
