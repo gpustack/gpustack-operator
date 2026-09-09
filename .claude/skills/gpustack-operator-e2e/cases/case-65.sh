@@ -62,9 +62,16 @@
 #              which write path the fix has to reach.
 #
 # Cleanup:     Trap deletes both KVCacheBackends (owner references cascade) and every probe Pod,
-#              and best-effort removes the files the store wrote under the host directory on
-#              each node. The directory itself — mount and all — is the deployer's and is left
-#              exactly as found. Idempotent, runs on pass AND fail, safe to re-run.
+#              and empties the host directory on each node. The directory itself — mount and all
+#              — is the deployer's and is left exactly as found. Idempotent, runs on pass AND
+#              fail, safe to re-run.
+#              THE WIPE IS NOT SCOPED TO THIS RUN'S WRITES, and cannot be: the store names its
+#              own files and this case's whole verdict is that it writes none, so there is no
+#              pattern to match on. THE PATH MUST THEREFORE BE EXCLUSIVE TO ONE case-65 RUN. Two
+#              concurrent runs against one directory, or any other tenant of the default path,
+#              lose their files to each other's teardown. There is no lock enforcing this.
+#              A second limit of the same shape: the node list is captured once, at start. A node
+#              that becomes Ready mid-run gets a member Pod writing to the tier and no wipe.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on
@@ -99,6 +106,17 @@ results() {
 
 NODES="$(kubectl get nodes --no-headers 2>/dev/null | awk '$2=="Ready" {print $1}')"
 
+# A probe Pod is named after the node it pins to, so the tag must be UNIQUE PER NODE. A slice of
+# the node name is not: chars 12-17 of ip-10-0-1-123.ec2.internal and of ip-10-0-2-123.ec2.internal
+# are both "23.ec2", and EKS hands out names of exactly that shape.
+#
+# The probes run SERIALLY and each is --rm, so a shared name does not normally race. It bites when
+# a previous Pod outlives its delete -- a timeout, an interrupt: the next `kubectl run` hits
+# AlreadyExists, the error goes to /dev/null, and that node contributes NO READING. On the ls
+# probe that is a node silently missing from the file count this case reads its verdict from, and
+# "no files anywhere" is exactly the answer a skipped node also produces.
+node_tag() { printf '%s' "$1" | cksum | cut -d' ' -f1; }
+
 teardown() {
   echo
   echo "[case-65] cleanup"
@@ -106,7 +124,7 @@ teardown() {
   kubectl -n "$NS" delete pod -l "gpustack-e2e-case=65-${SFX}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   # The directory is the deployer's; the files the store wrote into it are this case's.
   for node in $NODES; do
-    kubectl -n "$NS" run "case65-wipe-${SFX}-$(echo "$node" | cut -c12-17 | tr -d -)" --restart=Never --rm -i --quiet \
+    kubectl -n "$NS" run "case65-wipe-${SFX}-$(node_tag "$node")" --restart=Never --rm -i --quiet \
       --image=busybox:1.36 --overrides='{"spec":{"nodeName":"'"$node"'","containers":[{"name":"wipe","image":"busybox:1.36","command":["sh","-c","rm -rf /tier/* 2>/dev/null; true"],"volumeMounts":[{"name":"tier","mountPath":"/tier"}]}],"volumes":[{"name":"tier","hostPath":{"path":"'"$HOST_PATH"'","type":"Directory"}}]}}' \
       >/dev/null 2>&1 || true
   done
@@ -134,7 +152,7 @@ fi
 
 PREP_OK=1
 for node in $NODES; do
-  short="$(echo "$node" | cut -c12-17 | tr -d -)"
+  short="$(node_tag "$node")"
   out="$(kubectl -n "$NS" run "case65-pre-${SFX}-${short}" --restart=Never --rm -i --quiet \
     --image=busybox:1.36 --overrides='{"spec":{"nodeName":"'"$node"'","containers":[{"name":"pre","image":"busybox:1.36","command":["sh","-c","touch /tier/.case65-probe && rm /tier/.case65-probe && echo WRITABLE"],"volumeMounts":[{"name":"tier","mountPath":"/tier"}]}],"volumes":[{"name":"tier","hostPath":{"path":"'"$HOST_PATH"'","type":"Directory"}}]}}' \
     2>/dev/null)"
@@ -286,7 +304,7 @@ fi
 
 FOUND=""
 for node in $NODES; do
-  short="$(echo "$node" | cut -c12-17 | tr -d -)"
+  short="$(node_tag "$node")"
   out="$(kubectl -n "$NS" run "case65-ls-${SFX}-${short}" --restart=Never --rm -i --quiet \
     --image=busybox:1.36 --overrides='{"spec":{"nodeName":"'"$node"'","containers":[{"name":"ls","image":"busybox:1.36","command":["sh","-c","ls /tier | head -5; ls /tier | wc -l"],"volumeMounts":[{"name":"tier","mountPath":"/tier"}]}],"volumes":[{"name":"tier","hostPath":{"path":"'"$HOST_PATH"'","type":"Directory"}}]}}' \
     2>/dev/null)"
