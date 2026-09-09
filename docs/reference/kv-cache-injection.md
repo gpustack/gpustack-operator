@@ -344,11 +344,11 @@ registry, and vLLM's name is absent from that release's — and forwards nothing
 serving only SGLang workloads needs no such Binding: each Pod writes under its own domain, which its
 own Binding already registered.
 
-The `default` Binding is needed **per backend**, and per backend is what the uniqueness rule allows:
-a reuse domain is claimed per master, not per cluster, so every `KVCacheBackend` can hold its own
-`default` Binding. ([#166](https://github.com/gpustack/gpustack-operator/issues/166): the claim used
-to be cluster-wide, and a second backend's injected Pods then failed every write with
-`TENANT_NOT_REGISTERED`.)
+The `default` Binding is needed **per backend**, and that is what
+[One Binding, one reuse domain](../kv-cache/pool.md#one-binding-one-reuse-domain) allows: every
+`KVCacheBackend` holds its own. ([#166](https://github.com/gpustack/gpustack-operator/issues/166):
+the claim used to be cluster-wide, and a second backend's injected Pods then failed every write
+with `TENANT_NOT_REGISTERED`.)
 
 ### vLLM-Ascend and a non-`ascend` transport
 

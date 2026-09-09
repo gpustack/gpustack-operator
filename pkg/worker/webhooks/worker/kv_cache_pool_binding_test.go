@@ -317,7 +317,7 @@ func TestKVCachePoolBindingWebhook_ADuplicateDomainIsTrueOfOneMasterOnly(t *test
 	msg := err.Error()
 	assert.Contains(t, msg, "team-b/batch",
 		"the refusal names the Binding holding the domain, which is where the operator looks first")
-	assert.Contains(t, msg, "backend mooncake-dram serves both Bindings' pools",
+	assert.Contains(t, msg, "both Bindings' pools are served by mooncake-dram",
 		"the shared backend is the fact the refusal turns on, so it is stated, not implied")
 	assert.Contains(t, msg, "Two masters hold two ledgers",
 		"the admitted case is stated too, so nobody reads the refusal as cluster-wide")

@@ -201,9 +201,16 @@ func validateKVCachePoolBindingDomain(
 // pools; it never argued for uniqueness across pools on a DIFFERENT master, and the check now reads
 // both pools' backends and refuses only on a shared one.
 //
-// THE REFUSAL'S MESSAGE NAMES THE SHARED BACKEND, and that is load-bearing rather than thorough: the
-// check reads neither Binding's pool until it finds a name collision, so the message is the only
+// THE REFUSAL'S MESSAGE NAMES THE SHARED BACKENDS, and that is load-bearing rather than thorough:
+// the check reads neither Binding's pool until it finds a name collision, so the message is the only
 // place the operator learns which backend makes the two Bindings collide.
+//
+// Its wording is deliberately independent of HOW MANY are shared — "both Bindings' pools are served
+// by X" reads the same for one backend and for several, and no clause is inflected. Several is
+// reachable: a pool may NAME several backends, and the reconciler's BackendNotSingular reports that
+// in status rather than keeping it out of the spec, so admission does see it. A message with a
+// singular subject would then be ungrammatical on a path nothing rules out, and a plural branch
+// would be a second code path with no test that could fail on it.
 //
 // It races: two creates admitted against one cache state both pass. That is why F9's reconcile-time
 // refusal exists, and why this check is the one that produces a good message rather than the one that
@@ -244,11 +251,11 @@ func (r *KVCachePoolBindingWebhook) validateKVCachePoolBindingDomainIsUnclaimed(
 		}
 
 		return field.ErrorList{field.Duplicate(namePath, fmt.Sprintf(
-			"reuse domain %q is already registered by %s/%s, and backend %s serves both Bindings' "+
-				"pools: the two would share cache and overwrite each other's ceiling in that "+
-				"master's single ledger entry for this tenant. Two masters hold two ledgers, so a "+
+			"reuse domain %q is already registered by %s/%s, and both Bindings' pools are served "+
+				"by %s: the two would share cache and overwrite each other's ceiling in the "+
+				"single ledger entry a master keeps per tenant. Two masters hold two ledgers, so a "+
 				"Binding claiming this domain against a pool on another backend is fine — register "+
-				"a domain no other Binding on THIS master holds. That does not rescue a needed "+
+				"a domain no other Binding on a shared master holds. That does not rescue a needed "+
 				"\"default\" domain here: the engines that forward no tenant write under that "+
 				"literal name, so a Binding registering anything else registers a domain those "+
 				"Pods never write to",
@@ -267,7 +274,9 @@ func (r *KVCachePoolBindingWebhook) validateKVCachePoolBindingDomainIsUnclaimed(
 // BackendNotSingular refusal), but the intersection is still the safe answer — admission refuses
 // rather than reasoning about a shape its sibling webhook is already reporting.
 //
-// A pool that cannot be read is answered as sharing NOTHING. For this Binding's own pool the
+// A pool with no masters is answered as sharing NOTHING, and that covers a pool which cannot be
+// read as well as one which names no backend — poolBackends returns the same nil for both, because
+// both are the same answer to "which masters serve it". For this Binding's own pool the
 // refusal is the ceiling check's to make, one call later, and a domain verdict computed against a
 // missing pool would be noise ahead of it; for the holder's, a gone pool means no master serves the
 // holder, so its claim collides with nothing — the reconciler's per-master contested set agrees.
@@ -306,9 +315,14 @@ func (r *KVCachePoolBindingWebhook) poolsSharedMasters(
 	return shared, nil
 }
 
-// poolBackends reads one pool's spec.backends, distinguishing absent (nil, nil) from present. The
-// read falls back to the API server for the reason the ceiling check's does: a Binding created in
-// the same breath as its pool is ordinary, and a cache miss must not become a wrong scope verdict.
+// poolBackends reads one pool's spec.backends. A nil slice with no error means NO MASTER SERVES
+// THIS POOL, and it deliberately does not distinguish the two ways that happens — the pool does not
+// exist, or it exists and names no backend. Both are the same answer to the only question this
+// helper is asked, "which masters serve it", so separating them would produce two paths that a
+// caller has to merge again.
+//
+// The read falls back to the API server for the reason the ceiling check's does: a Binding created
+// in the same breath as its pool is ordinary, and a cache miss must not become a wrong scope verdict.
 func (r *KVCachePoolBindingWebhook) poolBackends(
 	ctx context.Context, name string,
 ) ([]string, error) {
