@@ -238,6 +238,16 @@ A second mutating webhook on Pods writes the client configuration an inference e
 - Both entries live in the single `gpustack-worker-mutation` configuration, whose name sorts before
   Kueue's on purpose. Their order within it is immaterial, which a test asserts by running both over
   one Pod in both orders.
+- Before it adds connector arguments, the KV cache webhook removes the transparent launcher prefixes
+  it knows and accepts only `vllm` or `python3 -m sglang.launch_server`. An unrecognised launcher or
+  launch form is refused, so a missing parser entry is visible at admission rather than producing a
+  Pod marked injected whose engine never receives the connector arguments.
+- A Pod author may set `kvcache.gpustack.ai/launch-args-forwarded: "true"` only to declare that an
+  unrecognised launcher, script, or command line hidden in one argument forwards appended arguments
+  to the engine. It does not exempt a shell command mode such as `sh -c`: admission knows that the
+  appended arguments become shell positional parameters and never reach the engine.
+- The injected record includes `launchProgram` and `launchArgsForwarded`, so a JSONPath query can show
+  the resolved executable and whether that author declaration admitted the launch.
 
 ## Update validation while an object is deleted
 

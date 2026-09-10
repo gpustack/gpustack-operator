@@ -276,17 +276,18 @@ func TestPodKVCacheInject_RefusesAShellWrapper(t *testing.T) {
 		{name: "-c in args", command: []string{"/bin/sh"}, args: []string{"-c", "vllm serve"}, refuse: true},
 		{name: "bash -lc bundle", command: []string{"/bin/bash", "-lc"}, args: []string{"vllm serve"}, refuse: true},
 		{name: "bare basename", command: []string{"sh", "-c"}, args: []string{"vllm serve"}, refuse: true},
-		// -c belongs to the program, not to a shell. Refusing these is the mistake this check must not make.
-		{name: "not a shell", command: []string{"myapp", "-c", "config.yaml"}, args: []string{"run"}},
+		// -c belongs to the program, not to a shell. This is refused because the program is not an
+		// engine this webhook can identify, not because it has a -c option.
+		{name: "not a shell", command: []string{"myapp", "-c", "config.yaml"}, args: []string{"run"}, refuse: true, wantMsg: "cannot identify"},
 		{name: "engine directly", command: []string{"vllm"}, args: []string{"serve", "--model", "x"}},
-		{name: "long option", command: []string{"/bin/sh", "--config"}, args: []string{"x"}},
+		{name: "long option", command: []string{"/bin/sh", "--config"}, args: []string{"x"}, refuse: true, wantMsg: "cannot identify"},
 		// A shell stops reading options at its first operand, so a -c AFTER the command file belongs
 		// to the file: `sh /app/run -c config` sets its $1, not the shell's command string. These
 		// must not carry the shell refusal - an earlier revision scanned the whole argv and did.
 		// The command file is deliberately not named *.sh here, so what these rows assert is where
 		// the scan STOPS; the pair below asserts what happens at the stop.
-		{name: "-c after the command file", command: []string{"/bin/sh", "/app/run"}, args: []string{"-c", "config"}},
-		{name: "options ended by --", command: []string{"/bin/sh", "--", "run"}, args: []string{"-c", "x"}},
+		{name: "-c after the command file", command: []string{"/bin/sh", "/app/run"}, args: []string{"-c", "config"}, refuse: true, wantMsg: "cannot identify"},
+		{name: "options ended by --", command: []string{"/bin/sh", "--", "run"}, args: []string{"-c", "x"}, refuse: true, wantMsg: "cannot identify"},
 		// The same two spellings with a script as the command file. `sh /app/run.sh` hands the shell
 		// the same unreadable file `./run.sh` runs directly, and the appended flag becomes that
 		// script's $1 either way - so refusing one spelling and admitting the other would only
@@ -339,7 +340,7 @@ func TestPodKVCacheInject_RefusesAShellWrapper(t *testing.T) {
 		{name: "an operand letter is per launcher", command: []string{"/sbin/tini", "-C", "sh", "-c"}, args: []string{"vllm serve"}, refuse: true},
 		// Resolving the prefix must not turn a direct launch into a refusal.
 		{name: "env then the engine", command: []string{"/usr/bin/env", "vllm"}, args: []string{"serve", "--model", "x"}},
-		{name: "env then a shell and its command file", command: []string{"env", "sh", "/app/run"}, args: []string{"-c", "config"}},
+		{name: "env then a shell and its command file", command: []string{"env", "sh", "/app/run"}, args: []string{"-c", "config"}, refuse: true, wantMsg: "cannot identify"},
 		{
 			name: "env then a shell and a script", command: []string{"env", "sh", "/app/run.sh"},
 			args: []string{"-c", "config"}, refuse: true, wantMsg: "forwards its arguments",
@@ -355,7 +356,7 @@ func TestPodKVCacheInject_RefusesAShellWrapper(t *testing.T) {
 		{name: "bash --init-file takes a file", command: []string{"/bin/bash", "--init-file", "/tmp/x", "-c"}, args: []string{"vllm serve"}, refuse: true},
 		// An ordinary long flag still must not swallow the token after it: --norc is operand-free, so
 		// what follows is the command file, and the -c after THAT belongs to that file.
-		{name: "operand-free long flag", command: []string{"/bin/bash", "--norc", "/app/run"}, args: []string{"-c", "config"}},
+		{name: "operand-free long flag", command: []string{"/bin/bash", "--norc", "/app/run"}, args: []string{"-c", "config"}, refuse: true, wantMsg: "cannot identify"},
 		// A multi-call binary names its applet in the first operand, so the shell is one token further
 		// along than argv[0]. Neither "busybox" nor "toybox" is a shell name, so an unresolved prefix
 		// here admits the launch outright.
@@ -460,6 +461,81 @@ func TestPodKVCacheInject_RefusesAShellWrapper(t *testing.T) {
 			}
 			assert.Contains(t, err.Error(), want,
 				"the message has to say WHY appending cannot work, or the fix is not obvious")
+		})
+	}
+}
+
+func TestPodKVCacheInject_LaunchResolution(t *testing.T) {
+	testCases := []struct {
+		name           string
+		command, args  []string
+		forwarding     string
+		refuse         bool
+		wantProgram    string
+		wantEscapeUsed bool
+		wantMsg        string
+	}{
+		{
+			name: "an unrecognised launcher", command: []string{"setsid"}, args: []string{"vllm", "serve"},
+			refuse: true, wantMsg: "cannot identify",
+		},
+		{
+			name: "a launcher with an unparsed positional operand", command: []string{"gosu", "worker", "sh", "-c"}, args: []string{"vllm serve"},
+			refuse: true, wantMsg: "cannot identify",
+		},
+		{
+			name: "an unrecognised launcher declared to forward", command: []string{"setsid"}, args: []string{"vllm", "serve"},
+			forwarding: "true", wantProgram: "setsid", wantEscapeUsed: true,
+		},
+		{
+			name: "an unparsed positional launcher declared to forward", command: []string{"gosu", "worker", "sh", "-c"}, args: []string{"vllm serve"},
+			forwarding: "true", wantProgram: "gosu", wantEscapeUsed: true,
+		},
+		{
+			name: "a script declared to forward", command: []string{"/app/entrypoint.sh"}, args: []string{"vllm", "serve"},
+			forwarding: "true", wantProgram: "entrypoint.sh", wantEscapeUsed: true,
+		},
+		{
+			name: "a command line hidden in one argument declared to forward", command: []string{"env", "-S", "vllm serve"},
+			forwarding: "true", wantEscapeUsed: true,
+		},
+		{
+			name: "a shell command mode declared to forward", command: []string{"sh", "-c"}, args: []string{"vllm serve"},
+			forwarding: "true", refuse: true, wantMsg: "positional parameters",
+		},
+		{
+			name: "the sglang launch form", command: []string{"/opt/venv/bin/python3"}, args: []string{"-m", "sglang.launch_server", "--model-path", "x"},
+			wantProgram: "python3",
+		},
+		{
+			name: "python is not the documented sglang interpreter", command: []string{"python"}, args: []string{"-m", "sglang.launch_server", "--model-path", "x"},
+			refuse: true, wantMsg: "cannot identify",
+		},
+		{
+			name: "the forwarding declaration has one accepted value", command: []string{"setsid"}, args: []string{"vllm", "serve"},
+			forwarding: "yes", refuse: true, wantMsg: "must be \"true\"",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := kvCachePod()
+			pod.Spec.Containers[0].Command = tc.command
+			pod.Spec.Containers[0].Args = tc.args
+			if tc.forwarding != "" {
+				pod.Annotations[KVCacheLaunchArgsForwardedAnnotationKey] = tc.forwarding
+			}
+
+			err := admit(t, pod)
+			if tc.refuse {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantMsg)
+				return
+			}
+			require.NoError(t, err)
+			record := stampOf(t, pod)
+			assert.Equal(t, tc.wantProgram, record.LaunchProgram)
+			assert.Equal(t, tc.wantEscapeUsed, record.LaunchArgsForwarded)
 		})
 	}
 }
@@ -576,7 +652,7 @@ func TestPodKVCacheInject_ValueVariableYieldsToTheWorkload(t *testing.T) {
 // repository's own experience, where an injection landed in a sidecar while the workload ran in the
 // main container, and the symptom was "artifacts present, feature absent".
 func TestPodKVCacheInject_ContainerSelection(t *testing.T) {
-	sidecar := core.Container{Name: "logs", Args: []string{"tail"}}
+	sidecar := core.Container{Name: "logs", Command: []string{"vllm"}, Args: []string{"serve"}}
 
 	t.Run("one container needs no annotation", func(t *testing.T) {
 		pod := kvCachePod()

@@ -52,6 +52,11 @@ const (
 	// while the workload runs elsewhere.
 	KVCacheContainerAnnotationKey = "kvcache." + systemname.LabelPrefix + "container"
 
+	// KVCacheLaunchArgsForwardedAnnotationKey lets a container author declare that an unrecognized
+	// launcher or script forwards appended arguments to the engine. It cannot override a launch the
+	// webhook already knows loses those arguments, such as a shell's command mode.
+	KVCacheLaunchArgsForwardedAnnotationKey = "kvcache." + systemname.LabelPrefix + "launch-args-forwarded"
+
 	// KVCacheDomainAnnotationKey is a REFUSED key, not an unrecognized one. The reuse domain comes
 	// from the Binding and only from the Binding, so a Pod that names one here is rejected rather
 	// than silently ignored - a manifest written against an escape hatch that does not exist should
