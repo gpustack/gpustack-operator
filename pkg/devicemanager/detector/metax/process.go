@@ -19,8 +19,10 @@ var _ device.AcceleratorProcessDetector = (*metax)(nil)
 // processes hold each GPU and how much memory of it, so the device manager can attribute a share of
 // a shared card to the Instance holding it.
 //
-// UNVERIFIED ON HARDWARE: no MetaX GPU was available while writing this adapter; the conversion
-// below is exercised only against recorded MXSML payloads in process_test.go.
+// Verified on hardware against a real allocating process and mx-smi --show-process. The first
+// hardware run found the row-matching id passed here was DeviceInfo.GpuId (the physical id) where
+// ProcessGpuInfo.GpuId is a sequence index, so every row was silently dropped and every card read
+// back as idle; see acceleratorProcessesOf's doc for the fix.
 func (in *metax) MonitorAcceleratorProcesses(
 	noPciCheck bool, deviceIDs sets.Set[string],
 ) (_ device.AcceleratorProcessesGroup, err error) {
@@ -87,7 +89,7 @@ func (in *metax) MonitorAcceleratorProcesses(
 
 		rows, rowsRet := dev.GetProcessInfo()
 
-		procs := acceleratorProcessesOf(uuid, info.GpuId, rows, rowsRet)
+		procs := acceleratorProcessesOf(uuid, uint32(i), rows, rowsRet)
 		if procs.MemoryReason != device.AcceleratorProcessReasonNone {
 			logger.V(3).Info("no per-process memory", "reason", procs.MemoryReason, "return", rowsRet)
 		}
@@ -129,11 +131,15 @@ func unreadAcceleratorProcesses(
 // acceleratorProcessesOf turns one device's MXSML per-device process answer into the rows the
 // aggregator consumes, in MXSML's own units and without flattening its semantics.
 //
-// Each row names every GPU the process is using, not only this one, so the row matching this
-// device's own GpuId is what is read; a process the query names that carries no entry for this
-// device is not reported for it. CoresReason is always unsupported: MXSML carries no per-process
-// utilization query at all, so per-process compute is not merely zero on this hardware, it is
-// unavailable — a figure this adapter must never claim.
+// Each row names every GPU the process is using, not only this one, so the row matching gpuID is
+// what is read; a process the query names that carries no entry for this device is not reported
+// for it. gpuID is the device's sequence index (GetDeviceHandleByIndex's i), the same id space
+// ProcessGpuInfo.GpuId carries — confirmed on hardware to differ from DeviceInfo.GpuId, which is
+// the physical id (matches sysfs phy_gpu_id) and never matches a process row.
+//
+// CoresReason is always unsupported: MXSML carries no per-process utilization query at all, so
+// per-process compute is not merely zero on this hardware, it is unavailable — a figure this
+// adapter must never claim.
 func acceleratorProcessesOf(
 	id string, gpuID uint32, rows []mxsml.ProcessInfo_v3, rowsRet mxsml.Return,
 ) device.AcceleratorProcesses {

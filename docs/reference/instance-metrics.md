@@ -174,7 +174,7 @@ vary by what the vendor exposes — and by whether we have been able to run it a
 | Hygon | ✅ | ⚠️ driver-dependent logical · ✅ MIG partition | ✅ logical · ✅ MIG partition |
 | Cambricon | ✅ | ✅ | — |
 | Iluvatar | ✅ | — | — |
-| Metax | ✅ | — | — |
+| Metax | ✅ | — | ✅ |
 
 - **A `—` in one of the first two columns is a capability, not a fault.** The vendor's library
   offers no entry point for that figure on that backend, so the field is permanently absent there and
@@ -208,6 +208,11 @@ vary by what the vendor exposes — and by whether we have been able to run it a
   while its idle siblings on the same card read 0. That is why its `coresUtilizationPercent` is a
   plain `✅` under partitioning while the logical column beside it stays hardware-dependent — the two
   come from different entry points, and the partition's does not go through `cu_occupancy`.
+- **On MetaX, memory was cross-checked against the vendor's own tool.** A MACA sample process
+  holding an allocation on a C600-A read `memoryUsedMiB` 16 here — the same figure the vendor's
+  `mx-smi --show-process` reported for that PID. Compute has no second source to check against:
+  MXSML serves no per-process utilization query at all, the same gap Ascend's compute has, so
+  `coresUtilizationPercent` reports `unsupported` rather than a number nobody measured.
 - **A partition is addressed by the identifier its allocation recorded**, and by nothing else, on
   every partitioning manufacturer. The alternative is translating the recorded profile name back into
   a driver profile id, which walks the vendor's whole profile catalog — 17 ids on NVIDIA, 85 on

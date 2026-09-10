@@ -607,10 +607,12 @@ type subdevKey struct {
 // sysfsSGPUManager is the real sgpuManager. It reads and writes the MetaX driver's
 // sysfs sgpu controls under root (default /sys/bus/pci/devices).
 //
-// The exact sysfs schema is a documented hardware open question (see the spec): the
-// paths below follow the manufacturer documentation but are unvalidated on real hardware,
-// which is why every write goes through this thin seam so only this type changes when
-// the layout is confirmed. All unit tests use a fake manager, not this impl.
+// The node names below (model, sgpu/sched_class, sgpu/create, sgpu/remove) were confirmed
+// by hand on real hardware. What stays a documented hardware open question (see the spec)
+// is index assignment -- see Create's own comment -- which is why every write still goes
+// through this thin seam so only this type changes if that turns out to differ. Unit tests
+// exercise both this real implementation directly (Test_sysfsSGPUManager) and a fake
+// manager (the allocation/reclaim tests).
 type sysfsSGPUManager struct {
 	root string
 }
@@ -644,8 +646,12 @@ func (m *sysfsSGPUManager) Create(bdf string, index int, vramMiB int64, alias st
 	return os.WriteFile(filepath.Join(m.cardDir(bdf), "create"), []byte(strconv.FormatInt(vramMiB, 10)), 0o600)
 }
 
+// Remove reclaims a subdevice through the driver's "remove" control node. Confirmed on
+// hardware: the driver exposes no "destroy" node at all -- a write there always answers
+// os.IsNotExist, which this function's own IsNotExist tolerance would read as an
+// already-reclaimed slice and silently do nothing.
 func (m *sysfsSGPUManager) Remove(bdf string, index int) error {
-	err := os.WriteFile(filepath.Join(m.cardDir(bdf), "destroy"), []byte(strconv.Itoa(index)), 0o600)
+	err := os.WriteFile(filepath.Join(m.cardDir(bdf), "remove"), []byte(strconv.Itoa(index)), 0o600)
 	if os.IsNotExist(err) {
 		return nil
 	}

@@ -72,9 +72,9 @@ func (l *MXSML) GetDriverVersion() (string, Return) {
 	}
 
 	version := make([]byte, VERSION_INFO_SIZE)
-	var versionLen uint32
+	versionLen := uint32(len(version))
 	ret := mxSmlGetDeviceVersion(0, Version_Driver, &version[0], &versionLen)
-	return string(version[:versionLen]), ret
+	return string(version[:clen(version)]), ret
 }
 
 // GetMacaVersion retrieves the version of the MACA version.
@@ -84,9 +84,9 @@ func (l *MXSML) GetMacaVersion() (string, Return) {
 	}
 
 	version := make([]byte, VERSION_INFO_SIZE)
-	var versionLen uint32
+	versionLen := uint32(len(version))
 	ret := mxSmlGetMacaVersion(&version[0], &versionLen)
-	return string(version[:versionLen]), ret
+	return string(version[:clen(version)]), ret
 }
 
 // IsSuccess returns true if the Return value indicates success.
