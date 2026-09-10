@@ -824,10 +824,22 @@ func TestPodKVCacheInject_NoCommandNoArgsIsRefused(t *testing.T) {
 	err := admit(t, pod)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "discard the image's CMD")
-	assert.Contains(t, err.Error(), "copy the image's launch arguments into args",
-		"the message names which field to fill, because command is the wrong one")
-	assert.Contains(t, err.Error(), "ENTRYPOINT",
-		"and says why command is wrong: it overrides the vendor runtime's entrypoint too")
+	assert.Contains(t, err.Error(), "Set command to the engine executable",
+		"the message names both fields, because args without command cannot be admitted")
+	assert.Contains(t, err.Error(), "overrides the image ENTRYPOINT",
+		"and says why the command must start the engine directly")
+}
+
+func TestCheckLaunchArgs_AscendRuntimeMismatchNamesTheDerivedRuntime(t *testing.T) {
+	_, err := checkLaunchArgs(&core.Container{
+		Name:    "server",
+		Command: []string{"python3"},
+		Args:    []string{"-m", "sglang.launch_server"},
+	}, inject.EngineVLLMAscend, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `selected cache runtime is "vllm-ascend"`)
+	assert.NotContains(t, err.Error(), "annotation \"kvcache.gpustack.ai/engine\" declares")
 }
 
 // TestPodKVCacheInject_AnnotationVocabulary. A typo is the case this exists for: an ignored

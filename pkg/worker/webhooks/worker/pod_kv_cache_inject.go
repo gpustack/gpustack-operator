@@ -327,9 +327,9 @@ func checkLaunchArgs(ctr *core.Container, engine inject.Engine, annotations map[
 	if len(ctr.Command) == 0 && len(ctr.Args) == 0 {
 		return launchCheck{}, fmt.Errorf("container %q declares neither command nor args, so it runs the image's own "+
 			"ENTRYPOINT and CMD. Both engines need a flag on the command line, and setting args while "+
-			"command is unset makes Kubernetes discard the image's CMD - copy the image's launch "+
-			"arguments into args, leaving command unset. Do not move them into command: that would "+
-			"override the ENTRYPOINT too, which on these images initializes the vendor runtime",
+			"command is unset makes Kubernetes discard the image's CMD. Set command to the engine executable "+
+			"and copy the image's launch arguments into args; this overrides the image ENTRYPOINT too, so "+
+			"the command must start the engine directly",
 			ctr.Name)
 	}
 	declaresForwarding, err := declaresLaunchArgsForwarding(annotations)
@@ -360,9 +360,9 @@ func checkLaunchArgs(ctr *core.Container, engine inject.Engine, annotations map[
 	program := path.Base(argv[0])
 	if resolvedEngine, recognised := launchEngine(argv); recognised {
 		if !launchMatchesEngine(resolvedEngine, engine) {
-			return launchCheck{}, fmt.Errorf("container %q resolves to the %q engine, but annotation %q "+
-				"declares %q. The injected configuration must match the engine that starts; correct the "+
-				"annotation or launch that engine directly", ctr.Name, resolvedEngine, KVCacheEngineAnnotationKey, engine)
+			return launchCheck{}, fmt.Errorf("container %q resolves to the %q engine, but the selected cache "+
+				"runtime is %q. The injected configuration must match the engine that starts; correct the "+
+				"engine or manufacturer annotation, or launch that engine directly", ctr.Name, resolvedEngine, engine)
 		}
 		return launchCheck{program: program}, nil
 	}
@@ -392,17 +392,20 @@ func launchEngine(argv []string) (inject.Engine, bool) {
 	case "vllm":
 		return inject.EngineVLLM, true
 	case "python3":
-		return inject.EngineSGLang, len(argv) >= 3 && argv[1] == "-m" && argv[2] == "sglang.launch_server"
+		if len(argv) >= 3 && argv[1] == "-m" && argv[2] == "sglang.launch_server" {
+			return inject.EngineSGLang, true
+		}
+		return "", false
 	default:
 		return "", false
 	}
 }
 
-func launchMatchesEngine(launchEngine, declaredEngine inject.Engine) bool {
-	if launchEngine == inject.EngineVLLM {
+func launchMatchesEngine(resolvedEngine, declaredEngine inject.Engine) bool {
+	if resolvedEngine == inject.EngineVLLM {
 		return declaredEngine == inject.EngineVLLM || declaredEngine == inject.EngineVLLMAscend
 	}
-	return launchEngine == declaredEngine
+	return resolvedEngine == declaredEngine
 }
 
 // shellNames are the interpreters for which "-c" means "the next argument is the whole script".
@@ -522,10 +525,10 @@ func checkShellWrapper(ctr *core.Container, argv []string, insideOneString, decl
 // the script directly, `sh /app/run.sh` hands the same file to an interpreter, and the appended flag
 // becomes that script's $1 either way.
 //
-// A .sh suffix is a convention rather than a guarantee, so this is neither sound nor complete: a
-// script without the suffix is admitted, and a program that merely ends in .sh would be refused.
-// Reading the file is not available at admission, and the suffix is the only signal on the command
-// line.
+// A .sh suffix is a convention rather than a guarantee, so a program that merely ends in .sh would
+// be refused. A suffix-less script passes this helper, then the launch check refuses its unrecognized
+// program unless its author declares forwarding. Reading the file is not available at admission, and
+// the suffix is the only script-specific signal on the command line.
 func scriptByPath(ctrName, program string, declaresForwarding bool) error {
 	if !strings.HasSuffix(program, ".sh") {
 		return nil
