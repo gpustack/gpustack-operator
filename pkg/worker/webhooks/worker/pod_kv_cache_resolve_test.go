@@ -70,7 +70,11 @@ func kvCachePod() *core.Pod {
 				KVCacheEngineAnnotationKey:  "vllm",
 			},
 		},
-		Spec: core.PodSpec{Containers: []core.Container{{Name: "server", Args: []string{"serve"}}}},
+		Spec: core.PodSpec{Containers: []core.Container{{
+			Name:    "server",
+			Command: []string{"vllm"},
+			Args:    []string{"serve"},
+		}}},
 	}
 }
 

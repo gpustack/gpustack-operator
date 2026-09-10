@@ -308,7 +308,7 @@ An injected Pod carries `kvcache.gpustack.ai/injected`, a JSON object recording 
 ```console
 $ kubectl get pod chat-0 -o jsonpath='{.metadata.annotations.kvcache\.gpustack\.ai/injected}'
 {"binding":"chat","engine":"vllm","engineVersion":"v0.25.1","vehicle":"file",
- "domain":"team-a-chat","tenantInjected":false}
+ "domain":"team-a-chat","tenantInjected":false,"launchProgram":"vllm","launchArgsForwarded":false}
 ```
 
 | Field | What it answers |
@@ -318,6 +318,8 @@ $ kubectl get pod chat-0 -o jsonpath='{.metadata.annotations.kvcache\.gpustack\.
 | `vehicle` | `file` or `environment` |
 | `domain` | the reuse domain the Binding declared |
 | `tenantInjected` | whether a tenant was written into the container — an **action**, not an outcome |
+| `launchProgram` | the executable left after transparent launcher prefixes were removed; empty when there was no submitted command to resolve |
+| `launchArgsForwarded` | whether the author's `kvcache.gpustack.ai/launch-args-forwarded: "true"` declaration admitted a launch the webhook could not identify as an engine entry point |
 
 `vehicle` is on the record because it turns one otherwise-silent outcome into a one-line check: a Pod
 stamped `"vehicle":"environment"` whose cache stays cold is a Pod whose own

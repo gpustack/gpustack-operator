@@ -317,6 +317,7 @@ var acceptedAnnotations = []string{
 	KVCacheManufacturerAnnotationKey,
 	KVCacheRoleAnnotationKey,
 	KVCacheContainerAnnotationKey,
+	KVCacheLaunchArgsForwardedAnnotationKey,
 }
 
 // checkAnnotationVocabulary refuses a key in this webhook's namespace that it does not accept.

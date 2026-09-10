@@ -97,6 +97,14 @@ type injectionRecord struct {
 	//     container declared the same variable, so a missing rendered tenant means this engine does
 	//     not forward one.
 	TenantInjected bool `json:"tenantInjected"`
+
+	// LaunchProgram is the executable left after transparent launchers are removed. An empty value
+	// means the launcher had no submitted command to resolve.
+	LaunchProgram string `json:"launchProgram"`
+
+	// LaunchArgsForwarded records whether the author declaration admitted a launch this webhook
+	// could not identify as an engine entry point.
+	LaunchArgsForwarded bool `json:"launchArgsForwarded"`
 }
 
 // injectPod applies a rendered Result to one container of the Pod, and stamps what it did.
@@ -112,7 +120,8 @@ func (r *PodKVCacheWebhook) injectPod(pod *core.Pod, res *resolution, out *injec
 	if err = checkOwnedKeys(pod, ctr, out); err != nil {
 		return err
 	}
-	if err = checkLaunchArgs(ctr); err != nil {
+	launch, err := checkLaunchArgs(ctr, pod.Annotations)
+	if err != nil {
 		return err
 	}
 
@@ -160,16 +169,18 @@ func (r *PodKVCacheWebhook) injectPod(pod *core.Pod, res *resolution, out *injec
 		vehicle = "file"
 	}
 	record, err := json.Marshal(injectionRecord{
-		Binding:        pod.Annotations[KVCacheBindingAnnotationKey],
-		Engine:         string(res.Input.Engine),
-		EngineVersion:  res.Isolation.EngineVersion,
-		Vehicle:        vehicle,
-		Domain:         res.Isolation.Domain,
-		TenantInjected: out.TenantInjected,
+		Binding:             pod.Annotations[KVCacheBindingAnnotationKey],
+		Engine:              string(res.Input.Engine),
+		EngineVersion:       res.Isolation.EngineVersion,
+		Vehicle:             vehicle,
+		Domain:              res.Isolation.Domain,
+		TenantInjected:      out.TenantInjected,
+		LaunchProgram:       launch.program,
+		LaunchArgsForwarded: launch.argsForwarded,
 	})
 	if err != nil {
 		// UNREACHABLE, and left in rather than dropped because dropping it would mean ignoring an
-		// error return. injectionRecord is six strings and a bool, and encoding/json fails only on
+		// error return. injectionRecord contains only strings and booleans, and encoding/json fails only on
 		// values it cannot represent - channels, functions, cyclic references, NaN and infinities -
 		// none of which this struct can hold. The branch is therefore not covered by any test, and
 		// writing one would mean adding a field that can fail to a record that has no use for it.
@@ -307,19 +318,70 @@ func checkOwnedKeys(pod *core.Pod, ctr *core.Container, out *inject.Result) erro
 // this webhook appends anything. The container's author dropped it, not the injection. That row is
 // also why the refusal below fires on neither-declared rather than on args-empty - a container with
 // only a command is complete, and appending to its args is the ordinary case this webhook is for.
-func checkLaunchArgs(ctr *core.Container) error {
-	if err := checkShellWrapper(ctr); err != nil {
-		return err
+type launchCheck struct {
+	program       string
+	argsForwarded bool
+}
+
+func checkLaunchArgs(ctr *core.Container, annotations map[string]string) (launchCheck, error) {
+	if len(ctr.Command) == 0 && len(ctr.Args) == 0 {
+		return launchCheck{}, fmt.Errorf("container %q declares neither command nor args, so it runs the image's own "+
+			"ENTRYPOINT and CMD. Both engines need a flag on the command line, and setting args while "+
+			"command is unset makes Kubernetes discard the image's CMD - copy the image's launch "+
+			"arguments into args, leaving command unset. Do not move them into command: that would "+
+			"override the ENTRYPOINT too, which on these images initializes the vendor runtime",
+			ctr.Name)
 	}
-	if len(ctr.Command) > 0 || len(ctr.Args) > 0 {
-		return nil
+	declaresForwarding, err := declaresLaunchArgsForwarding(annotations)
+	if err != nil {
+		return launchCheck{}, err
 	}
-	return fmt.Errorf("container %q declares neither command nor args, so it runs the image's own "+
-		"ENTRYPOINT and CMD. Both engines need a flag on the command line, and setting args while "+
-		"command is unset makes Kubernetes discard the image's CMD - copy the image's launch "+
-		"arguments into args, leaving command unset. Do not move them into command: that would "+
-		"override the ENTRYPOINT too, which on these images initializes the vendor runtime",
-		ctr.Name)
+	if err := checkShellWrapper(ctr, declaresForwarding); err != nil {
+		return launchCheck{}, err
+	}
+
+	argv, insideOneString := shellLaunchArgv(slices.Concat(ctr.Command, ctr.Args))
+	if insideOneString {
+		return launchCheck{argsForwarded: declaresForwarding}, nil
+	}
+	if len(argv) == 0 {
+		return launchCheck{}, nil
+	}
+
+	program := path.Base(argv[0])
+	if isEngineLaunch(argv) {
+		return launchCheck{program: program}, nil
+	}
+	if declaresForwarding {
+		return launchCheck{program: program, argsForwarded: true}, nil
+	}
+	return launchCheck{}, fmt.Errorf("container %q resolves to %q, which this webhook cannot identify "+
+		"as a supported engine launch. Launch the engine directly - put its executable in command and "+
+		"its arguments in args - or set annotation %q to %q only if this launcher forwards appended "+
+		"arguments to the engine", ctr.Name, program, KVCacheLaunchArgsForwardedAnnotationKey, "true")
+}
+
+func declaresLaunchArgsForwarding(annotations map[string]string) (bool, error) {
+	value, declared := annotations[KVCacheLaunchArgsForwardedAnnotationKey]
+	if !declared {
+		return false, nil
+	}
+	if value != "true" {
+		return false, fmt.Errorf("annotation %q must be %q when declared: it is an author statement "+
+			"that the launch forwards appended arguments to the engine", KVCacheLaunchArgsForwardedAnnotationKey, "true")
+	}
+	return true, nil
+}
+
+func isEngineLaunch(argv []string) bool {
+	switch path.Base(argv[0]) {
+	case "vllm":
+		return true
+	case "python3":
+		return len(argv) >= 3 && argv[1] == "-m" && argv[2] == "sglang.launch_server"
+	default:
+		return false
+	}
 }
 
 // shellNames are the interpreters for which "-c" means "the next argument is the whole script".
@@ -339,11 +401,9 @@ var shellNames = []string{"sh", "bash", "dash", "ash", "zsh", "ksh"}
 // unreadable file the same appended flag, so refusing one and admitting the other would only teach
 // the spelling that gets through.
 //
-// WHAT THIS DOES NOT DO is decide whether the launcher enumeration below is complete, and no
-// reading of it should be taken as evidence either way. A launcher this parser has never heard of
-// still resolves to itself and is still admitted, exactly as before, because an unrecognized
-// launcher is indistinguishable from an ordinary program by construction. That gap is the one
-// tracked as #169; failing closed narrows the OTHER two, which are detectable.
+// The launcher enumeration below is not complete. A launcher this parser has never heard of resolves
+// to itself, and the engine check then refuses it unless its author declares that it forwards appended
+// arguments. That turns an omitted launcher into a visible refusal rather than a silent admission.
 //
 // After `sh -c <script>`, everything further is a POSITIONAL PARAMETER: the flag becomes $0 and its
 // value $1, and the shell never passes either to what it runs. Measured, not assumed -
@@ -364,9 +424,12 @@ var shellNames = []string{"sh", "bash", "dash", "ash", "zsh", "ksh"}
 // option for ordinary programs - `command: ["myapp", "-c", "config.yaml"]` is common and has no
 // problem here. Requiring argv[0] to be a shell narrows the refusal to the case where the behavior
 // is guaranteed by POSIX rather than inferred from an absence of counter-examples.
-func checkShellWrapper(ctr *core.Container) error {
+func checkShellWrapper(ctr *core.Container, declaresForwarding bool) error {
 	argv, insideOneString := shellLaunchArgv(slices.Concat(ctr.Command, ctr.Args))
 	if insideOneString {
+		if declaresForwarding {
+			return nil
+		}
 		return fmt.Errorf("container %q hides its command line inside a single argument, so this "+
 			"webhook cannot tell what would run or whether appending to args would reach it. "+
 			"Launch the engine directly - put its executable in command and its arguments in args - "+
@@ -380,7 +443,7 @@ func checkShellWrapper(ctr *core.Container) error {
 		// A launcher can be an arbitrary script, and its transparency lives in its body rather than
 		// on the command line. No enumeration of launchers closes that: this is not a launcher the
 		// parser has not heard of, it is one whose behavior admission cannot read at all.
-		return scriptByPath(ctr.Name, program)
+		return scriptByPath(ctr.Name, program, declaresForwarding)
 	}
 	// A shell stops reading options at its first operand, and so does this scan: in
 	// `sh /app/run.sh -c config` the -c belongs to the SCRIPT rather than to the shell, so it is not
@@ -392,13 +455,13 @@ func checkShellWrapper(ctr *core.Container) error {
 		case arg == "--":
 			// Options ended without -c; whatever follows is the command file.
 			if i+1 < len(argv) {
-				return scriptByPath(ctr.Name, path.Base(argv[i+1]))
+				return scriptByPath(ctr.Name, path.Base(argv[i+1]), declaresForwarding)
 			}
 
 			return nil
 		case len(arg) < 2 || (arg[0] != '-' && arg[0] != '+'):
 			// The command file itself. "-" alone is an operand too, not an option bundle.
-			return scriptByPath(ctr.Name, path.Base(arg))
+			return scriptByPath(ctr.Name, path.Base(arg), declaresForwarding)
 		case isShellCommandFlag(arg):
 			// Fall through to the refusal. Checked BEFORE the operand rules below, because a bundle can
 			// be both - `-co` is command mode whose -o still takes an operand.
@@ -443,8 +506,11 @@ func checkShellWrapper(ctr *core.Container) error {
 // script without the suffix is admitted, and a program that merely ends in .sh would be refused.
 // Reading the file is not available at admission, and the suffix is the only signal on the command
 // line.
-func scriptByPath(ctrName, program string) error {
+func scriptByPath(ctrName, program string, declaresForwarding bool) error {
 	if !strings.HasSuffix(program, ".sh") {
+		return nil
+	}
+	if declaresForwarding {
 		return nil
 	}
 
@@ -491,11 +557,10 @@ type launcherGrammar struct {
 // the process that reads -c. Their grammar is options-then-command, which is what makes them
 // resolvable; a launcher taking a positional operand first is not (see shellLaunchArgv).
 //
-// This map, its per-launcher option letters, and shellOperandLong below are three ENUMERATIONS, and
+// This map, its per-launcher option letters, and shellOperandLong below are three enumerations, and
 // none of them is closed: which programs are launchers, which of their options consume a token, and
-// which of a shell's do. Four rounds of review each found one more. An entry missing here resolves
-// to the wrong program and ADMITS the container, so the failure is silent. Tracked as #169, which
-// records the unbounded denominator rather than any single gap.
+// which of a shell's do. An entry missing here resolves to its launcher, and the engine check refuses
+// that program unless its author declares that it forwards appended arguments.
 //
 // Each entry is copied from that program's own option list rather than generalised, because a wrong
 // entry hides the shell in EITHER direction: assume too few operands and `env -C /tmp sh -c ...`
@@ -550,11 +615,11 @@ var shellOperandLong = []string{"--rcfile", "--init-file"}
 // is not a fourth special case to add - it says the first word is simply not always the program. So
 // the prefix is RESOLVED rather than enumerated against.
 //
-// SCOPE, stated because the gap is real. One shape is not resolved, and it is admitted and injected
-// - the same outcome as before this function existed, not a new one: a launcher whose own first
-// positional operand is an ARGUMENT rather than the program, as in `gosu USER sh -c` or
-// `chroot DIR sh -c`. Nothing here distinguishes that operand from a command. (A multi-call binary's
-// applet name is not this case - see busybox below.)
+// SCOPE, stated because the gap is real. One shape is not resolved: a launcher whose own first
+// positional operand is an argument rather than the program, as in `gosu USER sh -c` or
+// `chroot DIR sh -c`. Nothing here distinguishes that operand from a command. It remains as argv[0]
+// and is refused by the engine check unless its author declares forwarding. A multi-call binary's
+// applet name is not this case; see busybox below.
 //
 // insideOneString reports that the launcher was handed a command line inside a single token this
 // parser cannot look into, which is `env -S "sh -c ..."` and its spellings. The resolved argv is nil

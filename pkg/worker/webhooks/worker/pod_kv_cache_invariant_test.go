@@ -144,6 +144,7 @@ func TestPodWebhooks_AreOrderIndependent(t *testing.T) {
 			names.memPct: "50",
 		})
 		pod.Namespace = "team-a"
+		pod.Spec.Containers[0].Command = []string{"vllm"}
 		pod.Spec.Containers[0].Args = []string{"serve"}
 		pod.Labels[KVCacheInjectLabelKey] = KVCacheInjectLabelValue
 		pod.Annotations = map[string]string{
