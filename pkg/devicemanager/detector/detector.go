@@ -419,6 +419,12 @@ func (d *Detector) Start(ctx context.Context) error {
 // only account of it available here. Taking a stored group for an owned manufacturer would resurrect
 // hardware this pass just found to be gone.
 //
+// This merge has only run over fixtures, not the shape it exists for: two manufacturer DaemonSets
+// writing one NodeFeature on a node with accelerators from both manufacturers. Fixture tests cover
+// this function's logic, not whether two writers converge; another fixture or a second DaemonSet
+// that detects nothing cannot produce the stored group owned by the other pass. Exercising that
+// behavior needs both manufacturers' accelerators on one node.
+//
 // The result is a fresh slice whenever it differs from own, so the extra entries cannot be written
 // into own's spare capacity — the caller publishes own as this node's detected inventory.
 func nodeWideDeviceGroups(

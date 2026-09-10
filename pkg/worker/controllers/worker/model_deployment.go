@@ -346,6 +346,14 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			// few seconds of store unavailability would delete every replica of every deployment on
 			// that pool, and each one then reloads its weights. The blip becomes the outage.
 			//
+			// The cost is that this also withholds an unrelated spec change until the connection
+			// returns. A more precise design would keep a base hash without the connector and a
+			// separate connector fingerprint: spec edits would roll from the base hash, connector
+			// changes would compare the fingerprint, and only that comparison would be skipped here.
+			// It was deliberately not built because it needs two annotations and a one-time rebuild of
+			// every replica on upgrade, instead of this one-line guard. If a user reports that a spec
+			// edit did nothing during an outage, that split is the next design to evaluate.
+			//
 			// Leaving them alone is also what this design already decided for the neighboring case:
 			// an admin deleting the Binding leaves running Pods running, because tearing down a
 			// serving deployment because an admin object vanished is worse than serving without a
