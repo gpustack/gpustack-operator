@@ -34,13 +34,9 @@ LIB="$(cd "$(dirname "$0")/../../_e2e-lib/scripts" && pwd)"
 # chart's own `worker.fullname` in shell. One agreed literal is smaller and cannot drift.
 RELEASE=gpustack-operator
 
-# The pinned client, resolved exactly as teardown.sh resolves it and for the same reason: a 3.13 PATH
-# helm lacks flags this suite needs. Asking with a DIFFERENT binary than the one that did the
-# teardown is how an old client's refusal gets reported here as a leftover release rather than as the
-# tooling problem it is.
-REPO_ROOT="$(cd "$(dirname "$0")/../../../.." 2>/dev/null && pwd)"
-HELM=helm
-[ -n "$REPO_ROOT" ] && [ -x "${REPO_ROOT}/.sbin/helm" ] && HELM="${REPO_ROOT}/.sbin/helm"
+# Ask with the same pinned client that teardown uses, so a client incompatibility cannot appear as
+# a leftover release.
+HELM="$(bash "${LIB}/helm.sh")" || exit 1
 
 # Tear everything down (delegates the cleanup to the chart's own files/cleanup.sh).
 bash "$LIB/teardown.sh" "$NS"

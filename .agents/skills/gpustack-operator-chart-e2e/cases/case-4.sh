@@ -33,8 +33,8 @@ REPLICAS="${2:-2}"
 MIN_AVAILABLE=$((REPLICAS - 1))
 RELEASE=gpustack-operator
 CHART=deploy/gpustack-operator/chart
-HELM=helm
-[ -x .sbin/helm ] && HELM=.sbin/helm
+LIB="$(cd "$(dirname "$0")/../../_e2e-lib/scripts" && pwd)"
+HELM="$(bash "${LIB}/helm.sh")" || exit 1
 
 FAILS=0
 ROWS=()

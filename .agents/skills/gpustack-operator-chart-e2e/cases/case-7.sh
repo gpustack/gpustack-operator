@@ -50,8 +50,7 @@ IMAGE="gpustack/gpustack-operator:${TAG}"
 OLD_IMAGE="gpustack/gpustack-operator:${OLD_TAG}"
 LEGACY_RELEASES="gpustack-kueue gpustack-node-feature-discovery gpustack-csi-driver-nfs gpustack-csi-driver-s3"
 LIB="$(cd "$(dirname "$0")/../../_e2e-lib/scripts" && pwd)"
-HELM=helm
-[ -x .sbin/helm ] && HELM=.sbin/helm
+HELM="$(bash "${LIB}/helm.sh")" || exit 1
 
 FAILS=0
 ROWS=()

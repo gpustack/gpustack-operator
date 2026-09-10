@@ -310,6 +310,56 @@ while read -r fn; do
   fi
 done <<<"$discovered"
 
+# ---------------------------------------------------------------------------- Helm image pin
+
+# The Docker image is the Helm version authority. The helper's leading `v` is required by the
+# upstream archive name, while the Dockerfile's argument intentionally omits it.
+function helm_pins_match() {
+  local dockerfile="$1" helm_library="$2" image_pin helper_pin
+  image_pin="$(sed -nE 's/^ARG HELM_VERSION="([^"]+)"$/\1/p' "$dockerfile")"
+  helper_pin="$(sed -nE 's/^helm_version=\$\{HELM_VERSION:-"([^"]+)"\}$/\1/p' "$helm_library")"
+  [ -n "$image_pin" ] && [ -n "$helper_pin" ] && [ "v${image_pin}" = "$helper_pin" ]
+}
+
+echo
+echo "== the Helm helper pin matches the image pin =="
+if helm_pins_match "$ROOT/pack/gpustack-operator/Dockerfile" "$ROOT/hack/lib/helm.sh"; then
+  pass "Dockerfile Helm pin matches hack/lib/helm.sh"
+else
+  fail "Dockerfile Helm pin differs from hack/lib/helm.sh"
+fi
+
+# A mismatch must fail this gate; otherwise the matching real files above prove no comparison.
+MISMATCH_DOCKERFILE="$MINI/Dockerfile"
+awk '
+  !changed && /^ARG HELM_VERSION="[^"]+"$/ {
+    print "ARG HELM_VERSION=\"0.0.0-mismatch\""
+    changed = 1
+    next
+  }
+  { print }
+' "$ROOT/pack/gpustack-operator/Dockerfile" > "$MISMATCH_DOCKERFILE"
+if helm_pins_match "$MISMATCH_DOCKERFILE" "$ROOT/hack/lib/helm.sh"; then
+  fail "a mismatched Dockerfile Helm pin was accepted"
+else
+  pass "a mismatched Dockerfile Helm pin is rejected"
+fi
+
+MISMATCH_HELM_LIBRARY="$MINI/helm.sh"
+awk '
+  !changed && /^helm_version=\$\{HELM_VERSION:-"[^"]+"\}$/ {
+    print "helm_version=${HELM_VERSION:-\"v0.0.0-mismatch\"}"
+    changed = 1
+    next
+  }
+  { print }
+' "$ROOT/hack/lib/helm.sh" > "$MISMATCH_HELM_LIBRARY"
+if helm_pins_match "$ROOT/pack/gpustack-operator/Dockerfile" "$MISMATCH_HELM_LIBRARY"; then
+  fail "a mismatched Helm helper pin was accepted"
+else
+  pass "a mismatched Helm helper pin is rejected"
+fi
+
 # ---------------------------------------------------------------------------- the comparison
 
 # The accept side of the go-installed family. Those validators cannot be handed a matching binary
