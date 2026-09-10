@@ -35,7 +35,8 @@ characters, so everything of unbounded length is an annotation.
 |---|---|---|---|
 | label | `kvcache.gpustack.ai/inject` | `"true"` | yes — the trigger |
 | annotation | `kvcache.gpustack.ai/binding` | a `KVCachePoolBinding` name, in this Pod's namespace | yes |
-| annotation | `kvcache.gpustack.ai/engine` | `vllm` \| `vllm-ascend` \| `sglang` | yes |
+| annotation | `kvcache.gpustack.ai/engine` | `vllm` \| `sglang` | yes |
+| annotation | `kvcache.gpustack.ai/manufacturer` | `ascend` | no — only with `engine: vllm`; selects the vLLM-Ascend runtime |
 | annotation | `kvcache.gpustack.ai/role` | `prefill` \| `decode` | no — **vLLM family only**; SGLang refuses any role |
 | annotation | `kvcache.gpustack.ai/container` | a container name | only when the Pod has more than one container |
 
@@ -149,7 +150,7 @@ container that starts normally and does not use the cache — a result invisible
 | a Binding that does not exist, and the namespace | without it there is nothing to resolve the provisioned domain and endpoint from | create the Binding, or fix the name |
 | a pool or backend that does not exist | the Binding points at something missing | fix the `poolRef`, or create the pool |
 | the pool and `QuotaLedgerAvailable`, with the controller's own reason | `MultiTenancyDisabled` means the master holds no tenant ledger; `LedgerUnreachable` means a request to it failed, which is an outage rather than a setting | read the reason: turn multi-tenancy on for the first, restore the master for the second, or wait if the condition is not reported yet |
-| the `engine` annotation | it is required and never guessed from an image | set `vllm`, `vllm-ascend` or `sglang` |
+| the `engine` or `manufacturer` annotation | the engine is required and never guessed from an image; `manufacturer` selects only the measured Ascend vLLM runtime | set `vllm` or `sglang`; for vLLM-Ascend, set `engine: vllm` and `manufacturer: ascend` |
 | the container count and their names | several containers and none named; the first is never chosen | set `kvcache.gpustack.ai/container` |
 | a named container that is an init container | it finishes before the workload starts, so configuring it caches nothing | name an app container |
 | a key **this Pod's own engine** would be given — `MOONCAKE_CONFIG_PATH` or `--kv-transfer-config` on the vLLM family, `--hicache-storage-backend` on SGLang | the container already has a KV cache configured, and two sources for one setting is undiagnosable | remove yours, or drop the inject label |

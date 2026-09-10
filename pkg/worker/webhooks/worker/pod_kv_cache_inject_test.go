@@ -10,6 +10,7 @@ import (
 	core "k8s.io/api/core/v1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
@@ -70,6 +71,108 @@ func TestPodKVCacheInject_VLLMCarriesTheFileVehicle(t *testing.T) {
 
 	assert.Contains(t, pod.Annotations, inject.ClientConfigAnnotationKey,
 		"the downwardAPI projection reads the file back out of this annotation")
+}
+
+// TestPodKVCacheInject_ManufacturerSelectsTheVLLMRuntime checks the declared runtime variant at
+// the admitted Pod boundary. The declaration selects a connector; it does not attest to where the
+// scheduler eventually places the Pod.
+func TestPodKVCacheInject_ManufacturerSelectsTheVLLMRuntime(t *testing.T) {
+	testCases := []struct {
+		name            string
+		engine          string
+		manufacturer    string
+		manufacturerSet bool
+		protocol        string
+		wantConnector   string
+		wantErr         string
+	}{
+		{
+			name:            "Ascend vllm uses the Ascend connector",
+			manufacturer:    "ascend",
+			manufacturerSet: true,
+			protocol:        "Ascend",
+			wantConnector:   "AscendStoreConnector",
+		},
+		{
+			name:          "ordinary vllm remains accepted",
+			protocol:      "TCP",
+			wantConnector: "MooncakeStoreConnector",
+		},
+		{
+			name:            "Ascend vllm rejects tcp",
+			manufacturer:    "ascend",
+			manufacturerSet: true,
+			protocol:        "TCP",
+			wantErr:         `accepts only the "ascend" transport and this pool offers "tcp"`,
+		},
+		{
+			name:            "manufacturer spelling is exact",
+			manufacturer:    "Ascend",
+			manufacturerSet: true,
+			protocol:        "Ascend",
+			wantErr:         "kvcache.gpustack.ai/manufacturer",
+		},
+		{
+			name:            "manufacturer whitespace is refused",
+			manufacturer:    " ascend",
+			manufacturerSet: true,
+			protocol:        "Ascend",
+			wantErr:         "kvcache.gpustack.ai/manufacturer",
+		},
+		{
+			name:            "manufacturer has no unmeasured variant",
+			manufacturer:    "huawei",
+			manufacturerSet: true,
+			protocol:        "Ascend",
+			wantErr:         "kvcache.gpustack.ai/manufacturer",
+		},
+		{
+			name:            "empty manufacturer is refused when declared",
+			manufacturerSet: true,
+			protocol:        "Ascend",
+			wantErr:         "kvcache.gpustack.ai/manufacturer",
+		},
+		{
+			name:            "manufacturer does not apply to sglang",
+			engine:          "sglang",
+			manufacturer:    "ascend",
+			manufacturerSet: true,
+			protocol:        "Ascend",
+			wantErr:         "kvcache.gpustack.ai/manufacturer",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := kvCachePod()
+			if tc.engine != "" {
+				pod.Annotations[KVCacheEngineAnnotationKey] = tc.engine
+			}
+			if tc.manufacturerSet {
+				pod.Annotations[KVCacheManufacturerAnnotationKey] = tc.manufacturer
+			}
+			objs := kvCacheFixture()
+			var backend *workercore.KVCacheBackend
+			for _, obj := range objs {
+				if candidate, ok := obj.(*workercore.KVCacheBackend); ok {
+					backend = candidate
+					break
+				}
+			}
+			require.NotNil(t, backend)
+			backend.Spec.Transport.Protocol = tc.protocol
+
+			err := admit(t, pod, objs...)
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.JSONEq(t, `{"kv_connector":"`+tc.wantConnector+`","kv_role":"kv_both"}`,
+				pod.Spec.Containers[0].Args[2])
+		})
+	}
 }
 
 // TestPodKVCacheInject_SGLangCarriesTheEnvironmentVehicle is the counterpart, and its negative half
