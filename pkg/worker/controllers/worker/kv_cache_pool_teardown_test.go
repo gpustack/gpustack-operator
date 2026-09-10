@@ -1099,6 +1099,54 @@ func TestKVCachePoolTeardown_AnUndrainedDomainHoldsItsBindingsFinalizer(t *testi
 		"and the hold says why, because nothing else in the cluster explains this one")
 }
 
+func TestKVCachePoolBindingRelease_ExplainsWhetherTheLedgerWasUnavailable(t *testing.T) {
+	testCases := []struct {
+		name       string
+		status     int
+		body       string
+		wantReason string
+		wantMsg    string
+	}{
+		{
+			name:       "multi-tenancy is disabled",
+			status:     409,
+			body:       `{"success":false,"error_code":-1011,"error_message":"UNAVAILABLE_IN_CURRENT_MODE"}`,
+			wantReason: KVCachePoolBindingReasonMultiTenancyDisabled,
+			wantMsg:    "the master answered that it has no tenant ledger",
+		},
+		{
+			name:       "the ledger read fails for another reason",
+			status:     503,
+			body:       `{"success":false,"error_code":-1011,"error_message":"SERVICE_NOT_READY"}`,
+			wantReason: KVCachePoolBindingReasonLedgerNotReleased,
+			wantMsg:    "tenant ledger did not answer this pass",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			master := newFakeMaster()
+			address := master.start(t)
+			r, cli := newReconciler(
+				newReconcileBackend("mooncake-dram", address),
+				newTestKVCachePool("shared", "mooncake-dram"),
+				newBoundBinding("team-a", "chat", "shared", "team-a-chat", resource.MustParse("20Ti")),
+			)
+
+			reconcilePool(t, r, "shared")
+			deleteObject(t, cli, readBinding(t, cli, "team-a", "chat"))
+			master.refuse(tc.status, tc.body)
+			reconcilePool(t, r, "shared")
+
+			binding := readBinding(t, cli, "team-a", "chat")
+			assert.True(t, systemmeta.IsLocked(binding))
+			assert.Equal(t, tc.wantReason,
+				conditionReason(t, binding, KVCachePoolBindingConditionReleasable))
+			assert.Contains(t, KVCachePoolBindingConditionReleasable.GetMessage(binding), tc.wantMsg)
+		})
+	}
+}
+
 // TestKVCachePoolTeardown_AContestedDomainKeepsItsLedgerEntry holds the line the contested branch
 // draws: a domain two Bindings claim is managed for NEITHER, and its entry is left exactly as it is.
 //

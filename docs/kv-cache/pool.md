@@ -262,17 +262,19 @@ a False condition and a non-Ready pool rather than as a pool that quietly grants
 
 ## Operating notes
 
-**A Binding's deletion is held for two different reasons, and the condition says which.** Read the
-reason on `Releasable=False` before acting — the two want opposite things:
+**A Binding's deletion is held for three different reasons, and the condition says which.** Read the
+reason on `Releasable=False` before acting — they need different remedies:
 
 - `HeldByWorkloads` — a workload in the namespace still references the Binding (it is in
   `status.usedBy`). The message names the **workloads**. Remove them; nothing needs draining.
 - `LedgerNotReleased` — the store refuses to drop the tenant while its domain is non-empty. The
   message names the **domain**. Drain it — remove its objects — and the release completes in seconds.
+- `MultiTenancyDisabled` — the master answered that it has no tenant ledger. Draining cannot change
+  that answer; turn multi-tenancy on for the backend, then the next reconciliation can establish
+  whether the quota entry is gone.
 
-They are separate because the action is: an operator who assumes the second goes looking for objects
-to drain in a domain that may already be empty, while the thing actually holding the deletion is a
-workload that was never removed.
+They are separate because the action differs: draining a domain cannot restore a disabled ledger, and
+removing workloads cannot clear a tenant the store still retains.
 
 **A pool is held while a Binding still references it**, and a backend while a pool still claims it.
 Each layer names what to remove in its own condition message.
