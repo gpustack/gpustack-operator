@@ -371,6 +371,14 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 			withDiskTier()(k)
 			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("-1Gi")
 		}, "must not be negative"},
+		{"a disk capacity below one bucket", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("1Mi")
+		}, "must be at least 256Mi"},
+		{"a disk capacity of one bucket", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("256Mi")
+		}, ""},
 		{"a disk capacity of zero, which is the store's own ceiling", func(k *workercore.KVCacheBackend) {
 			withDiskTier()(k)
 			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("0")
