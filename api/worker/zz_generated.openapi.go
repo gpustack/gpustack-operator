@@ -7380,7 +7380,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentTemplate(ref common.Refe
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Ports are the container ports to expose in addition to the engine's own.",
+							Description: "Ports are the container ports to expose in addition to the engine's own. They do not reserve or select the transfer engine's runtime port window.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{

@@ -91,8 +91,7 @@ never arrive.
 
 > **A role's parallelism degrees are not API fields.** They reach the engine through
 > `roles[].extraArgs`, spelled the engine's own way, and the operator neither reads nor validates
-> them. What sizes a disaggregated deployment's port window is therefore not visible to admission —
-> tracked at [issue 203](https://github.com/gpustack/gpustack-operator/issues/203).
+> them. They do not determine the AscendDirect transfer-port window.
 
 `name` identifies the role and becomes the Kueue PodSet name; `kind` selects behaviour and is closed.
 They are separate because a semantic reachable by typing a free-form string is a semantic one typo away
@@ -530,6 +529,28 @@ benign on a client mounting no segment of its own — which is what every replic
 
 **A replica serves on port 8000** unless the role's template names its own container port. The
 Service in front of the replicas takes that port, and `status.endpoint` reports it.
+
+### Transfer ports are runtime-selected
+
+`roles[].template.ports` exposes container ports for the engine and Service. It neither reserves nor
+selects transfer-engine ports. AscendDirect binds its transfer ports inside the container's own
+network namespace, so a declaration here cannot prevent a collision with another process in that
+same namespace.
+
+For AscendDirect in Mooncake `v0.3.13.post1`, the transfer-port window is calculated only after
+scheduling, when `utils.cpp` resolves a logical device to its physical device ID. The device plugin
+decides that assignment, so admission cannot know the window's position. Other engine versions or
+images can use different rules.
+
+| Input | Rule |
+|---|---|
+| base port | `ASCEND_BASE_PORT`, or `20000` when unset |
+| window | `base_port + physical_device_id * 100` through `base_port + (physical_device_id + 1) * 100`, inclusive |
+| example on eight cards | physical device ID `7` can use `20700` through `20800` |
+| selection | a port is chosen at random, with up to 500 attempts; the other transfer-port families are also random |
+
+Parallelism and card count are not inputs to this calculation. Neither identifies the physical device
+and therefore neither locates its window.
 
 ---
 
