@@ -371,6 +371,18 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 			withDiskTier()(k)
 			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("-1Gi")
 		}, "must not be negative"},
+		{"a disk capacity below one bucket", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("1Mi")
+		}, "must be at least 256Mi"},
+		{"a fractional disk capacity below one bucket", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("1e-3")
+		}, "must be at least 256Mi"},
+		{"a disk capacity of one bucket", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("256Mi")
+		}, ""},
 		{"a disk capacity of zero, which is the store's own ceiling", func(k *workercore.KVCacheBackend) {
 			withDiskTier()(k)
 			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("0")
@@ -1002,27 +1014,34 @@ func manyKVCachePoolClaims(n int) []workercore.KVCacheObjectReference {
 // claiming to prove the capacity is frozen.
 func TestKVCacheBackendWebhook_DiskTierIsFrozenExceptItsCapacity(t *testing.T) {
 	cases := []struct {
-		name    string
-		mutate  func(*workercore.KVCacheBackend)
-		wantMsg string
+		name        string
+		mutate      func(*workercore.KVCacheBackend)
+		wantMsg     string
+		oldCapacity string
 	}{
 		{"capacity raised", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("8Ti")
-		}, ""},
+		}, "", ""},
 		// Both directions, because the rule is "the ceiling is not part of the identity" and not
 		// "the ceiling may grow". Testing only the raise leaves a lowering free to be refused by a
 		// later edit with nothing going red, and the documentation says either way is allowed.
 		{"capacity lowered", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("1Ti")
-		}, ""},
+		}, "", ""},
 		{"path moved", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Members[0].LocalDisk.Path = "/var/lib/elsewhere"
-		}, "the path is immutable"},
+		}, "the path is immutable", ""},
 		{"tier removed", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Members[0].LocalDisk = nil
 			k.Spec.Connection.Managed.Leader.Offload = nil
-		}, "cannot be removed from the group at this position"},
-		{"nothing changed", func(*workercore.KVCacheBackend) {}, ""},
+		}, "cannot be removed from the group at this position", ""},
+		{"nothing changed", func(*workercore.KVCacheBackend) {}, "", ""},
+		{"a grandfathered sub-bucket capacity is unchanged", func(k *workercore.KVCacheBackend) {
+			k.Spec.Image = "example.com/mooncake:v1"
+		}, "", "1Mi"},
+		{"a grandfathered sub-bucket capacity is changed", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("2Mi")
+		}, "must be at least 256Mi", "1Mi"},
 	}
 
 	wh := &KVCacheBackendWebhook{}
@@ -1031,6 +1050,10 @@ func TestKVCacheBackendWebhook_DiskTierIsFrozenExceptItsCapacity(t *testing.T) {
 			oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
 			withDiskTier()(oldKvcb)
 			withDiskTier()(newKvcb)
+			if c.oldCapacity != "" {
+				oldKvcb.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse(c.oldCapacity)
+				newKvcb.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse(c.oldCapacity)
+			}
 			c.mutate(newKvcb)
 
 			_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)

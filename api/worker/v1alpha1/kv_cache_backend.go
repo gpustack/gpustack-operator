@@ -596,6 +596,9 @@ type KVCacheBackendMemberLocalDisk struct {
 	// is rendered, so a ceiling that moves upstream is a change to investigate rather than one
 	// this API silently restated.
 	//
+	// A set capacity must hold one 256Mi bucket. The store does not flush a partial bucket, and
+	// this API cannot configure that threshold, so a smaller tier can never receive a key.
+	//
 	// It is NOT counted into the Pod's resource requests, unlike CapacityPerMember. The tier is a
 	// host directory, which is outside the kubelet's ephemeral-storage accounting entirely — a
 	// request against it would reserve a figure nothing polices and would then keep the member off

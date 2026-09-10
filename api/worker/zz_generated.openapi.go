@@ -5664,7 +5664,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberLocalDisk(ref commo
 					},
 					"capacity": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Capacity caps what this tier stores. Left unset, the store's own ceiling applies and nothing is rendered, so a ceiling that moves upstream is a change to investigate rather than one this API silently restated.\n\nIt is NOT counted into the Pod's resource requests, unlike CapacityPerMember. The tier is a host directory, which is outside the kubelet's ephemeral-storage accounting entirely — a request against it would reserve a figure nothing polices and would then keep the member off the very node that has the disk. Watching that filesystem is the operator's, and the documentation says so.",
+							Description: "Capacity caps what this tier stores. Left unset, the store's own ceiling applies and nothing is rendered, so a ceiling that moves upstream is a change to investigate rather than one this API silently restated.\n\nA set capacity must hold one 256Mi bucket. The store does not flush a partial bucket, and this API cannot configure that threshold, so a smaller tier can never receive a key.\n\nIt is NOT counted into the Pod's resource requests, unlike CapacityPerMember. The tier is a host directory, which is outside the kubelet's ephemeral-storage accounting entirely — a request against it would reserve a figure nothing polices and would then keep the member off the very node that has the disk. Watching that filesystem is the operator's, and the documentation says so.",
 							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
 						},
 					},
