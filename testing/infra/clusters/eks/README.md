@@ -49,6 +49,23 @@ terraform apply \
 GPU instance selection reference:
 <https://docs.aws.amazon.com/dlami/latest/devguide/gpu.html>.
 
+EFA needs both variables set together, because the default CPU types do not support it:
+
+```bash
+terraform apply \
+  -var='efa_enabled=true' \
+  -var='cpu_instance_types=["c5n.9xlarge"]' \
+  -var='cpu_node_count=2'
+```
+
+Check a candidate type before applying; most are not EFA-capable, including every small size
+of the general-purpose families:
+
+```bash
+aws ec2 describe-instance-types --instance-types c5n.9xlarge \
+  --query 'InstanceTypes[].NetworkInfo.EfaSupported'
+```
+
 Once apply succeeds, the kubeconfig is already refreshed:
 
 ```bash
@@ -78,6 +95,7 @@ terraform destroy
 | `release` | EKS version | `1.34` |
 | `cpu_instance_types` | Instance types for the CPU node group | `["c6a.4xlarge","c7a.4xlarge"]` |
 | `cpu_node_count` | Number of nodes in the CPU node group | `1` |
+| `efa_enabled` | Enable EFA on the CPU node group: an EFA launch template, a cluster placement group, one public subnet (single availability zone), and the label `gpustack.ai/efa=true`. REQUIRES `cpu_instance_types` to name an EFA-capable type, which neither default is | `false` |
 | `gpu_instance_types` | GPU node groups as a `map(list(string))` keyed by group name | `{ g4dn = ["g4dn.xlarge","g4dn.12xlarge"] }` |
 | `node_boot_disk_type` | Node root volume EBS type/performance (`volume_type`, optional `iops`/`throughput`) | `{ volume_type = "gp3", iops = 3000, throughput = 125 }` |
 | `node_boot_disk_size_gb` | Node root (boot) volume size, in GiB | `100` |
