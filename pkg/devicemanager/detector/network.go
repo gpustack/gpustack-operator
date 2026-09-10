@@ -457,6 +457,12 @@ func (s *sysfsTree) readInterface(
 		// directory, and a bond, a VLAN or a veth has none. So this reader cannot produce a
 		// virtual interface carrying an RDMA device or a link verdict, on any host.
 		//
+		// This is a defect for software RDMA: rxe and siw bind an RDMA device to an ordinary
+		// netdev, which may be a bond or VLAN. The endpoint works but is invisible here. Moving
+		// this return cannot help because the other branch is unreachable, not skipped. Fixing it
+		// needs an RDMA lookup by netdev name, for example through
+		// /sys/class/infiniband/<device>/ports/*/gid_attrs/ndevs/*, rather than a PCI lookup.
+		//
 		// triggersDetect nonetheless exempts only virtual interfaces with NO RDMA record, which
 		// reads as if such records existed. It is written on the verdict rather than on virtuality
 		// deliberately: the predicate is "cannot affect the gate", so if a future reader ever
