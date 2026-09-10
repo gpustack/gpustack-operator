@@ -78,6 +78,17 @@ func kvCachePod() *core.Pod {
 	}
 }
 
+func kvCachePodForEngine(engine string) *core.Pod {
+	pod := kvCachePod()
+	if engine != "sglang" {
+		return pod
+	}
+	pod.Annotations[KVCacheEngineAnnotationKey] = engine
+	pod.Spec.Containers[0].Command = []string{"python3"}
+	pod.Spec.Containers[0].Args = []string{"-m", "sglang.launch_server", "--model-path", "x"}
+	return pod
+}
+
 // TestPodKVCacheResolve_HappyPath pins what a fully resolvable chain produces.
 func TestPodKVCacheResolve_HappyPath(t *testing.T) {
 	r := newPodKVCacheWebhook(kvCacheFixture()...)

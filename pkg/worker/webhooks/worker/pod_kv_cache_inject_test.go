@@ -178,8 +178,7 @@ func TestPodKVCacheInject_ManufacturerSelectsTheVLLMRuntime(t *testing.T) {
 // TestPodKVCacheInject_SGLangCarriesTheEnvironmentVehicle is the counterpart, and its negative half
 // carries as much weight as its positive one.
 func TestPodKVCacheInject_SGLangCarriesTheEnvironmentVehicle(t *testing.T) {
-	pod := kvCachePod()
-	pod.Annotations[KVCacheEngineAnnotationKey] = "sglang"
+	pod := kvCachePodForEngine("sglang")
 	require.NoError(t, admit(t, pod))
 
 	ctr := &pod.Spec.Containers[0]
@@ -245,8 +244,7 @@ func TestPodKVCacheInject_StampTenantFollowsTheEngine(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.engine, func(t *testing.T) {
-			pod := kvCachePod()
-			pod.Annotations[KVCacheEngineAnnotationKey] = tc.engine
+			pod := kvCachePodForEngine(tc.engine)
 			require.NoError(t, admit(t, pod))
 			assert.Equal(t, tc.want, stampOf(t, pod).TenantInjected,
 				"the stamp reports what this engine's renderer emitted")
@@ -469,6 +467,7 @@ func TestPodKVCacheInject_LaunchResolution(t *testing.T) {
 	testCases := []struct {
 		name           string
 		command, args  []string
+		engine         string
 		forwarding     string
 		refuse         bool
 		wantProgram    string
@@ -478,6 +477,14 @@ func TestPodKVCacheInject_LaunchResolution(t *testing.T) {
 		{
 			name: "an unrecognised launcher", command: []string{"setsid"}, args: []string{"vllm", "serve"},
 			refuse: true, wantMsg: "cannot identify",
+		},
+		{
+			name: "args without a command", args: []string{"vllm", "serve"},
+			refuse: true, wantMsg: "image ENTRYPOINT is not visible",
+		},
+		{
+			name: "args without a command declared to forward", args: []string{"vllm", "serve"},
+			forwarding: "true", wantEscapeUsed: true,
 		},
 		{
 			name: "a launcher with an unparsed positional operand", command: []string{"gosu", "worker", "sh", "-c"}, args: []string{"vllm serve"},
@@ -505,7 +512,15 @@ func TestPodKVCacheInject_LaunchResolution(t *testing.T) {
 		},
 		{
 			name: "the sglang launch form", command: []string{"/opt/venv/bin/python3"}, args: []string{"-m", "sglang.launch_server", "--model-path", "x"},
-			wantProgram: "python3",
+			engine: "sglang", wantProgram: "python3",
+		},
+		{
+			name: "a recognised launch for another engine", command: []string{"vllm"}, args: []string{"serve"},
+			engine: "sglang", refuse: true, wantMsg: "must match the engine",
+		},
+		{
+			name: "a recognised launch for another engine declared to forward", command: []string{"vllm"}, args: []string{"serve"},
+			engine: "sglang", forwarding: "true", refuse: true, wantMsg: "must match the engine",
 		},
 		{
 			name: "python is not the documented sglang interpreter", command: []string{"python"}, args: []string{"-m", "sglang.launch_server", "--model-path", "x"},
@@ -522,6 +537,9 @@ func TestPodKVCacheInject_LaunchResolution(t *testing.T) {
 			pod := kvCachePod()
 			pod.Spec.Containers[0].Command = tc.command
 			pod.Spec.Containers[0].Args = tc.args
+			if tc.engine != "" {
+				pod.Annotations[KVCacheEngineAnnotationKey] = tc.engine
+			}
 			if tc.forwarding != "" {
 				pod.Annotations[KVCacheLaunchArgsForwardedAnnotationKey] = tc.forwarding
 			}
@@ -543,8 +561,7 @@ func TestPodKVCacheInject_LaunchResolution(t *testing.T) {
 // TestPodKVCacheInject_TenantFromBindingOverwritesWorkloadValue ensures the tenant identity reaches
 // the container exactly as the Binding resolved it.
 func TestPodKVCacheInject_TenantFromBindingOverwritesWorkloadValue(t *testing.T) {
-	pod := kvCachePod()
-	pod.Annotations[KVCacheEngineAnnotationKey] = "sglang"
+	pod := kvCachePodForEngine("sglang")
 	pod.Spec.Containers[0].Env = []core.EnvVar{{Name: "MOONCAKE_TENANT_ID", Value: "mine"}}
 	require.NoError(t, admit(t, pod))
 
@@ -553,8 +570,7 @@ func TestPodKVCacheInject_TenantFromBindingOverwritesWorkloadValue(t *testing.T)
 }
 
 func TestPodKVCacheInject_TenantFromBindingOverwritesDuplicateWorkloadValues(t *testing.T) {
-	pod := kvCachePod()
-	pod.Annotations[KVCacheEngineAnnotationKey] = "sglang"
+	pod := kvCachePodForEngine("sglang")
 	pod.Spec.Containers[0].Env = []core.EnvVar{
 		{Name: "MOONCAKE_TENANT_ID", Value: "mine"},
 		{Name: "MOONCAKE_TENANT_ID", Value: "team-other"},
@@ -581,8 +597,7 @@ func TestPodKVCacheInject_StampVehicleFollowsTheEngine(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.engine, func(t *testing.T) {
-			pod := kvCachePod()
-			pod.Annotations[KVCacheEngineAnnotationKey] = tc.engine
+			pod := kvCachePodForEngine(tc.engine)
 			require.NoError(t, admit(t, pod))
 
 			assert.Equal(t, tc.want, stampOf(t, pod).Vehicle)
@@ -636,8 +651,7 @@ func TestPodKVCacheInject_ObservabilityDefaultsOnAndYieldToTheUser(t *testing.T)
 // select the mechanism and the ones that carry a value inside it. A user overriding one value keeps the
 // rest of the injection, which is what makes the rule useful rather than all-or-nothing.
 func TestPodKVCacheInject_ValueVariableYieldsToTheWorkload(t *testing.T) {
-	pod := kvCachePod()
-	pod.Annotations[KVCacheEngineAnnotationKey] = "sglang"
+	pod := kvCachePodForEngine("sglang")
 	pod.Spec.Containers[0].Env = []core.EnvVar{{Name: "MOONCAKE_PROTOCOL", Value: "rdma"}}
 
 	require.NoError(t, admit(t, pod), "a value variable is not a mechanism key, so it does not refuse")
@@ -777,8 +791,7 @@ func TestPodKVCacheInject_ConflictRefusals(t *testing.T) {
 }
 
 func TestPodKVCacheInject_TenantFromBindingOverridesAnotherRegisteredDomain(t *testing.T) {
-	pod := kvCachePod()
-	pod.Annotations[KVCacheEngineAnnotationKey] = "sglang"
+	pod := kvCachePodForEngine("sglang")
 	pod.Spec.Containers[0].Env = []core.EnvVar{{Name: "MOONCAKE_TENANT_ID", Value: "team-other"}}
 
 	require.NoError(t, admit(t, pod))
@@ -790,8 +803,7 @@ func TestPodKVCacheInject_TenantFromBindingOverridesAnotherRegisteredDomain(t *t
 // precedence rather than a collision. The injection yields to it silently, which is recorded as the one
 // accepted silent outcome in the design.
 func TestPodKVCacheInject_SGLangConfigPathIsNotAConflict(t *testing.T) {
-	pod := kvCachePod()
-	pod.Annotations[KVCacheEngineAnnotationKey] = "sglang"
+	pod := kvCachePodForEngine("sglang")
 	pod.Spec.Containers[0].Env = []core.EnvVar{
 		{Name: "SGLANG_HICACHE_MOONCAKE_CONFIG_PATH", Value: "/mine.json"},
 	}
@@ -812,10 +824,22 @@ func TestPodKVCacheInject_NoCommandNoArgsIsRefused(t *testing.T) {
 	err := admit(t, pod)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "discard the image's CMD")
-	assert.Contains(t, err.Error(), "copy the image's launch arguments into args",
-		"the message names which field to fill, because command is the wrong one")
-	assert.Contains(t, err.Error(), "ENTRYPOINT",
-		"and says why command is wrong: it overrides the vendor runtime's entrypoint too")
+	assert.Contains(t, err.Error(), "Set command to the engine executable",
+		"the message names both fields, because args without command cannot be admitted")
+	assert.Contains(t, err.Error(), "overrides the image ENTRYPOINT",
+		"and says why the command must start the engine directly")
+}
+
+func TestCheckLaunchArgs_AscendRuntimeMismatchNamesTheDerivedRuntime(t *testing.T) {
+	_, err := checkLaunchArgs(&core.Container{
+		Name:    "server",
+		Command: []string{"python3"},
+		Args:    []string{"-m", "sglang.launch_server"},
+	}, inject.EngineVLLMAscend, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `selected cache runtime is "vllm-ascend"`)
+	assert.NotContains(t, err.Error(), "annotation \"kvcache.gpustack.ai/engine\" declares")
 }
 
 // TestPodKVCacheInject_AnnotationVocabulary. A typo is the case this exists for: an ignored

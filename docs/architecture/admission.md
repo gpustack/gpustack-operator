@@ -239,9 +239,10 @@ A second mutating webhook on Pods writes the client configuration an inference e
   Kueue's on purpose. Their order within it is immaterial, which a test asserts by running both over
   one Pod in both orders.
 - Before it adds connector arguments, the KV cache webhook removes the transparent launcher prefixes
-  it knows and accepts only `vllm` or `python3 -m sglang.launch_server`. An unrecognised launcher or
-  launch form is refused, so a missing parser entry is visible at admission rather than producing a
-  Pod marked injected whose engine never receives the connector arguments.
+  it knows and accepts only the entry point for the declared engine: `vllm` for the vLLM family or
+  `python3 -m sglang.launch_server` for SGLang. An unrecognised launcher, launch form, or mismatched
+  engine is refused, so a missing parser entry is visible at admission rather than producing a Pod
+  marked injected whose engine never receives the connector arguments.
 - A Pod author may set `kvcache.gpustack.ai/launch-args-forwarded: "true"` only to declare that an
   unrecognised launcher, script, or command line hidden in one argument forwards appended arguments
   to the engine. It does not exempt a shell command mode such as `sh -c`: admission knows that the
