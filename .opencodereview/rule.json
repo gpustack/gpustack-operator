@@ -4,16 +4,17 @@
     "README.md"
   ],
   "exclude": [
-    "staging/**",
     "binding/**",
-    "**/zz_generated*",
-    "**/*_deepcopy*",
-    "**/generated.pb.go",
-    "**/generated.proto",
-    "**/generated.protomessage.pb.go",
+    "staging/**",
+    "hack/**",
+    "gen/**",
     "deploy/gpustack-operator/chart/charts/**",
     "pkg/extensionroute/swagger/ui/**",
-    "pkg/kubeclients/**/*.go"
+    "pkg/kubeclients/**/*.go",
+    "**/*_test.go",
+    "**/*_deepcopy*",
+    "**/generated.*",
+    "**/zz_generated*"
   ],
   "rules": [
     {
