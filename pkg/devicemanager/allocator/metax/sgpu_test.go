@@ -462,6 +462,15 @@ func Test_sysfsSGPUManager(t *testing.T) {
 	require.Len(t, subdevs, 1)
 	assert.Equal(t, sgpuSubdevice{bdf: testBDF0, index: 3, alias: "gpustack-pod-x"}, subdevs[0])
 
+	// Remove writes the subdevice index to the real "remove" control file. Confirmed on
+	// hardware: the driver exposes no "destroy" node at all, so a write there always came
+	// back os.IsNotExist and Remove silently did nothing -- this pins the file name a future
+	// edit could revert without any test catching it.
+	require.NoError(t, mgr.Remove(testBDF0, 3))
+	removeWrite, err := os.ReadFile(filepath.Join(sgpuDir, "remove"))
+	require.NoError(t, err)
+	assert.Equal(t, "3", string(removeWrite))
+
 	// Remove tolerates an already-absent subdevice dir (no error).
 	require.NoError(t, mgr.Remove("0000:ff:00.0", 0))
 }
