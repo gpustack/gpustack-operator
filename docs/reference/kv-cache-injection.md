@@ -39,6 +39,7 @@ characters, so everything of unbounded length is an annotation.
 | annotation | `kvcache.gpustack.ai/manufacturer` | `ascend` | no — only with `engine: vllm`; selects the vLLM-Ascend runtime |
 | annotation | `kvcache.gpustack.ai/role` | `prefill` \| `decode` | no — **vLLM family only**; SGLang refuses any role |
 | annotation | `kvcache.gpustack.ai/container` | a container name | only when the Pod has more than one container |
+| annotation | `kvcache.gpustack.ai/launch-args-forwarded` | `"true"` | no — only when an unrecognised launcher, script, or image ENTRYPOINT forwards appended arguments to the declared engine |
 
 ```yaml
 apiVersion: apps/v1
@@ -57,7 +58,8 @@ spec:
       containers:
         - name: server
           image: vllm/vllm-openai:v0.25.1
-          args: ["--model", "Qwen/Qwen3-8B"]   # see the refusal on an empty args
+          command: ["vllm"]
+          args: ["serve", "--model", "Qwen/Qwen3-8B"]
 ```
 
 The engine is **declared, never guessed from the image**. Engines take entirely different flags, and a
@@ -158,9 +160,11 @@ container that starts normally and does not use the cache — a result invisible
 | a pool that has published no client endpoint yet | there is no address to point the engine at | wait for the pool to report `status.clientEndpoint` |
 | a volume name or mount path the webhook owns | the same collision, in the Pod's storage | rename yours |
 | a container declaring **neither** `command` nor `args` | appending would not append: Kubernetes then reads `args` as the whole command line and discards the image's `CMD` | copy the image's launch arguments into **`args`**, leaving `command` unset |
+| a container declaring `args` but no `command` | admission cannot inspect the image `ENTRYPOINT`, so it cannot show that appended arguments reach the engine | put the engine executable in `command`, or declare `kvcache.gpustack.ai/launch-args-forwarded: "true"` only when the image ENTRYPOINT forwards them |
+| an unrecognised launch program or a program for another engine | the webhook would otherwise inject one engine's configuration into another program, or silently trust an unknown launcher | launch the engine named by the `engine` annotation directly, or declare forwarding only for an unrecognised launcher that passes appended arguments through |
 | a container launched through a shell's `-c` | an appended flag becomes the shell's `$0`, so it never reaches the engine and the Pod is stamped as injected anyway | launch the engine directly — its executable in `command`, its arguments in `args` — or add the connector flag to the script yourself |
-| a command line hidden inside one argument — `env -S "…"` and its `--split-string` spellings | there is nothing on the command line to test: the launcher splits that string itself, so admission cannot tell whether a shell is inside it | launch the engine directly, or add the connector flag inside that argument yourself |
-| a program whose name ends in `.sh` — `./run.sh`, and `sh /app/run.sh` alike | whether an appended argument reaches the engine depends on whether the script forwards `"$@"`, which is a file inside the image rather than a token on the command line | launch the engine directly, or add the connector flag inside the script yourself |
+| a command line hidden inside one argument — `env -S "…"` and its `--split-string` spellings | there is nothing on the command line to test: the launcher splits that string itself, so admission cannot tell whether a shell is inside it | launch the engine directly, add the connector flag inside that argument, or declare that it forwards appended arguments |
+| a program whose name ends in `.sh` — `./run.sh`, and `sh /app/run.sh` alike | whether an appended argument reaches the engine depends on whether the script forwards `"$@"`, which is a file inside the image rather than a token on the command line | launch the engine directly, add the connector flag inside the script, or declare that it forwards appended arguments |
 | the `role` annotation on an SGLang Pod | that engine has no prefill/decode equivalent, and accepting the role while ignoring it would leave the container looking configured and behaving otherwise | drop the annotation, or use a vLLM-family engine |
 | an unrecognised `kvcache.gpustack.ai/` key | a typo would otherwise be ignored, leaving the Pod configured differently from its manifest | fix the key |
 | `kvcache.gpustack.ai/client-config` or `.../injected` | these record what the webhook decided; a submitted value would be a record of a decision nobody made | remove them |
@@ -170,11 +174,10 @@ container that starts normally and does not use the cache — a result invisible
 > runtime. The resulting failure is further from its cause than the discarded `CMD` the refusal exists
 > to prevent.
 
-⚠️ The script refusal keys off the **`.sh` suffix**, which is a convention rather than a guarantee, so
-it is neither sound nor complete: a wrapper named `entrypoint` or `run` is admitted and carries the
-same uncertainty. Admission cannot open the file, and the suffix is the only signal on the command
-line. A suffix-less wrapper that does not forward `"$@"` therefore still yields a Pod that starts,
-records itself as injected, and never enables the connector.
+The script-specific refusal keys off the **`.sh` suffix**, which is a convention rather than a
+guarantee. The general launch check also refuses a suffix-less wrapper named `entrypoint` or `run`
+unless its author declares that it forwards appended arguments. Admission cannot open the file, so
+the declaration is the only way to admit that uncertainty.
 
 Two keys are **not** conflicts and are left alone: `MOONCAKE_TENANT_ID`, which the webhook does write
 for SGLang but never over a value you set yourself — declare it and yours stands, and the injection
@@ -318,7 +321,7 @@ $ kubectl get pod chat-0 -o jsonpath='{.metadata.annotations.kvcache\.gpustack\.
 | `vehicle` | `file` or `environment` |
 | `domain` | the reuse domain the Binding declared |
 | `tenantInjected` | whether a tenant was written into the container — an **action**, not an outcome |
-| `launchProgram` | the executable left after transparent launcher prefixes were removed; empty when there was no submitted command to resolve |
+| `launchProgram` | the executable left after transparent launcher prefixes were removed; empty when no executable can be resolved, including a command line hidden in one argument |
 | `launchArgsForwarded` | whether the author's `kvcache.gpustack.ai/launch-args-forwarded: "true"` declaration admitted a launch the webhook could not identify as an engine entry point |
 
 `vehicle` is on the record because it turns one otherwise-silent outcome into a one-line check: a Pod
