@@ -212,8 +212,14 @@ generation() {
 
 # rdma_labels prints this node's rdma.* label keys, one per line.
 rdma_labels() {
-  kubectl get node "$1" -o jsonpath='{.metadata.labels}' 2>/dev/null \
-    | tr ',' '\n' | grep -o 'feature\.gpustack\.ai/rdma\.[a-z]*' | sort -u
+  local labels
+  labels=$(kubectl get node "$1" -o jsonpath='{.metadata.labels}' 2>/dev/null) || return
+  # grep returns 1 when the node has no RDMA labels. That is a valid answer
+  # for the negative assertion below, not a failed Kubernetes read.
+  printf '%s' "$labels" \
+    | tr ',' '\n' \
+    | grep -o 'feature\.gpustack\.ai/rdma\.[a-z]*' \
+    | sort -u || true
 }
 
 # The kubectl call is kept out of the pipeline on purpose. Under `pipefail` the pipeline's status is
