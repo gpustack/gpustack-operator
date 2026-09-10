@@ -76,7 +76,7 @@ E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/
 
 NS="${1:?usage: case-67.sh <NS>}"
 CASE_ID=67
-IMAGE="${E2E_MOONCAKE_IMAGE:-kvcacheai/mooncake:0.3.13}"
+IMAGE="${E2E_MOONCAKE_IMAGE:-docker.io/kvcacheai/mooncake:0.3.13}"
 
 OBJ_BYTES=4194304
 A_SEGMENT=67108864
@@ -171,6 +171,20 @@ run_probe() {
     --image="$IMAGE" --labels="${LABEL_KEY}=${LABEL_VAL}" \
     --overrides="{\"spec\":{\"nodeName\":\"${NODE_A}\",\"containers\":[{\"name\":\"probe\",\"image\":\"${IMAGE}\",\"command\":[\"python3\",\"-\"],\"stdin\":true,\"stdinOnce\":true}]}}" \
     >"$2" 2>&1 || true
+}
+
+# probe_ran <log> <done-marker> <label> -- run_probe swallows the launch's exit status so a
+# probe's own SETUP-FAILED exit does not kill the case; the price is that a pod that never ran
+# (image pull, API server, scheduler) leaves only kubectl's error text in the log, and every
+# downstream parse would blame the store for a launch failure. Gate every log parse on the
+# probe's own DONE marker. Run the SETUP-FAILED gate first where the probe has one: it is the
+# more specific verdict.
+probe_ran() {
+  if grep -q "$2" "$1" 2>/dev/null; then
+    return 0
+  fi
+  record FAIL "$3" "$(head -3 "$1" 2>/dev/null | tr '\n' ' ' | cut -c1-200)"
+  return 1
 }
 
 # ------------------------------------------------- 0. two nodes, or this case says nothing
@@ -396,13 +410,16 @@ def free_bytes(seg):
 payload = "x" * OBJ
 digest = hashlib.sha256(payload.encode()).hexdigest()
 
-# Fill the source segment and stop there, so nothing spills onto the target and the target keeps
-# the room the drain needs. With the master on local_first, a put through member A lands in A.
+# Write one fewer key than the segment holds, so no put can fill its last free bytes and push an
+# earlier a-key onto A's disk tier through eviction: every written key is memory-resident by
+# construction, which is what phase A's counters and read-backs assert. The post-write free check
+# stays as a backstop for an allocator that hands out less than the segment size. With the master
+# on local_first, a put through member A lands in A.
 # The a- prefix keeps phase A's keys out of phase B's d-/p- namespace: after the drain these
 # keys live in B's memory, and a same-named phase B key would make the disk phase's 404 verdict
 # answerable by a stale phase A replica instead of by the tier's fate.
 keys = []
-for i in range(60):
+for i in range(${A_SEGMENT} // ${OBJ_BYTES} - 1):
     key = "a-%03d" % i
     st, _ = http("PUT", "http://%s/api/put" % A, json.dumps({"key": key, "value": payload}).encode())
     if st != 200:
@@ -496,6 +513,7 @@ if grep -q "SETUP-FAILED" "$LOGA1"; then
   record FAIL "phase A preconditions hold" "$(grep 'SETUP-FAILED' "$LOGA1" | head -1)"
   results; exit 1
 fi
+probe_ran "$LOGA1" "PROBE-A-FILL-DONE" "the phase A fill/drain probe pod launches and runs" || { results; exit 1; }
 
 ACC="$(sed -n 's/^WRITE accepted=\([0-9]*\).*/\1/p' "$LOGA1" | tail -1)"
 SUBJECT_A="$(sed -n 's/^SUBJECT //p' "$LOGA1" | tail -1)"
@@ -614,6 +632,8 @@ PY
 echo "----- phase A read-back probe log (source pod deleted) -----"
 cat "$LOGA2"
 echo "-------------------------------------------------------------"
+
+probe_ran "$LOGA2" "READ-PROBE-DONE" "the phase A read-back probe pod launches and runs" || { results; exit 1; }
 
 if grep -q "SOURCE-SEGMENT-GONE" "$LOGA2"; then
   record PASS "the master drops the source segment after the pod is gone" "$(grep 'SOURCE-SEGMENT-GONE' "$LOGA2")"
@@ -745,17 +765,27 @@ print("TIER evicted_key_count_mem=%d" % g("master_evicted_key_count_mem"))
 # and later mistake the verdict reads.
 subject = []
 # The metrics page is large; read it once per key and carry the previous reading forward as the
-# next key's baseline instead of reading it twice per key.
-hits = g("file_cache_hit_nums_")
+# next key's baseline instead of reading it twice per key. The exact-name lookup returns 0.0 for
+# a metric the page never carried, so track whether the counter showed up at all: an absent
+# instrument and an absent tier both end at "fewer than 4 subjects" and must not share a message.
+FC_METRIC = "file_cache_hit_nums_"
+snap = metrics()
+hits = g(FC_METRIC, snap)
+fc_seen = FC_METRIC in snap
 for key in dkeys:
     st, _ = http("GET", "http://%s/api/get/%s" % (A, key), timeout=30)
-    after = g("file_cache_hit_nums_")
+    snap = metrics()
+    after = g(FC_METRIC, snap)
+    fc_seen = fc_seen or FC_METRIC in snap
     if st == 200 and after > hits:
         subject.append(key)
     hits = after
 print("TIER subject_count=%d subject=%s" % (len(subject), ",".join(subject)))
 if len(subject) < 4:
-    print("SETUP-FAILED only %d keys are disk-resident, the disk half cannot be exercised" % len(subject))
+    if not fc_seen:
+        print("SETUP-FAILED the master's /metrics never exported %s: the disk-residency instrument is missing on this build, not the tier's keys" % FC_METRIC)
+    else:
+        print("SETUP-FAILED only %d keys are disk-resident, the disk half cannot be exercised" % len(subject))
     sys.exit(1)
 
 # A remove reaches only the keys the addressed member can name: filler that spilled to B is
@@ -819,9 +849,14 @@ print("SEGMENTS source=%s used=%d free=%d" % (a_seg["segment_name"], a_seg["allo
 print("SEGMENTS target=%s used=%d free=%d" % (b_seg["segment_name"], b_seg["allocator_used_bytes"], free_bytes(b_seg)))
 # The pre-drain baselines the verdict compares against: the source's memory keys (used/OBJ, an
 # exact count here -- every object is OBJ bytes) and the tier's size. Both come from the store's
-# own segment and metrics reads, never from the job report under test.
+# own segment and metrics reads, never from the job report under test. The tier-size counter gets
+# the same presence tracking as the file-cache-hit one: its exact-name lookup also returns 0.0
+# for an absent metric, and a "0 -> 0" comparison would PASS vacuously.
 print("BEFORE source_used=%d" % a_seg["allocator_used_bytes"])
-print("BEFORE tier_bytes=%d" % g("master_allocated_file_size_bytes"))
+TB_METRIC = "master_allocated_file_size_bytes"
+snap = metrics()
+tb_seen = TB_METRIC in snap
+print("BEFORE tier_bytes=%d" % g(TB_METRIC, snap))
 if free_bytes(b_seg) < 3 * OBJ:
     print("SETUP-FAILED target free=%d, the memory witnesses need %d" % (free_bytes(b_seg), 3 * OBJ))
     sys.exit(1)
@@ -871,7 +906,11 @@ a_after, b_after = seg_of(A_IP), seg_of(B_IP)
 print("AFTER source_used=%d source_status=%s" % (
     a_after["allocator_used_bytes"] if a_after else -1, a_after.get("status") if a_after else "MISSING"))
 print("AFTER target_used=%d" % (b_after["allocator_used_bytes"] if b_after else -1))
-print("AFTER tier_bytes=%d" % g("master_allocated_file_size_bytes"))
+snap = metrics()
+tb_seen = tb_seen or TB_METRIC in snap
+print("AFTER tier_bytes=%d" % g(TB_METRIC, snap))
+if not tb_seen:
+    print("TIER-BYTES-INSTRUMENT-MISSING the master's /metrics never exported %s" % TB_METRIC)
 print("MEM subject=%s" % ",".join(mkeys))
 print("WANT sha256=%s bytes=%d" % (digest, OBJ))
 print("PROBE-B-FILL-DONE")
@@ -885,6 +924,7 @@ if grep -q "SETUP-FAILED" "$LOGB1"; then
   record FAIL "phase B preconditions hold (a disk-resident subject exists)" "$(grep 'SETUP-FAILED' "$LOGB1" | head -1)"
   results; exit 1
 fi
+probe_ran "$LOGB1" "PROBE-B-FILL-DONE" "the phase B fill/drain probe pod launches and runs" || { results; exit 1; }
 
 TERM_B="$(sed -n 's/^DRAIN-TERMINAL-STATE //p' "$LOGB1" | tail -1)"
 FINAL_B="$(sed -n 's/^FINAL //p' "$LOGB1" | tail -1)"
@@ -927,22 +967,27 @@ fi
 # test -- and the job's counters sum to the memory keys alone. The tier's keys are in nobody's
 # report. The day a fix makes the job account for the tier -- migrating it or counting the skip --
 # the covered sum reaches the held one and the case must go red.
-if [ -n "$B_SUCC" ] && [ -n "$B_FAIL" ] && [ -n "$B_BLOCK" ] && [ -n "$B_ACTIVE" ] && [ -n "$TIER_COUNT" ] && [ -n "$B_SRC_USED_PRE" ]; then
+# A counter that did not parse is a different verdict from a covered sum that grew: the first
+# indicts this case's own parsing, the second the drain's accounting. Keep them in separate rows.
+if [ -z "$B_SUCC" ] || [ -z "$B_FAIL" ] || [ -z "$B_BLOCK" ] || [ -z "$B_ACTIVE" ] || [ -z "$TIER_COUNT" ] || [ -z "$B_SRC_USED_PRE" ]; then
+  record FAIL "the phase B counters parse from the probe log" \
+    "FINAL='${FINAL_B}', TIER='${TIER_LINE}', BEFORE source_used='${B_SRC_USED_PRE}' -- an empty counter means the probe log above changed shape, not that the drain's accounting did"
+else
   GAP_COVERED=$((B_SUCC + B_FAIL + B_BLOCK + B_ACTIVE))
   GAP_HELD=$((TIER_COUNT + B_SRC_USED_PRE / OBJ_BYTES))
-else
-  GAP_COVERED=0
-  GAP_HELD=0
-fi
-if [ "$GAP_HELD" -gt 0 ] && [ "$GAP_COVERED" -lt "$GAP_HELD" ]; then
-  record PASS "the job's counters do not sum to the keys the source held" \
-    "succeeded+failed+blocked+active=${GAP_COVERED} < held=${GAP_HELD} (${TIER_COUNT} tier-resident + $((B_SRC_USED_PRE / OBJ_BYTES)) memory keys measured pre-drain)"
-else
-  record FAIL "the job's counters do not sum to the keys the source held" \
-    "succeeded+failed+blocked+active=${GAP_COVERED} vs held=${GAP_HELD} (${TIER_COUNT} tier-resident + pre-drain source_used=${B_SRC_USED_PRE}) -- the drain's accounting of the tier changed, or the probe log did not parse; revisit the skipped-tier premise"
+  if [ "$GAP_COVERED" -lt "$GAP_HELD" ]; then
+    record PASS "the job's counters do not sum to the keys the source held" \
+      "succeeded+failed+blocked+active=${GAP_COVERED} < held=${GAP_HELD} (${TIER_COUNT} tier-resident + $((B_SRC_USED_PRE / OBJ_BYTES)) memory keys measured pre-drain)"
+  else
+    record FAIL "the job's counters do not sum to the keys the source held" \
+      "succeeded+failed+blocked+active=${GAP_COVERED} vs held=${GAP_HELD} (${TIER_COUNT} tier-resident + pre-drain source_used=${B_SRC_USED_PRE}) -- the drain's accounting of the tier changed; revisit the skipped-tier premise"
+  fi
 fi
 
-if [ -n "$B_TIER_BEFORE" ] && [ -n "$B_TIER_BYTES" ] && [ "$B_TIER_BYTES" = "$B_TIER_BEFORE" ]; then
+if grep -q "TIER-BYTES-INSTRUMENT-MISSING" "$LOGB1"; then
+  record FAIL "the drain leaves the tier's bytes untouched" \
+    "the master never exported master_allocated_file_size_bytes -- the tier-size instrument is missing on this build and a bytes comparison would be vacuous"
+elif [ -n "$B_TIER_BEFORE" ] && [ -n "$B_TIER_BYTES" ] && [ "$B_TIER_BYTES" = "$B_TIER_BEFORE" ]; then
   record PASS "the drain leaves the tier's bytes untouched" "tier_bytes ${B_TIER_BEFORE} -> ${B_TIER_BYTES}"
 else
   record FAIL "the drain leaves the tier's bytes untouched" "tier_bytes ${B_TIER_BEFORE} -> ${B_TIER_BYTES}"
@@ -1025,6 +1070,8 @@ PY
 echo "----- phase B read-back probe log (source pod deleted) -----"
 cat "$LOGB2"
 echo "-------------------------------------------------------------"
+
+probe_ran "$LOGB2" "READ-PROBE-DONE" "the phase B read-back probe pod launches and runs" || { results; exit 1; }
 
 if grep -q "SOURCE-SEGMENT-GONE" "$LOGB2"; then
   record PASS "the master drops the tiered source segment after the pod is gone" "$(grep 'SOURCE-SEGMENT-GONE' "$LOGB2")"
