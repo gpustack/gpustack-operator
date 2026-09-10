@@ -117,8 +117,11 @@ locals {
         labels             = var.efa_enabled ? { "gpustack.ai/efa" = "true" } : {}
         enable_efa_support = var.efa_enabled
         enable_efa_only    = false
-        # A cluster placement group is scoped to one availability zone.
-        subnet_ids = var.efa_enabled ? [module.vpc.private_subnets[0]] : null
+        # A cluster placement group is scoped to one availability zone, so the group
+        # takes a single subnet. It stays public like every other node group here: the
+        # launch template below assigns a public IP, and in a private subnet that IP
+        # has no route to an internet gateway, which loses SSH access to the nodes.
+        subnet_ids = var.efa_enabled ? [module.vpc.public_subnets[0]] : null
         network_interfaces = [
           {
             associate_public_ip_address = true
