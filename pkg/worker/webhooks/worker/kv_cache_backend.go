@@ -594,7 +594,11 @@ func validateKVCacheBackendMember(
 	// enumerates the one value, so a medium this API does not render is refused before this handler
 	// runs and a rule for it would be code no request can reach.
 
-	errs = append(errs, validateKVCacheBackendLocalDisk(member.LocalDisk, fldPath.Child("localDisk"))...)
+	var oldDisk *workercore.KVCacheBackendMemberLocalDisk
+	if oldMember != nil {
+		oldDisk = oldMember.LocalDisk
+	}
+	errs = append(errs, validateKVCacheBackendLocalDisk(member.LocalDisk, oldDisk, fldPath.Child("localDisk"))...)
 
 	// A resource.Quantity is a STRING in the schema, so no numeric bound in a marker can reach it —
 	// these two are the only place either can be refused. Zero is refused rather than defaulted,
@@ -670,7 +674,7 @@ func validateKVCacheBackendMember(
 // a third-party container, and no tier is served by it. A blocklist of "dangerous" paths would also
 // be unclosable — every entry invites a reader to trust that what is missing from it is safe.
 func validateKVCacheBackendLocalDisk(
-	disk *workercore.KVCacheBackendMemberLocalDisk, fldPath *field.Path,
+	disk, oldDisk *workercore.KVCacheBackendMemberLocalDisk, fldPath *field.Path,
 ) field.ErrorList {
 	if disk == nil {
 		return nil
@@ -732,7 +736,8 @@ func validateKVCacheBackendLocalDisk(
 	if disk.Capacity.CmpInt64(0) < 0 {
 		errs = append(errs, field.Invalid(fldPath.Child("capacity"), disk.Capacity.String(),
 			"must not be negative: it caps what this tier stores"))
-	} else if !disk.Capacity.IsZero() && disk.Capacity.CmpInt64(localDiskMinimumCapacity) < 0 {
+	} else if !disk.Capacity.IsZero() && disk.Capacity.CmpInt64(localDiskMinimumCapacity) < 0 &&
+		(oldDisk == nil || disk.Capacity.Cmp(oldDisk.Capacity) != 0) {
 		errs = append(errs, field.Invalid(fldPath.Child("capacity"), disk.Capacity.String(),
 			"must be at least 256Mi: the store flushes whole buckets and this API cannot configure "+
 				"their size"))
