@@ -349,6 +349,9 @@ type KVCacheBackendLeader struct {
 	// KVCachePool is refused when its backend has no ledger to write quota into. A webhook reading
 	// an unschema'd string — "true", "1", "True" — would be judging a value domain that belongs to
 	// whoever typed it.
+	// The store's global -quota_bytes flag stays in extraArgs because no other API needs to validate
+	// or interpret it. Giving that process-only setting a field would add schema without an API
+	// contract.
 	//
 	// A plain bool, not a pointer, because unset and false mean the same thing here: no ledger.
 	// Unset renders NO flag rather than an explicit false, so a backend that never asked for this
