@@ -70,8 +70,8 @@ func ParseEngine(value string) (Engine, error) {
 		return "", newRefusal(ReasonEngineUnknown,
 			"engine %q is not one this annotation takes: it names the Python package vllm_ascend, "+
 				"which the runner installs when the accelerator backend is CANN, rather than an "+
-				"engine anybody picks. Set %q -- the operator renders the Ascend connector on its "+
-				"own for a pool whose accelerator is Ascend", value, EngineVLLM)
+				"engine anybody picks. Set %q and declare the Ascend runtime with "+
+				"kvcache.gpustack.ai/manufacturer=%q", value, EngineVLLM, "ascend")
 	}
 
 	return "", newRefusal(ReasonEngineUnknown,

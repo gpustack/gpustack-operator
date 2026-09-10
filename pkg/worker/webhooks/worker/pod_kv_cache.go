@@ -38,6 +38,11 @@ const (
 	// starts normally and caches nothing.
 	KVCacheEngineAnnotationKey = "kvcache." + systemname.LabelPrefix + "engine"
 
+	// KVCacheManufacturerAnnotationKey selects the vendor runtime variant for vLLM. It is a workload
+	// author's declaration, not a claim this webhook has verified against the Pod's eventual node.
+	// Only the measured Ascend variant is accepted; a wrong declaration is refused rather than guessed.
+	KVCacheManufacturerAnnotationKey = "kvcache." + systemname.LabelPrefix + "manufacturer"
+
 	// KVCacheRoleAnnotationKey declares a prefill/decode role. Unset is legal and means the caller
 	// has no such split.
 	KVCacheRoleAnnotationKey = "kvcache." + systemname.LabelPrefix + "role"

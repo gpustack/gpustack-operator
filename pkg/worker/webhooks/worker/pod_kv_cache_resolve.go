@@ -11,6 +11,7 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemname"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
@@ -72,6 +73,10 @@ func (r *PodKVCacheWebhook) resolve(ctx context.Context, pod *core.Pod) (*resolu
 	if err != nil {
 		return nil, fmt.Errorf("annotation %q: %w", KVCacheEngineAnnotationKey, err)
 	}
+	engine, err = resolveManufacturer(engine, pod.Annotations)
+	if err != nil {
+		return nil, err
+	}
 	role, err := inject.ParseRole(pod.Annotations[KVCacheRoleAnnotationKey])
 	if err != nil {
 		return nil, fmt.Errorf("annotation %q: %w", KVCacheRoleAnnotationKey, err)
@@ -118,6 +123,26 @@ func (r *PodKVCacheWebhook) resolve(ctx context.Context, pod *core.Pod) (*resolu
 			EngineVersion: version,
 		},
 	}, nil
+}
+
+// resolveManufacturer selects the one vLLM runtime variant whose connector differs. This affects
+// rendering only: ModelDeployment role admission remains conservative across its possible variants,
+// because that path has no corresponding author declaration.
+func resolveManufacturer(engine inject.Engine, annotations map[string]string) (inject.Engine, error) {
+	manufacturer, declared := annotations[KVCacheManufacturerAnnotationKey]
+	if !declared {
+		return engine, nil
+	}
+	if engine != inject.EngineVLLM {
+		return "", fmt.Errorf("annotation %q is only accepted with engine %q", KVCacheManufacturerAnnotationKey,
+			inject.EngineVLLM)
+	}
+	if manufacturer != nodefeature.ManufacturerAscend {
+		return "", fmt.Errorf("annotation %q must be %q when declared with engine %q, got %q",
+			KVCacheManufacturerAnnotationKey, nodefeature.ManufacturerAscend, inject.EngineVLLM, manufacturer)
+	}
+
+	return inject.EngineVLLMAscend, nil
 }
 
 // resolveBinding reads the Binding the Pod names, in the Pod's OWN namespace. There is no
@@ -289,6 +314,7 @@ func (r *PodKVCacheWebhook) get(ctx context.Context, key ctrlcli.ObjectKey, obj 
 var acceptedAnnotations = []string{
 	KVCacheBindingAnnotationKey,
 	KVCacheEngineAnnotationKey,
+	KVCacheManufacturerAnnotationKey,
 	KVCacheRoleAnnotationKey,
 	KVCacheContainerAnnotationKey,
 }
