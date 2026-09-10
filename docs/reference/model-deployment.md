@@ -403,14 +403,15 @@ it is admitted: anything derived from the gate would answer for the moment of ad
 | `True` | `Reserved` | the group has quota reserved in the named cluster queue |
 | `False` | `Pending` | the group is waiting for quota |
 | `False` | `PodGroupIncomplete` | fewer Pods exist than the group declares, so Kueue composes **no Workload at all**; the message carries `<have>/<want>` |
+| `False` | `NoQueueInReservedNamespace` | the deployment is in a reserved namespace, which has no LocalQueue, so it will never be scheduled |
 | `Unknown` | `AdmissionInFlight` | the group is complete and has no Workload yet — Kueue composes it asynchronously, so absence is admission in flight, not refusal |
 | `Unknown` | `NoReplicas` | no replica has been created yet |
 | `Unknown` | `AllReplicasTerminating` | every replica is on its way out, so none holds quota to report on |
 
-`PodGroupIncomplete` and `AdmissionInFlight` are the same observation — no Workload — and they mean
-opposite things. One clears in a moment; the other is the deployment sitting with gated Pods and an
-empty `kubectl get workloads` until something creates the missing replica. Telling them apart is why
-the reason exists.
+`PodGroupIncomplete`, `NoQueueInReservedNamespace` and `AdmissionInFlight` all observe no Workload
+but mean different things. The first clears when the missing replica exists; the second is permanent
+because reserved namespaces deliberately have no LocalQueue; the third clears when Kueue composes the
+Workload. Telling them apart is why the reason exists.
 
 **`CacheAttached`** — whether the cache is observed to be in effect, which is a different question
 from whether it was configured. It is judged downstream of the engine and **never** on a rendered flag

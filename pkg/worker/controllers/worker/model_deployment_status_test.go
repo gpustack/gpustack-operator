@@ -312,7 +312,9 @@ func TestObserveModelDeploymentQuota(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-				md.Namespace = tc.namespace
+				if tc.namespace != "" {
+					md.Namespace = tc.namespace
+				}
 				md.Spec.Roles[0].Replicas = tc.replicas
 			})
 
