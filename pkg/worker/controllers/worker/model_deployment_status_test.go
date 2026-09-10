@@ -265,7 +265,8 @@ func TestModelDeploymentStatus_KindIsEchoedAndNeverEmpty(t *testing.T) {
 // and an empty `kubectl get workloads` until something creates the missing replica.
 func TestObserveModelDeploymentQuota(t *testing.T) {
 	testCases := []struct {
-		name string
+		name      string
+		namespace string
 		// replicas is what the role declares; live is how many Pods actually exist. They differ only
 		// in the incomplete case, which is the whole point of carrying them separately.
 		replicas    int32
@@ -293,6 +294,12 @@ func TestObserveModelDeploymentQuota(t *testing.T) {
 			wantStatus: meta.ConditionUnknown, wantReason: "AdmissionInFlight",
 		},
 		{
+			name: "a reserved namespace has no entrance queue", namespace: "gpustack-system",
+			replicas: 2, live: 2,
+			wantStatus: meta.ConditionFalse, wantReason: "NoQueueInReservedNamespace",
+			wantMessage: "the deployment is in reserved namespace \"gpustack-system\" and will never be scheduled",
+		},
+		{
 			// The same absence, for the opposite reason, and the message carries have/want so a
 			// reader can tell which one they are looking at without counting Pods themselves.
 			name: "the group is short of its total", replicas: 4, live: 3,
@@ -305,6 +312,9 @@ func TestObserveModelDeploymentQuota(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				if tc.namespace != "" {
+					md.Namespace = tc.namespace
+				}
 				md.Spec.Roles[0].Replicas = tc.replicas
 			})
 

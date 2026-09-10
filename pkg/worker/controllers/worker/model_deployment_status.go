@@ -15,6 +15,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
+	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
 const (
@@ -243,6 +244,12 @@ func observeModelDeploymentQuota(
 
 	switch {
 	case wl == nil:
+		if kuberess.IsReservedNamespace(md.Namespace) {
+			ModelDeploymentConditionQuotaReserved.False(holder, "NoQueueInReservedNamespace", fmt.Sprintf(
+				"the deployment is in reserved namespace %q and will never be scheduled", md.Namespace))
+
+			return
+		}
 		ModelDeploymentConditionQuotaReserved.Unknown(holder, "AdmissionInFlight", fmt.Sprintf(
 			"the group is complete at %d replicas but has no workload yet in cluster queue %q",
 			live, queue))
