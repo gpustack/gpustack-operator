@@ -107,13 +107,18 @@ locals {
     {
       cpu = {
         # https://docs.aws.amazon.com/eks/latest/APIReference/API_Nodegroup.html#AmazonEKS-Type-Nodegroup-amiType
-        ami_type       = "AL2023_x86_64_STANDARD"
-        desired_size   = var.cpu_node_count
-        max_size       = var.cpu_node_count
-        min_size       = var.cpu_node_count
-        instance_types = var.cpu_instance_types
-        key_name       = aws_key_pair.accessor.key_name
-        tags           = local.node_group_tags
+        ami_type           = "AL2023_x86_64_STANDARD"
+        desired_size       = var.cpu_node_count
+        max_size           = var.cpu_node_count
+        min_size           = var.cpu_node_count
+        instance_types     = var.cpu_instance_types
+        key_name           = aws_key_pair.accessor.key_name
+        tags               = local.node_group_tags
+        labels             = var.efa_enabled ? { "gpustack.ai/efa" = "true" } : {}
+        enable_efa_support = var.efa_enabled
+        enable_efa_only    = false
+        # A cluster placement group is scoped to one availability zone.
+        subnet_ids = var.efa_enabled ? [module.vpc.private_subnets[0]] : null
         network_interfaces = [
           {
             associate_public_ip_address = true

@@ -47,6 +47,17 @@ variable "cpu_node_count" {
   }
 }
 
+variable "efa_enabled" {
+  # cpu_instance_types must name an EFA-capable type. Most are not: neither
+  # default above is, and nor is any small size of the c7i/m7i/r7i families.
+  # c5n.9xlarge is one that is. Check a candidate before enabling this with
+  # `aws ec2 describe-instance-types --instance-types <type> --query
+  # 'InstanceTypes[].NetworkInfo.EfaSupported'`.
+  description = "Enable EFA on the CPU node group. EFA nodes are placed in one availability zone with an EFA launch template and placement group."
+  type        = bool
+  default     = false
+}
+
 variable "gpu_instance_types" {
   # Keyed by group name so each GPU node group has a stable key (gpu-<name>).
   # Adding a key is a +create only; editing a key's instance-type list replaces
