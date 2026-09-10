@@ -733,15 +733,16 @@ func validateKVCacheBackendLocalDisk(
 	// it. Zero is legitimate and means "no ceiling of ours" — the store's own applies — which is
 	// the same thing leaving the field out means. A positive value needs one full bucket: the store
 	// cannot flush a partial bucket, and this API cannot configure the bucket threshold.
-	if disk.Capacity.CmpInt64(0) < 0 {
+	switch {
+	case disk.Capacity.CmpInt64(0) < 0:
 		errs = append(errs, field.Invalid(fldPath.Child("capacity"), disk.Capacity.String(),
 			"must not be negative: it caps what this tier stores"))
-	} else if !disk.Capacity.IsZero() && disk.Capacity.CmpInt64(localDiskMinimumCapacity) < 0 &&
-		(oldDisk == nil || disk.Capacity.Cmp(oldDisk.Capacity) != 0) {
+	case !disk.Capacity.IsZero() && disk.Capacity.CmpInt64(localDiskMinimumCapacity) < 0 &&
+		(oldDisk == nil || disk.Capacity.Cmp(oldDisk.Capacity) != 0):
 		errs = append(errs, field.Invalid(fldPath.Child("capacity"), disk.Capacity.String(),
 			"must be at least 256Mi: the store flushes whole buckets and this API cannot configure "+
 				"their size"))
-	} else if quantityx.OverflowsInt64(disk.Capacity) {
+	case quantityx.OverflowsInt64(disk.Capacity):
 		errs = append(errs, field.Invalid(fldPath.Child("capacity"), disk.Capacity.String(),
 			quantityTooLarge))
 	}
