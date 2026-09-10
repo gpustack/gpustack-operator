@@ -645,7 +645,7 @@ func (m *sysfsSGPUManager) Create(bdf string, index int, vramMiB int64, alias st
 }
 
 func (m *sysfsSGPUManager) Remove(bdf string, index int) error {
-	err := os.WriteFile(filepath.Join(m.cardDir(bdf), "destroy"), []byte(strconv.Itoa(index)), 0o600)
+	err := os.WriteFile(filepath.Join(m.cardDir(bdf), "remove"), []byte(strconv.Itoa(index)), 0o600)
 	if os.IsNotExist(err) {
 		return nil
 	}
