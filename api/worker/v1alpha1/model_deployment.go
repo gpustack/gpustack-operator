@@ -333,7 +333,8 @@ type ModelDeploymentTemplate struct {
 	// +optional
 	Privileged bool `json:"privileged,omitempty" protobuf:"varint,4,opt,name=privileged"`
 
-	// Ports are the container ports to expose in addition to the engine's own.
+	// Ports are the container ports to expose in addition to the engine's own. They do not
+	// reserve or select the transfer engine's runtime port window.
 	//
 	// +optional
 	// +patchMergeKey=port

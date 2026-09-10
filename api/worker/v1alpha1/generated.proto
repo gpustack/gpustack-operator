@@ -3031,7 +3031,8 @@ message ModelDeploymentTemplate {
   // +optional
   optional bool privileged = 4;
 
-  // Ports are the container ports to expose in addition to the engine's own.
+  // Ports are the container ports to expose in addition to the engine's own. They do not
+  // reserve or select the transfer engine's runtime port window.
   //
   // +optional
   // +patchMergeKey=port

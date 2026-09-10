@@ -4035,7 +4035,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																	Nullable: true,
 																},
 																"ports": {
-																	Description: "Ports are the container ports to expose in addition to the engine's own.",
+																	Description: "Ports are the container ports to expose in addition to the engine's own. They do not\nreserve or select the transfer engine's runtime port window.",
 																	Type:        "array",
 																	Items: &v1.JSONSchemaPropsOrArray{
 																		Schema: &v1.JSONSchemaProps{
