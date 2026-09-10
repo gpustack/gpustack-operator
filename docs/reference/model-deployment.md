@@ -536,9 +536,10 @@ selects transfer-engine ports. AscendDirect binds its transfer ports inside the 
 network namespace, so a declaration here cannot prevent a collision with another process in that
 same namespace.
 
-For AscendDirect, the transfer-port window is calculated only after scheduling, when the runtime
-resolves a logical device to its physical device ID. The device plugin decides that assignment, so
-admission cannot know the window's position.
+For AscendDirect in Mooncake `v0.3.13.post1`, the transfer-port window is calculated only after
+scheduling, when `utils.cpp` resolves a logical device to its physical device ID. The device plugin
+decides that assignment, so admission cannot know the window's position. Other engine versions or
+images can use different rules.
 
 | Input | Rule |
 |---|---|
@@ -547,8 +548,8 @@ admission cannot know the window's position.
 | example on eight cards | physical device ID `7` can use `20700` through `20800` |
 | selection | a port is chosen at random, with up to 500 attempts; the other transfer-port families are also random |
 
-Parallelism and card count are not inputs to this calculation. Card count can bound a possible
-window width, but cannot place a window because it does not identify the physical device.
+Parallelism and card count are not inputs to this calculation. Neither identifies the physical device
+and therefore neither locates its window.
 
 ---
 
