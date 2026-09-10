@@ -213,11 +213,6 @@ vary by what the vendor exposes — and by whether we have been able to run it a
   `mx-smi --show-process` reported for that PID. Compute has no second source to check against:
   MXSML serves no per-process utilization query at all, the same gap Ascend's compute has, so
   `coresUtilizationPercent` reports `unsupported` rather than a number nobody measured.
-- **MetaX's fix was a same-name, different-space trap.** The per-process rows key `GpuId` to the
-  device's sequence index (0–15, MXSML's own "GPU's sequence label"), while the device's info query
-  answers a field of the identical name with its physical id instead (`40244` here, matching sysfs
-  `phy_gpu_id`). Matching against the physical id silently matched no row on any card — every card
-  read back idle, present-and-zero rather than absent, with nothing to surface it.
 - **A partition is addressed by the identifier its allocation recorded**, and by nothing else, on
   every partitioning manufacturer. The alternative is translating the recorded profile name back into
   a driver profile id, which walks the vendor's whole profile catalog — 17 ids on NVIDIA, 85 on
