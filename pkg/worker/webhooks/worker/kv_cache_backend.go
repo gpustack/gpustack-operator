@@ -732,7 +732,7 @@ func validateKVCacheBackendLocalDisk(
 	if disk.Capacity.CmpInt64(0) < 0 {
 		errs = append(errs, field.Invalid(fldPath.Child("capacity"), disk.Capacity.String(),
 			"must not be negative: it caps what this tier stores"))
-	} else if disk.Capacity.CmpInt64(0) > 0 && disk.Capacity.CmpInt64(localDiskMinimumCapacity) < 0 {
+	} else if !disk.Capacity.IsZero() && disk.Capacity.CmpInt64(localDiskMinimumCapacity) < 0 {
 		errs = append(errs, field.Invalid(fldPath.Child("capacity"), disk.Capacity.String(),
 			"must be at least 256Mi: the store flushes whole buckets and this API cannot configure "+
 				"their size"))
