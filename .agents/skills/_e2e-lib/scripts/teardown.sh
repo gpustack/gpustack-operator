@@ -47,20 +47,16 @@ WORKER_CERT_SECRET="${2:-gpustack-operator-worker-cert}"
 # parameter that is correct in one script and silently wrong in the next.
 RELEASE=gpustack-operator
 
-# Resolved from this script's own location rather than from the working directory. The pinned helm
-# lives at the repository root, and a relative `.sbin/helm` test silently falls through to a PATH
-# helm whenever the caller runs from anywhere else — which is how a 3.13 client without
-# --take-ownership gets used by a suite that needs it.
-REPO_ROOT="$(cd "$(dirname "$0")/../../../.." 2>/dev/null && pwd)"
+# The resolver installs the pinned binary into this worktree when needed. A worktree does not
+# share the main checkout's .sbin directory, so probing its own .sbin and falling back to PATH
+# would still select an unrelated client.
+LIB="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "${LIB}/../../../.." 2>/dev/null && pwd)"
 CLEANUP="${REPO_ROOT}/deploy/gpustack-operator/chart/files/cleanup.sh"
 
-# Put the pinned helm ahead of PATH rather than passing a path around: cleanup.sh calls a bare
-# `helm`, and prepending here is what makes the delegate use the same binary this script does.
-HELM=helm
-if [ -x "${REPO_ROOT}/.sbin/helm" ]; then
-  PATH="${REPO_ROOT}/.sbin:$PATH"
-  HELM="${REPO_ROOT}/.sbin/helm"
-fi
+# cleanup.sh calls a bare `helm`, so put the resolved binary ahead of PATH for that delegate too.
+HELM="$(bash "${LIB}/helm.sh")" || exit 1
+PATH="$(dirname "${HELM}"):$PATH"
 
 echo "[teardown] namespace=${NS}"
 

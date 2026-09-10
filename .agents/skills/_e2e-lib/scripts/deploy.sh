@@ -48,10 +48,10 @@ CHART="deploy/gpustack-operator/chart"
 # overridable: the chart derives the worker Certificate and its Secret from this name, so an override
 # honoured here and not there leaves objects behind that the teardown never looks for.
 RELEASE=gpustack-operator
-# Prefer the client hack/lib/helm.sh pins (3.21+). A PATH helm can be old enough to lack
-# flags this suite needs — a 3.13 client has no --take-ownership at all.
-HELM=helm
-[ -x .sbin/helm ] && HELM=.sbin/helm
+# Resolve the pinned client rather than falling back to PATH. The release query below needs
+# --all, and the migration cases also need --take-ownership.
+LIB="$(cd "$(dirname "$0")" && pwd)"
+HELM="$(bash "${LIB}/helm.sh")" || exit 1
 
 # An install that does not complete is the expensive failure here, not one that fails outright:
 # helm creates the subcharts' cluster-scoped RBAC early, and if the run is interrupted — a jittery

@@ -41,8 +41,8 @@ SUBCHART="${CHART}/charts/csi-driver-nfs"
 # cluster-scoped CSIDriver object name identical, so nothing is left behind under another name.
 DRIVER=nfs.csi.gpustack.ai
 PROBE=deploy/csi-nfs-controller
-HELM=helm
-[ -x .sbin/helm ] && HELM=.sbin/helm
+LIB="$(cd "$(dirname "$0")/../../_e2e-lib/scripts" && pwd)"
+HELM="$(bash "${LIB}/helm.sh")" || exit 1
 
 FAILS=0
 ROWS=()

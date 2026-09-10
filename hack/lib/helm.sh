@@ -4,7 +4,7 @@
 # linting and testing the charts under "deploy/". These functions rely on the
 # following tunable versions:
 #
-#            HELM_VERSION  -  The Helm CLI version, default is v3.13.3.
+#            HELM_VERSION  -  The Helm CLI version, default is v3.21.0.
 #       HELM_DOCS_VERSION  -  The norwoodj/helm-docs version, default is v1.14.2.
 #     HELM_SCHEMA_VERSION  -  The dadav/helm-schema version. It only ships Go
 #                             pseudo-versions, so a pinned one (helm-schema 0.23.4)
