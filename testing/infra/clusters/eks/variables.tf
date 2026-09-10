@@ -127,6 +127,11 @@ variable "node_instance_store_count" {
     condition     = var.node_instance_store_count >= 0 && var.node_instance_store_count == floor(var.node_instance_store_count) && var.node_instance_store_count <= 24
     error_message = "node_instance_store_count must be a whole number between 0 and 24."
   }
+
+  validation {
+    condition     = !var.enable_instance_store_csi_driver || var.node_instance_store_count == 0
+    error_message = "enable_instance_store_csi_driver conflicts with node_instance_store_count: the CSI driver deletes the raw NVMe namespaces that the mapping exposes."
+  }
 }
 
 variable "enable_instance_store_csi_driver" {
@@ -147,12 +152,8 @@ variable "enable_instance_store_csi_driver" {
   # the addon is the one that broke node_instance_store_count, and the whole
   # point of the variable is that the two cannot both hold.
   #
-  # NOTHING ENFORCES THE CONFLICT AT PLAN TIME. Setting this true together with
-  # node_instance_store_count > 0 is accepted and fails later, at node boot,
-  # when the driver deletes the namespace the mapping exists to expose. A
-  # cross-variable validation would catch it, and every validation in this
-  # module today reads only its own variable -- referring to another needs
-  # terraform >= 1.9, which this module does not yet declare a floor for.
+  # The node_instance_store_count validation rejects this setting with a raw-device mapping,
+  # before the driver can delete the namespace the mapping would expose at node boot.
   description = "Install the aws-ec2-local-instance-store-csi-driver EKS addon (CSI-managed instance store; deletes unmanaged NVMe namespaces such as the raw nvme1n1). Removing it from a cluster that predates this variable also removes any PVC's provisioner bound to its StorageClass."
   type        = bool
   default     = false
