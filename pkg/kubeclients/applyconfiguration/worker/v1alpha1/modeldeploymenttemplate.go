@@ -36,7 +36,8 @@ type ModelDeploymentTemplateApplyConfiguration struct {
 	Command []string `json:"command,omitempty"`
 	// Privileged runs the container privileged.
 	Privileged *bool `json:"privileged,omitempty"`
-	// Ports are the container ports to expose in addition to the engine's own.
+	// Ports are the container ports to expose in addition to the engine's own. They do not
+	// reserve or select the transfer engine's runtime port window.
 	Ports []InstancePortApplyConfiguration `json:"ports,omitempty"`
 	// Env are environment entries merged on top of the role's own. A name the operator owns is
 	// refused here just as it is in the role's Env: the renderer drops owned names from both tiers,
