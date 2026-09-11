@@ -2753,10 +2753,16 @@ func reconcileTwoGroups(
 // advertise the same host address.
 //
 // Three earlier versions of this code assigned anyway — credit the surviving Pod, credit the whole
-// set, credit by multiplicity — and each had a defect the next review found. The assertions below
-// are written against the ABSENCE of an assignment rather than against the condition being False,
-// so that restoring any of those three (or adding a "credit at least one" fallback to make the
-// status look better) turns this red rather than passing on a nicer-looking guess.
+// set, credit by multiplicity — and each had a defect the next review found.
+//
+// What the row DOES carry is the node and the medium, which are not per-Pod facts: the candidates
+// share a node, and the medium is their group's declaration. This fixture cannot tell a value taken
+// from their agreement from one picked off the first candidate, because here the candidates agree —
+// the input that separates those two is a disagreement, and it lives in
+// TestKVCacheBackendStatus_ADisagreeingMediumIsUnknownRatherThanTheFirstOne. What this case still
+// pins is that the ambiguity is REPORTED: a change that filled these fields by deciding which Pod
+// produced which segment would have to make the condition and its message agree with that, and those
+// assertions are below.
 func TestKVCacheBackendStatus_SharedIdentityIsReportedNotGuessed(t *testing.T) {
 	got := twoGroupsOnOneNode(t, segmentsSharedHost)
 
@@ -2771,8 +2777,8 @@ func TestKVCacheBackendStatus_SharedIdentityIsReportedNotGuessed(t *testing.T) {
 	assert.Contains(t, message, "node selectors",
 		"an operator reading this needs the action, not only the diagnosis")
 
-	// The heart of it: nothing was guessed. A segment on an ambiguous key is published as read, with
-	// no node and no medium attached, rather than attributed to whichever Pod a map happened to keep.
+	// The heart of it: the segment is published as read, and the unknown stays unknown. Which Pod
+	// produced it is not recorded anywhere on the row, and the condition above says so.
 	require.Len(t, got.Status.Members, 2)
 	assert.Equal(t, []string{"segment-1", "segment-2"}, []string{
 		got.Status.Members[0].SegmentID, got.Status.Members[1].SegmentID,
@@ -2781,15 +2787,51 @@ func TestKVCacheBackendStatus_SharedIdentityIsReportedNotGuessed(t *testing.T) {
 		"duplicate advertised names are valid and both uniquely keyed rows must be published")
 	assert.NotEqual(t, got.Status.Members[0].ClientID, got.Status.Members[1].ClientID)
 	for _, member := range got.Status.Members {
-		assert.Empty(t, member.NodeName,
-			"segment %s must carry no node: which pod produced it cannot be known", member.SegmentName)
-		assert.Empty(t, member.Medium,
-			"segment %s must carry no medium, for the same reason", member.SegmentName)
+		assert.Equal(t, "n7", member.NodeName,
+			"segment %s runs on the node its candidates share; that is not a pod attribution",
+			member.SegmentName)
+		assert.Equal(t, "DRAM", member.Medium,
+			"segment %s contributes the medium its candidates' groups both declare", member.SegmentName)
 	}
 
 	assert.NotContains(t, message, "match none of them",
 		"and it is not reported as a shortfall: the pods are unaccounted for by construction here, "+
 			"so a count of them would describe this index rather than the cluster")
+}
+
+// TestKVCacheBackendStatus_ADisagreeingMediumIsUnknownRatherThanTheFirstOne is the one input that
+// tells "what the candidates agree on" apart from "what the first candidate says".
+//
+// Everywhere else the candidates agree, so both rules render the same row and neither is under test.
+// Here the two groups declare different media: agreement has no answer and the field stays empty,
+// while a pick would publish the first group's value.
+//
+// The node is asserted beside it because the two decisions are independent — a medium nobody agrees
+// on does not put the node they share in doubt.
+//
+// This state is not reachable through the API today, whose enum on medium holds one value. The rule
+// is written against agreement rather than against that value so that widening the enum cannot turn
+// a correct row into a wrong one, and this case is the only thing holding it to that.
+func TestKVCacheBackendStatus_ADisagreeingMediumIsUnknownRatherThanTheFirstOne(t *testing.T) {
+	kvcb := twoGroupBackend(t)
+	kvcb.Spec.Connection.Managed.Members[1].Medium = "HBM"
+
+	got := reconcileTwoGroups(t, kvcb, segmentsSharedHost,
+		memberPodOfGroup(t, kvcb, 0, "n7", "10.42.0.11"),
+		memberPodOfGroup(t, kvcb, 1, "n7", "10.42.0.11"))
+
+	assert.Equal(t, "AmbiguousMemberIdentity",
+		KVCacheBackendConditionMembersMounted.GetReason(got),
+		"what the two fields do leaves the ambiguity itself untouched")
+
+	require.Len(t, got.Status.Members, 2)
+	for _, member := range got.Status.Members {
+		assert.Equal(t, "n7", member.NodeName,
+			"segment %s still reports the node both candidates run on", member.SegmentName)
+		assert.Empty(t, member.Medium,
+			"segment %s must carry no medium: its candidates declare different ones, so the value is "+
+				"unknown rather than whichever came first", member.SegmentName)
+	}
 }
 
 // TestKVCacheBackendStatus_AMixedListingScopesTheAmbiguityToItsSharedAddress keeps a collision on
@@ -2808,8 +2850,9 @@ func TestKVCacheBackendStatus_AMixedListingScopesTheAmbiguityToItsSharedAddress(
 		"the verdict must scope the ambiguity to the segments on the shared address")
 
 	require.Len(t, got.Status.Members, 3)
-	assert.Empty(t, got.Status.Members[0].NodeName)
-	assert.Empty(t, got.Status.Members[1].NodeName)
+	assert.Equal(t, "n7", got.Status.Members[0].NodeName,
+		"the colliding pair still reports the node it shares, which the collision does not put in doubt")
+	assert.Equal(t, "n7", got.Status.Members[1].NodeName)
 	assert.Equal(t, "n8", got.Status.Members[2].NodeName,
 		"a collision elsewhere does not make this segment's unique Pod attribution unknowable")
 	assert.Equal(t, "DRAM", got.Status.Members[2].Medium)

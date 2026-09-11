@@ -781,9 +781,10 @@ func (r *KVCacheBackendReconciler) observeMembers(
 	}
 
 	// Keys that several ready Pods answer to AND that a segment actually arrived on. Both halves
-	// matter. A segment on such a key cannot be traced to a Pod, so it is published without a node
-	// or a medium rather than with a guessed one, and the condition below reports the ambiguity
-	// instead of a number derived from it.
+	// matter. A segment on such a key cannot be traced to a Pod, so no Pod is credited for it and the
+	// condition below reports the ambiguity instead of a number derived from it. Its node and medium
+	// are still published: neither is a fact about the individual Pod, so both come from what the
+	// candidates agree on.
 	//
 	// Collected inside this loop rather than over the whole index, because a shared key that no
 	// segment uses is not a problem: two TCP groups on one node share that node's name, and the
@@ -808,6 +809,12 @@ func (r *KVCacheBackendReconciler) observeMembers(
 		case len(candidates) > 1:
 			ambiguous[host] = memberPodNames(candidates)
 			ambiguousSegments++
+			// WHICH member produced this segment is what cannot be known. Where it runs and what it
+			// contributes are not the same question: the candidates share a node, and the medium is
+			// their group's declaration rather than anything about the individual Pod. Both are taken
+			// from what the candidates agree on, so neither is a Pod credited by another name, and
+			// the ambiguity itself is still reported below.
+			member.NodeName, member.Medium = agreedMemberFacts(candidates)
 		case len(candidates) == 1:
 			member.NodeName = candidates[0].nodeName
 			member.Medium = candidates[0].medium
@@ -1022,10 +1029,14 @@ func memberPodStuck(pod *core.Pod) (memberPodFault, bool) {
 // Pods expose neither. Co-located host-network members advertise the same address, so no listing
 // field can map one of those distinct segments back to one of the Pods.
 //
-// So no assignment is attempted there. Three earlier versions of this tried — credit the surviving
-// Pod, credit the whole set, credit by multiplicity — and each had a defect the next review found,
+// So no Pod is credited there. Three earlier versions of this tried — credit the surviving Pod,
+// credit the whole set, credit by multiplicity — and each had a defect the next review found,
 // because each was producing an approximation for a problem whose input does not determine its
 // output. What is reported instead is that the identity is ambiguous.
+//
+// The two fields are still published, because neither is a fact about the individual Pod: the
+// candidates are on one node and the medium is their group's declaration, so both come from what the
+// candidates agree on rather than from one of them. See agreedMemberFacts.
 type memberPodFacts struct {
 	podName  string
 	nodeName string
@@ -1162,6 +1173,40 @@ func memberPodNames(facts []memberPodFacts) []string {
 	}
 
 	return names
+}
+
+// agreedMemberFacts is the node and the medium every one of a key's candidates carries, and the empty
+// string for whichever of the two they do not all agree on.
+//
+// AGREEMENT, NOT A PICK. Reading either field off one candidate would be the Pod attribution this
+// controller refuses to invent, and it would read identically while the candidates happen to match —
+// so the two are told apart only by an input where they differ, which is why the medium is compared
+// rather than assumed.
+//
+// The node survives the comparison for a structural reason rather than by luck: Pods behind one index
+// key are on one node, by definition when the key is the node name, and because only host-network
+// Pods on one node can share a pod IP when it is the IP. The medium agrees today because its enum
+// holds one value; comparing it is what keeps this correct on the day the enum widens, when a
+// disagreement becomes reachable and the answer becomes "unknown" rather than "the first one".
+//
+// The two are decided independently: a medium the candidates disagree on does not make their node
+// unknown.
+func agreedMemberFacts(facts []memberPodFacts) (nodeName, medium string) {
+	if len(facts) == 0 {
+		return "", ""
+	}
+
+	nodeName, medium = facts[0].nodeName, facts[0].medium
+	for _, fact := range facts[1:] {
+		if fact.nodeName != nodeName {
+			nodeName = ""
+		}
+		if fact.medium != medium {
+			medium = ""
+		}
+	}
+
+	return nodeName, medium
 }
 
 // describeAmbiguousKeys renders the sharing as one clause, sorted so the condition message is
