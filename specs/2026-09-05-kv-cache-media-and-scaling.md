@@ -526,7 +526,8 @@ counter-argument stronger than expected — which is why it is written out rathe
   and address; a collision-safe match there additionally requires the member's own `client_id`, which
   the member has no supported way to read. This shipped design renders no memory-unmount hook, so
   every scale-in still drops the segment. The upstream gap applies to supporting every transport, not
-  to identifying every member.
+  to identifying every member. The member-identity reasoning in this bullet is superseded by
+  `2026-09-09-kv-cache-segment-identity-status.md`; the scale-in conclusion it states is not.
 
 - **Acceptance:** a group with `localDisk` and a 30-second grace renders a `preStop` httpGet-free
   exec or HTTP POST carrying exactly `{"grace_period_seconds": 30}` to the member's own REST port,
@@ -1121,6 +1122,12 @@ make this code solid enough prior to committing the changes necessary to impleme
 | `pod_indexed_twice_keeps_collision` | two ready Pods on a node whose **name is its address** | `AmbiguousMemberIdentity` naming **two** pods. Such a Pod is filed under one key twice; the second filing must not displace the entry recording the collision, or a reported ambiguity turns back into a silent guess |
 | `unready_pod_does_not_take_the_segment` | one ready and one **starting** Pod on one key, one segment, the starting one filed last | `Mounted`, the segment carrying the ready Pod's node. Reading whichever Pod was filed last credits the starting one, and the ready member — the only one that could have produced the segment — is then reported short on a fully mounted backend |
 
+**Superseded.** The three shared-identity cases in the table above --
+`shared_identity_not_guessed`, `shared_identity_not_healthy` and
+`pod_indexed_twice_keeps_collision` -- are owned by
+`2026-09-09-kv-cache-segment-identity-status.md`, which states the cases in force. The scope named
+there is those cases; this marker makes no claim about the rest of the table.
+
 #### Integration tests
 
 - Reconcile against a fake ctrl client plus the fake admin round-tripper: create with a disk tier,
@@ -1218,9 +1225,10 @@ that sentence travels with the row so a later reader cannot mistake a green suit
   and puts the randomly bound transfer port only in `te_endpoint`. It also reports distinct
   `segment_id` and `client_id` values, but this historical status design neither decoded those fields
   nor keyed rows by them. Under the real duplicate-name response, the listing was therefore rejected
-  before the intended ambiguity verdict could be published. A later spec supersedes that status
-  design; the attribution conclusion remains: no Pod exposes either id, so assigning a shared-host
-  row to one of the Pods would still be a guess.
+  before the intended ambiguity verdict could be published.
+  `2026-09-09-kv-cache-segment-identity-status.md` supersedes that status design; the attribution
+  conclusion remains: no Pod exposes either id, so assigning a shared-host row to one of the Pods
+  would still be a guess.
   Two qualifiers make the rule narrow enough to be true, and both were learned by getting them wrong.
   Only **ready** Pods are candidates, because only a ready member can hold a segment — a key shared by
   one ready and one starting Pod has exactly one candidate and resolves normally. And the ambiguity is
@@ -1265,7 +1273,8 @@ that sentence travels with the row so a later reader cannot mistake a green suit
   Pod IP-based segment name. A transport-independent implementation additionally needs host-network
   members placed on one node to report their own `client_id`, because they share a name and address.
   Whether to implement the non-host-network case first or ask upstream for that identity is open; this
-  shipped design renders no memory-unmount hook.
+  shipped design renders no memory-unmount hook. The member-identity reasoning in this question is
+  superseded by `2026-09-09-kv-cache-segment-identity-status.md`.
 - **Whether `NoF` deserves an object of its own.** Its registration carries a target coordinate and
   no node affinity, so it is not a member group; whether it is a leader field, a list on the backend,
   or a separate CR is undecided, and nothing needs it yet.
