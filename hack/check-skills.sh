@@ -11,11 +11,13 @@
 # of them honours is a rule that fires on one machine and not another.
 #
 # INVOCATION POLICY. `disable-model-invocation: true` makes a skill explicit-only in Claude and
-# Kimi. Codex does not read that key -- its standard validator rejects it -- and takes the same
-# policy from agents/openai.yaml instead. The two must agree, or the skill is frozen on two hosts
-# and auto-invoked on the third. Freezing also removes the skill's description from what the host
-# loads, so AGENTS.md carries the trigger instead: a frozen skill absent from AGENTS.md is one the
-# model can no longer learn exists, and nothing about that state looks different from working.
+# Kimi. Codex ignores that key: a skill carrying only it still appears in the catalog, with no
+# diagnostic on stderr, so nothing signals that the freeze did not take. Codex takes the policy
+# from agents/openai.yaml instead -- a skill carrying only that file is absent from the catalog and
+# still runs under `$name`. Both files are therefore required, and both are asserted here, or the
+# skill is frozen on two hosts and auto-invoked on the third. Freezing also removes the skill's
+# description from what a host loads, so AGENTS.md carries the trigger instead: a frozen skill with
+# no trigger row is one the model can no longer learn exists, and nothing about that looks broken.
 #
 # EXCLUSION LISTS. Three reviewers read three different files, and only .opencodereview/rule.json
 # is machine-parsed; the other two are prose a human wrote. Every path rule.json excludes must be
