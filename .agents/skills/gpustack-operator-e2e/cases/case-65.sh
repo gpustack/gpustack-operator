@@ -451,7 +451,7 @@ fi
 # zero on a tier that is working -- and on a fresh tier that zero is exactly the value this case
 # treats as its known failure. So it is asked for repeatedly until it carries a number.
 #
-# ⛔ This is NOT "wait and it will come": below one bucket's worth the wait would never end, because
+# This is NOT "wait and it will come": below one bucket's worth the wait would never end, because
 # nothing is due. It is legitimate here only because the assertion above proved this write set
 # clears the rendered limit. Each attempt gets its own Pod name -- the previous one is still being
 # reclaimed, and a name collision returns no reading, which is the shape that must not be read as
