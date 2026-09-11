@@ -475,7 +475,8 @@ spec:
 | a `preStop` hook, and a termination window derived from `scaleIn.gracePeriodSeconds` | the member Pod |
 
 **A tier is a layer on a member group, never a group of its own** — see
-[The two axes](#the-two-axes) for why the shape has to be this way.
+[The two axes](#the-two-axes) for why the shape has to be this way, and
+[KV Cache on Disk-Heavy Nodes](disk-heavy-nodes.md) for what to write on a node that is mostly disk.
 
 ### The tier is written one bucket at a time
 

@@ -97,6 +97,17 @@ group discards that member's cache).
 **Never** — the four-stage scheduling chain. This chain is its own; `docs/architecture.md` links to it
 in one clause and does not describe it.
 
+## `docs/kv-cache/disk-heavy-nodes.md`
+
+**Owns** — the configuration a node whose capacity is disk rather than memory needs: that no member
+group is disk alone and what that costs if attempted, the thin-segment/thick-tier manifest, and the
+one-bucket floor on `capacityPerMember` together with what that floor is and is not evidence of.
+
+**Never** — how the tier itself behaves. Its rendering table, its eviction algebra, its five path
+rules, its failure modes and the one exit that removes it are `backend.md`'s; this page links to
+each. It exists because `backend.md` sits at both the line and the `##` cap, and because the reader
+arriving with a disk-heavy machine is asking a configuration question rather than a mechanism one.
+
 ## `docs/kv-cache/pool.md`
 
 **Owns** — the `KVCachePool` / `KVCachePoolBinding` pair: why they split by scope, the Binding as the
