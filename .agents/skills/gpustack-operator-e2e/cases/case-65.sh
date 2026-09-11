@@ -10,7 +10,15 @@
 #              and publishes, but a published capacity is not a written byte — the store has
 #              been observed announcing the tier while every offload stayed "deferred" forever.
 #              The one figure that answers whether the tier is real is the leader's own
-#              master_allocated_file_size_bytes: bytes actually written to disk. This case
+#              master_allocated_file_size_bytes: bytes actually written to disk. TWO THINGS
+#              HAVE TO HOLD BEFORE A ZERO THERE IS A VERDICT, and this case establishes both
+#              rather than assuming them. The store writes nothing until a BUCKET fills, so a
+#              tier offered less than one bucket reads zero while working perfectly — the case
+#              reads the rendered limit out of the member container and asserts its write set
+#              clears one bucket PER MEMBER, since each member client fills its own while the
+#              gauge sums the backend. And the figure follows a bucket being closed rather than
+#              a put returning, so
+#              it is asked for repeatedly until it carries a number instead of once. This case
 #              writes known content, then asserts that figure is non-zero, that files exist in
 #              the host directory, and that a read returns the bytes that were written. With
 #              offload_on_evict unset the store's contract is write-through at put time, so a
@@ -46,14 +54,19 @@
 # Expected:    Phase A (write-through, offload.onEvict unset):
 #              - the backend reaches Ready with the local disk segment registered;
 #              - writes succeed (rc=0) and reads return the bytes written;
-#              - master_allocated_file_size_bytes on the leader reads > 0 after the writes —
+#              - the rendered bucket limit is present in the member container and the write set
+#                clears it — without this the next assertion could not be read as a verdict;
+#              - master_allocated_file_size_bytes on the leader reads > 0 once it has settled —
 #                NOT status.capacity, which reports the declared figure and cannot tell an
 #                empty tier from a full one;
 #              - the host directory on at least one node holds files.
 #              Phase B (the discriminator, offload.onEvict=true, writes pushed past aggregate
 #              memory so eviction is forced):
-#              - writes succeed, an evicted object reads back byte-identical (served from the
-#                disk tier), and the on-evict leader's metric reads > 0.
+#              - writes succeed, and BEFORE the read the leader reports the key with a local
+#                disk replica and no memory replica — without that, bytes coming back proves
+#                only that the store works, not that the TIER served them;
+#              - the object then reads back byte-identical, and the on-evict leader's metric
+#                reads > 0.
 #
 #              KNOWN-FAILURE DETECTOR: against mooncake 0.3.13 phase A's last two assertions
 #              FAIL — the tier is announced (12 GB published, offload RPC servers up) and
@@ -146,9 +159,15 @@ ready_nodes() {
     2>/dev/null | awk -F'|' '$2=="True" {print $1}'
 }
 
+# ACROSS NAMESPACES, and not in $NS. A KVCacheBackend is cluster-scoped but the workloads it renders
+# land in the OPERATOR's namespace, which is not the namespace this case was handed -- the same fact
+# the endpoint lookup below already works around. Searched in $NS this returns zero for a healthy
+# backend whenever the two differ, and zero members is indistinguishable here from a backend whose
+# members never started. The label selector carries the backend's own name, which is unique cluster
+# wide, so widening the search cannot pick up another backend's Pods.
 running_member_count() {
   local backend="$1"
-  kubectl -n "$NS" get pod \
+  kubectl get pod -A \
     -l "app.kubernetes.io/name=kv-cache-backend,app.kubernetes.io/instance=${backend},app.kubernetes.io/component=member-0" \
     -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}' \
     2>/dev/null | awk 'NF {n++} END {print n+0}'
@@ -274,6 +293,59 @@ fi
 PHASE_A_TOTAL=$((MEMBER_COUNT * 44))
 PHASE_A_FILL=$((PHASE_A_TOTAL - 4))
 
+# ------------------------------------------------- the precondition every figure below rests on
+#
+# The store writes nothing until a bucket is full, so a tier offered less than one bucket holds
+# nothing LEGITIMATELY and the verdict figure reads zero on a tier that is working. This case is
+# only entitled to read that figure as a verdict because the write set above clears the bucket
+# limit -- so the limit has to be read from the container rather than assumed, and compared.
+#
+# It is read WITH a companion variable that must be present whenever the tier is rendered at all.
+# The two together separate three states a single read cannot: a probe that did not answer, a
+# limit that never arrived (leaving the store on its own 256MB default, which this write set would
+# NOT clear), and a limit that is there. An empty reading alone is the shape that would otherwise
+# arrive as "the tier is empty" -- the failure this whole case exists to report.
+MEMBER_REF="$(kubectl get pod -A \
+  -l "app.kubernetes.io/name=kv-cache-backend,app.kubernetes.io/instance=${BACKEND},app.kubernetes.io/component=member-0" \
+  -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.namespace} {.metadata.name}{"\n"}{end}' 2>/dev/null | head -1)"
+MEMBER_NS="${MEMBER_REF%% *}"
+MEMBER_POD="${MEMBER_REF##* }"
+TIER_ENV="$(kubectl -n "$MEMBER_NS" exec "$MEMBER_POD" -- sh -c \
+  'printf "%s|%s" "${MOONCAKE_OFFLOAD_BUCKET_SIZE_LIMIT_BYTES-}" "${MOONCAKE_OFFLOAD_FILE_STORAGE_PATH-}"' 2>/dev/null)"
+BUCKET_LIMIT="${TIER_ENV%%|*}"
+TIER_PATH_ENV="${TIER_ENV##*|}"
+# PER MEMBER, and that is the whole point of dividing here. Each member client fills ITS OWN bucket
+# from the objects that land on it, so a write set that clears one bucket in aggregate can leave
+# every member short of the threshold and close nothing -- while the gauge, which sums the backend,
+# still reads zero. Dividing by the member count is the conservative form: it asks that an EVEN
+# spread would still close a bucket, and an uneven one only makes some member cross it sooner.
+PHASE_A_BYTES_PER_MEMBER=$(((PHASE_A_TOTAL * 4 * 1024 * 1024) / MEMBER_COUNT))
+case "$BUCKET_LIMIT" in
+  '' | *[!0-9]*)
+    if [ -z "$TIER_PATH_ENV" ]; then
+      record FAIL "the rendered bucket limit reached the member container" \
+        "no reading from ${MEMBER_POD:-<no member pod>}: neither the limit nor the storage path came \
+back, so this run did not measure the environment and makes no claim about the limit"
+    else
+      record FAIL "the rendered bucket limit reached the member container" \
+        "MOONCAKE_OFFLOAD_FILE_STORAGE_PATH='${TIER_PATH_ENV}' but \
+MOONCAKE_OFFLOAD_BUCKET_SIZE_LIMIT_BYTES='${BUCKET_LIMIT}' -- the tier is rendered and the limit is \
+not, so the store keeps its own 256MB default and this write set would close no bucket"
+    fi
+    results; exit 1
+    ;;
+esac
+if [ "$PHASE_A_BYTES_PER_MEMBER" -lt "$BUCKET_LIMIT" ] 2>/dev/null; then
+  record FAIL "the write set clears one bucket per member" \
+    "phase A offers ${PHASE_A_BYTES_PER_MEMBER} bytes per member across ${MEMBER_COUNT} member(s) \
+against a bucket limit of ${BUCKET_LIMIT} -- below one bucket each, the tier holds nothing \
+legitimately, so the figures below could not be read as a verdict"
+  results; exit 1
+fi
+record PASS "the write set clears one bucket per member" \
+  "phase A offers ${PHASE_A_BYTES_PER_MEMBER} bytes per member across ${MEMBER_COUNT} member(s), \
+against MOONCAKE_OFFLOAD_BUCKET_SIZE_LIMIT_BYTES=${BUCKET_LIMIT}"
+
 # The managed workloads live in the OPERATOR's namespace, not necessarily $NS — the only
 # trustworthy address is the one the controller published in status.endpoints.
 CLIENT_ADDR="$(kubectl get kvcachebackends.worker.gpustack.ai "$BACKEND" -o jsonpath='{.status.endpoints[?(@.name=="Client")].address}' 2>/dev/null)"
@@ -364,11 +436,32 @@ fi
 # master_allocated_file_size_bytes is the leader's own count of bytes written to the file tier.
 # status.capacity cannot stand in for it: that one reports the DECLARED figure, which reads the
 # same for an empty tier as for a full one.
-METRIC="$(kubectl -n "$NS" run "case65-metrics-${SFX}" --image=busybox:1.36 --restart=Never --rm -i --quiet \
-  --pod-running-timeout="$PULL_TIMEOUT" \
-  --labels="gpustack-e2e-case=65-${SFX}" \
-  -- sh -c "wget -qO- http://${ADMIN_ADDR}/metrics | grep '^master_allocated_file_size_bytes'" 2>/dev/null)"
-METRIC_VAL="$(echo "$METRIC" | awk '{print $2}' | cut -d. -f1)"
+# The figure follows a bucket being CLOSED AND WRITTEN, not a put returning, and the master learns
+# of it from the member rather than at the same instant. A single read taken here therefore reads
+# zero on a tier that is working -- and on a fresh tier that zero is exactly the value this case
+# treats as its known failure. So it is asked for repeatedly until it carries a number.
+#
+# ⛔ This is NOT "wait and it will come": below one bucket's worth the wait would never end, because
+# nothing is due. It is legitimate here only because the assertion above proved this write set
+# clears the rendered limit. Each attempt gets its own Pod name -- the previous one is still being
+# reclaimed, and a name collision returns no reading, which is the shape that must not be read as
+# a zero.
+METRIC=""
+METRIC_VAL=""
+SETTLE=0
+while [ "$SETTLE" -lt 6 ]; do
+  SETTLE=$((SETTLE + 1))
+  METRIC="$(kubectl -n "$NS" run "case65-metrics-${SFX}-${SETTLE}" --image=busybox:1.36 --restart=Never --rm -i --quiet \
+    --pod-running-timeout="$PULL_TIMEOUT" \
+    --labels="gpustack-e2e-case=65-${SFX}" \
+    -- sh -c "wget -qO- http://${ADMIN_ADDR}/metrics | grep '^master_allocated_file_size_bytes'" 2>/dev/null)"
+  METRIC_VAL="$(echo "$METRIC" | awk '{print $2}' | cut -d. -f1)"
+  case "$METRIC_VAL" in
+    '' | *[!0-9]*) ;;
+    *) [ "$METRIC_VAL" -gt 0 ] && break ;;
+  esac
+  [ "$SETTLE" -lt 6 ] && sleep 10
+done
 if [ -n "$METRIC_VAL" ] && [ "$METRIC_VAL" -gt 0 ] 2>/dev/null; then
   record PASS "the leader reports bytes actually written to the file tier" \
     "master_allocated_file_size_bytes=${METRIC_VAL} (> 0)"
@@ -382,8 +475,10 @@ elif [ -z "$METRIC" ]; then
 so this run makes no claim about the tier either way"
 else
   record FAIL "the leader reports bytes actually written to the file tier" \
-    "master_allocated_file_size_bytes='${METRIC}' -- a zero here with healthy writes above is the \
-known 'tier announced, nothing lands' failure shape: the leader defers offload forever while publishing capacity"
+    "master_allocated_file_size_bytes='${METRIC}' after ${SETTLE} reads over $(( (SETTLE - 1) * 10 ))s \
+-- a zero that does not move, with healthy writes above and a write set proven to clear one bucket, \
+is the known 'tier announced, nothing lands' failure shape: the leader defers offload forever while \
+publishing capacity"
 fi
 
 # ------------------------------------------------- 4. files on the host, not just a metric
@@ -485,7 +580,7 @@ cat <<PY | kubectl -n "$NS" run "case65-probe-oe-${SFX}" --image="$IMAGE" --rest
   --labels="gpustack-e2e-case=65-${SFX}" \
   --overrides='{"spec":{"containers":[{"name":"probe","image":"'"$IMAGE"'","command":["python3","-"],"stdin":true,"stdinOnce":true}]}}' \
   -i --rm --quiet >"$PROBE_LOG2" 2>&1 || true
-import sys, socket, hashlib
+import sys, socket, hashlib, json, urllib.request
 try:
     from mooncake.store import MooncakeDistributedStore
 except Exception as e:
@@ -505,26 +600,48 @@ if rc != 0:
 payload = (b"case65-onevict!" * (4 * 1024 * 1024 // 15 + 1))[:4 * 1024 * 1024]
 digest = hashlib.sha256(payload).hexdigest()
 
-# The oldest keys: eviction must push these to the tier once memory runs out.
+# KEYS DISTINCT FROM PHASE A's, and that is a correctness requirement rather than tidiness. Both
+# phases point their tier at the same host directory and phase A's backend is still alive here --
+# the teardown deletes both at the end -- so this store's startup scan finds phase A's bucket files
+# and adopts every key in them. Sharing a key name would let this phase's read be served by phase
+# A's bytes: a digest mismatch that looks like a failed read-back but is a different defect.
 for i in range(4):
-    print("PUT warm-%d rc=%d" % (i, store.put("warm-%d" % i, payload)))
+    print("PUT oe-warm-%d rc=%d" % (i, store.put("oe-warm-%d" % i, payload)))
 
 # Past aggregate memory by one member's capacity. With onEvict the disk write happens exactly here,
 # at eviction time.
 for i in range(${PHASE_B_FILL}):
-    rc = store.put("fill-%d" % i, payload)
+    rc = store.put("oe-fill-%d" % i, payload)
     if rc != 0:
-        print("PUT fill-%d rc=%d (first failure)" % (i, rc))
+        print("PUT oe-fill-%d rc=%d (first failure)" % (i, rc))
         break
 else:
     print("PUT fill all ${PHASE_B_FILL} rc=0")
 
-# warm-0 predates the fill by the whole run; served from the tier or not at all.
-got = store.get("warm-0")
+# WHICH replica the leader holds for this key, asked BEFORE the read and never after. A read served
+# from the tier can promote the object back into memory, so a query taken afterwards would report a
+# memory replica for a key that was on disk when it was read -- and the whole point of this phase is
+# to tell those two apart. Without this the GET below cannot distinguish a tier hit from a memory
+# hit, which is the one thing it is here to establish.
+try:
+    q = urllib.request.urlopen(
+        "http://${ADMIN_ADDR2}/batch_query_keys?keys=oe-warm-0", timeout=30).read().decode()
+    d = (json.loads(q).get("data") or {}).get("oe-warm-0") or {}
+    print("REPLICAS mem=%d local_disk=%d disk=%d" % (
+        len(d.get("values") or []),
+        len(d.get("local_disk_values") or []),
+        len(d.get("disk_values") or [])))
+except Exception as e:
+    # Reported, not defaulted to zeros: "no memory replica" is exactly the reading this phase acts
+    # on, so a failed query that returned zeros would manufacture the verdict it exists to test.
+    print("REPLICAS-FAIL %s" % e)
+
+# oe-warm-0 predates the fill by the whole run; served from the tier or not at all.
+got = store.get("oe-warm-0")
 if got is None:
-    print("GET warm-0 rc=NotFound")
+    print("GET oe-warm-0 rc=NotFound")
 else:
-    print("GET warm-0 len=%d sha256=%s" % (len(got), hashlib.sha256(got).hexdigest()))
+    print("GET oe-warm-0 len=%d sha256=%s" % (len(got), hashlib.sha256(got).hexdigest()))
 print("WANT sha256=%s len=%d" % (digest, len(payload)))
 PY
 
@@ -539,12 +656,38 @@ else
   record FAIL "on-evict writes succeed past aggregate memory" "$(grep 'PUT' "$PROBE_LOG2" | tail -3 | tr '\n' ' ')"
 fi
 
-WANT2="$(grep '^WANT' "$PROBE_LOG2")"
-if grep '^GET warm-0' "$PROBE_LOG2" | grep -q "$(echo "$WANT2" | awk '{print $2}')"; then
-  record PASS "an evicted object reads back byte-identical from the tier" "$(grep '^GET warm-0' "$PROBE_LOG2")"
+# WHERE the read came FROM, asserted before the read itself is judged. A successful GET of the right
+# bytes is compatible with the object never having left memory, and this phase's whole claim is that
+# it did -- so the leader's own replica list for that key, taken before the read, is what makes the
+# next assertion a statement about the TIER rather than about the store in general.
+REPL="$(grep -E '^REPLICAS' "$PROBE_LOG2" | head -1)"
+REPL_MEM="$(echo "$REPL" | sed -n 's/.*mem=\([0-9][0-9]*\).*/\1/p')"
+REPL_LD="$(echo "$REPL" | sed -n 's/.*local_disk=\([0-9][0-9]*\).*/\1/p')"
+if [ -z "$REPL_MEM" ] || [ -z "$REPL_LD" ]; then
+  # An unanswered query is NOT "no memory replica". That reading is the one this phase acts on, so
+  # defaulting it to zero would manufacture the verdict below out of a failed probe.
+  record FAIL "the leader places the key on the tier and not in memory before the read" \
+    "no replica reading: ${REPL:-<no REPLICAS line>} -- this run cannot say where the read below was served from"
+elif [ "$REPL_MEM" -eq 0 ] 2>/dev/null && [ "$REPL_LD" -gt 0 ] 2>/dev/null; then
+  record PASS "the leader places the key on the tier and not in memory before the read" "$REPL"
 else
+  record FAIL "the leader places the key on the tier and not in memory before the read" \
+    "$REPL -- with a memory replica still present, a successful read below does not establish that \
+the tier served it"
+fi
+
+WANT2="$(grep '^WANT' "$PROBE_LOG2")"
+if grep '^GET oe-warm-0' "$PROBE_LOG2" | grep -q "$(echo "$WANT2" | awk '{print $2}')"; then
+  record PASS "an evicted object reads back byte-identical from the tier" \
+    "$(grep '^GET oe-warm-0' "$PROBE_LOG2") [${REPL:-no replica reading}]"
+else
+  # Three outcomes reach here and they are different defects, so the message names all three rather
+  # than the one that was expected first. A digest that matches PHASE A's payload is not a failed
+  # read-back at all -- it is the other backend's bytes being served under this key.
   record FAIL "an evicted object reads back byte-identical from the tier" \
-    "get: $(grep '^GET warm-0' "$PROBE_LOG2") vs $WANT2 -- NotFound here means eviction dropped the object instead of offloading it"
+    "get: $(grep '^GET oe-warm-0' "$PROBE_LOG2") vs $WANT2 -- NotFound means eviction dropped the \
+object instead of offloading it; a digest that matches neither means the bytes came from somewhere \
+else, and the payloads of the two phases differ on purpose so that case can be told apart"
 fi
 
 METRIC2="$(kubectl -n "$NS" run "case65-metrics-oe-${SFX}" --image=busybox:1.36 --restart=Never --rm -i --quiet \
