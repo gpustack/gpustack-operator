@@ -67,26 +67,26 @@ spec:
 ⛔ **That is the supported shape, not a promise the tier fills.** Rendering it correctly is not
 sufficient to make the tier hold data, and `status.capacity` will not tell you either way — what
 decides it, and the figure to read instead, are in
-[the tier is written one bucket at a time](backend.md#the-tier-is-written-one-bucket-at-a-time).
+[the tier is written one bucket at a time](local-disk-tier.md#the-tier-is-written-one-bucket-at-a-time).
 Read that section before concluding this backend works.
 
 Three things that manifest depends on and does not state:
 
 - **The path must already exist on every selected node, owned by the image's user** — a member that
   cannot write it never becomes Ready. See
-  [the directory has to exist](backend.md#the-directory-has-to-exist-and-be-writable-by-the-images-user).
+  [the directory has to exist](local-disk-tier.md#the-directory-has-to-exist-and-be-writable-by-the-images-user).
 - **The path is chosen once, at the first apply.** Adding a tier to a running group, removing it from
   one, or repathing it are each refused; the tier's other settings stay editable. See
-  [The local disk tier](backend.md#the-local-disk-tier).
+  [The local disk tier](local-disk-tier.md).
 - **Nothing in Kubernetes accounts for what the tier writes** — watching that filesystem is yours.
-  See [what the tier costs](backend.md#what-the-tier-costs-that-nothing-accounts-for).
+  See [what the tier costs](local-disk-tier.md#what-the-tier-costs-that-nothing-accounts-for).
 
 ## How small the memory segment may be
 
 **`capacityPerMember` has a floor of 16Mi on a group declaring `localDisk`.** That is one bucket —
 the unit the tier is written in, and the figure this operator renders as `MemberBucketSizeLimit` in
 `pkg/worker/kvcache/mooncake/member_workload.go`. Why a segment below one bucket can never fill one
-is in [the tier is written one bucket at a time](backend.md#the-tier-is-written-one-bucket-at-a-time).
+is in [the tier is written one bucket at a time](local-disk-tier.md#the-tier-is-written-one-bucket-at-a-time).
 
 ⚠️ **The bound is judged only when a write moves the value** — on creation, or on an update that
 changes it. An object already carrying a smaller figure is admitted for every other edit, including
@@ -111,7 +111,7 @@ stops it from being free to raise later.
 The tier's own ceilings carry a matching floor, which a disk-heavy node is nowhere near: `capacity`
 sits far above one bucket, and the example leaves `keyLimit` unset, so the store's own applies and
 there is no declared ceiling to be near. Those two rules belong to
-[the tier is written one bucket at a time](backend.md#the-tier-is-written-one-bucket-at-a-time); the
+[the tier is written one bucket at a time](local-disk-tier.md#the-tier-is-written-one-bucket-at-a-time); the
 floor that binds here is the memory one above.
 
 ---

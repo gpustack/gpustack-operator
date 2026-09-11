@@ -33,6 +33,7 @@ one, not to widen the overview.
 | Chart mode vs image mode, `disableApplications`, what the worker applies itself | `docs/architecture/installation-modes.md` |
 | Startup ordering, the gateway mirror, the device-plugin registration loop, per-manufacturer packages, CGO bindings, the 63-char rule | `docs/architecture/internals.md` |
 | A `KVCacheBackend`'s workloads, its admin surface, its phase or capacity | `docs/kv-cache/backend.md` |
+| The local disk tier itself: what it renders, its bucket, its eviction, its host directory | `docs/kv-cache/local-disk-tier.md` |
 | Configuring a node that is mostly disk: why a group is never disk alone, the thin-segment shape, the memory floor | `docs/kv-cache/disk-heavy-nodes.md` |
 | A `KVCachePool` or `KVCachePoolBinding`: the grant, the reuse domain, a quota ceiling or grant, what a full quota does | `docs/kv-cache/pool.md` |
 | How a **Pod** consumes a pool: the inject label and annotations, the injected keys per engine, a refusal, the isolation record | `docs/reference/kv-cache-injection.md` |

@@ -97,6 +97,17 @@ group discards that member's cache).
 **Never** — the four-stage scheduling chain. This chain is its own; `docs/architecture.md` links to it
 in one clause and does not describe it.
 
+## `docs/kv-cache/local-disk-tier.md`
+
+**Owns** — the `members[].localDisk` layer end to end: the two halves admission pairs, the rendering
+table, the bucket that is the tier's write unit and the three bounds that follow from it, the
+eviction algebra and its four refusals, the five path rules and the host directory's ownership, the
+tier's immutability and its one exit, and the `hostPath` cost nothing accounts for.
+
+**Never** — the object the tier sits on. The leader, the member groups, the transport, the status
+algebra and the growing/shrinking rules are `backend.md`'s. It was split out of that page when it hit
+both the line and the `##` cap; the split is along the reader's question, not the subsystem.
+
 ## `docs/kv-cache/disk-heavy-nodes.md`
 
 **Owns** — the configuration a node whose capacity is disk rather than memory needs: that no member
