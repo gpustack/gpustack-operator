@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
@@ -86,6 +87,11 @@ const (
 	// memberLocalDiskVolumeName names the host directory holding a group's disk tier.
 	memberLocalDiskVolumeName = "local-disk"
 
+	// MemberLocalDiskSurveyContainerName names the init container that reports what the tier
+	// directory already held. The controller finds its reading by this name, so the two are one
+	// fact and not two spellings of it.
+	MemberLocalDiskSurveyContainerName = "local-disk-survey"
+
 	// memberUnmountLocalDiskPath is the entrypoint's own route for deregistering this store's SSD
 	// tier before the process goes away. The master stops naming this store as the owner of its
 	// offloaded keys, so a reader gets a clean miss instead of a peer that is about to disappear.
@@ -115,7 +121,13 @@ const (
 )
 
 // The member's environment. Every key the client reads has a real named variable, so the whole
-// configuration renders as environment and there is no ConfigMap, no volume and no init container.
+// CONFIGURATION renders as environment: no ConfigMap, and nothing mounted or prepared in order to
+// configure the member.
+//
+// A group declaring a disk tier does carry a volume and an init container, and neither of them
+// configures anything - one is the tier itself and the other only reports what was already in it.
+// The claim is about where configuration comes from, and it is written that way because the
+// unqualified version was true when the member had no tier and stopped being true when it got one.
 const (
 	// memberEnvMetadataServer carries an underscore inside META_DATA. It is NOT
 	// MOONCAKE_TE_METADATA_SERVER, and normalising it to the spelling that reads correctly does not
@@ -836,6 +848,88 @@ func applyMemberLocalDisk(
 	container.Lifecycle = &core.Lifecycle{
 		PreStop: memberUnmountLocalDiskHook(memberScaleInGraceSeconds(kvcb), memberRESTPort(group)),
 	}
+
+	podSpec.InitContainers = append(podSpec.InitContainers,
+		memberLocalDiskSurveyContainer(container.Image, member.LocalDisk.Path))
+}
+
+// memberLocalDiskSurveyContainer reports what was already in the tier directory when this member
+// started, so that reusing a directory is something an administrator is TOLD rather than something
+// they discover through a key that reads back as somebody else's.
+//
+// It only ever reports. It removes nothing and writes no marker into the administrator's directory,
+// and its script exits zero on every path including its own failure.
+//
+// THAT IS NOT THE SAME AS "IT CANNOT BLOCK THE MEMBER", and an earlier version of this comment
+// claimed it was. An init container that never STARTS -- an image with no `sh`, an unreadable mount
+// -- is retried by the kubelet and the member behind it does not run. The script cannot fail; the
+// container still can.
+//
+// So this adds a requirement to members[].image that was not there before: it must provide a shell.
+// The store images this operator ships do, and the member's own entrypoint is a Python console
+// script, so the image was already specific. It is stated on the API field and in the documentation
+// rather than left to be discovered on the one upgrade where it bites.
+//
+// The count travels in the termination message rather than in the log, because a log has to be
+// fetched from a container that is already gone while the message is on the Pod, which the same
+// reconcile already reads.
+//
+// IT CARRIES A SECOND COUNT IT CANNOT BE ZERO FOR. Every failure mode of this survey ends in an
+// empty count: no shell, an unreadable mount, a command that is not in the image. Those are the
+// value a caller is looking for when asking "was the directory empty", so a lone zero cannot be
+// acted on. The root directory is never empty, so a reading with control=0 is the survey failing and
+// is refused rather than believed.
+//
+// THE CONTROL CHECKS THE INSTRUMENT, NOT THE MEASUREMENT, and those are two different failures. It
+// is counted on the root directory, so it proves a shell and an `ls` exist -- and nothing at all
+// about the tier. A tier the container's user cannot read gives `ls` a non-zero exit and an empty
+// stdout, which `wc -l` turns into the same 0 an empty directory produces, on a survey whose control
+// is perfectly healthy. That reading would then be believed, and believed once and permanently.
+//
+// So the tier's own exit status is taken separately and reported as entries=-1, which the reader
+// refuses. A count cannot carry that failure, because every count it could carry is a count an empty
+// directory can also produce.
+//
+// ADDING IT CHANGES THE POD TEMPLATE, so upgrading restarts the members of a backend that declares a
+// tier, once. The tier itself is a host directory and survives that restart; nothing is discarded.
+// Groups without a tier are untouched, which is what keeps every other backend's members in place.
+func memberLocalDiskSurveyContainer(image, path string) core.Container {
+	// The tier is listed twice on purpose. The count has to come through a pipe, and a pipeline's
+	// status is the LAST command's, so `ls | wc -l` reports whether `wc` ran and never whether `ls`
+	// could read anything. The second call is the only place that status is available.
+	//
+	// THE PATH IS SHELL-QUOTED, NOT GO-QUOTED. An earlier revision interpolated it with %q, which
+	// produces double quotes -- and `sh` expands $, backticks and $(...) inside those, so it looks
+	// like quoting without being any. Measured in `sh`: a path of /tmp/qp/$(id -u) rendered that way
+	// RAN the command, while the single-quoted form stayed literal. Admission takes any absolute
+	// path without ".." and does not restrict the character set, so this quoting is the whole of
+	// what stands between a field of this object and command execution in the member's init
+	// container.
+	script := fmt.Sprintf(
+		`t=$(ls -A %[1]s 2>/dev/null | wc -l); c=$(ls -A / 2>/dev/null | wc -l); `+
+			`ls -A %[1]s >/dev/null 2>&1 || t=-1; `+
+			`printf 'entries=%%s control=%%s' "${t:-}" "${c:-}" > /dev/termination-log 2>/dev/null; `+
+			`exit 0`,
+		shellQuote(path))
+	return core.Container{
+		Name:                     MemberLocalDiskSurveyContainerName,
+		Image:                    image,
+		Command:                  []string{"sh", "-c", script},
+		TerminationMessagePolicy: core.TerminationMessageReadFile,
+		VolumeMounts: []core.VolumeMount{
+			{Name: memberLocalDiskVolumeName, MountPath: path},
+		},
+	}
+}
+
+// shellQuote renders a string as one literal word for POSIX sh.
+//
+// Single quotes are the only quoting sh performs no expansion inside, so the value cannot become a
+// variable, a command substitution or more than one argument. A single quote in the value cannot be
+// escaped within single quotes at all -- the sequence closes the run, contributes an escaped quote,
+// and opens the next one, which is why the replacement looks the way it does.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // memberUnmountLocalDiskHook builds the shutdown hook that deregisters this member's disk tier.

@@ -3653,6 +3653,14 @@ func (m *KVCacheBackendMemberLocalDisk) MarshalToSizedBuffer(dAtA []byte) (int, 
 	_ = i
 	var l int
 	_ = l
+	i--
+	if m.CleanAfterDelete {
+		dAtA[i] = 1
+	} else {
+		dAtA[i] = 0
+	}
+	i--
+	dAtA[i] = 0x28
 	if m.Eviction != nil {
 		{
 			size, err := m.Eviction.MarshalToSizedBuffer(dAtA[:i])
@@ -6746,6 +6754,7 @@ func (m *KVCacheBackendMemberLocalDisk) Size() (n int) {
 		l = m.Eviction.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
+	n += 2
 	return n
 }
 
@@ -8406,6 +8415,7 @@ func (this *KVCacheBackendMemberLocalDisk) String() string {
 		`Capacity:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.Capacity), "Quantity", "resource.Quantity", 1), `&`, ``, 1) + `,`,
 		`KeyLimit:` + fmt.Sprintf("%v", this.KeyLimit) + `,`,
 		`Eviction:` + strings.Replace(this.Eviction.String(), "KVCacheBackendMemberLocalDiskEviction", "KVCacheBackendMemberLocalDiskEviction", 1) + `,`,
+		`CleanAfterDelete:` + fmt.Sprintf("%v", this.CleanAfterDelete) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -20362,6 +20372,26 @@ func (m *KVCacheBackendMemberLocalDisk) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CleanAfterDelete", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.CleanAfterDelete = bool(v != 0)
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

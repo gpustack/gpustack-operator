@@ -1058,6 +1058,11 @@ func TestMemberWorkload_RESTPortIsPerGroup(t *testing.T) {
 
 // TestMemberWorkload_CarriesNoIndirection pins the other absences. The member's whole
 // configuration is environment variables, so there is nothing to mount and nothing to prepare.
+//
+// The backend under test declares NO disk tier, and that is what the assertions are about. A group
+// that declares one carries a volume and an init container for the tier; this pins that neither
+// arrives for a group that did not ask, which is what keeps an existing backend's members in place
+// across an upgrade.
 func TestMemberWorkload_CarriesNoIndirection(t *testing.T) {
 	podSpec := RenderMemberDaemonSet(testMemberBackend(), 0, "mooncake:v0.3.13").Spec.Template.Spec
 
@@ -1394,4 +1399,86 @@ func TestMemberWorkload_FingerprintDoesNotCoverItself(t *testing.T) {
 		MemberPodSpecHash(first.Spec.Template),
 		"re-hashing a stamped template reproduces its own stamp; otherwise the value drifts on "+
 			"every pass")
+}
+
+// TestMemberWorkload_SurveyReportsAnUnreadableTierDistinctly pins the producer half of the survey's
+// two-signal contract.
+//
+// The reader refuses a negative count, which is worth nothing unless the script actually emits one.
+// The count travels through a pipe, and a pipeline reports the LAST command's status, so `ls | wc -l`
+// says whether `wc` ran and never whether `ls` could read the directory. Both failures then look
+// like `entries=0`, and "empty" is the answer that suppresses the warning -- written once and
+// permanently. The control cannot cover this: it is counted on the root directory, so it is healthy
+// exactly when the tier is not readable.
+func TestMemberWorkload_SurveyReportsAnUnreadableTierDistinctly(t *testing.T) {
+	ds := RenderMemberDaemonSet(testMemberBackend(withMemberDiskTier), 0, "mooncake:v0.3.13")
+
+	var survey *core.Container
+	for i := range ds.Spec.Template.Spec.InitContainers {
+		if ds.Spec.Template.Spec.InitContainers[i].Name == MemberLocalDiskSurveyContainerName {
+			survey = &ds.Spec.Template.Spec.InitContainers[i]
+			break
+		}
+	}
+	if !assert.NotNil(t, survey, "a declared tier renders a survey") {
+		return
+	}
+	script := survey.Command[2]
+
+	assert.Contains(t, script, `ls -A '/var/lib/kvcache' >/dev/null 2>&1 || t=-1`,
+		"the tier's own exit status is the only signal that separates unreadable from empty")
+	assert.Contains(t, script, `c=$(ls -A / 2>/dev/null | wc -l)`,
+		"the control still has to prove a shell and an ls exist")
+	assert.Contains(t, script, "exit 0",
+		"the survey reports and never blocks the member on its own findings")
+}
+
+// TestMemberWorkload_SurveyQuotesThePathAgainstTheShell pins that the path cannot become a command.
+//
+// The renderer once interpolated it with %q, which produces DOUBLE quotes -- and `sh` expands $,
+// backticks and $(...) inside those, so it looked like quoting while being none. Admission takes any
+// absolute path without "..", with no restriction on the character set, so this quoting is the whole
+// of what stands between a field of the object and command execution in the member's init container.
+func TestMemberWorkload_SurveyQuotesThePathAgainstTheShell(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, want string
+	}{
+		{
+			name: "a command substitution is a literal, not a command",
+			path: "/mnt/$(id -u)", want: `'/mnt/$(id -u)'`,
+		},
+		{
+			name: "a backtick is a literal too",
+			path: "/mnt/`id -u`", want: "'/mnt/`id -u`'",
+		},
+		{
+			// A single quote cannot be escaped inside single quotes; the run is closed, an escaped
+			// quote is contributed, and a new run is opened. Without this the path would end the
+			// quoting and the rest would be parsed as shell.
+			name: "a single quote closes and reopens the run rather than escaping the quoting",
+			path: "/mnt/it's", want: `'/mnt/it'\''s'`,
+		},
+		{
+			name: "a space stays one argument",
+			path: "/mnt/a b", want: `'/mnt/a b'`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ds := RenderMemberDaemonSet(testMemberBackend(func(kvcb *workercore.KVCacheBackend) {
+				withMemberDiskTier(kvcb)
+				kvcb.Spec.Connection.Managed.Members[0].LocalDisk.Path = tc.path
+			}), 0, "mooncake:v0.3.13")
+
+			var script string
+			for i := range ds.Spec.Template.Spec.InitContainers {
+				if ds.Spec.Template.Spec.InitContainers[i].Name == MemberLocalDiskSurveyContainerName {
+					script = ds.Spec.Template.Spec.InitContainers[i].Command[2]
+				}
+			}
+			assert.Contains(t, script, tc.want,
+				"the path has to reach `sh` as one literal word")
+			assert.NotContains(t, script, `"`+tc.path+`"`,
+				"double quotes do not suppress expansion in sh, so they are not quoting here")
+		})
+	}
 }

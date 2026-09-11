@@ -22,6 +22,11 @@ type KVCacheBackendMemberLocalDiskApplyConfiguration struct {
 	// a host directory on somebody else's nodes is not a default this operator may pick: the wrong
 	// one fills a filesystem that nothing in Kubernetes accounts for.
 	//
+	// DECLARING A TIER REQUIRES A SHELL IN THE GROUP'S IMAGE. An init container surveys this
+	// directory before the member starts, so that reusing a path is something an administrator is
+	// told rather than discovers through a key that reads back as somebody else's. It runs
+	// `sh -c`, and an image without a shell keeps the member from starting at all.
+	//
 	// CREATING THIS DIRECTORY AND GIVING IT THE RIGHT OWNER IS YOURS, NOT THIS OPERATOR'S. Nothing
 	// here creates or chowns the path; a member whose container cannot write it fails at start.
 	// That is a deliberate omission rather than a missing feature, and the reason is recorded here
@@ -67,6 +72,42 @@ type KVCacheBackendMemberLocalDiskApplyConfiguration struct {
 	// store's own behavior applies, so a default that moves upstream is a change to investigate
 	// rather than one this API silently restated.
 	Eviction *KVCacheBackendMemberLocalDiskEvictionApplyConfiguration `json:"eviction,omitempty"`
+	// CleanAfterDelete asks this operator to empty Path when the backend is deleted, on every node
+	// this group's NodeSelector picks AT THAT MOMENT. It DEFAULTS TO FALSE, and left alone the
+	// directory keeps whatever it holds, which is the behavior of every release before this field
+	// existed.
+	//
+	// "At that moment" is the whole of the promise and is narrower than "every node this group ever
+	// ran on". The spec is the only record of which nodes those were: nothing stores the selector's
+	// history, and by the time the cleanup runs the members are gone, so a node the group has
+	// stopped selecting cannot be enumerated, let alone reached. Narrowing NodeSelector, or removing
+	// the LocalDisk block, before deleting the backend therefore leaves the dropped nodes holding
+	// their content with nothing reported about them. Delete the backend first and edit afterwards.
+	//
+	// Why a switch rather than a default: what is on that disk is the administrator's, and deleting
+	// it is not a decision this operator may take on their behalf. Turned on it is no longer this
+	// operator's decision but theirs, and this only carries it out.
+	//
+	// It is the counterpart to what Path says about creating the directory, and it is reachable for
+	// the reason that one is not: removing content needs no uid, while creating and chowning does,
+	// so the objection that keeps preparation out of this API does not reach deletion.
+	//
+	// WHAT IS REMOVED IS THE CONTENT, NOT THE DIRECTORY. The directory was made by whoever prepared
+	// the node, may be a mount point, and carries an owner this operator did not choose.
+	//
+	// The cleanup runs the image THIS GROUP runs, on the nodes it selects, with the backend's
+	// imagePullSecrets. That is what keeps it from waiting on a pull that the members already did.
+	//
+	// TWO THINGS IT DOES NOT PROMISE, and both are reported rather than silent:
+	//
+	// - A node this operator cannot reach in time keeps its content. Deletion is not held open for
+	// it, because a finalizer waiting on a node that is gone leaves an object nobody can delete.
+	// The node gets a warning Event naming what was left, which outlives this backend for the
+	// same reason the leftover data does.
+	// - A node where another KVCacheBackend declares an overlapping path is SKIPPED, and gets the
+	// same kind of Event. Nothing refuses two backends naming one directory, and emptying it for
+	// this one would take the other one's live data with it.
+	CleanAfterDelete *bool `json:"cleanAfterDelete,omitempty"`
 }
 
 // KVCacheBackendMemberLocalDiskApplyConfiguration constructs a declarative configuration of the KVCacheBackendMemberLocalDisk type for use with
@@ -104,5 +145,13 @@ func (b *KVCacheBackendMemberLocalDiskApplyConfiguration) WithKeyLimit(value int
 // If called multiple times, the Eviction field is set to the value of the last call.
 func (b *KVCacheBackendMemberLocalDiskApplyConfiguration) WithEviction(value *KVCacheBackendMemberLocalDiskEvictionApplyConfiguration) *KVCacheBackendMemberLocalDiskApplyConfiguration {
 	b.Eviction = value
+	return b
+}
+
+// WithCleanAfterDelete sets the CleanAfterDelete field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the CleanAfterDelete field is set to the value of the last call.
+func (b *KVCacheBackendMemberLocalDiskApplyConfiguration) WithCleanAfterDelete(value bool) *KVCacheBackendMemberLocalDiskApplyConfiguration {
+	b.CleanAfterDelete = &value
 	return b
 }
