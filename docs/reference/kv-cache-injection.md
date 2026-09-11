@@ -161,6 +161,7 @@ container that starts normally and does not use the cache — a result invisible
 | a volume name or mount path the webhook owns | the same collision, in the Pod's storage | rename yours |
 | a container declaring **neither** `command` nor `args` | appending would not append: Kubernetes then reads `args` as the whole command line and discards the image's `CMD` | put the engine executable in `command` and the image's launch arguments in `args` |
 | a container declaring `args` but no `command` | admission cannot inspect the image `ENTRYPOINT`, so it cannot show that appended arguments reach the engine | put the engine executable in `command`, or declare `kvcache.gpustack.ai/launch-args-forwarded: "true"` only when the image ENTRYPOINT forwards them |
+| the launcher, when nothing follows it — `command: ["tini", "--"]` with `args` empty | the container names no program at all, so the appended connector flag becomes the command that launcher executes | put the engine executable and its arguments after the launcher, or in `command` and `args` directly |
 | an unrecognised launch program or a program for another engine | the webhook would otherwise inject one engine's configuration into another program, or silently trust an unknown launcher | launch the engine named by the `engine` annotation directly, or declare forwarding only for an unrecognised launcher that passes appended arguments through |
 | a container launched through a shell's `-c` | an appended flag becomes the shell's `$0`, so it never reaches the engine and the Pod is stamped as injected anyway | launch the engine directly — its executable in `command`, its arguments in `args` — or add the connector flag to the script yourself |
 | a command line hidden inside one argument — `env -S "…"` and its `--split-string` spellings | there is nothing on the command line to test: the launcher splits that string itself, so admission cannot tell whether a shell is inside it | launch the engine directly, add the connector flag inside that argument, or declare that it forwards appended arguments |
@@ -321,7 +322,7 @@ $ kubectl get pod chat-0 -o jsonpath='{.metadata.annotations.kvcache\.gpustack\.
 | `vehicle` | `file` or `environment` |
 | `domain` | the reuse domain the Binding declared |
 | `tenantInjected` | whether a tenant was written into the container — an **action**, not an outcome |
-| `launchProgram` | the executable left after transparent launcher prefixes were removed; empty when no executable can be resolved, including a command line hidden in one argument |
+| `launchProgram` | the executable left after transparent launcher prefixes were removed; empty only where there was no executable to read and forwarding was declared anyway — an image `ENTRYPOINT`, or a command line hidden in one argument |
 | `launchArgsForwarded` | whether the author's `kvcache.gpustack.ai/launch-args-forwarded: "true"` declaration admitted a launch the webhook could not identify as an engine entry point |
 
 `vehicle` is on the record because it turns one otherwise-silent outcome into a one-line check: a Pod

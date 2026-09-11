@@ -98,8 +98,10 @@ type injectionRecord struct {
 	//     not forward one.
 	TenantInjected bool `json:"tenantInjected"`
 
-	// LaunchProgram is the executable left after transparent launchers are removed. An empty value
-	// means the launcher had no submitted command to resolve.
+	// LaunchProgram is the executable left after transparent launchers are removed. It is empty only
+	// where there was no program to read on the command line and the author declared that the launch
+	// forwards appended arguments anyway: an image ENTRYPOINT, or a command line carried inside one
+	// token. A launch that resolves to no program at all is refused rather than stamped.
 	LaunchProgram string `json:"launchProgram"`
 
 	// LaunchArgsForwarded records whether the author declaration admitted a launch this webhook
@@ -318,6 +320,14 @@ func checkOwnedKeys(pod *core.Pod, ctr *core.Container, out *inject.Result) erro
 // this webhook appends anything. The container's author dropped it, not the injection. That row is
 // also why the refusal below fires on neither-declared rather than on args-empty - a container with
 // only a command is complete, and appending to its args is the ordinary case this webhook is for.
+//
+// A COMMAND THAT IS ONLY A LAUNCHER is the exception on that third row, and it is refused. `tini --`
+// with args empty resolves to an empty argv: the container names no program at all, so the arguments
+// appended here become the command the launcher execs and the connector flag is run as a program.
+// Refusing costs no launch that would have worked - a launcher with nothing to launch already fails
+// on its own - while admitting it turns a container that cannot start into one that starts and runs
+// the wrong thing. It is narrower than "args is empty": `tini --` WITH a command in args resolves to
+// that command and is the ordinary appendable case above.
 type launchCheck struct {
 	program       string
 	argsForwarded bool
@@ -354,7 +364,11 @@ func checkLaunchArgs(ctr *core.Container, engine inject.Engine, annotations map[
 		return launchCheck{argsForwarded: declaresForwarding}, nil
 	}
 	if len(argv) == 0 {
-		return launchCheck{}, nil
+		return launchCheck{}, fmt.Errorf("container %q runs the launcher %q with no program after "+
+			"it, so its command line starts no engine and whatever this webhook appends to args "+
+			"would be taken by that launcher as the command to run - the connector flag itself "+
+			"would be executed as a program. Put the engine executable and its arguments after the "+
+			"launcher, or in command and args directly", ctr.Name, path.Base(ctr.Command[0]))
 	}
 
 	program := path.Base(argv[0])
@@ -647,10 +661,11 @@ var shellOperandLong = []string{"--rcfile", "--init-file"}
 // insideOneString reports that the launcher was handed a command line inside a single token this
 // parser cannot look into, which is `env -S "sh -c ..."` and its spellings. The resolved argv is nil
 // in that case, which is indistinguishable from "nothing to run" without this second return, and
-// those two deserve opposite answers: nothing to run is admitted, a command hidden in a string is
-// refused. Which token is opaque comes from the launcher's own grammar rather than from where the
-// argv happened to end - `env -S "sh -c ..." trailing` resolved to `trailing` and was admitted while
-// the hidden shell ran.
+// those two deserve different answers: nothing to run is refused for declaring no program, a command
+// hidden in a string is refused for being unreadable - and only the second one an author may take
+// responsibility for with the forwarding declaration. Which token is opaque comes from the
+// launcher's own grammar rather than from where the argv happened to end - `env -S "sh -c ..."
+// trailing` resolved to `trailing` and was admitted while the hidden shell ran.
 func shellLaunchArgv(argv []string) (resolved []string, insideOneString bool) {
 	for len(argv) > 0 {
 		grammar, ok := shellLaunchers[path.Base(argv[0])]
@@ -673,19 +688,37 @@ func shellLaunchArgv(argv []string) (resolved []string, insideOneString bool) {
 //
 // opaque reports that the launcher was told to run a command line carried INSIDE one of its tokens,
 // which is `env -S "sh -c ..."` and nothing else among the launchers here. There is then no program
-// on the argv to test, so it is returned rather than folded into an empty argv: those two deserve
-// opposite answers.
+// on the argv to test, so it is returned rather than folded into an empty argv: the caller refuses
+// both, under different messages and with only this one open to an author's forwarding declaration.
 //
-// AN EMPTY RESULT IS NOT "CANNOT TELL", AND TREATING IT AS ONE WOULD BE WRONG ON THE COMMONEST SHAPE
-// THERE IS. `tini --` resolves to an empty argv and is perfectly appendable: the appended arguments
-// ARE the command tini execs. Measured over the runner image families this operator synthesizes, 56
-// of 60 ship exactly that entrypoint - so refusing an empty argv would not cost the one refusal
-// failing closed is meant to cost, it would refuse almost everything and make the check unusable.
+// AN EMPTY RESULT IS NOT "CANNOT TELL", and folding the two together here would lose the difference
+// the caller refuses on. Empty says the container declares no program; opaque says the program is
+// inside a token this parser cannot read. The reader's next move differs, so the messages differ.
+//
+// Empty is also not the commonest shape, which is worth stating because the two read alike. The
+// runner image families this operator synthesizes ship `tini --` as their entrypoint - 56 of 60 -
+// and they carry a real command in ARGS. Kubernetes concatenates command and args before this runs,
+// so those resolve to that command rather than to nothing, and stay the appendable case they are.
+// An argv that resolves empty is a container whose whole declaration is the launcher.
 //
 // An operand-taking option left without its operand - `env -u` as the last token - is empty for the
-// same reason and admitted for it: env will fail on its own terms, and there is no command line
-// there for a shell to hide in. That case used to be folded in with -S by counting the tokens left,
-// which refused it under a message describing a command line it does not have.
+// same reason: env will fail on its own terms, and there is no command line there for a shell to
+// hide in. It is refused as the empty case rather than as the hidden one, which is what this second
+// return value is for. Folding it in with -S used to refuse it under a message describing a command
+// line it does not have.
+//
+// AN EMPTY OPAQUE OPERAND IS NOT OPAQUE EITHER, and it is the option's VALUE rather than the option
+// that decides here - the one place in this parser where that is so. An empty string splits into no
+// words at all, so the launcher runs whatever follows it, and resolution has to continue instead of
+// stopping at a command line that is not there. Measured on GNU coreutils 9.11 and BSD env alike:
+// `env -S "" echo hi` prints hi, `env --split-string= echo hi` prints hi, and `env -S ""` with
+// nothing after it launches nothing at all - it prints the environment and exits 0.
+//
+// Skipping it rather than reporting opaque decides three shapes, and only the first is the one that
+// was reported: `env -S ""` resolves to nothing and is refused for declaring no program, which the
+// forwarding declaration no longer lets through; `env -S "" vllm serve` resolves to vllm and is
+// admitted, where reporting opaque was a false refusal of a launch that runs; and `env -S "" sh -c`
+// reaches the shell refusal, which names what actually eats the appended flag.
 func stripLauncherOperands(argv []string, grammar launcherGrammar) (resolved []string, opaque bool) {
 	// Operands of the launcher's own that sit before the command, consumed as they are met. A
 	// launcher declaring none behaves exactly as before: the first non-option token is the command.
@@ -697,8 +730,18 @@ func stripLauncherOperands(argv []string, grammar launcherGrammar) (resolved []s
 		case arg == "--":
 			return argv[1:], false
 		case strings.HasPrefix(arg, "--"):
-			name, _, inline := strings.Cut(arg, "=")
+			name, value, inline := strings.Cut(arg, "=")
 			if slices.Contains(grammar.opaqueLong, name) {
+				if inline && value == "" {
+					argv = argv[1:]
+
+					continue
+				}
+				if !inline && len(argv) > 1 && argv[1] == "" {
+					argv = argv[2:]
+
+					continue
+				}
 				return nil, inline || len(argv) > 1
 			}
 			takesNext = !inline && slices.Contains(grammar.operandLong, name)
@@ -706,11 +749,16 @@ func stripLauncherOperands(argv []string, grammar launcherGrammar) (resolved []s
 			// A lone "-" carries no letters, so it reaches past nothing; env(1) reads it as -i.
 			separated, isOpaque := bundleOperand(arg[1:], grammar)
 			if isOpaque {
+				if separated && len(argv) > 1 && argv[1] == "" {
+					argv = argv[2:]
+
+					continue
+				}
 				// An opaque option is only opaque once it HAS its operand. Attached - `-Ssh -c vllm`
 				// or `--split-string=...` - carries the command line inside this very token;
 				// separated carries it in the next one, if there is one. With the operand missing
-				// there is no command line at all, so this is the empty-and-admitted case rather
-				// than the hidden one, exactly as for an operand-taking option that ran out.
+				// there is no command line at all, so this is the empty case rather than the hidden
+				// one, exactly as for an operand-taking option that ran out.
 				return nil, !separated || len(argv) > 1
 			}
 			takesNext = separated
