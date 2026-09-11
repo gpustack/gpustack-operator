@@ -421,19 +421,58 @@ func TestPodKVCacheInject_RefusesAShellWrapper(t *testing.T) {
 		// exactly those args. Refusing it would be the false refusal that makes fail-closed
 		// unusable, and it is the shape 56 of the 60 runner-image families ship.
 		{name: "tini with the command in args", command: []string{"tini", "--"}, args: []string{"vllm", "serve"}},
-		{name: "tini and nothing else", command: []string{"tini", "--"}},
+		// The same launcher with NOTHING after it is the opposite case, and the row above is what
+		// keeps them apart: this container declares no program, so the appended flag becomes the one
+		// tini execs. A rule that refused both would refuse those 56 image families as well.
+		{name: "tini and nothing else", command: []string{"tini", "--"}, refuse: true, wantMsg: "no program after it"},
 		// An operand-taking option with real tokens after it still resolves.
 		{name: "env -u then a program", command: []string{"env", "-u", "HOME", "vllm"}, args: []string{"serve"}},
 		// An operand-taking option left without its operand is not a hidden command line: env fails
-		// on its own terms and there is no token for a shell to be inside. Folding it in with -S
-		// refused it under a message describing a command line it does not have.
-		{name: "env -u with its operand missing", command: []string{"env", "-u"}},
-		// AND THE SAME HOLDS FOR THE OPAQUE OPTION ITSELF, which is where the first version of this
-		// fix stopped half way: -S was refused whether or not it had an operand, under the message
-		// about a command line hidden in one argument - the exact mis-classification the -u case
-		// above was changed to remove. An opaque option is opaque once it HAS its operand.
-		{name: "env -S with its operand missing", command: []string{"env", "-S"}},
-		{name: "env --split-string with its operand missing", command: []string{"env", "--split-string"}},
+		// on its own terms and there is no token for a shell to be inside. So it is refused under the
+		// no-program message rather than the hidden-command-line one, and asserting WHICH is the
+		// point of these rows - folding them together is the mis-classification they exist to catch.
+		{name: "env -u with its operand missing", command: []string{"env", "-u"}, refuse: true, wantMsg: "no program after it"},
+		// AND THE SAME HOLDS FOR THE OPAQUE OPTION ITSELF, which is where the first version of that
+		// fix stopped half way: -S carried the hidden-command-line message whether or not it had an
+		// operand. An opaque option is opaque once it HAS its operand; without one there is no
+		// command line at all, which is this message instead.
+		{name: "env -S with its operand missing", command: []string{"env", "-S"}, refuse: true, wantMsg: "no program after it"},
+		{
+			name: "env --split-string with its operand missing", command: []string{"env", "--split-string"},
+			refuse: true, wantMsg: "no program after it",
+		},
+		// AN EMPTY OPAQUE OPERAND IS A PRESENT OPERAND, and the option alone cannot classify it: an
+		// empty string splits into no words, so the launcher runs whatever follows rather than
+		// something hidden. Measured on GNU coreutils 9.11 and BSD env: `env -S "" echo hi` prints
+		// hi. All four rows below are the same token being read for its value, and each lands on a
+		// different answer - which is why they are not one row.
+		{
+			name: "an empty split string and nothing after it", command: []string{"env", "-S", ""},
+			refuse: true, wantMsg: "no program after it",
+		},
+		{
+			name: "an empty split string inline", command: []string{"env", "--split-string="},
+			refuse: true, wantMsg: "no program after it",
+		},
+		// The control that keeps the rows above from being a rule wide enough to refuse a launch
+		// that runs. This one does run: env drops the empty string and execs vllm.
+		{name: "an empty split string then the engine", command: []string{"env", "-S", "", "vllm"}, args: []string{"serve"}},
+		// And the shell behind one is reached rather than hidden, so the message names the shell -
+		// reporting it opaque described a command line that is not there.
+		{name: "an empty split string then a shell", command: []string{"env", "-S", "", "sh", "-c"}, args: []string{"vllm serve"}, refuse: true},
+		// THE LONG OPTION HAS ITS OWN BRANCH, and the rows above do not reach it: -S carries its
+		// operand through the short-bundle path while --split-string reads it as a separate token or
+		// from inside its own. Measured by deleting the separated-long branch - the whole suite
+		// stayed green, which is what an untested branch looks like from here.
+		{
+			name:    "an empty split string separated in its long form",
+			command: []string{"env", "--split-string", "", "vllm"}, args: []string{"serve"},
+		},
+		{
+			name: "an empty long split string with nothing after it", command: []string{"env", "--split-string", ""},
+			refuse: true, wantMsg: "no program after it",
+		},
+		{name: "an empty inline split string then the engine", command: []string{"env", "--split-string=", "vllm"}, args: []string{"serve"}},
 		// An opaque letter is only opaque when it is the FIRST operand-taking letter of the bundle:
 		// -u has already consumed the rest, so this unsets the variable named S and runs vllm.
 		{name: "an opaque letter behind an operand letter", command: []string{"env", "-uS", "vllm"}, args: []string{"serve"}},
@@ -509,6 +548,20 @@ func TestPodKVCacheInject_LaunchResolution(t *testing.T) {
 		{
 			name: "a shell command mode declared to forward", command: []string{"sh", "-c"}, args: []string{"vllm serve"},
 			forwarding: "true", refuse: true, wantMsg: "positional parameters",
+		},
+		// The declaration states that the launch forwards appended arguments TO THE ENGINE, and here
+		// there is no engine for them to reach: nothing follows the launcher, so they become the
+		// command it execs. An author cannot take responsibility for a program that is not there.
+		{
+			name: "a launcher with no program declared to forward", command: []string{"tini", "--"},
+			forwarding: "true", refuse: true, wantMsg: "no program after it",
+		},
+		// The same, spelled as an empty command line. This one reached the escape hatch before the
+		// no-program check, because an opaque option was classified without reading its operand -
+		// so the declaration admitted a container with no engine and stamped it as injected.
+		{
+			name: "an empty split string declared to forward", command: []string{"env", "-S", ""},
+			forwarding: "true", refuse: true, wantMsg: "no program after it",
 		},
 		{
 			name: "the sglang launch form", command: []string{"/opt/venv/bin/python3"}, args: []string{"-m", "sglang.launch_server", "--model-path", "x"},
@@ -828,6 +881,46 @@ func TestPodKVCacheInject_NoCommandNoArgsIsRefused(t *testing.T) {
 		"the message names both fields, because args without command cannot be admitted")
 	assert.Contains(t, err.Error(), "overrides the image ENTRYPOINT",
 		"and says why the command must start the engine directly")
+}
+
+// TestPodKVCacheInject_ALauncherWithNoProgramIsRefused pairs the refusal with the shape it must not
+// touch, because neither half means anything alone. The refusal alone passes against a rule wide
+// enough to refuse the commonest entrypoint there is, and the admission alone passes against no rule
+// at all.
+//
+// `tini --` with a real command in args is that entrypoint - 56 of the 60 runner-image families this
+// operator synthesizes ship it - and appending to it is the ordinary case this webhook exists for.
+// The same launcher with args EMPTY declares no program: the flags appended to it become the command
+// tini execs, so the connector flag is run as a program and no engine starts.
+func TestPodKVCacheInject_ALauncherWithNoProgramIsRefused(t *testing.T) {
+	t.Run("refused, before anything is appended", func(t *testing.T) {
+		pod := kvCachePod()
+		pod.Spec.Containers[0].Command = []string{"tini", "--"}
+		pod.Spec.Containers[0].Args = nil
+
+		err := admit(t, pod)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no program after it",
+			"the message has to name what the container is missing")
+		assert.Empty(t, pod.Spec.Containers[0].Args,
+			"the refusal runs before the mutation, so nothing was appended to args")
+		assert.NotContains(t, pod.Annotations, KVCacheInjectedAnnotationKey)
+	})
+
+	t.Run("the same launcher with a command in args is injected", func(t *testing.T) {
+		pod := kvCachePod()
+		pod.Spec.Containers[0].Command = []string{"tini", "--"}
+		pod.Spec.Containers[0].Args = []string{"vllm", "serve", "--model", "x"}
+
+		require.NoError(t, admit(t, pod))
+		args := pod.Spec.Containers[0].Args
+		require.Greater(t, len(args), 4, "the connector flag is appended to the author's own launch")
+		assert.Equal(t, []string{"vllm", "serve", "--model", "x"}, args[:4],
+			"and it is appended, so the author's launch stays in front of it")
+		assert.Contains(t, args, "--kv-transfer-config")
+		assert.Equal(t, "vllm", stampOf(t, pod).LaunchProgram,
+			"the launcher is resolved away and the engine behind it is what is stamped")
+	})
 }
 
 func TestCheckLaunchArgs_AscendRuntimeMismatchNamesTheDerivedRuntime(t *testing.T) {
