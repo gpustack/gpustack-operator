@@ -85,13 +85,13 @@ type ModelDeploymentSpec struct {
 	// +required
 	KVCache ModelDeploymentKVCache `json:"kvCache" protobuf:"bytes,3,name=kvCache"`
 
-	// Roles are the engine roles this deployment runs.
+	// Roles are the engine roles this deployment runs. A single-role deployment names one; a
+	// prefill/decode deployment names several, which is why this is a LIST FROM THE FIRST VERSION.
 	//
-	// It is a LIST FROM THE FIRST VERSION although only one entry is accepted today, because the
-	// spec that introduces P/D disaggregation adds entries to it rather than replacing the field.
-	// The length-1 bound lives in the validating webhook and not here, so that the refusal can name
-	// the spec that lifts it, and so that lifting it is a webhook edit rather than a schema change
-	// every stored object would have to survive.
+	// The UPPER bound lives in the validating webhook and not in this schema: it tracks Kueue's cap
+	// on Workload.spec.podSets, so the refusal can name whose limit it is, and following that number
+	// is a webhook edit rather than a schema change every stored object would have to survive. The
+	// figure is not restated here, because the one that binds is in the Kueue the cluster runs.
 	//
 	// +required
 	// +k8s:validation:minItems=1
