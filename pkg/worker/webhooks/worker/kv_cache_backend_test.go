@@ -569,6 +569,23 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 		{"leader extraArgs with rpc_interface", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"rpc_interface": "eth0"}
 		}, "derived from a field of this spec"},
+		// The three the completeness trace found, which the lists had missed because none of them
+		// changes the VALUE of a setting rendered here. Two are inert -- the rendered flag wins, or
+		// the fallback they feed is never taken -- and an inert key admission accepted is how an
+		// operator comes to believe a setting moved. The third moves where a rendered port is
+		// served rather than which port it is. The undeclared-flag case above remains their
+		// baseline: without it these three would also pass against a rule that refused everything.
+		{"leader extraArgs with the deprecated spelling of the RPC port", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"port": "50052"}
+		}, "deprecated spelling of rpc_port"},
+		{"leader extraArgs naming etcd endpoints for the election", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{
+				"etcd_endpoints": "10.0.0.1:2379",
+			}
+		}, "not compiled into the image"},
+		{"leader extraArgs moving where the admin surface binds", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"metrics_host": "127.0.0.1"}
+		}, "the endpoint it states is answered nowhere"},
 		// A key deliberately left reachable, and the one with the strongest reason: the renderer
 		// leaves MOONCAKE_DEVICE unset because one DaemonSet covers every node its group selects
 		// and an RDMA device is named per host, so no single name could be rendered for the group.

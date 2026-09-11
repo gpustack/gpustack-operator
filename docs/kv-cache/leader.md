@@ -19,6 +19,14 @@ The leader is a Deployment plus a ClusterIP Service publishing two ports — `50
 and `9003` for the admin surface, which serves the Prometheus exposition and the HTTP admin API on one
 port.
 
+⛔ **`port` is refused in `leader.extraArgs`, and it would have moved nothing.** It is the store's
+deprecated spelling of `rpc_port`, which this operator always renders, so the rendered one wins: the
+key reads as a port that moved without moving one.
+
+⛔ **`metrics_host` is refused there too, and it does move something** — not the port but the
+**address** it binds to. Both probes and the published admin endpoint address that port at the Pod's
+own, so a value here leaves nothing answering where this object says it does.
+
 `replicas` defaults to `1`, and `5` is the ceiling in the **webhook** and in the schema alike: only
 one leader ever serves, so further replicas are spare processes rather than capacity. More than one
 requires [`highAvailability`](#high-availability) and is refused by the webhook without it, naming
@@ -117,6 +125,10 @@ alternative of leaving members on the leader Service address and letting readine
 ⛔ **`enable_oplog` is refused in `leader.extraArgs`**, and not as a policy choice: the store's
 operation log requires the etcd backend, which cannot be compiled together with the Lease backend, so
 the flag produces a leader that refuses to start. Standbys rebuild from snapshot and remounts instead.
+
+⛔ **`etcd_endpoints` is refused as well, and it is out of reach twice over.** The store reads it only
+where `ha_backend_connstring` is empty, which the election never leaves empty, and the etcd backend it
+names is the one this image cannot carry.
 
 ⛔ **`rpc_address` and `rpc_interface` are refused there too**, because the election renders the
 first. The store folds it with the RPC port into the string it campaigns with, so that one value is
