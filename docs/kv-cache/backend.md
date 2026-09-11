@@ -720,8 +720,8 @@ than guessed when nothing matches.
 ⛔ **Two ready host-network member Pods that share an address make Pod attribution ambiguous.** Their
 rows remain publishable because their segment and client IDs are distinct, but neither Pod exposes
 the ID that maps a row back to it. `MembersMounted` goes `False` with reason
-`AmbiguousMemberIdentity`; the rows keep empty node names and media, and the remedy is to give the
-groups node selectors that keep them on different nodes.
+`AmbiguousMemberIdentity`; each row still carries the node and the medium its candidates **agree**
+on, neither being a fact about one Pod, and leaves empty whichever of the two they dispute.
 
 Two groups on one node do **not** collide by themselves. A `TCP` member advertises its own pod IP, so
 each segment carries a distinct name even though both Pods answer to the node's name; the collision is
