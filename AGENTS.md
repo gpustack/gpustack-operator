@@ -46,7 +46,8 @@ one by name is your job. The change on the left is the trigger.
   → `gpustack-operator-chart-subcharts-manage`
 - shipping a version → `gpustack-operator-release`
 - `pack/gpustack-operator/Dockerfile`, `pack/gpustack-operator/external/`, `pack/thead-ppu-devel/`,
-  or a slicing shim under `csrc/` → `gpustack-operator-xbuild-and-verify`
+  a slicing shim under `csrc/`, or `pkg/devicemanager/allocator/hygon/`
+  → `gpustack-operator-xbuild-and-verify`
 
 The `gpustack-operator-lint` hook dispatches on what a turn left dirty. Run the matching one yourself too:
 
