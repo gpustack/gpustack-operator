@@ -11,6 +11,7 @@ import (
 
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
@@ -67,16 +68,20 @@ const (
 	// rdmaDeviceVolumeName names that mount.
 	rdmaDeviceVolumeName = "rdma-devices"
 
-	// EFALibHostPath is where AWS's EFA installer puts the libfabric build that matches the host's
-	// EFA driver. The member image carries a distro libfabric only so the binary LOADS; on an EFA
-	// node this tree is mounted in and its lib/ outranks the image copy through LD_LIBRARY_PATH.
+	// efaDeviceResource is the extended resource AWS's EFA device plugin advertises, and what an
+	// EFA member asks for one of.
 	//
-	// Exported for the same reason as RDMADevicePath: admission has to refuse a disk tier that
-	// would land on top of it.
-	EFALibHostPath = "/opt/amazon/efa"
-
-	// efaLibVolumeName names that mount.
-	efaLibVolumeName = "efa-libfabric"
+	// IT IS WHAT MAKES THE DEVICE OPENABLE. Mounting /dev/infiniband carries the device node into
+	// the container's mount namespace and does nothing else: the device cgroup still denies open(),
+	// which comes back as EPERM even for uid 0 on a node whose file mode already permits everyone.
+	// The store reads that as a host with no fabric -- it discovers zero HCAs and installs a TCP
+	// transport instead, reporting no error. A plugin allocation is what adds the cgroup rule, and
+	// it adds it without the privileged flag that would otherwise be the only way to get one.
+	//
+	// Requesting it also decides what a node without EFA looks like. Such a node advertises none of
+	// this resource, so the member is never placed there at all, rather than starting and running
+	// TCP under a spec that says EFA.
+	efaDeviceResource core.ResourceName = "vpc.amazonaws.com/efa"
 
 	// memberLocalDiskVolumeName names the host directory holding a group's disk tier.
 	memberLocalDiskVolumeName = "local-disk"
@@ -686,11 +691,13 @@ func memberRequests(member workercore.KVCacheBackendMember) core.ResourceList {
 //
 // RDMA and EFA share the host-fabric base: hostNetwork, the device tree and two capabilities —
 // and NEVER privileged, which would hand the member its whole node for the sake of two
-// operations. EFA adds the host's libfabric tree and the environment that puts it first, because
-// the distro libfabric inside the image is only a load-time fallback and the AWS build is the one
-// matched to the node's driver. Every other path, including the Auto that resolved to TCP, is
-// left exactly as rendered: no security context at all rather than an empty one, since an empty
-// struct is an invitation to add a capability to it.
+// operations. EFA adds one extended-resource request and nothing else, because the device tree
+// alone grants no access: the device cgroup still refuses to open the node it carries in, and a
+// device plugin allocation is what adds the rule that lets it through. The libfabric an EFA
+// member runs on travels in the image, so there is no host tree to mount and no environment to
+// render. Every other path, including the Auto that resolved to TCP, is left exactly as
+// rendered: no security context at all rather than an empty one, since an empty struct is an
+// invitation to add a capability to it.
 func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
 	if protocol != "rdma" && protocol != "efa" {
 		return
@@ -727,37 +734,21 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
 		return
 	}
 
-	// Directory and NOT DirectoryOrCreate, for the same reason as the disk tier: a node running an
-	// EFA member is expected to have the EFA driver installed, and creating an empty stand-in
-	// would let the Pod start against a libfabric that finds no provider — a later, quieter
-	// failure than a FailedMount that names what is missing.
-	podSpec.Volumes = append(podSpec.Volumes, core.Volume{
-		Name: efaLibVolumeName,
-		VolumeSource: core.VolumeSource{
-			HostPath: &core.HostPathVolumeSource{
-				Path: EFALibHostPath,
-				Type: ptr.To(core.HostPathDirectory),
-			},
-		},
-	})
-	container.VolumeMounts = append(container.VolumeMounts, core.VolumeMount{
-		Name:      efaLibVolumeName,
-		MountPath: EFALibHostPath,
-		// Read-only: the container only LOADS the host's libfabric out of this tree, and a
-		// writable mount of a host install prefix would let a store process edit the node's
-		// EFA driver installation. The RDMA device tree cannot take the same treatment —
-		// libfabric ioctls its device nodes, which a read-only mount blocks.
-		ReadOnly: true,
-	})
-	// Appended here and not in renderMemberEnv, which is fabric-blind by construction: an
-	// LD_LIBRARY_PATH rendered for every member would put a host path on TCP members that never
-	// mount it, and a variable whose value is a lie on four paths out of five is worse than one
-	// rendered where it is true. LD_LIBRARY_PATH outranks the default search path, so the host's
-	// libfabric loads instead of the image's distro copy whenever this mount is present.
-	container.Env = append(container.Env, core.EnvVar{
-		Name:  "LD_LIBRARY_PATH",
-		Value: EFALibHostPath + "/lib",
-	})
+	// The device allocation, and nothing else. The libfabric an EFA member runs on travels in the
+	// image, so no host install prefix is mounted and no LD_LIBRARY_PATH is rendered: a host tree
+	// resolves its own libefa and libibverbs out of the host's /usr, which is not mounted here, so
+	// a loader pointed at it fails on symbol versions rather than loading it — and the prefix
+	// itself is lib on one distribution and lib64 on another, so no single path is right for both.
+	//
+	// Set on Limits alone, which is how an extended resource is asked for: request and limit may
+	// not differ for one, and the defaulter fills the request in from the limit. That defaulter
+	// runs on a Pod and deliberately NOT on a pod template, so this DaemonSet stores exactly what
+	// is rendered here — which is what keeps the whole-Resources comparison in the controller from
+	// rewriting the template on every pass.
+	if container.Resources.Limits == nil {
+		container.Resources.Limits = core.ResourceList{}
+	}
+	container.Resources.Limits[efaDeviceResource] = *resource.NewQuantity(1, resource.DecimalSI)
 }
 
 // memberTerminationGracePeriodSeconds is how long the kubelet waits after SIGTERM before it kills

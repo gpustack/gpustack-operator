@@ -31,11 +31,11 @@
 # two-layered by design. Upstream links `fabric` PUBLIC into transfer_engine, so master, engine.so
 # and store.so all carry a DT_NEEDED on libfabric.so.1, and upstream's build_wheel.sh excludes
 # libfabric from the repaired wheel unconditionally -- so the runtime stage installs the distro
-# libfabric1 as the load-time fallback that keeps TCP members starting anywhere. On an EFA node
-# the operator mounts the host's /opt/amazon/efa and sets LD_LIBRARY_PATH to its lib/ -- a
-# replacement, deliberate because this image defines no LD_LIBRARY_PATH of its own -- which
-# outranks the default search path, so the AWS build of libfabric -- matched to the host's EFA
-# driver -- is the one that loads. One process, one libfabric, either way.
+# libfabric1 as the load-time fallback that keeps TCP members starting anywhere. The second layer
+# is AWS's own libfabric, installed into this image beside it and ranked ahead of it in the loader
+# cache, so an EFA member loads a build that can drive the device while every other protocol keeps
+# starting on a node that has no EFA at all. The node contributes only what a node can: the efa
+# kernel module and the device under /dev/infiniband.
 #
 # FORBIDDEN: adding STORE_USE_ETCD. The upstream CMakeLists raises FATAL_ERROR when it is combined
 # with STORE_USE_K8S_LEASE, because both backends build a Go c-shared library. That exclusion is the
@@ -63,6 +63,21 @@ ARG RUNTIME_IMAGE="python:3.12-slim-bookworm"
 # the INSTALLED package, so a tag that moved to a different release fails the build instead of
 # producing an image whose name and contents disagree.
 ARG MOONCAKE_VERSION="0.3.13.post1"
+
+# The AWS EFA installer release whose libfabric the runtime stage installs. AWS also serves an
+# "-latest" name, which is what this must NOT use: the userspace the image carries has to stay a
+# property of this Dockerfile rather than of the day it was built, and a userspace that moves
+# underneath a fixed MOONCAKE_VERSION is the shape where a build that passes and a build that fails
+# have the same inputs on paper.
+#
+# Integrity rests on HTTPS to AWS's own host, and the version is the only thing pinned. Neither of
+# the two stronger options pays for itself here. AWS publishes no checksum beside the archive, so a
+# digest would have to be self-taken -- it would prove the bytes never changed, not who made them --
+# and it is a second value to re-read on every bump. The installer's own --check-signatures reads its
+# GPG key from EFA_INSTALLER_KEY, and that key ships neither in the archive nor with a published
+# fingerprint, so fetching it from the same host the archive came from checks the archive against
+# itself.
+ARG EFA_INSTALLER_VERSION="1.50.0"
 
 # =============================================================================
 # Stage: builder
@@ -271,13 +286,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 # member entrypoint dies before parsing an argument -- which is why the smoke test below imports
 # rather than only checking that the script is on PATH.
 # libfabric1 is the load-time fallback for the DT_NEEDED that USE_EFA puts on every transfer
-# engine consumer (see the builder stage's flag comment). It is NOT the libfabric an EFA member
-# runs on: there the operator mounts the host's /opt/amazon/efa and LD_LIBRARY_PATH puts its lib/
-# first, so the AWS build matched to the node's driver wins. This copy exists so that a member on
-# any other protocol still starts on a node that has no EFA installation at all. When the host
-# lib wins it also resolves its provider plugins from its own install prefix, so the arrangement
-# relies on the AWS installer shipping those providers under /opt/amazon/efa/lib -- a distro
-# provider paired with the host core library is the mixed state this avoids.
+# engine consumer (see the builder stage's flag comment). Which copy a process gets is the loader's
+# decision and never the configured protocol's, so once the AWS build below is registered it
+# outranks this one for EVERY process in the image, EFA member or not -- that build starts on a node
+# with no EFA just as this one does, it merely also drives the device when there is one. This copy
+# is what keeps the image starting at all if the AWS install ever lands where the loader does not
+# look, which is the failure the gate at the end of that step refuses to ship.
 RUN <<EOF
     set -exo pipefail
     apt-get update -y
@@ -289,6 +303,64 @@ RUN <<EOF
         libibverbs1 \
         libnuma1
     rm -rf /var/lib/apt/lists/*
+EOF
+
+# The EFA userspace an EFA member runs on, taken from AWS's own installer so that libfabric and the
+# rdma-core providers beneath it come from one build.
+#
+# IT IS IN THE IMAGE RATHER THAN MOUNTED FROM THE HOST, and that is a correctness requirement, not a
+# preference. A host install is not self-contained: its libfabric resolves libefa and libibverbs
+# from the host's own /usr prefix, which a container does not mount, so a loader pointed at the host
+# tree fails on symbol versions instead of loading it -- measured as
+# `libefa.so.1: version 'EFA_1.3' not found`. The prefix also moves by distribution, lib on Debian
+# and Ubuntu against lib64 on Amazon Linux, so one hard-coded path is wrong on the other. An image
+# that carries its own removes both, and the node then supplies only what only a node can: the efa
+# kernel module and the device under /dev/infiniband.
+#
+# The installer registers its prefix with ldconfig, so nothing downstream sets LD_LIBRARY_PATH. The
+# final check is a build-time gate on exactly that: an install that lands somewhere the loader does
+# not look leaves the distro libfabric in charge, which starts and then finds no EFA provider.
+#
+# No toolchain is needed here and none is installed: the archive ships PREBUILT packages per
+# distribution, this base image is Debian 12, and the installer's Debian branch apt-installs the
+# DEBS/DEBIAN12 set -- present for both architectures this image is built for. Nothing is compiled.
+# The installer pulls the rest of what it wants from the distro repositories itself, and under
+# --skip-kmod that list is userspace only: neither dkms nor kernel headers.
+#
+# --skip-kmod        the efa module belongs to the node, and a container cannot load one.
+# --skip-limit-conf  locked-memory limits are the node's; the member asks through its capabilities.
+# --skip-mpi
+# --skip-plugin      this image runs a store, not an MPI job and not NCCL.
+# --no-verify        the installer's self test opens a device, and none is attached at build time.
+ARG EFA_INSTALLER_VERSION
+RUN <<EOF
+    set -exo pipefail
+    apt-get update -y
+    apt-get install -y --no-install-recommends \
+        curl \
+        pciutils
+    curl -fsSL -o /tmp/aws-efa-installer.tar.gz \
+        "https://efa-installer.amazonaws.com/aws-efa-installer-${EFA_INSTALLER_VERSION}.tar.gz"
+    tar -xf /tmp/aws-efa-installer.tar.gz -C /tmp
+    pushd /tmp/aws-efa-installer >/dev/null
+    ./efa_installer.sh -y --skip-kmod --skip-limit-conf --skip-mpi --skip-plugin --no-verify
+    popd >/dev/null
+    # Both were installed for this step alone, and neither was pulled in as a dependency, so
+    # autoremove would leave them standing in the runtime image.
+    apt-get purge -y curl pciutils
+    apt-get autoremove -y
+    rm -rf /tmp/aws-efa-installer /tmp/aws-efa-installer.tar.gz /var/lib/apt/lists/*
+    ldconfig
+    # The gate names libfabric.so.1 and reads the FIRST cache entry for it, rather than asking
+    # whether anything at all sits under the prefix. The installer also puts libefa and the
+    # rdma-core providers there, so a prefix-only test passes on those while libfabric.so.1 still
+    # resolves to the distro copy -- which is the single outcome this gate exists to catch.
+    cache="$(ldconfig -p)"
+    winner="$(grep -m 1 -E '^[[:space:]]*libfabric\.so\.1 ' <<<"${cache}")" || winner=""
+    if [[ "${winner}" != *"=> /opt/amazon/efa/lib/"* ]]; then
+        echo "[ERROR] libfabric.so.1 resolves to '${winner:-nothing}', not AWS's /opt/amazon/efa/lib." >&2
+        exit 1
+    fi
 EOF
 
 RUN --mount=from=builder,source=/work/mooncake-wheel/dist,target=/wheel <<EOF
@@ -336,9 +408,10 @@ RUN <<EOF
     # kills it, and that is a pass too. The failure this test exists to catch is the third: the
     # transport map's "Invalid protocol", which is what an image WITHOUT the transport prints. A
     # loader error is refused alongside it, because the bench doubles as the regression half of
-    # the libfabric story: it is a transfer engine consumer, so it starts only if the DT_NEEDED
-    # on libfabric.so.1 resolved against the distro libfabric1 installed above -- the same
-    # resolution a TCP member depends on.
+    # the libfabric story: it is a transfer engine consumer, so it starts only if the DT_NEEDED on
+    # libfabric.so.1 resolved. It resolves against the AWS build, which outranks the distro copy
+    # for every process here, so this is also the check that AWS's libfabric carries a consumer
+    # that is not on the EFA path -- which is every other member.
     #
     # The timeout must outlast the device-less error path; if this check ever flakes, that is the
     # knob to revisit. docs/kv-cache/backend.md quotes "No EFA devices found" in its HA section,

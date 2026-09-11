@@ -146,8 +146,8 @@ cluster is legitimate — the master is a pure metadata service. A member on `as
 needs CANN (`libascendcl.so`) in its container, and a CANN-less image fails as a loader error whose
 own message reaches `status.phaseMessage`.
 
-A member on `efa` needs libfabric — and the build of it that matches the node's EFA driver, which is
-the host's own under `/opt/amazon/efa`, mounted into the member on that path.
+A member on `efa` needs libfabric in its image, and one that can drive the node's adapter — not the
+distro build. `mirrored-mooncake` installs AWS's, ahead of that copy in its loader cache.
 
 Nothing has to be built to run this **without high availability**.
 `docker.io/kvcacheai/mooncake:0.3.13` is published for amd64 and arm64 and carries **both**
@@ -399,13 +399,13 @@ not a per-node probe that promotes itself.
 > comes with it — which is those three things and **not** `privileged`. A `TCP` group sets none of
 > them.
 
-An `EFA` group takes everything `RDMA` takes, plus the host's `/opt/amazon/efa` tree — mounted
-**read-only** as `Directory`, so a node without the AWS EFA driver stops at `FailedMount` — with
-`LD_LIBRARY_PATH` putting its `lib/` ahead of the distro libfabric the image carries only so the
-binary loads.
+An `EFA` group takes everything `RDMA` takes, plus one `vpc.amazonaws.com/efa` device. That request
+is what lets the member open the adapter: the `/dev/infiniband` mount carries the device node in
+while the device cgroup still refuses `open()`, so a member without one starts TCP instead.
 
-`EFA` is measured as compiled into `mirrored-mooncake`, not run on EFA hardware end to end — the same
-bar `RDMA`, `HIP` and `Ascend` stand at. Storage-optimized families such as `i7ie` are not
+**The cluster therefore needs the AWS EFA Kubernetes device plugin**; without it no node advertises
+the resource and the member stays unscheduled. Nothing is mounted from a host EFA install — the
+libfabric an `EFA` member runs on is in the image. Storage-optimized families such as `i7ie` are not
 EFA-capable; check `fi_info -p efa` on the node before selecting one.
 
 **Reachability is a port range, never a list.** The transfer engine picks its data ports at random —
@@ -589,15 +589,15 @@ Five rules the path has to satisfy, all enforced at apply time:
 
 - It must be **absolute**.
 - It must not be the **root directory**.
-- It **may not overlap `/dev/infiniband` or `/opt/amazon/efa`** — equal to either, inside either, or
-  containing either. A sibling such as `/dev/infiniband-cache` is fine.
+- It **may not overlap `/dev/infiniband`** — equal to it, inside it, or containing it. A sibling such
+  as `/dev/infiniband-cache` is fine.
 - It **may not contain a `..` component**.
 - It **may not begin or end with whitespace**, spaces and tabs alike.
 
 > **Why** — the root directory would mount the node's whole filesystem into a third-party container.
-> The RDMA and EFA transports mount `/dev/infiniband` into this same container, and the EFA transport
-> also mounts `/opt/amazon/efa`; two mounts on one path are resolved by the kubelet with one
-> shadowing the other, which nothing on the object would record. That rule holds whatever
+> The RDMA and EFA transports mount `/dev/infiniband` into this same container; two mounts on one
+> path are resolved by the kubelet with one shadowing the other, which nothing on the object would
+> record. That rule holds whatever
 > `spec.transport.protocol` says today, because the field is editable. The
 > `..` rule mirrors the store's own, which refuses such a path before checking whether the directory
 > exists. The whitespace rule exists because the path is mounted exactly as written, so a trailing

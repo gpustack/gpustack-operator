@@ -340,22 +340,10 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 			"must not overlap /dev/infiniband",
 		},
 		{
-			"a disk path that is the EFA libfabric tree", withDiskPath("/opt/amazon/efa"),
-			"must not overlap /dev/infiniband or /opt/amazon/efa",
-		},
-		{
-			"a disk path inside the EFA libfabric tree", withDiskPath("/opt/amazon/efa/tier"),
-			"must not overlap /dev/infiniband or /opt/amazon/efa",
-		},
-		{
-			"a disk path that CONTAINS the EFA libfabric tree", withDiskPath("/opt/amazon"),
-			"must not overlap /dev/infiniband or /opt/amazon/efa",
-		},
-		{
-			// Same shape as the infiniband sibling below: a name that shares a prefix is not an
-			// overlap.
-			"a disk path that is a sibling of the EFA libfabric tree",
-			withDiskPath("/opt/amazon/efa-backup"), "",
+			// The device tree is the only mount either host fabric adds, so the AWS EFA install
+			// prefix is an ordinary path here: an EFA member takes its libfabric from the image.
+			"a disk path that is the EFA install prefix on a node", withDiskPath("/opt/amazon/efa"),
+			"",
 		},
 		{
 			// A sibling whose name merely starts with the same letters is not an overlap. A plain
@@ -1261,12 +1249,6 @@ func TestKVCacheBackendWebhook_ExtraEnvs(t *testing.T) {
 		{"the address every member connects to", withEnvs(map[string]string{
 			"MOONCAKE_MASTER": "elsewhere:50051",
 		}), "rendered from this spec"},
-		// Rendered only on the EFA path, and reserved on every path: the transport is editable, so a
-		// backend switched onto that fabric later would otherwise carry two definitions of it.
-		{"the library path only one transport renders", withEnvs(map[string]string{
-			"LD_LIBRARY_PATH": "/opt/mine/lib",
-		}), "rendered from this spec"},
-
 		// A name the strict rule refuses. Checked before the derived list, because a malformed name
 		// cannot collide with one while still reaching the container.
 		{"a name with a space", withEnvs(map[string]string{

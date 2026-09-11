@@ -181,18 +181,12 @@ var MemberExtraArgsRules = ExtraArgsRules{
 // OTHER setting -- so there is nothing to forbid outright. A variable here configures the setting it
 // names and nothing else, which leaves collision as the only problem worth reporting.
 //
-// It carries the names the renderer emits on SOME paths too. LD_LIBRARY_PATH is here although only
-// the EFA transport renders it, because the transport is editable: a backend switched onto that
-// fabric later would otherwise carry two definitions of the variable that decides whether the host's
-// libfabric loads at all, with the winner left to the runtime.
-//
 // The bucket pair is here for a different reason than the rest. The others protect an invariant
 // admission enforces elsewhere -- the tier's two halves, the path that passed the path rules, the
 // segment size counted into the Pod's request. The bucket pair protects nothing; it is a value this
 // operator CHOSE, and reserving it is the deliberate decision that a tuner who needs to move it gets
 // a field rather than a hatch that silently doubles a name.
 var MemberDerivedEnvs = []string{
-	"LD_LIBRARY_PATH",
 	memberEnvGlobalSegmentSize,
 	memberEnvLocalBufferSize,
 	memberEnvLocalHostname,
