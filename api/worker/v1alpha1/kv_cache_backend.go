@@ -147,13 +147,21 @@ type KVCacheBackendManaged struct {
 	//
 	// MOVING A GROUP TO ANOTHER POSITION IS REFUSED AT ADMISSION, rather than accepted and reported.
 	// The rule is narrow on purpose: it refuses an update that puts, at a position that already
-	// existed, a group identical to the one another position held — a swap, or the shift that
+	// existed, a group identical to one that LEFT another position — a swap, or the shift that
 	// removing a middle group produces. Appending a group, removing from the END of the list, and
 	// editing a group in place are all untouched, including the widening of a nodeSelector that is
 	// how a group gains nodes. It has to be that narrow because a group carries no name: an edit
 	// that merely happens to change two groups cannot be told from a reorder, so only a reorder that
 	// MOVES a group unchanged is recognizable at all, and refusing more would forbid the edits this
 	// list is meant to take.
+	//
+	// TWO SHAPES ARE KNOWINGLY NOT CAUGHT, and neither can be without a name. A reorder combined with
+	// an edit to the same group is indistinguishable from two ordinary edits. And removing a group
+	// while a LATER group is identical to the one taking its place produces the same two lists as
+	// editing that position to match an unchanged later group — which is the edit that takes the
+	// second of two look-alike groups out of service, so refusing it would forbid a documented
+	// operation. What both admitted shapes leave behind is at least visible: the resulting list holds
+	// two identical groups.
 	//
 	// To take a group out of service without removing it, narrow its nodeSelector until it matches
 	// no node. The group keeps its position, every later group keeps its DaemonSet, and nothing is

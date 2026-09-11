@@ -467,11 +467,9 @@ spec:
 
 | what it renders | where |
 |---|---|
-| `MOONCAKE_OFFLOAD_ENABLED`, `MOONCAKE_OFFLOAD_FILE_STORAGE_PATH` | the member container |
-| `MOONCAKE_OFFLOAD_BUCKET_SIZE_LIMIT_BYTES`, `MOONCAKE_OFFLOAD_BUCKET_KEYS_LIMIT` | the member container |
-| `MOONCAKE_OFFLOAD_TOTAL_SIZE_LIMIT_BYTES` and `MOONCAKE_OFFLOAD_BUCKET_MAX_TOTAL_SIZE`, both from `capacity` | the member container |
-| `MOONCAKE_OFFLOAD_TOTAL_KEYS_LIMIT`, from `keyLimit` | the member container |
-| `MOONCAKE_OFFLOAD_BUCKET_EVICTION_POLICY`, `MOONCAKE_OFFLOAD_ENABLE_DISK_WATERMARK_EVICTION` and the two ratio variables, from `eviction` | the member container |
+| `MOONCAKE_OFFLOAD_ENABLED` and `..._FILE_STORAGE_PATH`, plus `..._BUCKET_SIZE_LIMIT_BYTES` and `..._BUCKET_KEYS_LIMIT` | the member container |
+| `..._TOTAL_SIZE_LIMIT_BYTES` **and** `..._BUCKET_MAX_TOTAL_SIZE`, both from `capacity`; `..._TOTAL_KEYS_LIMIT` from `keyLimit` | the member container |
+| `..._BUCKET_EVICTION_POLICY`, `..._ENABLE_DISK_WATERMARK_EVICTION` and the two ratio variables, from `eviction` | the member container |
 | a `hostPath` volume and mount at `localDisk.path` | the member Pod |
 | `-enable_offload=true`, `-offload_on_evict=true` | the leader's argv |
 | a `preStop` hook, and a termination window derived from `scaleIn.gracePeriodSeconds` | the member Pod |
@@ -504,16 +502,14 @@ figure:
 
 - `capacityPerMember` must hold **one bucket** on a group that declares a tier — the bytes are held in
   the memory segment until the bucket is complete.
-- `localDisk.capacity`, when set, must hold **one bucket**.
-- `localDisk.keyLimit`, when set, must hold **one bucket's worth of keys**.
+- `localDisk.capacity` and `localDisk.keyLimit`, when set, must hold one bucket and one bucket's worth
+  of keys.
 
 > **Why a refusal rather than a default** — the store stops taking offload work as soon as one more
 > bucket would not fit under a declared ceiling, and it reports that by doing nothing. A tier below
-> any of these three is a configuration that cannot work under any workload, so it is refused where
-> the message can say so.
+> any of these is a configuration that cannot work under any workload.
 
-**Read `master_allocated_file_size_bytes` to see what the tier actually holds**, which is the one
-figure that answers the question:
+**Read `master_allocated_file_size_bytes` to see what the tier actually holds:**
 
 ```console
 $ kubectl exec -n gpustack-system deploy/<backend>-leader -- \
@@ -555,14 +551,11 @@ act on them:
 > is what keeps a typo from being a silently disabled cache. Turning eviction off is `enabled: false`
 > rather than a third enum value, so there is exactly one way to say it.
 
-**Settings this API does not name are reachable through `members[].extraEnvs`**, which passes
-environment variables straight through to the member container. `extraArgs` cannot reach them: it
-renders config-key overrides, and this family of settings is read from the environment only. A name
-the operator already renders is refused there — Kubernetes accepts a container carrying one name
-twice and leaves the winner to the runtime, so the collision would not be reported.
-
-⛔ **Every value in `extraEnvs` is world-readable**, on the cluster-scoped object and again in the
-Pod. No credential belongs there.
+**Settings this API does not name are reachable through `members[].extraEnvs`**, which `extraArgs`
+cannot reach: that map renders config-key overrides, and this family is read from the environment
+only. A name the operator already renders is refused there, because Kubernetes takes a container
+carrying one name twice and leaves the winner to the runtime. ⛔ **Every value is world-readable**, on
+the cluster-scoped object and again in the Pod — no credential belongs there.
 
 ### The directory has to exist, and be writable by the image's user
 
@@ -801,11 +794,21 @@ node.** The group keeps its position, every later group keeps its DaemonSet, and
 > go with them**. Refusing the move costs nothing and rebuilds nothing. The decision, and what
 > evidence would reopen it, is recorded on the `members` field itself.
 
-⚠️ **The rule recognises a group that arrived unchanged at a position another group held — not every
-reorder.** A reorder combined with an edit to the same group is indistinguishable from two ordinary
-edits, because without a name there is nothing else to recognise a group by. What it buys is that the
-mechanical reorder — the one a rewritten manifest produces — is reported instead of silently
-rebuilding members against another group's spec.
+⚠️ **The rule recognises a group that arrived unchanged at a position another group LEFT — not every
+reorder.** Without a name there is nothing else to recognise a group by, so two shapes are knowingly
+admitted:
+
+- a reorder **combined with an edit** to the same group, which is indistinguishable from two ordinary
+  edits;
+- removing a group when a **later group is identical** to the one taking its place — `[A, B, C]`
+  becoming `[A, C, C]`. That produces the same two lists as editing position 1 to match an unchanged
+  position 2, which is how the second of two look-alike groups is taken out of service, so refusing
+  it would forbid the operation recommended above. `[A, B, C]` to `[A, C]`, with no look-alike to
+  arrive in the gap, is still refused.
+
+Both admitted shapes leave one trace: the resulting `members` holds **two identical groups**. What the
+rule buys is that the mechanical reorder — the one a rewritten manifest produces — is reported instead
+of silently rebuilding members against another group's spec.
 
 ⛔ **Shrinking a group discards the cache that member held.** Narrowing the selector, or removing a
 node, unmounts that member's segment **immediately** — there is no drain.

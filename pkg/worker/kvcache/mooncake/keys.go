@@ -147,6 +147,30 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 // Leaving the key out of Derived is what gives an operator on heterogeneous hardware a way in: a
 // member's extraArgs renders as the entrypoint's own -D override, which is applied AFTER the
 // environment and wins over it.
+var MemberExtraArgsRules = ExtraArgsRules{
+	Derived: []string{
+		// The disk tier's member half, rendered from members[].localDisk. Reserving them matters
+		// more here than on the leader, because of where a member's extraArgs lands in the
+		// precedence chain: a real flag beats a config key, and a config key beats the environment.
+		// These two are rendered as ENVIRONMENT, and extraArgs renders as a -D config key — so an
+		// entry here does not merely add a second source, it WINS. Left reachable, ssd_offload_path
+		// takes a host path that never went through the rules admission applies to the field
+		// (absolute, not root, no "..", clear of the RDMA device tree), and enable_ssd_offload
+		// switches the tier off while the leader goes on queueing offload work for it.
+		//
+		// The third key the renderer sets, the tier's size limit, needs no entry: the client's
+		// config object has no field of that name, so a -D would set a key nothing reads.
+		"enable_ssd_offload",
+		"global_segment_size",
+		"local_buffer_size",
+		"local_hostname",
+		"master_server_address",
+		"metadata_server",
+		"protocol",
+		"ssd_offload_path",
+	},
+}
+
 // MemberDerivedEnvs is every environment variable name the member renderer emits, which is what
 // admission refuses in a group's extraEnvs.
 //
@@ -186,28 +210,4 @@ var MemberDerivedEnvs = []string{
 	memberEnvOffloadWatermarkHigh,
 	memberEnvOffloadWatermarkLow,
 	memberEnvProtocol,
-}
-
-var MemberExtraArgsRules = ExtraArgsRules{
-	Derived: []string{
-		// The disk tier's member half, rendered from members[].localDisk. Reserving them matters
-		// more here than on the leader, because of where a member's extraArgs lands in the
-		// precedence chain: a real flag beats a config key, and a config key beats the environment.
-		// These two are rendered as ENVIRONMENT, and extraArgs renders as a -D config key — so an
-		// entry here does not merely add a second source, it WINS. Left reachable, ssd_offload_path
-		// takes a host path that never went through the rules admission applies to the field
-		// (absolute, not root, no "..", clear of the RDMA device tree), and enable_ssd_offload
-		// switches the tier off while the leader goes on queueing offload work for it.
-		//
-		// The third key the renderer sets, the tier's size limit, needs no entry: the client's
-		// config object has no field of that name, so a -D would set a key nothing reads.
-		"enable_ssd_offload",
-		"global_segment_size",
-		"local_buffer_size",
-		"local_hostname",
-		"master_server_address",
-		"metadata_server",
-		"protocol",
-		"ssd_offload_path",
-	},
 }

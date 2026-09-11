@@ -1312,6 +1312,18 @@ func TestKVCacheBackendWebhook_AMemberGroupCannotMove(t *testing.T) {
 		Medium:            "DRAM",
 		CapacityPerMember: resource.MustParse("64Gi"),
 	}
+	// Two groups that differ ONLY by selector, so narrowing both out of service makes them equal.
+	// That is the shape the carve-out exists for, and the shape its price is paid in.
+	cold8Gi := workercore.KVCacheBackendMember{
+		NodeSelector:      map[string]string{"tier": "cold"},
+		Medium:            "DRAM",
+		CapacityPerMember: resource.MustParse("8Gi"),
+	}
+	drained := workercore.KVCacheBackendMember{
+		NodeSelector:      map[string]string{"drained": "true"},
+		Medium:            "DRAM",
+		CapacityPerMember: resource.MustParse("8Gi"),
+	}
 	members := func(groups ...workercore.KVCacheBackendMember) func(*workercore.KVCacheBackend) {
 		return func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Members = groups
@@ -1393,6 +1405,33 @@ func TestKVCacheBackendWebhook_AMemberGroupCannotMove(t *testing.T) {
 			"the later group edited to match the earlier one",
 			members(hot, cold), members(hot, hot),
 			"",
+		},
+		{
+			// The documented way to take a group out of service, on the SECOND of two groups that
+			// differ only by selector: narrowing it makes it equal to the first, which is what the
+			// carve-out above has to let through. Without that carve-out this is refused, so the case
+			// is what holds the carve-out in place rather than an incidental extra.
+			"the second of two look-alike groups narrowed out of service",
+			members(hot, cold8Gi), members(drained, drained),
+			"",
+		},
+		{
+			// THE PRICE OF THAT CARVE-OUT, recorded as admitted rather than left to be discovered.
+			// Removing a group when a later one is identical to its replacement produces the same two
+			// lists as editing that position to match an unchanged later group, so no predicate can
+			// tell them apart. The plain shift, with no look-alike to hide behind, is still refused —
+			// the case above this one.
+			"a middle group removed while a later look-alike takes its place",
+			members(hot, cold, third), members(hot, third, third),
+			"",
+		},
+		{
+			// The two-step spelling of the same attempt IS refused, because the appended copy is a
+			// second old entry that genuinely vanished. Held so the gap above is known to be exactly
+			// as wide as it is, rather than assumed to cover every clone-then-remove route.
+			"the same shift spelled as append-a-clone then remove",
+			members(hot, cold, third, third), members(hot, third, third),
+			"moves a group rather than editing one",
 		},
 		{
 			// A quantity respelled is the same group, so the comparison has to be semantic. A

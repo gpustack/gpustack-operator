@@ -1058,8 +1058,19 @@ func validateKVCacheBackendImmutable(oldKvcb, newKvcb *workercore.KVCacheBackend
 //
 // LEFT is load-bearing, and is not a synonym for "held". A group still sitting at its own position
 // has moved nowhere, so an edit that merely makes some other position resemble it is an edit and not
-// a move. Without that condition, changing one group to match a second that stays exactly where it
-// was would be refused as the move of a group that never went anywhere.
+// a move. Without that condition, the documented way to take a group out of service — narrowing its
+// nodeSelector until it selects nothing — would be REFUSED on the second of two groups that differ
+// only by selector, because narrowing the second makes it equal to the first. Measured: with the
+// condition removed, that update is refused.
+//
+// THE PRICE OF THAT CONDITION IS ONE ADMITTED SHIFT, AND IT CANNOT BE PAID ANY OTHER WAY. Removing a
+// group when a LATER group is identical to the one taking its place — [A,B,C] becoming [A,C,C] —
+// reaches this and is admitted, which is a shift that the plain [A,B,C] to [A,C] is refused for.
+// There is no predicate that separates the two: "position 1 was edited to equal an unchanged
+// position 2" and "position 1 was removed and position 2 cloned" produce the SAME two lists from the
+// same starting list, so nothing in the request distinguishes them. What the admitted case leaves
+// behind is at least visible — the resulting spec holds two identical groups, which the refused
+// shapes do not.
 //
 // WHAT IT LEAVES ALONE, deliberately, because each is an operation this API supports:
 //
