@@ -526,6 +526,22 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 		{"leader extraArgs reaching for the tier's eviction-time switch", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"offload_on_evict": "true"}
 		}, "derived from a field of this spec"},
+		// The CXL trio, refused as Forbidden rather than Derived: this API renders no CXL flag, so
+		// nothing collides by name and the Derived message -- "derived from a field of this spec"
+		// -- would be untrue of all three. Each assertion names leader.allocationStrategy because
+		// that is what the operator has to act on: enable_cxl does not shade that setting, it
+		// replaces it, and a refusal that does not say which setting was replaced leaves the
+		// reader with a rejected manifest and no next step. The undeclared-flag case above is the
+		// baseline that keeps these three from passing on a rule that refuses everything.
+		{"leader extraArgs turning on the CXL allocator", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"enable_cxl": "true"}
+		}, "leader.allocationStrategy is discarded and the object goes on stating"},
+		{"leader extraArgs naming a CXL device path", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"cxl_path": "/dev/dax0.0"}
+		}, "leader.allocationStrategy, so this key alone configures nothing"},
+		{"leader extraArgs sizing the CXL region", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"cxl_size": "68719476736"}
+		}, "leader.allocationStrategy, so this key alone configures nothing"},
 		{"leader extraArgs colliding with a derived flag", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"allocation_strategy": "random"}
 		}, "derived from a field of this spec"},

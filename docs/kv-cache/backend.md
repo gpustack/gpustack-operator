@@ -63,7 +63,7 @@ each is reached another way:
 |---|---|---|
 | `LocalDisk` | a tier on the members that already hold the memory replica | [`members[].localDisk`](#the-local-disk-tier) |
 | `NoF` | an NVMe-oF target coordinate, registered once, with no node affinity and no Pod | no API surface; it is not a member group |
-| `CXL` | a DAX device the **leader process** allocates from | `leader.extraArgs`: `enable_cxl`, `cxl_path`, `cxl_size` |
+| `CXL` | a DAX device the **leader process** allocates from | nowhere in this API: `enable_cxl`, `cxl_path` and `cxl_size` are refused in `leader.extraArgs`, because the first replaces `leader.allocationStrategy` |
 | `DFS` | a distributed filesystem the **leader process** allocates from | the leader's own environment, which this API does not render |
 
 > **Why the shape matters more than the names** — the leader routes an offload task to the client

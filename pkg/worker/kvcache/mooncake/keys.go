@@ -34,7 +34,8 @@ package mooncake
 //   - Forbidden: the flag reaches the artifact intact and then costs more than the hatch is worth.
 //     Nothing collides by name, which is exactly why this class needs to exist. Each entry carries
 //     its own reason because they are not one kind of problem: one changes how every OTHER flag is
-//     read, another names a store nothing reads, another refuses to start the process at all.
+//     read, another names a store nothing reads, another refuses to start the process at all, and
+//     another replaces a setting this spec states while leaving the object stating it.
 type ExtraArgsRules struct {
 	Derived   []string
 	Exclusive [][]string
@@ -116,8 +117,39 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 		"tenant_quota_connector_type": "it decides what kind of source the master reads the " +
 			"tenant quota policy from, so anything other than the default file connector leaves " +
 			"the policy this operator seeds and rewrites addressing a store nothing reads",
+
+		// The CXL switch, and a fourth kind of cost: this one does not shade a setting or refuse to
+		// start -- it REPLACES a setting the object states, and the object goes on stating it.
+		//
+		// Measured in the artifact's source: the master resolves its strategy type from this flag
+		// before construction finishes and then replaces the strategy object during startup, so
+		// the rendered -allocation_strategy is dead rather than overridden late, and the resolved
+		// type goes on gating other paths.
+		//
+		// Nothing collides by name -- this API renders no CXL flag -- which is why these belong
+		// here and not in Derived. The Derived message would also be untrue: it says the key is
+		// derived from a field of this spec, and none of these is.
+		"enable_cxl": "it replaces the leader's allocation strategy outright, so the " +
+			"-allocation_strategy rendered from leader.allocationStrategy is discarded and the " +
+			"object goes on stating a strategy the process is not running, with nothing " +
+			"reporting the difference",
+
+		// Both are read ONLY where enable_cxl is set, which is refused above. Reserved anyway,
+		// because a key that is accepted and then configures nothing is how an operator comes to
+		// believe a tier is on: the manifest carries a DAX path, the process never reads it, and
+		// no status says so. One reason serves both, from a single constant, because two literals
+		// saying the same thing drift apart and the field path already names which key was typed.
+		"cxl_path": cxlCompanionKeyReason,
+		"cxl_size": cxlCompanionKeyReason,
 	},
 }
+
+// cxlCompanionKeyReason is why the two CXL operands are refused on their own. They are not a
+// setting this API renders, so nothing collides by name; they are inert without the switch that
+// carries the real cost, and an inert key that admission accepted reads as a tier that is on.
+const cxlCompanionKeyReason = "it is read only when enable_cxl is set, and that key is refused " +
+	"here because it discards the -allocation_strategy rendered from leader.allocationStrategy, " +
+	"so this key alone configures nothing at all"
 
 // MemberExtraArgsRules governs a member group's passthrough.
 //
