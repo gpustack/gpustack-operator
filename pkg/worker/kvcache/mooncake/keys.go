@@ -35,10 +35,9 @@ package mooncake
 //     Nothing collides by name, which is exactly why this class needs to exist. Each entry carries
 //     its own reason because they are not one kind of problem: one changes how every OTHER flag is
 //     read, another names a store nothing reads, another refuses to start the process at all, and
-//     another replaces a setting this spec states while leaving the object stating it. Two more
-//     change no value at all: one this operator's own rendering always wins over, which therefore
-//     configures nothing while reading as a setting that moved, and one that moves where a rendered
-//     port is served rather than which port it is.
+//     another replaces a setting this spec states while leaving the object stating it, and two more
+//     change no value at all because this operator's own rendering always wins over them, which
+//     makes them configure nothing while reading as a setting that moved.
 type ExtraArgsRules struct {
 	Derived   []string
 	Exclusive [][]string
@@ -57,6 +56,15 @@ type ExtraArgsRules struct {
 // REQUIRED: moving the pinned artifact version invalidates the tracing, so redo it in the same
 // commit. A flag added upstream reaches a rendered setting under a name no rule here has, and the
 // refusals below are keyed on names — nothing else in this repository would notice.
+//
+// metrics_host is the one the trace found and DELIBERATELY LEFT REACHABLE, recorded here so the
+// next trace does not add it. It moves where the admin and Prometheus surfaces bind, which the two
+// probes reach at the Pod's own address -- but its artifact documents "::" as the value that listens
+// on IPv6 and, on a dual-stack host, on both. On a cluster that assigns the Pod an IPv6 address, the
+// artifact's own 0.0.0.0 default answers no probe at all, so this key is the only way to a leader
+// that becomes ready, and refusing it would cost far more than the hatch is worth. A concrete
+// address that is not the Pod's own still breaks the probes; that failure stops the rollout rather
+// than passing silently, which is the line this list draws.
 var LeaderExtraArgsRules = ExtraArgsRules{
 	// Keys are the flag's own name without its leading dash, which is how extraArgs is keyed.
 	Derived: []string{
@@ -172,15 +180,6 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 		"etcd_endpoints": "it supplies a connection string only when ha_backend_connstring is " +
 			"empty, which this operator never leaves empty, and the etcd leadership backend it " +
 			"names is not compiled into the image this operator runs",
-
-		// The bind ADDRESS of the port metrics_port names, and the one entry here refused for
-		// reachability rather than for a value. The rendered -metrics_port decides which port the
-		// admin and Prometheus surfaces answer on; this decides on which address, and both the
-		// published endpoint and the two probes address them at the Pod's own. Moved, nothing
-		// listens where this object says it does, and the probes fail rather than report it.
-		"metrics_host": "it moves the address the admin and metrics surfaces bind to, while this " +
-			"object publishes and probes them at the Pod's own address, so the endpoint it " +
-			"states is answered nowhere",
 	},
 }
 

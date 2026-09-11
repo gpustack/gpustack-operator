@@ -23,9 +23,14 @@ port.
 deprecated spelling of `rpc_port`, which this operator always renders, so the rendered one wins: the
 key reads as a port that moved without moving one.
 
-⛔ **`metrics_host` is refused there too, and it does move something** — not the port but the
-**address** it binds to. Both probes and the published admin endpoint address that port at the Pod's
-own, so a value here leaves nothing answering where this object says it does.
+**`metrics_host` is reachable on purpose, and on an IPv6 cluster it is required.** It moves the
+**address** the admin surface binds to, not the port. The store's default `0.0.0.0` is IPv4 only, so
+where the Pod's address is IPv6 nothing answers the probes and the leader never becomes ready; `::`
+listens on IPv6 and, on a dual-stack host, on both.
+
+⛔ **Any other concrete address breaks both probes**, because the kubelet reaches them at the Pod's
+own. The leader then stays not-ready rather than reporting the cause, so `0.0.0.0` and `::` are the
+only two values worth setting.
 
 `replicas` defaults to `1`, and `5` is the ceiling in the **webhook** and in the schema alike: only
 one leader ever serves, so further replicas are spare processes rather than capacity. More than one
