@@ -78,6 +78,17 @@ NS="${1:?usage: case-67.sh <NS>}"
 CASE_ID=67
 IMAGE="${E2E_MOONCAKE_IMAGE:-docker.io/kvcacheai/mooncake:0.3.13}"
 
+# How long a probe Pod may take to reach Running. The probes mount nothing, so the image pull is what
+# is being waited on, and without a bound a pull that cannot finish -- a missing tag, an unreachable
+# registry -- leaves the case waiting on a Pod that will never run. With the bound it gives up, and
+# probe_ran below reports the launch failure it was written to report.
+#
+# It errs LONG deliberately: a bound that fires on a pull that would have succeeded reports a slow
+# registry as a failed assertion about the operator, which is a wrong verdict, while one that is too
+# long only costs time and the case still reports. Every probe is pinned to the node the A-side pod
+# has already run this same image on, so the bound covers the uncommon path rather than a first pull.
+PULL_TIMEOUT=300s
+
 OBJ_BYTES=4194304
 A_SEGMENT=67108864
 B_SEGMENT=268435456
@@ -168,6 +179,7 @@ check_reads() {
 # run_probe <name-suffix> <log-file> -- the python program arrives on stdin
 run_probe() {
   kubectl -n "$NS" run "case67-probe-$1-${SFX}" --restart=Never --rm -i --quiet \
+    --pod-running-timeout="$PULL_TIMEOUT" \
     --image="$IMAGE" --labels="${LABEL_KEY}=${LABEL_VAL}" \
     --overrides="{\"spec\":{\"nodeName\":\"${NODE_A}\",\"containers\":[{\"name\":\"probe\",\"image\":\"${IMAGE}\",\"command\":[\"python3\",\"-\"],\"stdin\":true,\"stdinOnce\":true}]}}" \
     >"$2" 2>&1 || true

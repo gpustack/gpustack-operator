@@ -82,13 +82,25 @@ IMAGE="${E2E_MOONCAKE_IMAGE:-gpustack/mirrored-mooncake:0.3.13.post1-cpu}"
 HOST_PATH="${E2E_LOCALDISK_HOST_PATH:-/mnt/kvcache-localdisk}"
 HOST_PATH="${HOST_PATH%/}"
 
-# Every probe Pod in this case mounts the tier as hostPath type Directory, and the kubelet cannot
+# Two bounds, over two different waits. Keeping them apart is the point of the two names: a change to
+# either one must not silently move the other.
+#
+# PROBE_TIMEOUT is for the probes that mount the tier as hostPath type Directory. The kubelet cannot
 # satisfy that mount when the directory is absent: the Pod stays in ContainerCreating forever, so an
 # unbounded `kubectl run --rm -i` waits on a Pod that will never start. This bound turns that wait
 # into the empty reading the skip branch below is written to read, and `--rm` still deletes the Pod
 # it gave up on. It is generous because a cold image pull happens inside the same wait, and a bound
 # short enough to fire on a slow pull would report a prepared directory as missing.
 PROBE_TIMEOUT=120s
+
+# PULL_TIMEOUT is for the probes that mount nothing, where an absent directory is not among the
+# failure modes and the image pull IS what is being waited on. It errs LONG deliberately: a bound
+# that fires on a pull that would have succeeded reports a slow registry as a failed assertion about
+# the operator, which is a wrong verdict, while one that is too long only costs time and the case
+# still reports. By the time any of them runs, this case has already brought its image up on the
+# cluster -- the store image as a member, busybox as the probe above -- so the bound covers the
+# uncommon path, a probe placed where that image is not cached yet, rather than a first pull.
+PULL_TIMEOUT=300s
 
 # REQUIRED, and it REFUSES rather than skipping. The case creates its run directory below this
 # prepared parent, and a root or top-level path is not the dedicated tier shape this case claims to
@@ -277,6 +289,7 @@ record PASS "status.endpoints publishes Client and Admin addresses" "${CLIENT_AD
 # just sized.
 PROBE_LOG="$(mktemp)"
 cat <<PY | kubectl -n "$NS" run "case65-probe-${SFX}" --image="$IMAGE" --restart=Never \
+  --pod-running-timeout="$PULL_TIMEOUT" \
   --labels="gpustack-e2e-case=65-${SFX}" \
   --overrides='{"spec":{"containers":[{"name":"probe","image":"'"$IMAGE"'","command":["python3","-"],"stdin":true,"stdinOnce":true}]}}' \
   -i --rm --quiet >"$PROBE_LOG" 2>&1 || true
@@ -349,15 +362,24 @@ fi
 # status.capacity cannot stand in for it: that one reports the DECLARED figure, which reads the
 # same for an empty tier as for a full one.
 METRIC="$(kubectl -n "$NS" run "case65-metrics-${SFX}" --image=busybox:1.36 --restart=Never --rm -i --quiet \
+  --pod-running-timeout="$PULL_TIMEOUT" \
   --labels="gpustack-e2e-case=65-${SFX}" \
   -- sh -c "wget -qO- http://${ADMIN_ADDR}/metrics | grep '^master_allocated_file_size_bytes'" 2>/dev/null)"
 METRIC_VAL="$(echo "$METRIC" | awk '{print $2}' | cut -d. -f1)"
 if [ -n "$METRIC_VAL" ] && [ "$METRIC_VAL" -gt 0 ] 2>/dev/null; then
   record PASS "the leader reports bytes actually written to the file tier" \
     "master_allocated_file_size_bytes=${METRIC_VAL} (> 0)"
+elif [ -z "$METRIC" ]; then
+  # NO READING is not a zero, and the branch below would file it as one -- under the store's known
+  # failure shape, for the single figure this case exists to report. A probe that never started, a
+  # leader that never answered and an absent gauge all arrive here as an empty string, so this says
+  # what it knows and stops there.
+  record FAIL "the leader reports bytes actually written to the file tier" \
+    "the metrics probe returned no reading within ${PULL_TIMEOUT}; an absent reading is not a zero, \
+so this run makes no claim about the tier either way"
 else
   record FAIL "the leader reports bytes actually written to the file tier" \
-    "master_allocated_file_size_bytes='${METRIC:-<absent>}' -- a zero here with healthy writes above is the \
+    "master_allocated_file_size_bytes='${METRIC}' -- a zero here with healthy writes above is the \
 known 'tier announced, nothing lands' failure shape: the leader defers offload forever while publishing capacity"
 fi
 
@@ -438,6 +460,7 @@ record PASS "the on-evict backend publishes Client and Admin addresses" "${CLIEN
 
 PROBE_LOG2="$(mktemp)"
 cat <<PY | kubectl -n "$NS" run "case65-probe-oe-${SFX}" --image="$IMAGE" --restart=Never \
+  --pod-running-timeout="$PULL_TIMEOUT" \
   --labels="gpustack-e2e-case=65-${SFX}" \
   --overrides='{"spec":{"containers":[{"name":"probe","image":"'"$IMAGE"'","command":["python3","-"],"stdin":true,"stdinOnce":true}]}}' \
   -i --rm --quiet >"$PROBE_LOG2" 2>&1 || true
@@ -504,15 +527,22 @@ else
 fi
 
 METRIC2="$(kubectl -n "$NS" run "case65-metrics-oe-${SFX}" --image=busybox:1.36 --restart=Never --rm -i --quiet \
+  --pod-running-timeout="$PULL_TIMEOUT" \
   --labels="gpustack-e2e-case=65-${SFX}" \
   -- sh -c "wget -qO- http://${ADMIN_ADDR2}/metrics | grep '^master_allocated_file_size_bytes'" 2>/dev/null)"
 METRIC2_VAL="$(echo "$METRIC2" | awk '{print $2}' | cut -d. -f1)"
 if [ -n "$METRIC2_VAL" ] && [ "$METRIC2_VAL" -gt 0 ] 2>/dev/null; then
   record PASS "the on-evict leader reports bytes written under forced eviction" \
     "master_allocated_file_size_bytes=${METRIC2_VAL} (> 0) -- the eviction path writes; only the write-through path is broken"
+elif [ -z "$METRIC2" ]; then
+  # The discriminator's verdict is the harshest this case can reach -- both write paths broken -- and
+  # a probe that never returned would reach it without a reading.
+  record FAIL "the on-evict leader reports bytes written under forced eviction" \
+    "the metrics probe returned no reading within ${PULL_TIMEOUT}; an absent reading is not a zero, \
+so this run cannot say which write path the tier uses"
 else
   record FAIL "the on-evict leader reports bytes written under forced eviction" \
-    "master_allocated_file_size_bytes='${METRIC2:-<absent>}' -- a zero here, with eviction forced and writes healthy, \
+    "master_allocated_file_size_bytes='${METRIC2}' -- a zero here, with eviction forced and writes healthy, \
 means BOTH write paths are broken: the tier is unusable in every configuration this API renders"
 fi
 

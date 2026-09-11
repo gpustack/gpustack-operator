@@ -69,6 +69,18 @@ E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/
 NS="${1:?usage: case-44.sh <NS>}"
 IMAGE="${E2E_MOONCAKE_IMAGE:-docker.io/kvcacheai/mooncake:0.3.13}"
 
+# How long a probe Pod may take to reach Running. The probes mount nothing, so the image pull is what
+# is being waited on, and without a bound a pull that cannot finish -- a missing tag, an unreachable
+# registry -- leaves the case waiting on a Pod that will never run. The trailing `|| true` on those
+# invocations hides a failed probe; it does not shorten a hung one.
+#
+# It errs LONG deliberately: a bound that fires on a pull that would have succeeded reports a slow
+# registry as a failed assertion about the operator, which is a wrong verdict, while one that is too
+# long only costs time and the case still reports. By the time either probe runs, this case's own
+# backend has already brought the same image up, so the bound covers the uncommon path -- a probe
+# placed where that image is not cached yet -- rather than a first pull.
+PULL_TIMEOUT=300s
+
 # LC_ALL=C and the disabled pipefail are both load-bearing: under a UTF-8 locale tr dies on
 # /dev/urandom, and with pipefail on the SIGPIPE from head turns a trailing `|| echo $$` into an
 # append, so LC_ALL=C alone yields random characters with the PID glued on. The measurements behind
@@ -253,6 +265,7 @@ echo "== 2. fill the grant, hold it under lease, then write past it =="
 # from an unknown tenant from a transport failure — three outcomes that a bare "write failed" would
 # collapse into one.
 cat <<PY | kubectl -n "$NS_Q" run "$PROBE" --image="$IMAGE" --restart=Never \
+  --pod-running-timeout="$PULL_TIMEOUT" \
   --overrides='{"spec":{"containers":[{"name":"probe","image":"'"$IMAGE"'","command":["python3","-"],"stdin":true,"stdinOnce":true}]}}' \
   -i --rm --quiet >/tmp/kvc-probe-${SFX}.log 2>&1 || true
 import sys, time, socket, urllib.request
@@ -478,6 +491,7 @@ echo "== 5. removing the objects gives the bytes back =="
 # objects, the master refused to drop its quota, the operator correctly kept its finalizer, and the
 # namespace was left Terminating on every single run.
 cat <<PY | kubectl -n "$NS_Q" run "${PROBE}-rm" --image="$IMAGE" --restart=Never \
+  --pod-running-timeout="$PULL_TIMEOUT" \
   --overrides='{"spec":{"containers":[{"name":"probe","image":"'"$IMAGE"'","command":["python3","-"],"stdin":true,"stdinOnce":true}]}}' \
   -i --rm --quiet >/tmp/kvc-probe-rm-${SFX}.log 2>&1 || true
 import sys, time, socket
