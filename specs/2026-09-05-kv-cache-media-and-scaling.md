@@ -124,6 +124,29 @@ Two further facts about that table, both of which change what this spec can offe
   `enable_dfs_ = false` and **returns normally** (`master_service.cpp:568-574`). `leader.multiTenancy`
   is exactly what a `KVCachePool` requires of its backend. So a hypothetical `DFS` tier under a pool
   is not merely unimplemented here — it is a **silent** degradation upstream.
+- **Corrected after shipping.** The mechanism the bullet above gives does not hold, and its line
+  range names the wrong rule. `single_tenant` is a field of DFS's own config whose default is `true`
+  (`mooncake-store/include/storage/distributed/distributed_storage_backend.h:31`). Across the whole
+  store the field has exactly **two** write points — that default, and
+  `mooncake-store/src/storage/distributed/distributed_storage_backend.cpp:125-126`, which reads
+  `MOONCAKE_DFS_SINGLE_TENANT` and falls back to it — so no master setting can reach it. DFS also
+  enforces the requirement in its own validator (`distributed_storage_backend.cpp:70-74`), and
+  `master_service.cpp:572` is the only read outside that module. So `leader.multiTenancy` does not
+  select
+  this branch, the branch does not fire by default, and this API cannot reach it either —
+  `KVCacheBackendLeader` carries `extraArgs` and no environment passthrough, and `extraEnvs` exists
+  only on the member, so nothing here can set that variable on a leader. The single-tenant rule is
+  `master_service.cpp:571-576`; the cited `:568-574` began inside the preceding rule's `throw` and
+  stopped short of the two lines that perform the degradation.
+- ⛔ **What this correction does NOT establish.** It does not say `DFS` is usable under a pool. DFS
+  supports only its single-tenant mode, and a `KVCachePool` requires its backend to keep a
+  per-tenant ledger; whether those two are semantically incompatible is not answered here. The
+  mechanism this section gave is disproved, not the conclusion it reached.
+- **Two further `DFS` preconditions this section never recorded, and neither is silent.** Snapshot
+  or oplog recovery makes the leader **throw** `std::invalid_argument` and fail to start
+  (`master_service.cpp:563-569`). `RestoreFromStandbySnapshot` returns `DFS_SERVICE_UNAVAILABLE`
+  while `enable_dfs_` is set (`master_service.cpp:2994-2998`), which puts `DFS` at odds with
+  `leader.highAvailability`, because a standby rebuilds from exactly that snapshot.
 
 #### The finding that decides the shape: offload is routed to the memory replica's owner
 
