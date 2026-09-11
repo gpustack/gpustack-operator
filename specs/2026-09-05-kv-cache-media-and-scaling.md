@@ -435,7 +435,7 @@ Where each removed value goes, so a reader can tell "moved" from "dropped":
 |---|---|---|
 | `LocalDisk` | `members[].localDisk` (F1) — same members, second tier | shipped by this spec |
 | `NoF` | nowhere in this API | a registration surface carrying `nqn` / `nsid` / `traddr` / `trsvcid` / `base` / `size`. It has no node affinity and no Pod, so it is not a member group; whether it is a field on the leader or an object of its own is open |
-| `CXL` | `leader.extraArgs`: `enable_cxl`, `cxl_path`, `cxl_size` | a leader-side block plus a DAX device on the leader's node, and a note that it also replaces the allocation strategy |
+| `CXL` | nowhere in this API: `enable_cxl`, `cxl_path` and `cxl_size` are refused in `leader.extraArgs`, because the first replaces the strategy rendered from `leader.allocationStrategy` | a leader-side block plus a DAX device on the leader's node, and a note that it also replaces the allocation strategy |
 | `DFS` | `leader` environment, which this API does not render at all today | a leader-side block for `MOONCAKE_DFS_*`, plus admission refusing it together with `multiTenancy`. **Corrected after shipping:** the store does not degrade silently on that pairing — a DFS replica under a non-default tenant is refused per request with `INVALID_PARAMS` |
 
 - **Acceptance:** `medium: LocalDisk` is refused **by the CRD schema** with
