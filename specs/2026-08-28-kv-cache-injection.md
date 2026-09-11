@@ -10,21 +10,23 @@ A mutating admission webhook on Pods. Any Pod that opts in with the label `kvcac
 and a projected client-config file where the engine needs one — resolved from a `KVCachePoolBinding`
 in the Pod's own namespace.
 
-**It does not inject a reuse identity, and that is a measured constraint rather than a choice.** The
-`tenant_id` that would carry one is unreachable from outside the engine process at the versions this
-project targets: every engine writes its own Mooncake config reader, none of them carries a
-`tenant_id` key, and each calls the client's `setup()` through its **positional** overload, which
+**Whether it injects a reuse identity depends on the engine, and that answer is measured rather than
+chosen.** For vLLM and vLLM-Ascend the `tenant_id` that would carry one is unreachable from outside
+the engine process at the versions this project targets: each writes its own Mooncake config reader
+with no `tenant_id` key, and calls the client's `setup()` through its **positional** overload, which
 truncates before that parameter. The capability exists in the client — a second `setup()` overload
-takes a dict and forwards every key — so this is a caller-side gap with a named upstream fix, not a
-missing feature downstream. F4a **records that gap on the Pod** instead of refusing: every Binding
+takes a dict and forwards every key — so that is a caller-side gap with a named upstream fix, not a
+missing feature downstream. SGLang's reader takes the key on all three of its config paths and passes
+it as a keyword argument, so this webhook reaches it through the `MOONCAKE_TENANT_ID` variable. F4a **records that gap on the Pod** instead of refusing: every Binding
 declares a domain, so a refusal keyed on one would reject every Pod this webhook was ever asked about,
 and the refusal that does match the harm belongs on the Binding's own admission (D8, not landed).
 
 **One cluster-level prerequisite follows from that gap, and it is documented rather than enforced.**
-Because no engine sends a tenant, the client falls back to the store's own default — the literal
-`default` — and a multi-tenant master, the only kind a `KVCachePool` accepts, refuses writes from a
-name absent from its ledger. So the cluster needs a `KVCachePoolBinding` whose reuse domain is
-`default`; without one an injected Pod starts, stays Ready, and fails every write. It is not checked at
+Because vLLM and vLLM-Ascend send no tenant, their clients fall back to the store's own default — the
+literal `default` — and a multi-tenant master, the only kind a `KVCachePool` accepts, refuses writes
+from a name absent from its ledger. So a cluster serving either of them needs a `KVCachePoolBinding`
+whose reuse domain is `default`; without one an injected Pod starts, stays Ready, and fails every
+write. A pool serving only SGLang needs no such object (F4a). It is not checked at
 admission because the ledger is a reconciler's product and a Pod may legitimately arrive first. The
 Pod's own stamp carries the name its writes land on, so the fact is readable where it is needed.
 
@@ -91,8 +93,9 @@ scope must be the backend and not the pool: one backend may serve several pools
   a third-party operator's object — can read and write the pool by carrying one label and a handful of
   annotations. No workload CR, no Kueue queue, no operator-owned owner reference.
 - **G2** A reuse domain this project cannot actually deliver is **declared, never approximated**. The
-  isolation the Binding's domain promises requires the engine to carry a `tenant_id`, which no targeted
-  engine version does (F4). So the goal is not "the domain isolates" — it is that nobody can believe it
+  isolation the Binding's domain promises requires the engine to carry a `tenant_id`, which vLLM and
+  vLLM-Ascend do not (F4); SGLang does. So the goal is not "the domain isolates" — it is that nobody
+  can believe it
   does without being told otherwise: the Pod is injected and carries a stamp saying the domain is not
   enforced and why, instead of starting and quietly sharing one tenant with no record of it anywhere.
   The refusal that matches the causality is on creating a second domain the backend cannot separate, and
@@ -125,10 +128,11 @@ scope must be the backend and not the pool: one backend may serve several pools
   them that the sketched shapes do not yet carry.
 - **No NetworkPolicy authorship.** The transfer engine's port behaviour is documented here (see
   Notes) so an administrator can write a correct one; the webhook does not write one.
-- **No tenant isolation, at these engine versions — and no attempt to fake one.** This spec ships
-  connectivity, not isolation. Every injected Pod reaches the pool under the client's `default` tenant,
-  because no targeted engine forwards a `tenant_id` — **and only once a Binding has registered that
-  name**, since a multi-tenant master refuses writes from a tenant absent from its ledger and a
+- **No tenant isolation for two of the three engine versions — and no attempt to fake one.** This spec
+  ships connectivity, not isolation. A vLLM or vLLM-Ascend Pod reaches the pool under the client's
+  `default` tenant, because neither forwards a `tenant_id`; an SGLang Pod carries the Binding's domain
+  instead — **and either way only once a Binding has registered that name**, since a multi-tenant
+  master refuses writes from a tenant absent from its ledger and a
   `KVCachePool` accepts no other kind of backend. That prerequisite is documented rather than enforced
   (F4a); without it an injected Pod starts, stays Ready, and fails every write. With it, a pool serving
   two domains has them sharing one tenant's cache, where one domain's write pressure evicts another's
@@ -364,15 +368,15 @@ stamp rather than guaranteed by a gate**.
 F4b stays a refusal, because its subject is the pool the Pod is asking to join and its answer is
 already observed continuously by a controller.
 
-##### F4a — The engine end: no targeted engine sends a tenant, and the Pod is told so
+##### F4a — The engine end: which engines send a tenant, and the Pod is told either way
 
 **This is a fact about the engine versions this project targets, not a property of the technology, and
 it is written to be falsifiable.** The client is capable: `setup()` has a second overload taking a dict
 that forwards every key, `tenant_id` included (`mooncake-integration/store/store_py.cpp:2237-2271`;
 the key is read at `mooncake-store/src/real_client.cpp:1310` and named at
-`mooncake-store/include/types.h:214`). What is missing is on the **caller** side — each engine writes
-its own config reader with no `tenant_id` key, and each calls the **positional** overload, which stops
-before that parameter:
+`mooncake-store/include/types.h:214`). The variation is on the **caller** side — each engine writes
+its own Mooncake config reader, and how a tenant reaches it differs by engine; the table below is the
+measurement:
 
 | engine | version measured | reads a tenant? | evidence |
 |---|---|---|---|
@@ -429,8 +433,9 @@ triggered on "a domain is declared" therefore has a hit rate of 100% while every
 above reads false, and this webhook would refuse every Pod it was ever asked about.
 
 **Measured on a live cluster, the immediate cost is not a weaker guarantee — it is no writes at all.**
-The table above says no engine forwards a tenant. What follows from that is stronger than "the domain
-does not separate anything": the client falls back to its own default, the literal string `default`,
+The table above says two of the three engines forward no tenant. **For those two**, what follows is
+stronger than "the domain does not separate anything": the client falls back to its own default, the
+literal string `default`,
 and a multi-tenant master refuses a write from a tenant that is not in its ledger. A `KVCachePool` is
 only accepted over a multi-tenant backend (a pool is refused when its backend has no ledger to write
 quota into), so there is no single-tenant configuration to fall back to. An injected Pod starts, stays
@@ -639,8 +644,8 @@ Three consequences the renderer is built around, each measured rather than assum
   `master_server_address`, `protocol`, `device_name`, `mode`, `global_segment_size`,
   `local_buffer_size`, `enable_offload` (`worker.py:129-142`). There is no `**config` splat and no
   passthrough, so a key outside this set is not merely ignored: **no code path ever sees it.** This is
-  the fourth independent confirmation that `tenant_id` cannot reach the engine — writing it into the
-  file changes nothing, because `from_file` never reads it. vLLM-Ascend reads the same file with a
+  the fourth independent confirmation that a `tenant_id` key cannot reach vLLM through its config
+  file — writing it into the file changes nothing, because `from_file` never reads it. vLLM-Ascend reads the same file with a
   reader closed at **six** of those names, without `mode` or `enable_offload`
   (`mooncake_backend.py:115-124`) — it ignores the `mode` we render, which is safe only because vLLM
   does not pass `mode` to `setup()` either. SGLang's reader is closed at thirteen keys of
@@ -757,8 +762,10 @@ cannot be rendered at admission time.
   already mutating, and projects that annotation as a file into the container. No ConfigMap, so no
   webhook side effect, no RBAC, no garbage collection, and the file's lifetime is exactly the Pod's. The
   mount is read-only at a fixed path. SGLang carries no such annotation, volume or mount.
-- **`tenant_id` is written nowhere**, in any vehicle. No engine's config class carries the key, so
-  writing it would be decoration that reads as a guarantee — the worst of both. F4a reports the gap on
+- **This webhook writes no `tenant_id` key**, in any engine's config file. vLLM and vLLM-Ascend carry
+  no such key at all; SGLang's config class does carry it, and this webhook reaches that field through
+  the `MOONCAKE_TENANT_ID` variable instead of by writing the key. Writing the key where no reader
+  takes it would be decoration that reads as a guarantee — the worst of both. F4a reports the gap on
   the stamp instead, where it is addressed to an operator rather than to the store.
 - **The two engines do not share one key set, and treating them as one is how a key gets dropped.**
   The writable keys per engine, measured from each engine's own reader:
@@ -1580,7 +1587,7 @@ so the second column is what the work has to hold rather than a number to discov
 | `vllm_role_declaring_keys_move_together` | the vLLM family | the **three** role keys asserted as one unit: `global_segment_size: 0`, `mode: "standalone-store"`, `local_buffer_size` at the constant. They declare *what the instance is*, not how big it is, so no case asserts one without the others |
 | `sglang_has_no_mode_or_local_buffer` | engine `sglang` | neither key is emitted, in any spelling. SGLang's reader has no `mode` and no `local_buffer_size`, and hardcodes its own 16 MiB buffer, so emitting either would be a key nothing reads |
 | `local_buffer_size_is_nonzero` | the vLLM family | strictly above zero — a zero declares a pure server that may not `Get` or `Put`, which is a silently useless client rather than an error |
-| `no_tenant_id_emitted` | every engine | **no `tenant_id` key in any vehicle** — writing one would read as a guarantee the stack cannot keep (F4a). There is no domain dimension to vary: `Input` carries none, which is the structural version of the same guarantee |
+| `no_tenant_id_emitted` | every engine | **no `tenant_id` key** — writing one would read as a guarantee the stack cannot keep (F4a). There is no domain dimension to vary: `Input` carries none, which is the structural version of the same guarantee |
 | `device_name_empty_every_path` | TCP **and** RDMA protocol, each engine | present and empty in both — empty means "discover per host", and `auto-discovery` is a filter no host matches |
 | `metadata_server_literal` | each engine | the value is `P2PHANDSHAKE`, never an address |
 | `metadata_variable_spelling` | engine `sglang` | the variable is byte-for-byte `MOONCAKE_TE_META_DATA_SERVER` — see the trap below |
@@ -1624,7 +1631,7 @@ injection is far worse than none:
 | `stamp_isolation_is_not_a_constant` | the two rows above, compared | the isolation field **differs** between them. Both rows inject, so a stamp that read the same either way would make the whole distinction unobservable while every test still passed |
 | `f4b_refuses_even_when_f4a_would_stamp` | truncating engine **and** a pool reporting multi-tenancy off | **refused**, with F4b's message: F4a no longer refuses anything, so there is no precedence left to arbitrate, and the pool the Pod asked to join is genuinely unusable |
 | `domain_annotation_refused` | `kvcache.gpustack.ai/domain` set on the Pod | refused, naming the key; the value is never read |
-| `domain_empty_is_not_a_refusal` | a Binding whose domain name is empty — only reachable for an object that never went through Binding admission | **injected**, stamped as declaring no domain. It was a refusal in an earlier draft, to keep the webhook from falling back to the client's `'default'` tenant; that concern is gone, because this webhook writes no tenant in any form. Refusing here would be a gate whose trigger no admitted object can satisfy |
+| `domain_empty_is_not_a_refusal` | a Binding whose domain name is empty — only reachable for an object that never went through Binding admission | **injected**, stamped as declaring no domain. It was a refusal in an earlier draft, to keep the webhook from falling back to the client's `'default'` tenant; that concern is gone, because a Pod whose domain is empty gets no tenant variable either way — the injection is gated on a non-empty domain. Refusing here would be a gate whose trigger no admitted object can satisfy |
 | `engine_missing` / `engine_unknown` | no or bad engine | refused, names the accepted values |
 | `single_container` | one container, no container annotation | injected into it |
 | `two_containers_unnamed` | two containers | refused; never the first |
@@ -1764,10 +1771,11 @@ declaration through the workload CR and through this webhook produces the same c
   whole F4 section exists to refuse.
 - **Write the `tenant_id` key anyway, so the file is "ready" when engines catch up.** Rejected, and it
   is the most tempting wrong answer here: the key costs nothing to emit and would make the config look
-  complete. But no engine reads it, so its only effect is on a human — someone inspecting the injected
-  file, or the F7 stamp, would see a domain named and reasonably conclude it is in force. A value that
-  is present, ignored, and reads as a guarantee is worse than an absent one, and it would also mask
-  the day an engine starts forwarding, since nothing would change in the rendered output.
+  complete. But neither vLLM nor vLLM-Ascend reads it, so its only effect is on a human — someone
+  inspecting the injected file, or the F7 stamp, would see a domain named and reasonably conclude it
+  is in force. A value that is present, ignored, and reads as a guarantee is worse than an absent one,
+  and it would also mask the day a file-taking engine starts forwarding, since nothing would change in
+  the rendered output.
 - **Patch the engines in this project — vendor a fork, or inject a sitecustomize shim.** Rejected as
   out of scope: it puts this operator in the business of shipping engine builds, and the fix belongs
   upstream where one call-site change serves everyone. Recorded in Open Questions as the follow-up.
