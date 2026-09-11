@@ -241,8 +241,10 @@ type SegmentDetail struct {
 	// closed set here: this API publishes what the store reports, so a state a later store version
 	// adds travels through rather than being flattened into a value that fits.
 	State string
-	// Protocol is what the member actually came up on, which is the requested transport only when
-	// the request resolved the way the renderer predicted.
+	// Protocol is the transport the member registered with, NOT the one it came up on. The leader
+	// copies it out of the mount request and this decoder passes it through, so a member that fell
+	// back to TCP still lists the fabric it asked for. There is no surface on either side that
+	// carries the transport actually installed.
 	Protocol string
 	// TEEndpoint is the member's transfer-engine address, and it is how a listing entry is joined
 	// back to the Pod it belongs to.

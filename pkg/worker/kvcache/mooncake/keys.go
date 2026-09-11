@@ -148,13 +148,31 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 		// the rendered -allocation_strategy is dead rather than overridden late, and the resolved
 		// type goes on gating other paths.
 		//
+		// It does two things, and they are reported differently, which is why the reason names
+		// both. The SUBSTITUTION is reported nowhere, at any verbosity. Enabling CXL is reported:
+		// at default verbosity the artifact logs the allocator it creates and its size, and the
+		// leader's metrics then carry that size as capacity. Those lines name the ALLOCATOR and not
+		// the strategy, so they are not a report of the substitution, and reading them as one is
+		// the confusion this entry has to avoid making itself.
+		//
+		// Measured on a cluster whose nodes have no DAX device: the switch ALONE, with neither
+		// operand set and both therefore defaulting to /dev/dax0.0 and 8 GiB, brings the leader up
+		// serving and advertising eight gigabytes that nothing backs. It neither fails nor degrades.
+		//
+		// Refusing it removes the ONLY route to CXL through this API, which carries no field for
+		// it, and that is deliberate rather than an oversight: the hatch reaches the capability by
+		// accident, and what shipping it would take is recorded in the media spec. The line drawn
+		// above is what decides it -- a failure that stops a rollout may pass, one that passes
+		// silently may not -- and both of this key's effects are on the silent side.
+		//
 		// Nothing collides by name -- this API renders no CXL flag -- which is why these belong
 		// here and not in Derived. The Derived message would also be untrue: it says the key is
 		// derived from a field of this spec, and none of these is.
 		"enable_cxl": "it replaces the leader's allocation strategy outright, so the " +
 			"-allocation_strategy rendered from leader.allocationStrategy is discarded and the " +
-			"object goes on stating a strategy the process is not running, with nothing " +
-			"reporting the difference",
+			"object goes on stating a strategy the process is not running with nothing reporting " +
+			"that substitution, and it brings the leader up advertising the CXL allocator's size " +
+			"as capacity, which on a node with no DAX device is capacity nothing backs",
 
 		// Both are read ONLY where enable_cxl is set, which is refused above. Reserved anyway,
 		// because a key that is accepted and then configures nothing is how an operator comes to

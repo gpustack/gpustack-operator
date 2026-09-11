@@ -536,6 +536,16 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 		{"leader extraArgs turning on the CXL allocator", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"enable_cxl": "true"}
 		}, "leader.allocationStrategy is discarded and the object goes on stating"},
+		// The same key again, on its other effect. Two cases and not one assertion over both,
+		// because the refusal now carries two reasons and either could be dropped without the
+		// other noticing: it replaces the strategy, and it brings the leader up advertising the
+		// allocator's size as capacity on a node that need not have a DAX device at all.
+		{
+			"leader extraArgs turning on the CXL allocator, on the capacity it then claims",
+			func(k *workercore.KVCacheBackend) {
+				k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"enable_cxl": "true"}
+			}, "advertising the CXL allocator's size as capacity",
+		},
 		{"leader extraArgs naming a CXL device path", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"cxl_path": "/dev/dax0.0"}
 		}, "leader.allocationStrategy, so this key alone configures nothing"},

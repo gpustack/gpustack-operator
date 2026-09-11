@@ -2897,7 +2897,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 															Type:        "string",
 														},
 														"protocol": {
-															Description: "Protocol is the transport the LEADER reports this member came up on.\nIt is an OBSERVATION throughout, never an echo of spec.transport.protocol, and the two can\ndisagree: a member handed an RDMA request on a node whose device is missing comes up on TCP.\nRead it as what the data plane is doing, and the spec field as what was asked for.",
+															Description: "Protocol is the transport this member REGISTERED with when it mounted its segment.\nIt is NOT an observation. The value travels from the member's own mount request through the\nleader's listing unchanged, so it cannot disagree with spec.transport.protocol: a member that\nasks for a host fabric and comes up on TCP because the device is missing still reports the\nfabric here, and reports it while serving.\nSo agreement with the spec is not confirmation that the request took effect, and reading it as\nconfirmation is worse than having no field. The transport the data plane installed is reported\nonly in the member's own log.",
 															Type:        "string",
 														},
 														"segmentID": {
