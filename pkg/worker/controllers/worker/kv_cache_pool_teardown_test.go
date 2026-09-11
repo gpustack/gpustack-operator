@@ -1099,20 +1099,42 @@ func TestKVCachePoolTeardown_AnUndrainedDomainHoldsItsBindingsFinalizer(t *testi
 		"and the hold says why, because nothing else in the cluster explains this one")
 }
 
-func TestKVCachePoolBindingRelease_ExplainsWhetherTheLedgerWasUnavailable(t *testing.T) {
+// TestKVCachePoolBindingRelease_SeparatesASettledLedgerFromAnUnknownOne covers the serving path's
+// two non-converged answers, which arrive on the same failed read and mean opposite things.
+//
+// releaseKVCachePoolBinding tells them apart off ledger.failure. ErrMultiTenancyDisabled is a master
+// that ANSWERED: with multi-tenancy off there is no ledger for an entry to be in, so the release
+// strands nothing and the deletion finishes. Any other failed read leaves whether the entry is gone
+// unknown, and a Binding released over an entry still on the master leaves capacity nothing can
+// reclaim — the ledger records no owner. The second case is the one that makes the first
+// falsifiable: without it, a change that released on every non-converged pass would pass this test
+// too.
+//
+// Neither sentinel is NAMED below, because neither is injected: the refusals are the fake master's
+// own HTTP answers, so the pass under test is the one a real master drives, sentinel mapping
+// included. Searching the tests for the sentinel therefore finds nothing, and finds nothing whether
+// or not this coverage exists.
+//
+// The pool here is NOT being deleted. That is what makes this the serving path rather than the
+// pool's own teardown, which reaches the same two answers through a different call.
+func TestKVCachePoolBindingRelease_SeparatesASettledLedgerFromAnUnknownOne(t *testing.T) {
 	testCases := []struct {
-		name       string
-		status     int
-		body       string
-		wantReason string
-		wantMsg    string
+		name string
+		// status and body are what the master answers on every tenant-quota route from the second
+		// pass on, which is the pass that has to decide the release.
+		status int
+		body   string
+		// wantReleased is the object finishing its deletion. Its opposite is the finalizer staying
+		// on, which then has to say why.
+		wantReleased bool
+		wantReason   string
+		wantMsg      string
 	}{
 		{
-			name:       "multi-tenancy is disabled",
-			status:     409,
-			body:       `{"success":false,"error_code":-1011,"error_message":"UNAVAILABLE_IN_CURRENT_MODE"}`,
-			wantReason: KVCachePoolBindingReasonMultiTenancyDisabled,
-			wantMsg:    "the master answered that it has no tenant ledger",
+			name:         "the master reports it holds no tenant ledger",
+			status:       409,
+			body:         `{"success":false,"error_code":-1011,"error_message":"UNAVAILABLE_IN_CURRENT_MODE"}`,
+			wantReleased: true,
 		},
 		{
 			name:       "the ledger read fails for another reason",
@@ -1138,13 +1160,32 @@ func TestKVCachePoolBindingRelease_ExplainsWhetherTheLedgerWasUnavailable(t *tes
 			master.refuse(tc.status, tc.body)
 			reconcilePool(t, r, "shared")
 
+			if tc.wantReleased {
+				assert.True(t, bindingIsGone(t, cli, "team-a", "chat"),
+					"an entry that cannot exist is not one this release could orphan, so the "+
+						"finalizer comes off and the deletion completes")
+				assert.True(t, kvCachePoolIsPresent(t, cli, "shared"),
+					"and the pool it was on is untouched, because only the binding was deleted")
+				return
+			}
+
 			binding := readBinding(t, cli, "team-a", "chat")
-			assert.True(t, systemmeta.IsLocked(binding))
+			assert.True(t, systemmeta.IsLocked(binding),
+				"whether the entry is still on the master is unknown, so the object that owns it "+
+					"may not stop existing")
 			assert.Equal(t, tc.wantReason,
 				conditionReason(t, binding, KVCachePoolBindingConditionReleasable))
 			assert.Contains(t, KVCachePoolBindingConditionReleasable.GetMessage(binding), tc.wantMsg)
 		})
 	}
+}
+
+// kvCachePoolIsPresent reports a pool the API server still holds.
+func kvCachePoolIsPresent(t *testing.T, cli ctrlcli.Client, name string) bool {
+	t.Helper()
+
+	err := cli.Get(context.Background(), ctrlcli.ObjectKey{Name: name}, new(workercore.KVCachePool))
+	return err == nil
 }
 
 // TestKVCachePoolTeardown_AContestedDomainKeepsItsLedgerEntry holds the line the contested branch

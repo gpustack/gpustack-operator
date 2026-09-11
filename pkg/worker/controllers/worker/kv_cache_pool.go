@@ -1239,13 +1239,12 @@ const (
 	// nothing records it as using.
 	KVCachePoolBindingReasonHeldByWorkloads = "HeldByWorkloads"
 	// KVCachePoolBindingReasonLedgerNotReleased is a Binding nothing in the cluster holds any more,
-	// waiting on the MASTER: it refuses to drop a quota whose domain still holds objects. It is
-	// separate from HeldByWorkloads because the action is different — drain the domain, rather than
-	// stop the workloads — and because this one is the only hold no object in the cluster explains.
+	// waiting on the MASTER: it refuses to drop a quota whose domain still holds objects, or a ledger
+	// request failed and left whether the entry is gone unknown. The message says which. It is
+	// separate from HeldByWorkloads because the action is different — drain the domain or restore the
+	// master, rather than stop the workloads — and because this one is the only hold no object in the
+	// cluster explains.
 	KVCachePoolBindingReasonLedgerNotReleased = "LedgerNotReleased"
-	// KVCachePoolBindingReasonMultiTenancyDisabled is a Binding held because its master explicitly
-	// reports that no tenant ledger exists. Draining the domain cannot change that answer.
-	KVCachePoolBindingReasonMultiTenancyDisabled = "MultiTenancyDisabled"
 )
 
 // syncKVCachePoolBindings writes each Binding's own figures from the ONE scrape the pass took.
@@ -2038,7 +2037,8 @@ func (r *KVCachePoolReconciler) releaseKVCachePoolBackendClaim(
 // that tenant, so the entry has already been deleted from the master; the finalizer comes off after,
 // never before. A ledger that did not converge holds the release instead of forcing it — a Binding
 // released over an entry still on the master leaves capacity nothing can reclaim, because the ledger
-// records no owner and the object that knew is gone.
+// records no owner and the object that knew is gone. The one exception is a master that answered it
+// holds no tenant ledger at all, where there is no entry for the release to strand.
 //
 // No status is written on the way out. The object is about to stop existing, and a status write onto
 // one whose last finalizer is coming off races the API server's own removal.
@@ -2074,16 +2074,23 @@ func (r *KVCachePoolReconciler) releaseKVCachePoolBinding(
 		}
 
 		// An EMPTY retained list on a non-converged pass is a ledger that failed outright — the
-		// listing, a write, or a removal that was not the drain refusal. Whether this domain's entry
-		// is gone is then unknown, so the finalizer holds; and it says so, because the alternative
-		// is the same blank Deleting message for the far more common transient failure.
-		logger.V(2).Info("holding a binding's release: the ledger did not converge this pass")
+		// listing, a write, or a removal that was not the drain refusal.
+		//
+		// A master that answered it holds NO tenant ledger is the one such failure that SETTLES the
+		// question rather than leaving it open, and the pool's own teardown reads it the same way:
+		// with multi-tenancy off there is no ledger for an entry to be in, so this release has nothing
+		// it could strand on the master. Holding would instead keep the object forever against an
+		// answer that will not change while the backend stays as it is.
 		if errors.Is(ledger.failure, mooncake.ErrMultiTenancyDisabled) {
-			return r.holdKVCachePoolBindingRelease(ctx, kvcpb, KVCachePoolBindingReasonMultiTenancyDisabled,
-				fmt.Sprintf("deletion is held: the master answered that it has no tenant ledger because "+
-					"multi-tenancy is disabled, so whether the quota of reuse domain %q is gone cannot be "+
-					"established. The pool's own conditions carry that answer; the release retries every pass", domain))
+			logger.V(2).Info("releasing a binding against a master that holds no tenant ledger")
+			return r.unlockKVCachePoolBinding(ctx, kvcpb)
 		}
+
+		// Every other failure leaves whether this domain's entry is gone UNKNOWN, so the finalizer
+		// holds; and it says so, because the alternative is a blank Deleting message for the far more
+		// common transient failure. An unknown may not be read as the settled answer above: a Binding
+		// released over an entry still on the master leaves capacity nothing can reclaim.
+		logger.V(2).Info("holding a binding's release: the ledger did not converge this pass")
 		return r.holdKVCachePoolBindingRelease(ctx, kvcpb, KVCachePoolBindingReasonLedgerNotReleased,
 			fmt.Sprintf("deletion is held: the master's tenant ledger did not answer this pass, so "+
 				"whether the quota of reuse domain %q is gone cannot be established. The pool's own "+
