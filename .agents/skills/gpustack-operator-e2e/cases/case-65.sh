@@ -60,8 +60,11 @@
 #              - the host directory on at least one node holds files.
 #              Phase B (the discriminator, offload.onEvict=true, writes pushed past aggregate
 #              memory so eviction is forced):
-#              - writes succeed, an evicted object reads back byte-identical (served from the
-#                disk tier), and the on-evict leader's metric reads > 0.
+#              - writes succeed, and BEFORE the read the leader reports the key with a local
+#                disk replica and no memory replica — without that, bytes coming back proves
+#                only that the store works, not that the TIER served them;
+#              - the object then reads back byte-identical, and the on-evict leader's metric
+#                reads > 0.
 #
 #              KNOWN-FAILURE DETECTOR: against mooncake 0.3.13 phase A's last two assertions
 #              FAIL — the tier is announced (12 GB published, offload RPC servers up) and
@@ -560,7 +563,7 @@ cat <<PY | kubectl -n "$NS" run "case65-probe-oe-${SFX}" --image="$IMAGE" --rest
   --labels="gpustack-e2e-case=65-${SFX}" \
   --overrides='{"spec":{"containers":[{"name":"probe","image":"'"$IMAGE"'","command":["python3","-"],"stdin":true,"stdinOnce":true}]}}' \
   -i --rm --quiet >"$PROBE_LOG2" 2>&1 || true
-import sys, socket, hashlib
+import sys, socket, hashlib, json, urllib.request
 try:
     from mooncake.store import MooncakeDistributedStore
 except Exception as e:
@@ -580,26 +583,48 @@ if rc != 0:
 payload = (b"case65-onevict!" * (4 * 1024 * 1024 // 15 + 1))[:4 * 1024 * 1024]
 digest = hashlib.sha256(payload).hexdigest()
 
-# The oldest keys: eviction must push these to the tier once memory runs out.
+# KEYS DISTINCT FROM PHASE A's, and that is a correctness requirement rather than tidiness. Both
+# phases point their tier at the same host directory and phase A's backend is still alive here --
+# the teardown deletes both at the end -- so this store's startup scan finds phase A's bucket files
+# and adopts every key in them. Sharing a key name would let this phase's read be served by phase
+# A's bytes: a digest mismatch that looks like a failed read-back but is a different defect.
 for i in range(4):
-    print("PUT warm-%d rc=%d" % (i, store.put("warm-%d" % i, payload)))
+    print("PUT oe-warm-%d rc=%d" % (i, store.put("oe-warm-%d" % i, payload)))
 
 # Past aggregate memory by one member's capacity. With onEvict the disk write happens exactly here,
 # at eviction time.
 for i in range(${PHASE_B_FILL}):
-    rc = store.put("fill-%d" % i, payload)
+    rc = store.put("oe-fill-%d" % i, payload)
     if rc != 0:
-        print("PUT fill-%d rc=%d (first failure)" % (i, rc))
+        print("PUT oe-fill-%d rc=%d (first failure)" % (i, rc))
         break
 else:
     print("PUT fill all ${PHASE_B_FILL} rc=0")
 
-# warm-0 predates the fill by the whole run; served from the tier or not at all.
-got = store.get("warm-0")
+# WHICH replica the leader holds for this key, asked BEFORE the read and never after. A read served
+# from the tier can promote the object back into memory, so a query taken afterwards would report a
+# memory replica for a key that was on disk when it was read -- and the whole point of this phase is
+# to tell those two apart. Without this the GET below cannot distinguish a tier hit from a memory
+# hit, which is the one thing it is here to establish.
+try:
+    q = urllib.request.urlopen(
+        "http://${ADMIN_ADDR2}/batch_query_keys?keys=oe-warm-0", timeout=30).read().decode()
+    d = (json.loads(q).get("data") or {}).get("oe-warm-0") or {}
+    print("REPLICAS mem=%d local_disk=%d disk=%d" % (
+        len(d.get("values") or []),
+        len(d.get("local_disk_values") or []),
+        len(d.get("disk_values") or [])))
+except Exception as e:
+    # Reported, not defaulted to zeros: "no memory replica" is exactly the reading this phase acts
+    # on, so a failed query that returned zeros would manufacture the verdict it exists to test.
+    print("REPLICAS-FAIL %s" % e)
+
+# oe-warm-0 predates the fill by the whole run; served from the tier or not at all.
+got = store.get("oe-warm-0")
 if got is None:
-    print("GET warm-0 rc=NotFound")
+    print("GET oe-warm-0 rc=NotFound")
 else:
-    print("GET warm-0 len=%d sha256=%s" % (len(got), hashlib.sha256(got).hexdigest()))
+    print("GET oe-warm-0 len=%d sha256=%s" % (len(got), hashlib.sha256(got).hexdigest()))
 print("WANT sha256=%s len=%d" % (digest, len(payload)))
 PY
 
@@ -614,12 +639,38 @@ else
   record FAIL "on-evict writes succeed past aggregate memory" "$(grep 'PUT' "$PROBE_LOG2" | tail -3 | tr '\n' ' ')"
 fi
 
-WANT2="$(grep '^WANT' "$PROBE_LOG2")"
-if grep '^GET warm-0' "$PROBE_LOG2" | grep -q "$(echo "$WANT2" | awk '{print $2}')"; then
-  record PASS "an evicted object reads back byte-identical from the tier" "$(grep '^GET warm-0' "$PROBE_LOG2")"
+# WHERE the read came FROM, asserted before the read itself is judged. A successful GET of the right
+# bytes is compatible with the object never having left memory, and this phase's whole claim is that
+# it did -- so the leader's own replica list for that key, taken before the read, is what makes the
+# next assertion a statement about the TIER rather than about the store in general.
+REPL="$(grep -E '^REPLICAS' "$PROBE_LOG2" | head -1)"
+REPL_MEM="$(echo "$REPL" | sed -n 's/.*mem=\([0-9][0-9]*\).*/\1/p')"
+REPL_LD="$(echo "$REPL" | sed -n 's/.*local_disk=\([0-9][0-9]*\).*/\1/p')"
+if [ -z "$REPL_MEM" ] || [ -z "$REPL_LD" ]; then
+  # An unanswered query is NOT "no memory replica". That reading is the one this phase acts on, so
+  # defaulting it to zero would manufacture the verdict below out of a failed probe.
+  record FAIL "the leader places the key on the tier and not in memory before the read" \
+    "no replica reading: ${REPL:-<no REPLICAS line>} -- this run cannot say where the read below was served from"
+elif [ "$REPL_MEM" -eq 0 ] 2>/dev/null && [ "$REPL_LD" -gt 0 ] 2>/dev/null; then
+  record PASS "the leader places the key on the tier and not in memory before the read" "$REPL"
 else
+  record FAIL "the leader places the key on the tier and not in memory before the read" \
+    "$REPL -- with a memory replica still present, a successful read below does not establish that \
+the tier served it"
+fi
+
+WANT2="$(grep '^WANT' "$PROBE_LOG2")"
+if grep '^GET oe-warm-0' "$PROBE_LOG2" | grep -q "$(echo "$WANT2" | awk '{print $2}')"; then
+  record PASS "an evicted object reads back byte-identical from the tier" \
+    "$(grep '^GET oe-warm-0' "$PROBE_LOG2") [${REPL:-no replica reading}]"
+else
+  # Three outcomes reach here and they are different defects, so the message names all three rather
+  # than the one that was expected first. A digest that matches PHASE A's payload is not a failed
+  # read-back at all -- it is the other backend's bytes being served under this key.
   record FAIL "an evicted object reads back byte-identical from the tier" \
-    "get: $(grep '^GET warm-0' "$PROBE_LOG2") vs $WANT2 -- NotFound here means eviction dropped the object instead of offloading it"
+    "get: $(grep '^GET oe-warm-0' "$PROBE_LOG2") vs $WANT2 -- NotFound means eviction dropped the \
+object instead of offloading it; a digest that matches neither means the bytes came from somewhere \
+else, and the payloads of the two phases differ on purpose so that case can be told apart"
 fi
 
 METRIC2="$(kubectl -n "$NS" run "case65-metrics-oe-${SFX}" --image=busybox:1.36 --restart=Never --rm -i --quiet \
