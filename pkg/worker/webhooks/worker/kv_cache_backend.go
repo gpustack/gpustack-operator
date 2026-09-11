@@ -1051,10 +1051,15 @@ func validateKVCacheBackendImmutable(oldKvcb, newKvcb *workercore.KVCacheBackend
 //
 // WHAT IT RECOGNIZES, AND WHY THAT IS THE WHOLE OF WHAT CAN BE. Without a name of its own, a group is
 // only recognizable by its contents, so the one thing that can be told apart from an ordinary edit is
-// a group that ARRIVED UNCHANGED at a position another group held. That covers both shapes this
+// a group that ARRIVED UNCHANGED at a position another group LEFT. That covers both shapes this
 // happens in: a swap, and the upward shift that removing a group ahead of others produces. A reorder
 // combined with an edit to the same group is indistinguishable from two edits and is not caught —
 // stating that here rather than leaving the next reader to discover the gap.
+//
+// LEFT is load-bearing, and is not a synonym for "held". A group still sitting at its own position
+// has moved nowhere, so an edit that merely makes some other position resemble it is an edit and not
+// a move. Without that condition, changing one group to match a second that stays exactly where it
+// was would be refused as the move of a group that never went anywhere.
 //
 // WHAT IT LEAVES ALONE, deliberately, because each is an operation this API supports:
 //
@@ -1081,6 +1086,12 @@ func validateKVCacheBackendMembersNotMoved(
 
 		for j := range oldMembers {
 			if j == i || !kubemeta.DeepEqual(newMembers[i], oldMembers[j]) {
+				continue
+			}
+			if j < len(newMembers) && kubemeta.DeepEqual(newMembers[j], oldMembers[j]) {
+				// The group this one now resembles never left position j, so nothing moved: this is
+				// an edit that made two positions alike. Refusing it would forbid an edit on the
+				// strength of another position that did not change.
 				continue
 			}
 			// One error and not one per position: a swap trips at both of its ends and a shift at

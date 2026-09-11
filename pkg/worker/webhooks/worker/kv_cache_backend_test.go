@@ -1103,6 +1103,57 @@ func TestKVCacheBackendWebhook_DiskTierIsFrozenExceptItsCapacity(t *testing.T) {
 	}
 }
 
+// TestKVCacheBackendWebhook_ASubBucketGroupCannotAcquireATier holds the one way the bucket floor on
+// capacityPerMember could be walked around, which is that the floor only applies to a group with a
+// tier while the value itself carries the usual "this update did not move it" exemption.
+//
+// A group admitted with a sub-bucket capacityPerMember and no tier could, in principle, gain one
+// without touching the value that the new tier makes it fail. It cannot — but NOT because of the
+// floor: adding a tier to an existing position is refused by the tier's own immutability rule, and a
+// group that arrives WITH a tier arrives at a new position, where there is no old value to be exempt
+// against. Two rules in different validators cover this between them and neither says so.
+//
+// So this test exists to make that coverage a standing fact rather than a coincidence. If the tier
+// immutability rule is ever relaxed — there are reasons someone might want to — the first case here
+// goes green for the wrong reason and the floor needs the exemption narrowed in the same edit.
+func TestKVCacheBackendWebhook_ASubBucketGroupCannotAcquireATier(t *testing.T) {
+	subBucket := resource.MustParse("1Mi")
+
+	t.Run("a tier added in place, leaving capacityPerMember alone", func(t *testing.T) {
+		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+		oldKvcb.Spec.Connection.Managed.Members[0].CapacityPerMember = subBucket
+		withDiskTier()(newKvcb)
+		newKvcb.Spec.Connection.Managed.Members[0].CapacityPerMember = subBucket
+
+		_, err := (&KVCacheBackendWebhook{}).ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cannot be added to the group at this position",
+			"the tier immutability rule is what refuses this today; if that changes, the "+
+				"capacityPerMember floor's unchanged-value exemption becomes the hole")
+	})
+
+	t.Run("a group appended with a tier and a sub-bucket segment", func(t *testing.T) {
+		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+		appended := workercore.KVCacheBackendMember{
+			NodeSelector:      map[string]string{"kvcache-cold": "true"},
+			Medium:            "DRAM",
+			CapacityPerMember: subBucket,
+			LocalDisk: &workercore.KVCacheBackendMemberLocalDisk{
+				Path: "/var/lib/kvcache", Capacity: resource.MustParse("4Ti"),
+			},
+		}
+		newKvcb.Spec.Connection.Managed.Members = append(
+			newKvcb.Spec.Connection.Managed.Members, appended)
+		newKvcb.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+
+		_, err := (&KVCacheBackendWebhook{}).ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "one bucket, the unit the tier is written in",
+			"an appended position has no old value, so the exemption cannot apply and the floor "+
+				"is what refuses it")
+	})
+}
+
 // TestKVCacheBackendWebhook_DiskTierEviction pins the pair rules the eviction block needs, each of
 // which refuses a combination the store ACCEPTS and then does not act on.
 //
@@ -1326,6 +1377,21 @@ func TestKVCacheBackendWebhook_AMemberGroupCannotMove(t *testing.T) {
 				Medium:            "DRAM",
 				CapacityPerMember: resource.MustParse("32Gi"),
 			}, third),
+			"",
+		},
+		{
+			// The group that position 1 now resembles never left position 1, so nothing moved. A
+			// rule keyed on "resembles another position" rather than on "another position was
+			// vacated" would refuse this edit on the strength of a group that did not change.
+			"a group edited to match a second that stays where it is",
+			members(hot, cold), members(cold, cold),
+			"",
+		},
+		{
+			// The same shape with the two ends reversed, so the case does not pass by being at a
+			// particular index.
+			"the later group edited to match the earlier one",
+			members(hot, cold), members(hot, hot),
 			"",
 		},
 		{
