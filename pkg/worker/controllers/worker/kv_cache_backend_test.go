@@ -1077,11 +1077,11 @@ func TestKVCacheBackendReconciler_ConvergesAFabricSwitch(t *testing.T) {
 		"and drops the capabilities entirely, rather than leaving an empty context behind")
 }
 
-// TestKVCacheBackendReconciler_ConvergesAnEFASwitch is the EFA half of the same contract, with
-// one extra thing to take back off: the host's libfabric mount and the LD_LIBRARY_PATH that goes
-// with it. It also crosses EFA with RDMA directly, because the two share the host-fabric base and
-// a renderer that keyed everything on "host fabric, whichever" would leave the libfabric mount
-// behind on that switch.
+// TestKVCacheBackendReconciler_ConvergesAnEFASwitch is the EFA half of the same contract, with one
+// extra thing to take back off: the EFA device the plugin allocates. It also crosses EFA with RDMA
+// directly, because the two share the host-fabric base and a renderer that keyed everything on
+// "host fabric, whichever" would leave that request behind on the switch — which strands the member
+// on nodes that advertise the resource, for a transport that does not use it.
 func TestKVCacheBackendReconciler_ConvergesAnEFASwitch(t *testing.T) {
 	kvcb := newKVCacheBackendObject()
 	kvcb.Spec.Transport.Protocol = "TCP"
@@ -1103,32 +1103,28 @@ func TestKVCacheBackendReconciler_ConvergesAnEFASwitch(t *testing.T) {
 		require.NoError(t, cli.Get(ctx, memberObjectKey(kvcb, 0), ds))
 		return ds.Spec.Template.Spec
 	}
-	hasLDLibraryPath := func(pod core.PodSpec) bool {
-		for _, e := range pod.Containers[0].Env {
-			if e.Name == "LD_LIBRARY_PATH" {
-				return true
-			}
-		}
-		return false
+	hasEFADevice := func(pod core.PodSpec) bool {
+		_, ok := pod.Containers[0].Resources.Limits["vpc.amazonaws.com/efa"]
+		return ok
 	}
 
 	setProtocol("EFA")
 	efa := memberPod()
 	assert.True(t, efa.HostNetwork, "switching to EFA takes the host network")
-	require.Len(t, efa.Volumes, 2, "the device tree and the host's libfabric")
-	assert.True(t, hasLDLibraryPath(efa))
+	require.Len(t, efa.Volumes, 1, "the device tree, shared with RDMA")
+	assert.True(t, hasEFADevice(efa))
 
 	setProtocol("RDMA")
 	rdma := memberPod()
-	require.Len(t, rdma.Volumes, 1, "RDMA shares the base but not the libfabric mount")
-	assert.False(t, hasLDLibraryPath(rdma),
-		"nor the environment that points at it — both come back off on the same render")
+	require.Len(t, rdma.Volumes, 1, "RDMA shares the base")
+	assert.False(t, hasEFADevice(rdma),
+		"but not the EFA device request — it comes back off on the same render")
 
 	setProtocol("TCP")
 	tcp := memberPod()
 	assert.False(t, tcp.HostNetwork, "switching back gives the host network up")
 	assert.Empty(t, tcp.Volumes)
-	assert.False(t, hasLDLibraryPath(tcp))
+	assert.False(t, hasEFADevice(tcp))
 	assert.Nil(t, tcp.Containers[0].SecurityContext)
 }
 

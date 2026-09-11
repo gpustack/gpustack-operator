@@ -831,9 +831,9 @@ func TestMemberWorkload_RDMAContext(t *testing.T) {
 }
 
 // TestMemberWorkload_EFAContext pins what the EFA path takes over the host-fabric base it shares
-// with RDMA: the host's libfabric tree, mounted so a node without the EFA driver fails the mount
-// rather than starting against a stand-in, and the one environment variable that makes the AWS
-// build of libfabric win over the image's load-time fallback.
+// with RDMA: one device from the plugin that advertises EFA, and nothing else. No host install
+// prefix is mounted and no loader path is rendered, because the libfabric an EFA member runs on is
+// in the image.
 func TestMemberWorkload_EFAContext(t *testing.T) {
 	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 		k.Spec.Transport.Protocol = "EFA"
@@ -845,29 +845,26 @@ func TestMemberWorkload_EFAContext(t *testing.T) {
 	assert.True(t, podSpec.HostNetwork)
 	assert.Equal(t, core.DNSClusterFirstWithHostNet, podSpec.DNSPolicy)
 
-	require.Len(t, podSpec.Volumes, 2, "the device tree, then the host's libfabric")
+	require.Len(t, podSpec.Volumes, 1, "the device tree, and only the device tree")
 	require.NotNil(t, podSpec.Volumes[0].HostPath)
 	assert.Equal(t, "/dev/infiniband", podSpec.Volumes[0].HostPath.Path)
-	require.NotNil(t, podSpec.Volumes[1].HostPath)
-	assert.Equal(t, "/opt/amazon/efa", podSpec.Volumes[1].HostPath.Path)
-	require.NotNil(t, podSpec.Volumes[1].HostPath.Type)
-	assert.Equal(t, core.HostPathDirectory, *podSpec.Volumes[1].HostPath.Type,
-		"a node without the EFA driver is a FailedMount that names what is missing, not an empty "+
-			"directory the kubelet created")
-	require.Len(t, container.VolumeMounts, 2)
-	assert.Equal(t, "/opt/amazon/efa", container.VolumeMounts[1].MountPath)
-	assert.True(t, container.VolumeMounts[1].ReadOnly,
-		"the container only LOADS the host's libfabric; a writable mount would let it edit the "+
-			"node's EFA driver installation. The device tree at [0] stays writable because "+
-			"libfabric ioctls its device nodes")
+	require.Len(t, container.VolumeMounts, 1)
+	assert.Equal(t, "/dev/infiniband", container.VolumeMounts[0].MountPath)
+
+	efa := container.Resources.Limits[efaDeviceResource]
+	assert.Equal(t, int64(1), efa.Value(),
+		"one EFA device, asked for through the plugin: the hostPath above carries the device node "+
+			"into the mount namespace, and the device cgroup still refuses to open it without an "+
+			"allocation. A member that cannot open it discovers no HCA and starts TCP instead")
 
 	env := map[string]string{}
 	for _, e := range container.Env {
 		env[e.Name] = e.Value
 	}
-	assert.Equal(t, "/opt/amazon/efa/lib", env["LD_LIBRARY_PATH"],
-		"LD_LIBRARY_PATH outranks the default search path, so the host's libfabric — matched to "+
-			"the node's EFA driver — loads instead of the image's distro copy")
+	assert.NotContains(t, env, "LD_LIBRARY_PATH",
+		"the image's own loader cache already ranks the AWS libfabric ahead of the distro one, so "+
+			"pointing the loader at a host prefix would only reintroduce a tree whose own "+
+			"dependencies are not mounted")
 
 	require.NotNil(t, container.SecurityContext)
 	require.NotNil(t, container.SecurityContext.Capabilities)

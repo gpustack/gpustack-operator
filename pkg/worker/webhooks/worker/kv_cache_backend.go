@@ -779,18 +779,17 @@ func validateKVCacheBackendLocalDisk(
 		errs = append(errs, field.Invalid(pathPath, disk.Path,
 			"must not be the root directory: it would mount the node's whole filesystem into a "+
 				"third-party container"))
-	case pathOverlaps(filepath.Clean(path), mooncake.RDMADevicePath),
-		pathOverlaps(filepath.Clean(path), mooncake.EFALibHostPath):
+	case pathOverlaps(filepath.Clean(path), mooncake.RDMADevicePath):
 		// The two mounts land in ONE container, so a collision is resolved by the kubelet rather
 		// than reported here — one mount shadows the other, and which one wins is not something
 		// this object records. Refused whatever the transport is today, because the transport is
 		// editable: a tier that merely does not collide yet would start colliding the moment
-		// someone switched the backend to a host fabric. The EFA lib tree is guarded for the
-		// same reason: it is the second mount the EFA transport adds to that same container.
+		// someone switched the backend to a host fabric. The device tree is the only mount either
+		// host fabric adds; an EFA member takes its libfabric from the image.
 		errs = append(errs, field.Invalid(pathPath, disk.Path, fmt.Sprintf(
-			"must not overlap %s or %s, which the RDMA and EFA transports mount into the same "+
-				"container: one mount would shadow the other, and the transport can be switched "+
-				"to one after this path is set", mooncake.RDMADevicePath, mooncake.EFALibHostPath)))
+			"must not overlap %s, which the RDMA and EFA transports mount into the same container: "+
+				"one mount would shadow the other, and the transport can be switched to one after "+
+				"this path is set", mooncake.RDMADevicePath)))
 	}
 
 	// The capacity is a resource.Quantity, so it is a string in the schema and no marker can bound

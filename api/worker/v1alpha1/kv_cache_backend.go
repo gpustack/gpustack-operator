@@ -486,9 +486,11 @@ type KVCacheBackendTransport struct {
 	// what excludes the other ten strings that artifact's config parser accepts. It is NOT
 	// "measured to move bytes": only TCP has been exercised end to end, and RDMA, EFA, HIP and
 	// Ascend each await a run on that hardware. A member also needs the runtime its transport
-	// links — Ascend needs CANN in the member image, EFA needs the host's EFA driver and libfabric
-	// under /opt/amazon/efa, which the member Pod mounts — and the webhook cannot see inside an
-	// image or onto a node, so that pairing is the operator's to get right.
+	// links — Ascend needs CANN in the member image, EFA needs libfabric in it — and the webhook
+	// cannot see inside an image or onto a node, so that pairing is the operator's to get right.
+	// What EFA additionally needs from the NODE is a device plugin advertising
+	// vpc.amazonaws.com/efa: the member requests one, because carrying the device node in through a
+	// hostPath leaves the device cgroup refusing to open it.
 	//
 	// +k8s:validation:default="Auto"
 	// +k8s:validation:enum=["Auto","TCP","RDMA","EFA","HIP","Ascend"]
