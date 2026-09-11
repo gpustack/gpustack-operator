@@ -6,6 +6,36 @@ package v1alpha1
 // with apply.
 //
 // KVCacheBackendExternal is a backend this operator does not run.
+//
+// TWO OF THESE MAY NAME THE SAME BACKEND, AND NOTHING HERE NOTICES. For a managed backend the object
+// IS the leader, so two objects are two leaders; for an external one the object is a declaration of
+// addresses, and the same leader is reachable under more than one spelling — by service name in one
+// object and by address in another, with or without a trailing dot or an explicit default port. This
+// operator compares no addresses across objects and watches for none appearing later, deliberately:
+// every identity it could compare is editable or needs the leader reachable at admission, and the
+// comparison that is cheap enough to do catches only the copy-paste case while missing the one a
+// real deployment produces. KEEPING TWO OBJECTS OFF ONE LEADER IS YOURS.
+//
+// What it costs is not a refusal somewhere else, so there are three consequences to weigh, and only
+// a reader who knows all three can decide whether the duplication is safe here.
+//
+// FIRST, THE QUOTA OF A SHARED REUSE DOMAIN FLIPS AND NEVER SETTLES. The uniqueness rule for a
+// reuse domain is enforced between Bindings whose pools name the SAME backend object, so two
+// Bindings reaching one leader through two objects are both admitted on one domain name. The leader
+// keeps ONE ledger entry per tenant, and each pool's reconciler converges that entry toward its own
+// Binding's quotaCeiling on every pass — so each pass reads the other's figure, finds it wrong, and
+// writes its own back. The entry alternates between the two ceilings for as long as both exist.
+//
+// SECOND, THE SYMPTOM OF AN UNDERSIZED QUOTA IS A LOW HIT RATE AND NOTHING ELSE. Exceeding a tenant's
+// quota does not refuse the write: the store frees room by dropping that tenant's own older objects
+// and retries, irreversibly, WITHOUT ANY COUNTER MOVING. So the flipping above does not surface as an
+// error on any object — it surfaces as a cache that keeps losing content nobody asked it to lose.
+//
+// THIRD, AND THE ONLY ONE THAT PRODUCES WRONG ANSWERS RATHER THAN SLOW ONES: two Bindings claiming
+// one domain.name with a different blockSize or dtype CORRUPT EACH OTHER'S BLOCKS. The reuse identity
+// an engine is handed is the domain NAME alone — blockSize and dtype reach no engine, they are a
+// declaration this API validates and records — so two differently-shaped caches land under one
+// identity. The writes succeed, the reads succeed, and the tensors are wrong.
 type KVCacheBackendExternalApplyConfiguration struct {
 	// Endpoints are the addresses of a backend somebody else runs, one entry per named role.
 	// Both roles are required here, and for the same reason they are two entries and not one

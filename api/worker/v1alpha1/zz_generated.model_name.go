@@ -306,6 +306,16 @@ func (in KVCacheBackendMemberLocalDisk) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackendMemberLocalDiskEviction) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackendMemberLocalDiskEviction"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackendMemberLocalDiskEvictionWatermark) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackendMemberLocalDiskEvictionWatermark"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in KVCacheBackendMemberStatus) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.KVCacheBackendMemberStatus"
 }

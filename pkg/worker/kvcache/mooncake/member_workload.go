@@ -126,16 +126,78 @@ const (
 	memberEnvGlobalSegmentSize = "MOONCAKE_GLOBAL_SEGMENT_SIZE"
 	memberEnvLocalBufferSize   = "MOONCAKE_LOCAL_BUFFER_SIZE"
 
-	// The local disk tier's three keys. The first two are the client's own enable_ssd_offload and
+	// The local disk tier's keys. The first two are the client's own enable_ssd_offload and
 	// ssd_offload_path; without both, the client registers no local disk segment and the leader's
 	// offload queue has nowhere to send it.
 	memberEnvOffloadEnabled = "MOONCAKE_OFFLOAD_ENABLED"
 	memberEnvOffloadPath    = "MOONCAKE_OFFLOAD_FILE_STORAGE_PATH"
-	// memberEnvOffloadSizeLimit caps what the tier stores. Left unrendered, the client's own
-	// ceiling applies, so a ceiling that moves upstream shows up as a change to investigate rather
-	// than one this renderer silently restated.
+	// memberEnvOffloadSizeLimit and memberEnvOffloadKeysLimit cap what the tier stores, by bytes and
+	// by key count. Left unrendered, the client's own ceilings apply, so a ceiling that moves
+	// upstream shows up as a change to investigate rather than one this renderer silently restated.
 	memberEnvOffloadSizeLimit = "MOONCAKE_OFFLOAD_TOTAL_SIZE_LIMIT_BYTES"
+	memberEnvOffloadKeysLimit = "MOONCAKE_OFFLOAD_TOTAL_KEYS_LIMIT"
+
+	// memberEnvOffloadBucketSizeLimit and memberEnvOffloadBucketKeysLimit are the pair a bucket is
+	// closed on. See MemberBucketSizeLimit for why they are rendered at all.
+	memberEnvOffloadBucketSizeLimit = "MOONCAKE_OFFLOAD_BUCKET_SIZE_LIMIT_BYTES"
+	memberEnvOffloadBucketKeysLimit = "MOONCAKE_OFFLOAD_BUCKET_KEYS_LIMIT"
+
+	// memberEnvOffloadBucketMaxTotalSize is the quota the watermarks below are a fraction OF, and it
+	// is a different setting from memberEnvOffloadSizeLimit even though this renderer sends one value
+	// into both. Its own default is 0, which the client's watermark eviction reads as "no quota" and
+	// returns from without evicting anything -- so a watermark rendered without this reaches a path
+	// that is switched off, and the marks would look configured while doing nothing.
+	memberEnvOffloadBucketMaxTotalSize = "MOONCAKE_OFFLOAD_BUCKET_MAX_TOTAL_SIZE"
+
+	// memberEnvOffloadEvictionPolicy is the order buckets leave in.
+	//
+	// The client maps a string it does not recognize onto NO EVICTION -- silently, with no error and
+	// no failure to start -- so this renderer sends only values from memberEvictionPolicies, and
+	// never a value that arrived as a string from somewhere else.
+	memberEnvOffloadEvictionPolicy = "MOONCAKE_OFFLOAD_BUCKET_EVICTION_POLICY"
+
+	// The watermark eviction switch and its two marks. The switch sits above the on-disk format and
+	// the policy above sits inside it, which is why turning eviction off renders both.
+	memberEnvOffloadWatermarkEnabled = "MOONCAKE_OFFLOAD_ENABLE_DISK_WATERMARK_EVICTION"
+	memberEnvOffloadWatermarkHigh    = "MOONCAKE_OFFLOAD_DISK_EVICTION_HIGH_WATERMARK_RATIO"
+	memberEnvOffloadWatermarkLow     = "MOONCAKE_OFFLOAD_DISK_EVICTION_LOW_WATERMARK_RATIO"
 )
+
+// MemberBucketSizeLimit and MemberBucketKeysLimit are the size and the object count at which the
+// client closes a bucket and writes it to the tier. They are RENDERED rather than left at the
+// client's own values, which is the exception to this package's "no setting at its own default" rule
+// and the one place it would be wrong to follow it.
+//
+// The client assembles offloaded objects into a bucket and writes NOTHING until one of the two
+// thresholds is reached; what is short of it is carried over to the next attempt, indefinitely. Its
+// own pair -- 256Mi and 500 objects -- is sized for a saturated production store, and a backend that
+// never reaches either has a tier that is mounted, publishes its capacity, runs eviction, and holds
+// no data. Nothing reports that: every signal an operator would look at is the declared figure
+// rather than an observed one.
+//
+// So leaving these alone does not preserve a default to investigate later, it ships a feature that
+// does not work. The pair below is small enough that a modest backend closes buckets, and the cost is
+// more and smaller files rather than anything correctness depends on.
+//
+// They are EXPORTED because admission bounds three fields against them -- a group's
+// capacityPerMember, and its tier's capacity and keyLimit -- and each of those bounds is the same
+// fact as this pair rather than a number restated beside it.
+const (
+	MemberBucketSizeLimit int64 = 16 * 1024 * 1024
+	MemberBucketKeysLimit int64 = 64
+)
+
+// memberEvictionPolicies maps this API's spelling of an eviction policy onto the client's. It is the
+// one place the two vocabularies meet, like leaderAllocationStrategies on the other side.
+//
+// memberEvictionPolicyNone is not in the map because it is not an API value: it is what "eviction is
+// off" renders as, and it is the client's own name for that state.
+var memberEvictionPolicies = map[string]string{
+	"FIFO": "fifo",
+	"LRU":  "lru",
+}
+
+const memberEvictionPolicyNone = "none"
 
 // memberProtocols maps this API's spelling of a transport onto the artifact's.
 //
@@ -376,7 +438,7 @@ func MemberMasterEntry(kvcb *workercore.KVCacheBackend) string {
 	return fmt.Sprintf("%s:%d", LeaderServiceHost(kvcb), LeaderRPCPort)
 }
 
-// renderMemberEnv builds the member's whole configuration.
+// renderMemberEnv builds the member's whole configuration, the group's extraEnvs last.
 //
 // What is NOT set is deliberate. MOONCAKE_DEVICE is left unset so the client's device filter comes
 // out empty, which is what it reads as "every device" — see keys.go for why the documented
@@ -434,19 +496,115 @@ func renderMemberEnv(
 		// enabled AND it has somewhere to put the bytes, so a path without the switch, or a switch
 		// without a path, is a member that comes up holding no tier while the object says it has
 		// one.
+		//
+		// The bucket pair goes with them, unconditionally: it is what makes the tier take a byte at
+		// all, so it is as much a part of declaring one as the path is.
 		env = append(env,
 			core.EnvVar{Name: memberEnvOffloadEnabled, Value: "true"},
-			core.EnvVar{Name: memberEnvOffloadPath, Value: disk.Path})
+			core.EnvVar{Name: memberEnvOffloadPath, Value: disk.Path},
+			core.EnvVar{
+				Name:  memberEnvOffloadBucketSizeLimit,
+				Value: strconv.FormatInt(MemberBucketSizeLimit, 10),
+			},
+			core.EnvVar{
+				Name:  memberEnvOffloadBucketKeysLimit,
+				Value: strconv.FormatInt(MemberBucketKeysLimit, 10),
+			})
 
 		if size := disk.Capacity.Value(); size > 0 {
+			// One value, two settings. The first caps what the tier holds; the second is the quota
+			// the watermarks are a fraction of, and it defaults to a value the eviction path reads
+			// as "switched off".
+			env = append(env,
+				core.EnvVar{
+					Name:  memberEnvOffloadSizeLimit,
+					Value: strconv.FormatInt(size, 10),
+				},
+				core.EnvVar{
+					Name:  memberEnvOffloadBucketMaxTotalSize,
+					Value: strconv.FormatInt(size, 10),
+				})
+		}
+		if disk.KeyLimit > 0 {
 			env = append(env, core.EnvVar{
-				Name:  memberEnvOffloadSizeLimit,
-				Value: strconv.FormatInt(size, 10),
+				Name:  memberEnvOffloadKeysLimit,
+				Value: strconv.FormatInt(disk.KeyLimit, 10),
 			})
 		}
+
+		env = append(env, renderMemberEviction(disk.Eviction)...)
+	}
+
+	// The escape hatch goes last and in key order, so two renders of one spec are byte-identical.
+	// It cannot shade anything above it: admission refuses a name this renderer derives, which is
+	// what keeps every variable here single-sourced -- Kubernetes accepts a container carrying one
+	// name twice and leaves the winner to the runtime.
+	for _, name := range slices.Sorted(maps.Keys(member.ExtraEnvs)) {
+		env = append(env, core.EnvVar{Name: name, Value: member.ExtraEnvs[name]})
 	}
 
 	return env
+}
+
+// renderMemberEviction turns the tier's eviction block into the client's settings.
+//
+// A nil block renders NOTHING, so a backend that never asked about eviction runs the environment it
+// ran before the field existed and the client's own behavior applies.
+//
+// Turning eviction off renders BOTH the policy and the watermark switch, because they sit at
+// different layers of the client -- the policy inside the on-disk format, the switch above it -- and
+// "off" has to hold at whichever layer ends up asking. Turning it on renders neither by itself: the
+// switch is already the client's default, and restating a default is how a change upstream stops
+// being visible.
+func renderMemberEviction(eviction *workercore.KVCacheBackendMemberLocalDiskEviction) []core.EnvVar {
+	if eviction == nil {
+		return nil
+	}
+
+	// The schema defaults Enabled to true, so nil here means an object that never went through
+	// admission. Reading it as "on" keeps that object's rendering identical to the one the schema
+	// would have produced rather than nearly identical.
+	if eviction.Enabled != nil && !*eviction.Enabled {
+		return []core.EnvVar{
+			{Name: memberEnvOffloadEvictionPolicy, Value: memberEvictionPolicyNone},
+			{Name: memberEnvOffloadWatermarkEnabled, Value: "false"},
+		}
+	}
+
+	var env []core.EnvVar
+
+	// An unrecognized policy renders nothing rather than a guess. The field is enumerated by the
+	// schema, so an empty result means either that no policy was asked for -- in which case the
+	// client's own default applies -- or that the object never went through admission. Passing the
+	// string through would be the worse failure of the two: the client maps anything it does not
+	// know onto no eviction at all, without saying so.
+	if mapped, ok := memberEvictionPolicies[eviction.Policy]; ok {
+		env = append(env, core.EnvVar{Name: memberEnvOffloadEvictionPolicy, Value: mapped})
+	}
+
+	if watermark := eviction.Watermark; watermark != nil {
+		env = append(env,
+			core.EnvVar{
+				Name:  memberEnvOffloadWatermarkHigh,
+				Value: memberWatermarkRatio(watermark.High),
+			},
+			core.EnvVar{
+				Name:  memberEnvOffloadWatermarkLow,
+				Value: memberWatermarkRatio(watermark.Low),
+			})
+	}
+
+	return env
+}
+
+// memberWatermarkRatio turns a percentage into the fraction the client parses.
+//
+// Two decimals, always, and a fixed format rather than the shortest one: the client reads the value
+// with a stream extraction that must consume the WHOLE string, and silently falls back to its own
+// default for anything it cannot -- so a notation that is merely valid Go is not enough. It also
+// refuses a value outside (0, 1], which the field's own 1-to-100 bound already keeps this inside.
+func memberWatermarkRatio(percent int32) string {
+	return strconv.FormatFloat(float64(percent)/100, 'f', 2, 64)
 }
 
 // renderMemberArgs builds the member's argv: the REST port when it has to move, then extraArgs as

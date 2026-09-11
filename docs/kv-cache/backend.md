@@ -2,8 +2,7 @@
 
 > **Purpose** — how a `KVCacheBackend` runs a Mooncake store, what its status is read from, and the
 > three things that surprise operators: capacity is observed rather than derived, shrinking a group
-> discards the cache that member held, and a local disk tier can be configured correctly and still
-> hold nothing.
+> discards the cache that member held, and a member group's identity is its position in a list.
 > **Audience** operators, contributors · **Prerequisites** [Architecture](../architecture.md) ·
 > **Read time** ~20 min
 
@@ -457,11 +456,20 @@ spec:
         localDisk:                     # the members' half
           path: /var/lib/kvcache
           capacity: 4Ti                # optional; unset means the store's own ceiling
+          keyLimit: 10000000           # optional; the same, on the key count
+          eviction:                    # optional; unset means the store's own behaviour
+            enabled: true              # default; false fills the tier and then stops writing
+            policy: LRU                # FIFO | LRU; unset means the store's own, which is FIFO
+            watermark:                 # optional; percentages of capacity
+              high: 90
+              low: 80
 ```
 
 | what it renders | where |
 |---|---|
-| `MOONCAKE_OFFLOAD_ENABLED`, `MOONCAKE_OFFLOAD_FILE_STORAGE_PATH`, `MOONCAKE_OFFLOAD_TOTAL_SIZE_LIMIT_BYTES` | the member container |
+| `MOONCAKE_OFFLOAD_ENABLED` and `..._FILE_STORAGE_PATH`, plus `..._BUCKET_SIZE_LIMIT_BYTES` and `..._BUCKET_KEYS_LIMIT` | the member container |
+| `..._TOTAL_SIZE_LIMIT_BYTES` **and** `..._BUCKET_MAX_TOTAL_SIZE`, both from `capacity`; `..._TOTAL_KEYS_LIMIT` from `keyLimit` | the member container |
+| `..._BUCKET_EVICTION_POLICY`, `..._ENABLE_DISK_WATERMARK_EVICTION` and the two ratio variables, from `eviction` | the member container |
 | a `hostPath` volume and mount at `localDisk.path` | the member Pod |
 | `-enable_offload=true`, `-offload_on_evict=true` | the leader's argv |
 | a `preStop` hook, and a termination window derived from `scaleIn.gracePeriodSeconds` | the member Pod |
@@ -469,15 +477,39 @@ spec:
 **A tier is a layer on a member group, never a group of its own** — see
 [The two axes](#the-two-axes) for why the shape has to be this way.
 
-### A configured tier can hold nothing
+### The tier is written one bucket at a time
 
-⛔ **A tier can be accepted, report its full capacity, and still hold no data — with nothing else on
-the object looking wrong.** The member Pods are Ready, the leader logs the mount, and
-`status.capacity` reports the size the tier declared, because that figure is **capacity, not usage**
-(see [What status reports](#what-status-reports)).
+The store does not write an offloaded object on its own. It **assembles objects into a bucket and
+writes nothing until that bucket is full** — by bytes or by object count — and what is short of the
+threshold is carried to the next attempt, indefinitely.
 
-**Read `master_allocated_file_size_bytes` before relying on the tier**, which is the one figure that
-answers the question:
+⛔ **The store's own thresholds are 256 MB and 500 objects, and a backend that never reaches either
+has a tier that holds nothing while looking healthy.** The member Pods are Ready, the leader logs the
+mount and reports objects deferred for offload, and `status.capacity` shows the size the tier
+declared — because that figure is **capacity, not usage** (see
+[What status reports](#what-status-reports)).
+
+This is what [issue #200](https://github.com/gpustack/gpustack-operator/issues/200) was filed for;
+the history of what was and was not observed on the way to finding it is in
+[the spec](../../specs/2026-09-05-kv-cache-media-and-scaling.md#the-one-item-that-did-not-pass-no-byte-reached-the-disk).
+
+**The operator renders a smaller pair of its own**, so a modest backend closes buckets. They are
+**not in the API** and `extraEnvs` refuses them: moving them is a tuning decision that would need a
+field, not an escape hatch that silently defines the same variable twice.
+
+Three bounds follow from the bucket being the unit, all enforced at apply time, all naming the same
+figure:
+
+- `capacityPerMember` must hold **one bucket** on a group that declares a tier — the bytes are held in
+  the memory segment until the bucket is complete.
+- `localDisk.capacity` and `localDisk.keyLimit`, when set, must hold one bucket and one bucket's worth
+  of keys.
+
+> **Why a refusal rather than a default** — the store stops taking offload work as soon as one more
+> bucket would not fit under a declared ceiling, and it reports that by doing nothing. A tier below
+> any of these is a configuration that cannot work under any workload.
+
+**Read `master_allocated_file_size_bytes` to see what the tier actually holds:**
 
 ```console
 $ kubectl exec -n gpustack-system deploy/<backend>-leader -- \
@@ -489,10 +521,41 @@ $ kubectl exec -n gpustack-system deploy/<backend>-leader -- \
 `master_allocated_file_size_bytes` is **bytes actually written to the tier**, so `0` on a tier you
 expect to be filling means the data path is not working, whatever the rest of the object says.
 
-What this project has and has not observed of that data path, and what would count as settling it,
-is recorded in
-[the spec](../../specs/2026-09-05-kv-cache-media-and-scaling.md#the-one-item-that-did-not-pass-no-byte-reached-the-disk)
-and tracked in [issue #200](https://github.com/gpustack/gpustack-operator/issues/200).
+### What the tier does when it fills
+
+`localDisk.eviction` is one choice with two outcomes, not a set of knobs:
+
+| `eviction` | what the tier does when full |
+|---|---|
+| unset | whatever the store does by default |
+| `enabled: true` (the default when the block is present) | drops what it holds and goes on accepting writes |
+| `enabled: false` | stops accepting writes; what is there stays and stays readable |
+
+- **`policy`** is the order entries leave in — `FIFO` drops the oldest written, `LRU` the least
+  recently read. Left unset, the store's own applies, which is `FIFO`.
+- **`watermark`** is when eviction runs: it starts once the tier passes `high` and stops once it is
+  back under `low`, both **percentages of `capacity`**. `low` must be below `high`.
+
+Four combinations are refused at apply time, each because the store would accept them and then not
+act on them:
+
+| Refused | Why |
+|---|---|
+| `enabled: false` with a `policy` | there is no order in which nothing leaves |
+| `enabled: false` with a `watermark` | there is nothing for the marks to start and stop |
+| `watermark` with no `capacity` | the marks are a percentage of it, and the store's own default for the quota they are taken against is a value its eviction path reads as switched off |
+| `low` at or above `high` | every write past the mark would evict; the member's own startup check refuses the pair, inside a container log |
+
+> **Why the enum has only two values** — the store maps a policy string it does not recognise onto
+> **no eviction at all**, with no error, no warning and no failure to start. A neutral two-value enum
+> is what keeps a typo from being a silently disabled cache. Turning eviction off is `enabled: false`
+> rather than a third enum value, so there is exactly one way to say it.
+
+**Settings this API does not name are reachable through `members[].extraEnvs`**, which `extraArgs`
+cannot reach: that map renders config-key overrides, and this family is read from the environment
+only. A name the operator already renders is refused there, because Kubernetes takes a container
+carrying one name twice and leaves the winner to the runtime. ⛔ **Every value is world-readable**, on
+the cluster-scoped object and again in the Pod — no credential belongs there.
 
 ### The directory has to exist, and be writable by the image's user
 
@@ -638,7 +701,7 @@ adding up what members were asked to provide.
 member declared — published as soon as the member registers, before anything is written there.
 
 To ask whether the **disk** tier is holding data, the figure to read is not on the CR at all — see
-[A configured tier can hold nothing](#a-configured-tier-can-hold-nothing).
+[The tier is written one bucket at a time](#the-tier-is-written-one-bucket-at-a-time).
 
 ⛔ **Capacity is absent — not zero — while the leader is starting.** `/metrics` is ungated: a leader
 that is up but not serving answers 200 with a well-formed exposition whose gauges all read zero, and a
@@ -704,6 +767,48 @@ belongs to the Pod template, not to that field.
 **Existing objects are not rebalanced.** How fast the cluster converges onto a new member depends on
 `allocationStrategy`: `FreeRatioFirst` (the default) biases new writes toward the emptier member,
 `Random` does not.
+
+### A group's position is its identity
+
+A group has **no name**. Its position in `members` is what the DaemonSet's name, its immutable
+selector labels and its members' HTTP port are all derived from, so moving an entry in that list
+leaves every one of those in place and changes only the spec underneath it.
+
+⛔ **Moving a group to another position is refused at apply time.** The refusal names both positions.
+Two shapes reach it:
+
+| Edit | Outcome |
+|---|---|
+| swapping two entries | refused |
+| removing a group ahead of others, which shifts the rest up | refused |
+| appending a group | allowed |
+| removing from the **end** of the list | allowed |
+| editing a group in place, including widening its `nodeSelector` | allowed |
+
+**To take a group out of service without removing it, narrow its `nodeSelector` until it matches no
+node.** The group keeps its position, every later group keeps its DaemonSet, and nothing is rebuilt.
+
+> **Why not give a group a name** — a name independent of position would make reordering free, and
+> the price is paid once in full: a DaemonSet's `spec.selector` cannot be changed after creation, so
+> every existing member DaemonSet would have to be deleted and recreated and **the entire cache would
+> go with them**. Refusing the move costs nothing and rebuilds nothing. The decision, and what
+> evidence would reopen it, is recorded on the `members` field itself.
+
+⚠️ **The rule recognises a group that arrived unchanged at a position another group LEFT — not every
+reorder.** Without a name there is nothing else to recognise a group by, so two shapes are knowingly
+admitted:
+
+- a reorder **combined with an edit** to the same group, which is indistinguishable from two ordinary
+  edits;
+- removing a group when a **later group is identical** to the one taking its place — `[A, B, C]`
+  becoming `[A, C, C]`. That produces the same two lists as editing position 1 to match an unchanged
+  position 2, which is how the second of two look-alike groups is taken out of service, so refusing
+  it would forbid the operation recommended above. `[A, B, C]` to `[A, C]`, with no look-alike to
+  arrive in the gap, is still refused.
+
+Both admitted shapes leave one trace: the resulting `members` holds **two identical groups**. What the
+rule buys is that the mechanical reorder — the one a rewritten manifest produces — is reported instead
+of silently rebuilding members against another group's spec.
 
 ⛔ **Shrinking a group discards the cache that member held.** Narrowing the selector, or removing a
 node, unmounts that member's segment **immediately** — there is no drain.
@@ -792,6 +897,43 @@ Two behaviours differ from the managed mode:
   the spec, and honouring a `3xx` from it would read some other host with the operator's network
   identity, then copy an excerpt of the answer into a status readable by anyone who can read the
   object. The redirect is reported as the response it is.
+
+### Keeping two external objects off one leader is yours
+
+⛔ **Two `KVCacheBackend` objects may name the same leader, and nothing in the operator notices.** For
+a managed backend the object *is* the leader, so two objects are two leaders. For an external one the
+object is a **declaration of addresses**, and one leader is reachable under more than one spelling —
+by Service name in one object and by IP in another, with or without a trailing dot or an explicit
+default port.
+
+> **Why no check** — every identity the operator could compare is either editable or needs the leader
+> reachable at admission. The comparison cheap enough to run — byte-identical addresses — catches the
+> copy-paste case and misses the one a real deployment produces, which is the same leader spelled two
+> ways. A check that catches the easy half invites the reader to trust it for the other half. This is
+> tracked in [issue #288](https://github.com/gpustack/gpustack-operator/issues/288).
+
+**Three consequences follow, and the third is the one to read before deciding the duplication is
+safe.** The reuse-domain uniqueness rule is enforced between Bindings whose pools name the **same
+backend object**, so two Bindings reaching one leader through two objects are both admitted on one
+`domain.name`:
+
+1. **The quota of a shared domain flips and never settles.** The leader keeps one ledger entry per
+   tenant, and each pool's reconciler converges that entry toward its own Binding's `quotaCeiling`
+   **on every pass**. Each pass reads the other's figure, finds it wrong, and writes its own back.
+2. **The symptom of an undersized quota is a low hit rate and nothing else.** Exceeding a tenant's
+   quota does not refuse the write: the store frees room by dropping that tenant's own older objects
+   and retries, irreversibly and **without any counter moving**. So the flipping above never surfaces
+   as an error — it surfaces as a cache that keeps losing content nobody asked it to lose.
+3. ⛔ **Two Bindings on one `domain.name` with a different `blockSize` or `dtype` corrupt each
+   other's blocks.** The reuse identity an engine is handed is the domain **name alone** —
+   `blockSize` and `dtype` reach no engine; they are a declaration this API validates and records. So
+   two differently-shaped caches land under one identity, which is
+   [the silent cache pollution](../reference/model-deployment.md#the-reuse-domain-is-inherited)
+   a wrong `blockSize` or `dtype` causes, reached here without either value being wrong.
+
+⇒ If you point two objects at one leader, either keep their pools' Bindings on **different**
+`domain.name` values, or make sure every Binding that shares a name also shares its `blockSize`,
+`dtype` and `quotaCeiling`.
 
 ## Operating notes
 

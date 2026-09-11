@@ -12,6 +12,7 @@ import (
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
@@ -315,15 +316,16 @@ func TestMemberWorkload_NoDiskTierRendersWhatItAlwaysDid(t *testing.T) {
 		"the fingerprint must not move, or every existing member is deleted and comes back empty")
 }
 
-// TestMemberWorkload_DiskTierIsAllOrNothing asserts the tier's five rendered items as a WHOLE.
+// TestMemberWorkload_DiskTierIsAllOrNothing asserts the tier's rendered items as a WHOLE.
 //
-// One case per item would pass on a renderer that emitted four of the five, and four-fifths of a
-// tier is the shape this whole design exists to refuse: a member that reports disk capacity to the
-// leader while having nowhere to write, or somewhere to write that the leader never sends anything
-// to. The absence case matters for the same reason in reverse — it is what would catch a future
-// path granting one of the five to a group that asked for none.
+// One case per item would pass on a renderer that emitted all but one, and a tier missing one item
+// is the shape this whole design exists to refuse: a member that reports disk capacity to the
+// leader while having nowhere to write, somewhere to write that the leader never sends anything
+// to, or — the case this cost a cluster investigation to find — a complete-looking tier whose bucket
+// is never closed, so not one byte is written. The absence case matters for the same reason in
+// reverse: it is what would catch a future path granting one of them to a group that asked for none.
 func TestMemberWorkload_DiskTierIsAllOrNothing(t *testing.T) {
-	t.Run("a group with a disk tier gets all five", func(t *testing.T) {
+	t.Run("a group with a disk tier gets all of them", func(t *testing.T) {
 		kvcb := testMemberBackend(withMemberDiskTier)
 		ds := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13")
 		container := ds.Spec.Template.Spec.Containers[0]
@@ -333,6 +335,16 @@ func TestMemberWorkload_DiskTierIsAllOrNothing(t *testing.T) {
 		assert.Equal(t, "/var/lib/kvcache", env["MOONCAKE_OFFLOAD_FILE_STORAGE_PATH"])
 		assert.Equal(t, "4398046511104", env["MOONCAKE_OFFLOAD_TOTAL_SIZE_LIMIT_BYTES"],
 			"4Ti in bytes, since the client reads a byte count and not a quantity")
+		assert.Equal(t, "4398046511104", env["MOONCAKE_OFFLOAD_BUCKET_MAX_TOTAL_SIZE"],
+			"the same ceiling again, under the name the watermarks are a fraction of: its own "+
+				"default is 0, which the client's eviction path reads as no quota at all")
+		assert.Equal(t, strconv.FormatInt(MemberBucketSizeLimit, 10),
+			env["MOONCAKE_OFFLOAD_BUCKET_SIZE_LIMIT_BYTES"],
+			"the bucket is the unit the tier is written in, and the client's own threshold is what "+
+				"leaves a modest backend's tier empty")
+		assert.Equal(t, strconv.FormatInt(MemberBucketKeysLimit, 10),
+			env["MOONCAKE_OFFLOAD_BUCKET_KEYS_LIMIT"],
+			"the other threshold a bucket closes on; either alone leaves one kind of workload stuck")
 
 		require.Len(t, ds.Spec.Template.Spec.Volumes, 1)
 		volume := ds.Spec.Template.Spec.Volumes[0]
@@ -352,7 +364,7 @@ func TestMemberWorkload_DiskTierIsAllOrNothing(t *testing.T) {
 			"mounted where the client was told to write, so one field says both things")
 	})
 
-	t.Run("a group without one gets none of the five", func(t *testing.T) {
+	t.Run("a group without one gets none of them", func(t *testing.T) {
 		kvcb := testMemberBackend()
 		ds := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13")
 		env := memberEnv(t, kvcb, "mooncake:v0.3.13")
@@ -361,6 +373,9 @@ func TestMemberWorkload_DiskTierIsAllOrNothing(t *testing.T) {
 			"MOONCAKE_OFFLOAD_ENABLED",
 			"MOONCAKE_OFFLOAD_FILE_STORAGE_PATH",
 			"MOONCAKE_OFFLOAD_TOTAL_SIZE_LIMIT_BYTES",
+			"MOONCAKE_OFFLOAD_BUCKET_MAX_TOTAL_SIZE",
+			"MOONCAKE_OFFLOAD_BUCKET_SIZE_LIMIT_BYTES",
+			"MOONCAKE_OFFLOAD_BUCKET_KEYS_LIMIT",
 		} {
 			_, present := env[key]
 			assert.False(t, present, "%s must not be set for a group with no disk tier", key)
@@ -370,7 +385,7 @@ func TestMemberWorkload_DiskTierIsAllOrNothing(t *testing.T) {
 		assert.Nil(t, ds.Spec.Template.Spec.Containers[0].Lifecycle)
 	})
 
-	t.Run("an unset capacity leaves the store's own ceiling alone", func(t *testing.T) {
+	t.Run("an unset capacity leaves the store's own ceilings alone", func(t *testing.T) {
 		kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 			withMemberDiskTier(k)
 			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("0")
@@ -378,11 +393,269 @@ func TestMemberWorkload_DiskTierIsAllOrNothing(t *testing.T) {
 		env := memberEnv(t, kvcb, "mooncake:v0.3.13")
 
 		assert.Equal(t, "true", env["MOONCAKE_OFFLOAD_ENABLED"], "the tier is still declared")
-		_, present := env["MOONCAKE_OFFLOAD_TOTAL_SIZE_LIMIT_BYTES"]
-		assert.False(t, present,
-			"an unrendered limit is the store's own, so a ceiling that moves upstream is a change "+
-				"to investigate rather than one this renderer silently restated")
+		for _, key := range []string{
+			"MOONCAKE_OFFLOAD_TOTAL_SIZE_LIMIT_BYTES",
+			"MOONCAKE_OFFLOAD_BUCKET_MAX_TOTAL_SIZE",
+		} {
+			_, present := env[key]
+			assert.False(t, present, "%s: an unrendered limit is the store's own, so a ceiling that "+
+				"moves upstream is a change to investigate rather than one this renderer silently "+
+				"restated", key)
+		}
+		assert.Equal(t, strconv.FormatInt(MemberBucketSizeLimit, 10),
+			env["MOONCAKE_OFFLOAD_BUCKET_SIZE_LIMIT_BYTES"],
+			"the bucket pair is NOT conditional on a capacity: it is what makes the tier take a "+
+				"byte, so it goes with the tier rather than with the ceiling")
 	})
+
+	t.Run("an unset key limit leaves the store's own alone", func(t *testing.T) {
+		kvcb := testMemberBackend(withMemberDiskTier)
+		env := memberEnv(t, kvcb, "mooncake:v0.3.13")
+
+		_, present := env["MOONCAKE_OFFLOAD_TOTAL_KEYS_LIMIT"]
+		assert.False(t, present, "the same rule as the byte ceiling, on the count")
+	})
+
+	t.Run("a set key limit is rendered", func(t *testing.T) {
+		kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+			withMemberDiskTier(k)
+			k.Spec.Connection.Managed.Members[0].LocalDisk.KeyLimit = 500000
+		})
+		env := memberEnv(t, kvcb, "mooncake:v0.3.13")
+
+		assert.Equal(t, "500000", env["MOONCAKE_OFFLOAD_TOTAL_KEYS_LIMIT"])
+	})
+}
+
+// TestMemberBucketThresholds_StayUnderTheStoresOwn is the one assertion about the VALUE of the pair,
+// and it asserts a relation rather than a number so that tuning it does not redden the test that
+// exists to stop it being tuned back.
+//
+// The store's own 256Mi and 500 objects are not a neutral default here: they are the reason a
+// declared tier held nothing on every cluster this was tried on, since a backend that never
+// accumulates either never closes a bucket and therefore never writes one. A pair at or above them
+// is that failure restored, whatever else looks right.
+func TestMemberBucketThresholds_StayUnderTheStoresOwn(t *testing.T) {
+	const (
+		storeBucketSizeLimit int64 = 256 * 1024 * 1024
+		storeBucketKeysLimit int64 = 500
+	)
+
+	assert.Less(t, MemberBucketSizeLimit, storeBucketSizeLimit,
+		"a bucket at or above the store's own size threshold leaves a modest backend's tier empty, "+
+			"which is the whole reason this pair is rendered")
+	assert.Less(t, MemberBucketKeysLimit, storeBucketKeysLimit,
+		"and the same on the object count, which is the threshold a small-object workload reaches "+
+			"first")
+	assert.Positive(t, MemberBucketSizeLimit,
+		"the store refuses to start with a non-positive bucket size")
+	assert.Positive(t, MemberBucketKeysLimit,
+		"the store refuses to start with a non-positive bucket key count")
+}
+
+// TestMemberWorkload_DiskTierEviction pins what each shape of the eviction block renders.
+//
+// The absent and enabled-without-settings cases carry the rule the rest of this package follows: a
+// setting the spec does not address is NOT rendered, so a default that moves upstream shows up as a
+// change to investigate. The disabled case is the exception worth spelling out — "off" has to be
+// said explicitly, at both layers, because there is no absence that means it.
+func TestMemberWorkload_DiskTierEviction(t *testing.T) {
+	withEviction := func(
+		mutate func(*workercore.KVCacheBackendMemberLocalDiskEviction),
+	) func(*workercore.KVCacheBackend) {
+		return func(k *workercore.KVCacheBackend) {
+			withMemberDiskTier(k)
+			eviction := &workercore.KVCacheBackendMemberLocalDiskEviction{}
+			mutate(eviction)
+			k.Spec.Connection.Managed.Members[0].LocalDisk.Eviction = eviction
+		}
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*workercore.KVCacheBackend)
+		want   map[string]string
+		absent []string
+	}{
+		{
+			"no block at all",
+			withMemberDiskTier,
+			nil,
+			[]string{
+				"MOONCAKE_OFFLOAD_BUCKET_EVICTION_POLICY",
+				"MOONCAKE_OFFLOAD_ENABLE_DISK_WATERMARK_EVICTION",
+				"MOONCAKE_OFFLOAD_DISK_EVICTION_HIGH_WATERMARK_RATIO",
+				"MOONCAKE_OFFLOAD_DISK_EVICTION_LOW_WATERMARK_RATIO",
+			},
+		},
+		{
+			"enabled with nothing else, which is the client's own behavior",
+			withEviction(func(e *workercore.KVCacheBackendMemberLocalDiskEviction) {
+				e.Enabled = ptr.To(true)
+			}),
+			nil,
+			[]string{
+				"MOONCAKE_OFFLOAD_BUCKET_EVICTION_POLICY",
+				"MOONCAKE_OFFLOAD_ENABLE_DISK_WATERMARK_EVICTION",
+			},
+		},
+		{
+			"a policy",
+			withEviction(func(e *workercore.KVCacheBackendMemberLocalDiskEviction) { e.Policy = "LRU" }),
+			map[string]string{"MOONCAKE_OFFLOAD_BUCKET_EVICTION_POLICY": "lru"},
+			[]string{"MOONCAKE_OFFLOAD_ENABLE_DISK_WATERMARK_EVICTION"},
+		},
+		{
+			"the other policy",
+			withEviction(func(e *workercore.KVCacheBackendMemberLocalDiskEviction) { e.Policy = "FIFO" }),
+			map[string]string{"MOONCAKE_OFFLOAD_BUCKET_EVICTION_POLICY": "fifo"},
+			nil,
+		},
+		{
+			// Both layers, because the client reads them at different levels and a policy of none
+			// only reaches one of them.
+			"disabled",
+			withEviction(func(e *workercore.KVCacheBackendMemberLocalDiskEviction) {
+				e.Enabled = ptr.To(false)
+			}),
+			map[string]string{
+				"MOONCAKE_OFFLOAD_BUCKET_EVICTION_POLICY":         "none",
+				"MOONCAKE_OFFLOAD_ENABLE_DISK_WATERMARK_EVICTION": "false",
+			},
+			nil,
+		},
+		{
+			// A fraction with two decimals, not a percentage and not the shortest notation: the
+			// client parses the whole string and silently falls back to its own default for
+			// anything it cannot consume entirely.
+			"a watermark band",
+			withEviction(func(e *workercore.KVCacheBackendMemberLocalDiskEviction) {
+				e.Watermark = &workercore.KVCacheBackendMemberLocalDiskEvictionWatermark{High: 90, Low: 80}
+			}),
+			map[string]string{
+				"MOONCAKE_OFFLOAD_DISK_EVICTION_HIGH_WATERMARK_RATIO": "0.90",
+				"MOONCAKE_OFFLOAD_DISK_EVICTION_LOW_WATERMARK_RATIO":  "0.80",
+			},
+			nil,
+		},
+		{
+			"a band at the top of the range",
+			withEviction(func(e *workercore.KVCacheBackendMemberLocalDiskEviction) {
+				e.Watermark = &workercore.KVCacheBackendMemberLocalDiskEvictionWatermark{High: 100, Low: 5}
+			}),
+			map[string]string{
+				"MOONCAKE_OFFLOAD_DISK_EVICTION_HIGH_WATERMARK_RATIO": "1.00",
+				"MOONCAKE_OFFLOAD_DISK_EVICTION_LOW_WATERMARK_RATIO":  "0.05",
+			},
+			nil,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			env := memberEnv(t, testMemberBackend(c.mutate), "mooncake:v0.3.13")
+
+			for name, value := range c.want {
+				assert.Equal(t, value, env[name], "%s", name)
+			}
+			for _, name := range c.absent {
+				_, present := env[name]
+				assert.False(t, present, "%s must not be rendered here", name)
+			}
+		})
+	}
+}
+
+// TestMemberWorkload_ExtraEnvs pins the hatch's rendering: every entry reaches the container, in key
+// order, after everything derived.
+func TestMemberWorkload_ExtraEnvs(t *testing.T) {
+	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Connection.Managed.Members[0].ExtraEnvs = map[string]string{
+			"MOONCAKE_OFFLOAD_USE_URING":                  "true",
+			"MOONCAKE_OFFLOAD_HEARTBEAT_INTERVAL_SECONDS": "5",
+		}
+	})
+	container := memberContainer(t, kvcb, "mooncake:v0.3.13")
+
+	env := memberEnv(t, kvcb, "mooncake:v0.3.13")
+	assert.Equal(t, "true", env["MOONCAKE_OFFLOAD_USE_URING"])
+	assert.Equal(t, "5", env["MOONCAKE_OFFLOAD_HEARTBEAT_INTERVAL_SECONDS"])
+
+	names := make([]string, 0, len(container.Env))
+	for _, e := range container.Env {
+		names = append(names, e.Name)
+	}
+	require.Len(t, names, len(env), "no name may appear twice: Kubernetes takes a duplicate and "+
+		"leaves the winner to the runtime, which is why admission refuses a derived name here")
+	assert.Equal(t,
+		[]string{"MOONCAKE_OFFLOAD_HEARTBEAT_INTERVAL_SECONDS", "MOONCAKE_OFFLOAD_USE_URING"},
+		names[len(names)-2:],
+		"last and in key order, so two renders of one spec are byte-identical")
+}
+
+// TestMemberDerivedEnvs_CoversEveryNameTheRendererEmits holds the reserved list equal to what is
+// actually rendered, in both directions.
+//
+// The list is what admission refuses in extraEnvs, and it is a SECOND copy of a fact the renderer
+// already has — so the failure it is exposed to is drift, in either direction and both silent. A
+// name the renderer emits but the list forgets is a container carrying that name twice, with the
+// winner left to the runtime; a name the list holds but nothing emits is a hatch entry refused for a
+// collision that cannot happen.
+//
+// The union is taken over several fixtures on purpose. No single backend renders all of them: the
+// eviction policy is emitted either as a policy or as the "off" spelling, the watermark switch only
+// when eviction is off, and the library path only on one transport.
+func TestMemberDerivedEnvs_CoversEveryNameTheRendererEmits(t *testing.T) {
+	fixtures := []struct {
+		name   string
+		mutate []func(*workercore.KVCacheBackend)
+	}{
+		{"a plain TCP group", nil},
+		{"a tier with every ceiling and an eviction band", []func(*workercore.KVCacheBackend){
+			func(k *workercore.KVCacheBackend) {
+				withMemberDiskTier(k)
+				disk := k.Spec.Connection.Managed.Members[0].LocalDisk
+				disk.KeyLimit = 500000
+				disk.Eviction = &workercore.KVCacheBackendMemberLocalDiskEviction{
+					Enabled: ptr.To(true),
+					Policy:  "LRU",
+					Watermark: &workercore.KVCacheBackendMemberLocalDiskEvictionWatermark{
+						High: 90, Low: 80,
+					},
+				}
+			},
+		}},
+		{"a tier with eviction switched off", []func(*workercore.KVCacheBackend){
+			func(k *workercore.KVCacheBackend) {
+				withMemberDiskTier(k)
+				k.Spec.Connection.Managed.Members[0].LocalDisk.Eviction = &workercore.KVCacheBackendMemberLocalDiskEviction{Enabled: ptr.To(false)}
+			},
+		}},
+		{"the transport that mounts the host's libfabric", []func(*workercore.KVCacheBackend){
+			func(k *workercore.KVCacheBackend) { k.Spec.Transport.Protocol = "EFA" },
+		}},
+	}
+
+	rendered := make(map[string]string)
+	for _, f := range fixtures {
+		kvcb := testMemberBackend(f.mutate...)
+		for _, e := range memberContainer(t, kvcb, "mooncake:v0.3.13").Env {
+			rendered[e.Name] = f.name
+		}
+	}
+
+	for name, fixture := range rendered {
+		assert.Contains(t, MemberDerivedEnvs, name,
+			"%s is rendered by %q and is not reserved, so a group could define it a second time "+
+				"through extraEnvs and nothing would report the collision", name, fixture)
+	}
+	for _, name := range MemberDerivedEnvs {
+		_, ok := rendered[name]
+		assert.True(t, ok,
+			"%s is reserved and no fixture here renders it: either the renderer stopped emitting it, "+
+				"in which case the reservation refuses a hatch entry for a collision that cannot "+
+				"happen, or this test is missing the path that does", name)
+	}
 }
 
 // TestMemberWorkload_ShutdownDrainsTheDiskTier pins the hook and the window that has to hold it.

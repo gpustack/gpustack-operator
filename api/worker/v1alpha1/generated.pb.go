@@ -150,6 +150,12 @@ func (m *KVCacheBackendMember) Reset() { *m = KVCacheBackendMember{} }
 
 func (m *KVCacheBackendMemberLocalDisk) Reset() { *m = KVCacheBackendMemberLocalDisk{} }
 
+func (m *KVCacheBackendMemberLocalDiskEviction) Reset() { *m = KVCacheBackendMemberLocalDiskEviction{} }
+
+func (m *KVCacheBackendMemberLocalDiskEvictionWatermark) Reset() {
+	*m = KVCacheBackendMemberLocalDiskEvictionWatermark{}
+}
+
 func (m *KVCacheBackendMemberStatus) Reset() { *m = KVCacheBackendMemberStatus{} }
 
 func (m *KVCacheBackendScaleIn) Reset() { *m = KVCacheBackendScaleIn{} }
@@ -3510,6 +3516,30 @@ func (m *KVCacheBackendMember) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if len(m.ExtraEnvs) > 0 {
+		keysForExtraEnvs := make([]string, 0, len(m.ExtraEnvs))
+		for k := range m.ExtraEnvs {
+			keysForExtraEnvs = append(keysForExtraEnvs, string(k))
+		}
+		sort.Strings(keysForExtraEnvs)
+		for iNdEx := len(keysForExtraEnvs) - 1; iNdEx >= 0; iNdEx-- {
+			v := m.ExtraEnvs[string(keysForExtraEnvs[iNdEx])]
+			baseI := i
+			i -= len(v)
+			copy(dAtA[i:], v)
+			i = encodeVarintGenerated(dAtA, i, uint64(len(v)))
+			i--
+			dAtA[i] = 0x12
+			i -= len(keysForExtraEnvs[iNdEx])
+			copy(dAtA[i:], keysForExtraEnvs[iNdEx])
+			i = encodeVarintGenerated(dAtA, i, uint64(len(keysForExtraEnvs[iNdEx])))
+			i--
+			dAtA[i] = 0xa
+			i = encodeVarintGenerated(dAtA, i, uint64(baseI-i))
+			i--
+			dAtA[i] = 0x42
+		}
+	}
 	if m.LocalDisk != nil {
 		{
 			size, err := m.LocalDisk.MarshalToSizedBuffer(dAtA[:i])
@@ -3623,6 +3653,21 @@ func (m *KVCacheBackendMemberLocalDisk) MarshalToSizedBuffer(dAtA []byte) (int, 
 	_ = i
 	var l int
 	_ = l
+	if m.Eviction != nil {
+		{
+			size, err := m.Eviction.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x22
+	}
+	i = encodeVarintGenerated(dAtA, i, uint64(m.KeyLimit))
+	i--
+	dAtA[i] = 0x18
 	{
 		size, err := m.Capacity.MarshalToSizedBuffer(dAtA[:i])
 		if err != nil {
@@ -3638,6 +3683,85 @@ func (m *KVCacheBackendMemberLocalDisk) MarshalToSizedBuffer(dAtA []byte) (int, 
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Path)))
 	i--
 	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
+func (m *KVCacheBackendMemberLocalDiskEviction) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *KVCacheBackendMemberLocalDiskEviction) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *KVCacheBackendMemberLocalDiskEviction) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Watermark != nil {
+		{
+			size, err := m.Watermark.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x1a
+	}
+	i -= len(m.Policy)
+	copy(dAtA[i:], m.Policy)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Policy)))
+	i--
+	dAtA[i] = 0x12
+	if m.Enabled != nil {
+		i--
+		if *m.Enabled {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *KVCacheBackendMemberLocalDiskEvictionWatermark) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *KVCacheBackendMemberLocalDiskEvictionWatermark) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *KVCacheBackendMemberLocalDiskEvictionWatermark) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	i = encodeVarintGenerated(dAtA, i, uint64(m.Low))
+	i--
+	dAtA[i] = 0x10
+	i = encodeVarintGenerated(dAtA, i, uint64(m.High))
+	i--
+	dAtA[i] = 0x8
 	return len(dAtA) - i, nil
 }
 
@@ -6596,6 +6720,14 @@ func (m *KVCacheBackendMember) Size() (n int) {
 		l = m.LocalDisk.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
+	if len(m.ExtraEnvs) > 0 {
+		for k, v := range m.ExtraEnvs {
+			_ = k
+			_ = v
+			mapEntrySize := 1 + len(k) + sovGenerated(uint64(len(k))) + 1 + len(v) + sovGenerated(uint64(len(v)))
+			n += mapEntrySize + 1 + sovGenerated(uint64(mapEntrySize))
+		}
+	}
 	return n
 }
 
@@ -6609,6 +6741,40 @@ func (m *KVCacheBackendMemberLocalDisk) Size() (n int) {
 	n += 1 + l + sovGenerated(uint64(l))
 	l = m.Capacity.Size()
 	n += 1 + l + sovGenerated(uint64(l))
+	n += 1 + sovGenerated(uint64(m.KeyLimit))
+	if m.Eviction != nil {
+		l = m.Eviction.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
+	return n
+}
+
+func (m *KVCacheBackendMemberLocalDiskEviction) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.Enabled != nil {
+		n += 2
+	}
+	l = len(m.Policy)
+	n += 1 + l + sovGenerated(uint64(l))
+	if m.Watermark != nil {
+		l = m.Watermark.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
+	return n
+}
+
+func (m *KVCacheBackendMemberLocalDiskEvictionWatermark) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += 1 + sovGenerated(uint64(m.High))
+	n += 1 + sovGenerated(uint64(m.Low))
 	return n
 }
 
@@ -8208,6 +8374,16 @@ func (this *KVCacheBackendMember) String() string {
 		mapStringForExtraArgs += fmt.Sprintf("%v: %v,", k, this.ExtraArgs[k])
 	}
 	mapStringForExtraArgs += "}"
+	keysForExtraEnvs := make([]string, 0, len(this.ExtraEnvs))
+	for k := range this.ExtraEnvs {
+		keysForExtraEnvs = append(keysForExtraEnvs, k)
+	}
+	sort.Strings(keysForExtraEnvs)
+	mapStringForExtraEnvs := "map[string]string{"
+	for _, k := range keysForExtraEnvs {
+		mapStringForExtraEnvs += fmt.Sprintf("%v: %v,", k, this.ExtraEnvs[k])
+	}
+	mapStringForExtraEnvs += "}"
 	s := strings.Join([]string{`&KVCacheBackendMember{`,
 		`NodeSelector:` + mapStringForNodeSelector + `,`,
 		`Medium:` + fmt.Sprintf("%v", this.Medium) + `,`,
@@ -8216,6 +8392,7 @@ func (this *KVCacheBackendMember) String() string {
 		`ExtraArgs:` + mapStringForExtraArgs + `,`,
 		`Image:` + fmt.Sprintf("%v", this.Image) + `,`,
 		`LocalDisk:` + strings.Replace(this.LocalDisk.String(), "KVCacheBackendMemberLocalDisk", "KVCacheBackendMemberLocalDisk", 1) + `,`,
+		`ExtraEnvs:` + mapStringForExtraEnvs + `,`,
 		`}`,
 	}, "")
 	return s
@@ -8227,6 +8404,31 @@ func (this *KVCacheBackendMemberLocalDisk) String() string {
 	s := strings.Join([]string{`&KVCacheBackendMemberLocalDisk{`,
 		`Path:` + fmt.Sprintf("%v", this.Path) + `,`,
 		`Capacity:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.Capacity), "Quantity", "resource.Quantity", 1), `&`, ``, 1) + `,`,
+		`KeyLimit:` + fmt.Sprintf("%v", this.KeyLimit) + `,`,
+		`Eviction:` + strings.Replace(this.Eviction.String(), "KVCacheBackendMemberLocalDiskEviction", "KVCacheBackendMemberLocalDiskEviction", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *KVCacheBackendMemberLocalDiskEviction) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&KVCacheBackendMemberLocalDiskEviction{`,
+		`Enabled:` + valueToStringGenerated(this.Enabled) + `,`,
+		`Policy:` + fmt.Sprintf("%v", this.Policy) + `,`,
+		`Watermark:` + strings.Replace(this.Watermark.String(), "KVCacheBackendMemberLocalDiskEvictionWatermark", "KVCacheBackendMemberLocalDiskEvictionWatermark", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *KVCacheBackendMemberLocalDiskEvictionWatermark) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&KVCacheBackendMemberLocalDiskEvictionWatermark{`,
+		`High:` + fmt.Sprintf("%v", this.High) + `,`,
+		`Low:` + fmt.Sprintf("%v", this.Low) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -19863,6 +20065,133 @@ func (m *KVCacheBackendMember) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 8:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtraEnvs", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.ExtraEnvs == nil {
+				m.ExtraEnvs = make(map[string]string)
+			}
+			var mapkey string
+			var mapvalue string
+			for iNdEx < postIndex {
+				entryPreIndex := iNdEx
+				var wire uint64
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowGenerated
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					wire |= uint64(b&0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				fieldNum := int32(wire >> 3)
+				if fieldNum == 1 {
+					var stringLenmapkey uint64
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return ErrIntOverflowGenerated
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						stringLenmapkey |= uint64(b&0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					intStringLenmapkey := int(stringLenmapkey)
+					if intStringLenmapkey < 0 {
+						return ErrInvalidLengthGenerated
+					}
+					postStringIndexmapkey := iNdEx + intStringLenmapkey
+					if postStringIndexmapkey < 0 {
+						return ErrInvalidLengthGenerated
+					}
+					if postStringIndexmapkey > l {
+						return io.ErrUnexpectedEOF
+					}
+					mapkey = string(dAtA[iNdEx:postStringIndexmapkey])
+					iNdEx = postStringIndexmapkey
+				} else if fieldNum == 2 {
+					var stringLenmapvalue uint64
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return ErrIntOverflowGenerated
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						stringLenmapvalue |= uint64(b&0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					intStringLenmapvalue := int(stringLenmapvalue)
+					if intStringLenmapvalue < 0 {
+						return ErrInvalidLengthGenerated
+					}
+					postStringIndexmapvalue := iNdEx + intStringLenmapvalue
+					if postStringIndexmapvalue < 0 {
+						return ErrInvalidLengthGenerated
+					}
+					if postStringIndexmapvalue > l {
+						return io.ErrUnexpectedEOF
+					}
+					mapvalue = string(dAtA[iNdEx:postStringIndexmapvalue])
+					iNdEx = postStringIndexmapvalue
+				} else {
+					iNdEx = entryPreIndex
+					skippy, err := skipGenerated(dAtA[iNdEx:])
+					if err != nil {
+						return err
+					}
+					if (skippy < 0) || (iNdEx+skippy) < 0 {
+						return ErrInvalidLengthGenerated
+					}
+					if (iNdEx + skippy) > postIndex {
+						return io.ErrUnexpectedEOF
+					}
+					iNdEx += skippy
+				}
+			}
+			m.ExtraEnvs[mapkey] = mapvalue
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -19978,6 +20307,288 @@ func (m *KVCacheBackendMemberLocalDisk) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field KeyLimit", wireType)
+			}
+			m.KeyLimit = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.KeyLimit |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Eviction", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Eviction == nil {
+				m.Eviction = &KVCacheBackendMemberLocalDiskEviction{}
+			}
+			if err := m.Eviction.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *KVCacheBackendMemberLocalDiskEviction) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: KVCacheBackendMemberLocalDiskEviction: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: KVCacheBackendMemberLocalDiskEviction: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Enabled", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			b := bool(v != 0)
+			m.Enabled = &b
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Policy", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Policy = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Watermark", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Watermark == nil {
+				m.Watermark = &KVCacheBackendMemberLocalDiskEvictionWatermark{}
+			}
+			if err := m.Watermark.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *KVCacheBackendMemberLocalDiskEvictionWatermark) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: KVCacheBackendMemberLocalDiskEvictionWatermark: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: KVCacheBackendMemberLocalDiskEvictionWatermark: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field High", wireType)
+			}
+			m.High = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.High |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Low", wireType)
+			}
+			m.Low = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Low |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
