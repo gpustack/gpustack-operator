@@ -5825,7 +5825,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberStatus(ref common.R
 					},
 					"protocol": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Protocol is the transport the LEADER reports this member came up on.\n\nIt is an OBSERVATION throughout, never an echo of spec.transport.protocol, and the two can disagree: a member handed an RDMA request on a node whose device is missing comes up on TCP. Read it as what the data plane is doing, and the spec field as what was asked for.",
+							Description: "Protocol is the transport this member REGISTERED with when it mounted its segment.\n\nIt is NOT an observation. The value travels from the member's own mount request through the leader's listing unchanged, so it cannot disagree with spec.transport.protocol: a member that asks for a host fabric and comes up on TCP because the device is missing still reports the fabric here, and reports it while serving.\n\nSo agreement with the spec is not confirmation that the request took effect, and reading it as confirmation is worse than having no field. The transport the data plane installed is reported only in the member's own log.",
 							Type:        []string{"string"},
 							Format:      "",
 						},

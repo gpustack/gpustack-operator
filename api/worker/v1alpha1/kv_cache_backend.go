@@ -906,11 +906,16 @@ type KVCacheBackendMemberStatus struct {
 	// Medium is what this member contributes, echoed from the group that selected its node.
 	Medium string `json:"medium,omitempty" protobuf:"bytes,3,opt,name=medium"`
 
-	// Protocol is the transport the LEADER reports this member came up on.
+	// Protocol is the transport this member REGISTERED with when it mounted its segment.
 	//
-	// It is an OBSERVATION throughout, never an echo of spec.transport.protocol, and the two can
-	// disagree: a member handed an RDMA request on a node whose device is missing comes up on TCP.
-	// Read it as what the data plane is doing, and the spec field as what was asked for.
+	// It is NOT an observation. The value travels from the member's own mount request through the
+	// leader's listing unchanged, so it cannot disagree with spec.transport.protocol: a member that
+	// asks for a host fabric and comes up on TCP because the device is missing still reports the
+	// fabric here, and reports it while serving.
+	//
+	// So agreement with the spec is not confirmation that the request took effect, and reading it as
+	// confirmation is worse than having no field. The transport the data plane installed is reported
+	// only in the member's own log.
 	Protocol string `json:"protocol,omitempty" protobuf:"bytes,4,opt,name=protocol"`
 
 	// State is the member's state AS THE LEADER REPORTS IT, read from the leader's own segment
