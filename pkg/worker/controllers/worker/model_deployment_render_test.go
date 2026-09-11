@@ -8,6 +8,7 @@ import (
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 
@@ -161,17 +162,27 @@ func TestRenderModelDeploymentPod_Command(t *testing.T) {
 		wantCommand []string
 	}{
 		{
-			name:        "vllm base command, model positional",
-			engine:      workercore.ModelDeploymentEngineVLLM,
-			wantCommand: []string{"vllm", "serve", "Qwen/Qwen2.5-72B-Instruct"},
+			// THE LISTEN ADDRESS IS RENDERED, not left to the engine. vLLM would have opened every
+			// interface on this port by itself; writing it makes the argv say so.
+			name:   "vllm base command, model positional, listen address filled",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			wantCommand: []string{
+				"vllm", "serve", "Qwen/Qwen2.5-72B-Instruct",
+				"--host", "0.0.0.0", "--port", "8000",
+			},
 		},
 		{
-			name:        "sglang base command names the model through a flag",
-			engine:      workercore.ModelDeploymentEngineSGLang,
-			wantCommand: []string{"python3", "-m", "sglang.launch_server", "--model-path", "Qwen/Qwen2.5-72B-Instruct"},
+			// THE CASE THE RENDERING EXISTS FOR. Left alone this engine opens 127.0.0.1:30000,
+			// which no Service endpoint and no kubelet probe can reach.
+			name:   "sglang base command names the model through a flag, and is moved off loopback",
+			engine: workercore.ModelDeploymentEngineSGLang,
+			wantCommand: []string{
+				"python3", "-m", "sglang.launch_server", "--model-path", "Qwen/Qwen2.5-72B-Instruct",
+				"--host", "0.0.0.0", "--port", "8000",
+			},
 		},
 		{
-			name:      "connector arguments land before the user's",
+			name:      "connector arguments land before the user's, and the address after both",
 			engine:    workercore.ModelDeploymentEngineVLLM,
 			connector: ModelDeploymentConnectorRender{Args: []string{`--kv-transfer-config={}`}},
 			extraArgs: []string{"--max-model-len=32768"},
@@ -179,6 +190,31 @@ func TestRenderModelDeploymentPod_Command(t *testing.T) {
 				"vllm", "serve", "Qwen/Qwen2.5-72B-Instruct",
 				`--kv-transfer-config={}`,
 				"--max-model-len=32768",
+				"--host", "0.0.0.0", "--port", "8000",
+			},
+		},
+		{
+			// FILLED, NOT OWNED. A role that names either flag keeps its own value, and the
+			// operator adds only the one that is missing.
+			name:      "a role's own port is kept and only the host is filled",
+			engine:    workercore.ModelDeploymentEngineVLLM,
+			extraArgs: []string{"--port", "9100"},
+			wantCommand: []string{
+				"vllm", "serve", "Qwen/Qwen2.5-72B-Instruct",
+				"--port", "9100",
+				"--host", "0.0.0.0",
+			},
+		},
+		{
+			// The other spelling has to answer alike, or the operator would append a second value
+			// for a flag the role already set.
+			name:      "the equals spelling counts as already set",
+			engine:    workercore.ModelDeploymentEngineSGLang,
+			extraArgs: []string{"--host=127.0.0.1"},
+			wantCommand: []string{
+				"python3", "-m", "sglang.launch_server", "--model-path", "Qwen/Qwen2.5-72B-Instruct",
+				"--host=127.0.0.1",
+				"--port", "8000",
 			},
 		},
 	}
@@ -243,6 +279,15 @@ func TestRenderModelDeploymentPod_TakeOver(t *testing.T) {
 	// configure -- a record of a wiring that is not there.
 	assert.NotContains(t, pod.Annotations, inject.ClientConfigAnnotationKey,
 		"a take-over role gets no part of the connector, including the annotation carrying it")
+
+	// AND NO PROBES, for the same reason. The operator did not write this argv, so it cannot claim
+	// the container answers the engine's health route on the Service's port. A gate rendered against
+	// a command it did not build would leave a working replica permanently unready, which is worse
+	// than the late-Ready the gates exist to fix.
+	assert.Nil(t, pod.Spec.Containers[0].StartupProbe,
+		"the operator cannot gate a command line it did not build")
+	assert.Nil(t, pod.Spec.Containers[0].ReadinessProbe,
+		"nor grade its readiness on a route it cannot know the container serves")
 }
 
 // TestRenderModelDeploymentPod_Env covers the merge across tiers: what the operator owns is
@@ -806,4 +851,223 @@ func TestRenderModelDeploymentPod_ConfigChangeMovesTheSpecHash(t *testing.T) {
 	// would be indistinguishable and no recreate would ever follow a configuration change.
 	assert.Equal(t, before.Spec, after.Spec,
 		"the projection names an annotation, so the spec is blind to the content change")
+}
+
+// TestRenderModelDeploymentPod_Probes pins the gates that make "ready" mean "the engine answers".
+//
+// Without them the kubelet reports Ready as soon as the process starts, which on a measured run
+// preceded the engine serving by more than a minute and a half. Every assertion here is about the
+// rendered shape; whether the gate actually tracks the engine needs an accelerator and is not
+// covered by any test in this package.
+func TestRenderModelDeploymentPod_Probes(t *testing.T) {
+	t.Run("a role declaring its own ports is gated on that port, which the engine is told to open", func(t *testing.T) {
+		// THE DECLARED PORT REACHES THE ENGINE, so the address the Service targets and the address
+		// the engine opens are one figure. That is what makes gating on it correct rather than a way
+		// to strand a replica, and it is why this case no longer withholds the gates.
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{
+				{Port: 9100, Name: "serve", Protocol: core.ProtocolTCP},
+			}
+		})
+
+		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			Deployment:   md,
+			Role:         &md.Spec.Roles[0],
+			InstanceType: newRenderInstanceType(),
+		})
+		require.NoError(t, err)
+
+		c := pod.Spec.Containers[0]
+		assert.Equal(t, []string{"--host", "0.0.0.0", "--port", "9100"}, c.Command[len(c.Command)-4:],
+			"the declared port is what the engine is told to open")
+		require.NotNil(t, c.StartupProbe, "and the gate reads it")
+		require.NotNil(t, c.ReadinessProbe)
+		assert.Equal(t, intstr.FromInt32(9100), c.StartupProbe.HTTPGet.Port)
+		assert.Equal(t, intstr.FromInt32(9100), c.ReadinessProbe.HTTPGet.Port)
+		assert.Equal(t, int32(9100), c.Ports[0].ContainerPort)
+	})
+
+	t.Run("a port declared as UDP is not gated, and this one fails the other way", func(t *testing.T) {
+		// EVERY OTHER GUARD HERE AVOIDS CALLING A WORKING REPLICA BROKEN. This one avoids the
+		// reverse: an HTTP engine speaks TCP whatever the declaration says, so the gate would
+		// SUCCEED while the published endpoint forwards a protocol nothing answers.
+		for _, proto := range []core.Protocol{core.ProtocolUDP, core.ProtocolSCTP} {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{
+					{Port: 8000, Name: "serve", Protocol: proto},
+				}
+			})
+
+			pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+				Deployment:   md,
+				Role:         &md.Spec.Roles[0],
+				InstanceType: newRenderInstanceType(),
+			})
+			require.NoError(t, err)
+
+			assert.Nil(t, pod.Spec.Containers[0].StartupProbe,
+				"%s: an HTTP gate would pass while the endpoint forwards %s", proto, proto)
+			assert.Nil(t, pod.Spec.Containers[0].ReadinessProbe, "%s", proto)
+		}
+	})
+
+	t.Run("a role configuring its own listening endpoint is not gated", func(t *testing.T) {
+		// TWO WAYS TO DO IT, and both strand a replica that is serving. --host and --port move WHERE
+		// the engine listens, and the operator then leaves them alone, so the engine moves without
+		// the Service following. An --ssl-* flag moves HOW: a plaintext GET against a TLS listener
+		// never completes, so the startup threshold would restart a replica answering every request.
+		for _, extraArgs := range [][]string{
+			{"--port", "9100"},
+			{"--port=9100"},
+			{"--host", "127.0.0.1"},
+			{"--host=127.0.0.1"},
+			{"--ssl-cert-reqs", "2"},
+			{"--ssl-certfile", "/etc/tls/tls.crt", "--port", "9100"},
+		} {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ExtraArgs = extraArgs
+			})
+
+			pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+				Deployment:   md,
+				Role:         &md.Spec.Roles[0],
+				InstanceType: newRenderInstanceType(),
+			})
+			require.NoError(t, err)
+
+			assert.Nil(t, pod.Spec.Containers[0].StartupProbe,
+				"%v decides the endpoint for itself, so the gate cannot claim to read it", extraArgs)
+			assert.Nil(t, pod.Spec.Containers[0].ReadinessProbe,
+				"%v decides the endpoint for itself, so the gate cannot claim to read it", extraArgs)
+		}
+	})
+
+	t.Run("a role enabling TLS stays gated, over HTTPS", func(t *testing.T) {
+		// LOSING READINESS TO ONE ORDINARY FLAG would hand back the defect these gates remove. The
+		// address is still the operator's own -- only the transport moved -- and the kubelet does
+		// not verify the server certificate on an HTTPS probe.
+		for _, extraArgs := range [][]string{
+			{"--ssl-certfile", "/etc/tls/tls.crt"},
+			{"--ssl-keyfile=/etc/tls/tls.key"},
+			{"--ssl-ca-certs", "/etc/tls/ca.crt"},
+		} {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ExtraArgs = extraArgs
+			})
+
+			pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+				Deployment:   md,
+				Role:         &md.Spec.Roles[0],
+				InstanceType: newRenderInstanceType(),
+			})
+			require.NoError(t, err)
+
+			c := pod.Spec.Containers[0]
+			require.NotNil(t, c.StartupProbe, "%v", extraArgs)
+			require.NotNil(t, c.ReadinessProbe, "%v", extraArgs)
+			assert.Equal(t, core.URISchemeHTTPS, c.StartupProbe.HTTPGet.Scheme,
+				"%v moved the transport, so the gate has to follow it", extraArgs)
+			assert.Equal(t, core.URISchemeHTTPS, c.ReadinessProbe.HTTPGet.Scheme, "%v", extraArgs)
+		}
+	})
+
+	t.Run("a connector argument carrying an endpoint flag is seen too", func(t *testing.T) {
+		// THE TWO CHECKS READ THE SAME LIST. The fill skips a flag anywhere on the rendered command
+		// line, so a gate scanning only role.ExtraArgs would honor a connector-supplied port and
+		// then grade the operator's own -- the asymmetry this case exists to keep closed. No
+		// connector renders one of these today, which is exactly why nothing else would catch it.
+		md := newRenderDeployment()
+
+		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			Deployment:   md,
+			Role:         &md.Spec.Roles[0],
+			InstanceType: newRenderInstanceType(),
+			Connector:    ModelDeploymentConnectorRender{Args: []string{"--port", "9100"}},
+		})
+		require.NoError(t, err)
+
+		assert.Nil(t, pod.Spec.Containers[0].StartupProbe,
+			"a port the connector supplied is still not a port the operator chose")
+		assert.Nil(t, pod.Spec.Containers[0].ReadinessProbe)
+		assert.NotContains(t, pod.Spec.Containers[0].Command[len(pod.Spec.Containers[0].Command)-2:],
+			"--port", "and the fill must not add a second one")
+	})
+
+	t.Run("an extra argument that is not an endpoint flag leaves both gates in place", func(t *testing.T) {
+		// THE BASELINE THE CASE ABOVE NEEDS. Without it, a guard that withheld the gates whenever a
+		// role carried ANY extra argument would pass that case just as well. The second argument is
+		// deliberately one whose name contains "ssl" without being part of the family, so a guard
+		// matching on a substring rather than the flag prefix fails here.
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].ExtraArgs = []string{"--max-model-len", "4096", "--served-model-name", "ssl-demo"}
+		})
+
+		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			Deployment:   md,
+			Role:         &md.Spec.Roles[0],
+			InstanceType: newRenderInstanceType(),
+		})
+		require.NoError(t, err)
+
+		require.NotNil(t, pod.Spec.Containers[0].StartupProbe,
+			"an argument that does not move the port leaves the engine on the operator's own")
+		require.NotNil(t, pod.Spec.Containers[0].ReadinessProbe,
+			"and the readiness gate with it")
+		assert.Equal(t, core.URISchemeHTTP, pod.Spec.Containers[0].StartupProbe.HTTPGet.Scheme,
+			"and nothing moved the transport, so the gate stays plaintext")
+	})
+
+	testCases := []struct {
+		name     string
+		wantPort int32
+	}{
+		{
+			name:     "a role naming no port is gated on the default every engine serves on",
+			wantPort: modelDeploymentDefaultPort,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment()
+
+			pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+				Deployment:   md,
+				Role:         &md.Spec.Roles[0],
+				InstanceType: newRenderInstanceType(),
+			})
+			require.NoError(t, err)
+
+			c := pod.Spec.Containers[0]
+			require.NotNil(t, c.StartupProbe, "a slow loader needs a startup gate")
+			require.NotNil(t, c.ReadinessProbe, "ready must not precede the engine serving")
+
+			// NO LIVENESS GATE, and this is an assertion rather than an omission. One supported
+			// engine answers this route with 503 for the whole load, so a liveness gate reading it
+			// would restart a replica that is loading normally.
+			assert.Nil(t, c.LivenessProbe,
+				"a liveness gate on this route would restart an engine that is merely still loading")
+
+			for name, p := range map[string]*core.Probe{
+				"startup": c.StartupProbe, "readiness": c.ReadinessProbe,
+			} {
+				require.NotNil(t, p.HTTPGet, "%s gate must read the engine's route, not accept a socket", name)
+				assert.Equal(t, modelDeploymentProbePath, p.HTTPGet.Path, "%s gate path", name)
+				assert.Equal(t, tc.wantPort, p.HTTPGet.Port.IntVal, "%s gate port", name)
+			}
+
+			// THE GATE AND THE SERVICE MUST NAME ONE PORT, and the comparison is against the
+			// rendered Service rather than against the helper the render used -- comparing a value
+			// with the function that produced it would hold however either side drifted.
+			svc := renderModelDeploymentService(md)
+			require.Len(t, svc.Spec.Ports, 1)
+			assert.Equal(t, svc.Spec.Ports[0].TargetPort.IntVal, c.ReadinessProbe.HTTPGet.Port.IntVal,
+				"the port the gate grades and the port the Service sends traffic to are one fact")
+
+			// The two gates are not one gate twice: the startup budget carries the load window and
+			// readiness stays tight, so a replica that has served once is taken out quickly.
+			assert.Greater(t, c.StartupProbe.FailureThreshold, c.ReadinessProbe.FailureThreshold,
+				"the startup gate carries the load window that readiness must not have to tolerate")
+		})
+	}
 }

@@ -367,6 +367,43 @@ means some replicas are ready and some are not — serving, at less than the cap
 and `status.endpoint` is the address the deployment-wide Service serves on, in the form
 `http://<name>.<namespace>.svc:<port>`.
 
+**`ready` counts replicas whose engine answered, not replicas whose process started** — for every
+role except the three shapes listed below, which carry no gates and keep the weaker meaning. A gated
+replica carries a startup gate and a readiness gate, both reading the engine's own `GET /health` on
+the port the Service targets, so `ready == desired` and "the endpoint answers" are one fact rather
+than two. One still loading its model counts as not ready for as long as that takes.
+
+The KV cache store's leader answers a route of the same name that is deliberately **not** a readiness
+signal — see [KV Cache Leader](../kv-cache/leader.md). They are different programs, and only the
+engine's route is read here.
+
+**The startup gate allows thirty minutes per attempt, not in total.** A replica that has not
+answered by then is restarted and gets the same budget again, so a model that never finishes loading
+is a restart loop rather than a replica stuck at not-ready.
+
+**The operator tells the engine where to listen.** It renders `--host 0.0.0.0` and `--port <the port
+the Service targets>` into the engine's own command line, so the address traffic is sent to and the
+address the engine opens are one decision. The two engines do not agree on a default — vLLM opens
+every interface on 8000, SGLang opens `127.0.0.1:30000` — and an engine left on its own would be
+unreachable on one of them.
+
+⛔ **Both flags are filled, not owned.** A role that passes either through `extraArgs` keeps its own
+value, and the operator adds only the one that is missing.
+
+**A role that enables TLS is still gated**, over HTTPS. Only the transport moved — the address is
+still the operator's own — and the kubelet does not verify the server certificate on a probe, so a
+self-signed pair is graded like any other.
+
+⛔ **Three shapes carry neither gate**: a role that replaces the command through `template.command`;
+a role that moves where its engine listens, with `--host`, `--port`, or `--ssl-cert-reqs`, which can
+demand a client certificate a probe has none to present; and a role declaring its port as `UDP` or
+`SCTP`.
+
+The first two fail one way and the third the other. Gating an address the operator does not know
+would restart a replica answering every request; an HTTP engine speaks TCP whatever the declaration
+says, so a gate would **pass** while the published endpoint forwards a protocol nothing answers.
+Replicas of all three are Ready as soon as their process starts.
+
 `assignedFlavor` answers *which accelerator model did this role actually get*, read from the group
 Workload's per-PodSet assignment. It is **absent** rather than empty while no assignment exists,
 because "not assigned yet" and "assigned to a flavor with no name" are different facts and one of them
@@ -528,7 +565,8 @@ configured, so a NetworkPolicy or port reservation has to be a range rather than
 benign on a client mounting no segment of its own — which is what every replica here is.
 
 **A replica serves on port 8000** unless the role's template names its own container port. The
-Service in front of the replicas takes that port, and `status.endpoint` reports it.
+Service in front of the replicas takes that port, `status.endpoint` reports it, and the engine is
+told to open it — a declared port reaches the engine's `--port` rather than only the Service.
 
 ### Transfer ports are runtime-selected
 
