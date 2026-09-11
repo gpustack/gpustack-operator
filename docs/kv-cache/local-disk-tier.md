@@ -86,7 +86,7 @@ figure:
 > bucket would not fit under a declared ceiling, and it reports that by doing nothing. A tier below
 > any of these is a configuration that cannot work under any workload.
 
-**Read `master_allocated_file_size_bytes` to see what the tier actually holds:**
+**Read `master_allocated_file_size_bytes` to see what the leader has REGISTERED on disk:**
 
 ```console
 $ kubectl exec -n gpustack-system deploy/<backend>-leader -- \
@@ -95,8 +95,26 @@ $ kubectl exec -n gpustack-system deploy/<backend>-leader -- \
     if l.startswith('master_allocated_file_size_bytes')])"
 ```
 
-`master_allocated_file_size_bytes` is **bytes actually written to the tier**, so `0` on a tier you
-expect to be filling means the data path is not working, whatever the rest of the object says.
+⛔ **It is not bytes written, and reading it as such inverts what `0` means.** The leader adds to this
+gauge when it builds a disk replica and subtracts when it drops one, so the figure is the summed
+declared size of the replicas it currently **has registered**. For this tier a replica is built when
+a member reports a completed offload, so bytes that reach the directory any other way are on the disk
+and absent from this number.
+
+⇒ **`0` does not prove the data path is broken.** It proves the leader has registered nothing, which
+is also what a tier looks like while its objects are still deferred for offload. Non-zero is the
+useful direction: it means offload completed at least once.
+
+> **Why the name misleads** — the metric was added for a distributed filesystem backend and the disk
+> tier reuses it; its own description still reads "file storage in 3fs/nfs". The same figure is added
+> into `status.capacity.used` when a tier is declared, and carries the same meaning there.
+
+**To see whether bytes reached the tier, look at the directory itself** — nothing the leader exposes
+reports it:
+
+```console
+$ kubectl debug node/<node> -it --image=busybox -- du -sh /host/<localDisk.path>
+```
 
 ## What the tier does when it fills
 
