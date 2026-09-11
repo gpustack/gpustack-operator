@@ -162,9 +162,12 @@ NODES="$(ready_nodes)"
 #
 # The probes run SERIALLY and each is --rm, so a shared name does not normally race. It bites when
 # a previous Pod outlives its delete -- a timeout, an interrupt: the next `kubectl run` hits
-# AlreadyExists, the error goes to /dev/null, and that node contributes NO READING. On the ls
-# probe that is a node silently missing from the file count this case reads its verdict from, and
-# "no files anywhere" is exactly the answer a skipped node also produces.
+# AlreadyExists, the error goes to /dev/null, and that node contributes NO READING. A bound that
+# expires is the other way to get there, so this is a shape rather than a single cause and an
+# enumeration of causes here would go stale without saying so. On the ls probe a node with no
+# reading is one missing from the file count this case reads its verdict from, and "no files
+# anywhere" is exactly the answer a node that never answered also produces -- which is why that
+# loop keeps the two apart per node instead of counting.
 node_tag() { printf '%s' "$1" | cksum | cut -d' ' -f1; }
 
 teardown() {
@@ -386,6 +389,7 @@ fi
 # ------------------------------------------------- 4. files on the host, not just a metric
 
 FOUND=""
+SILENT=""
 for node in $NODES; do
   short="$(node_tag "$node")"
   out="$(kubectl -n "$NS" run "case65-ls-${SFX}-${short}" --restart=Never --rm -i --quiet \
@@ -393,10 +397,27 @@ for node in $NODES; do
     --image=busybox:1.36 --overrides='{"spec":{"nodeName":"'"$node"'","containers":[{"name":"ls","image":"busybox:1.36","command":["sh","-c","ls /tier | head -5; ls /tier | wc -l"],"volumeMounts":[{"name":"tier","mountPath":"/tier"}]}],"volumes":[{"name":"tier","hostPath":{"path":"'"$RUN_HOST_PATH"'","type":"Directory"}}]}}' \
     2>/dev/null)"
   n="$(echo "$out" | tail -1)"
-  [ "${n:-0}" -gt 0 ] 2>/dev/null && FOUND="$FOUND $node:${n}files"
+  # Each node contributes a STATE, not a number, and the state that matters is the one with no
+  # number in it. Every way this probe fails to answer -- the name still held by a previous Pod, the
+  # bound expiring, an unparsable last line -- leaves n empty or non-numeric, and a count that
+  # defaulted that to zero would enter the verdict below as a node that looked and found nothing.
+  # The distinction has to be kept HERE: after the loop there is only a total, and a total cannot
+  # say which nodes it was taken over.
+  case "$n" in
+    '' | *[!0-9]*) SILENT="$SILENT $node" ;;
+    0) ;;
+    *) FOUND="$FOUND $node:${n}files" ;;
+  esac
 done
 if [ -n "$FOUND" ]; then
-  record PASS "offloaded objects exist as files in the host directory" "$(echo $FOUND)"
+  # Files anywhere settle an existential claim, so a silent node cannot overturn it -- but it is
+  # named, because otherwise a partial survey reads as a complete one.
+  record PASS "offloaded objects exist as files in the host directory" \
+    "$(echo $FOUND)${SILENT:+ (no answer from$SILENT)}"
+elif [ -n "$SILENT" ]; then
+  record FAIL "offloaded objects exist as files in the host directory" \
+    "no file count from$SILENT -- the probe did not answer there, so this run did not measure the \
+directory and cannot say whether the writes reached it"
 else
   record FAIL "offloaded objects exist as files in the host directory" \
     "no files under $RUN_HOST_PATH on any node -- the metric and the directory disagree with the writes"
