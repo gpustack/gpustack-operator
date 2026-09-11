@@ -121,12 +121,10 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 		// The CXL switch, and a fourth kind of cost: this one does not shade a setting or refuse to
 		// start -- it REPLACES a setting the object states, and the object goes on stating it.
 		//
-		// Measured in the artifact's source, twice over. The constructor's own initializer list
-		// picks the strategy as "config.enable_cxl ? AllocationStrategyType::CXL :
-		// config.allocation_strategy_type", so the rendered flag is discarded before the process
-		// finishes constructing; startup then swaps the strategy object for CxlAllocationStrategy
-		// and initializes a DAX allocator from the other two keys. The strategy type also gates
-		// behavior elsewhere, since several paths branch on it being LOCAL_FIRST.
+		// Measured in the artifact's source: the master resolves its strategy type from this flag
+		// before construction finishes and then replaces the strategy object during startup, so
+		// the rendered -allocation_strategy is dead rather than overridden late, and the resolved
+		// type goes on gating other paths.
 		//
 		// Nothing collides by name -- this API renders no CXL flag -- which is why these belong
 		// here and not in Derived. The Derived message would also be untrue: it says the key is
