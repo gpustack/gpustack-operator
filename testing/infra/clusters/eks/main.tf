@@ -117,12 +117,15 @@ locals {
         labels             = var.efa_enabled ? { "gpustack.ai/efa" = "true" } : {}
         enable_efa_support = var.efa_enabled
         enable_efa_only    = false
-        # A cluster placement group is scoped to one availability zone, so the group
-        # takes a single subnet. It stays public like every other node group here: the
-        # launch template below assigns a public IP, and in a private subnet that IP
-        # has no route to an internet gateway, which loses SSH access to the nodes.
-        subnet_ids = var.efa_enabled ? [module.vpc.public_subnets[0]] : null
-        network_interfaces = [
+        # A cluster placement group is scoped to one availability zone, so the group takes a
+        # single subnet, and under EFA it has to be a private one: an EFA interface cannot
+        # carry a public address, so in a public subnet the node would have no route out and
+        # EKS refuses the group with Ec2SubnetInvalidConfiguration. Those nodes are not
+        # reachable over SSH either way.
+        subnet_ids = var.efa_enabled ? [module.vpc.private_subnets[0]] : null
+        # Under EFA the module substitutes its own interface set, sized and indexed for the
+        # instance's network cards, so this group declares none of its own.
+        network_interfaces = var.efa_enabled ? [] : [
           {
             associate_public_ip_address = true
           }
