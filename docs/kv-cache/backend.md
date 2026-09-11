@@ -4,7 +4,7 @@
 > three things that surprise operators: capacity is observed rather than derived, shrinking a group
 > discards the cache that member held, and a member group's identity is its position in a list.
 > **Audience** operators, contributors · **Prerequisites** [Architecture](../architecture.md) ·
-> **Read time** ~20 min
+> **Read time** ~13 min
 
 A `KVCacheBackend` declares a pooled KV cache for inference workloads. The operator runs a **leader**
 (one metadata process) and a **member** group (one store process per selected node), then reports what
@@ -18,9 +18,7 @@ rendered flag, environment variable and metric keeps the vendor's spelling.
 - [The two axes](#the-two-axes)
 - [The image](#the-image)
 - [The metadata plane](#the-metadata-plane)
-- [The leader](#the-leader)
 - [The members](#the-members)
-- [The local disk tier](#the-local-disk-tier)
 - [What status reports](#what-status-reports)
 - [Growing and shrinking a group](#growing-and-shrinking-a-group)
 - [The external mode](#the-external-mode)
@@ -50,7 +48,7 @@ spec:
 
 `connection.managed` and `connection.external` are both optional pointers and **exactly one** must be
 set; neither and both are refused at admission with a message naming the two. Several member groups
-are allowed; at most one of them may carry a [local disk tier](#the-local-disk-tier).
+are allowed; at most one of them may carry a [local disk tier](local-disk-tier.md).
 
 **`members[].medium` has one value, `DRAM`**, and it is an identity rather than a choice: the group
 says what it contributes, so a second medium widens the enum instead of being inferred from a field
@@ -61,7 +59,7 @@ each is reached another way:
 
 | Was a `medium` value | What it actually is | Where it lives |
 |---|---|---|
-| `LocalDisk` | a tier on the members that already hold the memory replica | [`members[].localDisk`](#the-local-disk-tier) |
+| `LocalDisk` | a tier on the members that already hold the memory replica | [`members[].localDisk`](local-disk-tier.md) |
 | `NoF` | an NVMe-oF target coordinate, registered once, with no node affinity and no Pod | no API surface; it is not a member group |
 | `CXL` | a DAX device the **leader process** allocates from | nowhere in this API: `enable_cxl`, `cxl_path` and `cxl_size` are refused in `leader.extraArgs`, because the first replaces `leader.allocationStrategy` |
 | `DFS` | a distributed filesystem the **leader process** allocates from | the leader's own environment, which this API does not render |
@@ -155,7 +153,7 @@ Nothing has to be built to run this **without high availability**.
 It runs on a host with no GPU: its `libcuda.so.1` is a stub and its `libcudart.so.12` is the real
 library, and neither reaches a driver.
 
-⛔ **[High availability](#high-availability) needs a different image, and for both roles.** That
+⛔ **[High availability](leader.md#high-availability) needs a different image, and for both roles.** That
 section carries which build, why no published one will do, and what each role does when handed one
 that cannot.
 
@@ -179,7 +177,7 @@ tag by the same rule the API server would have applied** — `Always` for `:late
 > `image-pull-secrets` Settings are values of the bundled-application chart install. They reach the
 > subcharts and nothing a controller renders, so a `KVCacheBackend` that inherited them would be the
 > only object in this API whose running workloads move when a chart value moves. The service accounts
-> [high availability](#high-availability) renders carry no registry credentials either — they grant
+> [high availability](leader.md#high-availability) renders carry no registry credentials either — they grant
 > Lease access and nothing else — so without these fields no image here could come from a private
 > registry at all.
 
@@ -192,7 +190,7 @@ dependencies beyond its image** — no etcd, no Redis, nothing to deploy alongsi
 Two axes get confused here, so both are stated. The metadata plane is how clients find one another.
 The **HA backend store** — `-enable_ha` with `-ha_backend_type` — is how leader replicas elect one
 among them, and that is where the Kubernetes Lease lives. It is
-[`highAvailability`](#high-availability), and it moves nothing on this plane.
+[`highAvailability`](leader.md#high-availability), and it moves nothing on this plane.
 
 ⛔ **A manifest that tries to configure the metadata plane is not refused with a helpful message.**
 There is no field, so there is nothing for a webhook to see:
@@ -204,154 +202,6 @@ There is no field, so there is nothing for a webhook to see:
 
 The second is indistinguishable from success at the point of apply. This section is the protection
 against it: the metadata plane takes no configuration at all.
-
-## The leader
-
-The leader is a Deployment plus a ClusterIP Service publishing two ports — `50051` for engine clients
-and `9003` for the admin surface, which serves the Prometheus exposition and the HTTP admin API on one
-port.
-
-`replicas` defaults to `1`, and `5` is the ceiling in the **webhook** and in the schema alike: only
-one leader ever serves, so further replicas are spare processes rather than capacity. More than one
-requires [`highAvailability`](#high-availability) and is refused by the webhook without it, naming
-the field that is missing. An enum would answer `Unsupported value: 2` and teach nothing.
-
-⛔ **Without `highAvailability` the Deployment runs one replica whatever `replicas` says.** The
-webhook refuses that combination, but a schema cannot express a cross-field rule — so where the
-webhook is not installed this clamp is what keeps unelected masters off one pool.
-
-**The update strategy follows the replica count, and the two cases are opposites.** At one replica
-the Deployment uses `Recreate`: an update stops the old master before starting the new one, so expect
-a gap with no master on every image or flag change. Members keep their segments across it and
-re-register.
-
-> **Why** — `RollingUpdate`'s `maxSurge` defaults to 25% and rounds *up*, which against one replica
-> is one: the default strategy would run two masters at once on every update, which is exactly what
-> the single replica exists to prevent.
-
-Above one replica it rolls instead — `maxSurge: 1`, `maxUnavailable: replicas` — because `Recreate`
-would take every standby down together with the leader and leave nothing to elect.
-
-> **Why `maxUnavailable` is not `replicas-1`** — the Deployment controller removes an old Pod only
-> while more replicas are available than `replicas - maxUnavailable`. Exactly one is ever available
-> here, so `replicas-1` makes that `1 > 1`: the old leader is never removed, the new replicas cannot
-> become ready until it releases the Lease, and the rollout stalls for good.
-
-⛔ **A rollout still has a window with no serving master**, and high availability shortens it rather
-than removing it. A floor of zero available replicas is what lets the old leader go, so it can go
-before a replacement has taken the Lease. The window is bounded by the lease expiry plus activation,
-not by a Pod start — the replacements are already running as standbys, contending for it.
-
-**The two probes deliberately take different paths**, and this is the one configuration detail on this
-page that must not be "simplified":
-
-| probe | path | gated? |
-|---|---|---|
-| readiness | `GET /get_all_segments` | yes — 503 until the service plane is active |
-| liveness | `GET /health` | **no**, and it must not be |
-
-`/health` answers 200 in every state, so using it for readiness is the same as having no readiness
-probe. Using a gated route for **liveness** would kill a leader that is slow to activate.
-
-The health document has four fields that matter:
-
-```json
-{"status":"ok","role":"leader","ha_state":"serving","service_ready":true}
-```
-
-⛔ **`status` is a hard-coded constant.** It reads `"ok"` on a leader that is serving nothing.
-**`service_ready` is the only verdict in the document**, and every readiness decision rests on it.
-
-A single leader reports `service_ready: true` from its first answer, because the non-HA path sets it
-unconditionally three lines after the admin server starts. Under high availability it is the standby
-marker, and the readiness gate above is what turns it into an endpoint decision.
-
-### High availability
-
-Set `leader.highAvailability` and the leader elects through a **Kubernetes Lease**. The field has no
-settings — the Lease carries the leader's own object name, `<backend>-leader`, in this operator's
-namespace — and its presence is the switch:
-
-```yaml
-spec:
-  connection:
-    managed:
-      leader:
-        replicas: 3
-        highAvailability: {}
-```
-
-⛔ **A published `kvcacheai/mooncake` image cannot do this, on either side.** Leadership backend
-availability is a compile-time switch and every option ships **off**:
-
-| role on a published image | what it does |
-|---|---|
-| leader | answers `UNAVAILABLE_IN_CURRENT_MODE`, runs as a permanent standby |
-| member | answers `Invalid HA backend entry`, exits, CrashLoopBackOffs |
-
-Use an image built from [`pack/mirrored-mooncake`](../../pack/mirrored-mooncake/Dockerfile) for
-`spec.image` **and for every `members[].image`**.
-
-⛔ **A member group on `RDMA`, `HIP` or `Ascend` cannot run under high availability today.** Those
-transports need a vendor runtime `mirrored-mooncake` does not carry, and the vendor build does not
-carry the leadership backend — the two axes are independent, so covering them means rebuilding each
-variant.
-
-`EFA` is the one fabric not on that list: it needs no vendor runtime, only libfabric, so
-`mirrored-mooncake` compiles it in — the image build proves the transport installed by running a
-target-mode bench told `--protocol=efa` and refusing the transport map's "Invalid protocol": the
-device-less builder's "No EFA devices found" and an EFA-capable builder's clean run both pass. An
-`EFA` member group runs under high availability, on nodes that have the AWS EFA driver installed.
-
-Tracked at [issue #279](https://github.com/gpustack/gpustack-operator/issues/279), together with the
-alternative of leaving members on the leader Service address and letting readiness move the endpoint.
-
-⛔ **`enable_oplog` is refused in `leader.extraArgs`**, and not as a policy choice: the store's
-operation log requires the etcd backend, which cannot be compiled together with the Lease backend, so
-the flag produces a leader that refuses to start. Standbys rebuild from snapshot and remounts instead.
-
-⛔ **`rpc_address` and `rpc_interface` are refused there too**, because the election renders the
-first. The store folds it with the RPC port into the string it campaigns with, so that one value is
-both the election's identity and the address written into the Lease for members to dial. Each replica
-advertises **its own Pod IP**; a value supplied by hand would point every member at one host, chosen
-without knowing whether the Pod answers there.
-
-**The healthy steady state reads `N desired / 1 ready`.** Exactly one leader serves; the rest are
-standbys, and a standby is deliberately **not ready** — that is what keeps it out of the leader
-Service's endpoints, so an engine never connects to a process that cannot serve. To anyone who has
-not been told, `3/1` is what a broken Deployment looks like. It is not. `kubectl get deploy` during a
-healthy failover briefly shows `2` ready as the old leader steps down; both readings are normal.
-
-> **Why there is no "who is the leader" field** — the store labels its own Pod
-> `mooncake.io/store-role=leader` once it wins, so `kubectl get pod -l mooncake.io/store-role=leader`
-> answers it. This operator does not read the admin API to re-report it, because failover is the
-> client's business and a second opinion could disagree with the first.
-
-**Both roles get a ServiceAccount, and they are different accounts.** The operator renders a
-`ServiceAccount`, `Role` and `RoleBinding` per role in its own namespace, and names them on the Pods:
-
-| role | grant | why |
-|---|---|---|
-| leader | `leases`: `create`, `get`, `update`; `pods`: `patch` | takes the Lease, and labels its own Pod |
-| member | `leases`: `get` | finds the leader, and nothing more |
-
-The member's is narrower on purpose: a shared account would let any member take the Lease from the
-leader it is following.
-
-**A member's `MOONCAKE_MASTER` becomes `k8s://<namespace>/<lease>`** instead of the leader Service
-address, so the client reads the holder and follows it across an election without restarting. Without
-`highAvailability` the value is unchanged.
-
-**The Service address is not known to be wrong under HA** — a standby is not ready, so the Service
-already resolves to the serving leader. What is unmeasured is whether a member's reconnect follows
-the endpoint when an election moves it. The Lease is what this operator renders until that is
-measured; see #279 above.
-
-**A missing grant fails differently on each side, and one of them is silent.** A leader that cannot
-reach the Lease retries every second forever — liveness is ungated, so nothing restarts and the
-Deployment sits at `0/N` ready with no message naming the cause. A member that cannot read it gives
-up after twenty tries and CrashLoopBackOffs. Check both accounts exist before reading `0/N` as a
-store problem.
 
 ## The members
 
@@ -435,218 +285,6 @@ hands to clients. Rules written for the data plane therefore target pod addresse
 > nothing here survived a restart anyway. On the host-fabric paths the pod holds the host's network
 > namespace and this is the node's address regardless.
 
-## The local disk tier
-
-A member group may declare a directory on each of its nodes, which configures the store client's
-offload keys to point at it. It is **two halves and admission requires both**, because either alone
-is accepted by the store and then does nothing it reports:
-
-```yaml
-spec:
-  connection:
-    managed:
-      leader:
-        offload:
-          enabled: true                # the leader's half
-          onEvict: true                # optional; requires enabled
-      members:
-      - nodeSelector: { kvcache: "true" }
-        medium: DRAM
-        capacityPerMember: 500Gi
-        localDisk:                     # the members' half
-          path: /var/lib/kvcache
-          capacity: 4Ti                # optional; unset means the store's own ceiling
-          keyLimit: 10000000           # optional; the same, on the key count
-          eviction:                    # optional; unset means the store's own behaviour
-            enabled: true              # default; false fills the tier and then stops writing
-            policy: LRU                # FIFO | LRU; unset means the store's own, which is FIFO
-            watermark:                 # optional; percentages of capacity
-              high: 90
-              low: 80
-```
-
-| what it renders | where |
-|---|---|
-| `MOONCAKE_OFFLOAD_ENABLED` and `..._FILE_STORAGE_PATH`, plus `..._BUCKET_SIZE_LIMIT_BYTES` and `..._BUCKET_KEYS_LIMIT` | the member container |
-| `..._TOTAL_SIZE_LIMIT_BYTES` **and** `..._BUCKET_MAX_TOTAL_SIZE`, both from `capacity`; `..._TOTAL_KEYS_LIMIT` from `keyLimit` | the member container |
-| `..._BUCKET_EVICTION_POLICY`, `..._ENABLE_DISK_WATERMARK_EVICTION` and the two ratio variables, from `eviction` | the member container |
-| a `hostPath` volume and mount at `localDisk.path` | the member Pod |
-| `-enable_offload=true`, `-offload_on_evict=true` | the leader's argv |
-| a `preStop` hook, and a termination window derived from `scaleIn.gracePeriodSeconds` | the member Pod |
-
-**A tier is a layer on a member group, never a group of its own** — see
-[The two axes](#the-two-axes) for why the shape has to be this way.
-
-### The tier is written one bucket at a time
-
-The store does not write an offloaded object on its own. It **assembles objects into a bucket and
-writes nothing until that bucket is full** — by bytes or by object count — and what is short of the
-threshold is carried to the next attempt, indefinitely.
-
-⛔ **The store's own thresholds are 256 MB and 500 objects, and a backend that never reaches either
-has a tier that holds nothing while looking healthy.** The member Pods are Ready, the leader logs the
-mount and reports objects deferred for offload, and `status.capacity` shows the size the tier
-declared — because that figure is **capacity, not usage** (see
-[What status reports](#what-status-reports)).
-
-This is what [issue #200](https://github.com/gpustack/gpustack-operator/issues/200) was filed for;
-the history of what was and was not observed on the way to finding it is in
-[the spec](../../specs/2026-09-05-kv-cache-media-and-scaling.md#the-one-item-that-did-not-pass-no-byte-reached-the-disk).
-
-**The operator renders a smaller pair of its own**, so a modest backend closes buckets. They are
-**not in the API** and `extraEnvs` refuses them: moving them is a tuning decision that would need a
-field, not an escape hatch that silently defines the same variable twice.
-
-Three bounds follow from the bucket being the unit, all enforced at apply time, all naming the same
-figure:
-
-- `capacityPerMember` must hold **one bucket** on a group that declares a tier — the bytes are held in
-  the memory segment until the bucket is complete.
-- `localDisk.capacity` and `localDisk.keyLimit`, when set, must hold one bucket and one bucket's worth
-  of keys.
-
-> **Why a refusal rather than a default** — the store stops taking offload work as soon as one more
-> bucket would not fit under a declared ceiling, and it reports that by doing nothing. A tier below
-> any of these is a configuration that cannot work under any workload.
-
-**Read `master_allocated_file_size_bytes` to see what the tier actually holds:**
-
-```console
-$ kubectl exec -n gpustack-system deploy/<backend>-leader -- \
-    python3 -c "import urllib.request;print([l for l in \
-    urllib.request.urlopen('http://127.0.0.1:9003/metrics').read().decode().splitlines() \
-    if l.startswith('master_allocated_file_size_bytes')])"
-```
-
-`master_allocated_file_size_bytes` is **bytes actually written to the tier**, so `0` on a tier you
-expect to be filling means the data path is not working, whatever the rest of the object says.
-
-### What the tier does when it fills
-
-`localDisk.eviction` is one choice with two outcomes, not a set of knobs:
-
-| `eviction` | what the tier does when full |
-|---|---|
-| unset | whatever the store does by default |
-| `enabled: true` (the default when the block is present) | drops what it holds and goes on accepting writes |
-| `enabled: false` | stops accepting writes; what is there stays and stays readable |
-
-- **`policy`** is the order entries leave in — `FIFO` drops the oldest written, `LRU` the least
-  recently read. Left unset, the store's own applies, which is `FIFO`.
-- **`watermark`** is when eviction runs: it starts once the tier passes `high` and stops once it is
-  back under `low`, both **percentages of `capacity`**. `low` must be below `high`.
-
-Four combinations are refused at apply time, each because the store would accept them and then not
-act on them:
-
-| Refused | Why |
-|---|---|
-| `enabled: false` with a `policy` | there is no order in which nothing leaves |
-| `enabled: false` with a `watermark` | there is nothing for the marks to start and stop |
-| `watermark` with no `capacity` | the marks are a percentage of it, and the store's own default for the quota they are taken against is a value its eviction path reads as switched off |
-| `low` at or above `high` | every write past the mark would evict; the member's own startup check refuses the pair, inside a container log |
-
-> **Why the enum has only two values** — the store maps a policy string it does not recognise onto
-> **no eviction at all**, with no error, no warning and no failure to start. A neutral two-value enum
-> is what keeps a typo from being a silently disabled cache. Turning eviction off is `enabled: false`
-> rather than a third enum value, so there is exactly one way to say it.
-
-**Settings this API does not name are reachable through `members[].extraEnvs`**, which `extraArgs`
-cannot reach: that map renders config-key overrides, and this family is read from the environment
-only. A name the operator already renders is refused there, because Kubernetes takes a container
-carrying one name twice and leaves the winner to the runtime. ⛔ **Every value is world-readable**, on
-the cluster-scoped object and again in the Pod — no credential belongs there.
-
-### The directory has to exist, and be writable by the image's user
-
-`localDisk.path` is mounted with `type: Directory`, so **the directory must already exist on every
-node the group selects**. This is deliberate: a directory the kubelet creates is owned by `root` with
-mode `0755`, while the published store image runs as **uid 65532**, and the member then starts and
-cannot write to it. `fsGroup` does not help — it does not apply to `hostPath` volumes.
-
-**The uid depends on the image**, since `members[].image` may put a different vendor's build on a
-group. Read it off the image you are using:
-
-```console
-$ docker run --rm --entrypoint id <your-member-image>
-uid=65532 gid=0(root) groups=0(root)
-```
-
-Then create the directory on each node with that uid:
-
-```console
-$ install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
-```
-
-There is **no switch that makes the operator do this for you.**
-
-> **Why** — an init container would have to name a single uid, and the command above is the evidence
-> against that: the uid is a property of the image, and `members[].image` can differ per group. The
-> decision and the alternative that was weighed against it are recorded in
-> `specs/2026-09-05-kv-cache-media-and-scaling.md`.
-
-Five rules the path has to satisfy, all enforced at apply time:
-
-- It must be **absolute**.
-- It must not be the **root directory**.
-- It **may not overlap `/dev/infiniband`** — equal to it, inside it, or containing it. A sibling such
-  as `/dev/infiniband-cache` is fine.
-- It **may not contain a `..` component**.
-- It **may not begin or end with whitespace**, spaces and tabs alike.
-
-> **Why** — the root directory would mount the node's whole filesystem into a third-party container.
-> The RDMA and EFA transports mount `/dev/infiniband` into this same container; two mounts on one
-> path are resolved by the kubelet with one shadowing the other, which nothing on the object would
-> record. That rule holds whatever
-> `spec.transport.protocol` says today, because the field is editable. The
-> `..` rule mirrors the store's own, which refuses such a path before checking whether the directory
-> exists. The whitespace rule exists because the path is mounted exactly as written, so a trailing
-> space produces a different directory than the one an operator read on the screen.
-
-⛔ **The tier is frozen once a group has it: it cannot be added to a running group, removed from one,
-or moved to another `path`.** Members would have to restart to mount the directory, and whatever they
-already wrote would stay on their nodes with nothing addressing it. `capacity` is the exception and
-moves **either way** — raising or lowering it re-renders one variable, and the tier's contents survive
-the restart that follows.
-
-⛔ **`leader.offload.enabled` cannot be turned off on its own while a group carries a tier**, because
-the pair rule refuses the half-configuration in both directions. It comes off only together with the
-tier, in the one edit below.
-
-**There is exactly one exit, and it needs the tier on the last group.** The rules pair groups **by
-position** and stop at the end of the new list, so an update that drops the **last** group and clears
-`leader.offload` in the same edit is admitted. Dropping an earlier group is refused: every position
-after it would be compared against a different group's spec, which is also why reordering `members`
-is refused. That message is accurate rather than confused about which group you meant.
-
-⛔ **A backend whose only group carries a tier has no exit but deletion.** `members` requires at least
-one entry, so that group cannot be removed, and replacing it in place is the forbidden edit. Deleting
-the `KVCacheBackend` is what is left, and it takes the leader and every member with it. Put a tier on
-the last group if you want to be able to take it off.
-
-**Three failure modes, all loud:**
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| Refused at `kubectl apply` | the path breaks one of the five rules above, or the tier was added, removed or repathed on a running group | fix the path, or leave the tier alone; the message names which rule |
-| Member Pod stuck, event says `FailedMount ... hostPath type check failed` | the directory does not exist on that node | create it as above |
-| Member Pod runs but never becomes Ready; container log carries `FileStorageConfig: no write permission on directory: <path>` and `Store startup failed (attempt N): Invalid FileStorage configuration` | the directory exists but the image's user cannot write to it | `chown` it to the uid above |
-
-The last one never reaches a Ready state — the member's REST port opens only after the store mounts,
-so the readiness probe never passes — and `MembersMounted` reports the shortfall rather than the
-backend looking healthy.
-
-### What the tier costs that nothing accounts for
-
-The `hostPath` is **not** counted into any resource request, and it cannot be: the kubelet's
-ephemeral-storage accounting covers the container filesystem, `emptyDir` volumes and logs, never a
-`hostPath`. A request against it would reserve a figure nothing polices and would keep the member off
-the very node that has the disk.
-
-**Watching that filesystem is yours.** `localDisk.capacity` renders the store's own ceiling, which is
-the only bound on what the tier writes; nothing in Kubernetes will evict or throttle the member when
-the node's disk fills.
-
 ## What status reports
 
 ```console
@@ -701,7 +339,7 @@ adding up what members were asked to provide.
 member declared — published as soon as the member registers, before anything is written there.
 
 To ask whether the **disk** tier is holding data, the figure to read is not on the CR at all — see
-[The tier is written one bucket at a time](#the-tier-is-written-one-bucket-at-a-time).
+[The tier is written one bucket at a time](local-disk-tier.md#the-tier-is-written-one-bucket-at-a-time).
 
 ⛔ **Capacity is absent — not zero — while the leader is starting.** `/metrics` is ungated: a leader
 that is up but not serving answers 200 with a well-formed exposition whose gauges all read zero, and a
@@ -824,7 +462,7 @@ node, unmounts that member's segment **immediately** — there is no drain.
 > own shutdown — it does not preserve the data.
 
 **`scaleIn.gracePeriodSeconds` holds the process, not the tier.** A member with a
-[local disk tier](#the-local-disk-tier) gets a `preStop` hook that deregisters the tier with the
+[local disk tier](local-disk-tier.md) gets a `preStop` hook that deregisters the tier with the
 leader and then waits out the grace. A group with no tier renders no hook and the setting is inert.
 
 **Measured against `mooncake` 0.3.13 on a two-node cluster**, deregistration takes effect **at once**:
@@ -990,8 +628,10 @@ judging on another is how an object goes missing from its own teardown.
 
 ---
 
-**See also** — [KV Cache Pool](pool.md) (how a namespace is granted a quota on this store, and what a
-quota ceiling buys) · [Admission](../architecture/admission.md) (the gates and the four-view status pattern) ·
+**See also** — [KV Cache Leader](leader.md) (the metadata process, its probes and its
+Lease election) · [KV Cache Local Disk Tier](local-disk-tier.md) (the optional disk layer on a member
+group, and the bucket that is its write unit) · [KV Cache Pool](pool.md) (how a namespace is granted
+a quota on this store, and what a quota ceiling buys) · [Admission](../architecture/admission.md) (the gates and the four-view status pattern) ·
 [Settings & Environment Variables](../settings.md) (the `kv-cache-backend-image` Setting) ·
 [Installation Modes](../architecture/installation-modes.md) (why the CRD is applied by the worker, not the chart)
 

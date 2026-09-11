@@ -191,7 +191,7 @@ at all — and it is process-global, so a per-pool figure would charge a co-tena
 
 Eviction is reached where it lives: the store's own process-level startup flags, which reach it
 through the backend's `spec.connection.managed.leader.extraArgs` — see
-[The leader](backend.md#the-leader) for how that container is assembled. The flag names are the
+[The leader](leader.md) for how that container is assembled. The flag names are the
 store's to document, and are deliberately not restated here.
 
 ## The quota policy file

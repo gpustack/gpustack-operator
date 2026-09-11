@@ -97,6 +97,39 @@ group discards that member's cache).
 **Never** — the four-stage scheduling chain. This chain is its own; `docs/architecture.md` links to it
 in one clause and does not describe it.
 
+## `docs/kv-cache/leader.md`
+
+**Owns** — the leader process end to end: the Deployment and ClusterIP Service and their two ports,
+the replica ceiling and the clamp that survives a missing webhook, the update strategy per replica
+count, the two probes and why they take different paths, the health document's four fields, and all
+of `leader.highAvailability` -- the Lease, the image both roles need, the per-role ServiceAccounts,
+and how a missing grant fails on each side.
+
+**Never** — the member groups, the transport, the status algebra. Those stay on `backend.md`, which
+links here. It was split out when that page hit both the line and the `##` cap.
+
+## `docs/kv-cache/local-disk-tier.md`
+
+**Owns** — the `members[].localDisk` layer end to end: the two halves admission pairs, the rendering
+table, the bucket that is the tier's write unit and the three bounds that follow from it, the
+eviction algebra and its four refusals, the five path rules and the host directory's ownership, the
+tier's immutability and its one exit, and the `hostPath` cost nothing accounts for.
+
+**Never** — the object the tier sits on. The leader, the member groups, the transport, the status
+algebra and the growing/shrinking rules are `backend.md`'s. It was split out of that page when it hit
+both the line and the `##` cap; the split is along the reader's question, not the subsystem.
+
+## `docs/kv-cache/disk-heavy-nodes.md`
+
+**Owns** — the configuration a node whose capacity is disk rather than memory needs: that no member
+group is disk alone and what that costs if attempted, the thin-segment/thick-tier manifest, and the
+one-bucket floor on `capacityPerMember` together with what that floor is and is not evidence of.
+
+**Never** — how the tier itself behaves. Its rendering table, its eviction algebra, its five path
+rules, its failure modes and the one exit that removes it are `backend.md`'s; this page links to
+each. It exists because `backend.md` sits at both the line and the `##` cap, and because the reader
+arriving with a disk-heavy machine is asking a configuration question rather than a mechanism one.
+
 ## `docs/kv-cache/pool.md`
 
 **Owns** — the `KVCachePool` / `KVCachePoolBinding` pair: why they split by scope, the Binding as the
