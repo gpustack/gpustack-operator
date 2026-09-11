@@ -132,16 +132,21 @@ Two further facts about that table, both of which change what this spec can offe
   `MOONCAKE_DFS_SINGLE_TENANT` and falls back to it — so no master setting can reach it. DFS also
   enforces the requirement in its own validator (`distributed_storage_backend.cpp:70-74`), and
   `master_service.cpp:572` is the only read outside that module. So `leader.multiTenancy` does not
-  select
-  this branch, the branch does not fire by default, and this API cannot reach it either —
+  select this branch, the branch does not fire by default, and this API cannot reach it either —
   `KVCacheBackendLeader` carries `extraArgs` and no environment passthrough, and `extraEnvs` exists
   only on the member, so nothing here can set that variable on a leader. The single-tenant rule is
   `master_service.cpp:571-576`; the cited `:568-574` began inside the preceding rule's `throw` and
   stopped short of the two lines that perform the degradation.
-- ⛔ **What this correction does NOT establish.** It does not say `DFS` is usable under a pool. DFS
-  supports only its single-tenant mode, and a `KVCachePool` requires its backend to keep a
-  per-tenant ledger; whether those two are semantically incompatible is not answered here. The
-  mechanism this section gave is disproved, not the conclusion it reached.
+- ⭐ **The incompatibility is real; it lives on the request path, and it is not silent.** `PutStart`
+  and `UpsertStart` each refuse outright when a DFS replica is asked for under a non-default tenant:
+  `config.dfs_replica_num > 0 && !object_id.tenant_id.IsDefault()` returns `INVALID_PARAMS` and logs
+  `error=dfs_currently_requires_default_tenant` (`master_service.cpp:4315-4318` and `:4973-4976`).
+  This project reaches that guard on one engine — `SGLang` forwards `MOONCAKE_TENANT_ID`, and the
+  injection renderer sets it to the Binding's domain, so under a pool every request carries a
+  non-default tenant and a `DFS` replica is refused per request. `vLLM` and `vLLM-Ascend` forward no
+  tenant and arrive as the literal `default`, so that guard does not fire for them.
+  ⇒ So the original bullet's **conclusion** stands and the store says it in so many words; what was
+  wrong is the mechanism it named, the line range it cited, and the claim that the failure is silent.
 - **Two further `DFS` preconditions this section never recorded, and neither is silent.** Snapshot
   or oplog recovery makes the leader **throw** `std::invalid_argument` and fail to start
   (`master_service.cpp:563-569`). `RestoreFromStandbySnapshot` returns `DFS_SERVICE_UNAVAILABLE`
@@ -431,7 +436,7 @@ Where each removed value goes, so a reader can tell "moved" from "dropped":
 | `LocalDisk` | `members[].localDisk` (F1) — same members, second tier | shipped by this spec |
 | `NoF` | nowhere in this API | a registration surface carrying `nqn` / `nsid` / `traddr` / `trsvcid` / `base` / `size`. It has no node affinity and no Pod, so it is not a member group; whether it is a field on the leader or an object of its own is open |
 | `CXL` | `leader.extraArgs`: `enable_cxl`, `cxl_path`, `cxl_size` | a leader-side block plus a DAX device on the leader's node, and a note that it also replaces the allocation strategy |
-| `DFS` | `leader` environment, which this API does not render at all today | a leader-side block for `MOONCAKE_DFS_*`, plus admission refusing it together with `multiTenancy`, which the store degrades on silently |
+| `DFS` | `leader` environment, which this API does not render at all today | a leader-side block for `MOONCAKE_DFS_*`, plus admission refusing it together with `multiTenancy`. **Corrected after shipping:** the store does not degrade silently on that pairing — a DFS replica under a non-default tenant is refused per request with `INVALID_PARAMS` |
 
 - **Acceptance:** `medium: LocalDisk` is refused **by the CRD schema** with
   `Unsupported value: "LocalDisk": supported values: "DRAM"`, before any webhook runs. The message is
@@ -1301,10 +1306,13 @@ that sentence travels with the row so a later reader cannot mistake a green suit
 - **Whether `NoF` deserves an object of its own.** Its registration carries a target coordinate and
   no node affinity, so it is not a member group; whether it is a leader field, a list on the backend,
   or a separate CR is undecided, and nothing needs it yet.
-- **Whether a `DFS` tier is reachable at all under this project's pools.** The store disables it
-  where the config is not single-tenant, and `leader.multiTenancy` is what a `KVCachePool` requires
-  of its backend. So the two are mutually exclusive upstream, and whether that is a permanent
-  property or a gap upstream intends to close has not been asked.
+- **Whether a `DFS` tier is reachable at all under this project's pools.** **Corrected after
+  shipping.** This question formerly said the store disables DFS where the config is not
+  single-tenant and that `leader.multiTenancy` is what selects that branch. It does not: DFS reads
+  its own `MOONCAKE_DFS_SINGLE_TENANT`, no master setting reaches it, and the refusal that does
+  apply is on the request path — a DFS replica under a non-default tenant returns `INVALID_PARAMS`
+  with `error=dfs_currently_requires_default_tenant`. What remains open is unchanged in substance:
+  whether that is a permanent property or a gap upstream intends to close has not been asked.
 - **Whether the webhook should parse and bound the eviction watermarks** without giving them fields
   (F7). It is now a writable rule for the first time, costs no API change either way, and is left
   open rather than scheduled.
