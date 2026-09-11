@@ -33,14 +33,16 @@
 #              SGLang container receives the Binding's own domain as MOONCAKE_TENANT_ID; and across
 #              the engines this fixture can reach BOTH tenant answers appear.
 #
-#              ONE SKIP, structural: the vLLM-Ascend row of the control loop. That value is no longer
-#              one the engine annotation takes, and the spelling that replaces it needs an
-#              ascend-transport pool this fixture does not build - so the row is unreachable rather
-#              than unlucky, and it says so where a reader meets it. The remaining two carry both
-#              answers, which is what the control needs; the loop still records an engine whose Pod
-#              never appears as a FAILURE and still reports how many it observed, because a control
-#              that quietly did not run would otherwise leave a smaller set checked while the summary
-#              claimed all of them.
+#              ONE SKIP, and it is MEASURED rather than declared: the vLLM-Ascend row of the control
+#              loop. That value is no longer one the engine annotation takes, and the spelling that
+#              replaces it needs an ascend-transport pool this fixture does not build - so the row is
+#              unreachable rather than unlucky. The loop does not take that on trust: it submits the
+#              row as a server-side dry run and skips only on an actual refusal, printing what the
+#              server said, so the skip retires itself if either refusal is ever lifted. A dry run
+#              that fails for any OTHER reason is a FAILURE, not a skip. The count the loop is held
+#              to is derived from what was skipped for the same reason, and a count that does not add
+#              up is recorded rather than passed over. The remaining two carry both tenant answers,
+#              which is what the control needs; an engine whose Pod never appears is still a FAILURE.
 # Cleanup:     the trap removes the Pods, the Binding, the namespace, the pool and the backend, in
 #              that order and idempotently, on pass AND fail. The Binding is given 60s before its
 #              finalizer is forced: a domain still holding objects makes the master refuse to drop
@@ -171,37 +173,56 @@ fi
 # something is impossible does not notice when it becomes possible.
 ok=1
 checked=0
+skipped=0
 seen_true=0
 seen_false=0
 for engine in vllm vllm-ascend sglang; do
   pod="ctl-${engine//-/}"
-  # vLLM-Ascend cannot be reached from this fixture at all, and TWO refusals stand in front of it -
-  # neither of them about the launch. It is recorded before the expectation is consulted, because
-  # the expectation is not what stops it.
+  # vLLM-Ascend is not reachable from this fixture, and TWO refusals stand in front of it - neither
+  # of them about the launch:
   #
-  #  1. The engine annotation no longer takes the value. `vllm_ascend` was ruled the package the
+  #  1. The engine annotation does not take the value. `vllm_ascend` was ruled the package the
   #     runner installs when the accelerator backend is CANN rather than an engine anybody names, so
   #     ParseEngine refuses it and names `engine: vllm` + `manufacturer: ascend` as the spelling.
   #  2. Spelled that way it is refused one layer down: that runtime accepts only the `ascend`
   #     transport, and this family's pool is built on a TCP backend.
   #
-  # So the row needs a pool of its own, on an ascend-transport backend, which is a fixture this case
-  # does not have and cannot build on a cluster with no Ascend hardware. Recorded as a SKIP that
-  # says what is unverified rather than as a FAIL naming a Pod that never appeared, which is what a
-  # reader would otherwise chase.
+  # THE SKIP IS ASKED FOR, NOT ASSERTED. Both refusals live in the webhook, which is the moving part
+  # here - so this submits the row's own manifest as a server-side dry run and skips only on an
+  # actual refusal. Hard-coding it would have written a claim about admission into this file, where
+  # it would go stale silently: the row would keep skipping, `checked` would keep adding up, and the
+  # case would stay green while covering one engine less than it says. Asked this way the skip
+  # retires itself the day either refusal is lifted, and the reason it prints is the server's own.
+  #
+  # It is asked before the expectation below is consulted, because the expectation is not what stops
+  # the row - and it is a SKIP rather than a FAIL naming a Pod that never appeared, which is what a
+  # reader would otherwise go and chase.
   #
   # The Go side made this move first and for the first reason alone:
   # TestPodKVCacheInject_StampTenantFollowsTheEngine dropped its vllm-ascend row as unreachable
   # through the annotation, and the answer is pinned where the engine IS reachable, in
   # TestSupportsTenant_PinsTheMeasuredAnswerPerEngine. What no test replaces is the cluster half.
   if [ "$engine" = vllm-ascend ]; then
-    record SKIP "the tenant action follows the engine (${engine})" \
-      "unreachable from this fixture: the engine annotation refuses '${engine}' outright, and the \
-'vllm' + manufacturer=ascend spelling it names instead requires an ascend-transport pool while this \
-one is TCP. Its tenant answer is pinned in the inject package's own table \
-(TestSupportsTenant_PinsTheMeasuredAnswerPerEngine); what is UNVERIFIED is that a cluster produces \
-that stamp"
-    continue
+    why="$(kvi_admission_refuses "$(kvi_pod_manifest "$pod" "$engine")")" && rc=0 || rc=$?
+    case "$rc" in
+      0)
+        skipped=$((skipped + 1))
+        record SKIP "the tenant action follows the engine (${engine})" \
+          "admission refuses this row on this fixture, so its tenant answer is UNVERIFIED on a \
+cluster - it is pinned only in the inject package's own table \
+(TestSupportsTenant_PinsTheMeasuredAnswerPerEngine). The server said: ${why}"
+        continue
+        ;;
+      2)
+        ok=0
+        record FAIL "the tenant action follows the engine" \
+          "engine ${engine}: the dry run failed for something other than this webhook's refusal, so \
+whether the row is reachable was never established and it was neither run nor skipped: ${why}"
+        continue
+        ;;
+    esac
+    # rc=1: admission accepts it now, so the row RUNS like any other - which is the whole point of
+    # asking rather than deciding here.
   fi
   # What this engine is expected to have injected. Two answers appear in this table, and that is what
   # gives the loop its discriminating power: a webhook that injected nothing, or one that injected
@@ -220,7 +241,7 @@ that stamp"
   kvi_pod_manifest "$pod" "$engine" | kubectl apply -f - >/dev/null 2>&1
   if ! kvi_wait_for pods "$pod" '{.metadata.name}' "$pod" 60 "$TEST_NS" >/dev/null; then
     # A control that did not run is recorded, never passed over. Skipping it silently would leave a
-    # smaller set of engines checked while the summary below still claimed all three.
+    # smaller set of engines checked while the summary below still claimed all of them.
     ok=0
     record FAIL "the tenant action follows the engine" \
       "engine ${engine} never produced a Pod, so its answer was not observed at all"
@@ -237,21 +258,28 @@ that stamp"
          "engine ${engine} stamped tenantInjected='${got:-<absent>}', which is neither answer" ;;
   esac
 done
-# TWO reachable engines, not three, and the count is what the loop is held to. The discriminating
-# property survives the vLLM-Ascend row being unreachable - vllm answers False and sglang answers
-# True, so both still have to appear - but the claim this line may make is smaller, and the count is
-# what keeps it from being overstated.
-if [ "$ok" -eq 1 ] && [ "$checked" -eq 2 ]; then
+# The count the loop is held to is DERIVED from what was skipped, never written as a constant. The
+# skip above is asked of admission and can stop firing, and a hard-coded 2 would then leave a third
+# row running with nothing holding the loop to it - no PASS, no FAIL, the case green by omission.
+# The discriminating property survives either way: two answers still have to appear.
+if [ "$ok" -eq 1 ] && [ "$checked" -eq $((3 - skipped)) ]; then
   if [ "$seen_true" -eq 1 ] && [ "$seen_false" -eq 1 ]; then
     record PASS "the tenant action follows the engine" \
-      "both reachable engines observed, and BOTH answers appeared - sglang injected a tenant, vllm \
-did not. Seeing both is what separates this from a stamp hard-coded either way. vllm-ascend is \
-skipped above and is NOT part of this claim"
+      "${checked} of 3 engines observed and ${skipped} skipped as unreachable, and BOTH answers \
+appeared - at least one engine was given a tenant and at least one was not. Seeing both is what \
+separates this from a stamp hard-coded either way; a skipped engine is NOT part of this claim"
   else
     record FAIL "the tenant action follows the engine" \
       "all ${checked} observed but only one answer appeared, so this run cannot tell a per-engine \
 decision from a constant"
   fi
+elif [ "$ok" -eq 1 ]; then
+  # Counts that do not add up, with no FAIL from the loop to explain them. Recorded rather than
+  # passed over, because the loop's own rule is that a control which did not run is never dropped in
+  # silence - and this is the one arm where that could otherwise happen.
+  record FAIL "the tenant action follows the engine" \
+    "observed ${checked} engines and skipped ${skipped} of 3, which do not add up: the reachable set \
+changed under the loop and no row reported it"
 fi
 
 kvi_results "$CASE_ID"

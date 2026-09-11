@@ -411,6 +411,47 @@ something else and the reason it names is not ours: $(echo "$out" | tr '\n' ' ' 
   return 0
 }
 
+# kvi_admission_refuses reports whether THIS webhook refuses a manifest, creating nothing.
+#
+# A server-side dry run goes through the same admission chain a create does - this webhook declares
+# sideEffects None, so the API server calls it - and stores no object. It exists so a case can decide
+# to SKIP a row on what admission ANSWERS rather than on a value written into the case. A skip that
+# encodes a claim about another component goes stale the day that component changes, and nothing in
+# this suite would notice: the row would keep skipping, the count would keep adding up, and the case
+# would stay green while covering less than it says. Asking makes the skip retire itself.
+#
+# Prints the message, one line and truncated, and returns:
+#
+#   0  OUR webhook DECIDED to refuse it - the row is unreachable, and the message says on what
+#      grounds. A decision, not merely this webhook's name appearing: see the envelope below
+#   1  admission accepted it - the row is REACHABLE and must be run rather than skipped
+#   2  it failed with no admission decision - a fault rather than a skip, because it says nothing
+#      about the row; an unreachable cluster must never read as an unreachable row
+kvi_admission_refuses() {
+  local manifest="$1" out rc
+  # The status is captured on its own line, as in kvi_refused below: testing $? after an assignment
+  # reads the assignment's status, which is the one thing here that is never the interesting value.
+  out="$(echo "$manifest" | kubectl apply --dry-run=server -f - 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    return 1
+  fi
+  echo "$out" | tr '\n' ' ' | cut -c1-200
+  # THE DENIAL ENVELOPE, not merely this webhook's name, and the difference is the whole safety of
+  # the third outcome. An OUTAGE names this webhook too: its failurePolicy is Fail, so a webhook the
+  # API server cannot reach produces `failed calling webhook "<name>": ... connection refused` -
+  # the name, and no admission decision anywhere in it. Keyed on the name alone, a dead webhook read
+  # as "this row is unreachable", and since that outage rejects every Pod in the cluster, both cases
+  # would have reported a tidy SKIP while nothing worked at all.
+  #
+  # So the whole envelope is matched as one string, which also keeps it attributed: name and verdict
+  # cannot come from two different webhooks. It is the envelope kvi_refused reads and its comment
+  # records as measured - `admission webhook "<name>" denied the request: <message>`.
+  if echo "$out" | grep -qF "admission webhook \"${KVI_WEBHOOK_NAME}\" denied the request"; then
+    return 0
+  fi
+  return 2
+}
+
 # kvi_results prints the table every case ends with, and sets the exit status.
 kvi_results() {
   local case_id="$1"
