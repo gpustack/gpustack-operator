@@ -669,6 +669,9 @@ in this operator.
   list is a legible value meaning "the master lists no segments" — so clearing it on a failed scrape
   would publish a falsehood. The stale list plus a `False` condition says what actually happened; the
   condition is what makes the staleness readable.
+- **Superseded.** The `status.members[]` shape and the listing decoder described in these bullets are
+  owned by `2026-09-09-kv-cache-segment-identity-status.md`. The readiness, phase and scrape rules
+  above are not in that scope.
 
 #### F7 — `status.capacity` is read from the master's Prometheus counters
 
@@ -980,6 +983,8 @@ it restarts on **what changed** rather than on **that the template changed**.
     members. Host-network members on one node share that name and address; supporting them without an
     ambiguous match additionally requires the member's own `client_id`, which upstream keeps inside
     the C++ `Client` and one startup log line. This shipped design renders no memory-unmount hook.
+    **Superseded.** The member-identity reasoning in this bullet is owned by
+    `2026-09-09-kv-cache-segment-identity-status.md`; the shrink conclusion it states is not.
   - What the master DOES offer is `POST /api/v1/drain_jobs`, which **migrates** a segment's data to
     named target segments rather than unmounting it. That is a different and stronger operation than
     a graceful unmount, it needs the remaining members to have room, and it is a stateful
@@ -1723,6 +1728,9 @@ after T10 (status is fully observed); after T12 (every acceptance item is met).
       outcomes, none of which is a zero. The listing decoder — and only that one, since `/health` and
       `/metrics` are never gated — has a fourth: a **503** carrying `service plane is not active`,
       which is the master saying it is not serving yet, so it maps to a phase and not to an error.
+      **Superseded.** The `/get_segments_detail` decoder this acceptance describes is owned by
+      `2026-09-09-kv-cache-segment-identity-status.md`. The `/health` and `/metrics` decoders are not
+      in that scope.
       Verify: `go test ./pkg/worker/kvcache/mooncake/ -run Admin` over the recorded fixtures.
 
 - [x] **T8 · `status.capacity` from the master's counters**
@@ -1783,6 +1791,9 @@ after T10 (status is fully observed); after T12 (every acceptance item is met).
       Node name and medium are the two fields the listing cannot supply — they are joined in from the
       member Pod whose `te_endpoint` matches, and are left empty rather than guessed when no Pod
       matches.
+      **Superseded.** This acceptance text for `members[]` is owned by
+      `2026-09-09-kv-cache-segment-identity-status.md`; read the row shape and the attribution rule
+      there. The phase and condition acceptance above is not in that scope.
       Verify: `go test ./pkg/worker/controllers/worker/ -run KVCacheBackendStatus` — a table over
       recorded `/health` × `/get_segments_detail` bodies × workload states, including one listing
       carrying a `DRAINING` segment, one carrying a state string the fixture invents, one where the
