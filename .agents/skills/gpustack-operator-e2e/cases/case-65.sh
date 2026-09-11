@@ -15,7 +15,9 @@
 #              rather than assuming them. The store writes nothing until a BUCKET fills, so a
 #              tier offered less than one bucket reads zero while working perfectly — the case
 #              reads the rendered limit out of the member container and asserts its write set
-#              clears it. And the figure follows a bucket being closed, not a put returning, so
+#              clears one bucket PER MEMBER, since each member client fills its own while the
+#              gauge sums the backend. And the figure follows a bucket being closed rather than
+#              a put returning, so
 #              it is asked for repeatedly until it carries a number instead of once. This case
 #              writes known content, then asserts that figure is non-zero, that files exist in
 #              the host directory, and that a read returns the bytes that were written. With
@@ -157,9 +159,15 @@ ready_nodes() {
     2>/dev/null | awk -F'|' '$2=="True" {print $1}'
 }
 
+# ACROSS NAMESPACES, and not in $NS. A KVCacheBackend is cluster-scoped but the workloads it renders
+# land in the OPERATOR's namespace, which is not the namespace this case was handed -- the same fact
+# the endpoint lookup below already works around. Searched in $NS this returns zero for a healthy
+# backend whenever the two differ, and zero members is indistinguishable here from a backend whose
+# members never started. The label selector carries the backend's own name, which is unique cluster
+# wide, so widening the search cannot pick up another backend's Pods.
 running_member_count() {
   local backend="$1"
-  kubectl -n "$NS" get pod \
+  kubectl get pod -A \
     -l "app.kubernetes.io/name=kv-cache-backend,app.kubernetes.io/instance=${backend},app.kubernetes.io/component=member-0" \
     -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}' \
     2>/dev/null | awk 'NF {n++} END {print n+0}'
@@ -297,14 +305,21 @@ PHASE_A_FILL=$((PHASE_A_TOTAL - 4))
 # limit that never arrived (leaving the store on its own 256MB default, which this write set would
 # NOT clear), and a limit that is there. An empty reading alone is the shape that would otherwise
 # arrive as "the tier is empty" -- the failure this whole case exists to report.
-MEMBER_POD="$(kubectl -n "$NS" get pod \
+MEMBER_REF="$(kubectl get pod -A \
   -l "app.kubernetes.io/name=kv-cache-backend,app.kubernetes.io/instance=${BACKEND},app.kubernetes.io/component=member-0" \
-  -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}' 2>/dev/null | head -1)"
-TIER_ENV="$(kubectl -n "$NS" exec "$MEMBER_POD" -- sh -c \
+  -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.namespace} {.metadata.name}{"\n"}{end}' 2>/dev/null | head -1)"
+MEMBER_NS="${MEMBER_REF%% *}"
+MEMBER_POD="${MEMBER_REF##* }"
+TIER_ENV="$(kubectl -n "$MEMBER_NS" exec "$MEMBER_POD" -- sh -c \
   'printf "%s|%s" "${MOONCAKE_OFFLOAD_BUCKET_SIZE_LIMIT_BYTES-}" "${MOONCAKE_OFFLOAD_FILE_STORAGE_PATH-}"' 2>/dev/null)"
 BUCKET_LIMIT="${TIER_ENV%%|*}"
 TIER_PATH_ENV="${TIER_ENV##*|}"
-PHASE_A_BYTES=$((PHASE_A_TOTAL * 4 * 1024 * 1024))
+# PER MEMBER, and that is the whole point of dividing here. Each member client fills ITS OWN bucket
+# from the objects that land on it, so a write set that clears one bucket in aggregate can leave
+# every member short of the threshold and close nothing -- while the gauge, which sums the backend,
+# still reads zero. Dividing by the member count is the conservative form: it asks that an EVEN
+# spread would still close a bucket, and an uneven one only makes some member cross it sooner.
+PHASE_A_BYTES_PER_MEMBER=$(((PHASE_A_TOTAL * 4 * 1024 * 1024) / MEMBER_COUNT))
 case "$BUCKET_LIMIT" in
   '' | *[!0-9]*)
     if [ -z "$TIER_PATH_ENV" ]; then
@@ -320,14 +335,16 @@ not, so the store keeps its own 256MB default and this write set would close no 
     results; exit 1
     ;;
 esac
-if [ "$PHASE_A_BYTES" -le "$BUCKET_LIMIT" ] 2>/dev/null; then
-  record FAIL "the write set clears one bucket" \
-    "phase A offers ${PHASE_A_BYTES} bytes against a bucket limit of ${BUCKET_LIMIT} -- at or below \
-one bucket the tier holds nothing legitimately, so the figures below could not be read as a verdict"
+if [ "$PHASE_A_BYTES_PER_MEMBER" -lt "$BUCKET_LIMIT" ] 2>/dev/null; then
+  record FAIL "the write set clears one bucket per member" \
+    "phase A offers ${PHASE_A_BYTES_PER_MEMBER} bytes per member across ${MEMBER_COUNT} member(s) \
+against a bucket limit of ${BUCKET_LIMIT} -- below one bucket each, the tier holds nothing \
+legitimately, so the figures below could not be read as a verdict"
   results; exit 1
 fi
-record PASS "the write set clears one bucket" \
-  "phase A offers ${PHASE_A_BYTES} bytes against MOONCAKE_OFFLOAD_BUCKET_SIZE_LIMIT_BYTES=${BUCKET_LIMIT}"
+record PASS "the write set clears one bucket per member" \
+  "phase A offers ${PHASE_A_BYTES_PER_MEMBER} bytes per member across ${MEMBER_COUNT} member(s), \
+against MOONCAKE_OFFLOAD_BUCKET_SIZE_LIMIT_BYTES=${BUCKET_LIMIT}"
 
 # The managed workloads live in the OPERATOR's namespace, not necessarily $NS — the only
 # trustworthy address is the one the controller published in status.endpoints.

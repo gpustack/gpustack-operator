@@ -96,21 +96,26 @@ $ kubectl exec -n gpustack-system deploy/<backend>-leader -- \
 ```
 
 `master_allocated_file_size_bytes` is **bytes actually written to the tier** — it moves when a bucket
-is closed and written, measured against a tier holding one 16 MiB bucket.
+is closed and written, and it sums the whole backend.
 
 ⛔ **A `0` is not on its own a verdict, and the section above is why.** A backend that has not filled
 a bucket has written nothing **legitimately**, and that is indistinguishable at this gauge from a
-tier that cannot write at all. Read it together with how much has been offered to the tier:
+tier that cannot write at all.
 
-| what has been offered since the tier came up | what `0` means |
+⚠️ **The threshold that decides which reading applies is PER MEMBER, while the gauge is not.** Each
+member client fills its own bucket, so traffic spread over four members has to reach four buckets'
+worth before every one of them closes — the figure the group's
+[`capacityPerMember` floor](disk-heavy-nodes.md) is taken from. Judge the two together:
+
+| offered **per member** since the tier came up | what a settled `0` means |
 |---|---|
-| less than one bucket | the expected reading — waiting does not change it, because nothing is due yet |
-| more than one bucket | the reading to act on, once it has had time to settle |
+| below one bucket | the expected reading; waiting does not change it, because nothing is due |
+| one bucket or more | **the tier is not taking writes** — this is the reading to act on |
 
-⇒ **Above a bucket's worth, give it time before believing it.** The figure follows a bucket being
-closed rather than a `put` returning, so a reading taken immediately after a write can still be `0`
-on a tier that is working; it settles within tens of seconds. Non-zero is the direction that carries
-information — it says a bucket was closed and written.
+⇒ **Settled is the word doing the work in that table.** The figure follows a bucket being closed
+rather than a `put` returning, so a read taken immediately after a write is stale and can be `0` on
+a tier that is working; it catches up within tens of seconds. A `0` that persists past that, with a
+bucket's worth per member behind it, is a real verdict.
 
 ## What the tier does when it fills
 
