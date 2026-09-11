@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # CASE 60 — The connector name we render is one that engine's own factory has registered
-#   (MUTATING, self-recovering, AUTO-SKIPS each engine without its image; the vLLM-Ascend row SKIPS
-#    unconditionally - see Environment)
+#   (MUTATING, self-recovering, AUTO-SKIPS each engine without its image; the vLLM-Ascend row also
+#    SKIPS whenever admission refuses it, which today is always - see Environment)
 #
 #   case-60.sh <NS>
 #
@@ -20,8 +20,11 @@
 #              ONE OF THE TWO NO LONGER RUNS, and the assertion is smaller for it. The vLLM-Ascend
 #              row cannot be submitted from this fixture at all - the engine annotation refuses that
 #              value, and the spelling admission points at instead needs an ascend-transport pool
-#              while this family's is TCP - so it SKIPs whatever its image says. The loop body
-#              carries the two refusals in full. What is lost is this case's own finding: the row
+#              while this family's is TCP. The case does not take that on trust: it submits the row's
+#              own manifest as a server-side dry run and skips only on an actual refusal, printing
+#              what the server said, so the skip retires itself the day either refusal is lifted
+#              instead of outliving its reason. The loop body carries both in full. What is lost
+#              while it stands is this case's own finding: the row
 #              that caught MooncakeStoreConnector being a name that factory does not know is the one
 #              going unrun, leaving the rendered name pinned by a Go test and by the off-cluster
 #              registry reading recorded below, neither of which is a factory answering on a cluster.
@@ -42,10 +45,12 @@
 #              lives exactly between them: both halves can be individually right about different X.
 #
 # Environment: as CASE 53, plus one image per engine. Each row AUTO-SKIPS INDEPENDENTLY when its own
-#              image is unset, and says which name is left unverified. The vLLM-Ascend row SKIPS
-#              BEFORE its image is consulted, because the image is not what stops it: that Pod is
-#              refused at admission on this fixture whatever image it names. So E2E_VLLM_ASCEND_IMAGE
-#              changes nothing today, and only E2E_VLLM_IMAGE can produce a row that runs.
+#              image is unset, and says which name is left unverified. The vLLM-Ascend row is tested
+#              against ADMISSION before its image is consulted, because the image is not what stops
+#              it: that Pod is refused on this fixture whatever image it names. A server-side dry run
+#              asks, and the row SKIPS on the refusal it gets back - so E2E_VLLM_ASCEND_IMAGE changes
+#              nothing today, only E2E_VLLM_IMAGE can produce a row that runs, and the day admission
+#              stops refusing, that row runs without this file being edited.
 #
 #                E2E_VLLM_IMAGE=gpustack/runner:cuda12.9-vllm0.25.1
 #                E2E_VLLM_ASCEND_IMAGE=quay.io/ascend/vllm-ascend:v0.19.1rc1
@@ -124,11 +129,13 @@
 #              then (`_get_connector_class_with_compat` at v0.19.1, `get_connector_class` at v0.25.1;
 #              the names differ, which is why the registry is read directly while that is equivalent).
 #
-#              SKIPS: each row independently, on its own image variable, plus one STRUCTURAL skip -
-#              vLLM-Ascend, which no image makes runnable here. One image present must not let the
-#              other row report green by omission, and the summary line enforces that: it claims the
-#              cross-engine property only when BOTH rows resolved, so with one row structurally
-#              skipped that line is a SKIP rather than a PASS on every run of this case today.
+#              SKIPS: each row independently, on its own image variable, plus one MEASURED skip -
+#              vLLM-Ascend, taken on admission's own refusal rather than on a name written here, and
+#              today that refusal always comes. A dry run that fails for any OTHER reason is a
+#              FAILURE, not a skip: an unreachable cluster must not read as an unreachable row. One
+#              image present must not let the other row report green by omission, and the summary
+#              line enforces that: it claims the cross-engine property only when BOTH rows resolved,
+#              so while that skip stands the line is a SKIP rather than a PASS.
 # Cleanup:     the trap removes the Pods, the Binding, the namespace, the pool and the backend, in
 #              that order and idempotently, on pass AND fail. It changes no shared baseline - every
 #              object it touches is one it created.
@@ -315,8 +322,8 @@ for row in "vllm:E2E_VLLM_IMAGE" "vllm-ascend:E2E_VLLM_ASCEND_IMAGE"; do
   check="the ${engine} factory has the connector name we render in its registry"
   pod="conn-${engine//-/}"
 
-  # vLLM-Ascend is unreachable from this fixture, and it is checked BEFORE the image because the
-  # image is not what stops it. Two refusals stand in front of the row:
+  # vLLM-Ascend is not reachable from this fixture, and the question is ASKED of admission rather
+  # than answered here. Two refusals stand in front of the row:
   #
   #  1. `kvcache.gpustack.ai/engine: vllm-ascend` is refused outright. That value was ruled the
   #     package the runner installs when the accelerator backend is CANN rather than an engine
@@ -324,20 +331,38 @@ for row in "vllm:E2E_VLLM_IMAGE" "vllm-ascend:E2E_VLLM_ASCEND_IMAGE"; do
   #  2. Spelled that way the Pod is refused one layer down: that runtime accepts only the `ascend`
   #     transport, and this family's pool is built on a TCP backend.
   #
-  # So reaching it needs a pool on an ascend-transport backend, which is a fixture this case does
-  # not have. THE COST IS THIS CASE'S OWN FINDING: the row that caught MooncakeStoreConnector being
-  # a name vLLM-Ascend's factory does not know is the one going unrun. What is left of that guard is
+  # Both live in the webhook, which is the moving part - so the row's own manifest goes through a
+  # server-side dry run and skips only on an actual refusal. Written as a fixed branch instead, the
+  # skip would outlive its reason in silence: the row would keep skipping after the refusal was
+  # lifted and this case would keep reporting the same thing. Asked this way it retires itself.
+  #
+  # It is asked BEFORE the image, because the image is not what stops it - admission never looks at
+  # one, which is also why the dry run does not need this row's own image to be set.
+  #
+  # THE COST IS THIS CASE'S OWN FINDING: the row that caught MooncakeStoreConnector being a name
+  # vLLM-Ascend's factory does not know is the one going unrun. What is left of that guard is
   # TestRender_VLLMFamilyVehicleIsAFile pinning AscendStoreConnector as the name we render, plus the
   # off-cluster reading in this case's header - one `docker run` against the image listing the whole
   # registry, recorded there with its date. Neither is this file asserting it, and the summary below
   # already refuses to claim the cross-engine property on one row.
   if [ "$engine" = vllm-ascend ]; then
-    record SKIP "$check" \
-      "unreachable from this fixture: the engine annotation refuses '${engine}' outright, and the \
-'vllm' + manufacturer=ascend spelling it names instead requires an ascend-transport pool while this \
-one is TCP. The name we render for ${engine} is UNVERIFIED against its factory - which is the \
-dimension this case was written for, and the one its original finding came from"
-    continue
+    why="$(kvi_admission_refuses "$(kvi_pod_manifest "$pod" "$engine")")" && rc=0 || rc=$?
+    case "$rc" in
+      0)
+        record SKIP "$check" \
+          "admission refuses this row on this fixture, so the name we render for ${engine} is \
+UNVERIFIED against its factory - the dimension this case was written for, and the one its original \
+finding came from. The server said: ${why}"
+        continue
+        ;;
+      2)
+        record FAIL "$check" \
+          "the dry run failed for something other than this webhook's refusal, so whether this row \
+is reachable was never established and it was neither run nor skipped: ${why}"
+        continue
+        ;;
+    esac
+    # rc=1: admission accepts it now, so the row goes on to its image check and runs.
   fi
 
   if [ -z "$image" ]; then
