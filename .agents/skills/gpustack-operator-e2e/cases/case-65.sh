@@ -62,10 +62,12 @@
 #              which write path the fix has to reach.
 #
 # Cleanup:     Trap deletes both KVCacheBackends (owner references cascade) and every probe Pod,
-#              then removes this run's subdirectory from every node that is Ready at teardown.
-#              The prepared parent directory and other runs' contents are untouched. Removing the
-#              subdirectory whole includes dotfiles. Idempotent, runs on pass AND fail, safe to
-#              re-run and safe beside another case-65 run using the same parent directory.
+#              then removes this run's subdirectory from every node that is Ready at teardown — or,
+#              when the prep check did not pass and so nothing was deployed, only from the nodes
+#              whose probe reported the directory writable. The prepared parent directory and other
+#              runs' contents are untouched. Removing the subdirectory whole includes dotfiles.
+#              Idempotent, runs on pass AND fail, safe to re-run and safe beside another case-65 run
+#              using the same parent directory.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on
@@ -79,6 +81,14 @@ CASE_ID=65
 IMAGE="${E2E_MOONCAKE_IMAGE:-gpustack/mirrored-mooncake:0.3.13.post1-cpu}"
 HOST_PATH="${E2E_LOCALDISK_HOST_PATH:-/mnt/kvcache-localdisk}"
 HOST_PATH="${HOST_PATH%/}"
+
+# Every probe Pod in this case mounts the tier as hostPath type Directory, and the kubelet cannot
+# satisfy that mount when the directory is absent: the Pod stays in ContainerCreating forever, so an
+# unbounded `kubectl run --rm -i` waits on a Pod that will never start. This bound turns that wait
+# into the empty reading the skip branch below is written to read, and `--rm` still deletes the Pod
+# it gave up on. It is generous because a cold image pull happens inside the same wait, and a bound
+# short enough to fire on a slow pull would report a prepared directory as missing.
+PROBE_TIMEOUT=120s
 
 # REQUIRED, and it REFUSES rather than skipping. The case creates its run directory below this
 # prepared parent, and a root or top-level path is not the dedicated tier shape this case claims to
@@ -151,9 +161,15 @@ teardown() {
   kubectl delete kvcachebackends.worker.gpustack.ai "$BACKEND" "$BACKEND2" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   kubectl -n "$NS" delete pod -l "gpustack-e2e-case=65-${SFX}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   # The parent is the deployer's; this run owns only its named child. Re-read the nodes so one that
-  # became Ready during the case is cleaned too.
-  for node in $(ready_nodes); do
+  # became Ready during the case is cleaned too. When the prep check did not pass there is nothing to
+  # re-read for: no backend was ever created, so the only child directories that exist are the ones
+  # the probe itself made, and asking a node that cannot mount the parent would spend the probe bound
+  # again per node -- turning the skip this case owes the operator into a long silent wait.
+  local wipe_nodes
+  if [ "${PREP_OK:-0}" = 1 ]; then wipe_nodes="$(ready_nodes)"; else wipe_nodes="${PREPARED_NODES:-}"; fi
+  for node in $wipe_nodes; do
     kubectl -n "$NS" run "case65-wipe-${SFX}-$(node_tag "$node")" --restart=Never --rm -i --quiet \
+      --pod-running-timeout="$PROBE_TIMEOUT" \
       --image=busybox:1.36 --overrides='{"spec":{"nodeName":"'"$node"'","containers":[{"name":"wipe","image":"busybox:1.36","command":["sh","-c","rm -rf /tier/'"$RUN_DIR"' 2>/dev/null; true"],"volumeMounts":[{"name":"tier","mountPath":"/tier"}]}],"volumes":[{"name":"tier","hostPath":{"path":"'"$HOST_PATH"'","type":"Directory"}}]}}' \
       >/dev/null 2>&1 || true
   done
@@ -180,17 +196,23 @@ if [ -z "$NODES" ]; then
 fi
 
 PREP_OK=1
+PREPARED_NODES=""
 for node in $NODES; do
   short="$(node_tag "$node")"
   out="$(kubectl -n "$NS" run "case65-pre-${SFX}-${short}" --restart=Never --rm -i --quiet \
+    --pod-running-timeout="$PROBE_TIMEOUT" \
     --image=busybox:1.36 --overrides='{"spec":{"nodeName":"'"$node"'","containers":[{"name":"pre","image":"busybox:1.36","command":["sh","-c","mkdir -p /tier/'"$RUN_DIR"' && chmod 0777 /tier/'"$RUN_DIR"' && touch /tier/'"$RUN_DIR"'/.hidden && echo WRITABLE"],"volumeMounts":[{"name":"tier","mountPath":"/tier"}]}],"volumes":[{"name":"tier","hostPath":{"path":"'"$HOST_PATH"'","type":"Directory"}}]}}' \
     2>/dev/null)"
-  if [ "$out" != "WRITABLE" ]; then
+  # One LINE of the output, not the whole of it: this container exits before kubectl can attach, so
+  # kubectl falls back to streaming the logs and the probe's single line arrives more than once. An
+  # equality test reads that repetition as a failed prep and skips a node that is prepared.
+  if ! printf '%s\n' "$out" | grep -qx WRITABLE; then
     PREP_OK=0
-    echo "[case-65] SKIP: node $node has no writable host directory at $HOST_PATH"
+    echo "[case-65] SKIP: node $node has no writable host directory at $HOST_PATH (probe waited up to $PROBE_TIMEOUT)"
     echo "  prep on each node: mkfs.xfs /dev/nvme1n1 && mkdir -p $HOST_PATH && mount /dev/nvme1n1 $HOST_PATH && chmod 0777 $HOST_PATH"
     break
   fi
+  PREPARED_NODES="$PREPARED_NODES $node"
 done
 [ "$PREP_OK" = "1" ] || exit 0
 record PASS "the run directory is prepared on every Ready node" "$(echo $NODES | wc -w | tr -d ' ') node(s) at $RUN_HOST_PATH"
@@ -345,6 +367,7 @@ FOUND=""
 for node in $NODES; do
   short="$(node_tag "$node")"
   out="$(kubectl -n "$NS" run "case65-ls-${SFX}-${short}" --restart=Never --rm -i --quiet \
+    --pod-running-timeout="$PROBE_TIMEOUT" \
     --image=busybox:1.36 --overrides='{"spec":{"nodeName":"'"$node"'","containers":[{"name":"ls","image":"busybox:1.36","command":["sh","-c","ls /tier | head -5; ls /tier | wc -l"],"volumeMounts":[{"name":"tier","mountPath":"/tier"}]}],"volumes":[{"name":"tier","hostPath":{"path":"'"$RUN_HOST_PATH"'","type":"Directory"}}]}}' \
     2>/dev/null)"
   n="$(echo "$out" | tail -1)"
