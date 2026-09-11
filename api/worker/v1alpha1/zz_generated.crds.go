@@ -3816,7 +3816,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											},
 										},
 										"roles": {
-											Description: "Roles are the engine roles this deployment runs.\nIt is a LIST FROM THE FIRST VERSION although only one entry is accepted today, because the\nspec that introduces P/D disaggregation adds entries to it rather than replacing the field.\nThe length-1 bound lives in the validating webhook and not here, so that the refusal can name\nthe spec that lifts it, and so that lifting it is a webhook edit rather than a schema change\nevery stored object would have to survive.",
+											Description: "Roles are the engine roles this deployment runs. A single-role deployment names one; a\nprefill/decode deployment names several, which is why this is a LIST FROM THE FIRST VERSION.\nThe UPPER bound lives in the validating webhook and not in this schema: it tracks Kueue's cap\non Workload.spec.podSets, so the refusal can name whose limit it is, and following that number\nis a webhook edit rather than a schema change every stored object would have to survive. The\nfigure is not restated here, because the one that binds is in the Kueue the cluster runs.",
 											Type:        "array",
 											MinItems:    ptr.To[int64](1),
 											Items: &v1.JSONSchemaPropsOrArray{
