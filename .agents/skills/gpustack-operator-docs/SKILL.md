@@ -1,6 +1,6 @@
 ---
 name: gpustack-operator-docs
-description: "Write or update the GPUStack Operator documentation: choose the page a new fact belongs on, keep each page's header block / Contents / footer and the docs/README.md index in sync, and respect the tables a Go test or a generator pins. Invoke when a code change needs a doc change, when adding or splitting a page, when a link or table of contents drifts, or when reviewing a docs diff. Examples: \"document this new setting\", \"where should this go in the docs?\", \"add a page for X\", \"update the docs for my change\", \"the docs index is out of date\", \"文档该写在哪一页\"."
+description: "Write or update the GPUStack Operator documentation: route a new fact to the page that owns it, and keep each page's header, Contents, footer and the docs/README.md index in sync. Also adding a page or reviewing a docs diff."
 ---
 
 # GPUStack Operator — documentation

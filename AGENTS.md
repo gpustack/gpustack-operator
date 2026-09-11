@@ -5,7 +5,7 @@ accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 
 ## Project Structure
 
-- `cmd/` — single `gpustack-operator` binary entrypoint (three cobra subcommands).
+- `cmd/` — single `gpustack-operator` binary entrypoint (the cobra subcommands).
 - `pkg/` — implementation: `worker` (control plane), `devicemanager` (per-node DaemonSet), `nodefeature` (label algebra), and supporting packages.
 - `api/` — API types: CRDs + aggregated extension APIs.
 - `binding/` — generated CGO bindings to vendor GPU runtime/management libraries.
@@ -20,9 +20,10 @@ accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 ## Architecture
 
 Three subcommands (`worker`, `worker-gateway`, `device-manager`) drive a four-stage chain: NFD labels
-nodes → the Device Manager detects accelerators → the worker profiles node capacity → five
-controllers materialize Kueue `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool)
-→ `LocalQueue` plus an `InstanceType` CRD. `pkg/nodefeature` holds the label algebra.
+nodes → the Device Manager detects accelerators → the worker profiles node capacity → the
+controllers under `pkg/worker/controllers/worker` materialize Kueue `ResourceFlavor` →
+`ClusterQueue` (one isolated queue per pool) → `LocalQueue` plus an `InstanceType` CRD.
+`pkg/nodefeature` holds the label algebra.
 
 Read `docs/architecture.md` first: one page, the four stages, the life of a request, the vocabulary.
 Then the deep page under `docs/architecture/` for what you are touching — `device-discovery.md` (NFD,
@@ -33,14 +34,20 @@ Device Manager, allocator), `scheduling-chain.md` (capacity labels, flavors/queu
 ## Development
 
 See `docs/development.md` for build/lint/test commands, code generation, and vendored dependencies.
-Four skills carry the rest:
 
-- `gpustack-operator-overview` — a tour of the directory layout and naming conventions.
-- `gpustack-operator-generate` — runs `make generate` after you edit API types or webhooks.
-- `gpustack-operator-docs` — when a change needs a doc change: routes the fact to the right page,
-  checks the index, links and tables of contents.
-- `gpustack-operator-issue-pr` — filing an issue or opening a PR: the title prefixes and cap, the
-  label and type each pairs with, and the three linking verbs.
+These build, deploy or publish, so they are explicit-only: your host never lists them, and offering
+one by name is your job. The change on the left is the trigger.
+
+- the chart, in-cluster app installation, the image build → `gpustack-operator-chart-e2e`
+- reconcile, an admission webhook, the extension-apiserver, in-cluster app installation
+  → `gpustack-operator-e2e`
+- a pinned version in `hack/deps.sh`, a patch under `hack/deploy/`, a vendored tree edited in
+  place, a bundled chart added or dropped, or `make deps` leaving a `.rej`
+  → `gpustack-operator-chart-subcharts-manage`
+- shipping a version → `gpustack-operator-release`
+- `pack/gpustack-operator/Dockerfile`, `pack/gpustack-operator/external/`, `pack/thead-ppu-devel/`,
+  a slicing shim under `csrc/`, or `pkg/devicemanager/allocator/hygon/`
+  → `gpustack-operator-xbuild-and-verify`
 
 The `gpustack-operator-lint` hook dispatches on what a turn left dirty. Run the matching one yourself too:
 

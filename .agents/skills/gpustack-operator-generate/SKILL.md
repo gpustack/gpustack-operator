@@ -1,6 +1,6 @@
 ---
 name: gpustack-operator-generate
-description: "Run `make generate` to regenerate code after editing API types or webhooks. Invoke after changing files under api/ (api/v1, api/worker/v1, api/worker/v1alpha1) or webhook sources under pkg/*/webhooks/*/ — it regenerates deepcopy, register, apiservice, CRD, conversion, protobuf, and webhook code. Examples: \"regenerate the API\", \"I added a field to the Instance type\", \"update the generated code\"."
+description: "Run `make generate` after editing API types under `api/` or webhook sources under `pkg/*/webhooks/*/`. It regenerates deepcopy, register, apiservice, CRD, conversion, protobuf, and webhook code."
 allowed-tools: "Bash(make generate*)"
 ---
 

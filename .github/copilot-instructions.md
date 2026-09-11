@@ -28,8 +28,10 @@ only, no auto-close). None of this is enforced anywhere, and none of it is a rev
 not a code defect.
 
 When performing a code review, use the `gpustack-operator-code-review` skill in
-`.claude/skills/gpustack-operator-code-review/SKILL.md`, and apply the rules below. Keep feedback
-specific and actionable; cite the file and line.
+`.claude/skills/gpustack-operator-code-review/SKILL.md`, and apply the rules below. That skill owns
+the review criteria and `AGENTS.md` owns the coding conventions; what follows is the part of both
+that this reviewer can see and evaluate. Keep feedback specific and actionable; cite the file and
+line.
 
 ## Review conventions — where a low-severity finding goes
 
@@ -57,20 +59,37 @@ has *measured* as wrong, so they are filtered by what they claim instead:
   the jsonpath printer JSON-encodes a slice, so `pciSwitches` prints `["0000:01:00.0","0000:00:01.0"]`
   and splitting on commas is correct. Measured on kubectl v1.36.3 and on real multi-bridge hardware.
   Reported six times, wrong six times, and acting on it introduces the very mis-parse it warns about.
-- **"Add a comment explaining this" on code that already carries the rule.** `CLAUDE.md` requires
+- **"Add a comment explaining this" on code that already carries the rule.** `AGENTS.md` requires
   source comments to stay plain and short and to state logic rather than history; a request for more
   prose, for restating what the spec owns, or for keeping a revision narrative in a hot path
   contradicts it. Review against that convention, not toward more text.
+- **"This fix ships no regression test", inferred from not having seen one.** Test files are removed
+  from this review by the content-exclusion policy, so their absence from your view carries no
+  information about whether they exist. State the requirement as a reminder; never assert that a
+  test is present or missing. This has been raised against a test file present in that very PR.
 
-A finding in either class should be omitted. If it seems to apply anyway, say which measurement it
-contradicts — that is the only form of it worth a reviewer's attention.
+A finding in any of these classes should be omitted. If it seems to apply anyway, say which
+measurement it contradicts — that is the only form of it worth a reviewer's attention.
 
 ## Out of scope — do not review
 
-- `binding/` (generated CGO bindings), `staging/` (patched k8s modules).
-- Files matching `zz_generated*`, `*_deepcopy*`, `generated.pb.go`, `generated.proto`,
-  `generated.protomessage.pb.go`.
-- Vendored subcharts under `deploy/gpustack-operator/chart/charts/*`.
+Mirrors the `exclude` list in `.opencodereview/rule.json`, verbatim and in the same order.
+
+- `**/*_deepcopy*`
+- `**/*_test.go`
+- `**/generated.*`
+- `**/zz_generated*`
+- `.agents/skills/**/*.sh`
+- `.claude/skills/**/*.sh`
+- `binding/**`
+- `deploy/gpustack-operator/chart/*.json`
+- `deploy/gpustack-operator/chart/*.md`
+- `deploy/gpustack-operator/chart/charts/**`
+- `gen/**`
+- `hack/**`
+- `pkg/extensionroute/swagger/ui/**`
+- `pkg/kubeclients/**/*.go`
+- `staging/**`
 
 ## Hard invariants — flag as required changes
 
@@ -110,8 +129,13 @@ contradicts — that is the only form of it worth a reviewer's attention.
 - Thread `context.Context` through call paths to honor cancellation and timeouts.
 - Watch only what affects desired state; flag reconcile triggered by irrelevant objects.
 - Design for eventual consistency, not immediate convergence.
+- Prefer composition that is reused across controllers; flag logic copied between reconcilers.
 
 ## Testing conventions
+
+These apply only to test files that actually reach you. The content-exclusion policy currently
+removes every `_test.go` from this review and lists them in the review body, so seeing no test file
+says nothing about whether one exists.
 
 - Prefer table-driven tests with a shared execution loop; flag duplicated per-case logic.
 - Each case verifies one behavior; keep cases declarative — data, not control flow.
