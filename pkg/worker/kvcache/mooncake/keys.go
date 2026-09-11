@@ -35,7 +35,10 @@ package mooncake
 //     Nothing collides by name, which is exactly why this class needs to exist. Each entry carries
 //     its own reason because they are not one kind of problem: one changes how every OTHER flag is
 //     read, another names a store nothing reads, another refuses to start the process at all, and
-//     another replaces a setting this spec states while leaving the object stating it.
+//     another replaces a setting this spec states while leaving the object stating it. Two more
+//     change no value at all: one this operator's own rendering always wins over, which therefore
+//     configures nothing while reading as a setting that moved, and one that moves where a rendered
+//     port is served rather than which port it is.
 type ExtraArgsRules struct {
 	Derived   []string
 	Exclusive [][]string
@@ -43,6 +46,17 @@ type ExtraArgsRules struct {
 }
 
 // LeaderExtraArgsRules governs the leader's passthrough.
+//
+// The two lists are COMPLETE against the artifact version this project pins, rather than a record
+// of the names that happened to be noticed. Every setting this API renders from a field was traced
+// to the write points of its effective value in the artifact's own source, and every other flag
+// reaching one of them is listed below. Where that value lives in a const member, the constructor's
+// initializer list is the whole write set — which is what makes "complete" a claim a reader can
+// check instead of one this comment asserts.
+//
+// REQUIRED: moving the pinned artifact version invalidates the tracing, so redo it in the same
+// commit. A flag added upstream reaches a rendered setting under a name no rule here has, and the
+// refusals below are keyed on names — nothing else in this repository would notice.
 var LeaderExtraArgsRules = ExtraArgsRules{
 	// Keys are the flag's own name without its leading dash, which is how extraArgs is keyed.
 	Derived: []string{
@@ -141,6 +155,32 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 		// saying the same thing drift apart and the field path already names which key was typed.
 		"cxl_path": cxlCompanionKeyReason,
 		"cxl_size": cxlCompanionKeyReason,
+
+		// The artifact's deprecated spelling of rpc_port, and INERT here rather than harmful: it is
+		// read only where rpc_port is left at zero, and this operator renders -rpc_port
+		// unconditionally with a fixed positive value that wins. Refused for the reason the CXL
+		// operands are -- a key admission accepted and the process then ignores reads as a port
+		// that moved, while the Service and the published endpoint go on naming the old one.
+		"port": "it is the artifact's deprecated spelling of rpc_port, which this operator always " +
+			"renders and which wins over it, so this key moves nothing while reading as a port " +
+			"that moved",
+
+		// The etcd leadership backend's endpoints, and out of reach twice over. It is read ONLY as
+		// a fallback for an empty ha_backend_connstring, which this operator renders non-empty
+		// whenever the election is on; and the backend it names is not in the image, by the same
+		// fact that forbids enable_oplog above.
+		"etcd_endpoints": "it supplies a connection string only when ha_backend_connstring is " +
+			"empty, which this operator never leaves empty, and the etcd leadership backend it " +
+			"names is not compiled into the image this operator runs",
+
+		// The bind ADDRESS of the port metrics_port names, and the one entry here refused for
+		// reachability rather than for a value. The rendered -metrics_port decides which port the
+		// admin and Prometheus surfaces answer on; this decides on which address, and both the
+		// published endpoint and the two probes address them at the Pod's own. Moved, nothing
+		// listens where this object says it does, and the probes fail rather than report it.
+		"metrics_host": "it moves the address the admin and metrics surfaces bind to, while this " +
+			"object publishes and probes them at the Pod's own address, so the endpoint it " +
+			"states is answered nowhere",
 	},
 }
 
