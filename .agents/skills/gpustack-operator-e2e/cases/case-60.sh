@@ -253,14 +253,17 @@ for i, a in enumerate(argv):
 ' 2>/dev/null
 }
 
-# The probe. NAME is interpolated rather than passed as an argument because exec_probe runs
-# `python3 -c`, and the shell-side guard below refuses anything that is not a bare identifier, so
-# the interpolation cannot carry quoting.
+# The probe. NAME is emitted ahead of the body rather than interpolated into it, and the body is a
+# QUOTED heredoc so the shell expands nothing inside it. Unquoted, every backtick pair in the prose
+# below runs as a command substitution: the comment naming ValueError did exactly that, printing
+# "ValueError:: command not found" on the case's own output and deleting the line it sat in. The
+# value still cannot carry quoting, because the shell-side guard below refuses anything that is not
+# a bare identifier. NAME is passed to exec_probe as part of the script rather than as an argument
+# because that helper runs `python3 -c` with no argv after it.
 probe_script() {
-  cat <<PY
+  printf 'NAME = "%s"\n' "$1"
+  cat <<'PY'
 import sys
-
-NAME = "$1"
 
 # 1. The factory module. Reported on its own: an import failure says nothing about the name we
 # render, and calls for a different action than a name that does not resolve.
