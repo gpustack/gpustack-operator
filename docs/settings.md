@@ -49,13 +49,52 @@ kubectl -n gpustack-system patch setting instance-type-derived-from-node --type 
 | `instance-host-path-volume-allowed` | `GPUSTACK_INSTANCE_HOST_PATH_VOLUME_ALLOWED` | `false` | Whether an Instance may mount a hostPath volume (`spec.additionalVolumes[*].hostPath`), which reaches the node's filesystem. Kept separate from `instance-privileged-allowed` because it grants strictly less — the filesystem, but not the node's devices or kernel — so an admin can allow node-path mounts without allowing a container escape. Enforced whenever an Instance **takes** a hostPath mount, on the same terms; a mount it already has is matched by value, so reordering the list is not a new grant while repointing an entry at a different node path is. |
 | `node-management-manual` | `GPUSTACK_NODE_MANAGEMENT_MANUAL` | `false` | Skip auto-managing nodes. When `false`, the operator auto-onboards discovered nodes by injecting the `gpustack.ai/managed=true` label; when `true`, an administrator must opt nodes in manually. Read per-reconcile. |
 | `instance-type-mixed-on-node` | `GPUSTACK_INSTANCE_TYPE_MIXED_ON_NODE` | `true` | Whether one node may surface both a GPU and a CPU-only InstanceType. When `true`, a node is summarized into every type it can serve; when `false`, a node with accelerators yields only a GPU InstanceType and a CPU-only node only a general one. Read per-reconcile. |
-| `instance-type-derived-from-node` | `GPUSTACK_INSTANCE_TYPE_DERIVED_FROM_NODE` | `true` | Whether the operator auto-derives the InstanceType (and its backing ClusterQueue) from node hardware. When `true`, the `NodeFlavorReconciler` authors the derived InstanceType (create-only); when `false`, it only aligns the ResourceFlavor and the administrator defines the InstanceType via the API. Read per-reconcile. |
+| `instance-type-derived-from-node` | `GPUSTACK_INSTANCE_TYPE_DERIVED_FROM_NODE` | `true` | Whether the operator auto-derives the InstanceType (and its backing ClusterQueue) from node hardware. When `true`, the `NodeFlavorReconciler` authors the derived InstanceType (create-only); when `false`, it only aligns the ResourceFlavor and the administrator defines the InstanceType via the API, and owns feasibility with it — see [Authoring the InstanceType yourself](#authoring-the-instancetype-yourself). Read per-reconcile. |
 | `instance-type-drain-when-no-flavors` | `GPUSTACK_INSTANCE_TYPE_DRAIN_WHEN_NO_FLAVORS` | `true` | Whether a ClusterQueue whose pool has lost all its ResourceFlavors is drained (`HoldAndDrain`, so Kueue evicts admitted workloads) before its resource groups are emptied. When `true`, the queue is drained first; when `false`, the operator waits for the reservations to clear on their own, then empties. Either way the groups are emptied only once every reservation is zero, so Kueue's counters never go negative. Read per-reconcile. |
 | `instance-type-aware-cpu-manufacturer` | `GPUSTACK_INSTANCE_TYPE_AWARE_CPU_MANUFACTURER` | `false` | Whether the derived ClusterQueue/InstanceType/InstanceTypeFlavor aggregation splits by CPU manufacturer. When `false`, non-accelerated flavors collapse into one `generic` pool per os/arch and accelerated flavors pool per accelerator (CPU ignored); when `true`, every pool splits by the CPU key (`gpustack--${gKey}-…` / `gpustack--${gKey}--${aKey}-…`) and the InstanceType records the raw CPU detail. The `ResourceFlavor`s themselves are unaffected — they always carry the CPU key, so a flip only re-groups the aggregation layer. Read per-reconcile. |
 
 The last five — `node-management-manual`, `instance-type-mixed-on-node`, `instance-type-derived-from-node`,
 `instance-type-drain-when-no-flavors`, `instance-type-aware-cpu-manufacturer` — are read **per-reconcile**
 (`ShouldValueBool(ctx)`): flipping one re-converges the scheduling chain next reconcile, no restart.
+
+### Authoring the InstanceType yourself
+
+With `instance-type-derived-from-node=false` the operator authors no InstanceType, so the
+administrator owns both halves of a pool: which InstanceTypes exist, and whether what their queue
+admits can actually be placed. Flipping the setting off does not retire the types the operator
+already authored — the derived marker is provenance, and nothing auto-removes a type.
+
+**No ClusterQueue gains a reference to the node-devices feasibility gate in this mode.** That
+[AdmissionCheck](architecture/admission.md#gate-3--the-per-accelerator-admissioncheck) has one
+writer, [`NodeQueueReconciler`](architecture/scheduling-chain.md#nodequeuereconciler-node_queuego),
+which reads this setting as a cluster-wide switch, not as "was this queue derived".
+
+So with the switch on, every accelerated queue carries the reference once the check reports `Active`,
+whoever authored its InstanceType; with it off none is added, and a queue that already carries one
+drops it the next time its resource groups are refilled — not at the moment of the flip.
+
+> **Why it is not attached in this mode anyway** — the gate changes what a queue admits, and in the
+> mode where the administrator authors every InstanceType that is theirs to decide.
+
+**The failure shape to expect.** Without that gate a Workload is admitted on quota alone and its Pods
+then sit `Pending` — which reads as a full cluster, while the truth is usually a request no node can
+place: quota is a scalar total and cannot see per-accelerator fragmentation. When the Pods of an
+admitted Workload stay `Pending`, compare the request against the per-accelerator ledger
+(`kubectl get devices <node> -o yaml`) before adding capacity.
+
+**Write the InstanceType against the `InstanceTypeFlavor` catalog.** It is the read-only,
+os/arch-agnostic view of the pools that actually exist — one entry per grouping the settings above
+produce — and its `spec` carries the identity fields an InstanceType is built from:
+`acceleratorGroup`, `generalGroup`, `acceleratable`, `manufacturer`, `product`, `family`, `memory`,
+`cores`.
+
+```bash
+kubectl get instancetypeflavors                               # short name: instypeflavor
+kubectl get instancetypeflavor gpustack--nvidia-a10g -o yaml
+```
+
+An InstanceType whose identity matches no entry there backs a ClusterQueue that selects no
+`ResourceFlavor`, so the queue is left with empty resource groups and admits nothing.
 
 ## Deploy-time environment variables
 
