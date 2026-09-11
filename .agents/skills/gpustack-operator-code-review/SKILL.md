@@ -1,6 +1,6 @@
 ---
 name: gpustack-operator-code-review
-description: Review pull requests for the GPUStack Operator. Use when reviewing a PR diff — checks reconcile correctness and idempotency, codegen/chart invariants, Kueue scheduling-chain semantics, test quality, and over-engineering, then reports findings with severity labels on two separate axes (Standards and Spec).
+description: "Review a GPUStack Operator pull-request diff on two axes reported separately — Standards (does it follow this repo's conventions) and Spec (does it implement what was asked) — with a severity label on every finding."
 ---
 
 # GPUStack Operator — code review
@@ -129,16 +129,18 @@ End the pass with `net: -N lines possible`. If there is nothing to cut, write
 ### 6. Aggregate and label
 
 Report under `## Standards` and `## Spec` headings. Prefix every finding with its
-severity — Copilot code review only leaves Comment reviews and cannot block merge,
-so the label is the priority signal:
+severity. Nothing here blocks a merge — this review is a report, not a
+required-changes verdict — so the label is the only priority signal the author gets.
+The third column maps onto the four levels OpenCodeReview emits on the same PR, so a
+human reading both reports is reading one scale:
 
-| Prefix | Meaning |
-|---|---|
-| **Critical:** | Data loss, broken reconcile, security hole, ledger inconsistency — must fix |
-| *(no prefix)* | Required change — convention or spec violation that must be addressed |
-| **Optional:** / **Consider:** | Worth considering, not required |
-| **Nit:** | Minor style preference; the author may ignore |
-| **FYI** | Context only, no action needed |
+| Prefix | Meaning | OCR level |
+|---|---|---|
+| **Critical:** | Data loss, broken reconcile, security hole, ledger inconsistency — must fix | `critical` |
+| *(no prefix)* | Required change — convention or spec violation that must be addressed | `high` |
+| **Optional:** / **Consider:** | Worth considering, not required | `medium` |
+| **Nit:** | Minor style preference; the author may ignore | `low` |
+| **FYI** | Context only, no action needed | `low` |
 
 Lead with what matters: correctness and security first, then structural
 regressions, then everything else. A few high-conviction comments beat a long list;
@@ -160,9 +162,45 @@ problem. Cite file and line for every finding.
   integer credits), treat it as intentional.
 - Comment on code, not people. If the author has context you lack, defer gracefully.
 
+## Named noise — do not report these at any severity
+
+Severity is a poor filter because it does not predict truth. These are filtered by
+what they claim instead, and each is a finding this repository has *measured* as wrong.
+
+- **`kubectl -o jsonpath` renders a `[]string` with Go's `%v`, space-separated.** It
+  does not: the jsonpath printer JSON-encodes a slice, so `pciSwitches` prints
+  `["0000:01:00.0","0000:00:01.0"]` and splitting on commas is correct. Measured on
+  kubectl v1.36.3 and on real multi-bridge hardware. Reported six times, wrong six
+  times, and acting on it introduces the very mis-parse it warns about.
+- **"Add a comment explaining this" on code that already carries the rule.**
+  `AGENTS.md` requires source comments to stay plain and short and to state logic
+  rather than history; a request for more prose, for restating what a spec owns, or
+  for keeping a revision narrative in a hot path contradicts it. Review against that
+  convention, not toward more text.
+- **"The fix ships no regression test", inferred from not having seen one.** You can
+  read `_test.go` files, so you may check this and report it. The machine reviewers on
+  the same PR cannot — Copilot drops them by content-exclusion policy, OpenCodeReview
+  by `**/*_test.go` — and have raised it against a test file present in that very PR.
+  When one of them does, the refutation is its own output: Copilot's review body lists
+  every excluded path by name.
+
+A finding in one of these classes should be omitted. If it seems to apply anyway, say
+which measurement it contradicts — that is the only form of it worth a reviewer's
+attention.
+
 ## Out of scope — never review
 
-- `binding/`, `staging/`, anything matching `zz_generated*`, `*_deepcopy*`,
-  `generated.pb.go`, `generated.proto`, `generated.protomessage.pb.go`.
+- `binding/`, `staging/`, `pkg/kubeclients/`, `pkg/extensionroute/swagger/ui/`, and
+  anything matching `zz_generated*`, `*_deepcopy*`, `generated.pb.go`,
+  `generated.proto`, `generated.protomessage.pb.go`.
+- `deploy/gpustack-operator/chart/*.json` and `deploy/gpustack-operator/chart/*.md` — rendered by
+  `make generate chart`. The `values.yaml` and `README.md.gotmpl` they come from are hand-written,
+  and are reviewed.
 - Vendored subchart trees under `deploy/gpustack-operator/chart/charts/*` — except
   to flag that an in-place edit should have been a patch under `hack/`.
+
+`hack/`, `gen/`, `.agents/skills/**/*.sh` and `.claude/skills/**/*.sh` stay **in** scope
+here, and only here: `.opencodereview/rule.json` excludes them all, so a change to a
+build script, a code generator, or an e2e case reaches no other reviewer. Review them as
+ordinary hand-written code — and for a case script, whether its assertion can fail at
+all, and whether its cleanup restores every baseline it changed.
