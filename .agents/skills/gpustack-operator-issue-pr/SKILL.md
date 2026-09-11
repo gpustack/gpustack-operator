@@ -1,6 +1,6 @@
 ---
 name: gpustack-operator-issue-pr
-description: "Conventions for filing a GPUStack Operator issue or opening a pull request: the issue title prefixes and the label each pairs with, the title cap, Conventional-Commit PR titles, and the issue-linking verbs. Invoke before `gh issue create` or `gh pr create`, which apply none of a template's frontmatter."
+description: "Conventions for filing a GPUStack Operator issue or opening a pull request: the title prefixes and their labels, the title cap, Conventional-Commit PR titles, and the issue-linking verbs. Invoke before `gh issue create` or `gh pr create`."
 allowed-tools: "Read, Write, Bash(gh issue create*), Bash(gh pr create*), Bash(gh issue view*), Bash(gh pr view*), Bash(gh label list*)"
 ---
 

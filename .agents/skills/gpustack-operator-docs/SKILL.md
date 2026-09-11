@@ -1,6 +1,6 @@
 ---
 name: gpustack-operator-docs
-description: "Write or update the GPUStack Operator documentation: route a new fact to the page that owns it, and keep each page's header / Contents / footer and the docs/README.md index in sync. Invoke when a change needs a doc change, when adding or splitting a page, or when reviewing a docs diff."
+description: "Write or update the GPUStack Operator documentation: route a new fact to the page that owns it, and keep each page's header, Contents, footer and the docs/README.md index in sync. Also adding a page or reviewing a docs diff."
 ---
 
 # GPUStack Operator — documentation

@@ -39,10 +39,14 @@ These build, deploy or publish, so they are explicit-only: your host never lists
 one by name is your job. The change on the left is the trigger.
 
 - the chart, in-cluster app installation, the image build → `gpustack-operator-chart-e2e`
-- reconcile, an admission webhook, the extension-apiserver → `gpustack-operator-e2e`
-- a pinned subchart version or its patch under `hack/` → `gpustack-operator-chart-subcharts-manage`
+- reconcile, an admission webhook, the extension-apiserver, in-cluster app installation
+  → `gpustack-operator-e2e`
+- a pinned version in `hack/deps.sh`, a patch under `hack/deploy/`, a vendored tree edited in
+  place, a bundled chart added or dropped, or `make deps` leaving a `.rej`
+  → `gpustack-operator-chart-subcharts-manage`
 - shipping a version → `gpustack-operator-release`
-- `pack/**/Dockerfile` or a `csrc/` slicing shim → `gpustack-operator-xbuild-and-verify`
+- `pack/gpustack-operator/Dockerfile`, `pack/gpustack-operator/external/`, `pack/thead-ppu-devel/`,
+  or a slicing shim under `csrc/` → `gpustack-operator-xbuild-and-verify`
 
 The `gpustack-operator-lint` hook dispatches on what a turn left dirty. Run the matching one yourself too:
 

@@ -40,9 +40,12 @@ COPILOT_MD="${ROOT_DIR}/.github/copilot-instructions.md"
 REVIEW_MD="${SKILLS_DIR}/gpustack-operator-code-review/SKILL.md"
 AGENTS_MD="${ROOT_DIR}/AGENTS.md"
 
-# A description longer than this is the shape that got truncated. The longest one in the tree is a
-# third of it, so the cap leaves room to write a real trigger sentence and still stops the essay.
-DESC_MAX=500
+# Every host truncates the catalog listing, and each picks its own limit: measured at 1536 characters
+# on Claude Code 2.1.261, 1024 on codex-cli 0.154.0, and 247 on Kimi Code 0.42.0. The cap is the
+# tightest of the three, because a description that fits only the widest host is silently cut on the
+# other two -- that already happened here and cost one skill half its discovery text. The longest
+# description in the tree sits at 240 under this cap.
+DESC_MAX=247
 
 ALLOWED_KEYS="name description allowed-tools disable-model-invocation license compatibility metadata"
 
@@ -76,9 +79,17 @@ for skill_md in "${SKILLS_DIR}"/*/SKILL.md; do
   # The frontmatter block, and only it: everything between the first '---' and the next one. A
   # value may wrap, so a key is a line whose first token ends in ':' at column 0 -- a wrapped
   # continuation is indented and is not mistaken for one.
+  #
+  # Reading to end-of-file and reading to the closing '---' produce the same lines, so the close is
+  # asserted separately. Without it a file that never closes its frontmatter passes: every key is
+  # found, and nothing reports that the body was parsed as metadata.
+  if ! awk 'NR>1 && /^---$/{found=1; exit} END{exit !found}' "${skill_md}"; then
+    report "${rel}: frontmatter never closes -- no second '---'"
+    continue
+  fi
   fm="$(awk 'NR==1{next} /^---$/{exit} {print}' "${skill_md}")"
   if [[ -z "${fm}" ]]; then
-    report "${rel}: frontmatter is empty or never closes"
+    report "${rel}: frontmatter is empty"
     continue
   fi
 
@@ -98,7 +109,11 @@ for skill_md in "${SKILLS_DIR}"/*/SKILL.md; do
     report "${rel}: name '${name}' is not lowercase kebab-case"
   fi
 
+  # Strip the surrounding YAML quotes before measuring: the cap is on the value a host renders, and
+  # counting the delimiters would reject a description two characters shorter than the real limit.
   desc="$(printf '%s\n' "${fm}" | awk '/^description:/{sub(/^description: */,""); print; exit}')"
+  desc="${desc%\"}"
+  desc="${desc#\"}"
   if [[ -z "${desc}" ]]; then
     report "${rel}: no description"
   elif [[ ${#desc} -gt ${DESC_MAX} ]]; then
@@ -107,20 +122,31 @@ for skill_md in "${SKILLS_DIR}"/*/SKILL.md; do
 
   frozen="$(printf '%s\n' "${fm}" | awk -F': *' '/^disable-model-invocation:/ {print $2; exit}')"
   openai_yaml="${dir}/agents/openai.yaml"
+
+  # policy_ok <file>: the file is exactly the two-line Codex policy and nothing else. A substring
+  # search would accept the same text commented out, or nested under an unrelated key, and either
+  # of those leaves the skill auto-invoked on Codex while reading as frozen here.
+  policy_ok() {
+    [[ "$(awk 'NF' "$1")" == "policy:
+  allow_implicit_invocation: false" ]]
+  }
+
   case "${frozen}" in
   "" | false)
-    if [[ -f "${openai_yaml}" ]] && grep -q 'allow_implicit_invocation: *false' "${openai_yaml}"; then
+    if [[ -f "${openai_yaml}" ]] && policy_ok "${openai_yaml}"; then
       report "${rel}: Codex policy freezes this skill but the frontmatter does not -- it would be explicit-only on Codex and auto-invoked on Claude and Kimi"
     fi
     ;;
   true)
     if [[ ! -f "${openai_yaml}" ]]; then
       report "${rel}: disable-model-invocation is true but agents/openai.yaml is missing -- Codex does not read that key and would still auto-invoke"
-    elif ! grep -q 'allow_implicit_invocation: *false' "${openai_yaml}"; then
-      report ".agents/skills/${want_name}/agents/openai.yaml: does not set allow_implicit_invocation: false"
+    elif ! policy_ok "${openai_yaml}"; then
+      report ".agents/skills/${want_name}/agents/openai.yaml: is not exactly 'policy:' / '  allow_implicit_invocation: false'"
     fi
-    if [[ -f "${AGENTS_MD}" ]] && ! grep -qF -- "${want_name}" "${AGENTS_MD}"; then
-      report "AGENTS.md: names no trigger for '${want_name}', whose description a frozen skill no longer gets loaded -- nothing would tell the model it exists"
+    # The name has to sit in an actual trigger row. Searching the whole file accepts a sentence that
+    # mentions the skill while saying nothing about when to offer it -- including one that denies it.
+    if [[ -f "${AGENTS_MD}" ]] && ! grep -F -- "${want_name}" "${AGENTS_MD}" | grep -q '→'; then
+      report "AGENTS.md: has no '<change> → ${want_name}' row; a frozen skill's description is never loaded, so nothing else would tell the model it exists"
     fi
     ;;
   *)
@@ -140,35 +166,66 @@ done
 # The "exclude" array of rule.json, one quoted path per line. An empty read means the extractor
 # stopped matching the file's shape, which would make every assertion below vacuously true -- so
 # it is an error, not a pass.
+# One quoted path per line, and the array must close on a line of its own. The previous version
+# stopped at the first line containing ']' without asking whether the bracket was inside a quoted
+# glob: a single malformed entry such as "**/*_test.go]" truncated the list silently, and every
+# assertion below then passed over the handful of entries that survived. So a line that is not a
+# quoted entry is a refusal to run, not a short list.
 excludes="$(awk '
-  /"exclude"[[:space:]]*:[[:space:]]*\[/ { inside = 1; next }
-  inside && /\]/                        { exit }
-  inside                                { gsub(/[",]/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if ($0 != "") print }
+  /"exclude"[[:space:]]*:[[:space:]]*\[/                      { inside = 1; next }
+  inside && /^[[:space:]]*\][[:space:]]*,?[[:space:]]*$/      { print "__CLOSED__"; exit }
+  inside && /^[[:space:]]*"[^"]*"[[:space:]]*,?[[:space:]]*$/ {
+      gsub(/^[[:space:]]*"|"[[:space:]]*,?[[:space:]]*$/, ""); print; next
+  }
+  inside                                                      { print "__MALFORMED__"; exit }
 ' "${RULE_JSON}")"
 
+case "${excludes}" in
+*__MALFORMED__*) cannot_run "${RULE_JSON}: the exclude array holds a line that is not a single quoted path" ;;
+*__CLOSED__*) excludes="${excludes%__CLOSED__}"; excludes="${excludes%$'\n'}" ;;
+*) cannot_run "${RULE_JSON}: the exclude array never closes; the extractor no longer matches its shape" ;;
+esac
+
 if [[ -z "${excludes}" ]]; then
-  cannot_run "read no exclude entries from ${RULE_JSON}; the extractor no longer matches its shape"
+  cannot_run "read no exclude entries from ${RULE_JSON}"
 fi
 
 if [[ "${excludes}" != "$(LC_ALL=C sort <<<"${excludes}")" ]]; then
   report ".opencodereview/rule.json: the exclude list is not sorted (LC_ALL=C)"
 fi
 
-# Reduce a glob to the literal a human would write in prose: drop a trailing /** or /**/*.ext, and
-# drop a leading **/ so "**/*_test.go" is looked for as "_test.go".
+# Reduce a glob to the literal a human would write in prose, KEEPING the trailing slash of a
+# directory. Dropping it is what made this assertion vacuous: "gen/**" reduced to "gen", which
+# occurs inside "**/generated.*", so the rule passed with every literal mention of gen/ deleted
+# from both files. "gen/" occurs in neither.
 while IFS= read -r glob; do
   needle="${glob}"
-  needle="${needle%/\*\*}"
-  needle="${needle%/\*\*/\*.go}"
+  needle="${needle%\*\*/\*.go}"
+  needle="${needle%\*\*}"
   needle="${needle#\*\*/}"
   needle="${needle#\*}"
   needle="${needle%\*}"
   [[ -n "${needle}" ]] || continue
-  grep -qF -- "${needle}" "${COPILOT_MD}" ||
-    report ".github/copilot-instructions.md: does not name '${needle}', excluded by .opencodereview/rule.json"
   grep -qF -- "${needle}" "${REVIEW_MD}" ||
     report ".agents/skills/gpustack-operator-code-review/SKILL.md: does not name '${needle}', excluded by .opencodereview/rule.json"
 done <<<"${excludes}"
+
+# copilot-instructions.md states the list verbatim rather than in prose, so it gets the stronger
+# assertion: the two lists must be equal, in order. "Is this path mentioned somewhere in the file"
+# is not enough there -- four of these globs reduce to a literal (`_test.go`, `generated.`) that the
+# document's other sections already contain, so their mention would be satisfied by a sentence that
+# has nothing to do with the exclusion list.
+mirrored="$(awk '
+  /^## Out of scope/      { inside = 1; next }
+  inside && /^## /        { exit }
+  inside && /^- `.*`$/    { gsub(/^- `|`$/, ""); print }
+' "${COPILOT_MD}")"
+
+if [[ "${mirrored}" != "${excludes}" ]]; then
+  report ".github/copilot-instructions.md: its Out-of-scope list is not the exclude list of .opencodereview/rule.json, verbatim and in the same order"
+  diff <(printf '%s\n' "${excludes}") <(printf '%s\n' "${mirrored}") |
+    sed 's/^/check-skills:   /' >&2
+fi
 
 [[ ${findings} -eq 0 ]] || exit 1
 exit 0

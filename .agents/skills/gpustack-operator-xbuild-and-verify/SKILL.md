@@ -22,7 +22,7 @@ It is the build+runtime-contract counterpart to the cluster-level `gpustack-oper
 Proactively suggest this skill when a branch changes the Docker build flow or a slicing shim:
 
 ```bash
-git diff --name-only origin/main...HEAD | grep -E 'pack/gpustack-operator/(Dockerfile|external/(ascend|nvidia)/)|csrc/(thead|amd)/'
+git diff --name-only origin/main...HEAD | grep -E 'pack/(gpustack-operator/(Dockerfile|external/)|thead-ppu-devel/)|csrc/(thead|amd)/'
 ```
 
 ## Runner model (local or remote)

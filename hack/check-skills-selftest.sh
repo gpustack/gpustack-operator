@@ -61,14 +61,19 @@ EOF
 }
 EOF
 
+  # A verbatim mirror of the exclude array above, in the same order: that equality is the contract.
   cat >"${d}/.github/copilot-instructions.md" <<'EOF'
-Out of scope: `binding/`, `staging/`, and every `_test.go`.
+## Out of scope — do not review
+
+- `**/*_test.go`
+- `binding/**`
+- `staging/**`
 EOF
 
-  # Named here so a case that freezes demo-skill tests only the thing it broke. The AGENTS.md
-  # assertion fires on frozen skills alone, and gets its own case below.
+  # A real trigger row, so a case that freezes demo-skill tests only the thing it broke. The
+  # AGENTS.md assertion wants the name beside an arrow, and gets its own cases below.
   cat >"${d}/AGENTS.md" <<'EOF'
-Invoke by name: `demo-skill`.
+- some change → `demo-skill`
 EOF
 }
 
@@ -106,7 +111,7 @@ case_() {
 # from one that rejects every input.
 case_ baseline 0 "" true
 
-case_ long-description 1 "over the 500 cap" \
+case_ long-description 1 "over the 247 cap" \
   bash -c 'printf "%s\n" "---" "name: demo-skill" "description: \"$(head -c 600 </dev/zero | tr "\0" "x")\"" "---" > .agents/skills/demo-skill/SKILL.md'
 
 case_ name-mismatch 1 "but its directory is" \
@@ -126,14 +131,42 @@ case_ non-boolean-freeze 1 "expected true or false" \
 
 # Freezing removes the description from what a host loads, so AGENTS.md is the only thing left that
 # can tell the model the skill exists. Correctly frozen on both hosts, and still invisible.
-case_ frozen-missing-from-agents-md 1 "names no trigger for" \
+case_ frozen-missing-from-agents-md 1 "has no '<change> →" \
   bash -c 'sed -i.bak "s/^description:/disable-model-invocation: true\ndescription:/" .agents/skills/demo-skill/SKILL.md \
     && mkdir -p .agents/skills/demo-skill/agents \
     && printf "policy:\n  allow_implicit_invocation: false\n" > .agents/skills/demo-skill/agents/openai.yaml \
     && printf "No skills named here.\n" > AGENTS.md'
 
-case_ exclude-missing-from-copilot 1 "copilot-instructions.md: does not name" \
-  sed -i.bak 's/`staging\/`, //' .github/copilot-instructions.md
+# Mentioning the skill is not the same as routing to it. This row names it while denying the
+# trigger, which the presence-only version of this assertion accepted.
+case_ agents-md-mention-without-trigger 1 "has no '<change> →" \
+  bash -c 'sed -i.bak "s/^description:/disable-model-invocation: true\ndescription:/" .agents/skills/demo-skill/SKILL.md \
+    && mkdir -p .agents/skills/demo-skill/agents \
+    && printf "policy:\n  allow_implicit_invocation: false\n" > .agents/skills/demo-skill/agents/openai.yaml \
+    && printf -- "- some change (No trigger: demo-skill)\n" > AGENTS.md'
+
+# A commented-out policy is still matched by a substring search, and leaves the skill auto-invoked
+# on Codex while every other signal reads as frozen.
+case_ commented-out-codex-policy 1 "is not exactly" \
+  bash -c 'sed -i.bak "s/^description:/disable-model-invocation: true\ndescription:/" .agents/skills/demo-skill/SKILL.md \
+    && mkdir -p .agents/skills/demo-skill/agents \
+    && printf "policy:\n#  allow_implicit_invocation: false\n" > .agents/skills/demo-skill/agents/openai.yaml'
+
+# Reading to EOF and reading to the closing marker yield the same lines, so the close is asserted.
+case_ unterminated-frontmatter 1 "frontmatter never closes" \
+  bash -c 'mkdir -p .agents/skills/probe && printf -- "---\nname: probe\ndescription: \"probe\"\n" > .agents/skills/probe/SKILL.md'
+
+# The copilot list is a verbatim mirror, so order is part of the contract, not only membership.
+case_ copilot-mirror-reordered 1 "not the exclude list" \
+  bash -c 'printf -- "## Out of scope — do not review\n\n- \`staging/**\`\n- \`binding/**\`\n- \`**/*_test.go\`\n" > .github/copilot-instructions.md'
+
+# A bracket outside the quotes used to truncate the list and let everything after it go unchecked.
+# That is the check failing to run, not a finding about the tree.
+case_ malformed-exclude-line 2 "not a single quoted path" \
+  bash -c 'printf "%s\n" "{" "  \"exclude\": [" "    \"binding/**\" ]bogus," "    \"staging/**\"" "  ]," "  \"rules\": []" "}" > .opencodereview/rule.json'
+
+case_ exclude-missing-from-copilot 1 "not the exclude list" \
+  sed -i.bak '/`staging\/\*\*`/d' .github/copilot-instructions.md
 
 case_ exclude-missing-from-review-skill 1 "SKILL.md: does not name" \
   sed -i.bak 's/`staging\/`, //' .agents/skills/gpustack-operator-code-review/SKILL.md
