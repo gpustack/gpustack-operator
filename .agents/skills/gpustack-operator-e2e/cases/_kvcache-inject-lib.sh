@@ -51,6 +51,19 @@ CLIENT_IMAGE="${E2E_CLIENT_IMAGE:-$MOONCAKE_IMAGE}"
 # "OUR webhook refused", which is a different claim once more than one plugin can sit on Pod CREATE.
 KVI_WEBHOOK_NAME="mutate.gpustack-worker-kvcache.core.v1.pod"
 
+# The API server's own wording for a COMPLETED refusal by that webhook, measured 2026-09-04 against a
+# live server: `admission webhook "<name>" denied the request: <message>`.
+#
+# It lives here, in one place, because two helpers test for it and both would have to change together
+# if that wording ever drifts - and because the thing being assumed is the server's phrasing, which is
+# a fact about somebody else's release rather than about this suite. A reader who has to re-measure it
+# has one string to find.
+#
+# The name and the verdict are one string on purpose: matched separately they can arrive from two
+# different plugins, and the whole point of this constant is that a decision was made BY THIS WEBHOOK.
+# The name alone would not say that - a failed call names the webhook too.
+KVI_DENIAL_ENVELOPE="admission webhook \"${KVI_WEBHOOK_NAME}\" denied the request"
+
 # The pipefail the callers set makes `cmd | head -c 5 || echo $$` do something other than it reads:
 # head closes after five bytes, tr dies on SIGPIPE, the pipeline reports failure, and the fallback
 # APPENDS to whatever tr already produced. Measured under `set -o pipefail`: [333986], [bg33986],
@@ -392,15 +405,48 @@ kvi_refused() {
     echo "$manifest" | kubectl delete -f - --ignore-not-found --wait=false >/dev/null 2>&1 || true
     return 1
   fi
-  # WHICH webhook refused, not merely that something did. Measured 2026-09-04 against a live API
-  # server: the envelope is `admission webhook "<name>" denied the request: <message>` and carries no
-  # other object - not even the Pod's own name. That narrowness is what makes the short `want` strings
-  # below (a bare "vllm", "args", or the namespace) satisfiable by SOMEONE ELSE's message the day a
-  # second admission plugin sits on this path. Today only one webhook here refuses; that is a property
-  # of the environment, not an assertion, so it is asserted.
-  if ! echo "$out" | grep -qF "$KVI_WEBHOOK_NAME"; then
-    record FAIL "$check" "refused, but not by ${KVI_WEBHOOK_NAME}, so the message below belongs to \
-something else and the reason it names is not ours: $(echo "$out" | tr '\n' ' ' | cut -c1-160)"
+  # WHICH webhook DECIDED to refuse, not merely that this webhook's name appears. Measured 2026-09-04
+  # against a live API server: the envelope is `admission webhook "<name>" denied the request:
+  # <message>` and carries no other object - not even the Pod's own name. That narrowness is what
+  # makes the short `want` strings below (a bare "vllm", "args", or the namespace) satisfiable by
+  # SOMEONE ELSE's message the day a second admission plugin sits on this path. Today only one
+  # webhook here refuses; that is a property of the environment, not an assertion, so it is asserted.
+  #
+  # THE NAME ALONE DOES NOT SAY A DECISION WAS MADE, which is why KVI_DENIAL_ENVELOPE carries the
+  # verdict as well. A FAILED CALL names this webhook too: its failurePolicy is Fail, so a call that
+  # returns no usable decision is turned into a rejection, and the API server reports it as
+  # `failed calling webhook "<name>": <why>` - the name, and no decision anywhere in it.
+  #
+  # This check was safe before the envelope was matched, but by accident rather than by design: an
+  # outage fell through to the `want` comparison below, missed, and was recorded as a FAILURE. Right
+  # direction, wrong reason - it reported "the message does not name X" about a webhook that never
+  # answered, which sends a reader to the refusal under test instead of to the cluster.
+  if ! echo "$out" | grep -qF "$KVI_DENIAL_ENVELOPE"; then
+    # A CALL THAT PRODUCED NO DECISION, reported apart from the case below because the next move is
+    # the opposite one: go and read the webhook the server names, not this refusal.
+    #
+    # WHAT IT CLAIMS IS BOUNDED BY WHERE IT SITS. Reaching here means the envelope above did not
+    # match, so THIS webhook decided nothing; finding a failed call adds that a call produced no
+    # usable answer. It says neither which webhook failed - that is in the server's message, and it
+    # need not be ours - nor that nothing else decided, which would be a claim about plugins this
+    # suite never asked about.
+    #
+    # That bound is what lets the test be a single grep. An earlier revision said "NO admission
+    # decision was made", which IS false when somebody else refused, and carried a second condition
+    # to keep that sentence honest. Narrowing the sentence to what this point in the flow knows
+    # removes the condition instead of paying for it.
+    #
+    # `failed calling webhook` covers an unreachable endpoint, a timeout, a rejected certificate and
+    # a malformed response alike, so the cause stays in the server's own words rather than being
+    # named here.
+    if echo "$out" | grep -qF "failed calling webhook"; then
+      record FAIL "$check" "this webhook produced no decision and a webhook call failed, so this run \
+says NOTHING about the refusal under test. The server names which webhook and why: \
+$(echo "$out" | tr '\n' ' ' | cut -c1-160)"
+      return 0
+    fi
+    record FAIL "$check" "refused, but not by ${KVI_WEBHOOK_NAME} deciding, so the message below \
+belongs to something else and the reason it names is not ours: $(echo "$out" | tr '\n' ' ' | cut -c1-160)"
     return 0
   fi
   if echo "$out" | grep -qF "$want"; then
@@ -425,8 +471,8 @@ something else and the reason it names is not ours: $(echo "$out" | tr '\n' ' ' 
 #   0  OUR webhook DECIDED to refuse it - the row is unreachable, and the message says on what
 #      grounds. A decision, not merely this webhook's name appearing: see the envelope below
 #   1  admission accepted it - the row is REACHABLE and must be run rather than skipped
-#   2  it failed with no admission decision - a fault rather than a skip, because it says nothing
-#      about the row; an unreachable cluster must never read as an unreachable row
+#   2  the call produced no admission decision - a fault rather than a skip, because it says nothing
+#      about the row; a broken admission path must never read as an unreachable row
 kvi_admission_refuses() {
   local manifest="$1" out rc
   # The status is captured on its own line, as in kvi_refused below: testing $? after an assignment
@@ -437,16 +483,18 @@ kvi_admission_refuses() {
   fi
   echo "$out" | tr '\n' ' ' | cut -c1-200
   # THE DENIAL ENVELOPE, not merely this webhook's name, and the difference is the whole safety of
-  # the third outcome. An OUTAGE names this webhook too: its failurePolicy is Fail, so a webhook the
-  # API server cannot reach produces `failed calling webhook "<name>": ... connection refused` -
-  # the name, and no admission decision anywhere in it. Keyed on the name alone, a dead webhook read
-  # as "this row is unreachable", and since that outage rejects every Pod in the cluster, both cases
-  # would have reported a tidy SKIP while nothing worked at all.
+  # the third outcome. A FAILED CALL names this webhook too: its failurePolicy is Fail, so a call
+  # that returns no usable decision - unreachable, timed out, bad certificate, malformed response -
+  # is turned into a rejection and reported as `failed calling webhook "<name>": <why>`, carrying
+  # the name and no admission decision at all. Keyed on the name alone, that read as "this row is
+  # unreachable"; and since the objectSelector routes every opted-in Pod through this webhook, the
+  # same failure rejects every fixture Pod this family creates - so both cases would have reported a
+  # tidy SKIP while none of the family could run.
   #
-  # So the whole envelope is matched as one string, which also keeps it attributed: name and verdict
-  # cannot come from two different webhooks. It is the envelope kvi_refused reads and its comment
-  # records as measured - `admission webhook "<name>" denied the request: <message>`.
-  if echo "$out" | grep -qF "admission webhook \"${KVI_WEBHOOK_NAME}\" denied the request"; then
+  # So the whole envelope is matched, which also keeps it attributed: name and verdict cannot come
+  # from two different webhooks. It is KVI_DENIAL_ENVELOPE, the one string kvi_refused tests for
+  # too - the server's phrasing is assumed once, where it is recorded as measured.
+  if echo "$out" | grep -qF "$KVI_DENIAL_ENVELOPE"; then
     return 0
   fi
   return 2
