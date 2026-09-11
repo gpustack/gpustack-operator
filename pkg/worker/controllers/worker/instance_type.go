@@ -252,7 +252,10 @@ func (r *InstanceTypeReconciler) ensureClusterQueue(
 // fixed no-borrow isolation policy written straight into the spec — empty cohort (no cross-queue
 // borrowing to broker), never reclaim/borrow within a nonexistent cohort, only in-queue
 // lower-priority preemption, all-namespace selector. The NodeQueueReconciler fills the resource
-// groups and the node-devices AdmissionCheck reference afterwards.
+// groups afterwards; it adds the node-devices AdmissionCheck reference only while the cluster-wide
+// derived-from-node switch is on and that check reports Active, so a queue backing an
+// administrator's own InstanceType does carry that gate in the default mode, and carries none in
+// the mode where the administrator authors every InstanceType.
 func (r *InstanceTypeReconciler) createClusterQueue(
 	ctx context.Context, it *workercore.InstanceType,
 ) (*kueue.ClusterQueue, error) {

@@ -7,6 +7,14 @@ engine image that serves on it. Nothing here is in progress. This moves to Compl
 tick, and to Abandoned if the hardware decision goes the other way. It does not move on its own: no
 code change can lift it.
 Type: Feature
+Upstream citations: a pinned release is the version qualifier for every source coordinate under it,
+so a bare `file.py:123` needs no release of its own. The pin may sit in this header, in a table's own
+version column, or in a `pinned at <release>` phrase beside the claim; a coordinate is read at the
+nearest pin that governs it — its own table row first, then the pin its section declares, then this
+header. This is the general rule, not a note about this document — it holds for every
+spec that pins an upstream. Repointing such a coordinate at a newer release's line numbers turns a
+citation that is correct at its declared pin into one that is wrong, so it is a defect and NEVER a
+fix. The coordinate that has to carry its own release is the one no pin governs.
 
 ## Summary
 
