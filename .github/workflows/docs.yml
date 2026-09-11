@@ -27,6 +27,13 @@ on:
       # check that catches it has to run when the test names move, not only when prose moves.
       - "**/*_test.go"
       - ".claude/skills/gpustack-operator-docs/scripts/*.sh"
+      # The skill contract rides on "make lint docs". A SKILL.md is markdown and is already covered
+      # by "**.md" above, but the Codex invocation policy beside it is YAML and the exclusion lists
+      # it compares are JSON and prose, so each needs its own trigger or the gate misses the edit.
+      - ".agents/skills/**"
+      - ".opencodereview/rule.json"
+      - "hack/check-skills.sh"
+      - "hack/check-skills-selftest.sh"
       - "hack/lint.sh"
       - ".github/workflows/docs.yml"
   pull_request:
@@ -42,6 +49,13 @@ on:
       # check that catches it has to run when the test names move, not only when prose moves.
       - "**/*_test.go"
       - ".claude/skills/gpustack-operator-docs/scripts/*.sh"
+      # The skill contract rides on "make lint docs". A SKILL.md is markdown and is already covered
+      # by "**.md" above, but the Codex invocation policy beside it is YAML and the exclusion lists
+      # it compares are JSON and prose, so each needs its own trigger or the gate misses the edit.
+      - ".agents/skills/**"
+      - ".opencodereview/rule.json"
+      - "hack/check-skills.sh"
+      - "hack/check-skills-selftest.sh"
       - "hack/lint.sh"
       - ".github/workflows/docs.yml"
 

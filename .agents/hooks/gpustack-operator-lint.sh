@@ -42,7 +42,10 @@ fi
 
 # Check the documentation contract when any markdown, or the checker itself, is changed/added.
 # A docs-only turn touches no .go file, so without this branch nothing here would run at all.
-if dirty_matches '\.md( -> |$)|/check-docs\.sh( -> |$)'; then
+# `make lint docs` also carries the skill contract, and the two non-markdown inputs it compares --
+# the Codex invocation policy beside each skill, and the exclusion list in .opencodereview -- have
+# to be named here too, or a turn that edits only one of them leaves the gate silent.
+if dirty_matches '\.md( -> |$)|/check-(docs|skills)\.sh( -> |$)|\.agents/skills/|\.opencodereview/rule\.json'; then
   run_lint "make lint docs" make lint docs
 fi
 

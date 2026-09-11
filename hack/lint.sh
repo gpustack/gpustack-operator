@@ -37,6 +37,22 @@ function docs_lint() {
     fi
   done
 
+  # The skill contract rides here rather than with the Go lint because a SKILL.md is markdown: the
+  # Stop hook and docs.yml both already fire on any .md, so this gate reaches every turn that edits
+  # a skill without a second trigger to keep in sync. Same self-test-first rule as above.
+  if ! bash "${ROOT_DIR}/hack/check-skills-selftest.sh" "${ROOT_DIR}"; then
+    failed+=("check-skills-selftest")
+  else
+    # Two failures, two messages: a finding about the skills, or a check that could not run at all.
+    local skills_rc=0
+    bash "${ROOT_DIR}/hack/check-skills.sh" "${ROOT_DIR}" || skills_rc=$?
+    if [[ ${skills_rc} -eq 1 ]]; then
+      failed+=("check-skills")
+    elif [[ ${skills_rc} -gt 1 ]]; then
+      failed+=("check-skills (could not run; its diagnostic is above)")
+    fi
+  fi
+
   if [[ ${#failed[@]} -gt 0 ]]; then
     gpustack::log::fatal "docs lint failed: ${failed[*]}"
   fi
