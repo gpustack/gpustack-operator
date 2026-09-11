@@ -30,8 +30,9 @@ configuration, and tests using port-bearing names hid both defects.
 
 This change decodes the two identifiers the leader already provides, keys status rows by segment ID,
 accepts duplicate segment names and keeps Pod attribution separate from segment identity. Rows on a
-shared address remain publishable, but their node and medium stay empty because no Pod exposes the
-client ID that would map a row back to one of those Pods.
+shared address remain publishable and are credited to no Pod, because no Pod exposes the client ID
+that would map a row back to one of those Pods; they still carry the node and the medium their
+candidates agree on, neither of which is a fact about the individual Pod.
 
 ## Goals
 
@@ -80,13 +81,19 @@ for identifying current status rows, not for user-authored references or long-li
 ### Separate row identity from Pod attribution
 
 For each decoded segment, the controller always publishes its segment ID, client ID, advertised name,
-protocol and state. It adds node and medium only when the endpoint address maps to exactly one ready
-member Pod.
+protocol and state. It credits the segment to a Pod only when the endpoint address maps to exactly
+one ready member Pod.
 
-If several ready Pods answer to an address used by one or more segments, those rows retain empty node
-and medium fields and `MembersMounted=False` reports `AmbiguousMemberIdentity`. The message states how
-many of the total listed segments are ambiguous. Segments on other addresses in the same response
-keep their determinate attribution.
+If several ready Pods answer to an address used by one or more segments, no Pod is credited for those
+rows and `MembersMounted=False` reports `AmbiguousMemberIdentity`. The message states how many of the
+total listed segments are ambiguous. Segments on other addresses in the same response keep their
+determinate attribution.
+
+**Corrected after shipping.** This section formerly said those rows retain empty node and medium
+fields. Neither field is a fact about the individual Pod — Pods behind one key share a node, and the
+medium is their group's declaration — so both are published from what the candidates agree on, and
+only a field they disagree on is left empty. Which Pod produced a segment is still unknown and still
+reported; the two are decided separately, so a disputed medium does not put the shared node in doubt.
 
 The status list is sorted by segment ID before comparison so leader response ordering does not cause
 status churn.
@@ -135,5 +142,6 @@ random transfer port only in `te_endpoint`. They cover:
 The separate live validation must construct two member groups co-located on one node under a
 supported host-network transport and capture `/get_segments_detail`. It must prove that the names are
 identical and portless, the IDs and transfer endpoints are distinct, both status rows persist, and
-the ambiguity condition leaves node and medium empty. Moving the groups to different nodes must make
-both rows attributable; a same-node TCP case must remain a non-ambiguous control.
+the ambiguity condition credits neither row to a Pod while both carry the node and medium their
+candidates agree on. Moving the groups to different nodes must make both rows attributable; a
+same-node TCP case must remain a non-ambiguous control.
