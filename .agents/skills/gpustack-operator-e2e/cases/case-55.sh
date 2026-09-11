@@ -31,12 +31,16 @@
 # Expected:    a domain-carrying Binding is INJECTED, never refused; the record carries the domain and
 #              the engine version; a vLLM container receives no tenant key in any spelling while an
 #              SGLang container receives the Binding's own domain as MOONCAKE_TENANT_ID; and across
-#              the three accepted engines BOTH tenant answers appear.
+#              the engines this fixture can reach BOTH tenant answers appear.
 #
-#              SKIPS: none, and the control loop is written so it cannot skip by accident. An engine
-#              whose Pod never appears is recorded as a FAILURE and the loop reports how many of the
-#              three it actually observed, because a control that quietly did not run would otherwise
-#              leave a smaller set checked while the summary still claimed all three.
+#              ONE SKIP, structural: the vLLM-Ascend row of the control loop. That value is no longer
+#              one the engine annotation takes, and the spelling that replaces it needs an
+#              ascend-transport pool this fixture does not build - so the row is unreachable rather
+#              than unlucky, and it says so where a reader meets it. The remaining two carry both
+#              answers, which is what the control needs; the loop still records an engine whose Pod
+#              never appears as a FAILURE and still reports how many it observed, because a control
+#              that quietly did not run would otherwise leave a smaller set checked while the summary
+#              claimed all of them.
 # Cleanup:     the trap removes the Pods, the Binding, the namespace, the pool and the backend, in
 #              that order and idempotently, on pass AND fail. The Binding is given 60s before its
 #              finalizer is forced: a domain still holding objects makes the master refuse to drop
@@ -171,6 +175,34 @@ seen_true=0
 seen_false=0
 for engine in vllm vllm-ascend sglang; do
   pod="ctl-${engine//-/}"
+  # vLLM-Ascend cannot be reached from this fixture at all, and TWO refusals stand in front of it -
+  # neither of them about the launch. It is recorded before the expectation is consulted, because
+  # the expectation is not what stops it.
+  #
+  #  1. The engine annotation no longer takes the value. `vllm_ascend` was ruled the package the
+  #     runner installs when the accelerator backend is CANN rather than an engine anybody names, so
+  #     ParseEngine refuses it and names `engine: vllm` + `manufacturer: ascend` as the spelling.
+  #  2. Spelled that way it is refused one layer down: that runtime accepts only the `ascend`
+  #     transport, and this family's pool is built on a TCP backend.
+  #
+  # So the row needs a pool of its own, on an ascend-transport backend, which is a fixture this case
+  # does not have and cannot build on a cluster with no Ascend hardware. Recorded as a SKIP that
+  # says what is unverified rather than as a FAIL naming a Pod that never appeared, which is what a
+  # reader would otherwise chase.
+  #
+  # The Go side made this move first and for the first reason alone:
+  # TestPodKVCacheInject_StampTenantFollowsTheEngine dropped its vllm-ascend row as unreachable
+  # through the annotation, and the answer is pinned where the engine IS reachable, in
+  # TestSupportsTenant_PinsTheMeasuredAnswerPerEngine. What no test replaces is the cluster half.
+  if [ "$engine" = vllm-ascend ]; then
+    record SKIP "the tenant action follows the engine (${engine})" \
+      "unreachable from this fixture: the engine annotation refuses '${engine}' outright, and the \
+'vllm' + manufacturer=ascend spelling it names instead requires an ascend-transport pool while this \
+one is TCP. Its tenant answer is pinned in the inject package's own table \
+(TestSupportsTenant_PinsTheMeasuredAnswerPerEngine); what is UNVERIFIED is that a cluster produces \
+that stamp"
+    continue
+  fi
   # What this engine is expected to have injected. Two answers appear in this table, and that is what
   # gives the loop its discriminating power: a webhook that injected nothing, or one that injected
   # everywhere, fails on one side or the other. A table with one answer could not tell either from a
@@ -205,11 +237,16 @@ for engine in vllm vllm-ascend sglang; do
          "engine ${engine} stamped tenantInjected='${got:-<absent>}', which is neither answer" ;;
   esac
 done
-if [ "$ok" -eq 1 ] && [ "$checked" -eq 3 ]; then
+# TWO reachable engines, not three, and the count is what the loop is held to. The discriminating
+# property survives the vLLM-Ascend row being unreachable - vllm answers False and sglang answers
+# True, so both still have to appear - but the claim this line may make is smaller, and the count is
+# what keeps it from being overstated.
+if [ "$ok" -eq 1 ] && [ "$checked" -eq 2 ]; then
   if [ "$seen_true" -eq 1 ] && [ "$seen_false" -eq 1 ]; then
     record PASS "the tenant action follows the engine" \
-      "all ${checked} of 3 observed, and BOTH answers appeared - sglang injected a tenant, vllm and \
-vllm-ascend did not. Seeing both is what separates this from a stamp hard-coded either way"
+      "both reachable engines observed, and BOTH answers appeared - sglang injected a tenant, vllm \
+did not. Seeing both is what separates this from a stamp hard-coded either way. vllm-ascend is \
+skipped above and is NOT part of this claim"
   else
     record FAIL "the tenant action follows the engine" \
       "all ${checked} observed but only one answer appeared, so this run cannot tell a per-engine \

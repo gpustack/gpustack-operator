@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # CASE 60 — The connector name we render is one that engine's own factory has registered
-#   (MUTATING, self-recovering, AUTO-SKIPS each engine without its image)
+#   (MUTATING, self-recovering, AUTO-SKIPS each engine without its image; the vLLM-Ascend row SKIPS
+#    unconditionally - see Environment)
 #
 #   case-60.sh <NS>
 #
@@ -15,6 +16,15 @@
 #              been checked either. We had verified that vLLM's reader accepts our file, never that
 #              its factory accepts the name we pair with that file. That row happened to be correct.
 #              A dimension nothing covered is the finding here; one engine failing it was the symptom.
+#
+#              ONE OF THE TWO NO LONGER RUNS, and the assertion is smaller for it. The vLLM-Ascend
+#              row cannot be submitted from this fixture at all - the engine annotation refuses that
+#              value, and the spelling admission points at instead needs an ascend-transport pool
+#              while this family's is TCP - so it SKIPs whatever its image says. The loop body
+#              carries the two refusals in full. What is lost is this case's own finding: the row
+#              that caught MooncakeStoreConnector being a name that factory does not know is the one
+#              going unrun, leaving the rendered name pinned by a Go test and by the off-cluster
+#              registry reading recorded below, neither of which is a factory answering on a cluster.
 #
 #              WHY THE WRONG NAME READ AS RIGHT, which is why the FAIL below prints the whole
 #              registry rather than only the verdict. After plugin registration vLLM-Ascend's factory
@@ -32,7 +42,10 @@
 #              lives exactly between them: both halves can be individually right about different X.
 #
 # Environment: as CASE 53, plus one image per engine. Each row AUTO-SKIPS INDEPENDENTLY when its own
-#              image is unset, and says which name is left unverified.
+#              image is unset, and says which name is left unverified. The vLLM-Ascend row SKIPS
+#              BEFORE its image is consulted, because the image is not what stops it: that Pod is
+#              refused at admission on this fixture whatever image it names. So E2E_VLLM_ASCEND_IMAGE
+#              changes nothing today, and only E2E_VLLM_IMAGE can produce a row that runs.
 #
 #                E2E_VLLM_IMAGE=gpustack/runner:cuda12.9-vllm0.25.1
 #                E2E_VLLM_ASCEND_IMAGE=quay.io/ascend/vllm-ascend:v0.19.1rc1
@@ -84,9 +97,10 @@
 #
 #              Neither image runs inference: no GPU, no NPU, no weights, no model. Each execs one
 #              python3 -c that imports a registry and looks up a string.
-# Inputs:      one Pod per engine, annotated for that engine, running that engine's own image. The
-#              webhook injects; the case reads the rendered name back off the Pod spec and asks that
-#              engine's factory to resolve it.
+# Inputs:      one Pod per engine that can be submitted at all - today the vLLM row only - annotated
+#              for that engine and running that engine's own image. The webhook injects; the case
+#              reads the rendered name back off the Pod spec and asks that engine's factory to
+#              resolve it. The vLLM-Ascend row creates no Pod.
 # Expected:    four outcomes are told apart, never collapsed into one try:
 #
 #                1. the factory module imports - if it does not, this run says NOTHING about the
@@ -110,8 +124,11 @@
 #              then (`_get_connector_class_with_compat` at v0.19.1, `get_connector_class` at v0.25.1;
 #              the names differ, which is why the registry is read directly while that is equivalent).
 #
-#              SKIPS: each row independently, on its own image variable. One image present must not
-#              let the other row report green by omission.
+#              SKIPS: each row independently, on its own image variable, plus one STRUCTURAL skip -
+#              vLLM-Ascend, which no image makes runnable here. One image present must not let the
+#              other row report green by omission, and the summary line enforces that: it claims the
+#              cross-engine property only when BOTH rows resolved, so with one row structurally
+#              skipped that line is a SKIP rather than a PASS on every run of this case today.
 # Cleanup:     the trap removes the Pods, the Binding, the namespace, the pool and the backend, in
 #              that order and idempotently, on pass AND fail. It changes no shared baseline - every
 #              object it touches is one it created.
@@ -285,6 +302,11 @@ PY
 
 # The engine table. Two rows, one assertion. Adding an engine here is adding a row, which is the
 # shape this case is built for - the previous gap was a dimension with no rows at all.
+#
+# ONE OF THE TWO IS CURRENTLY DEAD: the vllm-ascend row SKIPs unconditionally, for the two reasons
+# spelled out at the top of the loop body. It stays in the list rather than being deleted, because
+# the row is the unit this case is built from and its image variable is still the one to set when
+# the fixture can carry it; the skip is a statement about the fixture, not about the row.
 resolved_rows=0
 for row in "vllm:E2E_VLLM_IMAGE" "vllm-ascend:E2E_VLLM_ASCEND_IMAGE"; do
   engine="${row%%:*}"
@@ -292,6 +314,31 @@ for row in "vllm:E2E_VLLM_IMAGE" "vllm-ascend:E2E_VLLM_ASCEND_IMAGE"; do
   image="$(eval "printf '%s' \"\${${var}:-}\"")"
   check="the ${engine} factory has the connector name we render in its registry"
   pod="conn-${engine//-/}"
+
+  # vLLM-Ascend is unreachable from this fixture, and it is checked BEFORE the image because the
+  # image is not what stops it. Two refusals stand in front of the row:
+  #
+  #  1. `kvcache.gpustack.ai/engine: vllm-ascend` is refused outright. That value was ruled the
+  #     package the runner installs when the accelerator backend is CANN rather than an engine
+  #     anybody names, so admission points at `engine: vllm` + `manufacturer: ascend` instead.
+  #  2. Spelled that way the Pod is refused one layer down: that runtime accepts only the `ascend`
+  #     transport, and this family's pool is built on a TCP backend.
+  #
+  # So reaching it needs a pool on an ascend-transport backend, which is a fixture this case does
+  # not have. THE COST IS THIS CASE'S OWN FINDING: the row that caught MooncakeStoreConnector being
+  # a name vLLM-Ascend's factory does not know is the one going unrun. What is left of that guard is
+  # TestRender_VLLMFamilyVehicleIsAFile pinning AscendStoreConnector as the name we render, plus the
+  # off-cluster reading in this case's header - one `docker run` against the image listing the whole
+  # registry, recorded there with its date. Neither is this file asserting it, and the summary below
+  # already refuses to claim the cross-engine property on one row.
+  if [ "$engine" = vllm-ascend ]; then
+    record SKIP "$check" \
+      "unreachable from this fixture: the engine annotation refuses '${engine}' outright, and the \
+'vllm' + manufacturer=ascend spelling it names instead requires an ascend-transport pool while this \
+one is TCP. The name we render for ${engine} is UNVERIFIED against its factory - which is the \
+dimension this case was written for, and the one its original finding came from"
+    continue
+  fi
 
   if [ -z "$image" ]; then
     record SKIP "$check" \

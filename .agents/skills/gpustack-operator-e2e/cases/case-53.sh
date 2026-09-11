@@ -71,6 +71,11 @@ PROBE_LOG="/tmp/kvc-inject-53-${SFX}.log"
 
 # A plain Deployment. No queue-name label, no InstanceType, no owner reference from this operator -
 # which is the whole point of the case.
+#
+# The container declares the vLLM entry point and runs kvi_setup's stub behind it. That shape is not
+# this case's subject; it is what admission accepts, and the reasoning is with the stub in
+# _kvcache-inject-lib.sh. What matters here is that the probe below execs the image's OWN python3,
+# from PATH, so it reaches the mooncake client rather than the stub.
 kubectl apply -f - <<YAML >/dev/null
 apiVersion: apps/v1
 kind: Deployment
@@ -90,10 +95,21 @@ spec:
         kvcache.gpustack.ai/binding: ${BINDING}
         kvcache.gpustack.ai/engine: vllm
     spec:
+      volumes:
+        - name: ${LAUNCH_VOLUME}
+          configMap:
+            name: ${LAUNCH_CONFIGMAP}
+            defaultMode: 0755
+            items:
+              - key: launch
+                path: vllm
       containers:
         - name: engine
           image: ${CLIENT_IMAGE}
-          command: ["python3", "-c", "import time; time.sleep(3600)"]
+          command: ["${LAUNCH_DIR}/vllm", "serve"]
+          volumeMounts:
+            - name: ${LAUNCH_VOLUME}
+              mountPath: ${LAUNCH_DIR}
 YAML
 
 POD=""

@@ -83,6 +83,16 @@ BINDING="bind-i"
 BINDING_DEFAULT="bind-i-default"
 DOMAIN="dom-i-${SFX}"
 ENDPOINT=""
+# The launch stub kvi_setup projects into every injected fixture, and where each Pod mounts it. The
+# three names are shared because four manifests in this family declare the same volume: this file's
+# kvi_pod_manifest, case 53's Deployment, case 54's LWS leader and case 56's submit().
+#
+# LAUNCH_DIR is NOT on any image's PATH, and must not be: the stub is reached by the absolute path in
+# `command`, while a probe running `python3` inside the container has to get the image's real
+# interpreter. Naming a directory the loader already searches would shadow it.
+LAUNCH_CONFIGMAP="kvi-launch"
+LAUNCH_VOLUME="kvi-launch"
+LAUNCH_DIR="/kvi-launch"
 
 FAILS=0
 SKIPS=0
@@ -231,23 +241,66 @@ YAML
 would start and then fail every write with TENANT_NOT_REGISTERED"
     return 1
   fi
+
+  # The launch stub every injected fixture in this family runs. See kvi_pod_manifest below for why
+  # the fixtures need one at all; what belongs here is why it is a ConfigMap.
+  #
+  # The file has to exist under the engine's own program name BEFORE the container starts, so it is
+  # projected rather than written. An init container would do the same job and cost a second
+  # container in each of the four manifests that need it - this one object, created once per run,
+  # costs them a volume and a mount. It is namespaced, so the teardown's namespace delete takes it.
+  #
+  # One key, projected under a name the caller picks: the vLLM family launches `vllm`, SGLang
+  # launches `python3`, and both want the identical program behind that name.
+  kubectl apply -f - <<YAML >/dev/null
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${LAUNCH_CONFIGMAP}
+  namespace: ${TEST_NS}
+data:
+  launch: |
+    #!/usr/bin/env python3
+    # Stands in for an inference engine. It ignores every argument it is given - including the
+    # connector flags admission appends - and stays alive for the length of a probe.
+    import time
+    time.sleep(3600)
+YAML
+
+  if ! kvi_wait_for configmaps "$LAUNCH_CONFIGMAP" '{.metadata.name}' "$LAUNCH_CONFIGMAP" 30 "$TEST_NS" >/dev/null; then
+    record FAIL "launch stub created" \
+      "the ${LAUNCH_CONFIGMAP} ConfigMap was not stored, so every fixture Pod below would start a \
+container whose program does not exist and report it as an injection failure"
+    return 1
+  fi
   return 0
 }
 
 # kvi_pod_manifest prints an opted-in Pod. Args: name, engine, then any extra annotation lines.
 #
-# The container is kept alive by `python3 -c`, NOT by `/bin/sh -c`, and the difference is a refusal
-# this webhook now makes. After a shell's -c everything further becomes a positional parameter, so
-# anything appended to args reaches $0 and $1 rather than the engine - the Pod starts, records itself
-# as injected, and never enables the connector. These fixtures used exactly that shape, which meant
-# the fixture would have been refused the moment the check landed.
+# THE CONTAINER DECLARES THE ENGINE'S OWN LAUNCH, and runs a stub behind it. The webhook identifies
+# an engine launch by what argv[0] resolves to - `vllm` for the vLLM family, `python3 -m
+# sglang.launch_server` for SGLang - and refuses everything else, so no keep-alive command of this
+# suite's own choosing is admissible any more. The fixtures therefore write the real launch shape and
+# point it at kvi_setup's stub, projected under that program's name; the stub ignores its arguments,
+# including the connector flags admission appends, and sleeps.
 #
-# python3 -c has the same keep-alive effect without the trap: argv[0] is not a shell, so the check
-# does not fire, and arguments appended after the script land in sys.argv where they change nothing.
+# THE STUB IS NOT AN ENGINE, and no check here reads it as one. What these cases assert is what
+# admission WROTE onto the Pod - env, args, mounts, the stamp - and, in cases 59 and 60, what the
+# REAL engine's library does when a probe execs into the container. Neither needs the container's own
+# program to serve inference, and building a fixture that did would put a model and an accelerator
+# behind every check in this family.
 #
-# Keeping a `-c` in the shape is deliberate, and makes these fixtures a test of the check itself: the
-# refusal must key on argv[0] being a shell, not on the flag alone. Widen it to "any -c" and all eight
-# fixtures in this family turn red at once.
+# WHAT THE PREVIOUS SHAPE WAS FOR, since it is being removed rather than fixed. It was
+# `python3 -c 'import time; time.sleep(3600)'`, chosen over `/bin/sh -c` because argv[0] must not be
+# a shell: after a shell's -c everything further becomes a positional parameter, so anything appended
+# to args reaches $0 and $1 rather than the engine, and the Pod starts, records itself as injected
+# and never enables the connector. Keeping a `-c` in the shape made these fixtures a probe of what
+# the refusal KEYS ON - argv[0] being a shell, never the flag alone - and its own comment predicted
+# that widening the check would turn all eight of them red at once. The check was not widened; the
+# axis moved, and an unidentifiable argv[0] became a refusal. That probe now lives in the Go table
+# (TestPodKVCacheInject_RefusesAShellWrapper, the "not a shell" row asserts WHICH refusal a non-shell
+# -c gets), because no admissible fixture can carry it any more.
 #
 # command is non-empty for a second reason: a container declaring neither command nor args is refused,
 # because Kubernetes would then read the injected args as the whole command line and discard the
@@ -268,6 +321,17 @@ kvi_pod_manifest() {
   # kubectl rejects a duplicate mapping key, so the override has to happen here.
   local binding="${KVI_BINDING:-$BINDING}"
   shift 2
+  # SGLang is the one engine whose entry point is spelled through the interpreter, and the webhook
+  # matches that spelling exactly. Every other value reaching here is a vLLM-family engine, whose
+  # entry point is the `vllm` executable - which is also why the default arm is the vLLM one rather
+  # than an error: a value the webhook does not accept is refused by the webhook, where the message
+  # names the accepted set, instead of being second-guessed here.
+  local program=vllm
+  local launch="[\"${LAUNCH_DIR}/vllm\", \"serve\"]"
+  if [ "$engine" = sglang ]; then
+    program=python3
+    launch="[\"${LAUNCH_DIR}/python3\", \"-m\", \"sglang.launch_server\"]"
+  fi
   cat <<YAML
 apiVersion: v1
 kind: Pod
@@ -282,10 +346,21 @@ metadata:
 $(for a in "$@"; do echo "    $a"; done)
 spec:
   restartPolicy: Never
+  volumes:
+    - name: ${LAUNCH_VOLUME}
+      configMap:
+        name: ${LAUNCH_CONFIGMAP}
+        defaultMode: 0755
+        items:
+          - key: launch
+            path: ${program}
   containers:
     - name: engine
       image: ${image}
-      command: ["python3", "-c", "import time; time.sleep(3600)"]
+      command: ${launch}
+      volumeMounts:
+        - name: ${LAUNCH_VOLUME}
+          mountPath: ${LAUNCH_DIR}
 YAML
 }
 
