@@ -647,8 +647,8 @@ func modelDeploymentUserSetsEnv(userEnv []workercore.InstanceEnvVar, name string
 //
 // CPU, memory and ephemeral storage are DERIVED here because they are not expressible on the role
 // at all. The Instance path derives the same values in its mutating webhook and writes them onto the
-// object; a ModelDeployment has no mutating webhook, so the derivation happens at render time and
-// the values live only on the Pod. The arithmetic is the same one, restricted to the case that is
+// object; this CRD's mutating webhook defaults only the accelerator count, so the derivation happens
+// at render time and the values live only on the Pod. The arithmetic is the same one, restricted to the case that is
 // the only one reachable here — nothing declared — so an InstanceType's per-unit resources scaled by
 // the requested share is the whole of it.
 //

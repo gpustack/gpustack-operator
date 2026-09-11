@@ -269,7 +269,8 @@ it answers for having moved, which a finalizer edit does not do.
 |---|---|---|
 | `KVCachePoolBinding` | yes | its pool read is gated on the quota ceiling having moved |
 | `KVCacheBackend` | yes | it reads the fallback-image setting only when `spec.image` moved |
-| `KVCachePool`, `ModelDeployment`, `InstanceType` | yes | every rule is answered from the old and new objects alone |
+| `KVCachePool`, `InstanceType` | yes | every rule is answered from the old and new objects alone |
+| `ModelDeployment` | yes | its validation is answered that way, and its **defaulting** declines for an object carrying a deletion timestamp rather than keeping the guard |
 | `PodKVCache` | yes | a terminating Pod still serves, and the kubelet still reprojects its client configuration |
 | `Instance` | **no** | its **defaulting** reads the referenced `InstanceType` and refuses when it is gone |
 | `Pod` (accelerator) | not applicable | registered for CREATE only, and a create carries no deletion timestamp |
@@ -278,6 +279,11 @@ it answers for having moved, which a finalizer edit does not do.
 validation: `ValidateUpdate` compares the two objects, but `Default` reads the `InstanceType` and is
 registered `failurePolicy: Fail` on UPDATE. An `InstanceType` deleted ahead of its Instances would
 leave each one undeletable.
+
+`ModelDeployment`'s defaulting reads the same object for the same reason, and reaches the same outcome
+by the other route: it opts out, because its validation is worth keeping during deletion, and then
+returns early for an object carrying a deletion timestamp. Either shape works; what does not work is
+opting out and reading anyway, since the marker cannot be applied to one half alone.
 
 The marker is one decision covering both halves, which is why those frozen fields cannot be recovered
 without putting that read back in the path of every release.

@@ -525,8 +525,9 @@ one.
 
 ## What admission refuses
 
-One validating webhook is the whole admission surface for this CR; defaults live in the CRD schema,
-so there is no mutating webhook.
+Two webhooks make up the admission surface. Nearly every default lives in the CRD schema; the
+mutating half exists for the one value a schema cannot reach — a role's accelerator count, which
+depends on the `InstanceType` the role names.
 
 | Refused | Message names |
 |---|---|
@@ -544,9 +545,11 @@ so there is no mutating webhook.
 | a self-declared reuse domain | nothing — the field does not exist |
 | an EMPTY `poolRef.name` | the Binding as the authorization point, and that an empty reference names none |
 
-**Every rule above is answered from the submitted object.** The handler holds no client and reads
-nothing from the cluster, so admission cannot be delayed or made to fail by a cache that has not
-caught up.
+**Every rule above is answered from the submitted object**, so no refusal in the table waits on the
+cluster. The mutating half is the one place that reads another object — it looks up the
+`InstanceType` a role names, and a name no read can find is refused there rather than in the table.
+It declines for an object being deleted; why that is necessary rather than merely tidy is in
+[Update validation while an object is deleted](../architecture/admission.md#update-validation-while-an-object-is-deleted).
 
 A manufacturer with no runner backend is still refused **at render time and not at admission**, and the
 reason is not the missing client. The rule needs the InstanceType's OBSERVED detail, and

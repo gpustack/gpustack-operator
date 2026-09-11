@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -12,8 +13,12 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
+	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 )
 
 // modelDeployment builds a valid single-role deployment for the given engine, which every case then
@@ -508,4 +513,222 @@ func TestValidateModelDeploymentRoleServiceNames_ExemptsRolesTheObjectAlreadyHad
 			assert.Contains(t, errs[0].Error(), "not a valid Service name", tc.why)
 		})
 	}
+}
+
+// newModelDeploymentWebhookWith builds the handler over two independent fakes, so a case can put an
+// InstanceType behind the API reader that the cache does not have -- the state the two-stage read
+// exists for, and one a single shared fake cannot express.
+// newModelDeploymentWebhookWith builds a handler over one API-server view. There is no second,
+// cached view to pass: the defaulter reads through on purpose, so a fixture offering a stale one
+// would model a client this handler does not have.
+func newModelDeploymentWebhookWith(live []ctrlcli.Object) *ModelDeploymentWebhook {
+	return &ModelDeploymentWebhook{
+		APIReader: ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(live...).Build(),
+	}
+}
+
+func acceleratableInstanceType(name string, acceleratable bool) *worker.InstanceType {
+	return &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: name},
+		Spec:       workercore.InstanceTypeSpec{Acceleratable: acceleratable},
+	}
+}
+
+func roleWithAccelerator(name string, accel *resource.Quantity) workercore.ModelDeploymentRole {
+	role := workercore.ModelDeploymentRole{Name: name, Replicas: 1, InstanceType: "h20-8x"}
+	if accel != nil {
+		role.Resources = &workercore.ModelDeploymentRoleResources{Accelerator: accel}
+	}
+
+	return role
+}
+
+// TestModelDeploymentWebhook_Default covers the one value this API defaults from another object.
+//
+// A role that names no accelerator count on an acceleratable InstanceType gets one card. The point
+// is not the size of the replica: a role requesting no accelerator requests nothing an accelerated
+// ClusterQueue covers, and one such role alongside any second role leaves the deployment queued
+// forever -- measured: a mixed deployment is refused exactly like an all-uncovered one.
+func TestModelDeploymentWebhook_Default(t *testing.T) {
+	testCases := []struct {
+		name          string
+		acceleratable bool
+		roles         []workercore.ModelDeploymentRole
+		want          []*resource.Quantity // per role, nil meaning "left unset"
+	}{
+		{
+			name:          "an unset count on an acceleratable type becomes one card",
+			acceleratable: true,
+			roles:         []workercore.ModelDeploymentRole{roleWithAccelerator("server", nil)},
+			want:          []*resource.Quantity{resource.NewQuantity(1, resource.DecimalSI)},
+		},
+		{
+			// THE SHAPE THE DEFAULT EXISTS FOR. Two roles requesting nothing the queue covers is
+			// what makes the scheduler spin; one such role is admitted, so a single-role case
+			// cannot show this.
+			name:          "every role of a multi-role deployment is defaulted",
+			acceleratable: true,
+			roles: []workercore.ModelDeploymentRole{
+				roleWithAccelerator("prefill", nil), roleWithAccelerator("decode", nil),
+			},
+			want: []*resource.Quantity{
+				resource.NewQuantity(1, resource.DecimalSI), resource.NewQuantity(1, resource.DecimalSI),
+			},
+		},
+		{
+			// AN EXPLICIT ZERO IS A VALUE THE USER WROTE. It is kept even though it reaches the
+			// state above, because replacing it would make the request stop meaning what it says.
+			name:          "an explicit zero is kept",
+			acceleratable: true,
+			roles:         []workercore.ModelDeploymentRole{roleWithAccelerator("server", resource.NewQuantity(0, resource.DecimalSI))},
+			want:          []*resource.Quantity{resource.NewQuantity(0, resource.DecimalSI)},
+		},
+		{
+			name:          "a stated count is not touched",
+			acceleratable: true,
+			roles:         []workercore.ModelDeploymentRole{roleWithAccelerator("server", resource.NewQuantity(4, resource.DecimalSI))},
+			want:          []*resource.Quantity{resource.NewQuantity(4, resource.DecimalSI)},
+		},
+		{
+			// THE BASELINE FOR EVERY CASE ABOVE. A default applied unconditionally satisfies them
+			// and fails here, which is the only reason they say anything about acceleratability.
+			name:          "a non-acceleratable type is left alone",
+			acceleratable: false,
+			roles:         []workercore.ModelDeploymentRole{roleWithAccelerator("server", nil)},
+			want:          []*resource.Quantity{nil},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			it := acceleratableInstanceType("h20-8x", tc.acceleratable)
+			w := newModelDeploymentWebhookWith([]ctrlcli.Object{it})
+			md := modelDeployment(workercore.ModelDeploymentEngineVLLM, tc.roles...)
+
+			require.NoError(t, w.Default(context.Background(), md))
+
+			require.Len(t, md.Spec.Roles, len(tc.want))
+			for i, want := range tc.want {
+				got := md.Spec.Roles[i].Resources
+				if want == nil {
+					if got != nil {
+						assert.Nil(t, got.Accelerator, "role %d must keep an unset count", i)
+					}
+
+					continue
+				}
+				require.NotNil(t, got, "role %d lost its resources", i)
+				require.NotNil(t, got.Accelerator, "role %d was not defaulted", i)
+				assert.Zero(t, want.Cmp(*got.Accelerator),
+					"role %d: want %s, got %s", i, want, got.Accelerator)
+			}
+		})
+	}
+}
+
+// TestModelDeploymentWebhook_DefaultReadsTheAPIServer pins where the read goes and what a miss says.
+//
+// The handler holds no cached client, so a type the informers have not seen is still found and a
+// type that is genuinely gone is reported as the NAME it is. Those two send a reader to different
+// places, which is the whole reason the message is asserted rather than the error's existence.
+func TestModelDeploymentWebhook_DefaultReadsTheAPIServer(t *testing.T) {
+	it := acceleratableInstanceType("h20-8x", true)
+
+	t.Run("a type only the API server has is still found", func(t *testing.T) {
+		w := newModelDeploymentWebhookWith([]ctrlcli.Object{it})
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM, roleWithAccelerator("server", nil))
+
+		require.NoError(t, w.Default(context.Background(), md))
+		require.NotNil(t, md.Spec.Roles[0].Resources)
+		require.NotNil(t, md.Spec.Roles[0].Resources.Accelerator)
+		assert.Equal(t, int64(1), md.Spec.Roles[0].Resources.Accelerator.Value())
+	})
+
+	t.Run("a type the API server does not have is reported as the name it is", func(t *testing.T) {
+		w := newModelDeploymentWebhookWith(nil)
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM, roleWithAccelerator("server", nil))
+
+		err := w.Default(context.Background(), md)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "h20-8x",
+			"the message must name the instance type so a reader checks the spelling, not the cluster")
+		assert.Contains(t, err.Error(), "spec.roles[0].instanceType",
+			"and name the field that carries it")
+	})
+}
+
+// TestModelDeploymentWebhook_DefaultLeavesAnEmptyTypeToValidation pins what the defaulter does with
+// a name the API would refuse.
+//
+// Mutating admission runs before the schema, so a role naming no instance type reaches the defaulter
+// first. Looking that name up fails on the REQUEST rather than on the object, which would deny the
+// write with a message about reading the cluster — sending a reader to check the cluster when the
+// answer is a missing field.
+func TestModelDeploymentWebhook_DefaultLeavesAnEmptyTypeToValidation(t *testing.T) {
+	w := newModelDeploymentWebhookWith(nil)
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRole{
+		Name: "server", Replicas: 1, InstanceType: "",
+	})
+
+	require.NoError(t, w.Default(context.Background(), md),
+		"an empty instance type is the schema's to report, not the defaulter's")
+	if r := md.Spec.Roles[0].Resources; r != nil {
+		assert.Nil(t, r.Accelerator, "and nothing is defaulted against a type that was never read")
+	}
+}
+
+// TestModelDeploymentWebhook_DefaultDeclinesAnObjectBeingDeleted pins the one refusal nothing could
+// recover from.
+//
+// This handler opts out of the shared deletion guard so it keeps validating updates while a
+// deployment is being deleted, and that opt-out is one decision covering defaulting too. The
+// deployment's own finalizer holds it until teardown releases the Binding, and teardown releases the
+// finalizer with an UPDATE -- so a defaulter that refuses an absent InstanceType would refuse THAT
+// update whenever the type was deleted first, leaving an object nothing can release.
+func TestModelDeploymentWebhook_DefaultDeclinesAnObjectBeingDeleted(t *testing.T) {
+	w := newModelDeploymentWebhookWith(nil)
+
+	now := meta.Now()
+	deleting := modelDeployment(workercore.ModelDeploymentEngineVLLM, roleWithAccelerator("server", nil))
+	deleting.DeletionTimestamp = &now
+	deleting.Finalizers = []string{"test.gpustack.ai/hold"}
+
+	require.NoError(t, w.Default(context.Background(), deleting),
+		"the update that clears the finalizer must not be refused for a type that is already gone")
+	if r := deleting.Spec.Roles[0].Resources; r != nil {
+		assert.Nil(t, r.Accelerator, "and nothing is defaulted onto an object that is going away")
+	}
+
+	// THE BASELINE THE CASE ABOVE NEEDS: a defaulter that declined every object would pass it too.
+	live := modelDeployment(workercore.ModelDeploymentEngineVLLM, roleWithAccelerator("server", nil))
+	require.Error(t, w.Default(context.Background(), live),
+		"while the same shape that is not being deleted is still refused")
+}
+
+// TestModelDeploymentWebhook_DefaultKeepsTheRepairEditReachable bounds what a missing InstanceType
+// costs a deployment that already exists.
+//
+// Refusing the write blocks every update to that deployment for as long as the type is absent. What
+// keeps that bounded is WHICH name is read -- the one the incoming object carries -- so the edit
+// that points the role at a type that does exist is admitted rather than refused along with it. The
+// two halves run against the same cluster, so the refusal is shown to track the name and not an
+// empty cluster.
+func TestModelDeploymentWebhook_DefaultKeepsTheRepairEditReachable(t *testing.T) {
+	it := acceleratableInstanceType("h20-8x", true)
+	w := newModelDeploymentWebhookWith([]ctrlcli.Object{it})
+
+	absent := modelDeployment(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRole{
+		Name: "server", Replicas: 1, InstanceType: "retired-type",
+	})
+	require.Error(t, w.Default(context.Background(), absent),
+		"a role naming a type neither read has is still refused")
+
+	repaired := modelDeployment(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRole{
+		Name: "server", Replicas: 1, InstanceType: "h20-8x",
+	})
+	require.NoError(t, w.Default(context.Background(), repaired),
+		"and the edit that repairs the reference is not refused with it")
+	require.NotNil(t, repaired.Spec.Roles[0].Resources)
+	require.NotNil(t, repaired.Spec.Roles[0].Resources.Accelerator,
+		"the repaired role is defaulted on the way through")
 }

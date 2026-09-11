@@ -730,8 +730,11 @@ draft of this rule was wrong about that.** It said the resource decision "lives 
   How many cards a replica wants is a property of the model being served, not of the pool it is
   admitted against — two deployments on one InstanceType routinely want different counts.
 - CPU and memory are **derived**, not declared: the `Instance` webhook computes them as
-  `UnitResources × card count` and then caps them. `ModelDeployment` has no mutating webhook, so its
-  **renderer** performs the same derivation.
+  `UnitResources × card count` and then caps them. `ModelDeployment`'s **renderer** performs the
+  same derivation. Its mutating webhook defaults only the card count, because that is the one value
+  a later reader has to be able to see: CPU and memory are recomputed on every render from the
+  count and the InstanceType, so writing them into the stored object would create a second copy
+  that the next render disagrees with.
 
 So the role carries the accelerator half of a request and nothing else. That is a *stronger* form of
 Rule 2 than refusing a full `resources` block would have been: CPU and memory are not merely
@@ -740,10 +743,18 @@ be shadowed. `ModelDeploymentRoleResources` mirrors `InstanceResources`'s accele
 exactly rather than inventing a second vocabulary for one request.
 
 The two rules that need the InstanceType itself — that it offers the mode being asked for, and that
-the request fits its per-unit ceiling — are not in the validating webhook, which holds no client.
-They arrive with the Binding-resolution rule that gives it one. **Recorded rather than left as a
-silent hole**: until then an infeasible request is refused by the admission chain's own gates rather
-than at the API, which is a worse message but not a wrong outcome.
+the request fits its per-unit ceiling — are still not written. **The reason they were deferred no
+longer holds.** The webhook now holds a client, and it did not arrive with the Binding-resolution
+rule this paragraph originally expected to bring it: it arrived with the accelerator default, which
+has to read the InstanceType to know whether the type is acceleratable at all. That trigger never
+happened, and saying so is the point — a deferral whose stated condition is quietly satisfied by
+something else reads as though the condition had been met.
+
+**So the debt changed shape rather than closing.** These two rules moved from *cannot be written
+here* to *can be written here and are not*, which is the more urgent record of the two: the first
+had an external obstacle holding it, and this one has nothing. Until they are written an infeasible
+request is refused by the admission chain's own gates rather than at the API, which is a worse
+message but not a wrong outcome.
 
 One rule *is* enforced without a client, because it needs no cross-object read and its silent
 failure is the dangerous kind: a request naming both a partition profile and a slice percentage is
@@ -1376,9 +1387,11 @@ be **accepted**.
   `cluster-admin` (`deploy/gpustack-operator/chart/templates/worker/serviceaccount.yaml`), so there
   is **no per-resource RBAC rule to add**. `deploy/gpustack-operator/chart/**` is in no task's
   `Owns`; the guard is an e2e assertion that a `helm install` still ends with the CRD present (T12a).
-- **Defaults go in the CRD schema.** `+k8s:validation:default=` markers cover `connector: auto`,
-  `replicas: 1` and the port default, so **one validating webhook is the whole admission surface**
-  for this CRD — there is no mutating webhook.
+- **Defaults go in the CRD schema, with one exception.** `+k8s:validation:default=` markers cover
+  `connector: auto`, `replicas: 1` and the port default, and the admission surface was planned as
+  **one validating webhook** on that basis. It is now two. A role's accelerator count depends on the
+  InstanceType the role names, which no schema default can read, so a mutating half carries that
+  single value and nothing else — the same exception the `Instance` path already had.
 - **`make generate` also regenerates webhook registration.** The registration lives in
   `pkg/worker/webhooks/worker/zz_generated.webhooks.go`, so the webhook task runs `make generate`
   too — not only the API-type task.
@@ -2815,8 +2828,11 @@ comparison with one side missing is an assertion about nothing.
   trades availability against **cache** as well as against capacity, and choosing that trade needs
   the hit-rate instrument this spec is building. Recreate is the policy here, and its cache cost is
   stated rather than hidden.
-- **A mutating webhook for defaults.** Rejected: `+k8s:validation:default=` markers put the defaults
-  in the CRD schema, so one validating webhook is the whole admission surface.
+- **A mutating webhook for defaults.** Rejected at the time: `+k8s:validation:default=` markers put
+  the defaults in the CRD schema, so one validating webhook was the whole admission surface. **That
+  rejection has since been reversed**, and by a value the reasoning above did not consider: a role's
+  accelerator count depends on the InstanceType the role names, which no schema default can read.
+  The mutating half carries that one value.
 
 ## Open Questions
 

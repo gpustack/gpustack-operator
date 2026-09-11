@@ -882,8 +882,10 @@ queued. Its observations are recorded in the Test Plan when the case runs.
   generated into `api/worker/v1alpha1/zz_generated.crds.go` and installed by the worker at startup;
   webhook configurations are generated from `+k8s:webhook-gen:` markers; the worker's ServiceAccount
   is bound to `cluster-admin`. `deploy/gpustack-operator/chart/**` is in no task's `Owns`.
-- **Defaults go in the CRD schema**, so the validating webhook stays the whole admission surface:
-  `+k8s:validation:default="server"` on `kind`, and `+k8s:validation:enum` for its values.
+- **Defaults go in the CRD schema** for everything this task adds: `+k8s:validation:default="server"`
+  on `kind`, and `+k8s:validation:enum` for its values. The admission surface was one validating
+  webhook when this was written; a mutating half was added later for the accelerator count, which
+  depends on another object and so cannot be a schema default.
 - **`make generate` is run once for the API change**, and it regenerates deepcopy, register,
   apiservice, CRDs, conversion, protobuf and the webhook registration. It must run from a
   module-suffixed physical path (a worktree path does not satisfy it) and it drifts the binding tree,

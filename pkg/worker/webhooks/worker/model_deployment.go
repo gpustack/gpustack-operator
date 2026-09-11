@@ -6,22 +6,29 @@ import (
 	"strings"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
+	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/webhook"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 )
 
-// ModelDeploymentWebhook validates a v1alpha1.ModelDeployment.
+// ModelDeploymentWebhook validates a v1alpha1.ModelDeployment, and defaults the one field a schema
+// cannot.
 //
-// It is validating only. Every default this API has — the connector discriminator and the replica
-// count — is a CRD schema default, and every enum is a CRD schema enum, so there is no mutating
-// half. For the enums a webhook could not help even if one were written: structural schema
+// Every other default this API has — the connector discriminator and the replica count — is a CRD
+// schema default, and every enum is a CRD schema enum. The mutating half exists for the single
+// value whose default depends on ANOTHER object: a role's accelerator count, which is one on an
+// acceleratable InstanceType and absent on any other, and no schema default can tell the two apart.
+// For the enums a webhook could not help even if one were written: structural schema
 // validation runs before the validating admission chain, so a value outside an enum is refused
 // before this handler is reached.
 //
@@ -29,20 +36,38 @@ import (
 // a comparison between two entries of a list, and a collision between what a user supplies and what
 // the operator owns.
 //
-// EVERY RULE IS ANSWERED FROM THE OBJECT ALONE. The handler holds no client and reads nothing from
-// the cluster, so admission cannot be delayed or made to fail by a cache that has not caught up.
+// EVERY VALIDATION RULE IS ANSWERED FROM THE OBJECT ALONE, so no validation refusal depends on
+// cluster state. The default is the one place that reads another object, and it reads it FROM THE
+// API SERVER AND NEVER FROM A CACHE. A cache decides the outcome in both directions when it is
+// behind — a type created moments ago reads as absent and refuses a deployment that names a type
+// that exists, and a type recreated under the same name reads with its old acceleratable flag and
+// writes a count from it. The second is the worse one, because the wrong value is then persisted.
+//
+// THE PRICE IS ONE CONSISTENT READ PER ADMISSION, not per role: every role of a valid deployment
+// names the same type and the reads are memoized by name. This handler runs on a user-initiated
+// write to one object rather than in a reconcile loop, which is what makes that the cheaper side.
 //
 // nolint: lll
 // +k8s:webhook-gen:validating:group="worker.gpustack.ai",version="v1alpha1",resource="modeldeployments",scope="Namespaced"
 // +k8s:webhook-gen:validating:operations=["CREATE","UPDATE"],failurePolicy="Fail",sideEffects="None",matchPolicy="Equivalent",timeoutSeconds=10
-type ModelDeploymentWebhook struct{}
+// +k8s:webhook-gen:mutating:group="worker.gpustack.ai",version="v1alpha1",resource="modeldeployments",scope="Namespaced"
+// +k8s:webhook-gen:mutating:operations=["CREATE","UPDATE"],failurePolicy="Fail",sideEffects="None",matchPolicy="Equivalent",timeoutSeconds=10
+type ModelDeploymentWebhook struct {
+	// APIReader reads through to the API server. There is deliberately no cached client beside it:
+	// the one value this handler defaults is read from another object, and a cache that is behind
+	// would decide it.
+	APIReader ctrlcli.Reader
+}
 
-func (r *ModelDeploymentWebhook) SetupWebhook(_ context.Context, _ webhook.SetupOptions) (runtime.Object, error) {
+func (r *ModelDeploymentWebhook) SetupWebhook(_ context.Context, opts webhook.SetupOptions) (runtime.Object, error) {
+	r.APIReader = opts.Manager.GetAPIReader()
+
 	return &workercore.ModelDeployment{}, nil
 }
 
 var (
 	_ ctrladmission.Validator[runtime.Object] = (*ModelDeploymentWebhook)(nil)
+	_ ctrladmission.Defaulter[runtime.Object] = (*ModelDeploymentWebhook)(nil)
 	_ webhook.ReceiveDeletionUpdate           = (*ModelDeploymentWebhook)(nil)
 )
 
@@ -50,9 +75,136 @@ var (
 // Its own finalizer releases the Binding it holds, so it stays for as long as that takes, and the
 // role rules are what keep an edit in that window from producing a shape nothing consumes.
 //
-// The guard buys nothing here in the first place: this handler holds no client and every rule is
-// answered from the object alone, so there is no state deletion could have taken away.
+// THE MARKER IS ONE DECISION COVERING BOTH HALVES, so opting validation in opts defaulting in with
+// it. Validation is answerable from the object alone and loses nothing to deletion. Defaulting is
+// not: it reads an InstanceType and refuses when that type is absent, so the update that clears the
+// finalizer would be refused whenever the type went first -- an object its own teardown can never
+// release. Default therefore declines for an object carrying a deletion timestamp, which is what the
+// guard would have done and costs nothing, since filling a count on an object that is going away
+// changes nothing.
 func (r *ModelDeploymentWebhook) ReceiveDeletionUpdate() {}
+
+// Default fills the accelerator count a role left unset, which is one card on an acceleratable
+// InstanceType and nothing on any other.
+//
+// IT IS THE SAME RULE THE Instance WEBHOOK ALREADY APPLIES, and this type was the one that did not
+// have it. A role that names no count is asking for the ordinary thing — a card — and until now it
+// got a replica that requested no accelerator at all.
+//
+// THE COST OF LEAVING IT UNSET IS NOT A SMALLER REPLICA, it is a deployment that never starts. An
+// accelerated pool's ClusterQueue covers only that manufacturer's credits, so a role requesting no
+// accelerator requests nothing the queue covers. A Workload whose ONLY PodSet is such a role is
+// admitted, with an assignment carrying no flavors. Add a second PodSet of any kind and the
+// scheduler writes an admission carrying fewer assignments than the Workload has PodSets, the API
+// refuses it, and the Workload is requeued immediately and forever -- measured at roughly a hundred
+// scheduling cycles a second, with the deployment parked and nothing reporting why. So this
+// surfaces on a multi-role deployment whether or not its other roles ask for cards: a mixed
+// deployment is refused exactly like an all-uncovered one.
+//
+// AN EXPLICIT ZERO IS LEFT ALONE and still reaches that state. Zero is a value the user wrote, and
+// silently replacing it would be worse than the failure: the request would stop meaning what it
+// says. A CPU-only deployment belongs on a CPU-only InstanceType, whose queue covers cpu, which
+// every replica requests -- so the shape that hangs is reachable only by asking for a pool this
+// deployment does not need.
+//
+// IT RUNS ON UPDATE AS WELL AS CREATE, because roles are not frozen: a deployment edited to add a
+// second role would otherwise carry an undefaulted one and reach exactly the state above. The
+// defaulter cannot tell a new role from an old one -- it is handed the incoming object and no
+// previous one -- so it defaults any unset count it finds, which on an object that was stored
+// before this rule existed changes a request that had already been admitted. That is acceptable
+// only because this API is in no released version, so there are no such objects outside a branch.
+func (r *ModelDeploymentWebhook) Default(ctx context.Context, obj runtime.Object) error {
+	md := obj.(*workercore.ModelDeployment)
+
+	// AN OBJECT BEING DELETED IS NOT DEFAULTED. This handler opts out of the shared deletion guard
+	// to keep validating updates in that window, and that opt-out is one decision covering
+	// defaulting too. The read below refuses when the InstanceType is absent, so without this the
+	// update that clears the finalizer would be refused whenever the type was deleted first, and
+	// nothing could then release the object.
+	if md.DeletionTimestamp != nil {
+		return nil
+	}
+
+	// Roles must all name one InstanceType, but that is a VALIDATION rule and validation has not run
+	// yet -- mutating admission comes first. So each role is defaulted against the type it names,
+	// and the reads are memoized rather than assumed to be one.
+	seen := make(map[string]*worker.InstanceType, 1)
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		if role.Resources != nil && role.Resources.Accelerator != nil {
+			continue
+		}
+
+		// THE SCHEMA HAS NOT RUN YET EITHER, so a name this API would refuse still arrives here. An
+		// empty one is left to the rules that report it as the field error it is: looking it up
+		// would fail on the request rather than on the object, and deny the write with a message
+		// about reading the cluster instead of about the name.
+		if role.InstanceType == "" {
+			continue
+		}
+
+		instType, ok := seen[role.InstanceType]
+		if !ok {
+			var err error
+			if instType, err = r.getInstanceType(ctx, role.InstanceType, i); err != nil {
+				return err
+			}
+			seen[role.InstanceType] = instType
+		}
+		if !instType.Spec.Acceleratable {
+			continue
+		}
+
+		if role.Resources == nil {
+			role.Resources = new(workercore.ModelDeploymentRoleResources)
+		}
+		role.Resources.Accelerator = resource.NewQuantity(1, resource.DecimalSI)
+	}
+
+	return nil
+}
+
+// getInstanceType reads one InstanceType, from the API server and never from a cache.
+//
+// A QUORUM READ IS THE WHOLE OF WHAT MAKES THIS DEFAULT SAFE TO ADD. A cached read decides the
+// outcome whenever the informer is behind, and it does so in BOTH directions: a type created moments
+// earlier reads as absent and the deployment is refused for naming a type that exists, while a type
+// deleted and recreated under the same name reads with its old acceleratable flag and the count is
+// written from it -- the second is the worse one, because the wrong value is then persisted. Reading
+// with ResourceVersion "0" is not a fix either: that is answered from the API server's watch cache,
+// which is a second cache behind for the same reasons.
+//
+// THE COST IS ONE READ PER ADMISSION, not one per role. Every role of a valid deployment names the
+// same type, and the caller memoizes by name, so the reads collapse. This handler runs on a
+// user-initiated write to one object rather than on a reconcile loop, which is what makes paying for
+// consistency here the cheaper side of the trade.
+//
+// A MISS REFUSES THE WRITE, which on an update blocks every edit to a deployment that already exists
+// for as long as the type is absent. What bounds that is the name being read from the INCOMING
+// object: pointing the role at a type that does exist is admitted, and an object being deleted is
+// not defaulted at all. Admitting it instead would store a deployment the renderer cannot build, and
+// that failure reaches a reader only as an Event while the conditions go on saying no replica has
+// been created yet — which is how a slow start reads too.
+//
+// THE MESSAGE NAMES THE TYPE RATHER THAN THE READ, because those send a reader to different places.
+// "instance type not found" is a name to check; "could not read instance type" is a cluster to
+// check, and reporting the second for the first costs an operator the time to find a typo.
+func (r *ModelDeploymentWebhook) getInstanceType(
+	ctx context.Context, name string, roleIdx int,
+) (*worker.InstanceType, error) {
+	instType := &worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: name}}
+	rolePath := field.NewPath("spec.roles").Index(roleIdx).Child("instanceType")
+
+	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType); err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil, field.NotFound(rolePath, name)
+		}
+
+		return nil, field.InternalError(rolePath, fmt.Errorf("get instance type: %w", err))
+	}
+
+	return instType, nil
+}
 
 func (r *ModelDeploymentWebhook) ValidateCreate(
 	_ context.Context, obj runtime.Object,
@@ -516,10 +668,14 @@ func validateModelDeploymentRoleTemplate(
 //
 // One accelerator cannot serve both, so a request naming both has no correct reading — and the
 // operator's renderer resolves the pair by precedence, which would silently grant the profile and
-// discard the percentages. The two other things worth validating here — that the InstanceType
-// actually offers the requested mode, and that the request fits its per-unit ceiling — need the
-// InstanceType read from the cluster, which this handler deliberately does not do, so they are not
-// checked here at all.
+// discard the percentages.
+//
+// TWO OTHER RULES BELONG HERE AND ARE STILL NOT WRITTEN: that the InstanceType actually offers the
+// requested mode, and that the request fits its per-unit ceiling. What used to prevent them was
+// that this handler read nothing from the cluster. IT NOW DOES — the default reads the InstanceType
+// — so the obstacle is gone and only the work is left. Until they are written an infeasible request
+// is still refused by the admission chain's own gates rather than at the API, which is a worse
+// message but not a wrong outcome.
 func validateModelDeploymentRoleResources(
 	role *workercore.ModelDeploymentRole, rolePath *field.Path,
 ) field.ErrorList {
