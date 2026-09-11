@@ -95,8 +95,22 @@ $ kubectl exec -n gpustack-system deploy/<backend>-leader -- \
     if l.startswith('master_allocated_file_size_bytes')])"
 ```
 
-`master_allocated_file_size_bytes` is **bytes actually written to the tier**, so `0` on a tier you
-expect to be filling means the data path is not working, whatever the rest of the object says.
+`master_allocated_file_size_bytes` is **bytes actually written to the tier** — it moves when a bucket
+is closed and written, measured against a tier holding one 16 MiB bucket.
+
+⛔ **A `0` is not on its own a verdict, and the section above is why.** A backend that has not filled
+a bucket has written nothing **legitimately**, and that is indistinguishable at this gauge from a
+tier that cannot write at all. Read it together with how much has been offered to the tier:
+
+| what has been offered since the tier came up | what `0` means |
+|---|---|
+| less than one bucket | the expected reading — waiting does not change it, because nothing is due yet |
+| more than one bucket | the reading to act on, once it has had time to settle |
+
+⇒ **Above a bucket's worth, give it time before believing it.** The figure follows a bucket being
+closed rather than a `put` returning, so a reading taken immediately after a write can still be `0`
+on a tier that is working; it settles within tens of seconds. Non-zero is the direction that carries
+information — it says a bucket was closed and written.
 
 ## What the tier does when it fills
 

@@ -10,7 +10,13 @@
 #              and publishes, but a published capacity is not a written byte — the store has
 #              been observed announcing the tier while every offload stayed "deferred" forever.
 #              The one figure that answers whether the tier is real is the leader's own
-#              master_allocated_file_size_bytes: bytes actually written to disk. This case
+#              master_allocated_file_size_bytes: bytes actually written to disk. TWO THINGS
+#              HAVE TO HOLD BEFORE A ZERO THERE IS A VERDICT, and this case establishes both
+#              rather than assuming them. The store writes nothing until a BUCKET fills, so a
+#              tier offered less than one bucket reads zero while working perfectly — the case
+#              reads the rendered limit out of the member container and asserts its write set
+#              clears it. And the figure follows a bucket being closed, not a put returning, so
+#              it is asked for repeatedly until it carries a number instead of once. This case
 #              writes known content, then asserts that figure is non-zero, that files exist in
 #              the host directory, and that a read returns the bytes that were written. With
 #              offload_on_evict unset the store's contract is write-through at put time, so a
@@ -46,7 +52,9 @@
 # Expected:    Phase A (write-through, offload.onEvict unset):
 #              - the backend reaches Ready with the local disk segment registered;
 #              - writes succeed (rc=0) and reads return the bytes written;
-#              - master_allocated_file_size_bytes on the leader reads > 0 after the writes —
+#              - the rendered bucket limit is present in the member container and the write set
+#                clears it — without this the next assertion could not be read as a verdict;
+#              - master_allocated_file_size_bytes on the leader reads > 0 once it has settled —
 #                NOT status.capacity, which reports the declared figure and cannot tell an
 #                empty tier from a full one;
 #              - the host directory on at least one node holds files.
@@ -274,6 +282,50 @@ fi
 PHASE_A_TOTAL=$((MEMBER_COUNT * 44))
 PHASE_A_FILL=$((PHASE_A_TOTAL - 4))
 
+# ------------------------------------------------- the precondition every figure below rests on
+#
+# The store writes nothing until a bucket is full, so a tier offered less than one bucket holds
+# nothing LEGITIMATELY and the verdict figure reads zero on a tier that is working. This case is
+# only entitled to read that figure as a verdict because the write set above clears the bucket
+# limit -- so the limit has to be read from the container rather than assumed, and compared.
+#
+# It is read WITH a companion variable that must be present whenever the tier is rendered at all.
+# The two together separate three states a single read cannot: a probe that did not answer, a
+# limit that never arrived (leaving the store on its own 256MB default, which this write set would
+# NOT clear), and a limit that is there. An empty reading alone is the shape that would otherwise
+# arrive as "the tier is empty" -- the failure this whole case exists to report.
+MEMBER_POD="$(kubectl -n "$NS" get pod \
+  -l "app.kubernetes.io/name=kv-cache-backend,app.kubernetes.io/instance=${BACKEND},app.kubernetes.io/component=member-0" \
+  -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}' 2>/dev/null | head -1)"
+TIER_ENV="$(kubectl -n "$NS" exec "$MEMBER_POD" -- sh -c \
+  'printf "%s|%s" "${MOONCAKE_OFFLOAD_BUCKET_SIZE_LIMIT_BYTES-}" "${MOONCAKE_OFFLOAD_FILE_STORAGE_PATH-}"' 2>/dev/null)"
+BUCKET_LIMIT="${TIER_ENV%%|*}"
+TIER_PATH_ENV="${TIER_ENV##*|}"
+PHASE_A_BYTES=$((PHASE_A_TOTAL * 4 * 1024 * 1024))
+case "$BUCKET_LIMIT" in
+  '' | *[!0-9]*)
+    if [ -z "$TIER_PATH_ENV" ]; then
+      record FAIL "the rendered bucket limit reached the member container" \
+        "no reading from ${MEMBER_POD:-<no member pod>}: neither the limit nor the storage path came \
+back, so this run did not measure the environment and makes no claim about the limit"
+    else
+      record FAIL "the rendered bucket limit reached the member container" \
+        "MOONCAKE_OFFLOAD_FILE_STORAGE_PATH='${TIER_PATH_ENV}' but \
+MOONCAKE_OFFLOAD_BUCKET_SIZE_LIMIT_BYTES='${BUCKET_LIMIT}' -- the tier is rendered and the limit is \
+not, so the store keeps its own 256MB default and this write set would close no bucket"
+    fi
+    results; exit 1
+    ;;
+esac
+if [ "$PHASE_A_BYTES" -le "$BUCKET_LIMIT" ] 2>/dev/null; then
+  record FAIL "the write set clears one bucket" \
+    "phase A offers ${PHASE_A_BYTES} bytes against a bucket limit of ${BUCKET_LIMIT} -- at or below \
+one bucket the tier holds nothing legitimately, so the figures below could not be read as a verdict"
+  results; exit 1
+fi
+record PASS "the write set clears one bucket" \
+  "phase A offers ${PHASE_A_BYTES} bytes against MOONCAKE_OFFLOAD_BUCKET_SIZE_LIMIT_BYTES=${BUCKET_LIMIT}"
+
 # The managed workloads live in the OPERATOR's namespace, not necessarily $NS — the only
 # trustworthy address is the one the controller published in status.endpoints.
 CLIENT_ADDR="$(kubectl get kvcachebackends.worker.gpustack.ai "$BACKEND" -o jsonpath='{.status.endpoints[?(@.name=="Client")].address}' 2>/dev/null)"
@@ -364,11 +416,32 @@ fi
 # master_allocated_file_size_bytes is the leader's own count of bytes written to the file tier.
 # status.capacity cannot stand in for it: that one reports the DECLARED figure, which reads the
 # same for an empty tier as for a full one.
-METRIC="$(kubectl -n "$NS" run "case65-metrics-${SFX}" --image=busybox:1.36 --restart=Never --rm -i --quiet \
-  --pod-running-timeout="$PULL_TIMEOUT" \
-  --labels="gpustack-e2e-case=65-${SFX}" \
-  -- sh -c "wget -qO- http://${ADMIN_ADDR}/metrics | grep '^master_allocated_file_size_bytes'" 2>/dev/null)"
-METRIC_VAL="$(echo "$METRIC" | awk '{print $2}' | cut -d. -f1)"
+# The figure follows a bucket being CLOSED AND WRITTEN, not a put returning, and the master learns
+# of it from the member rather than at the same instant. A single read taken here therefore reads
+# zero on a tier that is working -- and on a fresh tier that zero is exactly the value this case
+# treats as its known failure. So it is asked for repeatedly until it carries a number.
+#
+# ⛔ This is NOT "wait and it will come": below one bucket's worth the wait would never end, because
+# nothing is due. It is legitimate here only because the assertion above proved this write set
+# clears the rendered limit. Each attempt gets its own Pod name -- the previous one is still being
+# reclaimed, and a name collision returns no reading, which is the shape that must not be read as
+# a zero.
+METRIC=""
+METRIC_VAL=""
+SETTLE=0
+while [ "$SETTLE" -lt 6 ]; do
+  SETTLE=$((SETTLE + 1))
+  METRIC="$(kubectl -n "$NS" run "case65-metrics-${SFX}-${SETTLE}" --image=busybox:1.36 --restart=Never --rm -i --quiet \
+    --pod-running-timeout="$PULL_TIMEOUT" \
+    --labels="gpustack-e2e-case=65-${SFX}" \
+    -- sh -c "wget -qO- http://${ADMIN_ADDR}/metrics | grep '^master_allocated_file_size_bytes'" 2>/dev/null)"
+  METRIC_VAL="$(echo "$METRIC" | awk '{print $2}' | cut -d. -f1)"
+  case "$METRIC_VAL" in
+    '' | *[!0-9]*) ;;
+    *) [ "$METRIC_VAL" -gt 0 ] && break ;;
+  esac
+  [ "$SETTLE" -lt 6 ] && sleep 10
+done
 if [ -n "$METRIC_VAL" ] && [ "$METRIC_VAL" -gt 0 ] 2>/dev/null; then
   record PASS "the leader reports bytes actually written to the file tier" \
     "master_allocated_file_size_bytes=${METRIC_VAL} (> 0)"
@@ -382,8 +455,10 @@ elif [ -z "$METRIC" ]; then
 so this run makes no claim about the tier either way"
 else
   record FAIL "the leader reports bytes actually written to the file tier" \
-    "master_allocated_file_size_bytes='${METRIC}' -- a zero here with healthy writes above is the \
-known 'tier announced, nothing lands' failure shape: the leader defers offload forever while publishing capacity"
+    "master_allocated_file_size_bytes='${METRIC}' after ${SETTLE} reads over $(( (SETTLE - 1) * 10 ))s \
+-- a zero that does not move, with healthy writes above and a write set proven to clear one bucket, \
+is the known 'tier announced, nothing lands' failure shape: the leader defers offload forever while \
+publishing capacity"
 fi
 
 # ------------------------------------------------- 4. files on the host, not just a metric
