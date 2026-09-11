@@ -33,12 +33,21 @@ type KVCacheBackendMemberLocalDiskApplyConfiguration struct {
 	// that would render it does not exist. An operator who has a uid that holds for their whole
 	// backend has information this API does not, which is the case that would settle it.
 	Path *string `json:"path,omitempty"`
-	// Capacity caps what this tier stores. Left unset, the store's own ceiling applies and nothing
-	// is rendered, so a ceiling that moves upstream is a change to investigate rather than one
-	// this API silently restated.
+	// Capacity caps what this tier stores, in bytes. Left unset, the store's own ceiling applies and
+	// nothing is rendered, so a ceiling that moves upstream is a change to investigate rather than
+	// one this API silently restated.
 	//
-	// A set capacity must hold one 256Mi bucket. The store does not flush a partial bucket, and
-	// this API cannot configure that threshold, so a smaller tier can never receive a key.
+	// IT IS ALSO THE FIGURE EVICTION MEASURES AGAINST, and that is why Eviction below is not usable
+	// without it. The store keeps two separate ceilings for one tier — the total it may hold, and
+	// the quota its watermark eviction takes its marks as a fraction of — and the second defaults to
+	// zero, which that eviction path reads as "no quota" and returns from having evicted nothing.
+	// One value is rendered into both, so the marks are a fraction of the ceiling an operator
+	// actually declared.
+	//
+	// A set capacity must hold one BUCKET, which is the unit this tier is written in. The store
+	// stops taking offload work as soon as one more bucket would not fit under this ceiling, so a
+	// tier smaller than a bucket never receives a key. The bucket size is this operator's to choose
+	// and it is not in this API; the floor moves with it.
 	//
 	// It is NOT counted into the Pod's resource requests, unlike CapacityPerMember. The tier is a
 	// host directory, which is outside the kubelet's ephemeral-storage accounting entirely — a
@@ -46,6 +55,18 @@ type KVCacheBackendMemberLocalDiskApplyConfiguration struct {
 	// the very node that has the disk. Watching that filesystem is the operator's, and the
 	// documentation says so.
 	Capacity *resource.Quantity `json:"capacity,omitempty"`
+	// KeyLimit caps how many keys this tier holds, and it is Capacity's other half rather than an
+	// alternative to it: the store bounds the tier by bytes AND by key count, stops taking offload
+	// work when either would be exceeded, and applies its own ceiling to whichever this object
+	// leaves out. Left unset or zero, nothing is rendered, on the same rule as Capacity.
+	//
+	// It carries the same kind of floor, for the same reason: the check the store makes is against
+	// one whole bucket's worth of keys, so a limit below that is a tier that can never receive one.
+	KeyLimit *int64 `json:"keyLimit,omitempty"`
+	// Eviction is what this tier does once it is full. Left unset, nothing is rendered and the
+	// store's own behavior applies, so a default that moves upstream is a change to investigate
+	// rather than one this API silently restated.
+	Eviction *KVCacheBackendMemberLocalDiskEvictionApplyConfiguration `json:"eviction,omitempty"`
 }
 
 // KVCacheBackendMemberLocalDiskApplyConfiguration constructs a declarative configuration of the KVCacheBackendMemberLocalDisk type for use with
@@ -67,5 +88,21 @@ func (b *KVCacheBackendMemberLocalDiskApplyConfiguration) WithPath(value string)
 // If called multiple times, the Capacity field is set to the value of the last call.
 func (b *KVCacheBackendMemberLocalDiskApplyConfiguration) WithCapacity(value resource.Quantity) *KVCacheBackendMemberLocalDiskApplyConfiguration {
 	b.Capacity = &value
+	return b
+}
+
+// WithKeyLimit sets the KeyLimit field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the KeyLimit field is set to the value of the last call.
+func (b *KVCacheBackendMemberLocalDiskApplyConfiguration) WithKeyLimit(value int64) *KVCacheBackendMemberLocalDiskApplyConfiguration {
+	b.KeyLimit = &value
+	return b
+}
+
+// WithEviction sets the Eviction field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Eviction field is set to the value of the last call.
+func (b *KVCacheBackendMemberLocalDiskApplyConfiguration) WithEviction(value *KVCacheBackendMemberLocalDiskEvictionApplyConfiguration) *KVCacheBackendMemberLocalDiskApplyConfiguration {
+	b.Eviction = value
 	return b
 }

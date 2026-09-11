@@ -20,6 +20,7 @@ import (
 	"gpustack.ai/gpustack/pkg/setting"
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 )
 
 // newKVCacheBackend builds a managed backend that passes every rule, so a case mutates exactly the
@@ -95,6 +96,12 @@ func newExternalKVCacheBackendSpec() workercore.KVCacheBackendSpec {
 		},
 	}
 }
+
+// oneBucketMsg is the capacity refusal, built from the same constant the rule reads rather than
+// from a copy of the number. The value itself is pinned once, in the renderer's own package, against
+// the store's defaults it has to stay under — a literal here would only pin it a second time, and
+// would go red on the edit that legitimately moved it.
+var oneBucketMsg = fmt.Sprintf("must be at least %s, which is one bucket", memberBucketSize.String())
 
 // kvCacheBackendCase is one admission case. wantMsg empty means the object must be ACCEPTED;
 // otherwise it is the substring the refusal must carry.
@@ -374,18 +381,47 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 		{"a disk capacity below one bucket", func(k *workercore.KVCacheBackend) {
 			withDiskTier()(k)
 			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("1Mi")
-		}, "must be at least 256Mi"},
+		}, oneBucketMsg},
 		{"a fractional disk capacity below one bucket", func(k *workercore.KVCacheBackend) {
 			withDiskTier()(k)
 			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("1e-3")
-		}, "must be at least 256Mi"},
-		{"a disk capacity of one bucket", func(k *workercore.KVCacheBackend) {
+		}, oneBucketMsg},
+		{"a disk capacity of exactly one bucket", func(k *workercore.KVCacheBackend) {
 			withDiskTier()(k)
-			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("256Mi")
+			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = memberBucketSize
 		}, ""},
 		{"a disk capacity of zero, which is the store's own ceiling", func(k *workercore.KVCacheBackend) {
 			withDiskTier()(k)
 			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("0")
+		}, ""},
+
+		// The key ceiling, which the store checks in the same breath as the byte one.
+		{"a key limit below one bucket's worth", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Members[0].LocalDisk.KeyLimit = mooncake.MemberBucketKeysLimit - 1
+		}, "one bucket's worth of keys"},
+		{"a key limit of exactly one bucket's worth", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Members[0].LocalDisk.KeyLimit = mooncake.MemberBucketKeysLimit
+		}, ""},
+		{"a key limit of zero, which is the store's own ceiling", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Members[0].LocalDisk.KeyLimit = 0
+		}, ""},
+
+		// The segment a bucket is assembled in. The floor applies only where a tier exists, which is
+		// what the second case holds open: without it, a rule refusing every small group would
+		// satisfy the first case just as well.
+		{"capacityPerMember below one bucket, with a tier", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Members[0].CapacityPerMember = resource.MustParse("1Mi")
+		}, "one bucket, the unit the tier is written in"},
+		{"capacityPerMember below one bucket, with no tier", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].CapacityPerMember = resource.MustParse("1Mi")
+		}, ""},
+		{"capacityPerMember of exactly one bucket, with a tier", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Members[0].CapacityPerMember = memberBucketSize
 		}, ""},
 
 		// One disk tier per backend, and the bound is the capacity contract rather than the
@@ -1041,7 +1077,7 @@ func TestKVCacheBackendWebhook_DiskTierIsFrozenExceptItsCapacity(t *testing.T) {
 		}, "", "1Mi"},
 		{"a grandfathered sub-bucket capacity is changed", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("2Mi")
-		}, "must be at least 256Mi", "1Mi"},
+		}, oneBucketMsg, "1Mi"},
 	}
 
 	wh := &KVCacheBackendWebhook{}
@@ -1055,6 +1091,263 @@ func TestKVCacheBackendWebhook_DiskTierIsFrozenExceptItsCapacity(t *testing.T) {
 				newKvcb.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse(c.oldCapacity)
 			}
 			c.mutate(newKvcb)
+
+			_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+			if c.wantMsg == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), c.wantMsg)
+		})
+	}
+}
+
+// TestKVCacheBackendWebhook_DiskTierEviction pins the pair rules the eviction block needs, each of
+// which refuses a combination the store ACCEPTS and then does not act on.
+//
+// Every case carries its positive counterpart, because each of these rules is one a blunter version
+// would satisfy too: a validator refusing every eviction block, or every disabled one, or every
+// watermark, passes the negative cases on its own and forbids the configurations the feature exists
+// for.
+func TestKVCacheBackendWebhook_DiskTierEviction(t *testing.T) {
+	withEviction := func(
+		mutate func(*workercore.KVCacheBackendMemberLocalDiskEviction),
+	) func(*workercore.KVCacheBackend) {
+		return func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			eviction := &workercore.KVCacheBackendMemberLocalDiskEviction{}
+			mutate(eviction)
+			k.Spec.Connection.Managed.Members[0].LocalDisk.Eviction = eviction
+		}
+	}
+
+	runKVCacheBackendCases(t, []kvCacheBackendCase{
+		{"no eviction block at all", withDiskTier(), ""},
+		{"an empty block, which the schema reads as enabled", withEviction(
+			func(*workercore.KVCacheBackendMemberLocalDiskEviction) {}), ""},
+		{"a policy on its own", withEviction(
+			func(e *workercore.KVCacheBackendMemberLocalDiskEviction) { e.Policy = "LRU" }), ""},
+
+		// Disabled: the two settings that would read as taken.
+		{"disabled on its own", withEviction(
+			func(e *workercore.KVCacheBackendMemberLocalDiskEviction) { e.Enabled = ptr.To(false) }), ""},
+		{"disabled with a policy", withEviction(
+			func(e *workercore.KVCacheBackendMemberLocalDiskEviction) {
+				e.Enabled, e.Policy = ptr.To(false), "FIFO"
+			}), "no order in which nothing leaves"},
+		{"disabled with a watermark", withEviction(
+			func(e *workercore.KVCacheBackendMemberLocalDiskEviction) {
+				e.Enabled = ptr.To(false)
+				e.Watermark = &workercore.KVCacheBackendMemberLocalDiskEvictionWatermark{High: 90, Low: 80}
+			}), "nothing for these marks to start and stop"},
+		// Enabled explicitly, which must not trip either of the two rules above.
+		{"enabled with both", withEviction(
+			func(e *workercore.KVCacheBackendMemberLocalDiskEviction) {
+				e.Enabled, e.Policy = ptr.To(true), "FIFO"
+				e.Watermark = &workercore.KVCacheBackendMemberLocalDiskEvictionWatermark{High: 90, Low: 80}
+			}), ""},
+
+		// The band itself.
+		{"marks in the wrong order", withEviction(
+			func(e *workercore.KVCacheBackendMemberLocalDiskEviction) {
+				e.Watermark = &workercore.KVCacheBackendMemberLocalDiskEvictionWatermark{High: 70, Low: 80}
+			}), "must be below high"},
+		{"equal marks", withEviction(
+			func(e *workercore.KVCacheBackendMemberLocalDiskEviction) {
+				e.Watermark = &workercore.KVCacheBackendMemberLocalDiskEvictionWatermark{High: 80, Low: 80}
+			}), "must be below high"},
+
+		// The band is a percentage OF the capacity, and the store's own quota default is a value its
+		// eviction path reads as switched off — so a band without one would never fire while reading
+		// as configured.
+		{"a watermark with no capacity", func(k *workercore.KVCacheBackend) {
+			withEviction(func(e *workercore.KVCacheBackendMemberLocalDiskEviction) {
+				e.Watermark = &workercore.KVCacheBackendMemberLocalDiskEvictionWatermark{High: 90, Low: 80}
+			})(k)
+			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("0")
+		}, "a capacity is required"},
+		{"a policy with no capacity, which needs none", func(k *workercore.KVCacheBackend) {
+			withEviction(func(e *workercore.KVCacheBackendMemberLocalDiskEviction) {
+				e.Policy = "FIFO"
+			})(k)
+			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("0")
+		}, ""},
+	}, func(wh *KVCacheBackendWebhook, _, newKvcb *workercore.KVCacheBackend) error {
+		_, err := wh.ValidateCreate(context.Background(), newKvcb)
+		return err
+	})
+}
+
+// TestKVCacheBackendWebhook_ExtraEnvs pins the environment hatch's two rules.
+//
+// The accepted cases are what make the rule a rule rather than a ban: this hatch exists so the
+// store's environment-only settings are reachable at all, and a validator refusing anything that
+// looks like one of ours would take the feature away while passing every refusal below.
+func TestKVCacheBackendWebhook_ExtraEnvs(t *testing.T) {
+	withEnvs := func(envs map[string]string) func(*workercore.KVCacheBackend) {
+		return func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].ExtraEnvs = envs
+		}
+	}
+
+	runKVCacheBackendCases(t, []kvCacheBackendCase{
+		{"a variable this operator does not render", withEnvs(map[string]string{
+			"MOONCAKE_OFFLOAD_USE_URING": "true",
+		}), ""},
+		{"several of them", withEnvs(map[string]string{
+			"MOONCAKE_OFFLOAD_USE_URING":                  "true",
+			"MOONCAKE_OFFLOAD_HEARTBEAT_INTERVAL_SECONDS": "5",
+		}), ""},
+
+		// One derived name per layer of the rendering, so a list that lost a whole layer reddens.
+		{"the tier's own switch", withEnvs(map[string]string{
+			"MOONCAKE_OFFLOAD_ENABLED": "false",
+		}), "rendered from this spec"},
+		{"the bucket size this operator chose", withEnvs(map[string]string{
+			"MOONCAKE_OFFLOAD_BUCKET_SIZE_LIMIT_BYTES": "268435456",
+		}), "rendered from this spec"},
+		{"the address every member connects to", withEnvs(map[string]string{
+			"MOONCAKE_MASTER": "elsewhere:50051",
+		}), "rendered from this spec"},
+		// Rendered only on the EFA path, and reserved on every path: the transport is editable, so a
+		// backend switched onto that fabric later would otherwise carry two definitions of it.
+		{"the library path only one transport renders", withEnvs(map[string]string{
+			"LD_LIBRARY_PATH": "/opt/mine/lib",
+		}), "rendered from this spec"},
+
+		// A name the strict rule refuses. Checked before the derived list, because a malformed name
+		// cannot collide with one while still reaching the container.
+		{"a name with a space", withEnvs(map[string]string{
+			"MOONCAKE OFFLOAD": "1",
+		}), "is not an environment variable name"},
+		{"a name starting with a digit", withEnvs(map[string]string{
+			"1MOONCAKE": "1",
+		}), "is not an environment variable name"},
+		{"an empty name", withEnvs(map[string]string{"": "1"}), "is not an environment variable name"},
+		// A dash IS allowed, by the strict rule as well as the relaxed one. Held here so that
+		// tightening the check further has to be a deliberate edit rather than a side effect.
+		{"a name with a dash", withEnvs(map[string]string{
+			"MOONCAKE-OFFLOAD-MINE": "1",
+		}), ""},
+	}, func(wh *KVCacheBackendWebhook, _, newKvcb *workercore.KVCacheBackend) error {
+		_, err := wh.ValidateCreate(context.Background(), newKvcb)
+		return err
+	})
+}
+
+// TestKVCacheBackendWebhook_AMemberGroupCannotMove covers the gap the two per-position rules leave:
+// a group's position is its identity, and swapping two groups that differ only in editable fields
+// passes every field-wise check while handing each running DaemonSet the other group's spec.
+//
+// THE POSITIVE CASES ARE THE POINT OF THIS TABLE. The refusal is easy to get for free — freezing
+// nodeSelector, or refusing any list whose length or content moved, satisfies every negative case
+// here and forbids appending a group, widening a selector to gain nodes, and taking a group out of
+// service in place. Those three are what the rule has to keep working, so they are cases rather than
+// a comment.
+func TestKVCacheBackendWebhook_AMemberGroupCannotMove(t *testing.T) {
+	hot := workercore.KVCacheBackendMember{
+		NodeSelector:      map[string]string{"tier": "hot"},
+		Medium:            "DRAM",
+		CapacityPerMember: resource.MustParse("8Gi"),
+	}
+	cold := workercore.KVCacheBackendMember{
+		NodeSelector:      map[string]string{"tier": "cold"},
+		Medium:            "DRAM",
+		CapacityPerMember: resource.MustParse("32Gi"),
+	}
+	third := workercore.KVCacheBackendMember{
+		NodeSelector:      map[string]string{"tier": "archive"},
+		Medium:            "DRAM",
+		CapacityPerMember: resource.MustParse("64Gi"),
+	}
+	members := func(groups ...workercore.KVCacheBackendMember) func(*workercore.KVCacheBackend) {
+		return func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members = groups
+		}
+	}
+
+	cases := []struct {
+		name    string
+		old     func(*workercore.KVCacheBackend)
+		new     func(*workercore.KVCacheBackend)
+		wantMsg string
+	}{
+		// The reported case: neither group has a tier, so the two rules that compare positions have
+		// nothing to compare and the swap used to pass.
+		{
+			"two tier-less groups swapped",
+			members(hot, cold), members(cold, hot),
+			"moves a group rather than editing one",
+		},
+		{
+			// The other shape the same mistake takes. Removing the middle group shifts the third up,
+			// so position 1 now carries what position 2 held.
+			"a middle group removed, shifting the one after it",
+			members(hot, cold, third), members(hot, third),
+			"moves a group rather than editing one",
+		},
+
+		{"nothing changed", members(hot, cold), members(hot, cold), ""},
+		{
+			"a group appended",
+			members(hot, cold), members(hot, cold, third),
+			"",
+		},
+		{
+			// An append that duplicates an existing group is still an append: positions past the old
+			// list's end are never examined, so nothing here depends on the new group being novel.
+			"a group appended that copies an existing one",
+			members(hot, cold), members(hot, cold, hot),
+			"",
+		},
+		{
+			"the last group removed",
+			members(hot, cold, third), members(hot, cold),
+			"",
+		},
+		{
+			"a nodeSelector widened in place, which is how a group gains nodes",
+			members(hot, cold),
+			members(workercore.KVCacheBackendMember{
+				NodeSelector:      map[string]string{},
+				Medium:            "DRAM",
+				CapacityPerMember: resource.MustParse("8Gi"),
+			}, cold),
+			"",
+		},
+		{
+			// The documented way to take a middle group out of service: narrow it until it selects
+			// nothing. Its position, its DaemonSet and every later group stay exactly as they are.
+			"a middle group narrowed until it matches no node",
+			members(hot, cold, third),
+			members(hot, workercore.KVCacheBackendMember{
+				NodeSelector:      map[string]string{"tier": "cold", "drained": "true"},
+				Medium:            "DRAM",
+				CapacityPerMember: resource.MustParse("32Gi"),
+			}, third),
+			"",
+		},
+		{
+			// A quantity respelled is the same group, so the comparison has to be semantic. A
+			// structural one would read this as an edit and let a swap written the same way through.
+			"a capacity respelled to the same quantity",
+			members(hot, cold),
+			members(workercore.KVCacheBackendMember{
+				NodeSelector:      map[string]string{"tier": "hot"},
+				Medium:            "DRAM",
+				CapacityPerMember: resource.MustParse("8192Mi"),
+			}, cold),
+			"",
+		},
+	}
+
+	wh := &KVCacheBackendWebhook{}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+			c.old(oldKvcb)
+			c.new(newKvcb)
 
 			_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
 			if c.wantMsg == "" {

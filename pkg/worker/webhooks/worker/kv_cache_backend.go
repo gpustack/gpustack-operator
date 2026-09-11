@@ -15,12 +15,14 @@ import (
 	conregname "github.com/google/go-containerregistry/pkg/name"
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/webhook"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
@@ -581,7 +583,10 @@ func validateKVCacheBackendScaleIn(
 const quantityTooLarge = "must not exceed 9223372036854775807 (2^63-1) bytes: the renderer reads " +
 	"this as a signed 64-bit count, and a larger one does not survive the conversion"
 
-const localDiskMinimumCapacity = 256 * 1024 * 1024
+// memberBucketSize is the renderer's bucket size as a Quantity, so the three bounds below compare
+// against the figure that is actually sent rather than against a copy of it, and print it the way
+// the field they guard is written.
+var memberBucketSize = *resource.NewQuantity(mooncake.MemberBucketSizeLimit, resource.BinarySI)
 
 // validateKVCacheBackendMember holds the per-group rules a schema cannot carry: a medium the schema
 // accepts but nothing renders, and two quantities whose schema type is a string.
@@ -604,13 +609,26 @@ func validateKVCacheBackendMember(
 	// these two are the only place either can be refused. Zero is refused rather than defaulted,
 	// because the renderer omits the segment size it derives when the value is not positive, and a
 	// member that mounts no segment is indistinguishable from one whose leader lost it.
-	if member.CapacityPerMember.CmpInt64(0) <= 0 {
+	switch {
+	case member.CapacityPerMember.CmpInt64(0) <= 0:
 		errs = append(errs, field.Invalid(fldPath.Child("capacityPerMember"),
 			member.CapacityPerMember.String(),
 			"must be greater than 0: a member contributing nothing is a Pod with no reason to run"))
-	} else if quantityx.OverflowsInt64(member.CapacityPerMember) {
+	case quantityx.OverflowsInt64(member.CapacityPerMember):
 		errs = append(errs, field.Invalid(fldPath.Child("capacityPerMember"),
 			member.CapacityPerMember.String(), quantityTooLarge))
+	case member.LocalDisk != nil &&
+		member.CapacityPerMember.CmpInt64(mooncake.MemberBucketSizeLimit) < 0 &&
+		(oldMember == nil || member.CapacityPerMember.Cmp(oldMember.CapacityPerMember) != 0):
+		// The floor applies only to a group that declares a tier, and only when this update moved
+		// the value. Re-judging a figure the update left alone is what would strand an object
+		// admitted before the bound existed — and not every update is the user's.
+		errs = append(errs, field.Invalid(fldPath.Child("capacityPerMember"),
+			member.CapacityPerMember.String(), fmt.Sprintf(
+				"must be at least %s for a group declaring localDisk: that is one bucket, the unit the "+
+					"tier is written in, and its bytes are held in this segment until the bucket is "+
+					"complete — so a smaller segment leaves the tier empty under every workload, with "+
+					"nothing reporting it", memberBucketSize.String())))
 	}
 	if member.LocalBufferSize.CmpInt64(0) < 0 {
 		errs = append(errs, field.Invalid(fldPath.Child("localBufferSize"),
@@ -648,13 +666,59 @@ func validateKVCacheBackendMember(
 		errs = append(errs, checkImageReference(member.Image, fldPath.Child("image"))...)
 	}
 
-	var oldExtraArgs map[string]string
+	var oldExtraArgs, oldExtraEnvs map[string]string
 	if oldMember != nil {
-		oldExtraArgs = oldMember.ExtraArgs
+		oldExtraArgs, oldExtraEnvs = oldMember.ExtraArgs, oldMember.ExtraEnvs
 	}
 	if !unchangedExtraArgs(oldMember != nil, oldExtraArgs, member.ExtraArgs) {
 		errs = append(errs, validateExtraArgs(member.ExtraArgs,
 			mooncake.MemberExtraArgsRules, fldPath.Child("extraArgs"))...)
+	}
+	if !unchangedExtraArgs(oldMember != nil, oldExtraEnvs, member.ExtraEnvs) {
+		errs = append(errs, validateExtraEnvs(member.ExtraEnvs, fldPath.Child("extraEnvs"))...)
+	}
+
+	return errs
+}
+
+// validateExtraEnvs enforces the environment passthrough's two rules.
+//
+// It is separate from validateExtraArgs rather than sharing it, because the half that differs is the
+// half that matters: a config key and an environment-variable name have different shapes, judged by
+// different upstream rules, and a message naming the wrong one sends someone looking for a mistake
+// they did not make. What they have in common is one list walk, which is smaller than the
+// abstraction that would hold it.
+//
+// Its scoping matches validateExtraArgs for the same reason: the derived list GROWS as this API
+// renders more, and re-judging a map an update did not touch would retroactively refuse an object
+// admitted before the entry existed — on every update, including the reconciler's own removal of
+// this object's finalizer. See unchangedExtraArgs.
+func validateExtraEnvs(extraEnvs map[string]string, fldPath *field.Path) field.ErrorList {
+	var errs field.ErrorList
+
+	for _, name := range slices.Sorted(maps.Keys(extraEnvs)) {
+		// Checked before the derived list, because that list holds names and anything that is not a
+		// name cannot collide with one while still reaching the container.
+		//
+		// The STRICT rule and not the relaxed one, deliberately. Kubernetes has two: the classic form
+		// this calls, and a relaxed form accepting any printable ASCII but "=", which newer API
+		// servers apply to a Pod's env. Judging by the strict one refuses a handful of names a new
+		// enough cluster would have taken — and every name it accepts is accepted by an API server of
+		// any age, which is the direction that cannot fail silently. The other way round, this webhook
+		// would admit a name that the cluster's own Pod validation then refuses inside a reconcile,
+		// where the only trace is a line in this operator's log while the group never comes up. No
+		// setting this hatch exists to reach carries such a name.
+		if msgs := validation.IsEnvVarName(name); len(msgs) > 0 {
+			errs = append(errs, field.Invalid(fldPath.Key(name), name,
+				"is not an environment variable name: "+strings.Join(msgs, "; ")))
+			continue
+		}
+		if slices.Contains(mooncake.MemberDerivedEnvs, name) {
+			errs = append(errs, field.Forbidden(fldPath.Key(name),
+				"this variable is rendered from this spec, and two definitions of one name make the "+
+					"rendered container ambiguous: Kubernetes accepts both and leaves the winner to "+
+					"the container runtime, so nothing would report the collision"))
+		}
 	}
 
 	return errs
@@ -732,19 +796,93 @@ func validateKVCacheBackendLocalDisk(
 	// The capacity is a resource.Quantity, so it is a string in the schema and no marker can bound
 	// it. Zero is legitimate and means "no ceiling of ours" — the store's own applies — which is
 	// the same thing leaving the field out means. A positive value needs one full bucket: the store
-	// cannot flush a partial bucket, and this API cannot configure the bucket threshold.
+	// stops taking offload work as soon as one more bucket would not fit under this ceiling, so a
+	// tier below it never receives a key.
 	switch {
 	case disk.Capacity.CmpInt64(0) < 0:
 		errs = append(errs, field.Invalid(fldPath.Child("capacity"), disk.Capacity.String(),
 			"must not be negative: it caps what this tier stores"))
-	case !disk.Capacity.IsZero() && disk.Capacity.CmpInt64(localDiskMinimumCapacity) < 0 &&
+	case !disk.Capacity.IsZero() && disk.Capacity.Cmp(memberBucketSize) < 0 &&
 		(oldDisk == nil || disk.Capacity.Cmp(oldDisk.Capacity) != 0):
 		errs = append(errs, field.Invalid(fldPath.Child("capacity"), disk.Capacity.String(),
-			"must be at least 256Mi: the store flushes whole buckets and this API cannot configure "+
-				"their size"))
+			fmt.Sprintf("must be at least %s, which is one bucket: the store stops taking offload "+
+				"work as soon as one more bucket would not fit under this ceiling",
+				memberBucketSize.String())))
 	case quantityx.OverflowsInt64(disk.Capacity):
 		errs = append(errs, field.Invalid(fldPath.Child("capacity"), disk.Capacity.String(),
 			quantityTooLarge))
+	}
+
+	// The key ceiling's other half. The schema bounds it at zero and no lower, which is all a marker
+	// can say; the bucket's worth below it is the same fact as the capacity floor above, on the
+	// count the store checks in the same breath as the bytes.
+	if disk.KeyLimit > 0 && disk.KeyLimit < mooncake.MemberBucketKeysLimit &&
+		(oldDisk == nil || disk.KeyLimit != oldDisk.KeyLimit) {
+		errs = append(errs, field.Invalid(fldPath.Child("keyLimit"), disk.KeyLimit,
+			fmt.Sprintf("must be at least %d, which is one bucket's worth of keys: the store stops "+
+				"taking offload work as soon as one more bucket would not fit under this ceiling",
+				mooncake.MemberBucketKeysLimit)))
+	}
+
+	errs = append(errs, validateKVCacheBackendLocalDiskEviction(disk, fldPath)...)
+
+	return errs
+}
+
+// validateKVCacheBackendLocalDiskEviction refuses an eviction block that would render settings the
+// store accepts and then does not act on.
+//
+// Every rule here is a PAIR rule, which is why none of them is a schema marker: the enum, the
+// percentage bounds and the default on enabled are all in the schema already, and what is left is
+// what one field means in the presence of another.
+func validateKVCacheBackendLocalDiskEviction(
+	disk *workercore.KVCacheBackendMemberLocalDisk, diskPath *field.Path,
+) field.ErrorList {
+	eviction := disk.Eviction
+	if eviction == nil {
+		return nil
+	}
+
+	var errs field.ErrorList
+
+	fldPath := diskPath.Child("eviction")
+
+	// The schema defaults this to true, so nil is an object that never reached an API server and is
+	// read the way the schema would have read it.
+	disabled := eviction.Enabled != nil && !*eviction.Enabled
+
+	if disabled && eviction.Policy != "" {
+		errs = append(errs, field.Forbidden(fldPath.Child("policy"),
+			"eviction is disabled here, and there is no order in which nothing leaves. Remove one of "+
+				"the two rather than leaving a policy that reads as taken"))
+	}
+
+	if eviction.Watermark == nil {
+		return errs
+	}
+
+	watermarkPath := fldPath.Child("watermark")
+
+	switch {
+	case disabled:
+		errs = append(errs, field.Forbidden(watermarkPath,
+			"eviction is disabled here, so there is nothing for these marks to start and stop. "+
+				"Remove one of the two rather than leaving a band that reads as configured"))
+	case disk.Capacity.IsZero():
+		// The marks are a fraction of the tier's ceiling, and the store's own default for the quota
+		// they are taken against is zero — which its eviction path reads as "no quota" and returns
+		// from without evicting. Refused rather than rendered, because a band that never fires looks
+		// exactly like one that has not been reached yet.
+		errs = append(errs, field.Required(diskPath.Child("capacity"), fmt.Sprintf(
+			"a capacity is required when %s is set: the marks are a percentage of it, and without one "+
+				"the store evicts nothing while the band reads as configured", watermarkPath)))
+	}
+
+	if eviction.Watermark.Low >= eviction.Watermark.High {
+		errs = append(errs, field.Invalid(watermarkPath.Child("low"), eviction.Watermark.Low,
+			fmt.Sprintf("must be below high (%d): equal or inverted marks make every write past the "+
+				"mark evict, and the member's own startup check refuses the pair — inside a container "+
+				"log rather than here", eviction.Watermark.High)))
 	}
 
 	return errs
@@ -849,8 +987,14 @@ func validateExtraArgs(
 // branch is frozen because switching it would abandon or adopt a whole workload; a medium is frozen
 // because the segments already mounted from it cannot change kind underneath the data in them.
 //
-// Everything else is editable on purpose: an image, a node selector, a capacity, an extraArgs entry
-// and the transport block all converge on the next pass.
+// It also refuses moving a group between positions, which is a different kind of rule: the
+// per-position ones below ask whether a field changed, and that one asks whether the whole group at
+// a position is one that used to be somewhere else. See validateKVCacheBackendMembersNotMoved for
+// why no per-field rule can reach it.
+//
+// Everything else is editable on purpose: an image, a node selector, a capacity, an extraArgs or
+// extraEnvs entry, a tier's ceilings and its eviction settings, and the transport block all converge
+// on the next pass.
 func validateKVCacheBackendImmutable(oldKvcb, newKvcb *workercore.KVCacheBackend) field.ErrorList {
 	var errs field.ErrorList
 
@@ -873,6 +1017,7 @@ func validateKVCacheBackendImmutable(oldKvcb, newKvcb *workercore.KVCacheBackend
 
 	oldMembers, newMembers := oldKvcb.Spec.Connection.Managed.Members, newKvcb.Spec.Connection.Managed.Members
 	membersPath := specPath.Child("connection", "managed", "members")
+	errs = append(errs, validateKVCacheBackendMembersNotMoved(oldMembers, newMembers, membersPath)...)
 	for i := range newMembers {
 		if i >= len(oldMembers) {
 			break
@@ -891,6 +1036,66 @@ func validateKVCacheBackendImmutable(oldKvcb, newKvcb *workercore.KVCacheBackend
 	}
 
 	return errs
+}
+
+// validateKVCacheBackendMembersNotMoved refuses an update that carries a group from one position to
+// another, which is the edit that hands a running DaemonSet a different group's spec.
+//
+// WHY IT IS NOT ENOUGH TO FREEZE FIELDS. A group's position IS its identity: the DaemonSet's name,
+// its immutable selector labels and the port its members serve all derive from the index. Reordering
+// keeps every one of those and moves only the spec underneath, so the members at a position are
+// rebuilt against another group's configuration and the cache they held goes with them, with nothing
+// on the object saying so. The per-position rules below catch that only when the two groups differ in
+// a frozen field — swapping two groups that both lack a disk tier passes them all, because every
+// field that does differ is one this API deliberately leaves editable.
+//
+// WHAT IT RECOGNIZES, AND WHY THAT IS THE WHOLE OF WHAT CAN BE. Without a name of its own, a group is
+// only recognizable by its contents, so the one thing that can be told apart from an ordinary edit is
+// a group that ARRIVED UNCHANGED at a position another group held. That covers both shapes this
+// happens in: a swap, and the upward shift that removing a group ahead of others produces. A reorder
+// combined with an edit to the same group is indistinguishable from two edits and is not caught —
+// stating that here rather than leaving the next reader to discover the gap.
+//
+// WHAT IT LEAVES ALONE, deliberately, because each is an operation this API supports:
+//
+//   - appending a group, which is why positions beyond the old list's end are never examined;
+//   - removing from the END of the list, which changes no surviving position;
+//   - editing a group in place, including widening a nodeSelector to gain nodes — the only way a
+//     widened selector could trip this rule is by making the group identical to one another position
+//     already held, which is a reorder written as an edit.
+//
+// The comparison is SEMANTIC rather than structural, so two specs differing only in how a quantity
+// was spelled — 1Gi against 1024Mi — count as the same group rather than as an edit that would slip
+// past the rule.
+func validateKVCacheBackendMembersNotMoved(
+	oldMembers, newMembers []workercore.KVCacheBackendMember, fldPath *field.Path,
+) field.ErrorList {
+	for i := range newMembers {
+		if i >= len(oldMembers) {
+			// A position that did not exist before is an append, and an append moves nothing.
+			break
+		}
+		if kubemeta.DeepEqual(newMembers[i], oldMembers[i]) {
+			continue
+		}
+
+		for j := range oldMembers {
+			if j == i || !kubemeta.DeepEqual(newMembers[i], oldMembers[j]) {
+				continue
+			}
+			// One error and not one per position: a swap trips at both of its ends and a shift at
+			// every position after the gap, and the fix is the same single edit for all of them.
+			return field.ErrorList{field.Forbidden(fldPath.Index(i), fmt.Sprintf(
+				"this position now carries the group that was at position %d, which moves a group "+
+					"rather than editing one. The position is a group's identity here: the DaemonSet "+
+					"at this position keeps its name, its selector and its port, so its members would "+
+					"be rebuilt against another group's spec and the cache they hold would go with "+
+					"them. Append groups at the end and remove them from the end; to take a group out "+
+					"of service in place, narrow its nodeSelector until it matches no node", j))}
+		}
+	}
+
+	return nil
 }
 
 // kvCacheBackendMaxConsumerNames caps how many claimants the refusal below spells out.

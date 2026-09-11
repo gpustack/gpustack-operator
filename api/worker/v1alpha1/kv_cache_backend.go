@@ -145,6 +145,20 @@ type KVCacheBackendManaged struct {
 	// every position after it — the members there are rebuilt against a different group's spec, and
 	// their cache goes with them.
 	//
+	// MOVING A GROUP TO ANOTHER POSITION IS REFUSED AT ADMISSION, rather than accepted and reported.
+	// The rule is narrow on purpose: it refuses an update that puts, at a position that already
+	// existed, a group identical to the one another position held — a swap, or the shift that
+	// removing a middle group produces. Appending a group, removing from the END of the list, and
+	// editing a group in place are all untouched, including the widening of a nodeSelector that is
+	// how a group gains nodes. It has to be that narrow because a group carries no name: an edit
+	// that merely happens to change two groups cannot be told from a reorder, so only a reorder that
+	// MOVES a group unchanged is recognizable at all, and refusing more would forbid the edits this
+	// list is meant to take.
+	//
+	// To take a group out of service without removing it, narrow its nodeSelector until it matches
+	// no node. The group keeps its position, every later group keeps its DaemonSet, and nothing is
+	// rebuilt.
+	//
 	// GIVING A GROUP A NAME OF ITS OWN IS POSSIBLE AND IS DELIBERATELY NOT DONE. A name independent
 	// of position would make reordering free, and the price of introducing one is paid once, in
 	// full: a DaemonSet's spec.selector cannot be changed after creation, so every existing member
@@ -237,6 +251,36 @@ type KVCacheBackendScaleIn struct {
 }
 
 // KVCacheBackendExternal is a backend this operator does not run.
+//
+// TWO OF THESE MAY NAME THE SAME BACKEND, AND NOTHING HERE NOTICES. For a managed backend the object
+// IS the leader, so two objects are two leaders; for an external one the object is a declaration of
+// addresses, and the same leader is reachable under more than one spelling — by service name in one
+// object and by address in another, with or without a trailing dot or an explicit default port. This
+// operator compares no addresses across objects and watches for none appearing later, deliberately:
+// every identity it could compare is editable or needs the leader reachable at admission, and the
+// comparison that is cheap enough to do catches only the copy-paste case while missing the one a
+// real deployment produces. KEEPING TWO OBJECTS OFF ONE LEADER IS YOURS.
+//
+// What it costs is not a refusal somewhere else, so there are three consequences to weigh, and only
+// a reader who knows all three can decide whether the duplication is safe here.
+//
+// FIRST, THE QUOTA OF A SHARED REUSE DOMAIN FLIPS AND NEVER SETTLES. The uniqueness rule for a
+// reuse domain is enforced between Bindings whose pools name the SAME backend object, so two
+// Bindings reaching one leader through two objects are both admitted on one domain name. The leader
+// keeps ONE ledger entry per tenant, and each pool's reconciler converges that entry toward its own
+// Binding's quotaCeiling on every pass — so each pass reads the other's figure, finds it wrong, and
+// writes its own back. The entry alternates between the two ceilings for as long as both exist.
+//
+// SECOND, THE SYMPTOM OF AN UNDERSIZED QUOTA IS A LOW HIT RATE AND NOTHING ELSE. Exceeding a tenant's
+// quota does not refuse the write: the store frees room by dropping that tenant's own older objects
+// and retries, irreversibly, WITHOUT ANY COUNTER MOVING. So the flipping above does not surface as an
+// error on any object — it surfaces as a cache that keeps losing content nobody asked it to lose.
+//
+// THIRD, AND THE ONLY ONE THAT PRODUCES WRONG ANSWERS RATHER THAN SLOW ONES: two Bindings claiming
+// one domain.name with a different blockSize or dtype CORRUPT EACH OTHER'S BLOCKS. The reuse identity
+// an engine is handed is the domain NAME alone — blockSize and dtype reach no engine, they are a
+// declaration this API validates and records — so two differently-shaped caches land under one
+// identity. The writes succeed, the reads succeed, and the tensors are wrong.
 type KVCacheBackendExternal struct {
 	// Endpoints are the addresses of a backend somebody else runs, one entry per named role.
 	// Both roles are required here, and for the same reason they are two entries and not one
@@ -489,6 +533,13 @@ type KVCacheBackendMember struct {
 	// into the member Pod's own resource request, so a member that does not fit stays Pending
 	// instead of overcommitting the node.
 	//
+	// A GROUP CARRYING LocalDisk NEEDS AT LEAST ONE BUCKET HERE, which is the unit that tier is
+	// written in. The bytes a bucket is assembled from are held in this segment until the bucket is
+	// complete, so a segment smaller than one can never have a bucket's worth of content in it at
+	// once and the tier stays empty under every workload — the failure this bound exists to turn into
+	// a refusal, because nothing else reports it. A group with no tier has no such floor: there is
+	// nothing for it to fail to fill.
+	//
 	// SEVERAL MEMBERS PER NODE IS DECIDED AND NOT DONE, and this field is named for the shape it
 	// would take rather than the one that ships. What is deferred is splitting a node's members by
 	// NUMA domain; today one selected node runs one member.
@@ -529,6 +580,31 @@ type KVCacheBackendMember struct {
 	// this field is the only way one arrives.
 	ExtraArgs map[string]string `json:"extraArgs,omitempty" protobuf:"bytes,5,rep,name=extraArgs"`
 
+	// ExtraEnvs passes environment variables this API does not enumerate straight through to the
+	// member container.
+	//
+	// IT IS NOT A SECOND SPELLING OF ExtraArgs, and the reason is that the two reach different
+	// places. ExtraArgs renders as the entrypoint's own "-D key=value" config override, which sets a
+	// key on the client's config object; a whole family of this store's settings — the local disk
+	// tier's flush thresholds, its promotion behavior, the rest of its eviction knobs — has no config
+	// key at all and is read from the ENVIRONMENT only. Nothing filters those out. There is simply no
+	// path to them from a command line, which is what this field is for.
+	//
+	// A NAME THIS OPERATOR ALREADY RENDERS IS REFUSED at admission, for the same reason a colliding
+	// ExtraArgs key is: two sources for one setting make the rendered container ambiguous. Kubernetes
+	// accepts a container carrying one name twice and leaves the winner to the runtime, so the
+	// collision would not even be reported. That includes the tier's bucket thresholds, which this
+	// operator now sizes itself — a tuner who needs to move them needs a field, and this hatch is
+	// deliberately not it.
+	//
+	// EVERY VALUE HERE IS WORLD-READABLE, on three paths and not one. It is stored verbatim on THIS
+	// object, which is cluster-scoped, so reading it needs no access to any workload; it is then
+	// rendered into the member container's environment, which exposes it again to anyone who can read
+	// the Pod or the DaemonSet carrying it. It stays readable for the life of the object. A
+	// credential does not belong here. This operator renders no variable that carries one, so this
+	// field is the only way one arrives.
+	ExtraEnvs map[string]string `json:"extraEnvs,omitempty" protobuf:"bytes,8,rep,name=extraEnvs"`
+
 	// Image overrides the backend's Image for this member group only. Left unset, the group runs
 	// the backend's Image.
 	//
@@ -544,17 +620,19 @@ type KVCacheBackendMember struct {
 	// LocalDisk declares a directory on the nodes this group already selects and points the store
 	// client's offload keys at it. Left unset, the group is memory only.
 	//
-	// WHAT IS AND IS NOT ESTABLISHED. Setting this is observed to make the leader accept a local
-	// disk segment from the member, publish the declared capacity, and run eviction — and THIS
-	// PROJECT HAS NOT OBSERVED DATA ACTUALLY REACHING THE TIER in any environment. Filling a
-	// member's memory segment under a low watermark, the leader reported objects "deferred for disk
-	// offload" while the tier stayed empty, in both configurations this API can render. The cause is
-	// not established and this is not a claim about the store in general.
+	// WHAT THE TIER IS WRITTEN IN IS A BUCKET, AND THAT IS WHY THIS OPERATOR SIZES ONE. The store
+	// assembles offloaded objects into a bucket and writes nothing until that bucket is full, by
+	// bytes or by object count; objects below the threshold are carried to the next attempt
+	// indefinitely, reported as deferred for offload, and the tier stays empty while every other
+	// signal — the segment registered, the capacity published, eviction running — looks healthy. The
+	// store's own thresholds are sized for a saturated production store and are far above what a
+	// modest backend ever accumulates, so this operator renders a smaller pair of its own. They are
+	// not in this API: a tuner who needs to move them needs a field, and members[].extraEnvs refuses
+	// them for the same reason it refuses every other name this operator renders.
 	//
-	// So before relying on the tier, check the one figure that answers the question: the leader's
-	// own master_allocated_file_size_bytes is bytes actually written, and reads 0 for a tier that
-	// holds nothing while every other signal looks healthy. status.capacity reports the declared
-	// CAPACITY and will not show this.
+	// To check what the tier actually holds rather than what it declared, read the leader's own
+	// master_allocated_file_size_bytes: that is bytes written, and reads 0 for a tier holding
+	// nothing. status.capacity reports the declared CAPACITY and will not show this.
 	//
 	// It is a LAYER on this group rather than a group of its own, and that is the store's shape
 	// rather than a simplification here: the leader routes an offload task to the client that owns
@@ -592,12 +670,21 @@ type KVCacheBackendMemberLocalDisk struct {
 	// +k8s:validation:maxLength=4096
 	Path string `json:"path" protobuf:"bytes,1,name=path"`
 
-	// Capacity caps what this tier stores. Left unset, the store's own ceiling applies and nothing
-	// is rendered, so a ceiling that moves upstream is a change to investigate rather than one
-	// this API silently restated.
+	// Capacity caps what this tier stores, in bytes. Left unset, the store's own ceiling applies and
+	// nothing is rendered, so a ceiling that moves upstream is a change to investigate rather than
+	// one this API silently restated.
 	//
-	// A set capacity must hold one 256Mi bucket. The store does not flush a partial bucket, and
-	// this API cannot configure that threshold, so a smaller tier can never receive a key.
+	// IT IS ALSO THE FIGURE EVICTION MEASURES AGAINST, and that is why Eviction below is not usable
+	// without it. The store keeps two separate ceilings for one tier — the total it may hold, and
+	// the quota its watermark eviction takes its marks as a fraction of — and the second defaults to
+	// zero, which that eviction path reads as "no quota" and returns from having evicted nothing.
+	// One value is rendered into both, so the marks are a fraction of the ceiling an operator
+	// actually declared.
+	//
+	// A set capacity must hold one BUCKET, which is the unit this tier is written in. The store
+	// stops taking offload work as soon as one more bucket would not fit under this ceiling, so a
+	// tier smaller than a bucket never receives a key. The bucket size is this operator's to choose
+	// and it is not in this API; the floor moves with it.
 	//
 	// It is NOT counted into the Pod's resource requests, unlike CapacityPerMember. The tier is a
 	// host directory, which is outside the kubelet's ephemeral-storage accounting entirely — a
@@ -605,6 +692,106 @@ type KVCacheBackendMemberLocalDisk struct {
 	// the very node that has the disk. Watching that filesystem is the operator's, and the
 	// documentation says so.
 	Capacity resource.Quantity `json:"capacity,omitempty" protobuf:"bytes,2,opt,name=capacity"`
+
+	// KeyLimit caps how many keys this tier holds, and it is Capacity's other half rather than an
+	// alternative to it: the store bounds the tier by bytes AND by key count, stops taking offload
+	// work when either would be exceeded, and applies its own ceiling to whichever this object
+	// leaves out. Left unset or zero, nothing is rendered, on the same rule as Capacity.
+	//
+	// It carries the same kind of floor, for the same reason: the check the store makes is against
+	// one whole bucket's worth of keys, so a limit below that is a tier that can never receive one.
+	//
+	// +k8s:validation:minimum=0
+	KeyLimit int64 `json:"keyLimit,omitempty" protobuf:"varint,3,opt,name=keyLimit"`
+
+	// Eviction is what this tier does once it is full. Left unset, nothing is rendered and the
+	// store's own behavior applies, so a default that moves upstream is a change to investigate
+	// rather than one this API silently restated.
+	Eviction *KVCacheBackendMemberLocalDiskEviction `json:"eviction,omitempty" protobuf:"bytes,4,opt,name=eviction"`
+}
+
+// KVCacheBackendMemberLocalDiskEviction is what the tier does once it is full: drop what it already
+// holds to make room, or stop taking new work.
+//
+// The two are different OUTCOMES rather than two settings of one knob. Evicting, the tier goes on
+// accepting writes indefinitely and its oldest content leaves; not evicting, the tier fills to its
+// Capacity and the store simply stops sending it work, so what is already there stays and stays
+// readable.
+type KVCacheBackendMemberLocalDiskEviction struct {
+	// Enabled is whether this tier evicts at all. It DEFAULTS TO TRUE, so declaring this block
+	// without it asks for eviction rather than against it.
+	//
+	// A POINTER carrying a schema default, unlike the plain bools elsewhere in this API, and the
+	// asymmetry is forced: here unset has to mean TRUE. A plain bool cannot say that — `enabled:
+	// false` and an omitted key are the same JSON — so the block would turn eviction off for
+	// everyone who declared it only to set a Watermark.
+	//
+	// Turning it off renders TWO settings, not one: an eviction policy of "none", which is the
+	// store's own name for that value, and an explicit false on its watermark-eviction switch. They
+	// belong to different layers — the policy is read by the on-disk format this operator's members
+	// use, the switch is above it and format-independent — and eviction should be off at whichever
+	// layer ends up asking.
+	//
+	// +k8s:validation:default=true
+	Enabled *bool `json:"enabled,omitempty" protobuf:"varint,1,opt,name=enabled"`
+
+	// Policy is the order in which entries leave. FIFO drops the oldest written first, LRU the least
+	// recently read.
+	//
+	// The enum is the two any cache would offer, deliberately, rather than every string the store's
+	// parser happens to read. It carries NO value meaning "do not evict": that is Enabled's job, and
+	// a third value saying the same thing would be a second spelling admission would then have to
+	// adjudicate against the first.
+	//
+	// Left unset NOTHING IS RENDERED and the store's own default applies, which is first-in
+	// first-out. That is this API's rule for every setting a spec does not address, and it earns more
+	// here than usual: the store maps a policy string it does not recognize onto no eviction at all —
+	// no error, no warning, no failure to start — so a policy is only ever sent when this API is the
+	// one that chose it, and only from a fixed set of spellings.
+	//
+	// It is REFUSED together with Enabled set to false, because there is no order in which nothing
+	// leaves.
+	//
+	// +k8s:validation:enum=["FIFO","LRU"]
+	Policy string `json:"policy,omitempty" protobuf:"bytes,2,opt,name=policy"`
+
+	// Watermark is WHEN eviction runs: it starts once the tier passes High and stops once it is back
+	// under Low, both as a percentage of Capacity. Left unset, nothing is rendered and the store's
+	// own marks apply.
+	//
+	// It REQUIRES Capacity, which is what the percentages are of, and it is refused together with
+	// Enabled set to false.
+	Watermark *KVCacheBackendMemberLocalDiskEvictionWatermark `json:"watermark,omitempty" protobuf:"bytes,3,opt,name=watermark"`
+}
+
+// KVCacheBackendMemberLocalDiskEvictionWatermark is the band eviction works between.
+//
+// It is a STRUCT and not two optional fields on the block above, because either mark alone describes
+// nothing this operator would want to render: a high mark on its own leaves the store pairing it
+// with a low mark this object never states, and the pair is refused at the member's startup whenever
+// that unstated default is not below it — a member that never comes up, for a reason only in a
+// container log.
+type KVCacheBackendMemberLocalDiskEvictionWatermark struct {
+	// High is the percentage of Capacity at which eviction starts.
+	//
+	// A PERCENTAGE and not a quantity. The store takes a fraction of its own quota rather than a
+	// size, and a size here would restate a figure Capacity already carries — one that would quietly
+	// stop matching the moment Capacity moved.
+	//
+	// +required
+	// +k8s:validation:minimum=1
+	// +k8s:validation:maximum=100
+	High int32 `json:"high" protobuf:"varint,1,name=high"`
+
+	// Low is the percentage of Capacity eviction stops at, and it MUST be below High. Equal marks
+	// would make every write past the mark evict, which is the thrashing a band exists to prevent.
+	// The store refuses the pair when its member starts; admission refuses it here instead, where
+	// the message reaches whoever wrote it.
+	//
+	// +required
+	// +k8s:validation:minimum=1
+	// +k8s:validation:maximum=100
+	Low int32 `json:"low" protobuf:"varint,2,name=low"`
 }
 
 // KVCacheBackendStatus defines the observed state of KVCacheBackend.

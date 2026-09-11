@@ -21,6 +21,20 @@ type KVCacheBackendManagedApplyConfiguration struct {
 	// every position after it — the members there are rebuilt against a different group's spec, and
 	// their cache goes with them.
 	//
+	// MOVING A GROUP TO ANOTHER POSITION IS REFUSED AT ADMISSION, rather than accepted and reported.
+	// The rule is narrow on purpose: it refuses an update that puts, at a position that already
+	// existed, a group identical to the one another position held — a swap, or the shift that
+	// removing a middle group produces. Appending a group, removing from the END of the list, and
+	// editing a group in place are all untouched, including the widening of a nodeSelector that is
+	// how a group gains nodes. It has to be that narrow because a group carries no name: an edit
+	// that merely happens to change two groups cannot be told from a reorder, so only a reorder that
+	// MOVES a group unchanged is recognizable at all, and refusing more would forbid the edits this
+	// list is meant to take.
+	//
+	// To take a group out of service without removing it, narrow its nodeSelector until it matches
+	// no node. The group keeps its position, every later group keeps its DaemonSet, and nothing is
+	// rebuilt.
+	//
 	// GIVING A GROUP A NAME OF ITS OWN IS POSSIBLE AND IS DELIBERATELY NOT DONE. A name independent
 	// of position would make reordering free, and the price of introducing one is paid once, in
 	// full: a DaemonSet's spec.selector cannot be changed after creation, so every existing member

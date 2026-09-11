@@ -16,10 +16,10 @@
 //     and zero are different facts, and publishing the second for the first is how a warm cache comes
 //     to look empty.
 //
-// This file holds only the rules governing the extraArgs escape hatch, because two callers must
-// agree on them: the renderers emit the derived flags, and the admission webhook refuses an
-// extraArgs entry that would fight one. Keeping the lists here rather than in either caller is what
-// makes "two sources for one flag" impossible.
+// This file holds only the rules governing the escape hatches, because two callers must agree on
+// them: the renderers emit the derived flags and variables, and the admission webhook refuses an
+// entry that would fight one. Keeping the lists here rather than in either caller is what makes "two
+// sources for one setting" impossible.
 //
 // Every entry below is read from the artifact's own source at the version this project pins.
 package mooncake
@@ -121,11 +121,13 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 
 // MemberExtraArgsRules governs a member group's passthrough.
 //
-// These are CONFIG keys, not environment-variable names: the member's extraArgs is keyed the way
-// its own entrypoint documents, and the renderer maps each to its MOONCAKE_* variable. The tiering
-// knobs this API does not render — promotion, eviction — are deliberately absent, because reaching
-// them is what the escape hatch is for. The disk tier's two are NOT among them any more: they come
-// from members[].localDisk now, so they are derived rather than reachable.
+// These are CONFIG keys, not environment-variable names: the member's extraArgs is keyed the way its
+// own entrypoint documents, and the renderer maps each to its MOONCAKE_* variable. Names the client
+// reads from the ENVIRONMENT ONLY are not reachable through this map at all and are not listed here;
+// members[].extraEnvs is the hatch for those, and MemberDerivedEnvs is what it reserves.
+//
+// The disk tier's two are NOT reachable any more: they come from members[].localDisk now, so they
+// are derived.
 //
 // There is no Forbidden entry here, and the rendering shape is the reason: a member's extraArgs
 // becomes a per-key override, so a key named after a config FILE would set a config key of that
@@ -145,6 +147,47 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 // Leaving the key out of Derived is what gives an operator on heterogeneous hardware a way in: a
 // member's extraArgs renders as the entrypoint's own -D override, which is applied AFTER the
 // environment and wins over it.
+// MemberDerivedEnvs is every environment variable name the member renderer emits, which is what
+// admission refuses in a group's extraEnvs.
+//
+// It is a PLAIN LIST and not an ExtraArgsRules, because the other two kinds that type carries would
+// both be empty and an empty field invites a reader to wonder what belongs in it. No two of these
+// names are alternatives to one another, so there is nothing to make exclusive; and nothing in this
+// namespace has the leader's config_path property -- the one that makes a passthrough void every
+// OTHER setting -- so there is nothing to forbid outright. A variable here configures the setting it
+// names and nothing else, which leaves collision as the only problem worth reporting.
+//
+// It carries the names the renderer emits on SOME paths too. LD_LIBRARY_PATH is here although only
+// the EFA transport renders it, because the transport is editable: a backend switched onto that
+// fabric later would otherwise carry two definitions of the variable that decides whether the host's
+// libfabric loads at all, with the winner left to the runtime.
+//
+// The bucket pair is here for a different reason than the rest. The others protect an invariant
+// admission enforces elsewhere -- the tier's two halves, the path that passed the path rules, the
+// segment size counted into the Pod's request. The bucket pair protects nothing; it is a value this
+// operator CHOSE, and reserving it is the deliberate decision that a tuner who needs to move it gets
+// a field rather than a hatch that silently doubles a name.
+var MemberDerivedEnvs = []string{
+	"LD_LIBRARY_PATH",
+	memberEnvGlobalSegmentSize,
+	memberEnvLocalBufferSize,
+	memberEnvLocalHostname,
+	memberEnvMaster,
+	memberEnvMetadataServer,
+	memberEnvOffloadBucketKeysLimit,
+	memberEnvOffloadBucketMaxTotalSize,
+	memberEnvOffloadBucketSizeLimit,
+	memberEnvOffloadEnabled,
+	memberEnvOffloadEvictionPolicy,
+	memberEnvOffloadKeysLimit,
+	memberEnvOffloadPath,
+	memberEnvOffloadSizeLimit,
+	memberEnvOffloadWatermarkEnabled,
+	memberEnvOffloadWatermarkHigh,
+	memberEnvOffloadWatermarkLow,
+	memberEnvProtocol,
+}
+
 var MemberExtraArgsRules = ExtraArgsRules{
 	Derived: []string{
 		// The disk tier's member half, rendered from members[].localDisk. Reserving them matters

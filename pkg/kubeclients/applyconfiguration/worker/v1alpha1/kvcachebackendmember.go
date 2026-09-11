@@ -48,6 +48,13 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// into the member Pod's own resource request, so a member that does not fit stays Pending
 	// instead of overcommitting the node.
 	//
+	// A GROUP CARRYING LocalDisk NEEDS AT LEAST ONE BUCKET HERE, which is the unit that tier is
+	// written in. The bytes a bucket is assembled from are held in this segment until the bucket is
+	// complete, so a segment smaller than one can never have a bucket's worth of content in it at
+	// once and the tier stays empty under every workload — the failure this bound exists to turn into
+	// a refusal, because nothing else reports it. A group with no tier has no such floor: there is
+	// nothing for it to fail to fill.
+	//
 	// SEVERAL MEMBERS PER NODE IS DECIDED AND NOT DONE, and this field is named for the shape it
 	// would take rather than the one that ships. What is deferred is splitting a node's members by
 	// NUMA domain; today one selected node runs one member.
@@ -83,6 +90,30 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// object. A credential does not belong here. This operator renders no flag that carries one, so
 	// this field is the only way one arrives.
 	ExtraArgs map[string]string `json:"extraArgs,omitempty"`
+	// ExtraEnvs passes environment variables this API does not enumerate straight through to the
+	// member container.
+	//
+	// IT IS NOT A SECOND SPELLING OF ExtraArgs, and the reason is that the two reach different
+	// places. ExtraArgs renders as the entrypoint's own "-D key=value" config override, which sets a
+	// key on the client's config object; a whole family of this store's settings — the local disk
+	// tier's flush thresholds, its promotion behavior, the rest of its eviction knobs — has no config
+	// key at all and is read from the ENVIRONMENT only. Nothing filters those out. There is simply no
+	// path to them from a command line, which is what this field is for.
+	//
+	// A NAME THIS OPERATOR ALREADY RENDERS IS REFUSED at admission, for the same reason a colliding
+	// ExtraArgs key is: two sources for one setting make the rendered container ambiguous. Kubernetes
+	// accepts a container carrying one name twice and leaves the winner to the runtime, so the
+	// collision would not even be reported. That includes the tier's bucket thresholds, which this
+	// operator now sizes itself — a tuner who needs to move them needs a field, and this hatch is
+	// deliberately not it.
+	//
+	// EVERY VALUE HERE IS WORLD-READABLE, on three paths and not one. It is stored verbatim on THIS
+	// object, which is cluster-scoped, so reading it needs no access to any workload; it is then
+	// rendered into the member container's environment, which exposes it again to anyone who can read
+	// the Pod or the DaemonSet carrying it. It stays readable for the life of the object. A
+	// credential does not belong here. This operator renders no variable that carries one, so this
+	// field is the only way one arrives.
+	ExtraEnvs map[string]string `json:"extraEnvs,omitempty"`
 	// Image overrides the backend's Image for this member group only. Left unset, the group runs
 	// the backend's Image.
 	//
@@ -95,17 +126,19 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// LocalDisk declares a directory on the nodes this group already selects and points the store
 	// client's offload keys at it. Left unset, the group is memory only.
 	//
-	// WHAT IS AND IS NOT ESTABLISHED. Setting this is observed to make the leader accept a local
-	// disk segment from the member, publish the declared capacity, and run eviction — and THIS
-	// PROJECT HAS NOT OBSERVED DATA ACTUALLY REACHING THE TIER in any environment. Filling a
-	// member's memory segment under a low watermark, the leader reported objects "deferred for disk
-	// offload" while the tier stayed empty, in both configurations this API can render. The cause is
-	// not established and this is not a claim about the store in general.
+	// WHAT THE TIER IS WRITTEN IN IS A BUCKET, AND THAT IS WHY THIS OPERATOR SIZES ONE. The store
+	// assembles offloaded objects into a bucket and writes nothing until that bucket is full, by
+	// bytes or by object count; objects below the threshold are carried to the next attempt
+	// indefinitely, reported as deferred for offload, and the tier stays empty while every other
+	// signal — the segment registered, the capacity published, eviction running — looks healthy. The
+	// store's own thresholds are sized for a saturated production store and are far above what a
+	// modest backend ever accumulates, so this operator renders a smaller pair of its own. They are
+	// not in this API: a tuner who needs to move them needs a field, and members[].extraEnvs refuses
+	// them for the same reason it refuses every other name this operator renders.
 	//
-	// So before relying on the tier, check the one figure that answers the question: the leader's
-	// own master_allocated_file_size_bytes is bytes actually written, and reads 0 for a tier that
-	// holds nothing while every other signal looks healthy. status.capacity reports the declared
-	// CAPACITY and will not show this.
+	// To check what the tier actually holds rather than what it declared, read the leader's own
+	// master_allocated_file_size_bytes: that is bytes written, and reads 0 for a tier holding
+	// nothing. status.capacity reports the declared CAPACITY and will not show this.
 	//
 	// It is a LAYER on this group rather than a group of its own, and that is the store's shape
 	// rather than a simplification here: the leader routes an offload task to the client that owns
@@ -169,6 +202,20 @@ func (b *KVCacheBackendMemberApplyConfiguration) WithExtraArgs(entries map[strin
 	}
 	for k, v := range entries {
 		b.ExtraArgs[k] = v
+	}
+	return b
+}
+
+// WithExtraEnvs puts the entries into the ExtraEnvs field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, the entries provided by each call will be put on the ExtraEnvs field,
+// overwriting an existing map entries in ExtraEnvs field with the same key.
+func (b *KVCacheBackendMemberApplyConfiguration) WithExtraEnvs(entries map[string]string) *KVCacheBackendMemberApplyConfiguration {
+	if b.ExtraEnvs == nil && len(entries) > 0 {
+		b.ExtraEnvs = make(map[string]string, len(entries))
+	}
+	for k, v := range entries {
+		b.ExtraEnvs[k] = v
 	}
 	return b
 }

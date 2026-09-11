@@ -130,6 +130,10 @@ func (*KVCacheBackendMember) ProtoMessage() {}
 
 func (*KVCacheBackendMemberLocalDisk) ProtoMessage() {}
 
+func (*KVCacheBackendMemberLocalDiskEviction) ProtoMessage() {}
+
+func (*KVCacheBackendMemberLocalDiskEvictionWatermark) ProtoMessage() {}
+
 func (*KVCacheBackendMemberStatus) ProtoMessage() {}
 
 func (*KVCacheBackendScaleIn) ProtoMessage() {}
