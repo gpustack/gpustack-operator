@@ -182,9 +182,9 @@ Five rules the path has to satisfy, all enforced at apply time:
 
 ⛔ **The tier is frozen once a group has it: it cannot be added to a running group, removed from one,
 or moved to another `path`.** Members would have to restart to mount the directory, and whatever they
-already wrote would stay on their nodes with nothing addressing it. `capacity` is the exception and
-moves **either way** — raising or lowering it re-renders one variable, and the tier's contents survive
-the restart that follows.
+already wrote would stay on their nodes with nothing addressing it. **What the tier may hold is not
+frozen**: `capacity`, `keyLimit` and `eviction` each move either way, re-rendering the variables in
+the table above, and the tier's contents survive the restart that follows.
 
 ⛔ **`leader.offload.enabled` cannot be turned off on its own while a group carries a tier**, because
 the pair rule refuses the half-configuration in both directions. It comes off only together with the
