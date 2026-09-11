@@ -125,10 +125,23 @@ spec:
           kvcache.gpustack.ai/binding: ${BINDING}
           kvcache.gpustack.ai/engine: vllm
       spec:
+        volumes:
+          - name: ${LAUNCH_VOLUME}
+            configMap:
+              name: ${LAUNCH_CONFIGMAP}
+              defaultMode: 0755
+              items:
+                - key: launch
+                  path: vllm
         containers:
           - name: engine
             image: ${CLIENT_IMAGE}
-            command: ["python3", "-c", "import time; time.sleep(3600)"]
+            command: ["${LAUNCH_DIR}/vllm", "serve"]
+            volumeMounts:
+              - name: ${LAUNCH_VOLUME}
+                mountPath: ${LAUNCH_DIR}
+    # The worker carries no inject label, so this webhook never sees it and it needs no admissible
+    # launch. It is left as a plain keep-alive on purpose: the pair is what shows the label decides.
     workerTemplate:
       spec:
         containers:

@@ -93,6 +93,11 @@ CONFIG_VOLUME=gpustack-kvcache-config
 # there by admission.
 WANT="$(printf 'CONFIG=\nSTAMP=\n' | sort)"
 
+# The container declares the vLLM entry point and runs kvi_setup's stub behind it, because the
+# opted-in Pod below has to be ADMITTED for the positive control to mean anything. The three
+# untouched checks would pass with any launch at all - the webhook never looks at a Pod without the
+# label - so the shape is decided by the one submission that does reach admission, and all four use
+# it because the comparison's whole premise is that they submit the same container.
 submit() {
   local pod="$1" label_line="$2"
   kubectl apply -f - <<YAML >/dev/null 2>&1
@@ -107,10 +112,21 @@ ${label_line}
     kvcache.gpustack.ai/engine: vllm
 spec:
   restartPolicy: Never
+  volumes:
+    - name: ${LAUNCH_VOLUME}
+      configMap:
+        name: ${LAUNCH_CONFIGMAP}
+        defaultMode: 0755
+        items:
+          - key: launch
+            path: vllm
   containers:
     - name: engine
       image: ${CLIENT_IMAGE}
-      command: ["python3", "-c", "import time; time.sleep(3600)"]
+      command: ["${LAUNCH_DIR}/vllm", "serve"]
+      volumeMounts:
+        - name: ${LAUNCH_VOLUME}
+          mountPath: ${LAUNCH_DIR}
 YAML
 }
 
