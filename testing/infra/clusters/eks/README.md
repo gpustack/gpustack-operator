@@ -95,7 +95,7 @@ terraform destroy
 | `release` | EKS version | `1.34` |
 | `cpu_instance_types` | Instance types for the CPU node group | `["c6a.4xlarge","c7a.4xlarge"]` |
 | `cpu_node_count` | Number of nodes in the CPU node group | `1` |
-| `efa_enabled` | Enable EFA on the CPU node group: an EFA launch template, a cluster placement group, one public subnet (single availability zone), and the label `gpustack.ai/efa=true`. REQUIRES `cpu_instance_types` to name an EFA-capable type, which neither default is | `false` |
+| `efa_enabled` | Enable EFA on the CPU node group: an EFA launch template, a cluster placement group, one private subnet (single availability zone, reached through the NAT gateway and therefore not over SSH), and the label `gpustack.ai/efa=true`. REQUIRES `cpu_instance_types` to name an EFA-capable type, which neither default is | `false` |
 | `gpu_instance_types` | GPU node groups as a `map(list(string))` keyed by group name | `{ g4dn = ["g4dn.xlarge","g4dn.12xlarge"] }` |
 | `node_boot_disk_type` | Node root volume EBS type/performance (`volume_type`, optional `iops`/`throughput`) | `{ volume_type = "gp3", iops = 3000, throughput = 125 }` |
 | `node_boot_disk_size_gb` | Node root (boot) volume size, in GiB | `100` |
