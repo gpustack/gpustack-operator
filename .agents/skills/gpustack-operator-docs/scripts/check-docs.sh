@@ -52,9 +52,18 @@ shape_err() {
 
 # Pages whose structure is under contract.
 PAGES=$(find docs -name '*.md' | sort)
-# Everything whose links are checked.
-LINKED_PAGES=$(printf '%s\n%s\n%s\n%s\n' \
-  "README.md" "CLAUDE.md" "$PAGES" "$(find .claude/skills -name '*.md' | sort)")
+# Everything whose links are checked. AGENTS.md is named here in its own right and not left to
+# CLAUDE.md, which is on this list and whose entire body is the single line `@AGENTS.md`. An entry
+# that only forwards contributes no coverage of what it forwards to, while reading exactly like
+# coverage -- a list auditor sees a root instruction file present and stops. That file is the one
+# every session loads and the one that names the build, lint and test entry points, which is the
+# kind of pointer that rots; it has already sent a change to a target that does not read it.
+#
+# Only the two link loops read this list. Being on it subjects a file to link and anchor resolution
+# and to nothing else -- the Contents, header, footer, index and size rules are held by $PAGES, and
+# AGENTS.md is not a docs page.
+LINKED_PAGES=$(printf '%s\n%s\n%s\n%s\n%s\n' \
+  "README.md" "AGENTS.md" "CLAUDE.md" "$PAGES" "$(find .claude/skills -name '*.md' | sort)")
 
 # Shape caps (rules 5-7). The paragraph cap is the one that carries the weight: a long page that
 # reads in short paragraphs and clear lists is fine, a short page that reads as a wall of text is not.
@@ -392,7 +401,7 @@ if [ "$errors" -gt 0 ]; then
   echo "FAIL: $errors problem(s)."
   exit 1
 fi
-summary="OK: $(printf '%s\n' "$PAGES" | awk 'NF { n++ } END { print n + 0 }') docs pages checked; links also verified across README.md, CLAUDE.md and .claude/skills."
+summary="OK: $(printf '%s\n' "$PAGES" | awk 'NF { n++ } END { print n + 0 }') docs pages checked; links also verified across README.md, AGENTS.md, CLAUDE.md and .claude/skills."
 [ "$warnings" -eq 0 ] || summary="$summary
 WARN: $warnings shape warning(s); rules 5-8 are advisory under --report."
 echo "$summary"
