@@ -815,6 +815,12 @@ func TestMemberWorkload_RDMAContext(t *testing.T) {
 	require.Len(t, podSpec.Volumes, 1, "exactly one volume: the RDMA device tree")
 	require.NotNil(t, podSpec.Volumes[0].HostPath)
 	assert.Equal(t, "/dev/infiniband", podSpec.Volumes[0].HostPath.Path)
+	require.NotNil(t, podSpec.Volumes[0].HostPath.Type,
+		"an untyped hostPath is not a weaker check, it is no check: the kubelet's mounter returns "+
+			"without looking at the path at all")
+	assert.Equal(t, core.HostPathDirectory, *podSpec.Volumes[0].HostPath.Type,
+		"a node with no device tree has to stop the member at the mount. Left to start, it "+
+			"discovers no device, installs TCP and serves, while the object still says RDMA")
 	require.Len(t, container.VolumeMounts, 1)
 	assert.Equal(t, "/dev/infiniband", container.VolumeMounts[0].MountPath)
 
@@ -848,6 +854,9 @@ func TestMemberWorkload_EFAContext(t *testing.T) {
 	require.Len(t, podSpec.Volumes, 1, "the device tree, and only the device tree")
 	require.NotNil(t, podSpec.Volumes[0].HostPath)
 	assert.Equal(t, "/dev/infiniband", podSpec.Volumes[0].HostPath.Path)
+	require.NotNil(t, podSpec.Volumes[0].HostPath.Type)
+	assert.Equal(t, core.HostPathDirectory, *podSpec.Volumes[0].HostPath.Type,
+		"the type is on the shared base, so EFA gets the loud missing-device-tree failure too")
 	require.Len(t, container.VolumeMounts, 1)
 	assert.Equal(t, "/dev/infiniband", container.VolumeMounts[0].MountPath)
 
