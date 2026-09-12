@@ -196,11 +196,15 @@ type transportFacts struct {
 //     that a branch exists.
 //
 // HOW TO EXERCISE A ROW, which is not the same question. This table is keyed by Engines(), and that
-// list is WIDER than SelectableEngines(): vLLM-Ascend is renderable but not nameable, so its row is
-// reachable only through the ModelDeployment path, where the operator derives the engine from the
-// role's accelerator. Trying to trigger it from the Pod annotation instead gets a refusal from
-// ParseEngine, on the engine name and not on the transport - a reader who reads that as "the table is
-// wrong" has been answered by a different rule.
+// list is WIDER than SelectableEngines(): vLLM-Ascend is renderable but not nameable. NAMING it in
+// the Pod annotation gets a refusal from ParseEngine, on the engine name and not on the transport -
+// a reader who reads that as "the table is wrong" has been answered by a different rule.
+//
+// REACHING it from an annotated Pod is a different matter, and that refusal says how: name the plain
+// engine and declare the runtime alongside it, which selects this row the same way the
+// ModelDeployment path does from the role's accelerator. The spelling lives in the refusal rather
+// than here, so there is one copy of it. The row is therefore not ModelDeployment-only, and a reader
+// who stops at the refusal concludes a route does not exist when it does.
 //
 // A wrong entry fails in both directions, and neither direction is quiet: too strict refuses a pool
 // that would have worked, too loose admits a container that raises before it serves anything.

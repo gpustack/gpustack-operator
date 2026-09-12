@@ -57,7 +57,8 @@
 #                  another reads like a fix because the first error really is gone.
 #              ⇒ WHAT WOULD: a real accelerator, the engine starting AND serving requests with the
 #              injected configuration, and the KV traffic demonstrably going through mooncake.
-#              Tracked with the rest of that family in issue #172.
+#              Tracked in issue #333, which carries this one assertion and nothing else - so a
+#              carrier found closed has to be checked for THIS answer rather than a neighbour's.
 #              DISK, AND WHY THIS IS A STEP COUNT RATHER THAN A PARAMETER. Measured 2026-09-04 from
 #              the arm64 manifests, scaled by a ratio measured on a third image (6.0GB of layers ->
 #              22.7GB resident, 3.8x): vLLM 13.6GB of layers / ~52GB resident, SGLang 18.1GB / ~69GB,
