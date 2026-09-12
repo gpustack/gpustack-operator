@@ -75,8 +75,9 @@ func terminatingMemberDaemonSet(
 	return ds
 }
 
-// terminatingMemberPod is one of that DaemonSet's pods, stuck terminating on a node.
-func terminatingMemberPod(name, node string) *core.Pod {
+// terminatingMemberPod is one of that DaemonSet's pods, stuck terminating on a node, carrying the
+// grace it was CREATED with rather than whatever its DaemonSet's template says now.
+func terminatingMemberPod(name, node string, grace *int64) *core.Pod {
 	return &core.Pod{
 		ObjectMeta: meta.ObjectMeta{
 			Name:              name,
@@ -85,7 +86,7 @@ func terminatingMemberPod(name, node string) *core.Pod {
 			DeletionTimestamp: ptr.To(meta.NewTime(time.Now().Add(-time.Hour))),
 			Finalizers:        []string{meta.FinalizerDeleteDependents},
 		},
-		Spec: core.PodSpec{NodeName: node},
+		Spec: core.PodSpec{NodeName: node, TerminationGracePeriodSeconds: grace},
 	}
 }
 
@@ -270,8 +271,8 @@ func TestAbandonedWorkloadNamesTheNodeHoldingIt(t *testing.T) {
 			WithScheme(scheme.Scheme).
 			WithObjects(
 				terminatingMemberDaemonSet(kvcb, time.Hour, ptr.To[int64](60)),
-				terminatingMemberPod("store-0-abcde", "node-b"),
-				terminatingMemberPod("store-0-fghij", "node-a"),
+				terminatingMemberPod("store-0-abcde", "node-b", nil),
+				terminatingMemberPod("store-0-fghij", "node-a", nil),
 			).
 			Build(),
 		Recorder: recorder,
@@ -317,4 +318,55 @@ func TestAbandonedWorkloadSurvivesANilRecorder(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 0, remaining)
 	})
+}
+
+// TestTeardownReadsTheGraceTheStuckPodActuallyHas pins that the deciding grace comes from the pod and
+// not from the template above it.
+//
+// A pod runs the template it was CREATED from, and the two drift for as long as a rolling restart
+// takes: restartOutdatedMemberPods replaces a generation one pod at a time, so a member whose group
+// had scaleIn.gracePeriodSeconds lowered is still draining on the old, longer one. Reading the
+// template would abandon it while its kubelet is doing exactly what it was told, and the disk tier
+// cleanup that runs next would then empty a directory under a store still writing to it.
+//
+// The mirror case is what stops this from being a wait with no bound again: the same pod, past the
+// grace it really has, is abandoned.
+func TestTeardownReadsTheGraceTheStuckPodActuallyHas(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		podGrace *int64
+		want     int
+	}{
+		{
+			name:     "the pod was created on the longer grace its group used to declare",
+			podGrace: ptr.To[int64](3600),
+			want:     1,
+		},
+		{
+			name:     "the pod carries the same short grace the template does",
+			podGrace: ptr.To[int64](60),
+			want:     0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kvcb := teardownBackend()
+			r := &KVCacheBackendReconciler{
+				Client: ctrlfake.NewClientBuilder().
+					WithScheme(scheme.Scheme).
+					WithObjects(
+						// The template has since been lowered to a minute; the pod has not caught up.
+						terminatingMemberDaemonSet(kvcb, time.Hour, ptr.To[int64](60)),
+						terminatingMemberPod("store-0-abcde", "node-a", tc.podGrace),
+					).
+					Build(),
+				Recorder: record.NewFakeRecorder(10),
+			}
+
+			remaining, err := r.deleteRenderedWorkloads(context.Background(), kvcb)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, remaining,
+				"the kubelet honors the grace the pod was created with, so that is the only one "+
+					"that says whether this pod is late")
+		})
+	}
 }

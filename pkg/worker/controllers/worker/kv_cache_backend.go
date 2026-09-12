@@ -2590,9 +2590,31 @@ func (r *KVCacheBackendReconciler) abandonKVCacheBackendWorkload(
 	if deletedAt.IsZero() {
 		return false
 	}
+	elapsed := time.Since(deletedAt.Time)
+
+	// THE TEMPLATE IS THE CHEAP GATE AND NEVER THE LAST WORD. It describes the pods this workload
+	// would create NOW, while a pod that is terminating runs the template it was CREATED from -- the
+	// two differ for as long as a rolling restart takes. Lowering scaleIn.gracePeriodSeconds and
+	// deleting the backend before that restart finishes leaves a member draining on an hour-long
+	// grace this template no longer mentions, and abandoning it there would start the disk cleanup
+	// under a store still writing.
 	budget := kvCacheBackendWorkloadTerminationBudget(obj)
-	if time.Since(deletedAt.Time) <= budget {
+	if elapsed <= budget {
 		return false
+	}
+
+	// So the pods themselves get the deciding read, once the template says the time is up. Any one of
+	// them still inside the grace IT was created with holds the workload, which is the same rule as
+	// taking the longest of them and is one comparison rather than two passes.
+	//
+	// A read that fails yields no pods and leaves the template's verdict standing. That is the weaker
+	// answer rather than the wrong one: the template is still a bound, and refusing to decide here
+	// would put the object back in the state that has none.
+	pods := r.terminatingKVCacheBackendWorkloadPods(ctx, obj)
+	for i := range pods {
+		if elapsed <= kvCacheBackendTerminationBudget(pods[i].Spec.TerminationGracePeriodSeconds) {
+			return false
+		}
 	}
 
 	// THE EVENT CARRIES NO ELAPSED TIME, only the budget that ran out and the nodes it ran out on.
@@ -2600,7 +2622,7 @@ func (r *KVCacheBackendReconciler) abandonKVCacheBackendWorkload(
 	// fires again on each pass -- and client-go folds repeats into one event with a count only while
 	// the message is IDENTICAL. An exact age would make every repeat a distinct event.
 	where := "no pod of it names a node"
-	if nodes := r.terminatingKVCacheBackendWorkloadNodes(ctx, obj); len(nodes) > 0 {
+	if nodes := terminatingKVCacheBackendWorkloadNodes(pods); len(nodes) > 0 {
 		where = "its pods are still terminating on " + strings.Join(nodes, ", ")
 	}
 	r.recordWarning(obj, kvCacheBackendEventWorkloadAbandoned,
@@ -2636,31 +2658,41 @@ func kvCacheBackendWorkloadTerminationBudget(obj ctrlcli.Object) time.Duration {
 	case *apps.DaemonSet:
 		template = &o.Spec.Template.Spec
 	}
-
-	var grace time.Duration
-	if template != nil {
-		seconds := int64(core.DefaultTerminationGracePeriodSeconds)
-		if template.TerminationGracePeriodSeconds != nil {
-			seconds = *template.TerminationGracePeriodSeconds
-		}
-		grace = time.Duration(seconds) * time.Second
+	if template == nil {
+		return kvCacheBackendWorkloadTerminationMargin
 	}
 
-	return grace + kvCacheBackendWorkloadTerminationMargin
+	return kvCacheBackendTerminationBudget(template.TerminationGracePeriodSeconds)
 }
 
-// terminatingKVCacheBackendWorkloadNodes names the nodes this workload still has a terminating pod
-// on, sorted so that the same stall produces the same message on every pass.
+// kvCacheBackendTerminationBudget turns one declared grace into the time it is waited for.
 //
-// It is the pointer the give-up event exists to hand over. The workload names WHAT did not go; only
-// its pods can say WHERE, and an operator reading a backend stuck in Deleting has had neither.
+// An unnamed grace is the kubelet's default and not zero, because that is what the kubelet gives a
+// container whose pod never named one.
+func kvCacheBackendTerminationBudget(grace *int64) time.Duration {
+	seconds := int64(core.DefaultTerminationGracePeriodSeconds)
+	if grace != nil {
+		seconds = *grace
+	}
+
+	return time.Duration(seconds)*time.Second + kvCacheBackendWorkloadTerminationMargin
+}
+
+// terminatingKVCacheBackendWorkloadPods returns the pods of one rendered workload that are still
+// terminating.
 //
-// A failed read degrades to no names rather than to an error. This runs on the path that has already
-// decided to stop waiting, and failing there would put the object back in the state that has no
-// bound -- trading the whole fix for a detail of the message.
-func (r *KVCacheBackendReconciler) terminatingKVCacheBackendWorkloadNodes(
+// It answers two questions from ONE read, and they are asked together because they have the same
+// answer only when the pods are read once: which grace this workload is actually waited on, and
+// which nodes to name when it is given up. A pod carries the grace it was CREATED with, which is the
+// grace its kubelet will honor, while the workload's template carries the grace a pod created now
+// would get.
+//
+// A failed read yields no pods rather than an error. Both callers are on the path that has already
+// decided the template's budget is up, and failing there would put the object back in the state that
+// has no bound -- trading the whole fix for a longer wait and a better message.
+func (r *KVCacheBackendReconciler) terminatingKVCacheBackendWorkloadPods(
 	ctx context.Context, obj ctrlcli.Object,
-) []string {
+) []core.Pod {
 	var selector *meta.LabelSelector
 	switch o := obj.(type) {
 	case *apps.Deployment:
@@ -2682,15 +2714,29 @@ func (r *KVCacheBackendReconciler) terminatingKVCacheBackendWorkloadNodes(
 		return nil
 	}
 
-	var nodes []string
+	terminating := make([]core.Pod, 0, len(pods.Items))
 	for i := range pods.Items {
-		pod := &pods.Items[i]
-		if pod.DeletionTimestamp.IsZero() || pod.Spec.NodeName == "" {
+		if !pods.Items[i].DeletionTimestamp.IsZero() {
+			terminating = append(terminating, pods.Items[i])
+		}
+	}
+
+	return terminating
+}
+
+// terminatingKVCacheBackendWorkloadNodes names the nodes those pods are on, sorted so that the same
+// stall produces the same message on every pass.
+//
+// It is the pointer the give-up event exists to hand over. The workload names WHAT did not go; only
+// its pods can say WHERE, and an operator reading a backend stuck in Deleting has had neither.
+func terminatingKVCacheBackendWorkloadNodes(pods []core.Pod) []string {
+	var nodes []string
+	for i := range pods {
+		node := pods[i].Spec.NodeName
+		if node == "" || slices.Contains(nodes, node) {
 			continue
 		}
-		if !slices.Contains(nodes, pod.Spec.NodeName) {
-			nodes = append(nodes, pod.Spec.NodeName)
-		}
+		nodes = append(nodes, node)
 	}
 	slices.Sort(nodes)
 
