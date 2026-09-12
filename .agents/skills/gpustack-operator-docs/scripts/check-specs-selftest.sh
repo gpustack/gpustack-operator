@@ -64,8 +64,13 @@ EOF
 Status: Shipped
 Type: Feature
 
+Superseded by `2026-01-02-blocked.md`, which is in this tree.
+
 Verify: `go test ./pkg/thing/ -run TestThingWorks`
 EOF
+  # The reference above has to resolve, so the baseline exercises rule 4 rather than merely not
+  # tripping it. A rule whose only case is its own failure case is one nobody has seen succeed.
+  cp "$SPEC" "$MINI/tree/specs/2026-01-02-blocked.md"
   cat > "$BLOCKED" <<'EOF'
 # Spec: Blocked Thing
 
@@ -307,6 +312,29 @@ if [ "$rc" -eq 0 ]; then
 else
   fail "prose was read as a command: $out"
 fi
+
+echo
+echo "=== spec-to-spec: a named specification that is not in the tree ==="
+build
+subst "$SPEC" '2026-01-02-blocked.md' '2026-01-01-gone.md'
+expect_hit "a reference to a missing spec is caught" "names '2026-01-01-gone.md'"
+
+echo
+echo "=== spec-to-spec: the same name WITHOUT the extension is not a reference ==="
+build
+subst "$SPEC" '`2026-01-02-blocked.md`' '`2026-01-01-gone`'
+run
+if [ "$rc" -eq 0 ]; then
+  pass "naming a document that deliberately left the tree does not trip rule 4"
+else
+  fail "a bare document name must not be read as a path, got: $out"
+fi
+
+echo
+echo "=== spec-to-spec: the reference is resolved, not merely pattern-matched ==="
+build
+rm -f "$MINI/tree/specs/2026-01-02-blocked.md"
+expect_hit "deleting the target turns the surviving reference red" "no such file is under specs/"
 
 echo
 if [ "$fails" -gt 0 ]; then

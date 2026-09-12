@@ -166,9 +166,9 @@ rather than deleted because it is the problem statement T10 was written against.
 ### Dependencies
 
 **This spec depends on the single-role `ModelDeployment` spec, which is now BUILT AND MERGED** —
-landed as `dff92144`. **Corrected after shipping.** That dependency was cited here as
-`specs/2026-08-28-model-deployment.md`; the commit is the coordinate now, because that document is
-no longer in this repository. What it built is unchanged, and so is this spec's dependency on it:
+landed as `dff92144`. **Corrected after shipping.** That dependency was cited here as a file under
+`specs/`, named `2026-08-28-model-deployment`; the commit is the coordinate now, because that
+document is no longer in this repository and the file name resolved to nothing. What it built is unchanged, and so is this spec's dependency on it:
 the CRD, the reconciler, the render path, the Service and the status all come from there, and the
 shape this spec assumes is the shape that one shipped:
 
