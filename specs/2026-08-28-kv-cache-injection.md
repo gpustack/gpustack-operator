@@ -19,7 +19,8 @@ takes a dict and forwards every key — so that is a caller-side gap with a name
 missing feature downstream. SGLang's reader takes the key on all three of its config paths and passes
 it as a keyword argument, so this webhook reaches it through the `MOONCAKE_TENANT_ID` variable. F4a **records that gap on the Pod** instead of refusing: every Binding
 declares a domain, so a refusal keyed on one would reject every Pod this webhook was ever asked about,
-and the refusal that does match the harm belongs on the Binding's own admission (D8, not landed).
+and the refusal that does match the harm belongs on the Binding's own admission (D8, which this
+spec shipped without; Open Questions records what has since landed and what has not).
 
 **One cluster-level prerequisite follows from that gap, and it is documented rather than enforced.**
 Because vLLM and vLLM-Ascend send no tenant, their clients fall back to the store's own default — the
@@ -74,7 +75,7 @@ from a *design that only describes one*. A zero on any of these would mean the w
 | D5 | The `P2PHANDSHAKE` metadata-plane literal and the `META_DATA` spelling trap | `pkg/worker/kvcache/mooncake/member_workload.go:66,69` | `git grep -c P2PHANDSHAKE origin/main -- pkg/worker/kvcache/mooncake/member_workload.go` | 1 |
 | D6 | The existing `PodWebhook`, whose selector this spec must **not** widen and whose fields it must not touch | `pkg/worker/webhooks/worker/pod.go` | `git grep -c 'func (r \*PodWebhook) Default' origin/main -- pkg/worker/webhooks/worker/pod.go` | 1 |
 | D7 | `pkg/worker/kvcache/inject/**` — this spec's own new package | — | `git grep -c . origin/main -- 'pkg/worker/kvcache/inject/*'` | **0 — created here** |
-| D8 | **NOT LANDED.** A Binding-side refusal of a second *distinct* reuse domain against a backend whose engines cannot separate them — the gate F4a deliberately does not perform | `pkg/worker/webhooks/worker/kv_cache_pool_binding.go` (a follow-up, outside this spec's file surface) | `git grep -c KVCacheBackend origin/main -- pkg/worker/webhooks/worker/kv_cache_pool_binding.go` | **0 — the Binding's webhook does not resolve its backend at all today** |
+| D8 | **NOT LANDED AT THIS BRANCH'S BASE**, and see Open Questions for what has since landed. A Binding-side refusal of a second *distinct* reuse domain against a backend whose engines cannot separate them — the gate F4a deliberately does not perform | `pkg/worker/webhooks/worker/kv_cache_pool_binding.go` (a follow-up, outside this spec's file surface) | `git grep -c KVCacheBackend origin/main -- pkg/worker/webhooks/worker/kv_cache_pool_binding.go` | **0 — the Binding's webhook does not resolve its backend at all today** |
 
 D1–D6 are all present on `main` at `c052b8af`, this branch's base. D7 is zero by design: the synthesis
 package is new, so nothing in this spec's own file surface collides with work in flight elsewhere.
@@ -82,8 +83,8 @@ package is new, so nothing in this spec's own file surface collides with work in
 **D8 is the one prerequisite this spec ships without, and states rather than assumes.** The existing
 Binding webhook enforces the opposite shape — that a domain is claimed by no *other* Binding
 (`validateKVCachePoolBindingDomainIsUnclaimed`) — and never resolves a Binding to its backend, which is
-what the missing check needs. Until it lands, **a second reuse domain on a shared backend is accepted,
-and the isolation gap is declared by this webhook's stamp rather than prevented by any gate.** The
+what the missing check needs. As this spec shipped, **a second reuse domain on a shared backend was accepted,
+and the isolation gap was declared by this webhook's stamp rather than prevented by any gate.** The
 scope must be the backend and not the pool: one backend may serve several pools
 (`kv_cache_pool.go:59-60`), so two Bindings on different pools sharing a backend collide identically.
 
@@ -138,8 +139,8 @@ scope must be the backend and not the pool: one backend may serve several pools
   two domains has them sharing one tenant's cache, where one domain's write pressure evicts another's
   blocks with no metric moving (F4a). The webhook's response is to **inject and say so on the Pod** rather than to refuse the
   Pod, whose author caused none of this, or to inject a domain that would not take effect (F4). The
-  refusal belongs on the Binding side and has not landed (D8); the upstream fix that would lift the gap
-  entirely is named in Open Questions. Patching the engines is out of scope here.
+  refusal belongs on the Binding side and was carried as D8, unlanded when this spec shipped; the
+  upstream fix that would lift the gap entirely is named in Open Questions. Patching the engines is out of scope here.
 
 ## Proposal
 
@@ -362,8 +363,8 @@ makes another namespace's Pods fail to start — a cross-tenant denial of servic
 nothing wrong and can fix nothing. So F4a **records** rather than refuses, and the refusal that matches
 the causality belongs on creating a second reuse domain against a backend that cannot separate them.
 That check is on the Binding's own webhook, which is outside this spec's file surface; it is carried in
-Dependencies as a prerequisite that has not landed, and until it does, **isolation is declared by the
-stamp rather than guaranteed by a gate**.
+Dependencies as a prerequisite this spec shipped without, and for as long as that held, **isolation was
+declared by the stamp rather than guaranteed by a gate**. Open Questions carries the current answer.
 
 F4b stays a refusal, because its subject is the pool the Pod is asking to join and its answer is
 already observed continuously by a controller.
@@ -1418,8 +1419,8 @@ reads and writes the pool, and a domain-carrying one is refused).
   with the vehicle and the reason for it, and every refusal with its message and its fix. **The tenant
   gap is documented as a first-class operational fact**, not a footnote: what the F4a stamp reports and
   how to query it, why the gap exists, the version table, the upstream fix that lifts it, and the
-  Binding-side check (D8) that has not landed — so a reader learns that isolation is currently declared
-  rather than enforced from the documentation, not from an incident. Plus the random-port behaviour stated as a
+  Binding-side check (D8), unlanded when this spec shipped — so a reader learns how far isolation is
+  declared rather than enforced from the documentation, not from an incident. Plus the random-port behaviour stated as a
   **range** requirement for any NetworkPolicy, the benign `Local segment descriptor not found` startup
   ERROR, and the 30-second lease coupling. **The client buffer gets its own stated number, not a
   vague coupling**: the injected `local_buffer_size` is host memory held inside the container's own
@@ -1785,18 +1786,28 @@ declaration through the workload CR and through this webhook produces the same c
 - **Should F4a refuse a Pod whose declared reuse domain will not take effect? Decided: no, it stamps.**
   It was written as a refusal, and as a refusal it fired on every Pod: `spec.domain` and
   `spec.domain.name` are both required and an empty name is refused at Binding admission
-  (`pkg/worker/kvcache/mooncake/quota_policy.go:129-132`), while every engine in F4a's table is measured
-  as non-forwarding. A gate at a 100% hit rate is not a gate, and it would have shipped a webhook that
-  only ever refused.
-  The refusal did not move to a narrower Pod-side condition; it moved to a different **actor**. The Pod's
-  author did not create the second reuse domain, so refusing them turns one namespace's Binding into
-  another namespace's outage. The matching refusal is on creating a second distinct domain against a
-  backend that cannot separate them, which is the Binding's webhook and is carried as **D8**, not landed.
-  Until D8 lands, the isolation gap is declared by the F7 stamp and prevented by nothing — stated here,
-  in Dependencies and in Risks, rather than left for a reader to notice.
-  The residual question is D8's own: what a Binding webhook should do about the domains that already
-  exist when the check is added. Refusing only *new* ones leaves the existing collision in place;
-  refusing on update would make an unrelated edit fail. That belongs to the follow-up.
+  (`pkg/worker/kvcache/mooncake/quota_policy.go:129-132`), and at the time this was written every engine
+  in F4a's table was recorded as non-forwarding. A gate at a 100% hit rate is not a gate, and it would
+  have shipped a webhook that only ever refused.
+  **That hit-rate argument has since expired and the decision has not.** SGLang's entry is measured as
+  forwarding, so a Pod-side gate would now fire on some Pods and not others. What still stands is the
+  reason that never depended on the count: the refusal did not move to a narrower Pod-side condition, it
+  moved to a different **actor**. The Pod's author did not create the second reuse domain, so refusing
+  them turns one namespace's Binding into another namespace's outage. The matching refusal is on
+  creating a second distinct domain against a backend that cannot separate them, which is the Binding's
+  webhook and was carried as **D8**.
+  **D8 has since landed for the separation a Binding can decide, and only that one.** A master with no
+  tenant ledger collapses every domain into one whatever the engines do, that is answerable from the
+  backend and from the pool's own observed verdict, and a second distinct domain against such a master
+  is now refused. The ENGINE half is not answerable there at all: no object records which engine will
+  consume a pool, because it arrives as an annotation on a Pod that does not exist yet. So a second
+  domain admitted against a ledger-holding master carries an admission warning saying what it does and
+  does not buy, and the F7 stamp on each Pod remains the record of which happened for it.
+  The residual question was D8's own: what a Binding webhook should do about the domains that already
+  exist when the check is added. Answered by the object's own immutability — `spec.poolRef` and
+  `spec.domain.name` are both frozen, so no update can pair a domain with a master it was not created
+  against, and a copy of the rule on the update path could only fail an unrelated edit against an older
+  collision. The check is therefore on CREATE alone.
 - **`failurePolicy: Fail` or `Ignore`?** Decided `Fail`, for the reason in F2, with the availability
   cost stated and the selector bounding it. Recorded here because it is the one decision an operator may
   legitimately want to reverse per cluster.

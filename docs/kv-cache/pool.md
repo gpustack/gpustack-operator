@@ -106,6 +106,12 @@ somebody else registered is a separate question, answered in
   cluster, not just in that namespace — with a message naming the holder and the shared backend. The
   same name against a pool a *different* backend serves is admitted: two masters hold two ledgers,
   so the claims collide with nothing.
+- **A second *distinct* domain needs a master that can tell the two apart.** A master *known* to hold
+  no ledger — observed on the pool, or declared by a managed backend — puts every request into one
+  default tenant, so a second distinct domain against it is **rejected at admission**. Everything
+  else is admitted with a **warning**, a backend nothing has established yet included: the store's
+  half is then unproven rather than proven, and the identity must also survive
+  [the engine](../reference/kv-cache-injection.md#isolation-is-per-engine-and-so-is-the-default-binding).
 - **A workload may not *register* its own domain.** It necessarily sends a domain name at runtime —
   that is how the store is addressed — but on a multi-tenant master the name has to be one an admin
   already registered through a Binding. Every distinct registered name is a new tenant with its own

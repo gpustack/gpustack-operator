@@ -412,10 +412,18 @@ the cache works, and two domains quietly share one tenant. Pin the engine versio
   belong to the other domains**, which are not the workload that hit the ceiling.
 
 **What is being done about it.** vLLM needs one line: pass the tenant through to the client, which
-already accepts it — the same change SGLang already made. Until then, the refusal that matches the
-harm — creating a **second** reuse domain against a backend that cannot separate them — belongs on the
-Binding's own admission and **has not landed yet**. So on a vLLM-only pool today: **one reuse domain
-per backend is safe; a second one shares a cache with the first.**
+already accepts it — the same change SGLang already made.
+
+**The refusal that matches the harm** — creating a **second** reuse domain against a backend that
+cannot separate them — is on the Binding's own admission, and it covers **only the half a Binding can
+decide**: the store's, which is
+[rejected at admission](../kv-cache/pool.md#one-binding-one-reuse-domain) and stated there.
+
+**The engine half is not refused, because nothing at that moment knows the engine.** Which engine will
+consume a pool arrives as an annotation on a Pod created later, so a second domain against a
+ledger-holding backend is admitted with an **admission warning** naming what it buys. So on a vLLM-only
+pool today the operational rule is unchanged: **one reuse domain per backend is safe; a second one
+shares a cache with the first**, and each injected Pod's stamp is where you read which happened.
 
 ## What a cache changes about a workload
 
