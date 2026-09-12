@@ -50,7 +50,7 @@ func cacheAttachedOf(
 	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli, CacheScraper: scraper}
 
-	status, err := r.computeModelDeploymentStatus(context.Background(), md, pods, domain)
+	status, err := r.computeModelDeploymentStatus(context.Background(), md, pods, domain, nil)
 	require.NoError(t, err)
 
 	return &workercore.ModelDeployment{Status: *status}

@@ -21,8 +21,8 @@ type ModelDeploymentStatusApplyConfiguration struct {
 	// PhaseMessage carries the reason for the phase.
 	PhaseMessage *string `json:"phaseMessage,omitempty"`
 	// Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,
-	// CacheAttached. The three are independent — "quota reserved but cache not attached" is a real
-	// and actionable state — which is what a single phase string cannot carry.
+	// CacheAttached, ReplicasUpToDate. They are independent — "quota reserved but cache not
+	// attached" is a real and actionable state — which is what a single phase string cannot carry.
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 	// Endpoint is the one address every replica serves behind, in the form
 	// <scheme>://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.

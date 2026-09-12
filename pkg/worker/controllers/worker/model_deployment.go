@@ -109,7 +109,7 @@ func (r *ModelDeploymentReconciler) teardownModelDeployment(
 			// Deleting rather than the last Ready it happened to reach. The Binding is deliberately
 			// not re-read: a teardown pass has no question to ask it, and the domain a replica is
 			// still writing into is the one that was last observed.
-			if err = r.syncModelDeploymentStatus(ctx, md, pods, nil); err != nil {
+			if err = r.syncModelDeploymentStatus(ctx, md, pods, nil, nil); err != nil {
 				logger.Error(err, "update model deployment status to deleting")
 				return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
 			}
@@ -292,6 +292,11 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// rebuild would not have cost anyway.
 	var departed bool
 
+	// What this pass decides about replicas carrying an earlier spec, for the condition that reports
+	// it. A rebuild pass records nothing: it deletes every replica without comparing a hash, so it
+	// has no answer to give and passes nil below rather than a zeroed one.
+	var rollout modelDeploymentRollout
+
 	for i := range actual {
 		pod := &actual[i]
 		if pod.DeletionTimestamp != nil {
@@ -324,9 +329,16 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 
 		delete(desired, pod.Name)
 
+		// Counted before the comparison rather than after: reaching this line is what makes the pass
+		// able to answer at all, and a pass that answers "nothing outdated" without having got here
+		// is reporting that it looked, not what it found.
+		rollout.accounted++
+
 		if pod.Annotations[modelDeploymentPodSpecHashAnnotation] == want.Annotations[modelDeploymentPodSpecHashAnnotation] {
 			continue
 		}
+
+		rollout.outdated++
 
 		if connection == nil && md.Status.KVCache != nil {
 			// LOSING THE CONNECTOR IS NOT A REASON TO REBUILD A REPLICA, and without this the hash
@@ -368,6 +380,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			// exist yet cannot be given an address that does not exist yet either.
 			logger.V(3).Info("no connection this pass; leaving the replica as built",
 				"pod", pod.Name)
+			rollout.held++
 
 			continue
 		}
@@ -438,6 +451,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			continue
 		}
 		logger.Info("created replica", "pod", name)
+		// A replica this pass just rendered and created is current by construction, so the pass can
+		// answer for it. Without this a deployment's first pass could not answer at all, and its
+		// second pass would write a status for a spec nobody changed.
+		rollout.accounted++
 	}
 
 	if err = r.syncModelDeploymentService(ctx, md); err != nil {
@@ -455,7 +472,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 
 	r.recordModelDeploymentDepartures(md, actual)
 
-	if err = r.syncModelDeploymentStatus(ctx, md, actual, domain); err != nil {
+	if err = r.syncModelDeploymentStatus(ctx, md, actual, domain, &rollout); err != nil {
 		logger.Error(err, "sync status")
 		return ctrl.Result{}, err
 	}

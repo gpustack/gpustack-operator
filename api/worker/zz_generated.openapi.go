@@ -7374,7 +7374,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved, CacheAttached. The three are independent — \"quota reserved but cache not attached\" is a real and actionable state — which is what a single phase string cannot carry.",
+							Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved, CacheAttached, ReplicasUpToDate. They are independent — \"quota reserved but cache not attached\" is a real and actionable state — which is what a single phase string cannot carry.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
