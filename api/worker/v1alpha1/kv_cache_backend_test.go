@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -106,4 +108,69 @@ func TestKVCacheBackendDiskTierRequiresItsPath(t *testing.T) {
 	assert.Equal(t, []string{"path"}, localDisk.Required,
 		"the path is required and the capacity is not: an unset capacity means the store's own "+
 			"ceiling, while an unset path would mean a host directory this operator chose")
+}
+
+// TestKVCacheBackendDeviceResourceNamePattern runs the schema's own pattern against the names real
+// device plugins advertise, and against the shapes that would be accepted by a looser one.
+//
+// The pattern is hand-written and the API server is the only thing that would otherwise enforce it,
+// which puts its first real exercise on a cluster. Compiling it here is faithful rather than
+// approximate: CRD pattern validation is Go's own regexp engine, so this is the same matcher.
+//
+// The rejections carry the weight. An extended resource must be fully qualified -- a bare name is
+// not one, and a plugin never advertises one -- so accepting "efa" would let an operator write
+// something no node can satisfy and learn about it only when the member stays Pending.
+func TestKVCacheBackendDeviceResourceNamePattern(t *testing.T) {
+	crd := GetCustomResourceDefinitions()["KVCacheBackend"]
+	require.NotNil(t, crd, "KVCacheBackend is not registered")
+	require.Len(t, crd.Spec.Versions, 1)
+
+	schema := crd.Spec.Versions[0].Schema.OpenAPIV3Schema
+	for _, level := range []string{"spec", "transport"} {
+		next, ok := schema.Properties[level]
+		require.True(t, ok, "the schema has no %q on the path to the transport", level)
+		schema = &next
+	}
+
+	field, ok := schema.Properties["deviceResourceName"]
+	require.True(t, ok, "the transport declares no device resource name")
+	require.NotEmpty(t, field.Pattern, "without a pattern the only check is the API server's own")
+
+	matcher, err := regexp.Compile(field.Pattern)
+	require.NoError(t, err, "the pattern has to compile in the engine that enforces it")
+
+	for _, accepted := range []string{
+		// AWS's EFA plugin, which is also this field's fallback for the EFA protocol.
+		"vpc.amazonaws.com/efa",
+		// The RDMA shared-device plugin, whose suffix is whatever its own configuration names.
+		"rdma/hca_shared_devices_a",
+		// An SR-IOV deployment, where both halves are chosen by the administrator.
+		"openshift.io/mlnxnics",
+	} {
+		assert.True(t, matcher.MatchString(accepted),
+			"%q is a name a device plugin really advertises, and refusing it would leave that "+
+				"cluster no way to declare its fabric", accepted)
+	}
+
+	// The longest name the API server accepts, and one character more. This axis was missing from
+	// the first version of these cases: the pattern bounded the whole value and not the part after
+	// the slash, so a name the CRD admitted became a resource list key the API server refused, and
+	// the failure landed on the rendered DaemonSet rather than on the object that declared it.
+	assert.True(t, matcher.MatchString("example.com/"+strings.Repeat("a", 63)),
+		"63 characters is the limit a resource name's own part is held to, so it has to pass")
+
+	for _, refused := range []string{
+		"",                      // absent is expressed by omitting the field, not by emptying it
+		"efa",                   // not qualified, and no plugin advertises a bare name
+		"/efa",                  // no domain
+		"vpc.amazonaws.com/",    // no name
+		"VPC.amazonaws.com/efa", // a domain is lower case
+		"vpc.amazonaws.com/e fa",
+		"example.com/" + strings.Repeat("a", 64), // one past the name part's limit
+		strings.Repeat("a", 64) + ".com/efa",     // one past a domain label's limit
+	} {
+		assert.False(t, matcher.MatchString(refused),
+			"%q is not a resource any node advertises, so a member asking for it would stay "+
+				"Pending with nothing saying why", refused)
+	}
 }

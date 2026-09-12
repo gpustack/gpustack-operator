@@ -2319,13 +2319,67 @@ message KVCacheBackendTransport {
   // Ascend each await a run on that hardware. A member also needs the runtime its transport
   // links — Ascend needs CANN in the member image, EFA needs libfabric in it — and the webhook
   // cannot see inside an image or onto a node, so that pairing is the operator's to get right.
-  // What EFA additionally needs from the NODE is a device plugin advertising
-  // vpc.amazonaws.com/efa: the member requests one, because carrying the device node in through a
-  // hostPath leaves the device cgroup refusing to open it.
+  // What a host fabric additionally needs from the NODE is a device plugin, because carrying the
+  // device node in through a hostPath leaves the device cgroup refusing to open it. Which
+  // resource the member asks for is deviceResourceName below; EFA falls back to
+  // vpc.amazonaws.com/efa when nothing is declared, and that name is a default rather than a
+  // property of the protocol.
   //
   // +k8s:validation:default="Auto"
   // +k8s:validation:enum=["Auto","TCP","RDMA","EFA","HIP","Ascend"]
   optional string protocol = 1;
+
+  // DeviceResourceName is the extended resource a host-fabric member asks one of, so the device
+  // cgroup lets it open the fabric device.
+  //
+  // WHY THIS IS A FIELD AND NOT A CONSTANT. Carrying /dev/infiniband in through a hostPath puts
+  // the device node in the container's mount namespace and grants nothing: the device cgroup
+  // still denies open(), which surfaces as EPERM even for uid 0 on a node whose file mode permits
+  // everyone. A device plugin allocation is what adds the cgroup rule. But the NAME of the
+  // resource to ask for is not a property of the fabric, it is a property of whichever plugin the
+  // cluster's administrator installed: the RDMA shared-device plugin names it in its own
+  // configuration, and the SR-IOV plugin's is configurable outright. There is no name this
+  // operator could hard-code that would be right on two clusters, which is why this is declared
+  // rather than derived, and why an admission rule refusing a fabric member whose node has no
+  // plugin cannot be written -- admission does not know which resource to look for.
+  //
+  // EFA is the exception that proves it: its plugin is AWS's own and advertises exactly one name,
+  // so a member on the EFA protocol asks for that name when this field is unset. Setting the
+  // field overrides it. Leaving it unset changes nothing about any backend that exists today.
+  //
+  // UNSET IS NOT A SAFE DEFAULT, IT IS THE OLD BEHAVIOR. A member on a fabric protocol with no
+  // resource named and no built-in for its protocol mounts the device tree and requests nothing,
+  // so the device cgroup refuses the open, the store discovers no device and installs TCP, and
+  // the object still reads as the fabric it asked for. That is the failure this field exists to
+  // let an operator avoid; it is left reachable because naming a resource no plugin advertises
+  // makes the member unschedulable instead, and this operator cannot tell which of the two an
+  // administrator with no plugin would rather have.
+  //
+  // Requesting a resource also decides what a node without the device looks like: it advertises
+  // none of that resource, so the member is never placed there, rather than starting and serving
+  // over TCP under a spec that says otherwise.
+  //
+  // It is CONSULTED ONLY on the RDMA and EFA protocols, which are the two that mount the device
+  // tree. Set beside any other protocol it renders nothing, because nothing on those paths opens
+  // a fabric device, and a resource requested there would only make the member unschedulable.
+  //
+  // The bounds are the ones the API server applies to a resource name, stated here so a value it
+  // would refuse is refused on the object that declares it rather than on the DaemonSet rendered
+  // from it. The part after the slash is at most 63 characters and each label of the domain is
+  // too; a longer one is admitted by a looser pattern and then fails when it becomes a resource
+  // list key, which strands reconciliation with no member workload and no obvious cause.
+  //
+  // ONE BOUND IS NOT EXPRESSED HERE. The domain as a whole is limited to 253 characters, and a
+  // regular expression cannot say that about a repeated group whose parts vary in length: five
+  // labels of sixty-three characters each clear every rule above and still exceed it. Such a
+  // name is refused when it becomes a resource list key, which is the failure described above.
+  // It is left to that check rather than widened into a second validator here, because the value
+  // is written by hand from a device plugin's own configuration and no plugin publishes a domain
+  // anywhere near that long.
+  //
+  // +k8s:validation:pattern="^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
+  // +k8s:validation:maxLength=317
+  optional string deviceResourceName = 2;
 }
 
 // KVCacheObjectReference names an object that consumes another one in this group. It is the ONE

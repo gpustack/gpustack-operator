@@ -1491,3 +1491,89 @@ func TestMemberWorkload_SurveyQuotesThePathAgainstTheShell(t *testing.T) {
 		})
 	}
 }
+
+// TestMemberWorkload_FabricDeviceResource pins which extended resource a host-fabric member asks
+// for, across every combination of protocol and declaration.
+//
+// The name is not a property of the fabric. It belongs to whichever device plugin the cluster's
+// administrator installed, and the two common RDMA plugins both let that name be configured, so
+// there is nothing this operator could hard-code that would be right on two clusters. EFA is the
+// single exception -- its plugin is AWS's own and advertises one name -- which is why it has a
+// fallback and RDMA does not.
+//
+// The case that matters most is the third row. An unset declaration on a fabric with no fallback
+// renders no request at all, which is what every backend written before this field did: the device
+// tree is mounted, the device cgroup refuses the open, the store finds no HCA and installs TCP, and
+// the object still reads as RDMA. Pinning it here says that outcome is reachable on purpose rather
+// than by omission.
+func TestMemberWorkload_FabricDeviceResource(t *testing.T) {
+	const declared = "rdma/hca_shared_devices_a"
+
+	cases := []struct {
+		name     string
+		protocol string
+		declare  string
+		want     core.ResourceName
+		absent   core.ResourceName
+	}{
+		{
+			name:     "EFA with nothing declared falls back to the one name its plugin advertises",
+			protocol: "EFA",
+			want:     efaDeviceResource,
+		},
+		{
+			name:     "a declaration overrides the EFA fallback rather than joining it",
+			protocol: "EFA",
+			declare:  declared,
+			want:     declared,
+			absent:   efaDeviceResource,
+		},
+		{
+			name:     "RDMA with nothing declared asks for nothing, which is the old behavior",
+			protocol: "RDMA",
+			absent:   declared,
+		},
+		{
+			name:     "RDMA asks for exactly the resource the administrator named",
+			protocol: "RDMA",
+			declare:  declared,
+			want:     declared,
+		},
+		{
+			name:     "a declaration on a path with no fabric renders nothing at all",
+			protocol: "TCP",
+			declare:  declared,
+			absent:   declared,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+				k.Spec.Transport.Protocol = c.protocol
+				k.Spec.Transport.DeviceResourceName = c.declare
+			})
+
+			limits := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13").
+				Spec.Template.Spec.Containers[0].Resources.Limits
+
+			if c.want != "" {
+				got := limits[c.want]
+				assert.Equal(t, int64(1), got.Value(),
+					"the device cgroup refuses to open the node the hostPath carried in until a "+
+						"plugin allocation adds the rule, and one device is what a member needs")
+			}
+
+			if c.absent != "" {
+				assert.NotContains(t, limits, c.absent,
+					"a resource asked for here is one the node must advertise, so an unwanted one "+
+						"makes the member unschedulable rather than merely over-provisioned")
+			}
+
+			if c.want == "" {
+				assert.Empty(t, limits,
+					"no fabric resource was asked for, and nothing else on this path sets a limit")
+			}
+		})
+	}
+}
