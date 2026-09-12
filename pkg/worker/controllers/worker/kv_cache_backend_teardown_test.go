@@ -77,13 +77,13 @@ func terminatingMemberDaemonSet(
 
 // terminatingMemberPod is one of that DaemonSet's pods, stuck terminating on a node, carrying the
 // grace it was CREATED with rather than whatever its DaemonSet's template says now.
-func terminatingMemberPod(name, node string, grace *int64) *core.Pod {
+func terminatingMemberPod(name, node string, age time.Duration, grace *int64) *core.Pod {
 	return &core.Pod{
 		ObjectMeta: meta.ObjectMeta{
 			Name:              name,
 			Namespace:         kuberess.SystemNamespaceName,
 			Labels:            teardownMemberSelector,
-			DeletionTimestamp: ptr.To(meta.NewTime(time.Now().Add(-time.Hour))),
+			DeletionTimestamp: ptr.To(meta.NewTime(time.Now().Add(-age))),
 			Finalizers:        []string{meta.FinalizerDeleteDependents},
 		},
 		Spec: core.PodSpec{NodeName: node, TerminationGracePeriodSeconds: grace},
@@ -271,8 +271,8 @@ func TestAbandonedWorkloadNamesTheNodeHoldingIt(t *testing.T) {
 			WithScheme(scheme.Scheme).
 			WithObjects(
 				terminatingMemberDaemonSet(kvcb, time.Hour, ptr.To[int64](60)),
-				terminatingMemberPod("store-0-abcde", "node-b", nil),
-				terminatingMemberPod("store-0-fghij", "node-a", nil),
+				terminatingMemberPod("store-0-abcde", "node-b", time.Hour, nil),
+				terminatingMemberPod("store-0-fghij", "node-a", time.Hour, nil),
 			).
 			Build(),
 		Recorder: recorder,
@@ -334,18 +334,31 @@ func TestAbandonedWorkloadSurvivesANilRecorder(t *testing.T) {
 func TestTeardownReadsTheGraceTheStuckPodActuallyHas(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
+		podAge   time.Duration
 		podGrace *int64
 		want     int
 	}{
 		{
 			name:     "the pod was created on the longer grace its group used to declare",
+			podAge:   time.Hour,
 			podGrace: ptr.To[int64](3600),
 			want:     1,
 		},
 		{
 			name:     "the pod carries the same short grace the template does",
+			podAge:   time.Hour,
 			podGrace: ptr.To[int64](60),
 			want:     0,
+		},
+		{
+			// The workload and its pods do not get their deletion timestamps at the same instant: a
+			// foreground deletion reaches the pods through the levels between them, and an eviction
+			// can delete one long after. Timed from the workload, this pod is charged with an hour it
+			// has not spent and is abandoned ten seconds into a grace it is honoring.
+			name:     "the pod started terminating long after the workload did",
+			podAge:   10 * time.Second,
+			podGrace: ptr.To[int64](60),
+			want:     1,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -356,7 +369,7 @@ func TestTeardownReadsTheGraceTheStuckPodActuallyHas(t *testing.T) {
 					WithObjects(
 						// The template has since been lowered to a minute; the pod has not caught up.
 						terminatingMemberDaemonSet(kvcb, time.Hour, ptr.To[int64](60)),
-						terminatingMemberPod("store-0-abcde", "node-a", tc.podGrace),
+						terminatingMemberPod("store-0-abcde", "node-a", tc.podAge, tc.podGrace),
 					).
 					Build(),
 				Recorder: record.NewFakeRecorder(10),

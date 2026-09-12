@@ -2607,12 +2607,21 @@ func (r *KVCacheBackendReconciler) abandonKVCacheBackendWorkload(
 	// them still inside the grace IT was created with holds the workload, which is the same rule as
 	// taking the longest of them and is one comparison rather than two passes.
 	//
+	// EACH POD IS TIMED FROM ITS OWN DELETION TIMESTAMP AND NOT FROM THE WORKLOAD'S. The two are not
+	// the same instant and the gap is not a rounding error: a foreground deletion reaches the pods
+	// through the levels between them -- a Deployment's go by way of its ReplicaSet -- and an
+	// eviction can delete one long after the workload was. Measured against the workload's clock, a
+	// pod that has been terminating for seconds is charged with the whole age of the object above it,
+	// which expires while its kubelet is doing exactly what it was told. The deletion timestamp is
+	// non-zero on every pod here, since that is what the read selects on.
+	//
 	// A read that fails yields no pods and leaves the template's verdict standing. That is the weaker
 	// answer rather than the wrong one: the template is still a bound, and refusing to decide here
 	// would put the object back in the state that has none.
 	pods := r.terminatingKVCacheBackendWorkloadPods(ctx, obj)
 	for i := range pods {
-		if elapsed <= kvCacheBackendTerminationBudget(pods[i].Spec.TerminationGracePeriodSeconds) {
+		podElapsed := time.Since(pods[i].DeletionTimestamp.Time)
+		if podElapsed <= kvCacheBackendTerminationBudget(pods[i].Spec.TerminationGracePeriodSeconds) {
 			return false
 		}
 	}
