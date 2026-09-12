@@ -49,11 +49,16 @@ one by name is your job. The change on the left is the trigger.
   a slicing shim under `csrc/`, or `pkg/devicemanager/allocator/hygon/`
   → `gpustack-operator-xbuild-and-verify`
 
-The `gpustack-operator-lint` hook dispatches on what a turn left dirty. Run the matching one yourself too:
+The `gpustack-operator-lint` hook dispatches on what a turn left dirty and does not implement this
+table. Run the matching one yourself; the last row is a default, not a list, so a file type nobody
+named still has an answer:
 
-- `*.go` → `make lint`
+- Markdown → `make lint docs`
 - the chart → `make lint chart`
-- `*.md` → `make lint docs`
+- every other source, Go and shell included → `make lint`
+
+REQUIRED: a change touching more than one subject runs more than one target — `make lint docs`
+returning 0 says nothing about a `.sh` in the same commit.
 
 ### Go conventions
 
