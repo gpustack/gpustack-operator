@@ -17,6 +17,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrlrecord "k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -76,6 +77,12 @@ const (
 	// KVCacheBackendConditionDeletable is False exactly while status.usedBy names a consumer.
 	// It is the condition the finalizer's refusal is explained by.
 	KVCacheBackendConditionDeletable kubeapistatus.ConditionType = "Deletable"
+	// KVCacheBackendConditionTierWasEmpty answers "was the disk tier empty when this backend
+	// started". It is written ONCE and then never revisited, unlike every other condition here,
+	// because after the first write nothing on the cluster can still answer it -- this backend's
+	// own data is indistinguishable from what it found. reportKVCacheBackendTierReuse carries why
+	// the alternatives were worse.
+	KVCacheBackendConditionTierWasEmpty kubeapistatus.ConditionType = "TierWasEmpty"
 )
 
 // KVCacheBackendReconciler reconciles a KVCacheBackend.
@@ -100,6 +107,11 @@ type KVCacheBackendReconciler struct {
 	// The timeout bounds one stall; it does not isolate the others from it. That is what
 	// kvCacheBackendConcurrency is for, and the two are only useful together.
 	AdminHTTP *http.Client
+
+	// Recorder publishes what a status field cannot hold. The disk tier's cleanup records against
+	// the NODE rather than against this backend, because the backend is being deleted at the moment
+	// there is something to say and would take the record with it.
+	Recorder ctrlrecord.EventRecorder
 }
 
 // adminReadTimeout bounds one read of the leader's admin surface. It is short: everything read there
@@ -393,6 +405,9 @@ func (r *KVCacheBackendReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	r.observeLeader(ctx, kvcb, holder)
+	// Decided once and carried on the object, because a member restarting under an established
+	// backend surveys this backend's own data and cannot be told apart from a fresh reuse.
+	r.reportKVCacheBackendTierReuse(ctx, kvcb, holder)
 	// Derived last, from the conditions the observation just wrote. A phase computed before them
 	// would summarize the previous pass.
 	deriveKVCacheBackendPhase(holder, renderBlocked)
@@ -987,6 +1002,30 @@ func memberPodStuck(pod *core.Pod) (memberPodFault, bool) {
 				reason: core.PodReasonUnschedulable,
 				detail: fmt.Sprintf("member pod %s has no node to run on: %s",
 					pod.Name, clipFaultDetail(cond.Message)),
+			}, true
+		}
+	}
+
+	// INIT CONTAINERS FIRST, because a Pod stuck in init never reaches the others and their statuses
+	// stay empty. This loop was not needed while members had none; the disk tier survey is the first,
+	// and without this a group whose image cannot run it reports a member that is not ready with no
+	// reason at all -- the fault is on the Pod, in a list nothing here was reading.
+	for _, status := range pod.Status.InitContainerStatuses {
+		if t := status.LastTerminationState.Terminated; t != nil && status.RestartCount > 0 {
+			return memberPodFault{
+				reason: "MemberInitCrashLooping",
+				detail: fmt.Sprintf(
+					"member pod %s init container %s has restarted %d time(s); it last exited with "+
+						"code %d: %s",
+					pod.Name, status.Name, status.RestartCount, t.ExitCode,
+					clipFaultDetail(t.Message)),
+			}, true
+		}
+		if w := status.State.Waiting; w != nil && isTerminalWaitReason(w.Reason) {
+			return memberPodFault{
+				reason: w.Reason,
+				detail: fmt.Sprintf("member pod %s init container %s is not running: %s: %s",
+					pod.Name, status.Name, w.Reason, clipFaultDetail(w.Message)),
 			}, true
 		}
 	}
@@ -2323,6 +2362,22 @@ func (r *KVCacheBackendReconciler) teardownKVCacheBackend(
 		return ctrl.Result{RequeueAfter: kvCacheBackendTeardownInterval}, nil
 	}
 
+	// The disk tier goes after the workloads and before the lock comes off, and both halves of that
+	// ordering are load-bearing: with a member still running the store would be writing into the
+	// directory being emptied, and once the lock is off there is no object left to run this on.
+	//
+	// It reports done when it has GIVEN UP as well as when it has finished, which is what keeps a
+	// node that will never answer from leaving an object nobody can delete. What it gave up on is on
+	// the node's own events rather than here.
+	cleaned, err := r.cleanKVCacheBackendTier(ctx, kvcb)
+	if err != nil {
+		logger.Error(err, "clean the kv cache backend disk tier")
+		return ctrl.Result{}, err
+	}
+	if !cleaned {
+		return ctrl.Result{RequeueAfter: kvCacheBackendTeardownInterval}, nil
+	}
+
 	systemmeta.Unlock(kvcb)
 	if err := r.Client.Update(ctx, kvcb); err != nil {
 		return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
@@ -2830,6 +2885,7 @@ func kvCacheBackendWorkloadPredicate() ctrlpredicate.Predicate {
 
 func (r *KVCacheBackendReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
+	r.Recorder = opts.Manager.GetEventRecorderFor("kvcachebackend")
 	if r.AdminHTTP == nil {
 		r.AdminHTTP = newAdminHTTPClient()
 	}

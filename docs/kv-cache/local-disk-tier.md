@@ -52,6 +52,7 @@ spec:
 - [The tier is written one bucket at a time](#the-tier-is-written-one-bucket-at-a-time)
 - [What the tier does when it fills](#what-the-tier-does-when-it-fills)
 - [The directory has to exist, and be writable by the image's user](#the-directory-has-to-exist-and-be-writable-by-the-images-user)
+- [Emptying the directory when the backend goes away](#emptying-the-directory-when-the-backend-goes-away)
 - [What the tier costs that nothing accounts for](#what-the-tier-costs-that-nothing-accounts-for)
 
 ## The tier is written one bucket at a time
@@ -174,12 +175,16 @@ Then create the directory on each node with that uid:
 $ install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
 ```
 
-There is **no switch that makes the operator do this for you.**
+There is **no switch that makes the operator CREATE the directory for you.**
 
 > **Why** — an init container would have to name a single uid, and the command above is the evidence
 > against that: the uid is a property of the image, and `members[].image` can differ per group. The
 > decision and the alternative that was weighed against it are recorded in
 > `specs/2026-09-05-kv-cache-media-and-scaling.md`.
+
+That objection is about ownership, so it reaches creating the directory and not emptying it: removing
+content needs no uid. Emptying is a switch, and it is
+[below](#emptying-the-directory-when-the-backend-goes-away).
 
 Five rules the path has to satisfy, all enforced at apply time:
 
@@ -231,6 +236,110 @@ the last group if you want to be able to take it off.
 The last one never reaches a Ready state — the member's REST port opens only after the store mounts,
 so the readiness probe never passes — and `MembersMounted` reports the shortfall rather than the
 backend looking healthy.
+
+## Emptying the directory when the backend goes away
+
+Deleting a `KVCacheBackend` leaves the tier directory exactly as it was. Set
+`members[].localDisk.cleanAfterDelete: true` and the operator empties it as part of the deletion, on
+every node that group's `nodeSelector` picks at the moment you delete it.
+
+```yaml
+      members:
+        - medium: DRAM
+          capacityPerMember: 64Gi
+          localDisk:
+            path: /var/lib/kvcache
+            capacity: 512Gi
+            cleanAfterDelete: true
+```
+
+**It defaults to false, and false is what every release before it did.** What is on that disk is
+yours; removing it is not a decision this operator takes on your behalf. Turned on, the decision is
+still yours and the operator only carries it out.
+
+**The content goes, the directory stays.** You created it, gave it an owner, and may have mounted a
+filesystem there.
+
+**Declaring a tier requires a shell in the group's image.** An init container surveys the directory
+before the member starts, and it runs `sh -c`; an image without a shell keeps the member from
+starting. The store images this project ships have one.
+
+### Leaving it off, and what that costs
+
+A later backend pointed at the same `path` starts on whatever the previous one left. The store
+claims those buckets, so a key the new backend has written can read back as the **old backend's
+bytes** — not as a miss, which is the part that makes it hard to spot.
+
+The operator reports this rather than acting on it. A backend whose tier directory is not empty when
+it first starts records it in `status.conditions` as `TierWasEmpty=False`, naming each node and the
+number of entries found, and emits one warning event beside it. Nothing is removed and nothing is
+blocked.
+
+```console
+$ kubectl get kvcachebackend <name> -o jsonpath='{.status.conditions[?(@.type=="TierWasEmpty")]}'
+```
+
+**The condition is written once and then left alone**, unlike everything else in that status. After
+the first write the question stops being answerable: the backend's own data on that disk is
+indistinguishable from what it found there, so a member restarting later cannot be told apart from a
+fresh reuse.
+
+Because that write is permanent, `TierWasEmpty=True` waits until **every** node carrying the tier has
+reported. `False` does not: one node holding content settles it whatever the others say. So the
+condition being **absent** means the question is still open — a member still starting, or one whose
+survey cannot run at all. Absent is not a clean tier.
+
+Only a backend's **first** member Pods are believed. A Pod replaced later — a node reboot, an
+eviction, an image change — re-runs the same survey against a tier this backend has since filled, and
+its entries are not evidence about what the backend found. Such readings are ignored, so a backend
+whose condition was never settled early does not end up accusing a predecessor of its own content.
+
+"Every node" means every node the member DaemonSet wants a Pod on, not every Pod that happens to
+exist yet — so a node still scheduling or still pulling holds the `True` verdict open rather than
+being skipped over. A node whose only reading came from a replacement counts as one that has not
+answered, which is why a backend can end up with no verdict at all.
+
+### What it does not promise
+
+**A node it cannot reach in time keeps its content.** The deletion is not held open for it — a
+deletion waiting on a node that is gone is an object nobody can delete. Five minutes after the first
+cleanup Pod is created, the nodes that have not finished are left as they are and each one gets a
+warning event, recorded **on the node** rather than on the backend, because the backend is about to
+stop existing and the leftover data is not.
+
+That clock starts at the first cleanup Pod rather than at the deletion, because everything before it
+is unbounded: the deletion is held while a pool still uses the backend, and again while the members
+terminate. Timed from the deletion, a slow teardown would leave the cleanup nothing to spend.
+
+**A cleanup still running at the deadline is stopped, not left to finish.** Emptying a very large
+tier can outlast the five minutes, and ending it there leaves the directory partly emptied. Leaving
+it running is worse: it keeps deleting from a path this backend no longer holds, and nothing stops a
+new backend claiming that directory the moment the deletion completes — its fresh data would go the
+same way.
+
+**A node the group has stopped selecting is not cleaned, and not reported either.** The spec is the
+only record of which nodes a group covered -- nothing keeps the selector's history, and the members
+are gone by the time the cleanup runs -- so a node dropped by narrowing `nodeSelector`, or by
+removing the `localDisk` block, cannot be named, let alone reached. **Delete the backend first and
+edit afterwards**; editing first silently takes those nodes out of the cleanup.
+
+**A tier with no image to empty it is given up on immediately**, with the same event. When neither
+the member group nor the backend names an image and the operator has no default, there is nothing to
+run and no clock to start; waiting would hold the backend open for as long as that stays true. The
+event names the image as the reason rather than the node.
+
+**A path another backend's tier overlaps is skipped**, with the same kind of event — a directory
+nested inside another backend's tier counts, not only an identical path. Nothing refuses two backends
+naming one directory, and emptying it for the one being deleted would take the other one's live data
+with it.
+
+> It is a check and not a lock. A backend created, or widened onto this node, between the check and
+> the removal is not seen. What it refuses is the case that actually occurs: a path already declared
+> when the deletion starts.
+
+```console
+$ kubectl describe node <node> | grep -E 'KVCacheTierNotCleaned|KVCacheTierSharedPath'
+```
 
 ## What the tier costs that nothing accounts for
 
