@@ -19,8 +19,22 @@
 #      A command carrying two `-run` flags is reported separately, because only the last one is in
 #      force and the packages after the first flag are never tested -- a different fix.
 #
+#   4. a specification naming another specification by file name -- the repository's own
+#      `<date>-<slug>.md` shape -- where no such file is under specs/. A specification that leaves
+#      the tree takes every pointer to it with it, and nothing else reads specs/ closely enough to
+#      notice: the docs gate resolves links but does not cover specs/, and rule 3 reads only
+#      commands. Measured when a bug fix's specification was moved out: eight markers in two
+#      shipped specifications went on naming it, and all three gates stayed green.
+#
 # Rule 3 reads the whole markdown corpus, not just specs/: the construct is a command someone
 # re-runs, and it goes stale wherever it is written.
+#
+# Rule 4 is deliberately NOT "every path a specification names must resolve". Measured on this
+# corpus, 51 of the paths named do not exist, and only a handful are defects: 22 belong to other
+# projects (Kueue, Helm, Kubernetes, Mooncake) and 29 are historical records naming a file that
+# existed when the specification was written, which is what a historical record is for. The
+# `<date>-<slug>.md` shape is narrow because its value domain is enumerable from this repository's
+# own naming convention, while "any path" would have to be the file system.
 #
 # Rule 3 has ONE escape: the upper-case phrase "NOT RE-RUNNABLE" within twelve lines below the
 # command. Issue 179 asks for exactly that where the test is gone and nothing replaced it, since
@@ -344,13 +358,38 @@ for f in $CORPUS; do
   done < "$WORK/cmds"
 done
 
+# --- 4. a specification named as a file is a file ----------------------------
+echo "==> spec-to-spec references"
+
+named=0
+for f in $SPECS; do
+  if [ ! -f "$f" ]; then
+    continue
+  fi
+  # grep exits 1 on no match, which is the ordinary case here rather than a failure.
+  set +e
+  grep -noE '[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9][a-z0-9-]*\.md' "$f" | sort -u -t: -k1,1n > "$WORK/refs"
+  set -e
+  while IFS=: read -r at ref; do
+    if [ -z "$ref" ]; then
+      continue
+    fi
+    named=$((named + 1))
+    if [ -f "specs/$ref" ]; then
+      continue
+    fi
+    err "$f:$at: names '$ref', and no such file is under specs/. A reader cannot follow it, and a specification that left the repository leaves every pointer to it behind without anything failing. Name the document without the extension if it is deliberately outside the tree -- the extension is what makes it a path."
+  done < "$WORK/refs"
+done
+
 echo
 if [ "$errors" -gt 0 ]; then
   echo "FAIL: $errors problem(s)."
   exit 1
 fi
-printf 'OK: %s specs checked; %s "go test -run" command(s) matched against %s top-level test names,\n    of which %s are exempt as NOT RE-RUNNABLE and were not required to select anything.\n' \
+printf 'OK: %s specs checked; %s "go test -run" command(s) matched against %s top-level test names,\n    of which %s are exempt as NOT RE-RUNNABLE and were not required to select anything;\n    %s spec-to-spec file reference(s) resolved.\n' \
   "$(printf '%s\n' "$SPECS" | awk 'NF { n++ } END { print n + 0 }')" \
   "$checked" \
   "$(cut -f2 "$WORK/index" | sort -u | wc -l | tr -d ' ')" \
-  "$exempted"
+  "$exempted" \
+  "$named"
