@@ -44,12 +44,38 @@ the source types above and regenerate.
 
    ```bash
    GEN="${HOME}/.gpustack-gen/gpustack.ai/gpustack"
+   SHA=$( git -C <worktree> rev-parse HEAD )   # the WORKTREE's commit, not <repo>'s
    git -C <repo> worktree prune
-   git -C <repo> worktree add --detach "$GEN" HEAD
+   git -C <repo> worktree add --detach "$GEN" "$SHA" \
+     || { echo "REFUSING: worktree add failed, so $GEN is not this run's tree"; exit 1; }
    real=$( cd "$GEN" && pwd -P )
    case "$real" in */gpustack.ai/gpustack) ;; *) echo "REFUSING: $real"; exit 1 ;; esac
+   grep -qF -- '<a string only your edit contains>' "$GEN/<the file you edited>" \
+     || { echo "REFUSING: the edit is not in the generation tree"; exit 1; }
    ( cd "$GEN" && make generate )
    ```
+
+   **Pass the commit explicitly; `HEAD` here does not mean what it looks like.** `git -C <repo>`
+   resolves `HEAD` in the MAIN checkout, so writing `HEAD` while working in a worktree creates the
+   generation tree at whatever main is sitting on and **your edit is not in it**. Nothing errors:
+   `make generate` succeeds, produces an empty diff, and the honest-looking reading is "the generated
+   files did not need to change". The failure surfaces later as a red `api.yml`, which regenerates
+   and finds a diff — two steps from the cause.
+
+   That is why the `grep` guard is in the recipe beside the path guard. Both exist for the same
+   reason: **a command exiting zero is not evidence it did the thing.** The path guard proves where
+   the tree is, and this one proves what is in it.
+
+   **Every line carries its own `||`, because there is no `set -e` here.** The snippet is meant to be
+   pasted, sometimes into a shell that keeps running afterwards, so it must not change that shell's
+   error handling. `worktree add` is the line that needs it most: an interrupted run leaves `$GEN` on
+   disk, `worktree prune` clears a stale registration but never a directory, and the `add` then fails
+   on it. Walk past that failure and the recipe generates from an earlier commit's tree — which still
+   holds your marker, so both guards pass and say so.
+
+   **The marker is matched with `-F` because `grep` reads a pattern, not a string.** A marker holding
+   `.`, `*`, `[` or `]` either matches text your edit does not contain or dies as a bad pattern,
+   which reads the same as absent. `--` ends option parsing, for a marker that starts with `-`.
 
    Then copy the regenerated files back into the worktree, `git worktree remove --force`, and
    `git reset` the WIP commit.
