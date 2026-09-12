@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,6 +16,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 )
 
 func newKVCachePoolBindingWebhook(objs ...ctrlcli.Object) *KVCachePoolBindingWebhook {
@@ -438,6 +440,327 @@ func TestKVCachePoolBindingWebhook_AClaimWhosePoolIsGoneCollidesWithNothing(t *t
 	wh := newKVCachePoolBindingWebhook(newKVCachePool(), holder)
 	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
 	require.NoError(t, err)
+}
+
+// newExternalKVCachePoolBackend is the backend this operator did not start. It carries no managed
+// branch, so there is no multiTenancy field to read and the only answer about its ledger is what a
+// controller observed against the running master.
+func newExternalKVCachePoolBackend() *workercore.KVCacheBackend {
+	kvcb := newKVCacheBackend()
+	kvcb.Spec.Connection.Managed = nil
+	kvcb.Spec.Connection.External = &workercore.KVCacheBackendExternal{
+		Endpoints: []workercore.KVCacheBackendEndpoint{
+			{Name: workercore.KVCacheBackendEndpointNameClient, Address: "mooncake.invalid:50051"},
+			{Name: workercore.KVCacheBackendEndpointNameAdmin, Address: "mooncake.invalid:9003"},
+		},
+	}
+	return kvcb
+}
+
+// kvCachePoolWithLedgerVerdict is the pool as a controller left it after asking the master.
+func kvCachePoolWithLedgerVerdict(reason string) *workercore.KVCachePool {
+	kvcp := newKVCachePool()
+	workerctrl.KVCachePoolConditionQuotaLedgerAvailable.False(kvcp, reason,
+		"read from the master on the last pass")
+	return kvcp
+}
+
+// TestKVCachePoolBindingWebhook_ASecondDistinctDomainNeedsAMasterThatSeparates covers both halves of
+// the rule, and the pairing is what makes either half mean anything: a check that refused every second
+// domain would pass the refusal cases alone, and one that refused none would pass the admitted cases
+// alone.
+func TestKVCachePoolBindingWebhook_ASecondDistinctDomainNeedsAMasterThatSeparates(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		objs     []ctrlcli.Object
+		wantMsg  string
+		wantWarn string
+	}{
+		{
+			// The positive half. A master holding a ledger keeps two domains apart, so the second one is
+			// admitted -- and warned about, because the store is only one of the two keepers.
+			name: "a master with a ledger takes a second domain",
+			objs: []ctrlcli.Object{
+				newKVCachePool(), newMultiTenantKVCacheBackend(),
+				otherKVCachePoolBinding("team-b-batch"),
+			},
+			wantWarn: "needs both a master holding a tenant ledger and an engine that forwards",
+		},
+		{
+			name: "a managed master with no ledger refuses the second domain",
+			objs: []ctrlcli.Object{
+				newKVCachePool(), newKVCacheBackend(), otherKVCachePoolBinding("team-b-batch"),
+			},
+			wantMsg: "that backend holds no tenant ledger",
+		},
+		{
+			// The word SECOND is load-bearing: one domain on a ledger-less master is what such a master
+			// serves correctly, so nothing is refused and nothing is warned about.
+			name:    "a ledger-less master takes the first domain",
+			objs:    []ctrlcli.Object{newKVCachePool(), newKVCacheBackend()},
+			wantMsg: "",
+		},
+		{
+			// The reachable shape. A pool's own webhook refuses a MANAGED backend with no ledger, and
+			// declines to ask an external one at all, so this is the configuration nothing else sees.
+			name: "an external master reported as running without multi-tenancy refuses it",
+			objs: []ctrlcli.Object{
+				kvCachePoolWithLedgerVerdict(workerctrl.KVCachePoolReasonMultiTenancyDisabled),
+				newExternalKVCachePoolBackend(), otherKVCachePoolBinding("team-b-batch"),
+			},
+			wantMsg: "that backend holds no tenant ledger",
+		},
+		{
+			// The same condition, False for the other reason. Refusing here would answer an outage with
+			// a message telling the operator to reconfigure something that is already right.
+			name: "an external master that is merely unreachable still takes it",
+			objs: []ctrlcli.Object{
+				kvCachePoolWithLedgerVerdict("LedgerUnreachable"),
+				newExternalKVCachePoolBackend(), otherKVCachePoolBinding("team-b-batch"),
+			},
+			wantWarn: "needs both a master holding a tenant ledger and an engine that forwards",
+		},
+		{
+			// Nobody has answered for this master: no backend object, no condition. Absence of a reading
+			// is not a reading that the domains collapse.
+			name:     "a master nothing has answered for still takes it",
+			objs:     []ctrlcli.Object{newKVCachePool(), otherKVCachePoolBinding("team-b-batch")},
+			wantWarn: "needs both a master holding a tenant ledger and an engine that forwards",
+		},
+		{
+			// Scope. The other domain is on a master this pool does not name, so the two never meet and
+			// there is nothing to separate -- no refusal and no warning, on a ledger-less backend.
+			name: "a distinct domain on another master is not this rule's business",
+			objs: func() []ctrlcli.Object {
+				otherPool := newKVCachePool()
+				otherPool.Name = "other-pool"
+				otherPool.Spec.Backends = []string{"mooncake-other"}
+				holder := otherKVCachePoolBinding("team-b-batch")
+				holder.Spec.PoolRef.Name = "other-pool"
+				return []ctrlcli.Object{newKVCachePool(), newKVCacheBackend(), otherPool, holder}
+			}(),
+			wantMsg: "",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			wh := newKVCachePoolBindingWebhook(c.objs...)
+
+			warnings, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
+			if c.wantMsg != "" {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), c.wantMsg)
+				assert.Empty(t, warnings,
+					"a warning describes what an admitted object leaves standing, and this one was refused")
+				return
+			}
+
+			require.NoError(t, err)
+			if c.wantWarn == "" {
+				assert.Empty(t, warnings)
+				return
+			}
+			require.Len(t, warnings, 1)
+			assert.Contains(t, warnings[0], c.wantWarn)
+		})
+	}
+}
+
+// unreadableKVCachePoolClient answers reads of ONE named pool with a denial rather than a NotFound.
+//
+// The distinction is what the rules turn on: NotFound is an answer about the object, and a denial is
+// the absence of one.
+//
+// It is scoped to a single pool deliberately. Denying every pool read makes the ceiling check fail
+// first, and an assertion on the resulting error then passes whatever the domain rules do — measured,
+// not assumed: a first version of this fixture denied all of them, and a mutation making the domain
+// rules swallow the denial left the test green.
+type unreadableKVCachePoolClient struct {
+	ctrlcli.Client
+
+	pool string
+}
+
+func (c unreadableKVCachePoolClient) Get(
+	ctx context.Context, key ctrlcli.ObjectKey, obj ctrlcli.Object, opts ...ctrlcli.GetOption,
+) error {
+	if _, ok := obj.(*workercore.KVCachePool); ok && key.Name == c.pool {
+		return kerrors.NewForbidden(schema.GroupResource{
+			Group: workercore.GroupVersion.Group, Resource: "kvcachepools",
+		}, key.Name, errors.New("no RBAC rule permits this read"))
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+// TestKVCachePoolBindingWebhook_APoolThatCannotBeReadIsNotAPoolThatIsGone pins the difference these
+// rules turn on, because both shapes end in no data and folding them together is the easy mistake.
+//
+// A pool that does not exist is an answer: no master serves that claim, so it collides with nothing
+// and the Binding is admitted. A pool that cannot be READ is not an answer at all, and treating it as
+// absent would let an RBAC denial or a timeout decide a domain question by silence — the claim would
+// be admitted because nobody could look, which is the one outcome this whole rule exists to prevent.
+//
+// The denial is aimed at the HOLDER's pool, which only the domain scan reads: this Binding's own pool
+// is read by the ceiling check too, so denying that one would prove nothing about these rules.
+func TestKVCachePoolBindingWebhook_APoolThatCannotBeReadIsNotAPoolThatIsGone(t *testing.T) {
+	holderPool := newKVCachePool()
+	holderPool.Name = "holder-pool"
+
+	holder := otherKVCachePoolBinding("team-b-batch")
+	holder.Spec.PoolRef.Name = holderPool.Name
+
+	base := newKVCachePoolBindingWebhook(
+		newKVCachePool(), holderPool, holder, newKVCacheBackend())
+	wh := &KVCachePoolBindingWebhook{
+		Client:    unreadableKVCachePoolClient{Client: base.Client, pool: holderPool.Name},
+		APIReader: unreadableKVCachePoolClient{Client: base.Client, pool: holderPool.Name},
+	}
+
+	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
+	require.Error(t, err,
+		"a pool read that was denied says nothing about the domains, and silence must not admit")
+	assert.Contains(t, err.Error(), "no RBAC rule permits this read",
+		"the cause travels up rather than being reported as a verdict about this object")
+}
+
+// TestKVCachePoolBindingWebhook_EverySharedMasterIsAsked is the case a first-match scan admits.
+//
+// The rule asks whether ANY master the two Bindings share fails to separate, so stopping at the first
+// neighbor found answers a different question: a neighbor whose shared master holds a ledger says
+// nothing about a second neighbor sharing a different master that does not. The pool under admission
+// names two backends here, which its own webhook refuses at creation and the schema does not, so the
+// shape reaches this rule whenever that webhook was absent when the pool was written.
+func TestKVCachePoolBindingWebhook_EverySharedMasterIsAsked(t *testing.T) {
+	ownPool := newKVCachePool()
+	ownPool.Spec.Backends = []string{"mooncake-dram", "mooncake-second"}
+
+	// The neighbor on the master that CAN separate, named to sort first.
+	okPool := newKVCachePool()
+	okPool.Name = "aaa-pool"
+	okPool.Spec.Backends = []string{"mooncake-dram"}
+	okHolder := otherKVCachePoolBinding("team-b-batch")
+	okHolder.Namespace, okHolder.Name = "team-b", "aaa-batch"
+	okHolder.Spec.PoolRef.Name = okPool.Name
+
+	// The neighbor on the master that cannot, named to sort last.
+	badPool := newKVCachePool()
+	badPool.Name = "zzz-pool"
+	badPool.Spec.Backends = []string{"mooncake-second"}
+	badHolder := otherKVCachePoolBinding("team-c-rag")
+	badHolder.Namespace, badHolder.Name = "team-c", "zzz-rag"
+	badHolder.Spec.PoolRef.Name = badPool.Name
+
+	ledgerless := newKVCacheBackend()
+	ledgerless.Name = "mooncake-second"
+
+	wh := newKVCachePoolBindingWebhook(
+		ownPool, okPool, badPool, okHolder, badHolder,
+		newMultiTenantKVCacheBackend(), ledgerless)
+
+	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
+	require.Error(t, err,
+		"the second neighbour's master holds no ledger, and it is reached only by scanning past the "+
+			"first neighbour whose master does")
+	assert.Contains(t, err.Error(), "mooncake-second",
+		"the refusal names the master that cannot separate, not the one that can")
+}
+
+// TestKVCachePoolBindingWebhook_TheObservationIsReadOffEitherPool covers a verdict that exists on the
+// HOLDER's pool while this Binding's own pool has never been reconciled.
+//
+// One backend may be named by several pools, so which pool carries the observation is an accident of
+// which one a controller reached first. A Binding created in the same breath as its pool is the
+// ordinary case, and that pool is precisely the one with no conditions yet — so reading only it would
+// miss an answer the cluster already holds.
+func TestKVCachePoolBindingWebhook_TheObservationIsReadOffEitherPool(t *testing.T) {
+	// This Binding's own pool: no conditions at all.
+	ownPool := newKVCachePool()
+
+	// The holder's pool, over the SAME backend, carrying the verdict.
+	holderPool := kvCachePoolWithLedgerVerdict(workerctrl.KVCachePoolReasonMultiTenancyDisabled)
+	holderPool.Name = "observed-pool"
+
+	holder := otherKVCachePoolBinding("team-b-batch")
+	holder.Spec.PoolRef.Name = holderPool.Name
+
+	wh := newKVCachePoolBindingWebhook(
+		ownPool, holderPool, holder, newExternalKVCachePoolBackend())
+
+	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
+	require.Error(t, err,
+		"the master behind the shared backend was already observed as running without its ledger, "+
+			"and the pool carrying that observation is the holder's rather than this one's")
+	require.Contains(t, err.Error(), "holds no tenant ledger")
+}
+
+// TestKVCachePoolBindingWebhook_TheWarningClaimsNoSeparationItDidNotEstablish guards the one way an
+// admission warning can be worse than none.
+//
+// Admitting means no master was observed OR declared to be ledger-less, which includes an external
+// master nobody has scraped yet. A warning saying the store keeps the two domains apart would assert
+// exactly what the fall-through did not establish, in the one place an operator reads at that moment.
+func TestKVCachePoolBindingWebhook_TheWarningClaimsNoSeparationItDidNotEstablish(t *testing.T) {
+	wh := newKVCachePoolBindingWebhook(
+		newKVCachePool(), newExternalKVCachePoolBackend(), otherKVCachePoolBinding("team-b-batch"))
+
+	warnings, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
+	require.NoError(t, err)
+	require.Len(t, warnings, 1)
+
+	assert.NotContains(t, warnings[0], "The master keeps the two",
+		"nothing here established that it does: an unscraped external master reaches this path")
+	assert.Contains(t, warnings[0], "needs both",
+		"the warning names both keepers, so neither reads as already satisfied")
+	assert.Contains(t, warnings[0], "team-b/batch",
+		"the other domain's holder is what an operator can act on")
+}
+
+// TestKVCachePoolBindingWebhook_TheSeparationRefusalSaysWhatToDo pins the clauses an operator acts on.
+// The refusal names another namespace's object, so it has to say why that object bars this one and
+// what can be changed here; a message naming only the collision leaves the reader with no next step.
+func TestKVCachePoolBindingWebhook_TheSeparationRefusalSaysWhatToDo(t *testing.T) {
+	wh := newKVCachePoolBindingWebhook(
+		newKVCachePool(), newKVCacheBackend(), otherKVCachePoolBinding("team-b-batch"))
+
+	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
+	require.Error(t, err)
+
+	msg := err.Error()
+	assert.Contains(t, msg, "team-b/batch",
+		"the Binding holding the other domain is where the operator looks first")
+	assert.Contains(t, msg, "mooncake-dram",
+		"the backend is the fact the refusal turns on, so it is named rather than implied")
+	assert.Contains(t, msg, "whatever the engines do",
+		"an operator who knows the engine forwards a tenant would otherwise read this as an engine "+
+			"problem and go looking for a build that fixes it; no build does")
+	assert.Contains(t, msg, "multiTenancy",
+		"the field that resolves it is named, since the object to change is not the one refused")
+	assert.NotContains(t, msg, "already registered by",
+		"that is the duplicate-domain refusal's wording, and these two rules send the operator to "+
+			"opposite actions: rename the domain there, give the master a ledger here")
+}
+
+// TestKVCachePoolBindingWebhook_SeparationIsNotRejudgedOnUpdate is the answer to what the check does
+// about domains that already exist.
+//
+// spec.poolRef and spec.domain.name are both frozen, so an update cannot pair a domain with a master
+// it was not created against. A copy of the rule on the update path would therefore never catch a new
+// collision and would only fail an unrelated ceiling edit on an old one -- including the update that
+// removes a finalizer, which would leave the Binding undeletable.
+func TestKVCachePoolBindingWebhook_SeparationIsNotRejudgedOnUpdate(t *testing.T) {
+	wh := newKVCachePoolBindingWebhook(
+		newKVCachePool(), newKVCacheBackend(), otherKVCachePoolBinding("team-b-batch"))
+
+	// The collision is real: the same cluster state refuses this object at CREATE.
+	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
+	require.Error(t, err, "the fixture must reproduce the collision, or this test proves nothing")
+
+	oldKvcpb := newKVCachePoolBinding()
+	newKvcpb := oldKvcpb.DeepCopy()
+	newKvcpb.Spec.QuotaCeiling = resource.MustParse("30Ti")
+
+	_, err = wh.ValidateUpdate(context.Background(), oldKvcpb, newKvcpb)
+	require.NoError(t, err,
+		"an edit that moves the ceiling must not be refused for a collision it did not create")
 }
 
 // TestKVCachePoolBindingWebhook_DeleteIsTheFinalizersDecision states where the refusal lives: this
