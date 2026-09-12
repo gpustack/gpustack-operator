@@ -229,9 +229,9 @@ func TestModelDeploymentStatus_AssignedFlavorIsAbsentUntilItIsAssigned(t *testin
 // TestModelDeploymentStatus_KindIsEchoedAndNeverEmpty pins the field that must never be written
 // blank.
 //
-// status.roles[].kind is REQUIRED and carries no enum, so an unset value is serialized and stored as
-// the empty string -- legal today only because the marker is missing. Resolving it here is what makes
-// adding that marker safe rather than the change that starts rejecting every status write.
+// status.roles[].kind is REQUIRED and enumerated, so an unset value written through is refused, and
+// the API server refuses the whole status write rather than the one field. Resolving it here is what
+// made adding that marker safe rather than the change that starts rejecting every status write.
 func TestModelDeploymentStatus_KindIsEchoedAndNeverEmpty(t *testing.T) {
 	md := twoRoleDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill

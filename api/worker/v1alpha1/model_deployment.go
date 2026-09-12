@@ -494,6 +494,14 @@ type ModelDeploymentRoleStatus struct {
 	// disaggregated deployment an entry describes. It carries no omitempty: every role has a kind,
 	// defaulted if the user named none, so an absent value would mean the status was written by
 	// something that did not know about kinds rather than that the role has none.
+	//
+	// The enum is the same one the spec field carries, and it has to stay that way: this field is
+	// written from the spec field with the unset case resolved, so a value the writer can produce
+	// and this list does not name would make every later status write on the object fail, taking
+	// every other figure on it down with the kind. The marker sits on the field because the type's
+	// own enum marker is a Go-level one and does not become schema validation.
+	//
+	// +k8s:validation:enum=["server","prefill","decode"]
 	Kind ModelDeploymentRoleKind `json:"kind" protobuf:"bytes,5,name=kind,casttype=ModelDeploymentRoleKind"`
 
 	// AssignedFlavor is the ResourceFlavor Kueue assigned to this role's PodSet for its ACCELERATOR

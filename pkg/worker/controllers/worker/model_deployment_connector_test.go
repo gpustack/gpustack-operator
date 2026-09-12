@@ -875,3 +875,71 @@ func TestModelDeploymentEngineCommand(t *testing.T) {
 		})
 	}
 }
+
+// modelDeploymentRoleKindEnum reads one section's role kind enum out of the generated CRD.
+//
+// Read rather than written down, because the point of the case below is that two enums and one
+// writer agree; a list typed here would be a third place to keep in step.
+func modelDeploymentRoleKindEnum(t *testing.T, section string) []string {
+	t.Helper()
+
+	crd := workercore.GetCustomResourceDefinitions()["ModelDeployment"]
+	require.NotNil(t, crd, "ModelDeployment is not registered")
+	require.Len(t, crd.Spec.Versions, 1)
+
+	schema := crd.Spec.Versions[0].Schema.OpenAPIV3Schema
+	for _, level := range []string{section, "roles"} {
+		next, ok := schema.Properties[level]
+		require.True(t, ok, "the schema has no %q on the path to a %s role", level, section)
+		schema = &next
+	}
+
+	require.NotNil(t, schema.Items, "roles is a list and its item schema carries the fields")
+	require.NotNil(t, schema.Items.Schema)
+
+	kind, ok := schema.Items.Schema.Properties["kind"]
+	require.True(t, ok, "a %s role has no kind", section)
+
+	values := make([]string, 0, len(kind.Enum))
+
+	for _, entry := range kind.Enum {
+		var value string
+
+		require.NoError(t, json.Unmarshal(entry.Raw, &value))
+
+		values = append(values, value)
+	}
+
+	return values
+}
+
+// TestModelDeploymentEffectiveRoleKindStaysInsideTheStatusEnum is the writer half of the status
+// kind's enum, and it is the half an enum case usually leaves out.
+//
+// Asserting the generated schema carries the enum proves the marker took effect. It does not prove
+// the controller cannot produce a value the enum refuses, and that is the failure adding an enum
+// introduces: the API server rejects the whole status write rather than the one field, so a kind
+// outside the list freezes readiness, replica counts and assigned flavors along with it.
+//
+// The inputs come from the SPEC enum rather than from a list written here, so a fourth kind added
+// to the API arrives in this case without anybody remembering to route it.
+func TestModelDeploymentEffectiveRoleKindStaysInsideTheStatusEnum(t *testing.T) {
+	specValues := modelDeploymentRoleKindEnum(t, "spec")
+	statusValues := modelDeploymentRoleKindEnum(t, "status")
+
+	require.NotEmpty(t, specValues, "the spec kind is where the writer's values come from")
+	require.NotEmpty(t, statusValues, "the status kind carries no enum, so nothing here is constrained")
+
+	// The empty kind is an input the writer really receives. The schema defaults the spec field, so
+	// nothing arriving from the API server is empty, but every in-process caller that builds the
+	// value in Go can leave it so, and the status echo is where such a value would be written out.
+	for _, in := range append([]string{""}, specValues...) {
+		role := &workercore.ModelDeploymentRole{Kind: workercore.ModelDeploymentRoleKind(in)}
+
+		got := string(ModelDeploymentEffectiveRoleKind(role))
+
+		assert.Contains(t, statusValues, got,
+			"the writer turns a spec kind of %q into a status kind of %q, which the status enum "+
+				"does not name: the API server refuses that status write whole", in, got)
+	}
+}
