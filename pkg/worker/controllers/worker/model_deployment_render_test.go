@@ -882,8 +882,11 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 			"the declared port is what the engine is told to open")
 		require.NotNil(t, c.StartupProbe, "and the gate reads it")
 		require.NotNil(t, c.ReadinessProbe)
+		require.NotNil(t, c.LivenessProbe)
 		assert.Equal(t, intstr.FromInt32(9100), c.StartupProbe.HTTPGet.Port)
 		assert.Equal(t, intstr.FromInt32(9100), c.ReadinessProbe.HTTPGet.Port)
+		assert.Equal(t, intstr.FromInt32(9100), c.LivenessProbe.HTTPGet.Port,
+			"all three gates read the port the engine was told to open")
 		assert.Equal(t, int32(9100), c.Ports[0].ContainerPort)
 	})
 
@@ -908,20 +911,41 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 			assert.Nil(t, pod.Spec.Containers[0].StartupProbe,
 				"%s: an HTTP gate would pass while the endpoint forwards %s", proto, proto)
 			assert.Nil(t, pod.Spec.Containers[0].ReadinessProbe, "%s", proto)
+			assert.Nil(t, pod.Spec.Containers[0].LivenessProbe,
+				"%s: and a liveness gate on an address nothing answers would restart it forever", proto)
 		}
 	})
 
 	t.Run("a role configuring its own listening endpoint is not gated", func(t *testing.T) {
 		// TWO WAYS TO DO IT, and both strand a replica that is serving. --host and --port move WHERE
 		// the engine listens, and the operator then leaves them alone, so the engine moves without
-		// the Service following. An --ssl-* flag moves HOW: a plaintext GET against a TLS listener
-		// never completes, so the startup threshold would restart a replica answering every request.
+		// the Service following. Demanding a CLIENT certificate is the other: the kubelet has none
+		// to present, so the gate would fail against a listener serving every real client correctly.
+		//
+		// THAT SECOND ONE NEEDS TLS ACTUALLY TURNED ON to mean anything, which is why the case below
+		// carries a certificate. --ssl-cert-reqs by itself is covered as a GATED case further down.
 		for _, extraArgs := range [][]string{
 			{"--port", "9100"},
 			{"--port=9100"},
 			{"--host", "127.0.0.1"},
 			{"--host=127.0.0.1"},
-			{"--ssl-cert-reqs", "2"},
+			{"--ssl-certfile", "/etc/tls/tls.crt", "--ssl-cert-reqs", "2"},
+			{"--ssl-cert-reqs", "2", "--ssl-keyfile=/etc/tls/tls.key"},
+			{"--ssl-certfile", "/etc/tls/tls.crt", "--ssl-cert-reqs=2"},
+			// "02" is CERT_REQUIRED to the engine's integer parser, so a check comparing the value
+			// as text would gate a listener that refuses the probe.
+			{"--ssl-certfile", "/etc/tls/tls.crt", "--ssl-cert-reqs", "02"},
+			// A value this cannot read is treated as the refusal: withdrawing a gate costs a signal,
+			// while fitting one to a listener that rejects it restarts a replica that is serving.
+			{"--ssl-certfile", "/etc/tls/tls.crt", "--ssl-cert-reqs", "required"},
+			{"--ssl-certfile", "/etc/tls/tls.crt", "--ssl-cert-reqs"},
+			// A NUMBER OUTSIDE THE ENUM IS NOT A PERMISSIVE ONE. ssl defines 0, 1 and 2 and nothing
+			// else, so these describe a listener whose behavior this operator cannot reason about.
+			// A check naming only the rejecting value would read them as safe and gate it.
+			{"--ssl-certfile", "/etc/tls/tls.crt", "--ssl-cert-reqs", "3"},
+			{"--ssl-certfile", "/etc/tls/tls.crt", "--ssl-cert-reqs=-1"},
+			// The last occurrence is the one the engine's parser keeps.
+			{"--ssl-certfile", "/etc/tls/tls.crt", "--ssl-cert-reqs=0", "--ssl-cert-reqs=2"},
 			{"--ssl-certfile", "/etc/tls/tls.crt", "--port", "9100"},
 		} {
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
@@ -939,6 +963,9 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 				"%v decides the endpoint for itself, so the gate cannot claim to read it", extraArgs)
 			assert.Nil(t, pod.Spec.Containers[0].ReadinessProbe,
 				"%v decides the endpoint for itself, so the gate cannot claim to read it", extraArgs)
+			assert.Nil(t, pod.Spec.Containers[0].LivenessProbe,
+				"%v: a liveness gate on an address the operator does not know would restart a "+
+					"replica that is serving, which is the worst of the three outcomes", extraArgs)
 		}
 	})
 
@@ -946,10 +973,21 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 		// LOSING READINESS TO ONE ORDINARY FLAG would hand back the defect these gates remove. The
 		// address is still the operator's own -- only the transport moved -- and the kubelet does
 		// not verify the server certificate on an HTTPS probe.
+		//
+		// EITHER FLAG ALONE IS ENOUGH, because uvicorn -- which both engines hand their ssl
+		// arguments to -- enables TLS on `ssl_keyfile or ssl_certfile`. Reading it as "both" would
+		// send a plaintext probe at a TLS listener, which never completes.
 		for _, extraArgs := range [][]string{
 			{"--ssl-certfile", "/etc/tls/tls.crt"},
 			{"--ssl-keyfile=/etc/tls/tls.key"},
-			{"--ssl-ca-certs", "/etc/tls/ca.crt"},
+			{"--ssl-certfile", "/etc/tls/tls.crt", "--ssl-keyfile", "/etc/tls/tls.key"},
+			// A CLIENT-CERTIFICATE MODE THAT ACCEPTS A CERTIFICATE-LESS CLIENT KEEPS ITS GATES.
+			// CERT_NONE asks for nothing and CERT_OPTIONAL verifies only what is offered, so the
+			// kubelet's probe completes against both; only CERT_REQUIRED turns it away. Withdrawing
+			// the gates on the flag's presence alone would cost these roles all three for nothing.
+			{"--ssl-certfile", "/etc/tls/tls.crt", "--ssl-cert-reqs", "0"},
+			{"--ssl-certfile", "/etc/tls/tls.crt", "--ssl-cert-reqs=1"},
+			{"--ssl-certfile", "/etc/tls/tls.crt", "--ssl-cert-reqs=2", "--ssl-cert-reqs=0"},
 		} {
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Roles[0].ExtraArgs = extraArgs
@@ -965,10 +1003,85 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 			c := pod.Spec.Containers[0]
 			require.NotNil(t, c.StartupProbe, "%v", extraArgs)
 			require.NotNil(t, c.ReadinessProbe, "%v", extraArgs)
+			require.NotNil(t, c.LivenessProbe, "%v", extraArgs)
 			assert.Equal(t, core.URISchemeHTTPS, c.StartupProbe.HTTPGet.Scheme,
 				"%v moved the transport, so the gate has to follow it", extraArgs)
 			assert.Equal(t, core.URISchemeHTTPS, c.ReadinessProbe.HTTPGet.Scheme, "%v", extraArgs)
+			assert.Equal(t, core.URISchemeHTTPS, c.LivenessProbe.HTTPGet.Scheme, "%v", extraArgs)
 		}
+	})
+
+	t.Run("an --ssl-* flag that does not turn TLS on leaves the replica gated over HTTP", func(t *testing.T) {
+		// THE WHOLE FAMILY IS NOT THE CRITERION, only the two flags that carry a certificate or a
+		// key. Both supported engines hand every ssl argument to uvicorn and decide nothing
+		// themselves, and uvicorn enables TLS on `ssl_keyfile or ssl_certfile` alone. Each of these
+		// passed BY ITSELF leaves an ordinary HTTP server.
+		//
+		// GETTING THIS WRONG FAILS TWICE: the gate speaks TLS to a plaintext listener, which never
+		// completes and restarts the replica at the startup threshold, and status.endpoint publishes
+		// an https:// address no client can use. --ssl-cert-reqs additionally lost its gate for a
+		// client-certificate rule that uvicorn never applied, having built no TLS context.
+		for _, extraArgs := range [][]string{
+			{"--ssl-ca-certs", "/etc/tls/ca.crt"},
+			{"--ssl-cert-reqs", "2"},
+			{"--ssl-ciphers", "HIGH"},
+			{"--ssl-keyfile-password", "hunter2"},
+		} {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ExtraArgs = extraArgs
+			})
+
+			pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+				Deployment:   md,
+				Role:         &md.Spec.Roles[0],
+				InstanceType: newRenderInstanceType(),
+			})
+			require.NoError(t, err)
+
+			c := pod.Spec.Containers[0]
+			require.NotNil(t, c.StartupProbe, "%v does not move the listener, so it keeps its gates", extraArgs)
+			require.NotNil(t, c.ReadinessProbe, "%v", extraArgs)
+			require.NotNil(t, c.LivenessProbe, "%v", extraArgs)
+			assert.Equal(t, core.URISchemeHTTP, c.StartupProbe.HTTPGet.Scheme,
+				"%v leaves an ordinary HTTP server, and a TLS probe against it never completes", extraArgs)
+			assert.Equal(t, core.URISchemeHTTP, c.ReadinessProbe.HTTPGet.Scheme, "%v", extraArgs)
+			assert.Equal(t, core.URISchemeHTTP, c.LivenessProbe.HTTPGet.Scheme, "%v", extraArgs)
+		}
+	})
+
+	t.Run("a gated replica carries a liveness gate whose threshold outlives the readiness one", func(t *testing.T) {
+		// A REPLICA WHOSE ENGINE STOPS ANSWERING HAS NO OTHER WAY BACK. Losing readiness only takes
+		// it out of the Service; the Pod keeps running and keeps the accelerators it was admitted
+		// with, and this controller deletes a replica only for a rebuild, a scale-down or a spec
+		// change -- never because it went quiet.
+		//
+		// THE ORDER OF THE TWO THRESHOLDS IS THE POINT, not either figure. Whatever they are, a
+		// stall has to cost readiness before it costs a restart, because readiness is recovered by
+		// answering again and a restart throws away a model that took the startup budget to load.
+		// Equal thresholds would restart on the same failure that withdrew the replica.
+		md := newRenderDeployment()
+
+		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			Deployment:   md,
+			Role:         &md.Spec.Roles[0],
+			InstanceType: newRenderInstanceType(),
+		})
+		require.NoError(t, err)
+
+		c := pod.Spec.Containers[0]
+		require.NotNil(t, c.LivenessProbe)
+		require.NotNil(t, c.ReadinessProbe)
+		require.NotNil(t, c.StartupProbe)
+
+		assert.Equal(t, modelDeploymentProbePath, c.LivenessProbe.HTTPGet.Path,
+			"the liveness gate reads the same route, which is safe only because the startup gate "+
+				"suppresses it for the whole load")
+		assert.Greater(t, c.LivenessProbe.FailureThreshold, c.ReadinessProbe.FailureThreshold,
+			"a stall must cost readiness before it costs a restart")
+		assert.Greater(t, c.StartupProbe.FailureThreshold, c.LivenessProbe.FailureThreshold,
+			"and the load window must outlast both, or a slow start becomes a restart loop")
+		assert.Equal(t, c.ReadinessProbe.PeriodSeconds, c.LivenessProbe.PeriodSeconds,
+			"the thresholds are only comparable while the periods agree")
 	})
 
 	t.Run("a connector argument carrying an endpoint flag is seen too", func(t *testing.T) {
@@ -989,11 +1102,12 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 		assert.Nil(t, pod.Spec.Containers[0].StartupProbe,
 			"a port the connector supplied is still not a port the operator chose")
 		assert.Nil(t, pod.Spec.Containers[0].ReadinessProbe)
+		assert.Nil(t, pod.Spec.Containers[0].LivenessProbe)
 		assert.NotContains(t, pod.Spec.Containers[0].Command[len(pod.Spec.Containers[0].Command)-2:],
 			"--port", "and the fill must not add a second one")
 	})
 
-	t.Run("an extra argument that is not an endpoint flag leaves both gates in place", func(t *testing.T) {
+	t.Run("an extra argument that is not an endpoint flag leaves all three gates in place", func(t *testing.T) {
 		// THE BASELINE THE CASE ABOVE NEEDS. Without it, a guard that withheld the gates whenever a
 		// role carried ANY extra argument would pass that case just as well. The second argument is
 		// deliberately one whose name contains "ssl" without being part of the family, so a guard
@@ -1042,14 +1156,15 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 			require.NotNil(t, c.StartupProbe, "a slow loader needs a startup gate")
 			require.NotNil(t, c.ReadinessProbe, "ready must not precede the engine serving")
 
-			// NO LIVENESS GATE, and this is an assertion rather than an omission. One supported
-			// engine answers this route with 503 for the whole load, so a liveness gate reading it
-			// would restart a replica that is loading normally.
-			assert.Nil(t, c.LivenessProbe,
-				"a liveness gate on this route would restart an engine that is merely still loading")
+			// A LIVENESS GATE ON THIS ROUTE IS SAFE ONLY BESIDE THE STARTUP GATE ABOVE. One
+			// supported engine answers 503 for the whole load, and a liveness gate reading it alone
+			// would restart a replica that is loading normally -- but the kubelet suppresses
+			// liveness until startup succeeds, so it never sees that window.
+			require.NotNil(t, c.LivenessProbe,
+				"an engine that answered once and then stopped has no other way back")
 
 			for name, p := range map[string]*core.Probe{
-				"startup": c.StartupProbe, "readiness": c.ReadinessProbe,
+				"startup": c.StartupProbe, "readiness": c.ReadinessProbe, "liveness": c.LivenessProbe,
 			} {
 				require.NotNil(t, p.HTTPGet, "%s gate must read the engine's route, not accept a socket", name)
 				assert.Equal(t, modelDeploymentProbePath, p.HTTPGet.Path, "%s gate path", name)
@@ -1064,10 +1179,13 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 			assert.Equal(t, svc.Spec.Ports[0].TargetPort.IntVal, c.ReadinessProbe.HTTPGet.Port.IntVal,
 				"the port the gate grades and the port the Service sends traffic to are one fact")
 
-			// The two gates are not one gate twice: the startup budget carries the load window and
-			// readiness stays tight, so a replica that has served once is taken out quickly.
+			// The three gates are not one gate three times: the startup budget carries the load
+			// window, readiness stays tight so a replica that has served once is taken out quickly,
+			// and liveness sits between them so a stall costs readiness before it costs a restart.
 			assert.Greater(t, c.StartupProbe.FailureThreshold, c.ReadinessProbe.FailureThreshold,
 				"the startup gate carries the load window that readiness must not have to tolerate")
+			assert.Greater(t, c.LivenessProbe.FailureThreshold, c.ReadinessProbe.FailureThreshold,
+				"a restart throws away a loaded model, so it must cost more than losing readiness")
 		})
 	}
 }

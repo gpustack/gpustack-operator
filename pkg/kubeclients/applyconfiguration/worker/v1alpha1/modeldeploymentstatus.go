@@ -25,7 +25,10 @@ type ModelDeploymentStatusApplyConfiguration struct {
 	// and actionable state — which is what a single phase string cannot carry.
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 	// Endpoint is the one address every replica serves behind, in the form
-	// http://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.
+	// <scheme>://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.
+	//
+	// The scheme is https where the first role's own arguments put its listener on TLS, and http
+	// otherwise. A client reads it from here rather than assuming either one.
 	Endpoint *string `json:"endpoint,omitempty"`
 	// Roles is one entry per declared role.
 	Roles []ModelDeploymentRoleStatusApplyConfiguration `json:"roles,omitempty"`
