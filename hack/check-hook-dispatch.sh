@@ -161,6 +161,24 @@ build
 printf '# Page\n\nmore\n' > "$TREE/docs/page.md"
 expect "markdown alone runs the documentation contract and nothing else" "lint docs"
 
+# Markdown git would quote without -z, which is the case that used to fall through every gate: the
+# quoted record ends in `.md"`, so no markdown pattern matches it, and the code gate that would then
+# claim it excludes markdown by decision. A space is enough; the non-ASCII name is the same
+# mechanism and is kept because it is the form this was reported as.
+build
+printf '# Spaced\n' > "$TREE/docs/my page.md"
+expect "markdown whose path holds a space is still markdown" "lint docs"
+
+build
+printf '# Accented\n' > "$TREE/docs/ünïcode.md"
+expect "markdown whose path holds a non-ASCII byte is still markdown" "lint docs"
+
+# A file whose own name contains the sequence git uses to print a rename. Split on that sequence it
+# becomes two paths that are neither the file nor markdown, and the page loses its gate.
+build
+printf '# Arrowed\n' > "$TREE/docs/has -> arrow.md"
+expect "a path containing the rename separator is one path" "lint docs"
+
 # --- a rename line carries two paths, and both count ------------------------
 
 # The name that left is shell and the name that arrived is markdown. Matching the porcelain line
@@ -168,6 +186,18 @@ expect "markdown alone runs the documentation contract and nothing else" "lint d
 build
 git -C "$TREE" mv hack/thing.sh docs/thing.md
 expect "a rename is routed by both of its paths" "lint,lint docs"
+
+# The departing path has to arrive whole, not merely present. Moving a script out of the skills tree
+# is what `make lint docs` compares, and only the name that left says so -- the name that arrived
+# matches nothing but the code gate. A parser that keeps the original but mislays its first bytes
+# passes the case above, where both paths are recognised by their suffix, and fails this one.
+build
+printf '#!/usr/bin/env bash\necho case\n' > "$TREE/.agents/skills/demo/case.sh"
+git -C "$TREE" add -A
+git -C "$TREE" -c user.email=check@example.invalid -c user.name=check \
+  -c commit.gpgsign=false commit -qm "case" >/dev/null
+git -C "$TREE" mv .agents/skills/demo/case.sh hack/case.sh
+expect "a rename out of the skills tree is routed by the name that left" "lint,lint docs"
 
 # --- nothing dirty means nothing to cover -----------------------------------
 

@@ -18,35 +18,46 @@ if [[ -z "${project_dir}" ]]; then
 fi
 cd "${project_dir}" || exit 0
 
-dirty="$(git status --porcelain --untracked-files=all 2>/dev/null)"
+# The dirty paths, one per line, read as NUL-terminated records so that what the patterns below
+# match is the path's own bytes. Without -z, `git status --porcelain` QUOTES any path carrying a
+# space, a tab or a non-ASCII byte, and a quoted `docs/my page.md` ends in `.md"`: it then matches
+# no markdown pattern, so it misses the documentation contract, while check-symbols.sh excludes
+# markdown from the code gate -- the file goes through neither, which is the exact failure this
+# dispatch exists to remove. Measured on git 2.50.1, and reachable with an ordinary space.
+#
+# -z prints paths verbatim, so there is nothing to unquote, and it delimits with NUL, so a file
+# whose own name contains " -> " needs no special case.
+#
+# The questions below are asked per file, so a rename contributes both of its paths: the name that
+# left needs a gate as much as the name that arrived. Under -z a rename is two records, the arriving
+# path carrying the status and the original following it bare -- the opposite order to the single
+# `orig -> new` line git prints without it.
+dirty_paths=""
+take_original=0
+while IFS= read -r -d '' record; do
+  if [[ ${take_original} -eq 1 ]]; then
+    take_original=0
+    dirty_paths+="${record}"$'\n'
+    continue
+  fi
+  [[ "${record:0:2}" == *[RC]* ]] && take_original=1
+  dirty_paths+="${record:3}"$'\n'
+done < <(git status --porcelain -z --untracked-files=all 2>/dev/null)
+
+# The separator after the last path goes, because the here-strings below add one of their own and
+# the two would leave a trailing empty line. An empty line is not markdown, so it alone would answer
+# the code question yes and that target would run on every turn -- the same trap the clean-tree exit
+# below covers, arriving by a different route.
+dirty_paths="${dirty_paths%$'\n'}"
 
 # Nothing is dirty, so no target has anything to cover. This exit comes before the questions below
 # rather than being folded into them, because the code question is asked the other way round and an
 # empty list answers it yes: `grep -v` finds no line to reject and reports success, so "some dirty
 # path is not markdown" is true of a clean tree. Without this, every turn that changed nothing would
 # run the code gate.
-if [[ -z "${dirty}" ]]; then
+if [[ -z "${dirty_paths}" ]]; then
   exit 0
 fi
-
-# The dirty paths, one per line. The questions below are asked per file, so they are asked of paths
-# rather than of the porcelain lines carrying them: a rename line carries two, and both count -- a
-# shell script renamed to markdown still needs the code gate, because what may have broken is
-# whatever referred to the name that left. Stripping the three-character status prefix here also
-# keeps it out of every pattern.
-#
-# A path git chose to quote (non-ASCII, a control character) arrives with its quotes attached and so
-# stops looking like markdown. That is the safe direction: it makes the code gate run.
-dirty_paths="$(awk '{
-  line = substr($0, 4)
-  arrow = index(line, " -> ")
-  if (arrow > 0) {
-    print substr(line, 1, arrow - 1)
-    print substr(line, arrow + 4)
-  } else {
-    print line
-  }
-}' <<<"${dirty}")"
 
 # run_lint <label> <command...>: run a lint command, reporting issues to stderr without ever blocking.
 run_lint() {
