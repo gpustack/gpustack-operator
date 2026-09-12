@@ -249,14 +249,32 @@ not a per-node probe that promotes itself.
 > comes with it — which is those three things and **not** `privileged`. A `TCP` group sets none of
 > them.
 
-An `EFA` group takes everything `RDMA` takes, plus one `vpc.amazonaws.com/efa` device. That request
-is what lets the member open the adapter: the `/dev/infiniband` mount carries the device node in
-while the device cgroup still refuses `open()`, so a member without one starts TCP instead.
+An `EFA` group takes everything `RDMA` takes, plus one device from a plugin — by default
+`vpc.amazonaws.com/efa`, which `deviceResourceName` below overrides. That request is what lets the
+member open the adapter: the `/dev/infiniband` mount carries the device node in while the device
+cgroup still refuses `open()`, so a member without one starts TCP instead.
 
-**The cluster therefore needs the AWS EFA Kubernetes device plugin**; without it no node advertises
-the resource and the member stays unscheduled. Nothing is mounted from a host EFA install — the
+**The cluster therefore needs the device plugin that advertises whichever resource the group asks
+for** — the AWS EFA plugin when the name is left at its default; without it no node advertises the
+resource and the member stays unscheduled. Nothing is mounted from a host EFA install — the
 libfabric an `EFA` member runs on is in the image. Storage-optimized families such as `i7ie` are not
 EFA-capable; check `fi_info -p efa` on the node before selecting one.
+
+`spec.transport.deviceResourceName` names the extended resource a fabric member asks one of, for the
+clusters where that name is not AWS's. The RDMA shared-device plugin and the SR-IOV plugin each let
+an administrator choose it, so no constant would be right on two clusters. Set it and the member
+requests one of that resource; leave it unset and an `EFA` group still asks for the AWS name while an
+`RDMA` group asks for nothing.
+
+**It is read only on `RDMA` and `EFA`**, the two protocols that mount the device tree. Set beside any
+other protocol it renders nothing at all — no other path opens a fabric device, and requesting a
+resource there would only leave the member unschedulable.
+
+> **Why an `RDMA` group should set it** — a member that asks for nothing mounts the device tree and
+> is still denied `open()` by the device cgroup, so the store finds no adapter and installs TCP while
+> the object reads as `RDMA`. That is the behavior every backend had before this field, and it stays
+> reachable because naming a resource no plugin advertises leaves the member unschedulable instead —
+> this operator cannot tell which of the two an administrator without a plugin would rather have.
 
 **Reachability is a port range, never a list.** The transfer engine picks its data ports at random —
 one observed run bound `15002` and `15995`, a second client `16566` and `16655`, none of them

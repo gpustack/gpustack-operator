@@ -70,7 +70,11 @@ const (
 	rdmaDeviceVolumeName = "rdma-devices"
 
 	// efaDeviceResource is the extended resource AWS's EFA device plugin advertises, and what an
-	// EFA member asks for one of.
+	// EFA member asks for one of WHEN THE BACKEND DECLARES NO NAME OF ITS OWN.
+	//
+	// It survives as a constant only because AWS's plugin advertises exactly one name. Every other
+	// fabric's name is chosen by whoever installed the plugin, which is why it is declared on the
+	// object instead, and why this is a fallback rather than the rule.
 	//
 	// IT IS WHAT MAKES THE DEVICE OPENABLE. Mounting /dev/infiniband carries the device node into
 	// the container's mount namespace and does nothing else: the device cgroup still denies open(),
@@ -370,7 +374,7 @@ func RenderMemberDaemonSet(
 		},
 	}
 
-	applyMemberFabric(ds, MemberProtocol(kvcb))
+	applyMemberFabric(ds, MemberProtocol(kvcb), kvcb.Spec.Transport.DeviceResourceName)
 	applyMemberLocalDisk(ds, kvcb, member, group)
 
 	// Stamped last, over a template that is otherwise complete. The fingerprint therefore covers
@@ -703,14 +707,14 @@ func memberRequests(member workercore.KVCacheBackendMember) core.ResourceList {
 //
 // RDMA and EFA share the host-fabric base: hostNetwork, the device tree and two capabilities —
 // and NEVER privileged, which would hand the member its whole node for the sake of two
-// operations. EFA adds one extended-resource request and nothing else, because the device tree
-// alone grants no access: the device cgroup still refuses to open the node it carries in, and a
-// device plugin allocation is what adds the rule that lets it through. The libfabric an EFA
-// member runs on travels in the image, so there is no host tree to mount and no environment to
-// render. Every other path, including the Auto that resolved to TCP, is left exactly as
-// rendered: no security context at all rather than an empty one, since an empty struct is an
-// invitation to add a capability to it.
-func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
+// operations. Either may add one extended-resource request, because the device tree alone grants
+// no access: the device cgroup still refuses to open the node it carries in, and a device plugin
+// allocation is what adds the rule that lets it through. The libfabric an EFA member runs on
+// travels in the image, so there is no host tree to mount and no environment to render. Every
+// other path, including the Auto that resolved to TCP, is left exactly as rendered: no security
+// context at all rather than an empty one, since an empty struct is an invitation to add a
+// capability to it.
+func applyMemberFabric(ds *apps.DaemonSet, protocol, deviceResource string) {
 	if protocol != "rdma" && protocol != "efa" {
 		return
 	}
@@ -751,8 +755,17 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
 		},
 	}
 
-	if protocol != "efa" {
-		return
+	// The resource to ask for is DECLARED, because its name belongs to whichever device plugin the
+	// cluster's administrator installed rather than to the fabric. EFA is the one protocol with a
+	// single possible answer -- its plugin is AWS's own -- so it falls back to that name, and the
+	// declaration overrides it. A protocol with neither renders no request, which is what every
+	// backend written before this field did.
+	if deviceResource == "" {
+		if protocol != "efa" {
+			return
+		}
+
+		deviceResource = string(efaDeviceResource)
 	}
 
 	// The device allocation, and nothing else. The libfabric an EFA member runs on travels in the
@@ -769,7 +782,8 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
 	if container.Resources.Limits == nil {
 		container.Resources.Limits = core.ResourceList{}
 	}
-	container.Resources.Limits[efaDeviceResource] = *resource.NewQuantity(1, resource.DecimalSI)
+
+	container.Resources.Limits[core.ResourceName(deviceResource)] = *resource.NewQuantity(1, resource.DecimalSI)
 }
 
 // memberTerminationGracePeriodSeconds is how long the kubelet waits after SIGTERM before it kills
