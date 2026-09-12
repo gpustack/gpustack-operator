@@ -2,6 +2,7 @@ package worker
 
 import (
 	"maps"
+	"strings"
 
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -135,10 +136,29 @@ func modelDeploymentServicePort(role *workercore.ModelDeploymentRole) core.Conta
 // It is derived rather than read back off the Service, because the in-cluster DNS name is decided by
 // the Service's name and namespace — both of which this operator chose — and a ClusterIP is neither
 // the address callers use nor stable across a recreate.
+//
+// THE SCHEME IS READ FROM THE SAME ROLE THE PORT IS, and it has to be: a role serving over TLS that
+// is published as http:// is an address no client can use, while the replica behind it is graded
+// Ready by a probe that did speak TLS. The two would then be separate facts, which is exactly what
+// the gates exist to prevent. The first role decides both, because it is the role this Service
+// fronts.
+//
+// It is read from the role's OWN arguments rather than from a rendered command line, which this
+// function has no way to build. That is sound only because the operator's own contributions carry no
+// listen or TLS flag, which is asserted by a test rather than assumed here.
 func modelDeploymentEndpoint(md *workercore.ModelDeployment) string {
-	port := modelDeploymentServicePort(&md.Spec.Roles[0])
+	role := &md.Spec.Roles[0]
+	port := modelDeploymentServicePort(role)
 
-	return "http://" + md.Name + "." + md.Namespace + ".svc:" + strconvx.Itoa(int(port.ContainerPort))
+	// ONLY THE SCHEME IS WANTED HERE, and discarding the other answer is deliberate rather than an
+	// oversight. It reports whether a PROBE may grade the listener, which is a different question
+	// from what a client should dial: a role that moved its listener has a wrong published port
+	// either way, and one demanding a client certificate still serves TLS. Neither is an error, and
+	// turning this into one would refuse to publish an address that is correct.
+	scheme, _ := modelDeploymentEngineTransport(modelDeploymentRoleArgs(role))
+
+	return strings.ToLower(string(scheme)) + "://" +
+		md.Name + "." + md.Namespace + ".svc:" + strconvx.Itoa(int(port.ContainerPort))
 }
 
 // alignModelDeploymentService folds the rendered Service onto the observed one and reports whether

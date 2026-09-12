@@ -363,15 +363,24 @@ appearing as an unattributable `ImagePullBackOff`.
 
 `status.phase` is the field to read first: `Starting`, `Ready`, `Degraded` or `Deleting`. `Degraded`
 means some replicas are ready and some are not — serving, at less than the capacity asked for.
-`status.roles[]` carries `name`, `kind`, `desired`, `ready`, `unmanaged` and `assignedFlavor` per role,
-and `status.endpoint` is the address the deployment-wide Service serves on, in the form
-`http://<name>.<namespace>.svc:<port>`.
+`status.roles[]` carries `name`, `kind`, `desired`, `ready`, `unmanaged` and `assignedFlavor` per role.
+
+`status.endpoint` is the address the deployment-wide Service serves on, in the form
+`<scheme>://<name>.<namespace>.svc:<port>`. The scheme is read from the same role the port is — the
+first one — and is `https` only where that role passes `--ssl-certfile` or `--ssl-keyfile`.
+
+> **Why** — either flag alone is enough, and the rest of the `--ssl-*` family is not enough. Both
+> engines hand every ssl argument to uvicorn, which turns on TLS for those two and for nothing else,
+> so `--ssl-ca-certs`, `--ssl-ciphers`, `--ssl-keyfile-password` or `--ssl-cert-reqs` passed by
+> itself leaves an ordinary HTTP server.
 
 **`ready` counts replicas whose engine answered, not replicas whose process started** — for every
-role except the three shapes listed below, which carry no gates and keep the weaker meaning. A gated
-replica carries a startup gate and a readiness gate, both reading the engine's own `GET /health` on
-the port the Service targets, so `ready == desired` and "the endpoint answers" are one fact rather
-than two. One still loading its model counts as not ready for as long as that takes.
+role except the three shapes listed below, which carry no gates and keep the weaker meaning. One
+still loading its model counts as not ready for as long as that takes.
+
+A gated replica carries a startup gate, a readiness gate and a liveness gate, all reading the
+engine's own `GET /health` on the port the Service targets, so `ready == desired` and "the endpoint
+answers" are one fact rather than two.
 
 The KV cache store's leader answers a route of the same name that is deliberately **not** a readiness
 signal — see [KV Cache Leader](../kv-cache/leader.md). They are different programs, and only the
@@ -380,6 +389,18 @@ engine's route is read here.
 **The startup gate allows thirty minutes per attempt, not in total.** A replica that has not
 answered by then is restarted and gets the same budget again, so a model that never finishes loading
 is a restart loop rather than a replica stuck at not-ready.
+
+**The liveness gate never sees that window**, because the kubelet suppresses liveness and readiness
+alike until the startup gate succeeds.
+
+⛔ **A replica that stops answering loses readiness first, and is restarted only if it stays quiet
+for longer.** The liveness gate's failure threshold is wider than the readiness gate's.
+
+> **Why** — the two cost different things: losing readiness withdraws a replica from the Service and
+> is undone by answering again, while a restart throws away a model that took the startup budget to
+> load. Equal thresholds would collapse them into one event. And without the liveness gate such a
+> replica has no way back at all, since this operator deletes a replica only for a group rebuild, a
+> scale-down or a spec change — never because it went quiet.
 
 **The operator tells the engine where to listen.** It renders `--host 0.0.0.0` and `--port <the port
 the Service targets>` into the engine's own command line, so the address traffic is sent to and the
@@ -390,14 +411,20 @@ unreachable on one of them.
 ⛔ **Both flags are filled, not owned.** A role that passes either through `extraArgs` keeps its own
 value, and the operator adds only the one that is missing.
 
-**A role that enables TLS is still gated**, over HTTPS. Only the transport moved — the address is
-still the operator's own — and the kubelet does not verify the server certificate on a probe, so a
-self-signed pair is graded like any other.
+**A role that enables TLS is still gated**, over HTTPS, on the criterion above. Only the transport
+moved — the address is still the operator's own — and the kubelet does not verify the server
+certificate on a probe, so a self-signed pair is graded like any other.
 
-⛔ **Three shapes carry neither gate**: a role that replaces the command through `template.command`;
-a role that moves where its engine listens, with `--host`, `--port`, or `--ssl-cert-reqs`, which can
-demand a client certificate a probe has none to present; and a role declaring its port as `UDP` or
-`SCTP`.
+⛔ **Three shapes carry no gates at all**: a role that replaces the command through
+`template.command`; a role that moves where its engine listens, with `--host` or `--port`, or that
+demands a client certificate a probe has none to present, with `--ssl-cert-reqs` set to anything but
+`0` or `1` **alongside a certificate or key**; and a role declaring its port as `UDP` or `SCTP`.
+
+> **Why** the value — that flag is an integer, and only `0` (`CERT_NONE`, the default) and `1`
+> (`CERT_OPTIONAL`) let a certificate-less probe through, so a role passing either keeps all three
+> gates. Everything else withdraws them: `2`, a value outside that enum, one that is not a number,
+> and the flag with no value at all. Losing a gate costs a signal, while fitting one to a listener
+> that refuses it restarts a replica that is serving.
 
 The first two fail one way and the third the other. Gating an address the operator does not know
 would restart a replica answering every request; an HTTP engine speaks TCP whatever the declaration

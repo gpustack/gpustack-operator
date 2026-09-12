@@ -66,16 +66,47 @@ const (
 	// a Service endpoint and a kubelet probe both dial. An engine left on its own default may open
 	// the loopback address instead, where only a process inside that container can reach it.
 	modelDeploymentEngineBindHost = "0.0.0.0"
-	// modelDeploymentEngineTLSArgPrefix opens the whole family that turns the engine's listener into
-	// a TLS one -- certificate, key, CA bundle, client-certificate mode. Both supported engines spell
-	// it this way, which is why a prefix is used rather than five names two engines have to agree on.
-	modelDeploymentEngineTLSArgPrefix = "--ssl-"
-	// modelDeploymentEngineTLSClientAuthArg is the one member of that family a gate cannot follow.
-	// The others move the listener to TLS, which a probe can be told to speak; this one can demand a
-	// CLIENT certificate, and a kubelet probe has none to present.
+	// modelDeploymentEngineTLSCertArg and modelDeploymentEngineTLSKeyArg are the ONLY two flags that
+	// turn the engine's listener into a TLS one, and the whole --ssl-* family is deliberately not
+	// used in their place.
+	//
+	// Both supported engines pass every ssl argument straight to uvicorn, which enables TLS on
+	// `ssl_keyfile or ssl_certfile` and on nothing else. --ssl-ca-certs, --ssl-ciphers,
+	// --ssl-keyfile-password and --ssl-cert-reqs passed ALONE all leave an ordinary HTTP server, so
+	// treating the prefix as the family would publish an https:// address for a listener serving
+	// plaintext.
+	//
+	// WHERE TO RE-CHECK THIS, since it is engine behavior and nothing here can enforce it: uvicorn's
+	// Config.is_ssl, reached from vllm's api_server.py serve_http call and from sglang's
+	// http_server.py launch_server. Each engine ALSO logs a line of its own about SSL being enabled,
+	// computed differently -- vllm from keyfile AND certfile -- and neither line decides the
+	// listener. Read the uvicorn property, not the log statement.
+	//
+	// THE SCOPE IS COMMAND-LINE FLAGS. An engine that grew an environment variable putting the same
+	// listener on TLS would not be seen here, and both the probe and the published address would
+	// then say http:// for a TLS listener. No such variable exists in either engine today.
+	modelDeploymentEngineTLSCertArg = "--ssl-certfile"
+	modelDeploymentEngineTLSKeyArg  = "--ssl-keyfile"
+	// modelDeploymentEngineTLSClientAuthArg is the one TLS-related flag a gate cannot always follow:
+	// it can demand a CLIENT certificate, and a kubelet probe has none to present. It withdraws the
+	// gate only where one of the two above turned TLS on -- uvicorn builds no TLS context for it to
+	// apply to otherwise -- and only at the VALUE below.
 	modelDeploymentEngineTLSClientAuthArg = "--ssl-cert-reqs"
+	// modelDeploymentEngineTLSClientAuthNone and modelDeploymentEngineTLSClientAuthOptional are
+	// ssl.CERT_NONE and ssl.CERT_OPTIONAL, the only two values of that flag under which a kubelet
+	// probe still completes: the first asks for no certificate, the second verifies one only if the
+	// client offers it.
+	//
+	// THEY ARE AN ALLOW LIST, not a "reject on CERT_REQUIRED" test, and the difference shows on a
+	// value outside the enum. ssl defines exactly these plus CERT_REQUIRED, so a 3 or a -1 is a
+	// configuration this operator cannot reason about; a test naming only the rejecting value would
+	// read it as safe and gate a listener whose behavior is unknown. Everything not on this list
+	// withdraws the gates, which matches how an unreadable value is treated below and for the same
+	// reason.
+	modelDeploymentEngineTLSClientAuthNone     = 0
+	modelDeploymentEngineTLSClientAuthOptional = 1
 
-	// modelDeploymentProbePath is the route both gates read, and it is the ONLY route both supported
+	// modelDeploymentProbePath is the route all three gates read, and it is the ONLY route both supported
 	// engines answer usefully -- which they do for OPPOSITE reasons, so neither engine's behavior
 	// may be used to reason about the other.
 	//
@@ -94,7 +125,8 @@ const (
 	// in its data-parallel supervisor, not in the server a role runs.
 	modelDeploymentProbePath = "/health"
 
-	// modelDeploymentProbePeriodSeconds paces both gates.
+	// modelDeploymentProbePeriodSeconds paces all three gates, which is what makes their failure
+	// thresholds comparable to each other.
 	modelDeploymentProbePeriodSeconds int32 = 10
 	// modelDeploymentProbeTimeoutSeconds bounds one probe request. It is above the kubelet's
 	// one-second default because the route is served by the same process that is loading the model.
@@ -110,6 +142,15 @@ const (
 	// modelDeploymentReadinessFailureThreshold is how many consecutive failures take a replica that
 	// HAS served out of the Service's endpoints.
 	modelDeploymentReadinessFailureThreshold int32 = 3
+	// modelDeploymentLivenessFailureThreshold is how many consecutive failures restart a replica
+	// whose engine answered once and then stopped answering.
+	//
+	// It is deliberately wider than the readiness threshold, because the two failures cost different
+	// things. Losing readiness withdraws a replica from the Service and is recovered by answering
+	// again, so a brief stall should reach it first. A restart throws away a model that took the
+	// startup budget above to load, so only a failure that outlives the readiness one should reach
+	// it.
+	modelDeploymentLivenessFailureThreshold int32 = 6
 )
 
 // ModelDeploymentRenderInput is everything one replica's Pod is rendered from.
@@ -242,7 +283,7 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 		// narrower list here than appendModelDeploymentBindArgs scans is how the two would come to
 		// disagree: a connector argument carrying one of these flags would be honored by the fill
 		// and invisible to the gate.
-		scheme, gradable = modelDeploymentProbeScheme(command)
+		scheme, gradable = modelDeploymentEngineTransport(command)
 		command = appendModelDeploymentBindArgs(
 			command, modelDeploymentServicePort(role).ContainerPort)
 	}
@@ -260,7 +301,7 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 		mounts = append(mounts, in.Connector.VolumeMounts...)
 	}
 
-	startupProbe, readinessProbe := modelDeploymentProbes(role, scheme, gradable)
+	startupProbe, readinessProbe, livenessProbe := modelDeploymentProbes(role, scheme, gradable)
 
 	mainC := core.Container{
 		Name:            "main",
@@ -274,6 +315,7 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 		VolumeMounts:   mounts,
 		StartupProbe:   startupProbe,
 		ReadinessProbe: readinessProbe,
+		LivenessProbe:  livenessProbe,
 	}
 	if tmpl.Privileged {
 		mainC.SecurityContext = &core.SecurityContext{Privileged: ptr.To(true)}
@@ -449,56 +491,136 @@ func modelDeploymentArgsName(command []string, name string) bool {
 	return false
 }
 
-// modelDeploymentProbeScheme reports the scheme a gate would have to read, and whether the operator
-// can grade this replica's endpoint at all.
+// modelDeploymentEngineTransport reports the scheme the engine's listener speaks, and whether the
+// operator can grade that listener at all.
 //
-// IT READS THE RENDERED COMMAND LINE, not the role's extra arguments, and it must be called BEFORE
-// the listen address is filled in. The fill skips a flag wherever it already appears -- base argv,
-// connector arguments, extra arguments -- so a check reading a narrower list would honor a
-// connector-supplied port and then grade the operator's own.
+// TWO FLAGS TURN THE LISTENER INTO A TLS ONE, and the rest of the --ssl-* family does not. Both
+// supported engines hand every ssl argument to uvicorn without deciding anything themselves, and
+// uvicorn enables TLS on `ssl_keyfile or ssl_certfile` alone. A CA bundle, a cipher list, a key
+// password or a client-certificate mode passed BY ITSELF leaves an ordinary HTTP server -- so a
+// prefix over the whole family would publish https:// for a listener serving plaintext, and withhold
+// a gate that would have worked. Each engine also logs its own idea of "SSL enabled" from a
+// different expression; those lines decide nothing and are not what this follows.
 //
-// THE TWO ANSWERS ARE NOT THE SAME QUESTION. --host and --port move WHERE the engine listens, and
-// the operator then leaves them alone, so it no longer knows the address and cannot grade anything.
-// A take-over role never reaches this function at all: its argv is not the operator's to read.
-// The --ssl-* family moves HOW: the address is still the operator's own, and a probe can be told to
-// speak TLS, so those roles stay gated rather than losing readiness to one ordinary flag. Both
-// supported engines spell that family alike, which is why a prefix covers it.
+// THE TWO ANSWERS ARE INDEPENDENT, and deciding either one mid-scan would decide the other. Whether
+// a client certificate may be demanded is only meaningful once TLS is on, and the two flags can
+// arrive in either order, so both are collected before either answer is formed.
 //
-// ONE MEMBER OF THE FAMILY IS THE EXCEPTION. --ssl-cert-reqs can demand a client certificate, and a
-// kubelet probe has none to present, so a gate would fail against a listener serving every real
-// client correctly. That case declines like an address it does not know.
+// IT READS THE RENDERED COMMAND LINE where one exists, and it must then be called BEFORE the listen
+// address is filled in. The fill skips a flag wherever it already appears -- base argv, connector
+// arguments, extra arguments -- so a check reading a narrower list would honor a connector-supplied
+// port and then grade the operator's own.
 //
-// The kubelet does not verify the server certificate on an HTTPS probe, so a self-signed pair is
-// graded as readily as a public one.
-func modelDeploymentProbeScheme(command []string) (core.URIScheme, bool) {
-	scheme := core.URISchemeHTTP
-	for _, arg := range command {
-		switch name := ModelDeploymentArgName(arg); {
-		case name == modelDeploymentEngineHostArg, name == modelDeploymentEnginePortArg:
-			return "", false
-		case name == modelDeploymentEngineTLSClientAuthArg:
-			return "", false
-		case strings.HasPrefix(name, modelDeploymentEngineTLSArgPrefix):
-			scheme = core.URISchemeHTTPS
+// WHAT WITHDRAWS THE GATE. --host and --port move WHERE the engine listens, and the operator then
+// leaves them alone, so it no longer knows the address and cannot grade it; the scheme such a
+// listener speaks is still observable, and is still reported. --ssl-cert-reqs can demand a CLIENT
+// certificate, which a kubelet probe has none to present -- but only where TLS is actually on,
+// because uvicorn builds no TLS context for it to apply to otherwise.
+//
+// Everything else about TLS stays gated: the address is still the operator's own, only the transport
+// moved, and the kubelet does not verify the server certificate on an HTTPS probe, so a self-signed
+// pair is graded as readily as a public one.
+func modelDeploymentEngineTransport(command []string) (core.URIScheme, bool) {
+	var tls, clientAuth, moved bool
+
+	for i, arg := range command {
+		switch ModelDeploymentArgName(arg) {
+		case modelDeploymentEngineHostArg, modelDeploymentEnginePortArg:
+			moved = true
+		case modelDeploymentEngineTLSCertArg, modelDeploymentEngineTLSKeyArg:
+			tls = true
+		case modelDeploymentEngineTLSClientAuthArg:
+			// Assigned rather than OR-ed, so a repeated flag settles on its last occurrence, which
+			// is the value the engine's own parser keeps.
+			clientAuth = modelDeploymentDemandsClientCert(command, i)
 		}
 	}
 
-	return scheme, true
+	scheme := core.URISchemeHTTP
+	if tls {
+		scheme = core.URISchemeHTTPS
+	}
+
+	return scheme, !moved && (!tls || !clientAuth)
 }
 
-// modelDeploymentProbes renders the startup and readiness gates a replica is graded by, or nothing
-// at all for a role that took over the command line.
+// modelDeploymentDemandsClientCert reports whether the --ssl-cert-reqs at index i asks for a client
+// certificate the kubelet cannot present.
+//
+// ANYTHING BUT A KNOWN-PERMISSIVE VALUE MEANS YES, which is the cautious direction for this
+// particular question. Withdrawing a gate costs a replica the readiness signal it had before any of
+// this existed; fitting one to a listener that then refuses the probe leaves a replica serving every
+// real client while the kubelet restarts it every startup budget. The first is a lost improvement,
+// the second is an outage -- so an unreadable value, a missing one, and a number outside the enum
+// are all treated alike as the refusal.
+//
+// The value is read as an INTEGER rather than compared as text, because the engine's parser does the
+// same and "02" is CERT_REQUIRED to it.
+func modelDeploymentDemandsClientCert(command []string, i int) bool {
+	_, value, ok := strings.Cut(command[i], "=")
+	if !ok {
+		if i+1 >= len(command) {
+			// The flag ends the command line, so it has no value to read at all.
+			return true
+		}
+
+		value = command[i+1]
+	}
+
+	mode, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return true
+	}
+
+	return mode != modelDeploymentEngineTLSClientAuthNone &&
+		mode != modelDeploymentEngineTLSClientAuthOptional
+}
+
+// modelDeploymentRoleArgs is the part of a replica's command line the ROLE contributes, which is the
+// only part that can carry a listen or a TLS flag.
+//
+// It exists so that a caller with nothing but the spec -- the published endpoint is derived from the
+// spec alone -- reaches the same answer the rendered command line would give it.
+//
+// IT IS A NARROWER LIST THAN THE RENDER SCANS, and the two agree only because of an invariant this
+// function cannot enforce: the engine's base argv and the connector's rendered arguments carry no
+// listen or TLS flag. A connector that grew one would put an HTTPS probe on a replica whose
+// published address still said http://. That is why the invariant is asserted against what
+// inject.Render actually emits, rather than left as a promise here.
+//
+// A take-over role contributes its whole argv and nothing else: the extra arguments are not appended
+// to a command the user replaced, so reading them here would describe a command line that is not
+// being run.
+func modelDeploymentRoleArgs(role *workercore.ModelDeploymentRole) []string {
+	if role.Template != nil && len(role.Template.Command) > 0 {
+		return role.Template.Command
+	}
+
+	return role.ExtraArgs
+}
+
+// modelDeploymentProbes renders the startup, readiness and liveness gates a replica is graded by, or
+// nothing at all for a role that took over the command line.
 //
 // WITHOUT THEM THE KUBELET REPORTS READY AS SOON AS THE PROCESS STARTS, which is a different fact
 // from the engine serving and is separated from it by the whole model load. Every reader of
 // status.roles[].ready and of status.endpoint takes the first for the second.
 //
-// THE TWO GATES ARE NOT REDUNDANT. Readiness alone would have to carry the entire load window in its
-// failure threshold, which is the same as having no early failure detection at all; a startup gate
-// carries that window instead and hands over to a tight readiness gate once the engine has answered
-// once. Nothing here grades liveness: on one supported engine this route answers 503 for the whole
-// load, so a liveness gate reading it would restart a replica that is loading normally -- turning a
-// slow start into a crash loop, which is worse than the late-Ready this fixes.
+// THE THREE GATES ARE NOT REDUNDANT. Readiness alone would have to carry the entire load window in
+// its failure threshold, which is the same as having no early failure detection at all; a startup
+// gate carries that window instead and hands over to the other two once the engine has answered
+// once.
+//
+// THE LIVENESS GATE IS SAFE ONLY BECAUSE THE STARTUP GATE EXISTS. On one supported engine this route
+// answers 503 for the whole load, and a liveness gate reading it on its own would restart a replica
+// that is loading normally. It never sees that window: the kubelet suppresses both liveness and
+// readiness until the startup gate has succeeded, so by the time liveness runs, a 503 means an
+// engine that answered once and stopped.
+//
+// WITHOUT IT SUCH A REPLICA HAS NO RECOVERY PATH. Losing readiness only withdraws it from the
+// Service; the Pod keeps running, keeps the accelerators Kueue admitted it with, and this controller
+// deletes a replica only when the group is rebuilt, when the spec no longer names it, or when its
+// rendered spec changed -- never because it stopped answering.
 //
 // A TAKE-OVER ROLE GETS NEITHER, for the reason the command, the connector volumes and the client
 // environment above it are also withheld: the operator did not build that command line, so it cannot
@@ -533,38 +655,35 @@ func modelDeploymentProbeScheme(command []string) (core.URIScheme, bool) {
 // than two that a test has to compare.
 func modelDeploymentProbes(
 	role *workercore.ModelDeploymentRole, scheme core.URIScheme, gradable bool,
-) (startup, readiness *core.Probe) {
+) (startup, readiness, liveness *core.Probe) {
 	if !gradable {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	servicePort := modelDeploymentServicePort(role)
 	if servicePort.Protocol != core.ProtocolTCP {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	port := intstr.FromInt32(servicePort.ContainerPort)
-	handler := func() core.ProbeHandler {
-		return core.ProbeHandler{
-			HTTPGet: &core.HTTPGetAction{
-				Path:   modelDeploymentProbePath,
-				Port:   port,
-				Scheme: scheme,
+	gate := func(failureThreshold int32) *core.Probe {
+		return &core.Probe{
+			ProbeHandler: core.ProbeHandler{
+				HTTPGet: &core.HTTPGetAction{
+					Path:   modelDeploymentProbePath,
+					Port:   port,
+					Scheme: scheme,
+				},
 			},
+			PeriodSeconds:    modelDeploymentProbePeriodSeconds,
+			TimeoutSeconds:   modelDeploymentProbeTimeoutSeconds,
+			FailureThreshold: failureThreshold,
 		}
 	}
 
-	return &core.Probe{
-			ProbeHandler:     handler(),
-			PeriodSeconds:    modelDeploymentProbePeriodSeconds,
-			TimeoutSeconds:   modelDeploymentProbeTimeoutSeconds,
-			FailureThreshold: modelDeploymentStartupFailureThreshold,
-		}, &core.Probe{
-			ProbeHandler:     handler(),
-			PeriodSeconds:    modelDeploymentProbePeriodSeconds,
-			TimeoutSeconds:   modelDeploymentProbeTimeoutSeconds,
-			FailureThreshold: modelDeploymentReadinessFailureThreshold,
-		}
+	return gate(modelDeploymentStartupFailureThreshold),
+		gate(modelDeploymentReadinessFailureThreshold),
+		gate(modelDeploymentLivenessFailureThreshold)
 }
 
 // mergeModelDeploymentEnv folds the three tiers into one environment list.

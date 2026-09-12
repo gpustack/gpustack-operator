@@ -13,6 +13,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
 func getModelDeploymentService(t *testing.T, cli ctrlcli.Client) *core.Service {
@@ -240,6 +241,186 @@ func TestModelDeploymentEndpoint(t *testing.T) {
 		md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{{Port: 9000, Protocol: core.ProtocolTCP}}
 	})
 	assert.Equal(t, "http://qwen.team-a.svc:9000", modelDeploymentEndpoint(md))
+}
+
+// TestModelDeploymentEndpoint_Scheme pins the transport the published address claims.
+//
+// A ROLE SERVING OVER TLS PUBLISHED AS http:// IS AN ADDRESS NO CLIENT CAN USE, and the replica
+// behind it is graded Ready by a probe that did speak TLS -- so "ready" and "the endpoint answers"
+// would be two facts again, which is what the gates exist to prevent.
+func TestModelDeploymentEndpoint_Scheme(t *testing.T) {
+	testCases := []struct {
+		name      string
+		extraArgs []string
+		command   []string
+		expected  string
+	}{
+		{
+			// THE POSITIVE BASELINE. Without it, an implementation that answered https:// to
+			// everything would pass every other case here.
+			name:     "a role adding no arguments is published over http",
+			expected: "http://qwen.team-a.svc:8000",
+		},
+		{
+			name:      "an argument whose value merely contains ssl does not move the transport",
+			extraArgs: []string{"--served-model-name", "ssl-demo"},
+			expected:  "http://qwen.team-a.svc:8000",
+		},
+		{
+			// A CERTIFICATE ALONE IS ENOUGH, and reading the criterion as "certificate AND key"
+			// would publish http:// for a listener uvicorn really does put on TLS -- it enables it
+			// on `ssl_keyfile or ssl_certfile`. Each engine separately logs its own idea of "SSL
+			// enabled" from a stricter expression; those lines decide nothing.
+			name:      "a certificate alone moves it",
+			extraArgs: []string{"--ssl-certfile", "/etc/tls/tls.crt"},
+			expected:  "https://qwen.team-a.svc:8000",
+		},
+		{
+			name:      "a key alone moves it too, spelled with an equals sign",
+			extraArgs: []string{"--ssl-keyfile=/etc/tls/tls.key"},
+			expected:  "https://qwen.team-a.svc:8000",
+		},
+		{
+			// THE REST OF THE FAMILY DOES NOT MOVE IT. uvicorn builds no TLS context for a CA
+			// bundle, a cipher list, a key password or a client-certificate mode on their own, so
+			// the server stays plaintext and an https:// address would be unusable.
+			name:      "a CA bundle alone leaves it plaintext",
+			extraArgs: []string{"--ssl-ca-certs", "/etc/tls/ca.crt"},
+			expected:  "http://qwen.team-a.svc:8000",
+		},
+		{
+			name:      "and so does a client-certificate mode with nothing to apply it to",
+			extraArgs: []string{"--ssl-cert-reqs", "2"},
+			expected:  "http://qwen.team-a.svc:8000",
+		},
+		{
+			// THE CASE THE PROBE DECLINES AND THE ADDRESS MUST NOT. Once a certificate is present
+			// the client-certificate mode bites: the replica is ungradable, because a kubelet probe
+			// has no certificate to present -- and it is serving TLS, so an address saying otherwise
+			// is wrong for every real client.
+			name:      "a client certificate demanded over real TLS is ungradable and still https",
+			extraArgs: []string{"--ssl-certfile", "/etc/tls/tls.crt", "--ssl-cert-reqs", "2"},
+			expected:  "https://qwen.team-a.svc:8000",
+		},
+		{
+			// Moving WHERE it listens withdraws the gate without touching the transport, which is
+			// the other half of the pair above.
+			name:      "moving the port alone leaves the transport as it was",
+			extraArgs: []string{"--port", "9100"},
+			expected:  "http://qwen.team-a.svc:8000",
+		},
+		{
+			name:      "a take-over role is read from the argv it replaced the command with",
+			command:   []string{"python", "-m", "vllm.entrypoints.openai.api_server", "--ssl-certfile", "/x"},
+			extraArgs: []string{"--ssl-certfile", "/ignored"},
+			expected:  "https://qwen.team-a.svc:8000",
+		},
+		{
+			// THE EXTRA ARGUMENTS OF A TAKE-OVER ROLE ARE NOT APPENDED to the command it replaced,
+			// so reading them would describe a command line that is not being run.
+			name:      "and not from the extra arguments that command line never receives",
+			command:   []string{"python", "-m", "vllm.entrypoints.openai.api_server"},
+			extraArgs: []string{"--ssl-certfile", "/never-reaches-the-engine"},
+			expected:  "http://qwen.team-a.svc:8000",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ExtraArgs = tc.extraArgs
+				md.Spec.Roles[0].Template.Command = tc.command
+			})
+
+			assert.Equal(t, tc.expected, modelDeploymentEndpoint(md))
+		})
+	}
+}
+
+// TestModelDeploymentEndpointReadsEveryFlagTheEngineGets is the gate under the one assumption
+// modelDeploymentEndpoint makes that it cannot check for itself.
+//
+// The published address is derived from the spec, which cannot show it a rendered command line, so
+// it reads the ROLE's arguments alone. That is sound only while the operator's own contributions --
+// the engine's base argv and every connector's arguments -- carry no listen or TLS flag. Nothing in
+// the type system says so, and a connector that grew one would render an HTTPS probe for a replica
+// whose published address still said http://, for the same replica. This fails on that day.
+func TestModelDeploymentEndpointReadsEveryFlagTheEngineGets(t *testing.T) {
+	operatorArgs := []string{}
+
+	for _, engine := range []string{
+		workercore.ModelDeploymentEngineVLLM,
+		workercore.ModelDeploymentEngineSGLang,
+	} {
+		command, err := ModelDeploymentEngineCommand(engine, "Qwen/Qwen2.5-72B-Instruct")
+		require.NoError(t, err, "engine %q", engine)
+		operatorArgs = append(operatorArgs, command...)
+	}
+
+	// THE CONNECTOR'S ARGUMENTS ARE TAKEN FROM THE RENDERER THAT PRODUCES THEM, not from
+	// modelDeploymentOwnedKeys. That catalog is what the validating webhook REFUSES a user for; what
+	// actually reaches a command line is inject.Render's output, and nothing makes the two equal. A
+	// check reading the catalog would pass while the renderer emitted a flag the catalog never
+	// listed -- which is the failure this test exists to catch, so it would be checking the one
+	// thing that cannot break.
+	//
+	// inject.Engines() is enumerated rather than restated, because it is wider than the set a user
+	// may name: the operator derives vllm-ascend from the pool's accelerator, so a check over the
+	// nameable engines alone would miss a third renderer. The roles are the three ParseRole accepts,
+	// filtered by SupportsRole so an unsupported pairing is skipped rather than asserted on.
+	rendered := 0
+	for _, engine := range inject.Engines() {
+		for _, role := range []inject.Role{inject.RoleNone, inject.RolePrefill, inject.RoleDecode} {
+			if !inject.SupportsRole(engine, role) {
+				continue
+			}
+
+			// AN ENGINE MAY REFUSE A TRANSPORT -- vllm-ascend takes only "ascend" -- and the table
+			// stating which is not exported. Rather than restate it here, where it would go stale
+			// silently, each candidate is tried and the first that renders is used. An engine none
+			// of them satisfies fails LOUDLY below rather than being skipped, which is the whole
+			// difference between this and a check that quietly measures nothing.
+			var res *inject.Result
+			for _, protocol := range []string{"tcp", "ascend"} {
+				r, err := inject.Render(inject.Input{
+					Engine: engine,
+					Role:   role,
+					Domain: "tenant-a",
+					Connection: inject.Connection{
+						MasterAddress: "kvcache.gpustack-system.svc:50051",
+						Protocol:      protocol,
+					},
+				})
+				if err == nil {
+					res = r
+
+					break
+				}
+			}
+			require.NotNil(t, res,
+				"engine %q role %q rendered under no candidate transport; add the one it takes",
+				engine, role)
+			require.NotEmpty(t, res.Args, "engine %q role %q renders no argument at all", engine, role)
+
+			operatorArgs = append(operatorArgs, res.Args...)
+			rendered++
+		}
+	}
+
+	require.NotEmpty(t, operatorArgs, "a check over an empty list is vacuously true")
+	// The count is stated so that a renderer which stopped emitting arguments, or an engine dropped
+	// from Engines(), shows up as a smaller denominator rather than as a check that still passes.
+	require.Equal(t, 7, rendered,
+		"three engines, two of them with three roles and sglang with one; update this figure "+
+			"deliberately when that changes")
+
+	scheme, gradable := modelDeploymentEngineTransport(operatorArgs)
+	assert.Equal(t, core.URISchemeHTTP, scheme,
+		"an operator-supplied TLS flag would move the transport where the published address "+
+			"cannot see it")
+	assert.True(t, gradable,
+		"an operator-supplied listen flag would move the engine where the published address "+
+			"cannot see it")
 }
 
 // TestModelDeploymentReconciler_ScalingDoesNotRecreateTheService is F9's third acceptance. The

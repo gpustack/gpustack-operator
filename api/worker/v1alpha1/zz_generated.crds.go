@@ -4320,7 +4320,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											XListType: ptr.To[string]("map"),
 										},
 										"endpoint": {
-											Description: "Endpoint is the one address every replica serves behind, in the form\nhttp://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.",
+											Description: "Endpoint is the one address every replica serves behind, in the form\n<scheme>://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.\nThe scheme is https where the first role's own arguments put its listener on TLS, and http\notherwise. A client reads it from here rather than assuming either one.",
 											Type:        "string",
 											MaxLength:   ptr.To[int64](512),
 										},

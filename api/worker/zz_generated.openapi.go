@@ -7388,7 +7388,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 					},
 					"endpoint": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Endpoint is the one address every replica serves behind, in the form http://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.",
+							Description: "Endpoint is the one address every replica serves behind, in the form <scheme>://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.\n\nThe scheme is https where the first role's own arguments put its listener on TLS, and http otherwise. A client reads it from here rather than assuming either one.",
 							MaxLength:   ptr.To[int64](512),
 							Type:        []string{"string"},
 							Format:      "",

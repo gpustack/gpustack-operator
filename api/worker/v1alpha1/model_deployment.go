@@ -446,7 +446,10 @@ type ModelDeploymentStatus struct {
 	Conditions []gpustack.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,3,rep,name=conditions"` // nolint: lll
 
 	// Endpoint is the one address every replica serves behind, in the form
-	// http://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.
+	// <scheme>://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.
+	//
+	// The scheme is https where the first role's own arguments put its listener on TLS, and http
+	// otherwise. A client reads it from here rather than assuming either one.
 	//
 	// +k8s:validation:maxLength=512
 	Endpoint string `json:"endpoint,omitempty" protobuf:"bytes,4,opt,name=endpoint"`
