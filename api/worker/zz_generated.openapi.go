@@ -7171,7 +7171,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref common
 				Properties: map[string]spec.Schema{
 					"accelerator": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Accelerator is how many accelerator cards ONE REPLICA asks for. Absent or zero on an acceleratable InstanceType is a CPU-only replica, which is legitimate for a small model.",
+							Description: "Accelerator is how many accelerator cards ONE REPLICA asks for.\n\nLEFT UNSET ON AN ACCELERATABLE InstanceType IT DEFAULTS TO ONE AT ADMISSION, on create and on update alike, the same way an Instance's does. A role that names no count is asking for the ordinary thing, and the value is written into the stored object rather than applied at render time, so what was admitted is what can be read back.\n\nAN EXPLICIT ZERO IS KEPT, because it is a value the user wrote. On an acceleratable InstanceType it asks for nothing that pool's queue accounts in, since that queue accounts only in accelerator credits. Such a role is admitted only while it is the deployment's ONLY role: add a second role and the deployment is never admitted and never reports why, whether that second role asks for cards or for nothing either. So a zero is safe to state alone and unsafe to combine. A replica meant to run without an accelerator belongs on an InstanceType that is not acceleratable, where CPU is what the queue accounts in.",
 							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
 						},
 					},

@@ -3915,7 +3915,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Type:        "object",
 															Properties: map[string]v1.JSONSchemaProps{
 																"accelerator": {
-																	Description: "Accelerator is how many accelerator cards ONE REPLICA asks for. Absent or zero on an\nacceleratable InstanceType is a CPU-only replica, which is legitimate for a small model.",
+																	Description: "Accelerator is how many accelerator cards ONE REPLICA asks for.\nLEFT UNSET ON AN ACCELERATABLE InstanceType IT DEFAULTS TO ONE AT ADMISSION, on create and on\nupdate alike, the same way an Instance's does. A role that names no count is asking for the\nordinary thing, and the value is written into the stored object rather than applied at render\ntime, so what was admitted is what can be read back.\nAN EXPLICIT ZERO IS KEPT, because it is a value the user wrote. On an acceleratable\nInstanceType it asks for nothing that pool's queue accounts in, since that queue accounts only\nin accelerator credits. Such a role is admitted only while it is the deployment's ONLY role:\nadd a second role and the deployment is never admitted and never reports why, whether that\nsecond role asks for cards or for nothing either. So a zero is safe to state alone and unsafe\nto combine. A replica meant to run without an accelerator belongs on an InstanceType that is\nnot acceleratable, where CPU is what the queue accounts in.",
 																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
 																	AnyOf: []v1.JSONSchemaProps{
 																		{

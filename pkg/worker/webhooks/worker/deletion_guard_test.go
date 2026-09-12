@@ -59,11 +59,12 @@ func TestDeletionGuardClassification(t *testing.T) {
 				"ValidateCreate alone",
 		},
 		{
-			name:    "ModelDeployment holds every rule against the object alone",
+			name:    "ModelDeployment holds every VALIDATION rule against the object alone",
 			handler: &ModelDeploymentWebhook{},
 			want:    true,
-			reason: "the handler holds no client at all and ValidateUpdate takes no context, so " +
-				"there is no state it could read that deletion could have taken away",
+			reason: "ValidateUpdate takes no context, so there is no state deletion could have " +
+				"taken away from it; Default does read an InstanceType, and returns early for " +
+				"an object carrying a deletion timestamp rather than keeping the guard",
 		},
 		{
 			name:    "InstanceType freezes its spec except three admin-editable fields",

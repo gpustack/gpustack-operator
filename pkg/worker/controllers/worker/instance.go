@@ -1157,8 +1157,8 @@ func getResourceRequirements(
 //
 // It sits beside getResourceRequirements rather than in the webhook package it was written for,
 // because sizing a request against an InstanceType is now done by two callers — the Instance
-// webhook, which defaults the values onto the object, and the ModelDeployment renderer, which has
-// no mutating webhook and derives them at render time. A second copy of a VRAM-anchored percentage
+// webhook, which defaults the values onto the object, and the ModelDeployment renderer, which
+// derives them at render time because its own mutating webhook defaults the card count alone. A second copy of a VRAM-anchored percentage
 // would be free to drift from this one, and the symptom of that drift is a Pod whose host CPU and
 // memory do not match the fraction of the card it holds.
 func PartitionProfileMemoryPercent(

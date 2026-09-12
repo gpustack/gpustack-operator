@@ -48,8 +48,10 @@ const (
 	// variant, never resolves however long the controller retries, and the deployment would sit in a
 	// state that reads like a slow start forever.
 	//
-	// Admission cannot take this one instead. The check needs the InstanceType's OBSERVED detail,
-	// and the ModelDeployment webhook holds no client by design.
+	// Admission cannot take this one instead, and the reason is not a missing client -- the webhook
+	// now holds one. The check needs the InstanceType's OBSERVED detail, which has not converged on
+	// a freshly created object, so the rule would refuse a legal deployment for losing a race
+	// against the InstanceType reconciler.
 	//
 	// Repeats aggregate into one Event with a count rather than a stream, which is what keeps a
 	// per-pass emission readable.
