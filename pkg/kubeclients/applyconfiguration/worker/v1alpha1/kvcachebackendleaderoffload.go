@@ -21,9 +21,12 @@ type KVCacheBackendLeaderOffloadApplyConfiguration struct {
 	// OnEvict defers the write to disk from the moment a key is stored to the moment it is
 	// evicted, so a key that is never evicted is never written to disk.
 	//
-	// It REQUIRES Enabled. The store ANDs the two, so setting this alone is accepted, echoed back
-	// in the leader's own startup log, and then does nothing — which is why admission refuses it
-	// rather than rendering a flag that reads as taken.
+	// It REQUIRES Enabled, and Enabled REQUIRES it. The store ANDs the two, so setting this alone
+	// is accepted, echoed back in the leader's own startup log, and then does nothing. Setting
+	// Enabled alone selects write-through, which the store leaves unprotected: it holds an object
+	// queued for offload in memory only on the deferred branch this field selects, so evicting
+	// without it destroys the sole replica of an object whose bucket has not been flushed.
+	// Admission refuses both directions.
 	OnEvict *bool `json:"onEvict,omitempty"`
 }
 
