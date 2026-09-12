@@ -52,8 +52,9 @@ const kvCacheBackendTierCleanupDeadline = 5 * time.Minute
 // the backend is being deleted and takes its events with it, while the leftover data and the node
 // outlive it together.
 const (
-	kvCacheBackendEventTierAbandoned = "KVCacheTierNotCleaned"
-	kvCacheBackendEventTierShared    = "KVCacheTierSharedPath"
+	kvCacheBackendEventTierAbandoned     = "KVCacheTierNotCleaned"
+	kvCacheBackendEventTierShared        = "KVCacheTierSharedPath"
+	kvCacheBackendEventTierPartlyEmptied = "KVCacheTierPartlyEmptied"
 )
 
 // cleanKVCacheBackendTier empties the disk tier of a backend being deleted, on every node the
@@ -111,18 +112,39 @@ func (r *KVCacheBackendReconciler) cleanKVCacheBackendTier(
 		// Nothing refuses two backends naming one path, so this is checked here rather than assumed
 		// away.
 		// IT IS A CHECK AND NOT A LOCK, and the difference is worth stating rather than leaving to be
-		// discovered. Another backend created, or widened onto this node, between this read and the
-		// Pod's `rm` would not be seen. Closing that needs an atomic claim on the path, which is a
-		// design this change does not introduce; what it buys today is that the case anybody
-		// actually hits -- a path already declared when the deletion starts -- is refused rather
-		// than acted on. The remaining window is documented for the operator.
+		// discovered. Closing the window entirely needs an atomic claim on the path, which is a
+		// design this change does not introduce.
+		//
+		// WHAT THE CHECK COVERS IS THE POD'S WHOLE LIFE AND NOT THE INSTANT IT RUNS IN, which an
+		// earlier version of this comment got wrong: it described the window as lying between this
+		// read and the Pod's `rm`, when the sharing can begin at any point while that `rm` is still
+		// going. Re-running the check each pass does not on its own reach a removal that has already
+		// started -- the Pod was built by an earlier pass and nothing revisits the decision -- so
+		// skipping the node here would leave the deletion this branch just refused running to
+		// completion, against a directory another backend now holds. The Pod is therefore ENDED
+		// rather than merely not created.
+		//
+		// What still gets through is whatever the `rm` managed between one pass and the next, which
+		// is why the second event exists: a partial removal of another backend's live data is a
+		// different thing to report from a directory left alone.
 		if holder := kvCacheBackendTierSharedWith(kvcb, others, path, node); holder != "" {
+			stopped, serr := r.stopKVCacheBackendTierCleanupPod(ctx, kvcb, node)
+			if serr != nil {
+				return false, serr
+			}
 			r.recordWarning(node, kvCacheBackendEventTierShared,
 				"%s was not emptied for deleted KVCacheBackend %q: KVCacheBackend %q declares an "+
 					"overlapping path on this node and emptying it would remove that backend's data",
 				path, kvcb.Name, holder)
+			if stopped {
+				r.recordWarning(node, kvCacheBackendEventTierPartlyEmptied,
+					"%s may hold a partial result: emptying it for deleted KVCacheBackend %q was "+
+						"already running when KVCacheBackend %q was found to declare an overlapping "+
+						"path, and was stopped; check that backend's data on this node",
+					path, kvcb.Name, holder)
+			}
 			logger.Info("skipped a disk tier shared with another backend",
-				"node", node.Name, "path", path, "sharedWith", holder)
+				"node", node.Name, "path", path, "sharedWith", holder, "stoppedRemoval", stopped)
 			continue
 		}
 
@@ -183,6 +205,52 @@ func (r *KVCacheBackendReconciler) cleanKVCacheBackendTier(
 	// the account of why a node kept its content. The Event is what remains, which is why it names
 	// the path, the backend and the deadline rather than only saying that something was skipped.
 	return true, r.deleteKVCacheBackendTierCleanupPods(ctx, kvcb)
+}
+
+// stopKVCacheBackendTierCleanupPod ends this backend's cleanup on one node and reports whether there
+// was one to end.
+//
+// It is how a decision taken at the top of a pass reaches a removal that a previous pass started. The
+// shared-path check runs every pass, but the `rm` does not ask anything between its own start and its
+// end -- so without this the check refuses to begin a deletion that is already most of the way
+// through, which reads as a refusal and behaves as a completion.
+//
+// THE UID LABEL IS CHECKED AND NOT THE NAME. The name is derived from the backend and the node, so it
+// repeats across incarnations; a Pod belonging to another one is emptying a path on another object's
+// behalf, and ending it here would do to that object exactly what this branch exists to prevent.
+//
+// Ending it is not instantaneous -- the Pod terminates on its own budget -- so this bounds the
+// removal rather than canceling it. That is the same trade the give-up path already takes, and for
+// the same reason: a partially emptied directory is a cost, while a removal nobody can stop running
+// against another backend's live data is a loss.
+func (r *KVCacheBackendReconciler) stopKVCacheBackendTierCleanupPod(
+	ctx context.Context, kvcb *workercore.KVCacheBackend, node *core.Node,
+) (stopped bool, err error) {
+	key := ctrlcli.ObjectKey{
+		Name:      kvCacheBackendTierCleanupPodName(kvcb, node),
+		Namespace: kuberess.SystemNamespaceName,
+	}
+	pod := new(core.Pod)
+	if err = r.Client.Get(ctx, key, pod); err != nil {
+		return false, ctrlcli.IgnoreNotFound(err)
+	}
+	if pod.Labels[kvCacheBackendTierCleanupUIDLabel] != string(kvcb.UID) {
+		return false, nil
+	}
+
+	// Already going, so reporting it stopped would be an event about work this pass did not do; the
+	// removal it names was ended by whichever pass issued the delete.
+	if pod.DeletionTimestamp != nil {
+		return false, nil
+	}
+	if err = r.Client.Delete(ctx, pod); err != nil {
+		if kerrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stop the disk tier cleanup pod on a shared path: %w", err)
+	}
+
+	return true, nil
 }
 
 // kvCacheBackendTierCleanupPods lists the cleanup Pods belonging to one backend.

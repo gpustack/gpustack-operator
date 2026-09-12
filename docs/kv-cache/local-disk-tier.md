@@ -331,14 +331,15 @@ event names the image as the reason rather than the node.
 **A path another backend's tier overlaps is skipped**, with the same kind of event — a directory
 nested inside another backend's tier counts, not only an identical path. Nothing refuses two backends
 naming one directory, and emptying it for the one being deleted would take the other one's live data
-with it.
+with it. A removal already under way when the path becomes shared is **stopped**, not left to finish.
 
-> It is a check and not a lock. A backend created, or widened onto this node, between the check and
-> the removal is not seen. What it refuses is the case that actually occurs: a path already declared
-> when the deletion starts.
+> It is a check and not a lock, and it is re-run on every pass rather than only before the removal
+> starts. What can still get through is whatever that removal managed between one pass and the next,
+> which is reported as its own event — the other backend may have lost data. Closing the window
+> entirely needs an atomic claim on the path, which this operator does not take.
 
 ```console
-$ kubectl describe node <node> | grep -E 'KVCacheTierNotCleaned|KVCacheTierSharedPath'
+$ kubectl describe node <node> | grep -E 'KVCacheTierNotCleaned|KVCacheTierSharedPath|KVCacheTierPartlyEmptied'
 ```
 
 ## What the tier costs that nothing accounts for

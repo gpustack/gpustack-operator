@@ -14,6 +14,7 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -820,4 +821,178 @@ func TestTierCleanupPodOfAnotherIncarnationIsNotBelieved(t *testing.T) {
 	}, got)
 	assert.True(t, kerrors.IsNotFound(err),
 		"the stale Pod has to go, or the next pass reads it again")
+}
+
+// tierCleanupPodOn builds a cleanup Pod that is mid-run on one node, labeled for one incarnation.
+//
+// A terminating one carries a finalizer because the fake client refuses a deletion timestamp without
+// one, which is also what an object being collected in the foreground actually looks like.
+func tierCleanupPodOn(
+	kvcb *workercore.KVCacheBackend, node *core.Node, uid string, terminating bool,
+) *core.Pod {
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Name:      kvCacheBackendTierCleanupPodName(kvcb, node),
+			Namespace: kuberess.SystemNamespaceName,
+			Labels: map[string]string{
+				kvCacheBackendTierCleanupLabel:    kvcb.Name,
+				kvCacheBackendTierCleanupUIDLabel: uid,
+			},
+		},
+		Status: core.PodStatus{Phase: core.PodRunning},
+	}
+	if terminating {
+		pod.DeletionTimestamp = ptr.To(meta.Now())
+		pod.Finalizers = []string{meta.FinalizerDeleteDependents}
+	}
+
+	return pod
+}
+
+// TestTierSharedPathStopsARemovalAlreadyRunning pins that the shared-path check reaches a removal
+// that has already begun, rather than only refusing to begin one.
+//
+// THE FIXTURE NEEDS TWO NODES, AND THAT IS THE WHOLE POINT. With one node the pass ends with nothing
+// pending, and the sweep on the way out deletes every cleanup Pod anyway -- so the removal would stop
+// for a reason that has nothing to do with this check, and the assertion would pass against the
+// defect it is written to catch. A second node still working holds that sweep back, which is the
+// shape the defect appears in: the sharing begins while another node is mid-cleanup, and the `rm` on
+// the shared path runs on to completion against data nobody asked to have removed.
+func TestTierSharedPathStopsARemovalAlreadyRunning(t *testing.T) {
+	const (
+		ours   = "11111111-2222-3333-4444-555555555555"
+		theirs = "99999999-8888-7777-6666-555555555555"
+	)
+
+	for _, tc := range []struct {
+		name string
+		// rivalSelector is what the other backend's group picks; only node-a carries tier=a.
+		rivalSelector  map[string]string
+		podUID         string
+		podTerminating bool
+		wantStopped    bool
+	}{
+		{
+			name:          "the path becomes shared while the removal is running",
+			rivalSelector: map[string]string{"tier": "a"},
+			podUID:        ours,
+			wantStopped:   true,
+		},
+		{
+			name:          "nothing shares the path, so the removal is left to finish",
+			rivalSelector: map[string]string{"tier": "elsewhere"},
+			podUID:        ours,
+			wantStopped:   false,
+		},
+		{
+			name:          "the Pod belongs to another incarnation, which is not this teardown's to end",
+			rivalSelector: map[string]string{"tier": "a"},
+			podUID:        theirs,
+			wantStopped:   false,
+		},
+		{
+			// The teardown re-runs every couple of seconds while any node is still working, so this
+			// is the state every pass after the first one sees. Reported as a fresh stop, it would
+			// republish the partial-removal warning for work an earlier pass did.
+			name:           "an earlier pass already stopped it, so this one stopped nothing",
+			rivalSelector:  map[string]string{"tier": "a"},
+			podUID:         ours,
+			podTerminating: true,
+			wantStopped:    false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kvcb := &workercore.KVCacheBackend{
+				ObjectMeta: meta.ObjectMeta{Name: "store", UID: ours},
+				Spec: workercore.KVCacheBackendSpec{
+					Image: "mooncake:v0.3.13",
+					Connection: workercore.KVCacheBackendConnection{
+						Managed: &workercore.KVCacheBackendManaged{
+							Members: []workercore.KVCacheBackendMember{{
+								LocalDisk: &workercore.KVCacheBackendMemberLocalDisk{
+									Path: "/mnt/tier", CleanAfterDelete: true,
+								},
+							}},
+						},
+					},
+				},
+			}
+			rival := &workercore.KVCacheBackend{
+				ObjectMeta: meta.ObjectMeta{Name: "rival", UID: theirs},
+				Spec: workercore.KVCacheBackendSpec{
+					Connection: workercore.KVCacheBackendConnection{
+						Managed: &workercore.KVCacheBackendManaged{
+							Members: []workercore.KVCacheBackendMember{{
+								LocalDisk:    &workercore.KVCacheBackendMemberLocalDisk{Path: "/mnt/tier"},
+								NodeSelector: tc.rivalSelector,
+							}},
+						},
+					},
+				},
+			}
+			nodeA := &core.Node{ObjectMeta: meta.ObjectMeta{
+				Name: "node-a", Labels: map[string]string{"tier": "a"},
+			}}
+			nodeB := &core.Node{ObjectMeta: meta.ObjectMeta{Name: "node-b"}}
+
+			recorder := record.NewFakeRecorder(10)
+			r := &KVCacheBackendReconciler{
+				Client: ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(
+					kvcb, rival, nodeA, nodeB,
+					tierCleanupPodOn(kvcb, nodeA, tc.podUID, tc.podTerminating),
+					// node-b is still working, so the pass returns with something pending and never
+					// reaches the sweep that would collect every Pod regardless.
+					tierCleanupPodOn(kvcb, nodeB, ours, false),
+				).Build(),
+				Recorder: recorder,
+			}
+
+			done, err := r.cleanKVCacheBackendTier(context.Background(), kvcb)
+			require.NoError(t, err)
+			require.False(t, done,
+				"node-b is mid-cleanup, so this pass must still be waiting -- a done pass would "+
+					"have run the sweep and made the assertion below vacuous")
+
+			err = r.Client.Get(context.Background(), ctrlcli.ObjectKey{
+				Name:      kvCacheBackendTierCleanupPodName(kvcb, nodeA),
+				Namespace: kuberess.SystemNamespaceName,
+			}, new(core.Pod))
+			if tc.wantStopped {
+				assert.True(t, kerrors.IsNotFound(err),
+					"a removal running against a path another backend now holds has to be ended, "+
+						"not merely left out of the next round")
+			} else {
+				assert.NoError(t, err, "nothing here justifies ending this node's removal")
+			}
+
+			err = r.Client.Get(context.Background(), ctrlcli.ObjectKey{
+				Name:      kvCacheBackendTierCleanupPodName(kvcb, nodeB),
+				Namespace: kuberess.SystemNamespaceName,
+			}, new(core.Pod))
+			assert.NoError(t, err,
+				"the node whose path nothing shares keeps working; stopping it would abandon a "+
+					"directory its own administrator asked to have emptied")
+
+			var events []string
+			for {
+				select {
+				case e := <-recorder.Events:
+					events = append(events, e)
+					continue
+				default:
+				}
+				break
+			}
+			partly := strings.Join(events, "\n")
+			if tc.wantStopped {
+				assert.Contains(t, partly, kvCacheBackendEventTierPartlyEmptied,
+					"a removal stopped part-way may already have taken some of the other "+
+						"backend's live data, which is a different thing to report from a "+
+						"directory that was left alone")
+			} else {
+				assert.NotContains(t, partly, kvCacheBackendEventTierPartlyEmptied,
+					"nothing was stopped, so nothing was partly emptied")
+			}
+		})
+	}
 }
