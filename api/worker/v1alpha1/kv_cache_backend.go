@@ -546,13 +546,13 @@ type KVCacheBackendTransport struct {
 	// too; a longer one is admitted by a looser pattern and then fails when it becomes a resource
 	// list key, which strands reconciliation with no member workload and no obvious cause.
 	//
-	// ONE BOUND IS NOT EXPRESSED HERE. The domain as a whole is limited to 253 characters, and a
-	// regular expression cannot say that about a repeated group whose parts vary in length: five
-	// labels of sixty-three characters each clear every rule above and still exceed it. Such a
-	// name is refused when it becomes a resource list key, which is the failure described above.
-	// It is left to that check rather than widened into a second validator here, because the value
-	// is written by hand from a device plugin's own configuration and no plugin publishes a domain
-	// anywhere near that long.
+	// ONE BOUND CANNOT BE EXPRESSED HERE, and admission carries it instead. The domain as a whole
+	// is limited to 253 characters, and a regular expression cannot say that about a repeated group
+	// whose parts vary in length: labels of 63, 63, 63 and 62 characters are each inside their own
+	// limit and make a domain of 254, in a value the 317 above still admits. Every rule stated here
+	// admits that name, so the webhook refuses it rather than letting it become the resource list
+	// key the API server refuses. That half is absent when the webhook is not installed, which is
+	// why the bounds that CAN be stated here still are.
 	//
 	// +k8s:validation:pattern="^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
 	// +k8s:validation:maxLength=317
