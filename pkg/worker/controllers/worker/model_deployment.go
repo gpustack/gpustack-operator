@@ -358,13 +358,23 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			// few seconds of store unavailability would delete every replica of every deployment on
 			// that pool, and each one then reloads its weights. The blip becomes the outage.
 			//
-			// The cost is that this also withholds an unrelated spec change until the connection
-			// returns. A more precise design would keep a base hash without the connector and a
-			// separate connector fingerprint: spec edits would roll from the base hash, connector
-			// changes would compare the fingerprint, and only that comparison would be skipped here.
-			// It was deliberately not built because it needs two annotations and a one-time rebuild of
-			// every replica on upgrade, instead of this one-line guard. If a user reports that a spec
-			// edit did nothing during an outage, that split is the next design to evaluate.
+			// The cost is that this also withholds a spec change that moves a replica's rendered Pod
+			// without moving the group's shape, until the connection returns.
+			//
+			// THE SPLIT THAT WOULD AVOID IT IS REFUSED, and not for the price it was first parked on.
+			// That design keeps a base hash over the spec without the connector beside a separate
+			// connector fingerprint, so a spec edit rolls from the base hash while only the fingerprint
+			// comparison is skipped here. Acting on that precision is what costs: the base hash
+			// difference deletes a replica, any replica leaving rebuilds the whole group, the group is
+			// rebuilt by a pass that still has no connector to give it, and when the store returns the
+			// desired render regains the connector and rebuilds it again. Where an edit is waiting, the
+			// split pays two whole-group reloads in place of one.
+			//
+			// The operator still has that trade, which is what bounds the wait: a change to the replica
+			// counts or to the set of roles moves the group annotations and takes the rebuild branch
+			// above, which runs before this guard and proceeds during an outage, carrying the withheld
+			// edit at exactly that price. Refused here is making the trade on behalf of someone who was
+			// not told what it costs.
 			//
 			// Leaving them alone is also what this design already decided for the neighboring case:
 			// an admin deleting the Binding leaves running Pods running, because tearing down a

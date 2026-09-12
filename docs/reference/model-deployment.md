@@ -549,14 +549,14 @@ read, which is accurate and about a different subject.
 > and proceeds during an outage. What waits is an edit that changes a replica's rendered Pod while
 > leaving the group's shape alone.
 
-> **Why a condition rather than a more precise rollout.** A design that never withholds an unrelated
-> edit exists — a base hash over the spec without the connector plus a separate connector fingerprint,
-> so only the fingerprint comparison is skipped during an outage — and it costs two annotations and a
-> one-time rebuild of every replica on upgrade.
+> **That is also the lever, if you need the edit sooner.** The group-shape change carries the withheld
+> edit through the outage with it, and it costs **two** rebuilds rather than one: every replica reloads
+> now and comes back without a cache, then reloads again when the store returns and the connector is
+> rendered back in.
 
-> Measured, the withheld change lands within seconds of the store returning, so what the guard costs is
-> diagnosability rather than correctness. This condition addresses that at a fraction of the price and
-> rules nothing out later.
+> **The stall is a decision, not a missing feature.** A rollout that never withholds an edit is
+> possible, and it is **refused** — it takes the price above on your behalf, on every deployment with
+> an edit waiting. Measured, a withheld edit lands within seconds of the store returning.
 
 ## Rollout is recreate
 
