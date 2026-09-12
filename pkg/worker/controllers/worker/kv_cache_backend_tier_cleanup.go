@@ -56,24 +56,6 @@ const (
 	kvCacheBackendEventTierShared    = "KVCacheTierSharedPath"
 )
 
-// recordTierWarning publishes one tier warning, and does NOTHING when this reconciler has no
-// recorder.
-//
-// The recorder is assigned in SetupController and nowhere else, so every construction path that
-// skips it -- the test suite's own reconcile helpers do -- would otherwise panic on the first event
-// from a backend that declares a tier. Measured: a nil dereference on the shared-path branch.
-//
-// Degrading to silence is safe because every caller logs the same fact beside the event; the event
-// is what outlives the backend, and a reconciler with no recorder is one nothing is watching.
-func (r *KVCacheBackendReconciler) recordTierWarning(
-	obj ctrlcli.Object, reason, format string, args ...any,
-) {
-	if r.Recorder == nil {
-		return
-	}
-	r.Recorder.Eventf(obj, core.EventTypeWarning, reason, format, args...)
-}
-
 // cleanKVCacheBackendTier empties the disk tier of a backend being deleted, on every node the
 // declaring member group covered.
 //
@@ -135,7 +117,7 @@ func (r *KVCacheBackendReconciler) cleanKVCacheBackendTier(
 		// actually hits -- a path already declared when the deletion starts -- is refused rather
 		// than acted on. The remaining window is documented for the operator.
 		if holder := kvCacheBackendTierSharedWith(kvcb, others, path, node); holder != "" {
-			r.recordTierWarning(node, kvCacheBackendEventTierShared,
+			r.recordWarning(node, kvCacheBackendEventTierShared,
 				"%s was not emptied for deleted KVCacheBackend %q: KVCacheBackend %q declares an "+
 					"overlapping path on this node and emptying it would remove that backend's data",
 				path, kvcb.Name, holder)
@@ -175,7 +157,7 @@ func (r *KVCacheBackendReconciler) cleanKVCacheBackendTier(
 		// on each pass -- and client-go folds repeats into one Event with a count only while the
 		// message is IDENTICAL. An exact age made every repeat a distinct Event, which is how a
 		// single abandoned node turned into a hundred of them.
-		r.recordTierWarning(node, kvCacheBackendEventTierAbandoned,
+		r.recordWarning(node, kvCacheBackendEventTierAbandoned,
 			"%s was not confirmed empty for deleted KVCacheBackend %q: its cleanup was still %s "+
 				"after %s and the deletion was not held open for it; a Pod that never left pending "+
 				"usually means the directory does not exist on this node",
@@ -387,7 +369,7 @@ func (r *KVCacheBackendReconciler) ensureKVCacheBackendTierCleanupPod(
 			//
 			// So it takes the same exit a node past the deadline takes, on the same Event, and the
 			// message names the image as the reason rather than the node.
-			r.recordTierWarning(node, kvCacheBackendEventTierAbandoned,
+			r.recordWarning(node, kvCacheBackendEventTierAbandoned,
 				"%s still holds data from deleted KVCacheBackend %q: no image could be resolved to "+
 					"empty it, and the deletion was not held open for it (%v)",
 				path, kvcb.Name, err)

@@ -158,7 +158,7 @@ func (r *KVCacheBackendReconciler) reportKVCacheBackendTierReuse(
 	// One Event beside the condition, on the transition rather than on every pass: the condition is
 	// what a reader finds later, and the Event is what reaches anybody watching now. Guarded like
 	// the cleanup's, because a reconciler built without a recorder would panic here instead.
-	r.recordTierWarning(kvcb, kvCacheBackendEventTierReused, "%s", message)
+	r.recordWarning(kvcb, kvCacheBackendEventTierReused, "%s", message)
 }
 
 // kvCacheBackendTierSurveyWindow is how long after a backend is created its member Pods are still
