@@ -366,9 +366,7 @@ each segment carries a distinct name even though both Pods answer to the node's 
 on host-network paths (`RDMA` and `EFA`), where both Pods hold the host's network namespace and
 advertise the node's address.
 
-The remedy is to give the groups node selectors that keep them on different nodes. The status reports
-the ambiguity rather than guessing an attribution: it credits the segment to neither Pod, while both
-rows still carry the node and the medium, which every candidate agrees on.
+The remedy is to give the groups node selectors that keep them on different nodes.
 
 A failed listing scrape **keeps** the previous list and sets `MembersMounted=False`; a failed capacity
 scrape **clears** the figures. That asymmetry is deliberate: capacity is two pointers and has an
