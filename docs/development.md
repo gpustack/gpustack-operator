@@ -8,6 +8,7 @@
 ## Contents
 
 - [Commands](#commands)
+- [Checks whose failure reads as success](#checks-whose-failure-reads-as-success)
 - [Shipped specification corrections](#shipped-specification-corrections)
 - [Runtime log verbosity](#runtime-log-verbosity)
 - [API groups & code generation](#api-groups--code-generation)
@@ -108,6 +109,40 @@ lands there, not in this document. Verify a rule change before committing: `npx 
 GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/nodefeature/...
 GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race -run TestExtractGeneralNodeKey ./pkg/nodefeature/
 ```
+
+## Checks whose failure reads as success
+
+REQUIRED: take a check's verdict from its **return code** and from the object under test, never from
+the shape of its output. Each trap below broke with the signal taken as the verdict reading as
+success, while the failure sat in a channel nobody was reading: stderr, a return code, or a line
+that was never printed. The shell traps are about the prompt these commands get typed at, which on
+macOS is zsh; the repository's own scripts run under bash with `pipefail` set.
+
+**An unquoted `$var` does not word-split in zsh.** `FILES="a b c"; cp $FILES $dir` passes the list
+as one filename and the copy fails, where bash would split it into three arguments. Keep a list in
+an array and expand it as `"${FILES[@]}"`: a bare `$FILES` over an array is three words in zsh but
+only its first element in bash. The comparison downstream then read a match, because both sides were
+the empty string a failed `git hash-object` returned.
+
+**zsh arrays are 1-indexed.** A `for i in 0 1 2 3 4` loop over `${IDS[$i]}` drops one end. Two
+arrays stepped together stay aligned, so the other iterations land correctly and the single missing
+one reads as a flake rather than as a boundary error.
+
+**A pipeline reports only its last command.** `make lint | tail -5; echo "rc=$?"` gives `tail`'s
+status, not lint's, unless `pipefail` is set -- and neither zsh nor bash sets it by default. A green
+lint prints nothing after its closing banner, so "the code is 0" and "the last line is the banner"
+confirm each other. Redirect instead: `make lint >/tmp/out.log 2>&1; echo "RC=$?"`.
+
+**An empty result is not a negative result.** A `grep -c` of `0` is a real count from whatever search
+ran, and a dropped `-i` quietly changes which search that is. A command that never ran prints no
+count at all: a missing path, or `-P` on the macOS grep, exits `2` with its message on stderr, where
+`|| echo none` prints the reassuring branch over it. Feed the check an input it MUST match first.
+
+**Let the check veto the cleanup.** Verification and teardown joined by `;` tear down even when the
+verification failed, costing the evidence needed to diagnose it; `&&` is the guard, and it guards
+only a check that exits non-zero. Carry the verdict in the status --
+`[ -n "$a" ] && [ -n "$b" ] && [ "$a" = "$b" ] && rm -rf "$tree"` -- rather than printing `SAME` or
+`DIFF` and returning `0` either way. The non-empty tests matter: two missing values compare equal.
 
 ## Shipped specification corrections
 
