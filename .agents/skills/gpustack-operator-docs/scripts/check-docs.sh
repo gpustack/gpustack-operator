@@ -62,6 +62,14 @@ PAGES=$(find docs -name '*.md' | sort)
 # Only the two link loops read this list. Being on it subjects a file to link and anchor resolution
 # and to nothing else -- the Contents, header, footer, index and size rules are held by $PAGES, and
 # AGENTS.md is not a docs page.
+#
+# Expect AGENTS.md to contribute zero checked links, and do not read that as a reason to drop it.
+# It carried none when it was added: every path in it is a bare backtick reference, which this
+# checker does not resolve. The entry is earned by the link written next, not by the ones there
+# now. Said here because a rule whose trigger never fires reads exactly like a rule that works, so
+# anyone counting what this list covers would otherwise find nothing to show for the entry and
+# conclude it is dead. It is not: it was confirmed to report both a path and an anchor that do not
+# exist, and to pass a link that resolves, before being trusted.
 LINKED_PAGES=$(printf '%s\n%s\n%s\n%s\n%s\n' \
   "README.md" "AGENTS.md" "CLAUDE.md" "$PAGES" "$(find .claude/skills -name '*.md' | sort)")
 
