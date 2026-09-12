@@ -621,6 +621,17 @@ gone rather than scheduled to be.
 > either way. But between the finalizer coming off and it running, the leader is still serving on an
 > address nothing accounts for. Ownership is the safety net, not the mechanism.
 
+**That wait is bounded, one workload at a time.** Each gets the termination grace its own Pod template
+declares plus a couple of minutes, timed from its own deletion timestamp. Past that it stops being
+waited for, and a warning Event on the workload names the nodes its Pods are still terminating on.
+Deleting a backend therefore finishes even when a node it ran on has stopped answering.
+
+> **Why its own grace and not one number** — a member group with a disk tier derives its Pod's grace
+> from `scaleIn.gracePeriodSeconds`, which reaches an hour, so any constant short enough to bound an
+> unreachable node would abandon a group draining exactly as configured. That grace works as the clock
+> because the kubelet treats it as a hard kill deadline: a Pod outliving it is not a slow one, it is
+> one whose kubelet is not acting.
+
 **Only objects carrying this backend's own note are deleted.** The names are derived, so an unrelated
 object can hold one, and a delete has to be surer than a name. The member sweep finds its DaemonSets
 by the same note it then checks, rather than by the identity labels — discovering on one key and

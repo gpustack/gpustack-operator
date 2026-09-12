@@ -302,14 +302,18 @@ answered, which is why a backend can end up with no verdict at all.
 ### What it does not promise
 
 **A node it cannot reach in time keeps its content.** The deletion is not held open for it — a
-deletion waiting on a node that is gone is an object nobody can delete. Five minutes after the first
-cleanup Pod is created, the nodes that have not finished are left as they are and each one gets a
-warning event, recorded **on the node** rather than on the backend, because the backend is about to
-stop existing and the leftover data is not.
+deletion waiting on a node that is gone is an object nobody can delete. The node is left as it is and
+gets a warning event, recorded **on the node** rather than on the backend, because the backend is
+about to stop existing and the leftover data is not.
 
-That clock starts at the first cleanup Pod rather than at the deletion, because everything before it
-is unbounded: the deletion is held while a pool still uses the backend, and again while the members
-terminate. Timed from the deletion, a slow teardown would leave the cleanup nothing to spend.
+**"In time" is five minutes, counted per node from that node's own cleanup Pod** — not from the
+oldest Pod of the pass, and not from the deletion.
+
+> **Why** — the Pods are not born together, since a create that failed transiently is retried on a
+> later pass; one clock taken from the oldest would report a young node as abandoned "after five
+> minutes" with a fraction of that elapsed. Starting at the deletion is worse: the deletion is held
+> while a pool still uses the backend, and then for each workload's own termination budget, so a slow
+> teardown would leave the cleanup nothing to spend.
 
 **A cleanup still running at the deadline is stopped, not left to finish.** Emptying a very large
 tier can outlast the five minutes, and ending it there leaves the directory partly emptied. Leaving
@@ -331,14 +335,16 @@ event names the image as the reason rather than the node.
 **A path another backend's tier overlaps is skipped**, with the same kind of event — a directory
 nested inside another backend's tier counts, not only an identical path. Nothing refuses two backends
 naming one directory, and emptying it for the one being deleted would take the other one's live data
-with it.
+with it. A removal already under way when the path becomes shared is **stopped**, not left to finish.
 
-> It is a check and not a lock. A backend created, or widened onto this node, between the check and
-> the removal is not seen. What it refuses is the case that actually occurs: a path already declared
-> when the deletion starts.
+> It is a check and not a lock, and it is re-run on every pass rather than only before the removal
+> starts. Stopping one is a delete, which asks the kubelet rather than cutting: the `rm` runs from
+> whenever the sharing began, until the check catches it, and on through that Pod's own termination.
+> Everything in that span can be lost, which is what the second event reports. Closing the window
+> entirely needs an atomic claim on the path, which this operator does not take.
 
 ```console
-$ kubectl describe node <node> | grep -E 'KVCacheTierNotCleaned|KVCacheTierSharedPath'
+$ kubectl describe node <node> | grep -E 'KVCacheTierNotCleaned|KVCacheTierSharedPath|KVCacheTierPartlyEmptied'
 ```
 
 ## What the tier costs that nothing accounts for

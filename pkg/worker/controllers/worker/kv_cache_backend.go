@@ -172,6 +172,31 @@ const kvCacheBackendObserveInterval = 15 * time.Second
 // the one before it, leaving nothing to wake the object again.
 const kvCacheBackendTeardownInterval = 2 * time.Second
 
+// kvCacheBackendWorkloadTerminationMargin is what a rendered workload is given ON TOP of the
+// termination budget it declares, before its teardown stops waiting for it.
+//
+// The budget itself is read off the workload rather than fixed here, because a member group with a
+// disk tier derives its pod's terminationGracePeriodSeconds from the scale-in grace the spec asked
+// for, which reaches an hour. A constant short enough to be a bound would abandon a member that is
+// draining exactly as configured; a constant long enough for that one would be no bound for anything
+// else.
+//
+// THE DECLARED GRACE IS A HARD DEADLINE AND THAT IS WHY IT CAN BE THE CLOCK: the kubelet kills the
+// container when it runs out, whatever the container is doing. So a workload still terminating past
+// its own grace is not a slow one, it is one whose kubelet is not acting -- which is the state that
+// has no bound at all, and the one this margin exists to stop waiting on.
+//
+// The margin covers what happens after the container is gone and is not the container's: the volumes
+// unmounting, the pods being removed, and the foreground deletion collecting the workload itself.
+// Generous rather than tight, because the cost of being wrong is asymmetric -- too short abandons a
+// healthy teardown early, while too long only delays an object that would otherwise never go.
+const kvCacheBackendWorkloadTerminationMargin = 2 * time.Minute
+
+// kvCacheBackendEventWorkloadAbandoned is recorded on the rendered workload that outlived the wait,
+// not on the backend: the backend is about to be released and takes its events with it, while the
+// workload stays exactly as long as whatever is holding it does.
+const kvCacheBackendEventWorkloadAbandoned = "KVCacheWorkloadNotTerminated"
+
 // kvCacheBackendMaxMembers caps how many segments status.members will carry.
 //
 // Every entry is republished on every pass, and the api server refuses an object past roughly 1.5
@@ -2441,6 +2466,13 @@ func (r *KVCacheBackendReconciler) syncHeldKVCacheBackendWorkloads(
 // however many passes have run. Deleting by derived name alone removes it, and nothing recreates it.
 //
 // Deletion is FOREGROUND, so that "still there" keeps meaning it for as long as the dependents run.
+//
+// WHAT IT REPORTS AS REMAINING IS WHAT IS STILL WORTH WAITING FOR, which is not the same as what is
+// still there. A workload that has been terminating past its own budget is dropped from the count and
+// reported instead, because the caller holds the backend's finalizer on this number: counted forever,
+// one pod the kubelet never finishes terminating makes the object permanently undeletable, and a node
+// that stops answering is enough to produce one. Measured on a cluster with one node stopped: twelve
+// minutes with no sign of ending, and the object went within ten seconds of the node coming back.
 func (r *KVCacheBackendReconciler) deleteRenderedWorkloads(
 	ctx context.Context, kvcb *workercore.KVCacheBackend,
 ) (remaining int, err error) {
@@ -2459,7 +2491,7 @@ func (r *KVCacheBackendReconciler) deleteRenderedWorkloads(
 		if err != nil {
 			return remaining, err
 		}
-		if present {
+		if present && !r.abandonKVCacheBackendWorkload(ctx, kvcb, obj) {
 			remaining++
 		}
 	}
@@ -2486,6 +2518,9 @@ func (r *KVCacheBackendReconciler) deleteRenderedWorkloads(
 		}
 		remaining++
 		if ds.DeletionTimestamp != nil {
+			if r.abandonKVCacheBackendWorkload(ctx, kvcb, ds) {
+				remaining--
+			}
 			continue
 		}
 		if err = r.Client.Delete(ctx, ds, ctrlcli.PropagationPolicy(meta.DeletePropagationForeground)); err != nil {
@@ -2529,6 +2564,210 @@ func (r *KVCacheBackendReconciler) deleteOwnedWorkload(
 		return !kerrors.IsNotFound(err), ctrlcli.IgnoreNotFound(err)
 	}
 	return true, nil
+}
+
+// abandonKVCacheBackendWorkload reports whether one rendered workload has been terminating longer
+// than its teardown waits for it, and says why when it has.
+//
+// THE CLOCK IS THE WORKLOAD'S OWN DELETION TIMESTAMP, which is the only one of the candidates that
+// measures this wait. The backend's cannot: everything ahead of this step is unbounded -- a consumer
+// naming the backend holds the teardown for as long as it likes -- so a workload deleted an hour
+// after the object was would arrive already expired and be abandoned without once being waited for.
+// A counter kept in memory cannot either; it resets on every controller restart, and a wedged node
+// would hold the object open across all of them.
+//
+// It also measures the RIGHT THING when somebody else started the deletion. A workload an operator
+// removed by hand before deleting the backend has already spent that time terminating, and this
+// counts it, because what the wait is about is how long the object has been dying rather than who
+// asked it to.
+//
+// Giving up is never silent: the workload gets a warning event naming where it is stuck, and the log
+// carries the exact age the event deliberately leaves out.
+func (r *KVCacheBackendReconciler) abandonKVCacheBackendWorkload(
+	ctx context.Context, kvcb *workercore.KVCacheBackend, obj ctrlcli.Object,
+) bool {
+	deletedAt := obj.GetDeletionTimestamp()
+	if deletedAt.IsZero() {
+		return false
+	}
+	elapsed := time.Since(deletedAt.Time)
+
+	// THE TEMPLATE IS THE CHEAP GATE AND NEVER THE LAST WORD. It describes the pods this workload
+	// would create NOW, while a pod that is terminating runs the template it was CREATED from -- the
+	// two differ for as long as a rolling restart takes. Lowering scaleIn.gracePeriodSeconds and
+	// deleting the backend before that restart finishes leaves a member draining on an hour-long
+	// grace this template no longer mentions, and abandoning it there would start the disk cleanup
+	// under a store still writing.
+	budget := kvCacheBackendWorkloadTerminationBudget(obj)
+	if elapsed <= budget {
+		return false
+	}
+
+	// So the pods themselves get the deciding read, once the template says the time is up. Any one of
+	// them still inside the grace IT was created with holds the workload, which is the same rule as
+	// taking the longest of them and is one comparison rather than two passes.
+	//
+	// EACH POD IS TIMED FROM ITS OWN DELETION TIMESTAMP AND NOT FROM THE WORKLOAD'S. The two are not
+	// the same instant and the gap is not a rounding error: a foreground deletion reaches the pods
+	// through the levels between them -- a Deployment's go by way of its ReplicaSet -- and an
+	// eviction can delete one long after the workload was. Measured against the workload's clock, a
+	// pod that has been terminating for seconds is charged with the whole age of the object above it,
+	// which expires while its kubelet is doing exactly what it was told. The deletion timestamp is
+	// non-zero on every pod here, since that is what the read selects on.
+	//
+	// A read that fails yields no pods and leaves the template's verdict standing. That is the weaker
+	// answer rather than the wrong one: the template is still a bound, and refusing to decide here
+	// would put the object back in the state that has none.
+	pods := r.terminatingKVCacheBackendWorkloadPods(ctx, obj)
+	for i := range pods {
+		podElapsed := time.Since(pods[i].DeletionTimestamp.Time)
+		if podElapsed <= kvCacheBackendTerminationBudget(pods[i].Spec.TerminationGracePeriodSeconds) {
+			return false
+		}
+	}
+
+	// THE EVENT CARRIES NO ELAPSED TIME, only the budget that ran out and the nodes it ran out on.
+	// The teardown requeues every couple of seconds while anything else is still terminating, so this
+	// fires again on each pass -- and client-go folds repeats into one event with a count only while
+	// the message is IDENTICAL. An exact age would make every repeat a distinct event.
+	where := "no pod of it names a node"
+	if nodes := terminatingKVCacheBackendWorkloadNodes(pods); len(nodes) > 0 {
+		where = "its pods are still terminating on " + strings.Join(nodes, ", ")
+	}
+	r.recordWarning(obj, kvCacheBackendEventWorkloadAbandoned,
+		"%T %q rendered by deleted KVCacheBackend %q was still terminating after %s and the deletion "+
+			"was not held open for it: %s; a pod that outlives its own grace usually means the node "+
+			"it runs on stopped answering",
+		obj, obj.GetName(), kvcb.Name, budget, where)
+	ctrllog.FromContext(ctx).Error(nil, "gave up waiting for a rendered workload to terminate",
+		"workload", fmt.Sprintf("%T", obj), "name", obj.GetName(),
+		"age", time.Since(deletedAt.Time), "budget", budget)
+
+	return true
+}
+
+// kvCacheBackendWorkloadTerminationBudget is how long one rendered workload is waited for.
+//
+// Per workload rather than per teardown, because the three kinds do not take the same time to go: a
+// member group's pods terminate on a budget the spec configures, the leader's on the default, and a
+// Service runs no pod at all and has only the margin -- which is already far more than removing an
+// object with no dependents takes.
+//
+// A template naming no grace is read as the kubelet's default rather than as zero. Zero would make
+// the margin the whole budget for the leader, which is the one workload whose pods this operator
+// never gives an explicit one.
+func kvCacheBackendWorkloadTerminationBudget(obj ctrlcli.Object) time.Duration {
+	// The POD TEMPLATE decides, and its absence is a different answer from an unset field on one. A
+	// kind that runs no pod waits on nothing but its own collection, so reading the default onto it
+	// would hand a Service a grace belonging to containers it does not have.
+	var template *core.PodSpec
+	switch o := obj.(type) {
+	case *apps.Deployment:
+		template = &o.Spec.Template.Spec
+	case *apps.DaemonSet:
+		template = &o.Spec.Template.Spec
+	}
+	if template == nil {
+		return kvCacheBackendWorkloadTerminationMargin
+	}
+
+	return kvCacheBackendTerminationBudget(template.TerminationGracePeriodSeconds)
+}
+
+// kvCacheBackendTerminationBudget turns one declared grace into the time it is waited for.
+//
+// An unnamed grace is the kubelet's default and not zero, because that is what the kubelet gives a
+// container whose pod never named one.
+func kvCacheBackendTerminationBudget(grace *int64) time.Duration {
+	seconds := int64(core.DefaultTerminationGracePeriodSeconds)
+	if grace != nil {
+		seconds = *grace
+	}
+
+	return time.Duration(seconds)*time.Second + kvCacheBackendWorkloadTerminationMargin
+}
+
+// terminatingKVCacheBackendWorkloadPods returns the pods of one rendered workload that are still
+// terminating.
+//
+// It answers two questions from ONE read, and they are asked together because they have the same
+// answer only when the pods are read once: which grace this workload is actually waited on, and
+// which nodes to name when it is given up. A pod carries the grace it was CREATED with, which is the
+// grace its kubelet will honor, while the workload's template carries the grace a pod created now
+// would get.
+//
+// A failed read yields no pods rather than an error. Both callers are on the path that has already
+// decided the template's budget is up, and failing there would put the object back in the state that
+// has no bound -- trading the whole fix for a longer wait and a better message.
+func (r *KVCacheBackendReconciler) terminatingKVCacheBackendWorkloadPods(
+	ctx context.Context, obj ctrlcli.Object,
+) []core.Pod {
+	var selector *meta.LabelSelector
+	switch o := obj.(type) {
+	case *apps.Deployment:
+		selector = o.Spec.Selector
+	case *apps.DaemonSet:
+		selector = o.Spec.Selector
+	}
+	if selector == nil || len(selector.MatchLabels) == 0 {
+		return nil
+	}
+
+	pods := new(core.PodList)
+	err := r.Client.List(ctx, pods,
+		ctrlcli.InNamespace(obj.GetNamespace()),
+		ctrlcli.MatchingLabels(selector.MatchLabels))
+	if err != nil {
+		ctrllog.FromContext(ctx).Error(err, "list the pods holding a rendered workload open",
+			"workload", fmt.Sprintf("%T", obj), "name", obj.GetName())
+		return nil
+	}
+
+	terminating := make([]core.Pod, 0, len(pods.Items))
+	for i := range pods.Items {
+		if !pods.Items[i].DeletionTimestamp.IsZero() {
+			terminating = append(terminating, pods.Items[i])
+		}
+	}
+
+	return terminating
+}
+
+// terminatingKVCacheBackendWorkloadNodes names the nodes those pods are on, sorted so that the same
+// stall produces the same message on every pass.
+//
+// It is the pointer the give-up event exists to hand over. The workload names WHAT did not go; only
+// its pods can say WHERE, and an operator reading a backend stuck in Deleting has had neither.
+func terminatingKVCacheBackendWorkloadNodes(pods []core.Pod) []string {
+	var nodes []string
+	for i := range pods {
+		node := pods[i].Spec.NodeName
+		if node == "" || slices.Contains(nodes, node) {
+			continue
+		}
+		nodes = append(nodes, node)
+	}
+	slices.Sort(nodes)
+
+	return nodes
+}
+
+// recordWarning publishes one warning event against obj, and does NOTHING when this reconciler has no
+// recorder.
+//
+// The recorder is assigned in SetupController and nowhere else, so every construction path that skips
+// it -- the test suite's own reconcile helpers do -- would otherwise panic on the first event a
+// teardown emits. Measured: a nil dereference on the shared-path branch of the tier cleanup.
+//
+// Degrading to silence is safe because every caller logs the same fact beside the event; the event is
+// what outlives the backend, and a reconciler with no recorder is one nothing is watching.
+func (r *KVCacheBackendReconciler) recordWarning(
+	obj ctrlcli.Object, reason, format string, args ...any,
+) {
+	if r.Recorder == nil {
+		return
+	}
+	r.Recorder.Eventf(obj, core.EventTypeWarning, reason, format, args...)
 }
 
 // restoreRenderedLabels puts the rendered labels back on a live object and reports whether anything
