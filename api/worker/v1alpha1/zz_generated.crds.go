@@ -4401,8 +4401,19 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Format:      "int32",
 														},
 														"kind": {
-															Description: "Kind echoes the role's kind, so reading the status alone answers which half of a\ndisaggregated deployment an entry describes. It carries no omitempty: every role has a kind,\ndefaulted if the user named none, so an absent value would mean the status was written by\nsomething that did not know about kinds rather than that the role has none.",
+															Description: "Kind echoes the role's kind, so reading the status alone answers which half of a\ndisaggregated deployment an entry describes. It carries no omitempty: every role has a kind,\ndefaulted if the user named none, so an absent value would mean the status was written by\nsomething that did not know about kinds rather than that the role has none.\nThe enum is the same one the spec field carries, and it has to stay that way: this field is\nwritten from the spec field with the unset case resolved, so a value the writer can produce\nand this list does not name would make every later status write on the object fail, taking\nevery other figure on it down with the kind. The marker sits on the field because the type's\nown enum marker is a Go-level one and does not become schema validation.",
 															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"server"`),
+																},
+																{
+																	Raw: []byte(`"prefill"`),
+																},
+																{
+																	Raw: []byte(`"decode"`),
+																},
+															},
 														},
 														"name": {
 															Description: "Name is the role this entry describes.",

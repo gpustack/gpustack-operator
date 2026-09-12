@@ -147,8 +147,9 @@ func modelDeploymentRoleStatuses(
 		statuses = append(statuses, workercore.ModelDeploymentRoleStatus{
 			Name: role.Name,
 			// The kind is ECHOED so an operator reading status alone sees which role is which. It is
-			// resolved rather than copied: this field is required and carries no enum, so an unset
-			// spec kind would be written out and stored as the empty string.
+			// resolved rather than copied: this field is required and enumerated, so writing an
+			// unset spec kind through would be refused, and the API server refuses the status write
+			// rather than the one field.
 			Kind:    ModelDeploymentEffectiveRoleKind(role),
 			Desired: role.Replicas,
 			Ready:   ready[role.Name],

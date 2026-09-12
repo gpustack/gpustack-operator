@@ -315,8 +315,10 @@ func modelDeploymentInjectEngine(engine, manufacturer string) (inject.Engine, er
 // The CRD schema defaults it, so nothing arriving from the API server carries an empty one -- but
 // every in-process caller that builds the value in Go does, and there are several: the webhook's
 // rules, the connector's mapping and the status echo. Reading the zero value as a kind of its own
-// would make them disagree about the same object, and the status echo is where that becomes visible:
-// status.roles[].kind is a REQUIRED field with no enum, so an empty one is written out and stored.
+// would make them disagree about the same object, and the status echo is where that becomes costly:
+// status.roles[].kind is REQUIRED and enumerated, so resolving here is what keeps a status write
+// inside the enum. An empty kind written through would be refused, and a refused status write takes
+// every other figure on the object down with the kind.
 func ModelDeploymentEffectiveRoleKind(
 	role *workercore.ModelDeploymentRole,
 ) workercore.ModelDeploymentRoleKind {
