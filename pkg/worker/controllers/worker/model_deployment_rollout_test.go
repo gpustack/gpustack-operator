@@ -50,7 +50,7 @@ func TestModelDeploymentRollout_ReportsWhatThePassDecided(t *testing.T) {
 			rollout:     modelDeploymentRollout{accounted: 2, outdated: 2},
 			wantStatus:  "False",
 			wantReason:  modelDeploymentReasonRolloutInProgress,
-			wantMessage: "2 replicas differed from what this pass rendered and were recreated",
+			wantMessage: "2 replicas differed from what this pass rendered and were deleted",
 		},
 		{
 			name:        "the store is away and the rollout is held",
@@ -89,35 +89,58 @@ func TestModelDeploymentRollout_AHeldMessageSaysWhatReleasesIt(t *testing.T) {
 	assert.Contains(t, message, "once the connection returns", "and what releases it")
 }
 
-// TestModelDeploymentRollout_ANilRecordLeavesTheConditionAlone states the rule a teardown pass and a
-// rebuild pass both depend on: neither compares a hash, so neither has an answer, and reporting the
-// zeroed record they happen to hold would read as a rollout that completed on the one pass that is
-// deleting every replica.
+// TestModelDeploymentRollout_ARecordThatVouchesForNothingReportsUnknown states the rule a teardown
+// pass and a rebuild pass both depend on: neither can account for a replica, so neither has an
+// answer -- and an axis with no answer is Unknown, which is itself an answer.
 //
-// The second half is the positive baseline. "Unchanged" is satisfied by an observer that never
-// writes at all, so the same fixture is driven with a record that MUST move it.
-func TestModelDeploymentRollout_ANilRecordLeavesTheConditionAlone(t *testing.T) {
+// It used to leave the stored value alone instead, and that was wrong in the state it is read in.
+// Whatever the last answering pass wrote stays authoritative, so a steady deployment's True survives
+// the very pass that deletes every replica. Both fixtures below start from a prior value and require
+// it to be REPLACED, because "unchanged" was the bug.
+func TestModelDeploymentRollout_ARecordThatVouchesForNothingReportsUnknown(t *testing.T) {
+	for _, prior := range []struct {
+		name    string
+		arrange func(*workercore.ModelDeployment)
+	}{
+		{
+			name: "a prior True is the harmful one",
+			arrange: func(md *workercore.ModelDeployment) {
+				ModelDeploymentConditionReplicasUpToDate.True(md, modelDeploymentReasonUpToDate,
+					"every replica matches what this pass rendered")
+			},
+		},
+		{
+			name: "a prior False is stale just the same",
+			arrange: func(md *workercore.ModelDeployment) {
+				ModelDeploymentConditionReplicasUpToDate.False(md, modelDeploymentReasonRolloutHeldByCache,
+					"held by a pass that ran before this one")
+			},
+		},
+	} {
+		t.Run(prior.name, func(t *testing.T) {
+			md := newRenderDeployment()
+			prior.arrange(md)
+
+			for label, rollout := range map[string]*modelDeploymentRollout{
+				"no record at all":             nil,
+				"a record accounting for none": {},
+			} {
+				observed := rolloutConditionOf(t, md.DeepCopy(), rollout)
+				assert.Equalf(t, "Unknown", ModelDeploymentConditionReplicasUpToDate.GetStatus(observed),
+					"%s must not leave the previous answer standing", label)
+				assert.Equalf(t, modelDeploymentReasonRolloutNotObserved,
+					ModelDeploymentConditionReplicasUpToDate.GetReason(observed), "%s", label)
+			}
+		})
+	}
+
+	// The positive baseline: a record that DID account for a replica answers, so the Unknown above is
+	// the observer distinguishing two inputs rather than an observer stuck on one value.
 	md := newRenderDeployment()
-	ModelDeploymentConditionReplicasUpToDate.False(md, modelDeploymentReasonRolloutHeldByCache,
-		"held by a pass that ran before this one")
-
-	kept := rolloutConditionOf(t, md, nil)
-	assert.Equal(t, "False", ModelDeploymentConditionReplicasUpToDate.GetStatus(kept))
-	assert.Equal(t, modelDeploymentReasonRolloutHeldByCache,
-		ModelDeploymentConditionReplicasUpToDate.GetReason(kept))
-	assert.Equal(t, "held by a pass that ran before this one",
-		ModelDeploymentConditionReplicasUpToDate.GetMessage(kept))
-
-	moved := rolloutConditionOf(t, md.DeepCopy(), &modelDeploymentRollout{accounted: 1})
-	require.Equal(t, "True", ModelDeploymentConditionReplicasUpToDate.GetStatus(moved),
-		"the fixture must be one a record that did compare does move, or the assertions above are vacuous")
-
-	// A record that compared nothing is the same answer as no record at all, and it reaches the
-	// observer from every caller rather than from a call site that remembered to check.
-	empty := rolloutConditionOf(t, md.DeepCopy(), &modelDeploymentRollout{})
-	assert.Equal(t, modelDeploymentReasonRolloutHeldByCache,
-		ModelDeploymentConditionReplicasUpToDate.GetReason(empty),
-		"a record with nothing compared must not overwrite what the last comparing pass found")
+	moved := rolloutConditionOf(t, md, &modelDeploymentRollout{accounted: 1})
+	require.Equal(t, "True", ModelDeploymentConditionReplicasUpToDate.GetStatus(moved))
+	require.Equal(t, modelDeploymentReasonUpToDate,
+		ModelDeploymentConditionReplicasUpToDate.GetReason(moved))
 }
 
 // TestModelDeploymentReconciler_ReportsARolloutHeldByAnUnreachableStore is the whole issue, end to
@@ -160,13 +183,15 @@ func TestModelDeploymentReconciler_ReportsARolloutHeldByAnUnreachableStore(t *te
 	assert.Contains(t, ModelDeploymentConditionReplicasUpToDate.GetMessage(md), "2 of 2 replicas")
 }
 
-// TestModelDeploymentReconciler_ARebuildPassClaimsNothingAboutTheRollout covers the branch that
-// passes no record at all. A rebuild deletes every replica without comparing a single hash, so the
-// zeroed record it happens to hold means "compared nothing", not "nothing was outdated" -- and
-// reporting the second would announce the rollout as complete on the one pass that is tearing the
-// whole group down.
+// TestModelDeploymentReconciler_ARebuildPassClaimsNothingAboutTheRollout covers a rebuild reached
+// from the outage state rather than from the steady one. A rebuild deletes every replica without
+// comparing a single hash, so the zeroed record it holds means "accounted for nothing", not "nothing
+// was outdated" -- and reporting the second would announce the rollout as complete on the one pass
+// that is tearing the whole group down.
 //
-// Measured: removing that branch leaves the entire package green, so this case is what holds it.
+// The answer is Unknown rather than the previous value, whatever that value was. Keeping it was the
+// earlier behavior and it is what let a steady deployment's True survive this pass; the sibling case
+// starting from True is TestModelDeploymentReconciler_ARebuildDoesNotLeaveAStaleTrue.
 func TestModelDeploymentReconciler_ARebuildPassClaimsNothingAboutTheRollout(t *testing.T) {
 	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(),
 		newRenderBinding(), newRenderPool(), newRenderBackend())
@@ -201,8 +226,9 @@ func TestModelDeploymentReconciler_ARebuildPassClaimsNothingAboutTheRollout(t *t
 	md := getModelDeployment(t, cli)
 	assert.NotEqual(t, modelDeploymentReasonUpToDate,
 		ModelDeploymentConditionReplicasUpToDate.GetReason(md),
-		"a pass that compared no hashes must not report the replicas as current")
-	assert.Equal(t, modelDeploymentReasonRolloutHeldByCache,
+		"a pass that accounted for no replica must not report them as current")
+	assert.Equal(t, "Unknown", ModelDeploymentConditionReplicasUpToDate.GetStatus(md))
+	assert.Equal(t, modelDeploymentReasonRolloutNotObserved,
 		ModelDeploymentConditionReplicasUpToDate.GetReason(md),
 		"it reports what the last pass that did compare found, unchanged")
 }
@@ -383,4 +409,55 @@ func TestModelDeploymentReconciler_ClearsTheHeldConditionWhenTheStoreReturns(t *
 	assert.NotEqual(t, modelDeploymentReasonRolloutHeldByCache,
 		ModelDeploymentConditionReplicasUpToDate.GetReason(md),
 		"the connection resolved again, so nothing is held")
+}
+
+// TestModelDeploymentReconciler_ARebuildDoesNotLeaveAStaleTrue is the case the rebuild case above
+// could not see, and the difference is the fixture rather than the assertion.
+//
+// That case sets the prior condition to RolloutHeldByCache before the rebuild, because leaving a
+// False value alone is what makes "this pass answered nothing" observable. But that is precisely the
+// prior value for which leaving it alone is harmless. The harmful prior value is True: a steady
+// deployment reaches UpToDate, a group-shape edit then deletes every replica without vouching for
+// one, and an untouched condition goes on reporting that every replica matches the render while none
+// exists at all.
+func TestModelDeploymentReconciler_ARebuildDoesNotLeaveAStaleTrue(t *testing.T) {
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(),
+		newRenderBinding(), newRenderPool(), newRenderBackend())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Equal(t, modelDeploymentReasonUpToDate,
+		ModelDeploymentConditionReplicasUpToDate.GetReason(getModelDeployment(t, cli)),
+		"the steady state is the precondition; without it the stale value is not True")
+
+	resized := getModelDeployment(t, cli)
+	resized.Spec.Roles[0].Replicas = 3
+	require.NoError(t, cli.Update(context.Background(), resized))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Empty(t, replicaNames(t, cli), "the rebuild deleted every replica")
+
+	md := getModelDeployment(t, cli)
+	assert.Equal(t, "Unknown", ModelDeploymentConditionReplicasUpToDate.GetStatus(md),
+		"a pass that vouched for no replica states that it could not tell")
+	assert.NotEqual(t, modelDeploymentReasonUpToDate,
+		ModelDeploymentConditionReplicasUpToDate.GetReason(md),
+		"it must not go on claiming every replica is current while none exists")
+}
+
+// TestModelDeploymentRollout_TheInProgressMessageDoesNotClaimARecreate pins the tense. The pass that
+// finds an outdated replica deletes it and requeues with no creates at all; the replacement is made
+// by the pass that observes it gone. Saying it was recreated describes something that pass did not
+// do, and a reader watching for the new replica would stop looking.
+func TestModelDeploymentRollout_TheInProgressMessageDoesNotClaimARecreate(t *testing.T) {
+	observed := rolloutConditionOf(t, newRenderDeployment(), &modelDeploymentRollout{
+		accounted: 2, outdated: 2,
+	})
+	message := ModelDeploymentConditionReplicasUpToDate.GetMessage(observed)
+
+	assert.NotContains(t, message, "were recreated",
+		"the pass deletes and requeues; nothing is created until a later pass")
+	assert.Contains(t, message, "were deleted",
+		"it states what this pass did")
 }

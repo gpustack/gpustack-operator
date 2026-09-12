@@ -61,8 +61,15 @@ const modelDeploymentReasonPodGroupIncomplete = "PodGroupIncomplete"
 // for the same reason — a second writer would be free to leave its own field behind.
 // The domain is what THIS pass observed about the referenced Binding, or nil for a pass that did not
 // look. Nil leaves the domain projection and its condition exactly as they were, because a teardown
-// pass reporting "not observed" would read as the domain having gone away. The rollout record is
-// nil on the same terms, for a pass that compared no spec hashes.
+// pass reporting "not observed" would read as the domain having gone away.
+//
+// THE ROLLOUT RECORD IS NIL ON THE SAME OCCASIONS AND ANSWERS THE OPPOSITE WAY, which is the one
+// asymmetry here worth knowing before adding a caller. Nil, or a record that accounted for no
+// replica, reports Unknown rather than leaving the stored condition alone. The difference is whose
+// object it is: the Binding belongs to somebody else, so a pass that did not read it has no question
+// to answer, while the replicas are this controller's own, so a pass that could account for none has
+// an answer and that answer is "could not tell". Left alone instead, a steady deployment's True
+// survives the very pass that deletes every replica.
 func (r *ModelDeploymentReconciler) syncModelDeploymentStatus(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod, domain *modelDeploymentDomain,
 	rollout *modelDeploymentRollout,

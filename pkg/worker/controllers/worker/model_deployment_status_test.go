@@ -491,6 +491,7 @@ func TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved(t *testing.T) {
 	assert.ElementsMatch(t, []string{
 		string(ModelDeploymentConditionQuotaReserved),
 		string(ModelDeploymentConditionCacheAttached),
+		string(ModelDeploymentConditionReplicasUpToDate),
 	}, declared)
 	assert.NotContains(t, declared, string(ModelDeploymentConditionDomainRegistered),
 		"this pass was handed no reading of the Binding, and a pass that did not look must not report")
@@ -498,6 +499,10 @@ func TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved(t *testing.T) {
 	holder := &workercore.ModelDeployment{Status: *status}
 	assert.True(t, ModelDeploymentConditionQuotaReserved.IsUnknown(holder))
 	assert.True(t, ModelDeploymentConditionCacheAttached.IsUnknown(holder))
+	// The rollout axis belongs with those two rather than with the domain: the replicas are this
+	// controller's own, so a pass that could account for none of them has no answer rather than no
+	// question, and Unknown is that answer. The domain is a reading of somebody else's object.
+	assert.True(t, ModelDeploymentConditionReplicasUpToDate.IsUnknown(holder))
 	assert.Nil(t, status.KVCache, "and it invents no domain to report")
 }
 
