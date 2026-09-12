@@ -233,6 +233,87 @@ func TestModelDeploymentReconciler_ARebuildPassClaimsNothingAboutTheRollout(t *t
 		"it reports what the last pass that did compare found, unchanged")
 }
 
+// TestModelDeploymentReconciler_AGroupShapeChangeCarriesAWithheldEditThroughAnOutage pins the lever
+// that bounds what the rollout guard costs.
+//
+// The guard withholds an edit that changes a replica's rendered Pod for as long as the KV cache
+// connection cannot be resolved, and an outage has no deadline. Without a way out, a deployment
+// broken by its own spec would stay broken until the store came back. The way out is that a change
+// to the replica counts or to the set of roles moves the group annotations and takes the whole-group
+// rebuild, which runs before the guard: the pass that finds the group gone renders it from the
+// current spec, connector or no connector, so the withheld edit lands with it.
+//
+// It is a lever rather than an automatic recovery because of what it costs -- every replica reloads
+// its weights, and the group comes back with no connector until the store returns -- and that is a
+// trade only the operator can weigh against serving the older spec a while longer. The neighboring
+// rebuild case resizes during an outage too, but it stops at the condition the rebuild pass writes
+// and never reads what the replacements were built from.
+func TestModelDeploymentReconciler_AGroupShapeChangeCarriesAWithheldEditThroughAnOutage(t *testing.T) {
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(),
+		newRenderBinding(), newRenderPool(), newRenderBackend())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaImages(t, cli), 2)
+
+	kvcpb := getModelDeploymentBinding(t, cli)
+	kvcpb.Status.Phase = KVCachePoolPhaseDegraded
+	require.NoError(t, cli.Status().Update(context.Background(), kvcpb))
+
+	edited := getModelDeployment(t, cli)
+	edited.Spec.Roles[0].Template.Image = "vllm/vllm-openai:v0.26.0"
+	require.NoError(t, cli.Update(context.Background(), edited))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Equal(t, modelDeploymentReasonRolloutHeldByCache,
+		ModelDeploymentConditionReplicasUpToDate.GetReason(getModelDeployment(t, cli)),
+		"the edit has to be withheld first, or the lever below has nothing to carry")
+	for name, image := range replicaImages(t, cli) {
+		require.Equal(t, "vllm/vllm-openai:v0.25.1", image,
+			"%s still carries the spec it was built from", name)
+	}
+
+	// The lever, pulled while the store is still away: a replica count the group has to be resized to.
+	resized := getModelDeployment(t, cli)
+	resized.Spec.Roles[0].Replicas = 3
+	require.NoError(t, cli.Update(context.Background(), resized))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Empty(t, replicaNames(t, cli), "the rebuild takes the whole group down before it builds one")
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	images := replicaImages(t, cli)
+	assert.Len(t, images, 3)
+	for name, image := range images {
+		assert.Equal(t, "vllm/vllm-openai:v0.26.0", image,
+			"%s came back carrying the edit the guard was withholding, with the store still away", name)
+	}
+	rebuilt := replicaHashes(t, cli)
+
+	// And the second half of what the lever costs. The group it brought back carries no connector, so
+	// the render that regains one differs from it and rolls every replica a second time. Waiting pays
+	// one rebuild for the same edit, which is why this is the operator's trade rather than the
+	// rollout's.
+	recovered := getModelDeploymentBinding(t, cli)
+	recovered.Status.Phase = KVCachePoolPhaseReady
+	require.NoError(t, cli.Status().Update(context.Background(), recovered))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Equal(t, modelDeploymentReasonRolloutInProgress,
+		ModelDeploymentConditionReplicasUpToDate.GetReason(getModelDeployment(t, cli)),
+		"the connector the replicas were built without is now part of the render")
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.NotEqual(t, rebuilt, replicaHashes(t, cli),
+		"the replacements carry the connector, so they are not the replicas the lever created")
+}
+
 // TestModelDeploymentReconciler_AFirstPassAnswersForTheReplicasItCreated states why a create counts
 // as an answer and a comparison is not the only one.
 //

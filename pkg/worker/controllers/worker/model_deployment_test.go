@@ -148,6 +148,23 @@ func replicaHashes(t *testing.T, cli ctrlcli.Client) map[string]string {
 	return hashes
 }
 
+// replicaImages reads back the image each running replica was built from. It is what tells a replica
+// rendered before a template edit from one rendered after it, which a hash cannot: a hash says two
+// renders differ and never which spec either of them came from.
+func replicaImages(t *testing.T, cli ctrlcli.Client) map[string]string {
+	t.Helper()
+
+	podList := new(core.PodList)
+	require.NoError(t, cli.List(context.Background(), podList, ctrlcli.InNamespace("team-a")))
+
+	images := make(map[string]string, len(podList.Items))
+	for i := range podList.Items {
+		images[podList.Items[i].Name] = podList.Items[i].Spec.Containers[0].Image
+	}
+
+	return images
+}
+
 func getModelDeployment(t *testing.T, cli ctrlcli.Client) *workercore.ModelDeployment {
 	t.Helper()
 
