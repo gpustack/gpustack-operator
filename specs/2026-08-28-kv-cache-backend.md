@@ -670,8 +670,14 @@ in this operator.
   would publish a falsehood. The stale list plus a `False` condition says what actually happened; the
   condition is what makes the staleness readable.
 - **Superseded.** The `status.members[]` shape and the listing decoder described in these bullets are
-  owned by `2026-09-09-kv-cache-segment-identity-status.md`. The readiness, phase and scrape rules
-  above are not in that scope.
+  owned by the segment-identity correction. The readiness, phase and scrape rules above are not in
+  that scope.
+- **Corrected after shipping.** Every *Superseded* marker in this document named
+  `2026-09-09-kv-cache-segment-identity-status`, then a file under `specs/`, as the owner of the text
+  it marks. That document is a bug fix's specification, so it is not in this repository and naming it
+  as a path resolves to nothing. The markers now call it the segment-identity correction, which is a
+  name rather than a path. What it supersedes is unchanged, and the rules in force are on the backend
+  page, `docs/kv-cache/backend.md`.
 
 #### F7 — `status.capacity` is read from the master's Prometheus counters
 
@@ -984,7 +990,7 @@ it restarts on **what changed** rather than on **that the template changed**.
     ambiguous match additionally requires the member's own `client_id`, which upstream keeps inside
     the C++ `Client` and one startup log line. This shipped design renders no memory-unmount hook.
     **Superseded.** The member-identity reasoning in this bullet is owned by
-    `2026-09-09-kv-cache-segment-identity-status.md`; the shrink conclusion it states is not.
+    the segment-identity correction; the shrink conclusion it states is not.
   - What the master DOES offer is `POST /api/v1/drain_jobs`, which **migrates** a segment's data to
     named target segments rather than unmounting it. That is a different and stronger operation than
     a graceful unmount, it needs the remaining members to have room, and it is a stateful
@@ -1729,7 +1735,7 @@ after T10 (status is fully observed); after T12 (every acceptance item is met).
       `/metrics` are never gated — has a fourth: a **503** carrying `service plane is not active`,
       which is the master saying it is not serving yet, so it maps to a phase and not to an error.
       **Superseded.** The `/get_segments_detail` decoder this acceptance describes is owned by
-      `2026-09-09-kv-cache-segment-identity-status.md`. The `/health` and `/metrics` decoders are not
+      the segment-identity correction. The `/health` and `/metrics` decoders are not
       in that scope.
       Verify: `go test ./pkg/worker/kvcache/mooncake/ -run Admin` over the recorded fixtures.
 
@@ -1792,7 +1798,7 @@ after T10 (status is fully observed); after T12 (every acceptance item is met).
       member Pod whose `te_endpoint` matches, and are left empty rather than guessed when no Pod
       matches.
       **Superseded.** This acceptance text for `members[]` is owned by
-      `2026-09-09-kv-cache-segment-identity-status.md`; read the row shape and the attribution rule
+      the segment-identity correction; read the row shape and the attribution rule
       there. The phase and condition acceptance above is not in that scope.
       Verify: `go test ./pkg/worker/controllers/worker/ -run KVCacheBackendStatus` — a table over
       recorded `/health` × `/get_segments_detail` bodies × workload states, including one listing

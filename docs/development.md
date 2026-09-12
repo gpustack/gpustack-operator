@@ -155,6 +155,21 @@ use `Corrected after shipping.` inside a preserved code block. Retain enough of 
 explain the correction, and state the replacement evidence at the same location. Keep the edit to that
 correction; terminology, formatting and later design belong elsewhere.
 
+**A bug fix writes no NEW specification into this repository.** Three shipped ones predate that rule
+and stay exactly where they are, as the historical records they already were. What it changes is the
+FIRST paragraph above: a design change a bug fix makes has no new specification to be recorded in, so
+recording it there is impossible rather than merely skipped.
+
+Record it in the superseded section instead, marked `**Corrected after shipping.**`. That is the SECOND
+paragraph's marker carrying one thing that paragraph otherwise forbids — the resulting rule does change
+here — so the note MUST name the page that carries the rule now. Everything else in that paragraph
+still applies: retain enough of the former text to explain what changed, and keep the edit to it.
+
+A superseded section MUST NOT be left carrying a **file name** that resolves to nothing — the reader
+follows it and lands nowhere. Naming the document is fine and often necessary; what must go is the
+extension that makes the name a path. So write `2026-01-02-a-thing` rather than `2026-01-02-a-thing.md`
+once that file is gone. The prohibition is on the dangling path, not on the mention.
+
 ## Runtime log verbosity
 
 Every component registers `PUT /debug/flags/v` on its own secure port, so klog verbosity can be raised on

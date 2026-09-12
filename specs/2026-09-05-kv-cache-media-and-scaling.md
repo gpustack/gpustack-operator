@@ -554,8 +554,14 @@ counter-argument stronger than expected — which is why it is written out rathe
   and address; a collision-safe match there additionally requires the member's own `client_id`, which
   the member has no supported way to read. This shipped design renders no memory-unmount hook, so
   every scale-in still drops the segment. The upstream gap applies to supporting every transport, not
-  to identifying every member. The member-identity reasoning in this bullet is superseded by
-  `2026-09-09-kv-cache-segment-identity-status.md`; the scale-in conclusion it states is not.
+  to identifying every member. The member-identity reasoning in this bullet is superseded by the
+  segment-identity correction; the scale-in conclusion it states is not.
+  **Corrected after shipping.** This supersession marker and the three later ones that named
+  `2026-09-09-kv-cache-segment-identity-status`, then a file under `specs/`, all pointed at it. That
+  document is a bug fix's specification, so it is not in this repository and naming it as a path
+  resolves to nothing; the markers now call it the
+  segment-identity correction, which is a name rather than a path. What it supersedes is unchanged,
+  and the rules in force are on the backend page, `docs/kv-cache/backend.md`.
 
 - **Acceptance:** a group with `localDisk` and a 30-second grace renders a `preStop` httpGet-free
   exec or HTTP POST carrying exactly `{"grace_period_seconds": 30}` to the member's own REST port,
@@ -1153,7 +1159,7 @@ make this code solid enough prior to committing the changes necessary to impleme
 **Superseded.** The three shared-identity cases in the table above --
 `shared_identity_not_guessed`, `shared_identity_not_healthy` and
 `pod_indexed_twice_keeps_collision` -- are owned by
-`2026-09-09-kv-cache-segment-identity-status.md`, which states the cases in force. The scope named
+the segment-identity correction, which states the cases in force. The scope named
 there is those cases; this marker makes no claim about the rest of the table.
 
 #### Integration tests
@@ -1254,7 +1260,7 @@ that sentence travels with the row so a later reader cannot mistake a green suit
   `segment_id` and `client_id` values, but this historical status design neither decoded those fields
   nor keyed rows by them. Under the real duplicate-name response, the listing was therefore rejected
   before the intended ambiguity verdict could be published.
-  `2026-09-09-kv-cache-segment-identity-status.md` supersedes that status design; the attribution
+  The segment-identity correction supersedes that status design; the attribution
   conclusion remains: no Pod exposes either id, so assigning a shared-host row to one of the Pods
   would still be a guess.
   Two qualifiers make the rule narrow enough to be true, and both were learned by getting them wrong.
@@ -1302,7 +1308,7 @@ that sentence travels with the row so a later reader cannot mistake a green suit
   members placed on one node to report their own `client_id`, because they share a name and address.
   Whether to implement the non-host-network case first or ask upstream for that identity is open; this
   shipped design renders no memory-unmount hook. The member-identity reasoning in this question is
-  superseded by `2026-09-09-kv-cache-segment-identity-status.md`.
+  superseded by the segment-identity correction.
 - **Whether `NoF` deserves an object of its own.** Its registration carries a target coordinate and
   no node affinity, so it is not a member group; whether it is a leader field, a list on the backend,
   or a separate CR is undecided, and nothing needs it yet.
