@@ -722,10 +722,19 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
 	// find the leader's Service name.
 	podSpec.DNSPolicy = core.DNSClusterFirstWithHostNet
 
+	// Typed, so a node with no device tree stops the member at the mount rather than starting,
+	// finding no device, installing TCP and serving while the object still says the fabric it was
+	// asked for. An untyped hostPath is not a weaker check but no check: the kubelet's mounter
+	// returns immediately for the empty type and never looks at the path. Directory and not
+	// DirectoryOrCreate, because only the OrCreate forms make a missing path, and an empty
+	// directory where the devices should be is that same silent start.
 	podSpec.Volumes = append(podSpec.Volumes, core.Volume{
 		Name: rdmaDeviceVolumeName,
 		VolumeSource: core.VolumeSource{
-			HostPath: &core.HostPathVolumeSource{Path: RDMADevicePath},
+			HostPath: &core.HostPathVolumeSource{
+				Path: RDMADevicePath,
+				Type: ptr.To(core.HostPathDirectory),
+			},
 		},
 	})
 
