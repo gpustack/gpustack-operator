@@ -40,7 +40,11 @@ while IFS= read -r -d '' record; do
     dirty_paths+="${record}"$'\n'
     continue
   fi
-  [[ "${record:0:2}" == *[RC]* ]] && take_original=1
+  # Anchored on the index column, which is the one that carries a rename or a copy. Asking whether
+  # either column holds an R gives the same answer today only because the worktree column's alphabet
+  # happens not to contain one; if that ever changed, the next record would be taken for a bare
+  # original and the path it really names would reach no gate at all.
+  [[ "${record:0:1}" == [RC] ]] && take_original=1
   dirty_paths+="${record:3}"$'\n'
 done < <(git status --porcelain -z --untracked-files=all 2>/dev/null)
 
