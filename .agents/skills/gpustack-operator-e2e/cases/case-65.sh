@@ -62,17 +62,27 @@
 #              - the host directory on at least one node holds files.
 #              Phase B (the discriminator, offload.onEvict=true, writes pushed past aggregate
 #              memory so eviction is forced):
-#              - writes succeed, and BEFORE the read the leader reports the key with a local
-#                disk replica and no memory replica — without that, bytes coming back proves
-#                only that the store works, not that the TIER served them;
-#              - the object then reads back byte-identical, and the on-evict leader's metric
-#                reads > 0.
+#              - every write lands, INCLUDING the ones the store first refuses for want of
+#                memory: that refusal is the moment the master flags the eviction this phase
+#                exists to force, so the put is retried rather than taken for a stop;
+#              - BEFORE any read, the leader reports keys holding a local disk replica and no
+#                memory replica — without that, bytes coming back proves only that the store
+#                works, not that the TIER served them;
+#              - one of THOSE keys, chosen from that answer rather than named in advance, then
+#                reads back byte-identical against a payload derived from its own key, and the
+#                on-evict leader's metric reads > 0.
 #
-#              KNOWN-FAILURE DETECTOR: against mooncake 0.3.13 phase A's last two assertions
-#              FAIL — the tier is announced (12 GB published, offload RPC servers up) and
-#              nothing is ever written. The case is kept failing on purpose: its FAILs are the
-#              regression alarm for the day the tier starts working, and phase B's result says
-#              which write path the fix has to reach.
+#              NO LONGER A KNOWN-FAILURE DETECTOR, and the reason is worth keeping because it
+#              is the same reason the case exists. This case used to be documented as expected
+#              to FAIL: the tier was announced and nothing was ever written. That was never the
+#              store refusing to write — it was the write set never closing a BUCKET. The store
+#              defaults a bucket to 256 MB, phase A offers less than that per member, and below
+#              one bucket a tier legitimately holds nothing. Once the operator began rendering
+#              the bucket limit the same write set closes eleven of them. Measured green end to
+#              end, both phases, on one member of 256Mi with a rendered 16 MiB bucket. So a FAIL
+#              here is now a regression to act on rather than the expected reading — but read
+#              the bucket precondition row first, because it is what entitles the rows after it
+#              to be read as verdicts at all.
 #
 # Cleanup:     Trap deletes both KVCacheBackends (owner references cascade) and every probe Pod,
 #              then removes this run's subdirectory from every node that is Ready at teardown — or,
@@ -441,7 +451,7 @@ fi
 # zero on a tier that is working -- and on a fresh tier that zero is exactly the value this case
 # treats as its known failure. So it is asked for repeatedly until it carries a number.
 #
-# ⛔ This is NOT "wait and it will come": below one bucket's worth the wait would never end, because
+# This is NOT "wait and it will come": below one bucket's worth the wait would never end, because
 # nothing is due. It is legitimate here only because the assertion above proved this write set
 # clears the rendered limit. Each attempt gets its own Pod name -- the previous one is still being
 # reclaimed, and a name collision returns no reading, which is the shape that must not be read as
@@ -455,7 +465,13 @@ while [ "$SETTLE" -lt 6 ]; do
     --pod-running-timeout="$PULL_TIMEOUT" \
     --labels="gpustack-e2e-case=65-${SFX}" \
     -- sh -c "wget -qO- http://${ADMIN_ADDR}/metrics | grep '^master_allocated_file_size_bytes'" 2>/dev/null)"
-  METRIC_VAL="$(echo "$METRIC" | awk '{print $2}' | cut -d. -f1)"
+  # ONE LINE of the probe's output, for the same reason the prep probe above takes one: this
+  # container exits before kubectl can attach, kubectl falls back to streaming the logs, and the
+  # single line the probe printed arrives more than once. Two identical lines make awk emit two
+  # numbers, and every numeric test below then rejects the pair -- so a tier holding real bytes
+  # reads here as a figure that is not a number, which the branch that follows would report as the
+  # very failure this case exists to detect.
+  METRIC_VAL="$(echo "$METRIC" | head -1 | awk '{print $2}' | cut -d. -f1)"
   case "$METRIC_VAL" in
     '' | *[!0-9]*) ;;
     *) [ "$METRIC_VAL" -gt 0 ] && break ;;
@@ -474,11 +490,23 @@ elif [ -z "$METRIC" ]; then
     "the metrics probe returned no reading within ${PULL_TIMEOUT}; an absent reading is not a zero, \
 so this run makes no claim about the tier either way"
 else
-  record FAIL "the leader reports bytes actually written to the file tier" \
-    "master_allocated_file_size_bytes='${METRIC}' after ${SETTLE} reads over $(( (SETTLE - 1) * 10 ))s \
+  case "$METRIC_VAL" in
+    '' | *[!0-9]*)
+      # A reading arrived and is not a number. Kept apart from the zero below because this case's
+      # whole verdict is that a zero means something, and a figure this run could not read is not
+      # one -- filing it as one would report the known failure shape off a parse.
+      record FAIL "the leader reports bytes actually written to the file tier" \
+        "master_allocated_file_size_bytes came back unparsable after ${SETTLE} reads: '${METRIC}' \
+-- a reading this run could not read is not a zero, so it makes no claim about the tier"
+      ;;
+    *)
+      record FAIL "the leader reports bytes actually written to the file tier" \
+        "master_allocated_file_size_bytes=${METRIC_VAL} after ${SETTLE} reads over $(( (SETTLE - 1) * 10 ))s \
 -- a zero that does not move, with healthy writes above and a write set proven to clear one bucket, \
 is the known 'tier announced, nothing lands' failure shape: the leader defers offload forever while \
 publishing capacity"
+      ;;
+  esac
 fi
 
 # ------------------------------------------------- 4. files on the host, not just a metric
@@ -561,10 +589,11 @@ if [ "$MEMBER_COUNT2" -le 0 ] 2>/dev/null; then
   record FAIL "running members exist to force eviction" "no Running member Pod belongs to ${BACKEND2}"
   results; exit 1
 fi
-# Each member holds 64 objects of 4MiB. Add one member's worth of fill keys beyond the aggregate;
-# the four warm keys make the oldest objects the eviction candidates.
-PHASE_B_FILL=$((MEMBER_COUNT2 * 64 + 64))
-PHASE_B_TOTAL=$((PHASE_B_FILL + 4))
+# Each member holds 64 objects of 4MiB, so one member's worth beyond the aggregate is what puts the
+# set past memory and leaves eviction no choice. There is no separate set of keys held back to be
+# the eviction candidates: which objects eviction takes is the store's to decide, and the subject
+# of the read-back below is taken from what it actually moved.
+PHASE_B_TOTAL=$((MEMBER_COUNT2 * 64 + 64))
 
 CLIENT_ADDR2="$(kubectl get kvcachebackends.worker.gpustack.ai "$BACKEND2" -o jsonpath='{.status.endpoints[?(@.name=="Client")].address}' 2>/dev/null)"
 ADMIN_ADDR2="$(kubectl get kvcachebackends.worker.gpustack.ai "$BACKEND2" -o jsonpath='{.status.endpoints[?(@.name=="Admin")].address}' 2>/dev/null)"
@@ -580,7 +609,7 @@ cat <<PY | kubectl -n "$NS" run "case65-probe-oe-${SFX}" --image="$IMAGE" --rest
   --labels="gpustack-e2e-case=65-${SFX}" \
   --overrides='{"spec":{"containers":[{"name":"probe","image":"'"$IMAGE"'","command":["python3","-"],"stdin":true,"stdinOnce":true}]}}' \
   -i --rm --quiet >"$PROBE_LOG2" 2>&1 || true
-import sys, socket, hashlib, json, urllib.request
+import sys, socket, hashlib, json, time, urllib.request
 try:
     from mooncake.store import MooncakeDistributedStore
 except Exception as e:
@@ -597,104 +626,180 @@ print("SETUP-RC %d" % rc)
 if rc != 0:
     sys.exit(0)
 
-payload = (b"case65-onevict!" * (4 * 1024 * 1024 // 15 + 1))[:4 * 1024 * 1024]
-digest = hashlib.sha256(payload).hexdigest()
+OBJ = 4 * 1024 * 1024
+
+# Content derived FROM THE KEY, so that a read-back's digest says WHICH object came back rather
+# than only that something of the right size did. One payload shared by every key makes all the
+# digests identical, and then an object served under the wrong key -- the shape a bucket adopted
+# from another backend produces -- compares equal and passes.
+def payload(key):
+    seed = (key + "|case65-onevict|").encode()
+    return (seed * (OBJ // len(seed) + 1))[:OBJ]
+
+def query(keys):
+    url = "http://${ADMIN_ADDR2}/batch_query_keys?keys=" + ",".join(keys)
+    raw = urllib.request.urlopen(url, timeout=60).read().decode()
+    return (json.loads(raw).get("data") or {})
 
 # KEYS DISTINCT FROM PHASE A's, and that is a correctness requirement rather than tidiness. Both
 # phases point their tier at the same host directory and phase A's backend is still alive here --
 # the teardown deletes both at the end -- so this store's startup scan finds phase A's bucket files
 # and adopts every key in them. Sharing a key name would let this phase's read be served by phase
 # A's bytes: a digest mismatch that looks like a failed read-back but is a different defect.
-for i in range(4):
-    print("PUT oe-warm-%d rc=%d" % (i, store.put("oe-warm-%d" % i, payload)))
+KEYS = ["oe-%03d" % i for i in range(${PHASE_B_TOTAL})]
 
-# Past aggregate memory by one member's capacity. With onEvict the disk write happens exactly here,
-# at eviction time.
-for i in range(${PHASE_B_FILL}):
-    rc = store.put("oe-fill-%d" % i, payload)
-    if rc != 0:
-        print("PUT oe-fill-%d rc=%d (first failure)" % (i, rc))
+# A put returning -200 (NO_AVAILABLE_HANDLE) IS NOT A TERMINAL ERROR HERE, and treating it as one
+# is how this phase came to assert a scene that never happened. The master raises its
+# need-eviction flag on the very path that returns that code, and its eviction thread then runs
+# the eviction -- which, under onEvict, is what writes to the tier. So the first -200 arrives at
+# the exact moment the thing this phase exists to force is about to start, and stopping there
+# stops just short of it. Retrying is what lets it happen.
+#
+# The FIRST stall is the slow one: the eviction it asks for was measured taking about 18 seconds,
+# while every later one recovered within a couple. The budget below covers the first.
+written = []
+stalls = 0
+hard = []
+for k in KEYS:
+    body = payload(k)
+    rc = -1
+    for attempt in range(15):
+        rc = store.put(k, body)
+        if rc == 0:
+            written.append(k)
+            break
+        if rc == -200:
+            stalls += 1
+            time.sleep(2)
+            continue
         break
-else:
-    print("PUT fill all ${PHASE_B_FILL} rc=0")
+    if rc != 0:
+        hard.append("%s rc=%d" % (k, rc))
+print("FILL written=%d of %d stalls=%d hard=%d" % (len(written), len(KEYS), stalls, len(hard)))
+if hard:
+    print("FILL-HARD %s" % " ".join(hard[:5]))
 
-# WHICH replica the leader holds for this key, asked BEFORE the read and never after. A read served
-# from the tier can promote the object back into memory, so a query taken afterwards would report a
-# memory replica for a key that was on disk when it was read -- and the whole point of this phase is
-# to tell those two apart. Without this the GET below cannot distinguish a tier hit from a memory
-# hit, which is the one thing it is here to establish.
-try:
-    q = urllib.request.urlopen(
-        "http://${ADMIN_ADDR2}/batch_query_keys?keys=oe-warm-0", timeout=30).read().decode()
-    d = (json.loads(q).get("data") or {}).get("oe-warm-0") or {}
-    print("REPLICAS mem=%d local_disk=%d disk=%d" % (
-        len(d.get("values") or []),
-        len(d.get("local_disk_values") or []),
-        len(d.get("disk_values") or [])))
-except Exception as e:
-    # Reported, not defaulted to zeros: "no memory replica" is exactly the reading this phase acts
-    # on, so a failed query that returned zeros would manufacture the verdict it exists to test.
-    print("REPLICAS-FAIL %s" % e)
+# WHERE the objects are, asked BEFORE any read and never after. A read served from the tier can
+# promote the object back into memory, so a query taken afterwards would report a memory replica
+# for a key that was on disk when it was read -- and telling those two apart is the whole point of
+# this phase. Promotion is off in the configuration this operator renders (the store defaults
+# promotion_on_hit to false and nothing here turns it on), so today the ordering changes no
+# reading; it is kept because it is what makes the assertion survive that being turned on.
+#
+# The subject is taken FROM this answer rather than assumed to be the oldest key. Which object
+# eviction chooses is the store's decision, and a case that names its own subject is asserting the
+# eviction policy it happens to have observed.
+tier_only = []
+for attempt in range(12):
+    try:
+        d = query(written)
+    except Exception as e:
+        # Reported, not defaulted to empty: "nothing is on the tier" is exactly the reading this
+        # phase acts on, so a failed query that returned it would manufacture the verdict.
+        print("PLACEMENT-FAIL %s" % e)
+        break
+    mem_only, tier_only, both, neither, errored = [], [], [], [], []
+    for k, v in d.items():
+        if not v.get("ok"):
+            errored.append(k)
+            continue
+        m = len(v.get("values") or [])
+        t = len(v.get("local_disk_values") or [])
+        if m and t:
+            both.append(k)
+        elif m:
+            mem_only.append(k)
+        elif t:
+            tier_only.append(k)
+        else:
+            neither.append(k)
+    print("PLACEMENT try=%d mem_only=%d tier_only=%d both=%d neither=%d error=%d" % (
+        attempt, len(mem_only), len(tier_only), len(both), len(neither), len(errored)))
+    if tier_only:
+        break
+    # The write lands in a BUCKET and the master learns of it when that bucket closes, so an empty
+    # answer this early is not yet a verdict.
+    time.sleep(10)
 
-# oe-warm-0 predates the fill by the whole run; served from the tier or not at all.
-got = store.get("oe-warm-0")
-if got is None:
-    print("GET oe-warm-0 rc=NotFound")
+if not tier_only:
+    print("SUBJECT none")
 else:
-    print("GET oe-warm-0 len=%d sha256=%s" % (len(got), hashlib.sha256(got).hexdigest()))
-print("WANT sha256=%s len=%d" % (digest, len(payload)))
+    subject = sorted(tier_only)[0]
+    print("SUBJECT %s" % subject)
+    got = store.get(subject)
+    if got is None:
+        print("GET %s rc=NotFound" % subject)
+    else:
+        print("GET %s len=%d sha256=%s" % (subject, len(got), hashlib.sha256(got).hexdigest()))
+    print("WANT %s len=%d sha256=%s" % (subject, OBJ, hashlib.sha256(payload(subject)).hexdigest()))
 PY
 
 grep -q 'SETUP-RC 0' "$PROBE_LOG2" \
   && record PASS "the on-evict probe's client set up against the leader" "$(grep 'SETUP-RC' "$PROBE_LOG2")" \
   || record FAIL "the on-evict probe's client set up against the leader" "$(grep -E 'SETUP|IMPORT-FAIL|Error|error' "$PROBE_LOG2" | head -3 | tr '\n' ' ')"
 
-if grep -q "PUT fill all ${PHASE_B_FILL} rc=0" "$PROBE_LOG2" && ! grep -qE 'PUT warm-[0-9] rc=-?[1-9]' "$PROBE_LOG2"; then
+FILL="$(grep -E '^FILL written=' "$PROBE_LOG2" | head -1)"
+FILL_W="$(echo "$FILL" | sed -n 's/.*written=\([0-9][0-9]*\).*/\1/p')"
+FILL_N="$(echo "$FILL" | sed -n 's/.* of \([0-9][0-9]*\).*/\1/p')"
+FILL_HARD="$(echo "$FILL" | sed -n 's/.*hard=\([0-9][0-9]*\).*/\1/p')"
+if [ -z "$FILL_W" ] || [ -z "$FILL_N" ]; then
+  record FAIL "on-evict writes succeed past aggregate memory" \
+    "no FILL line from the probe: $(grep -E 'SETUP|IMPORT-FAIL' "$PROBE_LOG2" | head -2 | tr '\n' ' ')"
+elif [ "$FILL_W" = "$FILL_N" ] && [ "${FILL_HARD:-1}" = 0 ]; then
+  # The stall count is printed rather than asserted on. A run with zero stalls wrote the whole set
+  # without ever exhausting memory, which is a smaller write set than intended rather than a
+  # failure; the placement reading below is what says whether eviction happened.
   record PASS "on-evict writes succeed past aggregate memory" \
-    "${PHASE_B_TOTAL} objects for ${MEMBER_COUNT2} running member(s), all puts rc=0 (eviction forced)"
+    "${FILL} for ${MEMBER_COUNT2} running member(s) (eviction forced)"
 else
-  record FAIL "on-evict writes succeed past aggregate memory" "$(grep 'PUT' "$PROBE_LOG2" | tail -3 | tr '\n' ' ')"
+  record FAIL "on-evict writes succeed past aggregate memory" \
+    "${FILL} $(grep '^FILL-HARD' "$PROBE_LOG2") -- puts that no retry recovered, so the set that \
+reached the store is not the one the assertions below are sized for"
 fi
 
-# WHERE the read came FROM, asserted before the read itself is judged. A successful GET of the right
-# bytes is compatible with the object never having left memory, and this phase's whole claim is that
-# it did -- so the leader's own replica list for that key, taken before the read, is what makes the
+# WHERE the read comes FROM, established before the read itself is judged. A successful GET of the
+# right bytes is compatible with the object never having left memory, and this phase's whole claim
+# is that it did -- so the leader's own placement answer, taken before any read, is what makes the
 # next assertion a statement about the TIER rather than about the store in general.
-REPL="$(grep -E '^REPLICAS' "$PROBE_LOG2" | head -1)"
-REPL_MEM="$(echo "$REPL" | sed -n 's/.*mem=\([0-9][0-9]*\).*/\1/p')"
-REPL_LD="$(echo "$REPL" | sed -n 's/.*local_disk=\([0-9][0-9]*\).*/\1/p')"
-if [ -z "$REPL_MEM" ] || [ -z "$REPL_LD" ]; then
-  # An unanswered query is NOT "no memory replica". That reading is the one this phase acts on, so
-  # defaulting it to zero would manufacture the verdict below out of a failed probe.
-  record FAIL "the leader places the key on the tier and not in memory before the read" \
-    "no replica reading: ${REPL:-<no REPLICAS line>} -- this run cannot say where the read below was served from"
-elif [ "$REPL_MEM" -eq 0 ] 2>/dev/null && [ "$REPL_LD" -gt 0 ] 2>/dev/null; then
-  record PASS "the leader places the key on the tier and not in memory before the read" "$REPL"
+PLACE="$(grep -E '^PLACEMENT try=' "$PROBE_LOG2" | tail -1)"
+PLACE_T="$(echo "$PLACE" | sed -n 's/.*tier_only=\([0-9][0-9]*\).*/\1/p')"
+if [ -z "$PLACE_T" ]; then
+  # An unanswered query is NOT "nothing is on the tier". That reading is the one this phase acts
+  # on, so defaulting it to zero would manufacture the verdict out of a failed probe.
+  record FAIL "the leader holds keys on the tier that memory no longer has" \
+    "no placement reading: ${PLACE:-<no PLACEMENT line>} $(grep '^PLACEMENT-FAIL' "$PROBE_LOG2") \
+-- this run cannot say where the read below was served from"
+elif [ "$PLACE_T" -gt 0 ] 2>/dev/null; then
+  record PASS "the leader holds keys on the tier that memory no longer has" "$PLACE"
 else
-  record FAIL "the leader places the key on the tier and not in memory before the read" \
-    "$REPL -- with a memory replica still present, a successful read below does not establish that \
-the tier served it"
+  record FAIL "the leader holds keys on the tier that memory no longer has" \
+    "$PLACE -- every key the store still knows about has a memory replica, so eviction either did \
+not run or dropped what it took instead of offloading it"
 fi
 
-WANT2="$(grep '^WANT' "$PROBE_LOG2")"
-if grep '^GET oe-warm-0' "$PROBE_LOG2" | grep -q "$(echo "$WANT2" | awk '{print $2}')"; then
+SUBJECT="$(grep -E '^SUBJECT ' "$PROBE_LOG2" | head -1 | awk '{print $2}')"
+GET2_SHA="$(grep -E '^GET ' "$PROBE_LOG2" | head -1 | awk '{print $4}')"
+WANT2_SHA="$(grep -E '^WANT ' "$PROBE_LOG2" | head -1 | awk '{print $4}')"
+if [ -n "$WANT2_SHA" ] && [ "$GET2_SHA" = "$WANT2_SHA" ]; then
   record PASS "an evicted object reads back byte-identical from the tier" \
-    "$(grep '^GET oe-warm-0' "$PROBE_LOG2") [${REPL:-no replica reading}]"
+    "$(grep -E '^GET ' "$PROBE_LOG2" | head -1) [${PLACE}]"
 else
   # Three outcomes reach here and they are different defects, so the message names all three rather
-  # than the one that was expected first. A digest that matches PHASE A's payload is not a failed
-  # read-back at all -- it is the other backend's bytes being served under this key.
+  # than the one that was expected first. The payload is derived from the key, so a digest that
+  # matches nothing is bytes stored under some other key rather than a corrupted read.
   record FAIL "an evicted object reads back byte-identical from the tier" \
-    "get: $(grep '^GET oe-warm-0' "$PROBE_LOG2") vs $WANT2 -- NotFound means eviction dropped the \
-object instead of offloading it; a digest that matches neither means the bytes came from somewhere \
-else, and the payloads of the two phases differ on purpose so that case can be told apart"
+    "subject=${SUBJECT:-<none: no key was on the tier>} get: $(grep -E '^GET ' "$PROBE_LOG2" | head -1) \
+vs $(grep -E '^WANT ' "$PROBE_LOG2" | head -1) -- NotFound means eviction dropped the object instead \
+of offloading it; a digest that matches neither means the bytes belong to a different key"
 fi
 
 METRIC2="$(kubectl -n "$NS" run "case65-metrics-oe-${SFX}" --image=busybox:1.36 --restart=Never --rm -i --quiet \
   --pod-running-timeout="$PULL_TIMEOUT" \
   --labels="gpustack-e2e-case=65-${SFX}" \
   -- sh -c "wget -qO- http://${ADMIN_ADDR2}/metrics | grep '^master_allocated_file_size_bytes'" 2>/dev/null)"
-METRIC2_VAL="$(echo "$METRIC2" | awk '{print $2}' | cut -d. -f1)"
+# One line, as above: the probe's single line is replayed by kubectl's log fallback, and the pair
+# of identical numbers that produces is not something any numeric test accepts.
+METRIC2_VAL="$(echo "$METRIC2" | head -1 | awk '{print $2}' | cut -d. -f1)"
 if [ -n "$METRIC2_VAL" ] && [ "$METRIC2_VAL" -gt 0 ] 2>/dev/null; then
   record PASS "the on-evict leader reports bytes written under forced eviction" \
     "master_allocated_file_size_bytes=${METRIC2_VAL} (> 0) -- the eviction path writes; only the write-through path is broken"
@@ -705,9 +810,21 @@ elif [ -z "$METRIC2" ]; then
     "the metrics probe returned no reading within ${PULL_TIMEOUT}; an absent reading is not a zero, \
 so this run cannot say which write path the tier uses"
 else
-  record FAIL "the on-evict leader reports bytes written under forced eviction" \
-    "master_allocated_file_size_bytes='${METRIC2}' -- a zero here, with eviction forced and writes healthy, \
+  case "$METRIC2_VAL" in
+    '' | *[!0-9]*)
+      # A reading arrived and is not a number. Named separately from the zero below because the
+      # harshest verdict this case can reach must not be reachable by a parse: a run that read a
+      # healthy figure it could not parse would otherwise be reported as a tier that never wrote.
+      record FAIL "the on-evict leader reports bytes written under forced eviction" \
+        "master_allocated_file_size_bytes came back unparsable: '${METRIC2}' -- a reading this run \
+could not read is not a zero, so it makes no claim about either write path"
+      ;;
+    *)
+      record FAIL "the on-evict leader reports bytes written under forced eviction" \
+        "master_allocated_file_size_bytes=${METRIC2_VAL} -- a zero here, with eviction forced and writes healthy, \
 means BOTH write paths are broken: the tier is unusable in every configuration this API renders"
+      ;;
+  esac
 fi
 
 rm -f "$PROBE_LOG" "$PROBE_LOG2"
