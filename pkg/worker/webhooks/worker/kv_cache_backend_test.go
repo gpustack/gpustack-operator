@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -815,6 +816,135 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 	}, func(wh *KVCacheBackendWebhook, _, newKvcb *workercore.KVCacheBackend) error {
 		_, err := wh.ValidateCreate(context.Background(), newKvcb)
 		return err
+	})
+}
+
+// TestKVCacheBackendWebhook_ADeviceResourceNameDomainIsBounded holds the one bound on this value that
+// no schema can carry, together with the exemption that keeps the bound from stranding an object.
+//
+// The schema bounds each label of the domain with a pattern and the whole value with a length. It
+// cannot bound the DOMAIN: that is a repeated group whose parts vary in length, while the API server
+// limits it to 253 characters as a whole. The refused value below is built to clear both schema
+// bounds and break only that one.
+//
+// THE SCHEMA HALF IS ASSERTED, not assumed. A value the schema already refuses never reaches this
+// handler, so a case built on one would be this rule's in name only. The lengths are asserted for the
+// same reason, and that is not a hypothetical worry: the paragraph this rule replaced illustrated the
+// gap with five labels of 63 characters, which is a domain of 319 and a value of at least 321 against
+// a cap of 317 — the schema refuses it, so a case written from that example would have exercised a
+// value no cluster can send.
+func TestKVCacheBackendWebhook_ADeviceResourceNameDomainIsBounded(t *testing.T) {
+	label := func(n int) string { return strings.Repeat("a", n) }
+	overLimitDomain := strings.Join([]string{label(63), label(63), label(63), label(62)}, ".")
+	atLimitDomain := strings.Join([]string{label(63), label(63), label(63), label(61)}, ".")
+	require.Len(t, overLimitDomain, 254, "the refused case has to be over the limit, by one")
+	require.Len(t, atLimitDomain, 253, "and its baseline exactly at it")
+	overLimit, atLimit := overLimitDomain+"/efa", atLimitDomain+"/efa"
+
+	crd, ok := workercore.GetCustomResourceDefinitions()["KVCacheBackend"]
+	require.True(t, ok, "the KVCacheBackend CRD is generated under this key")
+	require.NotEmpty(t, crd.Spec.Versions)
+	require.NotNil(t, crd.Spec.Versions[0].Schema)
+
+	node := crd.Spec.Versions[0].Schema.OpenAPIV3Schema
+	for _, step := range []string{"spec", "transport", "deviceResourceName"} {
+		next, found := node.Properties[step]
+		require.True(t, found, "the schema still has a %q under this path", step)
+		node = &next
+	}
+	require.NotEmpty(t, node.Pattern, "the schema is what bounds each label")
+	require.NotNil(t, node.MaxLength, "and what bounds the whole value")
+
+	matcher, err := regexp.Compile(node.Pattern)
+	require.NoError(t, err, "the pattern has to compile in the engine that enforces it")
+	require.True(t, matcher.MatchString(overLimit),
+		"every label is inside its own limit, so the pattern admits this and is not what refuses it")
+	require.LessOrEqual(t, int64(len(overLimit)), *node.MaxLength,
+		"and the length cap admits it too, which is what leaves this bound to this handler")
+
+	runKVCacheBackendCases(t, []kvCacheBackendCase{
+		{"a domain one character over the limit", func(k *workercore.KVCacheBackend) {
+			k.Spec.Transport.DeviceResourceName = overLimit
+		}, "must be no more than 253"},
+		{"a domain exactly at the limit", func(k *workercore.KVCacheBackend) {
+			k.Spec.Transport.DeviceResourceName = atLimit
+		}, ""},
+		{"the name AWS's own plugin advertises", func(k *workercore.KVCacheBackend) {
+			k.Spec.Transport.DeviceResourceName = "vpc.amazonaws.com/efa"
+		}, ""},
+	}, func(wh *KVCacheBackendWebhook, _, newKvcb *workercore.KVCacheBackend) error {
+		_, err := wh.ValidateCreate(context.Background(), newKvcb)
+		return err
+	})
+
+	// The exemption and its blind spot. A name this rule refuses belongs to a backend that never
+	// rendered a member DaemonSet, so its object is exactly the one somebody needs to delete — and
+	// deletion reaches this handler as the reconciler's finalizer removal. What the exemption may
+	// NOT do is let the name start being rendered.
+	wh := &KVCacheBackendWebhook{}
+
+	withName := func(k *workercore.KVCacheBackend, protocol, name string) {
+		k.Spec.Transport.Protocol = protocol
+		k.Spec.Transport.DeviceResourceName = name
+	}
+
+	t.Run("an update that leaves the name where it was is admitted", func(t *testing.T) {
+		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+		withName(oldKvcb, "RDMA", overLimit)
+		withName(newKvcb, "RDMA", overLimit)
+
+		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+		require.NoError(t, err,
+			"this is the finalizer removal, and refusing it leaves the object undeletable")
+	})
+
+	t.Run("an update that moves the name is refused", func(t *testing.T) {
+		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+		withName(oldKvcb, "RDMA", "vpc.amazonaws.com/efa")
+		withName(newKvcb, "RDMA", overLimit)
+
+		// The positive baseline for the case above: an exemption that swallowed the rule would
+		// pass that one just as well.
+		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+		require.Error(t, err, "the value moved, so it is judged")
+		require.Contains(t, err.Error(), "must be no more than 253")
+	})
+
+	// The blind spot the exemption has if it asks only whether the VALUE moved. A name sitting
+	// under TCP renders nothing, so it can be carried along harmlessly; switching to a host fabric
+	// is what starts rendering it, and that update touches the protocol rather than the name.
+	t.Run("an update that starts rendering an unchanged name is refused", func(t *testing.T) {
+		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+		withName(oldKvcb, "TCP", overLimit)
+		withName(newKvcb, "RDMA", overLimit)
+
+		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+		require.Error(t, err,
+			"the protocol moved, so the name it starts rendering is read again")
+		require.Contains(t, err.Error(), "must be no more than 253")
+	})
+
+	// The other direction, which is the way OUT of the state above and must stay open. Without
+	// this case the rule above could be written as "any protocol change re-reads the name", which
+	// would refuse the one edit that makes the bad name stop mattering.
+	t.Run("an update that stops rendering an unchanged name is admitted", func(t *testing.T) {
+		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+		withName(oldKvcb, "RDMA", overLimit)
+		withName(newKvcb, "TCP", overLimit)
+
+		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+		require.NoError(t, err,
+			"turning the fabric off is how an admitted bad name is defused, not a new offence")
+	})
+
+	t.Run("an update that leaves an unrendered name unrendered is admitted", func(t *testing.T) {
+		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+		withName(oldKvcb, "TCP", overLimit)
+		withName(newKvcb, "TCP", overLimit)
+		newKvcb.Spec.Image = "example.com/mooncake:v1"
+
+		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+		require.NoError(t, err, "nothing renders it, so an ordinary edit elsewhere is not its business")
 	})
 }
 
