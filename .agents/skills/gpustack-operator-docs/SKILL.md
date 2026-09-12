@@ -105,6 +105,8 @@ It still does **not** read prose: everything below is on you.
 - [ ] Touched `values.yaml`? Run `make generate chart` and commit the regenerated chart README/schema.
 - [ ] Moved or renamed a page? `grep -rn "<old-name>" --include='*.md' --include='*.go' --include='*.yaml' .`
       and fix everything outside `specs/` (specs are historical records — leave their references alone).
+      The exception is a spec naming another **spec** that left the tree: that name resolves to nothing,
+      so it is corrected in place under the rules in `docs/development.md`, not left alone.
 
 ## Keeping this skill honest
 

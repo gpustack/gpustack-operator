@@ -230,3 +230,10 @@ commit.
 Decision records, motivation, alternatives, task breakdowns and build logs live there. Docs state the
 resulting rule. Never edit a spec to reflect a later change, and never update a spec's references when
 a doc moves — a spec is a record of what was true when it was written.
+
+The one exception is a **correction**, and `docs/development.md` defines it: an in-place edit is
+allowed when evidence proves a claim wrong while the shipped design stands, and a bug fix's
+supersession is recorded that way because it has no new spec to be recorded in. Both are marked
+`**Corrected after shipping.**`. A spec naming another spec by file name is the case that forces one:
+when that file leaves the tree the name resolves to nothing, and leaving it alone preserves a pointer
+rather than a record.
