@@ -302,14 +302,18 @@ answered, which is why a backend can end up with no verdict at all.
 ### What it does not promise
 
 **A node it cannot reach in time keeps its content.** The deletion is not held open for it — a
-deletion waiting on a node that is gone is an object nobody can delete. Five minutes after the first
-cleanup Pod is created, the nodes that have not finished are left as they are and each one gets a
-warning event, recorded **on the node** rather than on the backend, because the backend is about to
-stop existing and the leftover data is not.
+deletion waiting on a node that is gone is an object nobody can delete. The node is left as it is and
+gets a warning event, recorded **on the node** rather than on the backend, because the backend is
+about to stop existing and the leftover data is not.
 
-That clock starts at the first cleanup Pod rather than at the deletion, because everything before it
-is unbounded: the deletion is held while a pool still uses the backend, and again while the members
-terminate. Timed from the deletion, a slow teardown would leave the cleanup nothing to spend.
+**"In time" is five minutes, counted per node from that node's own cleanup Pod** — not from the
+oldest Pod of the pass, and not from the deletion.
+
+> **Why** — the Pods are not born together, since a create that failed transiently is retried on a
+> later pass; one clock taken from the oldest would report a young node as abandoned "after five
+> minutes" with a fraction of that elapsed. Starting at the deletion is worse: the deletion is held
+> while a pool still uses the backend, and then for each workload's own termination budget, so a slow
+> teardown would leave the cleanup nothing to spend.
 
 **A cleanup still running at the deadline is stopped, not left to finish.** Emptying a very large
 tier can outlast the five minutes, and ending it there leaves the directory partly emptied. Leaving
