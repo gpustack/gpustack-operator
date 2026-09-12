@@ -49,9 +49,10 @@ one by name is your job. The change on the left is the trigger.
   a slicing shim under `csrc/`, or `pkg/devicemanager/allocator/hygon/`
   → `gpustack-operator-xbuild-and-verify`
 
-The `gpustack-operator-lint` hook dispatches on what a turn left dirty and does not implement this
-table. Run the matching one yourself; the last row is a default, not a list, so a file type nobody
-named still has an answer:
+The `gpustack-operator-lint` hook dispatches on what a turn left dirty and implements this table;
+`hack/check-hook-dispatch.sh` asserts that it still does. It is report-only and runs once the turn
+is over, so run the matching target yourself when you need the answer before that. The last row is a
+default, not a list, so a file type nobody named still has an answer:
 
 - Markdown → `make lint docs`
 - the chart → `make lint chart`
