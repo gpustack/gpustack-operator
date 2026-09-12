@@ -240,6 +240,21 @@ var memberProtocols = map[string]string{
 	"Ascend":           "ascend",
 }
 
+// MemberProtocolIsHostFabric reports whether a RESOLVED protocol is one of the two that reach the
+// host's device tree: the ones that take hostNetwork, get the two capabilities and mount the device
+// node. It takes MemberProtocol's output, not the API's spelling.
+//
+// It does NOT promise that a device request is rendered. That needs a name as well — declared, or
+// EFA's fallback — and an RDMA group with neither renders the mount and no request, which is the
+// state a declaration exists to let an operator leave.
+//
+// It is exported because admission asks the same question — a declared device resource name is
+// consequential only on these protocols, so the rule that judges one has to know which they are.
+// Restating the pair there would let the two drift apart the day a third fabric joins.
+func MemberProtocolIsHostFabric(protocol string) bool {
+	return protocol == "rdma" || protocol == "efa"
+}
+
 // MemberObjectName is the name of the objects rendered for one member group.
 //
 // The group's INDEX is in the name because a group has no name of its own, and because the position
@@ -715,7 +730,7 @@ func memberRequests(member workercore.KVCacheBackendMember) core.ResourceList {
 // context at all rather than an empty one, since an empty struct is an invitation to add a
 // capability to it.
 func applyMemberFabric(ds *apps.DaemonSet, protocol, deviceResource string) {
-	if protocol != "rdma" && protocol != "efa" {
+	if !MemberProtocolIsHostFabric(protocol) {
 		return
 	}
 
