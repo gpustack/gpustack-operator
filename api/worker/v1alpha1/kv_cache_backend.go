@@ -465,9 +465,14 @@ type KVCacheBackendLeaderOffload struct {
 
 // KVCacheBackendTransport is the data plane the members use.
 type KVCacheBackendTransport struct {
-	// Protocol is the transport the members use. Auto resolves to TCP, and
-	// status.members[].protocol reports what the leader says each member actually came up on, so
-	// the outcome is observed rather than assumed from this field.
+	// Protocol is the transport the members are ASKED to use. Auto resolves to TCP.
+	//
+	// Whether a member came up on it is NOT visible through this API. status.members[].protocol
+	// echoes this request back rather than reporting a result — the value travels from the member's
+	// own mount request through the leader's listing unchanged — so a member that asks for a host
+	// fabric and falls back to TCP because the device is missing still reads as the fabric there,
+	// while serving. The transport the data plane installed is reported only in the member's own
+	// log. Do not read agreement between the two fields as confirmation that this one took effect.
 	//
 	// Auto is deliberately NOT a per-node probe that promotes itself to a faster fabric, for two
 	// reasons. A member group renders one DaemonSet, so a single Pod template covers every node the
