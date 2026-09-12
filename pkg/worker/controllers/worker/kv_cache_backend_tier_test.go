@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
@@ -995,4 +997,66 @@ func TestTierSharedPathStopsARemovalAlreadyRunning(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestTierCleanupSurvivesAFailedCollection pins that a teardown which finished its work is not
+// undone by failing to tidy up after it.
+//
+// The last act of a completed cleanup is deleting its own Pods, and returning that error said
+// "finished" and "failed" in one breath. The caller reads the error first, so the finalizer stayed
+// on; and the next pass then found the Pods this one DID delete missing and built them again with
+// fresh creation timestamps, which restarts the per-node give-up deadline. A node that can never be
+// cleaned is handed its whole deadline over again by every failure to collect.
+//
+// The Pods carry an ownerReference to the backend, so the api server removes them once the object
+// goes. That is what makes the delete a question of WHEN rather than WHETHER, and what makes logging
+// the failure the right answer instead of holding an object open on it.
+func TestTierCleanupSurvivesAFailedCollection(t *testing.T) {
+	kvcb := &workercore.KVCacheBackend{
+		ObjectMeta: meta.ObjectMeta{Name: "store", UID: "11111111-2222-3333-4444-555555555555"},
+		Spec: workercore.KVCacheBackendSpec{
+			Image: "mooncake:v0.3.13",
+			Connection: workercore.KVCacheBackendConnection{
+				Managed: &workercore.KVCacheBackendManaged{
+					Members: []workercore.KVCacheBackendMember{{
+						LocalDisk: &workercore.KVCacheBackendMemberLocalDisk{
+							Path: "/mnt/tier", CleanAfterDelete: true,
+						},
+					}},
+				},
+			},
+		},
+	}
+	node := &core.Node{ObjectMeta: meta.ObjectMeta{Name: "node-a"}}
+
+	// The node is finished with, so the pass reaches the collection rather than returning pending.
+	done := tierCleanupPodOn(kvcb, node, string(kvcb.UID), false)
+	done.Status.Phase = core.PodSucceeded
+
+	r := &KVCacheBackendReconciler{
+		Client: ctrlfake.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithObjects(kvcb, node, done).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Delete: func(
+					_ context.Context, _ ctrlcli.WithWatch, obj ctrlcli.Object,
+					_ ...ctrlcli.DeleteOption,
+				) error {
+					if _, ok := obj.(*core.Pod); ok {
+						return kerrors.NewInternalError(errors.New("the api server said no"))
+					}
+					return nil
+				},
+			}).
+			Build(),
+		Recorder: record.NewFakeRecorder(10),
+	}
+
+	cleaned, err := r.cleanKVCacheBackendTier(context.Background(), kvcb)
+	require.NoError(t, err,
+		"the work is done; a tidy-up the api server refused must not become the reason a "+
+			"finalizer stays on")
+	assert.True(t, cleaned,
+		"reported unfinished, the next pass rebuilds the Pods it deleted and every node's "+
+			"give-up deadline starts over")
 }

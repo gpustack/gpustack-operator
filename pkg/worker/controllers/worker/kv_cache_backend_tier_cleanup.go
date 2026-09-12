@@ -197,14 +197,32 @@ func (r *KVCacheBackendReconciler) cleanKVCacheBackendTier(
 		return false, nil
 	}
 
-	// Past here every node is either emptied, skipped, or reported, and the Pods go with the pass.
-	// A Pod in the operator's own namespace naming a backend that no longer exists is litter, and
-	// nothing would ever collect it: the object that owns it is about to be released.
+	// Past here every node is either emptied, skipped, or reported, and the Pods go with the pass. A
+	// Pod in the operator's own namespace naming a backend that no longer exists is litter, and
+	// collecting it here is what keeps it from sitting there until the owner's own removal reaches it.
 	//
 	// The cost is that a failed Pod's logs go too, in exactly the case where they would have been
 	// the account of why a node kept its content. The Event is what remains, which is why it names
 	// the path, the backend and the deadline rather than only saying that something was skipped.
-	return true, r.deleteKVCacheBackendTierCleanupPods(ctx, kvcb)
+	//
+	// THE FAILURE TO COLLECT IS LOGGED AND NOT RETURNED, which is the one error in this file that
+	// stops nothing. Returned, it would say "finished" and "failed" in one breath, and the caller
+	// reads the error first -- so a cleanup that had seen every node through would release no
+	// finalizer. The pass after it then finds the Pods this one DID delete missing and builds them
+	// again with fresh creation timestamps, which is the single thing that breaks the give-up
+	// deadline, because the deadline is measured from the Pod. Each failed collection therefore hands
+	// a node that can never be cleaned another whole deadline, and one that keeps failing hands it
+	// one indefinitely -- the object nobody can delete that this entire step exists to prevent.
+	//
+	// Logging it is safe because these Pods carry an ownerReference to the backend: the api server
+	// removes them once the object goes, so this delete decides WHEN they are collected rather than
+	// WHETHER. See kvCacheBackendTierCleanupPod for that reference and for why it blocks nothing.
+	if cerr := r.deleteKVCacheBackendTierCleanupPods(ctx, kvcb); cerr != nil {
+		logger.Error(cerr, "collect the disk tier cleanup pods of a finished teardown",
+			"backend", kvcb.Name)
+	}
+
+	return true, nil
 }
 
 // stopKVCacheBackendTierCleanupPod ends this backend's cleanup on one node and reports whether there
