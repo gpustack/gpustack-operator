@@ -31,13 +31,13 @@ const (
 	ModelDeploymentPhaseDeleting = "Deleting"
 )
 
-// The condition types a ModelDeployment reports, one per axis. The three are independent: "quota
+// The condition types a ModelDeployment reports, one per axis. They are independent: "quota
 // reserved but cache not attached" is a real and actionable state, which is what a single phase
 // string cannot carry.
 //
-// DomainRegistered is declared beside the rule that resolves the Binding, and CacheAttached beside
-// the reading that judges it, so that each condition's vocabulary sits with the code that can
-// actually observe it.
+// DomainRegistered is declared beside the rule that resolves the Binding, CacheAttached beside the
+// reading that judges it, and ReplicasUpToDate beside the convergence that decides it, so that each
+// condition's vocabulary sits with the code that can actually observe it.
 const (
 	ModelDeploymentConditionQuotaReserved kubeapistatus.ConditionType = "QuotaReserved"
 )
@@ -61,11 +61,13 @@ const modelDeploymentReasonPodGroupIncomplete = "PodGroupIncomplete"
 // for the same reason — a second writer would be free to leave its own field behind.
 // The domain is what THIS pass observed about the referenced Binding, or nil for a pass that did not
 // look. Nil leaves the domain projection and its condition exactly as they were, because a teardown
-// pass reporting "not observed" would read as the domain having gone away.
+// pass reporting "not observed" would read as the domain having gone away. The rollout record is
+// nil on the same terms, for a pass that compared no spec hashes.
 func (r *ModelDeploymentReconciler) syncModelDeploymentStatus(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod, domain *modelDeploymentDomain,
+	rollout *modelDeploymentRollout,
 ) error {
-	desired, err := r.computeModelDeploymentStatus(ctx, md, pods, domain)
+	desired, err := r.computeModelDeploymentStatus(ctx, md, pods, domain, rollout)
 	if err != nil {
 		return err
 	}
@@ -85,6 +87,7 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentStatus(
 // computeModelDeploymentStatus derives the whole status from the spec and the observed Pods.
 func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod, domain *modelDeploymentDomain,
+	rollout *modelDeploymentRollout,
 ) (*workercore.ModelDeploymentStatus, error) {
 	// The condition accessors mutate the object they are given, so they work on a copy of the
 	// observed status: conditions carry a LastTransitionTime that must not be reset on every pass,
@@ -107,6 +110,8 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 	observeModelDeploymentQuota(md, pods, wl, holder)
 
 	r.observeModelDeploymentCache(ctx, md, pods, domain, holder)
+
+	observeModelDeploymentRollout(holder, rollout)
 
 	deriveModelDeploymentPhase(md, holder)
 

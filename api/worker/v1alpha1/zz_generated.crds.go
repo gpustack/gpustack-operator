@@ -4256,7 +4256,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 									Type: "object",
 									Properties: map[string]v1.JSONSchemaProps{
 										"conditions": {
-											Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,\nCacheAttached. The three are independent — \"quota reserved but cache not attached\" is a real\nand actionable state — which is what a single phase string cannot carry.",
+											Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,\nCacheAttached, ReplicasUpToDate. They are independent — \"quota reserved but cache not\nattached\" is a real and actionable state — which is what a single phase string cannot carry.",
 											Type:        "array",
 											Items: &v1.JSONSchemaPropsOrArray{
 												Schema: &v1.JSONSchemaProps{

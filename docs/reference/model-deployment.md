@@ -444,7 +444,7 @@ That is the field's contract rather than a gap in it. The answer is read through
 per-accelerator admission gate uses, and a flavor reported here that the gate would not fit against
 would be worse than none.
 
-Three conditions carry the axes a single phase cannot. They are independent: "quota reserved but cache
+Four conditions carry the axes a single phase cannot. They are independent: "quota reserved but cache
 not attached" is a real and actionable state.
 
 **`DomainRegistered`** — whether the referenced Binding resolved and its domain was read.
@@ -508,6 +508,49 @@ simply idle looks exactly like an unread one. No supported engine publishes anyt
 connector initialized" before any traffic, so reading silence as a detachment would be a false alarm
 on the most common steady state there is. A connector that cannot come up takes its replica with it,
 and that is already reported as a replica that never becomes Ready.
+
+**`ReplicasUpToDate`** — whether the running replicas match what the convergence renders for them now.
+It is deliberately **not** a statement about `spec` alone: the hash it compares covers the synthesized
+KV cache connector too, so a replica still carrying the current spec differs from the render as soon as
+that connector stops resolving — which is the one state the other three conditions describe correctly
+while saying nothing about.
+
+| Value | Reason | Meaning |
+|---|---|---|
+| `True` | `UpToDate` | every replica matches what the pass rendered |
+| `False` | `RolloutInProgress` | replicas that differed from the render were recreated this pass |
+| `False` | `RolloutHeldByCache` | replicas that differed from the render were **left in place**: no connection resolved this pass, and recreating them on that alone would rebuild every replica whenever the store blinks |
+
+A pass answers only for the replicas it can vouch for — ones whose hash it read, or ones it created
+from the render it just performed. A pass that can vouch for none leaves the condition alone instead
+of answering, because "nothing was outdated" and "nothing was looked at" are the same zero.
+
+That is not a rare path. A teardown, a whole-group rebuild, and the pass between a rollout's delete
+and its create while the replica names are still held all reach the status write that way, and the
+last is the worst: reporting the rollout complete while the group is short.
+
+`RolloutHeldByCache` is the answer to "I changed the image and nothing happened". Nothing else on the
+object is about that edit: the only false condition names a reuse domain whose figures could not be
+read, which is accurate and about a different subject.
+
+> **It does not mean an edit is waiting.** During an outage the render carries no connector, so every
+> attached replica differs from it whether or not anyone changed the deployment — an ordinary store
+> blink puts every deployment on the pool into this state. The message therefore says what *would* be
+> delayed, and never that something is.
+
+> **And not every edit is delayed.** A change to the replica counts or the role set moves the group
+> annotations, so the group resizes and takes the whole-group rebuild, which runs **before** this guard
+> and proceeds during an outage. What waits is an edit that changes a replica's rendered Pod while
+> leaving the group's shape alone.
+
+> **Why a condition rather than a more precise rollout.** A design that never withholds an unrelated
+> edit exists — a base hash over the spec without the connector plus a separate connector fingerprint,
+> so only the fingerprint comparison is skipped during an outage — and it costs two annotations and a
+> one-time rebuild of every replica on upgrade.
+
+> Measured, the withheld change lands within seconds of the store returning, so what the guard costs is
+> diagnosability rather than correctness. This condition addresses that at a fraction of the price and
+> rules nothing out later.
 
 ## Rollout is recreate
 
