@@ -104,6 +104,21 @@ function lint() {
     gpustack::log::fatal "the tool-pin validators in hack/lib are not trustworthy: their self-test failed"
   fi
 
+  # The Stop hook's routing, which decides whether anything above runs at all on a given turn. It is
+  # asserted rather than trusted because a routing rule fails by staying silent: a path matching no
+  # branch is verified by nothing, and from the outside that is indistinguishable from a turn with
+  # nothing to check. It replaces `make` with a stub, so it costs a second and runs no lint pass. It
+  # carries its own fixtures and pins absences as well as presences -- a dispatch stuck at "nothing"
+  # and one stuck at "everything" each fail half of it -- so unlike the symbol check above there is
+  # nothing separate to self-test.
+  local dispatch_rc=0
+  bash "${ROOT_DIR}/hack/check-hook-dispatch.sh" "${ROOT_DIR}" || dispatch_rc=$?
+  if [[ ${dispatch_rc} -eq 1 ]]; then
+    gpustack::log::fatal "the lint hook routes a dirty path to a target that does not cover it"
+  elif [[ ${dispatch_rc} -gt 1 ]]; then
+    gpustack::log::fatal "the lint hook's dispatch check could not run; its diagnostic is above"
+  fi
+
   # Three states, not two: the tree is clean, the tree is dirty, or git cannot answer
   # at all. Folding the last into "clean" is what made a build from a git worktree fail
   # — the checkout's .git is a file pointing outside the build context, so every git
