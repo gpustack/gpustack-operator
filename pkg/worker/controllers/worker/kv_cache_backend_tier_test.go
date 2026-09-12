@@ -13,6 +13,7 @@ import (
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
@@ -872,35 +873,36 @@ func TestTierSharedPathStopsARemovalAlreadyRunning(t *testing.T) {
 		rivalSelector  map[string]string
 		podUID         string
 		podTerminating bool
-		wantStopped    bool
+		wantPodEnded   bool
+		wantPartly     bool
 	}{
 		{
 			name:          "the path becomes shared while the removal is running",
 			rivalSelector: map[string]string{"tier": "a"},
 			podUID:        ours,
-			wantStopped:   true,
+			wantPodEnded:  true,
+			wantPartly:    true,
 		},
 		{
 			name:          "nothing shares the path, so the removal is left to finish",
 			rivalSelector: map[string]string{"tier": "elsewhere"},
 			podUID:        ours,
-			wantStopped:   false,
 		},
 		{
 			name:          "the Pod belongs to another incarnation, which is not this teardown's to end",
 			rivalSelector: map[string]string{"tier": "a"},
 			podUID:        theirs,
-			wantStopped:   false,
 		},
 		{
-			// The teardown re-runs every couple of seconds while any node is still working, so this
-			// is the state every pass after the first one sees. Reported as a fresh stop, it would
-			// republish the partial-removal warning for work an earlier pass did.
-			name:           "an earlier pass already stopped it, so this one stopped nothing",
+			// The event is recorded AFTER the delete, so a controller that restarted between the two
+			// arrives here on the retry. Read as "nothing happened", the partial-removal warning is
+			// lost for good and the backend is released without it ever having been published. The
+			// report is therefore about the removal's state, not about which pass ended it.
+			name:           "an earlier pass ended it, and the warning is still published",
 			rivalSelector:  map[string]string{"tier": "a"},
 			podUID:         ours,
 			podTerminating: true,
-			wantStopped:    false,
+			wantPartly:     true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -959,12 +961,12 @@ func TestTierSharedPathStopsARemovalAlreadyRunning(t *testing.T) {
 				Name:      kvCacheBackendTierCleanupPodName(kvcb, nodeA),
 				Namespace: kuberess.SystemNamespaceName,
 			}, new(core.Pod))
-			if tc.wantStopped {
+			if tc.wantPodEnded {
 				assert.True(t, kerrors.IsNotFound(err),
 					"a removal running against a path another backend now holds has to be ended, "+
 						"not merely left out of the next round")
 			} else {
-				assert.NoError(t, err, "nothing here justifies ending this node's removal")
+				assert.NoError(t, err, "no delete was due on this node's Pod this pass")
 			}
 
 			err = r.Client.Get(context.Background(), ctrlcli.ObjectKey{
@@ -986,7 +988,7 @@ func TestTierSharedPathStopsARemovalAlreadyRunning(t *testing.T) {
 				break
 			}
 			partly := strings.Join(events, "\n")
-			if tc.wantStopped {
+			if tc.wantPartly {
 				assert.Contains(t, partly, kvCacheBackendEventTierPartlyEmptied,
 					"a removal stopped part-way may already have taken some of the other "+
 						"backend's live data, which is a different thing to report from a "+
@@ -1059,4 +1061,113 @@ func TestTierCleanupSurvivesAFailedCollection(t *testing.T) {
 	assert.True(t, cleaned,
 		"reported unfinished, the next pass rebuilds the Pods it deleted and every node's "+
 			"give-up deadline starts over")
+}
+
+// TestTierSharedPathDeleteIsGuardedByTheUIDItRead pins that the UID guards the DELETE and not only
+// the read that preceded it.
+//
+// The Pod's name is derived from the backend and the node, so it repeats across incarnations. Between
+// the Get that checks the label and the Delete that acts on it, that Pod can finish terminating and
+// the next incarnation's cleanup Pod can take the same derived name -- and a delete by name alone
+// would end it, which is exactly what the label check one line earlier exists to prevent. The
+// precondition is what carries the check across that gap, and a refused one comes back as a conflict
+// meaning somebody else's object is there now.
+func TestTierSharedPathDeleteIsGuardedByTheUIDItRead(t *testing.T) {
+	const (
+		ours    = "11111111-2222-3333-4444-555555555555"
+		theirs  = "99999999-8888-7777-6666-555555555555"
+		podUID  = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+		tierDir = "/mnt/tier"
+	)
+
+	kvcb := &workercore.KVCacheBackend{
+		ObjectMeta: meta.ObjectMeta{Name: "store", UID: ours},
+		Spec: workercore.KVCacheBackendSpec{
+			Image: "mooncake:v0.3.13",
+			Connection: workercore.KVCacheBackendConnection{
+				Managed: &workercore.KVCacheBackendManaged{
+					Members: []workercore.KVCacheBackendMember{{
+						LocalDisk: &workercore.KVCacheBackendMemberLocalDisk{
+							Path: tierDir, CleanAfterDelete: true,
+						},
+					}},
+				},
+			},
+		},
+	}
+	rival := &workercore.KVCacheBackend{
+		ObjectMeta: meta.ObjectMeta{Name: "rival", UID: theirs},
+		Spec: workercore.KVCacheBackendSpec{
+			Connection: workercore.KVCacheBackendConnection{
+				Managed: &workercore.KVCacheBackendManaged{
+					Members: []workercore.KVCacheBackendMember{{
+						LocalDisk:    &workercore.KVCacheBackendMemberLocalDisk{Path: tierDir},
+						NodeSelector: map[string]string{"tier": "a"},
+					}},
+				},
+			},
+		},
+	}
+	nodeA := &core.Node{ObjectMeta: meta.ObjectMeta{
+		Name: "node-a", Labels: map[string]string{"tier": "a"},
+	}}
+	// node-b keeps this pass pending, so the sweep on the way out never runs and the delete under
+	// test is the only one that reaches a Pod.
+	nodeB := &core.Node{ObjectMeta: meta.ObjectMeta{Name: "node-b"}}
+
+	podA := tierCleanupPodOn(kvcb, nodeA, string(kvcb.UID), false)
+	podA.UID = podUID
+
+	var got string
+	recorder := record.NewFakeRecorder(10)
+	r := &KVCacheBackendReconciler{
+		Client: ctrlfake.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithObjects(kvcb, rival, nodeA, nodeB, podA,
+				tierCleanupPodOn(kvcb, nodeB, string(kvcb.UID), false)).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Delete: func(
+					_ context.Context, _ ctrlcli.WithWatch, obj ctrlcli.Object,
+					opts ...ctrlcli.DeleteOption,
+				) error {
+					if _, ok := obj.(*core.Pod); !ok {
+						return nil
+					}
+					do := new(ctrlcli.DeleteOptions)
+					for _, o := range opts {
+						o.ApplyToDelete(do)
+					}
+					require.NotNil(t, do.Preconditions,
+						"a delete by derived name alone can end another incarnation's Pod")
+					require.NotNil(t, do.Preconditions.UID)
+					got = string(*do.Preconditions.UID)
+					// The object was replaced between the read and this call, which is what the
+					// precondition is there to turn into a refusal rather than a wrong deletion.
+					return kerrors.NewConflict(
+						schema.GroupResource{Resource: "pods"}, obj.GetName(), errors.New("uid"))
+				},
+			}).
+			Build(),
+		Recorder: recorder,
+	}
+
+	done, err := r.cleanKVCacheBackendTier(context.Background(), kvcb)
+	require.NoError(t, err,
+		"a refused precondition means somebody else's object is there now, which is a normal "+
+			"outcome and not a teardown failure")
+	require.False(t, done, "node-b is still working")
+	assert.Equal(t, podUID, got, "the precondition has to name the Pod the label check actually read")
+
+	var events []string
+	for {
+		select {
+		case e := <-recorder.Events:
+			events = append(events, e)
+			continue
+		default:
+		}
+		break
+	}
+	assert.NotContains(t, strings.Join(events, "\n"), kvCacheBackendEventTierPartlyEmptied,
+		"nothing of this backend's was stopped, so nothing of it was partly emptied")
 }

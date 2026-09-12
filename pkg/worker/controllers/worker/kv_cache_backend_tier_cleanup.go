@@ -124,9 +124,11 @@ func (r *KVCacheBackendReconciler) cleanKVCacheBackendTier(
 		// completion, against a directory another backend now holds. The Pod is therefore ENDED
 		// rather than merely not created.
 		//
-		// What still gets through is whatever the `rm` managed between one pass and the next, which
-		// is why the second event exists: a partial removal of another backend's live data is a
-		// different thing to report from a directory left alone.
+		// WHAT STILL GETS THROUGH IS LONGER THAN THE GAP BETWEEN TWO PASSES. The `rm` runs from
+		// whenever the sharing began until the check catches it, and then on through the Pod's own
+		// termination, because a delete asks a kubelet to stop rather than cutting anything. That
+		// whole span is why the second event exists: a partial removal of another backend's live
+		// data is a different thing to report from a directory left alone.
 		if holder := kvCacheBackendTierSharedWith(kvcb, others, path, node); holder != "" {
 			stopped, serr := r.stopKVCacheBackendTierCleanupPod(ctx, kvcb, node)
 			if serr != nil {
@@ -140,7 +142,8 @@ func (r *KVCacheBackendReconciler) cleanKVCacheBackendTier(
 				r.recordWarning(node, kvCacheBackendEventTierPartlyEmptied,
 					"%s may hold a partial result: emptying it for deleted KVCacheBackend %q was "+
 						"already running when KVCacheBackend %q was found to declare an overlapping "+
-						"path, and was stopped; check that backend's data on this node",
+						"path, and was stopped -- the removal ends as that cleanup pod terminates, "+
+						"not at once, so check that backend's data on this node",
 					path, kvcb.Name, holder)
 			}
 			logger.Info("skipped a disk tier shared with another backend",
@@ -225,22 +228,32 @@ func (r *KVCacheBackendReconciler) cleanKVCacheBackendTier(
 	return true, nil
 }
 
-// stopKVCacheBackendTierCleanupPod ends this backend's cleanup on one node and reports whether there
-// was one to end.
+// stopKVCacheBackendTierCleanupPod ends this backend's cleanup on one node and reports whether a
+// removal was under way there.
 //
 // It is how a decision taken at the top of a pass reaches a removal that a previous pass started. The
 // shared-path check runs every pass, but the `rm` does not ask anything between its own start and its
 // end -- so without this the check refuses to begin a deletion that is already most of the way
 // through, which reads as a refusal and behaves as a completion.
 //
-// THE UID LABEL IS CHECKED AND NOT THE NAME. The name is derived from the backend and the node, so it
-// repeats across incarnations; a Pod belonging to another one is emptying a path on another object's
-// behalf, and ending it here would do to that object exactly what this branch exists to prevent.
+// WHAT IT REPORTS IS A STATE AND NOT AN ACTION THIS PASS TOOK, which is why a Pod already terminating
+// still counts. The event is recorded after the delete, so a controller that restarts between the two
+// would take that branch on the retry, report nothing, and release the backend having never published
+// the one fact an operator needs -- that another backend's data on this node may already be partly
+// gone. An edge that can be lost is the wrong carrier for it. The message names no pass and no time,
+// so the repeats fold into a single event with a count.
 //
-// Ending it is not instantaneous -- the Pod terminates on its own budget -- so this bounds the
-// removal rather than canceling it. That is the same trade the give-up path already takes, and for
-// the same reason: a partially emptied directory is a cost, while a removal nobody can stop running
-// against another backend's live data is a loss.
+// THE UID IS CHECKED TWICE AND FOR TWO DIFFERENT REASONS. The label decides whether the Pod this Get
+// found is ours at all -- the name is derived from the backend and the node, so it repeats across
+// incarnations. The precondition on the delete decides whether it is STILL ours: between the Get and
+// the Delete, that Pod can finish terminating and a cleanup Pod of the next incarnation can take the
+// same derived name, and a delete by name alone would end it. A refused precondition comes back as a
+// conflict and means exactly that somebody else's object is there now.
+//
+// Ending it is not instantaneous -- the Pod terminates on its own budget, and the `rm` runs on
+// through that -- so this bounds the removal rather than canceling it. That is the same trade the
+// give-up path already takes, and for the same reason: a partially emptied directory is a cost, while
+// a removal nobody can stop running against another backend's live data is a loss.
 func (r *KVCacheBackendReconciler) stopKVCacheBackendTierCleanupPod(
 	ctx context.Context, kvcb *workercore.KVCacheBackend, node *core.Node,
 ) (stopped bool, err error) {
@@ -256,13 +269,18 @@ func (r *KVCacheBackendReconciler) stopKVCacheBackendTierCleanupPod(
 		return false, nil
 	}
 
-	// Already going, so reporting it stopped would be an event about work this pass did not do; the
-	// removal it names was ended by whichever pass issued the delete.
+	// Already going, and reported as such. The delete is not reissued: it would change nothing, and
+	// the state this returns is about the removal rather than about who ended it.
 	if pod.DeletionTimestamp != nil {
-		return false, nil
+		return true, nil
 	}
-	if err = r.Client.Delete(ctx, pod); err != nil {
-		if kerrors.IsNotFound(err) {
+
+	uid := pod.UID
+	err = r.Client.Delete(ctx, pod, &ctrlcli.DeleteOptions{
+		Preconditions: &meta.Preconditions{UID: &uid},
+	})
+	if err != nil {
+		if kerrors.IsNotFound(err) || kerrors.IsConflict(err) {
 			return false, nil
 		}
 		return false, fmt.Errorf("stop the disk tier cleanup pod on a shared path: %w", err)

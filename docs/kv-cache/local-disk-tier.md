@@ -338,8 +338,9 @@ naming one directory, and emptying it for the one being deleted would take the o
 with it. A removal already under way when the path becomes shared is **stopped**, not left to finish.
 
 > It is a check and not a lock, and it is re-run on every pass rather than only before the removal
-> starts. What can still get through is whatever that removal managed between one pass and the next,
-> which is reported as its own event — the other backend may have lost data. Closing the window
+> starts. Stopping one is a delete, which asks the kubelet rather than cutting: the `rm` runs from
+> whenever the sharing began, until the check catches it, and on through that Pod's own termination.
+> Everything in that span can be lost, which is what the second event reports. Closing the window
 > entirely needs an atomic claim on the path, which this operator does not take.
 
 ```console
