@@ -464,7 +464,7 @@ func validateKVCacheBackendManaged(
 			fldPath.Child("members").Index(i))...)
 	}
 
-	errs = append(errs, validateKVCacheBackendOffload(managed, fldPath)...)
+	errs = append(errs, validateKVCacheBackendOffload(managed, oldManaged, fldPath)...)
 	errs = append(errs, validateKVCacheBackendScaleIn(managed, fldPath.Child("scaleIn"))...)
 
 	return errs
@@ -477,7 +477,7 @@ func validateKVCacheBackendManaged(
 // is the bar for putting a rule in a webhook rather than in the schema: a schema can say a value is
 // wrong, only a webhook can say a pair is.
 func validateKVCacheBackendOffload(
-	managed *workercore.KVCacheBackendManaged, fldPath *field.Path,
+	managed, oldManaged *workercore.KVCacheBackendManaged, fldPath *field.Path,
 ) field.ErrorList {
 	var errs field.ErrorList
 
@@ -513,6 +513,34 @@ func validateKVCacheBackendOffload(
 		errs = append(errs, field.Forbidden(offloadPath.Child("onEvict"), fmt.Sprintf(
 			"requires %s: the store ands the two together, so this alone is accepted, echoed back "+
 				"in the leader's own startup log, and then does nothing",
+			offloadPath.Child("enabled"))))
+	}
+
+	// The mirror image, and the reason it is a refusal rather than a documented caveat: the store
+	// gives this pair no protection at all. It holds an object queued for offload in memory by
+	// taking a reference on the memory replica when the object enters the queue and releasing it
+	// only once the client reports the disk write landed -- and that happens on the deferred branch
+	// alone. The write-through branch returns before reaching it, so an object whose bucket has not
+	// yet been flushed has its only replica evicted and is gone.
+	//
+	// Refusing the pair removes the mode. Defaulting the other one instead would leave an
+	// administrator who chose this one deliberately in exactly the same place.
+	//
+	// Scoped to the update that INTRODUCES the pair, like the capacityPerMember floor above it and
+	// for the same reason: re-judging a pair an update left alone would strand a backend admitted
+	// before this rule existed, and not every update is the user's. This webhook opts into
+	// ReceiveDeletionUpdate, so the reconciler removing the finalizer is one such update -- refusing
+	// that would leave the object undeletable rather than merely unsafe.
+	var oldOffload *workercore.KVCacheBackendLeaderOffload
+	if oldManaged != nil {
+		oldOffload = oldManaged.Leader.Offload
+	}
+	storedUnprotected := oldOffload != nil && oldOffload.Enabled && !oldOffload.OnEvict
+	if enabled && !offload.OnEvict && !storedUnprotected {
+		errs = append(errs, field.Required(offloadPath.Child("onEvict"), fmt.Sprintf(
+			"must be true when %s is true: the store pins a queued object's memory replica until "+
+				"its disk write lands only when this is set, and evicting without it destroys the "+
+				"sole replica of an object whose bucket has not been flushed",
 			offloadPath.Child("enabled"))))
 	}
 

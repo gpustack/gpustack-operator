@@ -49,19 +49,23 @@ func newKVCacheBackend() *workercore.KVCacheBackend {
 	}
 }
 
-// withDiskTier declares a complete local disk tier: the member's half and the leader's.
+// withDiskTier declares a complete local disk tier: the member's half, the leader's, and onEvict.
 //
-// It is one helper rather than two because a tier declared on one side only is a REFUSAL, so a
-// fixture that set one half would make every case built on it fail for that reason instead of its
-// own. Cases that want a half-declared tier remove one explicitly, which reads as the mutation it
-// is.
+// It is one helper rather than three because a tier missing any of those pieces is a REFUSAL, so a
+// fixture that set only some of them would make every case built on it fail for that reason instead
+// of its own. onEvict belongs to "complete" for exactly that reason: offload enabled without it is
+// refused too. Cases that want an incomplete tier drop a piece explicitly, which reads as the
+// mutation it is.
 func withDiskTier() func(*workercore.KVCacheBackend) {
 	return func(k *workercore.KVCacheBackend) {
 		k.Spec.Connection.Managed.Members[0].LocalDisk = &workercore.KVCacheBackendMemberLocalDisk{
 			Path:     "/var/lib/kvcache",
 			Capacity: resource.MustParse("4Ti"),
 		}
-		k.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+		k.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{
+			Enabled: true,
+			OnEvict: true,
+		}
 	}
 }
 
@@ -276,6 +280,13 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 			withDiskTier()(k)
 			k.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{OnEvict: true}
 		}, "the store ands the two together"},
+		// The pair with no protection in the store at all, which is why it is refused outright
+		// rather than documented. The case below it is the baseline: the same tier WITH onEvict is
+		// accepted, so this one is refused for the missing field and not for the tier.
+		{"enabled without onEvict", func(k *workercore.KVCacheBackend) {
+			withDiskTier()(k)
+			k.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+		}, "destroys the sole replica of an object whose bucket has not been flushed"},
 		{"onEvict with enabled", func(k *workercore.KVCacheBackend) {
 			withDiskTier()(k)
 			k.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true, OnEvict: true}
@@ -898,6 +909,47 @@ func TestKVCacheBackendWebhook_AGrandfatheredExtraArgIsNotRefusedOnEveryUpdate(t
 		// would pass that assertion just as well, and this is the update the exemption exists for.
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
 		require.NoError(t, err)
+	})
+}
+
+// TestKVCacheBackendWebhook_AGrandfatheredWriteThroughTierIsStillDeletable is the same exemption as
+// the one above, for the offload pair. A backend carrying enabled-without-onEvict was admitted
+// before that pair was refused, and re-judging it on every update would strand it: this webhook opts
+// into ReceiveDeletionUpdate, so the reconciler removing the finalizer arrives here as an update, and
+// refusing that leaves a backend that owns nothing and cannot be deleted.
+//
+// The create direction is covered in the table above; the two cases here are the pair of readings
+// that locate the line, since an exemption that swallowed the rule would pass the first one alone.
+func TestKVCacheBackendWebhook_AGrandfatheredWriteThroughTierIsStillDeletable(t *testing.T) {
+	wh := &KVCacheBackendWebhook{}
+
+	withWriteThroughTier := func(k *workercore.KVCacheBackend) {
+		withDiskTier()(k)
+		k.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+	}
+
+	t.Run("an update that leaves the stored pair alone is admitted", func(t *testing.T) {
+		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+		withWriteThroughTier(oldKvcb)
+		withWriteThroughTier(newKvcb)
+		// An edit somewhere else entirely, which is what an ordinary update looks like.
+		newKvcb.Spec.Image = "example.com/mooncake:v1"
+
+		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+		require.NoError(t, err,
+			"a pair admitted before the rule existed must not refuse every later update")
+	})
+
+	t.Run("an update that introduces the pair is still refused", func(t *testing.T) {
+		// The positive baseline for the case above: without it, an exemption that swallowed the
+		// rule outright would satisfy that assertion just as well.
+		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
+		withDiskTier()(oldKvcb)
+		withWriteThroughTier(newKvcb)
+
+		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+		require.Error(t, err, "this update is what introduces the unprotected pair")
+		require.Contains(t, err.Error(), "sole replica of an object whose bucket has not been flushed")
 	})
 }
 

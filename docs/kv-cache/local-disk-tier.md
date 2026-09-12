@@ -17,7 +17,7 @@ spec:
       leader:
         offload:
           enabled: true                # the leader's half
-          onEvict: true                # optional; requires enabled
+          onEvict: true                # REQUIRED with enabled
       members:
       - nodeSelector: { kvcache: "true" }
         medium: DRAM
@@ -42,6 +42,12 @@ spec:
 | a `hostPath` volume and mount at `localDisk.path` | the member Pod |
 | `-enable_offload=true`, `-offload_on_evict=true` | the leader's argv |
 | a `preStop` hook, and a termination window derived from `scaleIn.gracePeriodSeconds` | the member Pod |
+
+**`onEvict` is required whenever `enabled` is set** — admission refuses the pair without it, in both
+directions. The store keeps an object queued for offload in memory until the disk write lands only on
+the branch this field selects; leaving it out selects write-through, where an eviction can destroy the
+sole replica of an object whose bucket has not been flushed. The mode is refused rather than
+documented, so there is nothing to opt into.
 
 **A tier is a layer on a member group, never a group of its own** — see
 [The two axes](backend.md#the-two-axes) for why the shape has to be this way, and

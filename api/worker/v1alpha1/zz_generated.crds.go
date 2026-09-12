@@ -2427,7 +2427,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																			Type:        "boolean",
 																		},
 																		"onEvict": {
-																			Description: "OnEvict defers the write to disk from the moment a key is stored to the moment it is\nevicted, so a key that is never evicted is never written to disk.\nIt REQUIRES Enabled. The store ANDs the two, so setting this alone is accepted, echoed back\nin the leader's own startup log, and then does nothing — which is why admission refuses it\nrather than rendering a flag that reads as taken.",
+																			Description: "OnEvict defers the write to disk from the moment a key is stored to the moment it is\nevicted, so a key that is never evicted is never written to disk.\nIt REQUIRES Enabled, and Enabled REQUIRES it. The store ANDs the two, so setting this alone\nis accepted, echoed back in the leader's own startup log, and then does nothing. Setting\nEnabled alone selects write-through, which the store leaves unprotected: it holds an object\nqueued for offload in memory only on the deferred branch this field selects, so evicting\nwithout it destroys the sole replica of an object whose bucket has not been flushed.\nAdmission refuses both directions.",
 																			Type:        "boolean",
 																		},
 																	},
