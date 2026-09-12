@@ -17,6 +17,7 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/webhook"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 )
@@ -222,21 +223,172 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	_ context.Context, oldObj, newObj runtime.Object,
 ) (ctrladmission.Warnings, error) {
 	md := newObj.(*workercore.ModelDeployment)
+	old, _ := oldObj.(*workercore.ModelDeployment)
 
-	// There is nothing immutable to check. An Instance's template is frozen after creation, but that
-	// is a rule the Instance webhook enforces on InstanceSpec rather than a property of any template
-	// type, so this CR simply does not carry it: a mutable template is what makes a rollout possible.
+	// WHAT THIS DEPLOYMENT IS CANNOT BE EDITED; HOW IT IS CURRENTLY RUN CAN. The fields answering the
+	// first question are refused here, and the criterion that sorts them is stated on
+	// validateModelDeploymentIdentity rather than left as the list it produces, so the next field
+	// added has a question to be judged against.
 	//
 	// The role names the object ALREADY had are carried in, and the reason is that a rule this handler
 	// gained after an object was stored must not be able to strand that object. The Service-name rule
 	// is the one that could: a deployment's own name is immutable, so a role whose combined name is
 	// too long could never be shortened, and every later edit -- including one that removes the
 	// offending role -- would be refused. That is worse than the reconcile failure the rule prevents.
-	if errs := validateModelDeployment(md, modelDeploymentRoleNames(oldObj)); len(errs) > 0 {
+	errs := validateModelDeployment(md, modelDeploymentRoleNames(oldObj))
+	errs = append(errs, validateModelDeploymentIdentity(md, old)...)
+	if len(errs) > 0 {
 		return nil, kerrors.NewInvalid(md.GroupVersionKind().GroupKind(), md.Name, errs)
 	}
 
 	return nil, nil
+}
+
+// modelDeploymentIdentityMessage is the one reason every identity refusal carries.
+//
+// IT STATES THE RULE RATHER THAN A MECHANISM, and the difference is where it sends the reader. An
+// earlier framing of this freeze was "shrink the surface two writers can disagree on"; a message
+// carrying that sends an operator hunting for a locking problem that does not exist. What they need
+// is the question the rule answers -- this value is part of what makes the object this deployment,
+// so a different value describes a different deployment, and a different deployment is created.
+const modelDeploymentIdentityMessage = "this is part of what makes this deployment the deployment " +
+	"it is: a different value describes a different deployment, which is created rather than edited"
+
+// validateModelDeploymentIdentity refuses an update that changes what the deployment IS, and admits
+// one that changes how it is currently run.
+//
+// THE CRITERION IS THE RULE, NOT THE LIST BELOW. A field is frozen when it answers "which deployment
+// is this" -- what is served, what serves it, whose cache it shares, and the shape of the roles that
+// serve it. A field is editable when it answers "how is this deployment being run right now" -- how
+// many replicas, which build, how that build is fetched and tuned. Judging a NEW field means asking
+// that question, not appending to the list; a list alone grows by precedent and stops meaning
+// anything.
+//
+// ONE FIELD IS FROZEN AGAINST THE CRITERION and is marked here so it is not read as an oversight:
+// roles[].resources does not answer which deployment this is, but it changes what admission has to
+// find. Changing it renegotiates the scheduling, which is not materially different from deleting and
+// recreating. Its mirror image is template.privileged, which the criterion leaves editable even
+// though a different argument could move it.
+//
+// ROLES ARE MATCHED BY NAME, NEVER BY POSITION. The field is a listType=map keyed by name, so a
+// reordered list is the same set of roles and the API already treats it as one; comparing by index
+// would refuse a declarative apply that changed nothing, on the one field most likely to come back
+// serialized in another order.
+//
+// THE STORED OBJECT NEEDS NO DEFAULTING PASS BEFORE THE COMPARISON, and that is a property of this
+// webhook rather than an assumption. The mutating half is registered for CREATE as well as UPDATE,
+// so every object that reached storage was defaulted on the way in and carries the same accelerator
+// count the incoming one gets. The gap -- an object stored before the default existed, which would
+// read as nil becoming one and be refused for an edit nobody made -- is closed by this API being in
+// no released version, which is the same ground Default already stands on.
+//
+// NOTHING OUTSIDE spec IS COMPARED. Labels, annotations and finalizers stay editable because the
+// controllers that write them include this operator, and status is not a user's to send.
+func validateModelDeploymentIdentity(md, old *workercore.ModelDeployment) field.ErrorList {
+	if old == nil {
+		return nil
+	}
+
+	specPath := field.NewPath("spec")
+
+	var errs field.ErrorList
+	if !kubemeta.DeepEqual(md.Spec.Model, old.Spec.Model) {
+		errs = append(errs, field.Invalid(
+			specPath.Child("model"), md.Spec.Model, modelDeploymentIdentityMessage))
+	}
+	if md.Spec.Engine != old.Spec.Engine {
+		errs = append(errs, field.Invalid(
+			specPath.Child("engine"), md.Spec.Engine, modelDeploymentIdentityMessage))
+	}
+	if !kubemeta.DeepEqual(md.Spec.KVCache, old.Spec.KVCache) {
+		errs = append(errs, field.Invalid(
+			specPath.Child("kvCache"), md.Spec.KVCache, modelDeploymentIdentityMessage))
+	}
+
+	return append(errs, validateModelDeploymentRoleIdentity(md, old)...)
+}
+
+// validateModelDeploymentRoleIdentity refuses a change to the set of roles, or to the frozen fields
+// of a role the object already carried.
+//
+// THE SET IS PART OF THE SHAPE, so adding a role and removing one are both refused, each named where
+// a reader can act on it: an added role at its own index, a removed one at the list. Iteration runs
+// over the two slices rather than over a map, so the refusals come out in a stable order and a test
+// can assert which field was named rather than only that something was.
+func validateModelDeploymentRoleIdentity(md, old *workercore.ModelDeployment) field.ErrorList {
+	rolesPath := field.NewPath("spec", "roles")
+
+	stored := make(map[string]*workercore.ModelDeploymentRole, len(old.Spec.Roles))
+	for i := range old.Spec.Roles {
+		stored[old.Spec.Roles[i].Name] = &old.Spec.Roles[i]
+	}
+
+	var errs field.ErrorList
+	incoming := sets.New[string]()
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		incoming.Insert(role.Name)
+
+		was, ok := stored[role.Name]
+		if !ok {
+			errs = append(errs, field.Invalid(
+				rolesPath.Index(i).Child("name"), role.Name, modelDeploymentIdentityMessage))
+
+			continue
+		}
+
+		errs = append(errs, validateModelDeploymentRoleIdentityFields(rolesPath.Index(i), role, was)...)
+	}
+
+	for i := range old.Spec.Roles {
+		if name := old.Spec.Roles[i].Name; !incoming.Has(name) {
+			errs = append(errs, field.Invalid(rolesPath, name, modelDeploymentIdentityMessage))
+		}
+	}
+
+	return errs
+}
+
+// validateModelDeploymentRoleIdentityFields compares one role's frozen fields against the stored
+// role of the same name.
+//
+// template.command is frozen because it decides whether the operator configures this role at all: a
+// role that supplies one is taken over by its author, which changes cache injection and what status
+// can claim. The rest of the template is how the build is fetched, shaped and tuned, and is
+// editable. template.resources has no side here because an existing rule refuses it outright, so it
+// is never part of an update in either direction.
+func validateModelDeploymentRoleIdentityFields(
+	rolePath *field.Path, role, was *workercore.ModelDeploymentRole,
+) field.ErrorList {
+	var errs field.ErrorList
+	if role.Kind != was.Kind {
+		errs = append(errs, field.Invalid(
+			rolePath.Child("kind"), role.Kind, modelDeploymentIdentityMessage))
+	}
+	if role.InstanceType != was.InstanceType {
+		errs = append(errs, field.Invalid(
+			rolePath.Child("instanceType"), role.InstanceType, modelDeploymentIdentityMessage))
+	}
+	if !kubemeta.DeepEqual(role.Resources, was.Resources) {
+		errs = append(errs, field.Invalid(
+			rolePath.Child("resources"), role.Resources, modelDeploymentIdentityMessage))
+	}
+	if cmd, wasCmd := modelDeploymentRoleCommand(role), modelDeploymentRoleCommand(was); !kubemeta.DeepEqual(cmd, wasCmd) {
+		errs = append(errs, field.Invalid(
+			rolePath.Child("template", "command"), cmd, modelDeploymentIdentityMessage))
+	}
+
+	return errs
+}
+
+// modelDeploymentRoleCommand reads a role's command through an absent template, so that a role
+// gaining a template it did not have is not reported as a command change it did not make.
+func modelDeploymentRoleCommand(role *workercore.ModelDeploymentRole) []string {
+	if role.Template == nil {
+		return nil
+	}
+
+	return role.Template.Command
 }
 
 // modelDeploymentRoleNames is the set of role names an object already carried, or nil on create.

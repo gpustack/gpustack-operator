@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -731,4 +732,223 @@ func TestModelDeploymentWebhook_DefaultKeepsTheRepairEditReachable(t *testing.T)
 	require.NotNil(t, repaired.Spec.Roles[0].Resources)
 	require.NotNil(t, repaired.Spec.Roles[0].Resources.Accelerator,
 		"the repaired role is defaulted on the way through")
+}
+
+// modelDeploymentWithEveryField builds a deployment carrying a value in every field of spec, so a
+// case in the identity table CHANGES a value instead of creating the struct that holds it. Those
+// are different edits and only the first tests what the table claims to: comparing nil against a
+// populated struct passes for a rule that refuses everything.
+func modelDeploymentWithEveryField() *workercore.ModelDeployment {
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.Kind = workercore.ModelDeploymentRoleKindServer
+			r.Resources = &workercore.ModelDeploymentRoleResources{
+				Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+			}
+			r.ExtraArgs = []string{"--max-model-len=8192"}
+			r.Env = []workercore.InstanceEnvVar{{Name: "HF_HOME", Value: "/cache"}}
+			r.Template = &workercore.ModelDeploymentTemplate{
+				Image:             "vllm/vllm-openai:v0.25.1",
+				ImagePullPolicy:   core.PullIfNotPresent,
+				ImagePullSecret:   &core.LocalObjectReference{Name: "registry"},
+				Command:           []string{"/bin/serve"},
+				Ports:             []workercore.InstancePort{{Port: 8000}},
+				Env:               []workercore.InstanceEnvVar{{Name: "VLLM_LOG", Value: "info"}},
+				AdditionalVolumes: []workercore.InstanceAdditionalVolume{{MountPath: "/data"}},
+			}
+		}),
+	)
+	// The connector's one legal value is a schema default and a schema enum, with no Go constant to
+	// name it; the literal is what a stored object carries.
+	md.Spec.KVCache.Connector = "auto"
+
+	return md
+}
+
+// TestValidateModelDeploymentIdentity walks every field of spec, one case per field.
+//
+// BOTH DIRECTIONS ARE REQUIRED AND THAT IS THE POINT OF THE TABLE. A rule that refuses every update
+// passes the refusal cases; a rule that refuses nothing passes the acceptance cases; and today's
+// code, which has no rule at all, passes the acceptance cases too. Only the two halves together
+// distinguish the rule from either. A refusal case asserts the TYPED ERROR ON ITS OWN PATH rather
+// than that something was refused, because any other rule refusing the object would satisfy a
+// weaker assertion just as convincingly.
+func TestValidateModelDeploymentIdentity(t *testing.T) {
+	accel2 := resource.NewQuantity(2, resource.DecimalSI)
+
+	cases := []struct {
+		name string
+		edit func(*workercore.ModelDeployment)
+		// refuse is the field path the refusal must name, or "" to require acceptance.
+		refuse string
+	}{
+		// Frozen: what makes this deployment the deployment it is.
+		{"model", func(md *workercore.ModelDeployment) { md.Spec.Model.Name = "Qwen/Qwen3-32B" }, "spec.model"},
+		{"engine", func(md *workercore.ModelDeployment) {
+			md.Spec.Engine = workercore.ModelDeploymentEngineSGLang
+		}, "spec.engine"},
+		{"kvcache_pool_ref", func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache.PoolRef.Name = "another-kv"
+		}, "spec.kvCache"},
+		{"kvcache_connector", func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache.Connector = "mooncake"
+		}, "spec.kvCache"},
+		{"role_kind", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+		}, "spec.roles[0].kind"},
+		{"role_instance_type", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].InstanceType = "a100-8x"
+		}, "spec.roles[0].instanceType"},
+		{"role_resources", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Resources.Accelerator = accel2
+		}, "spec.roles[0].resources"},
+		{"role_template_command", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Template.Command = []string{"/bin/other"}
+		}, "spec.roles[0].template.command"},
+		{"role_added", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles = append(md.Spec.Roles, role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "decode"
+			}))
+		}, "spec.roles[1].name"},
+		{"role_removed", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles = nil
+		}, "spec.roles"},
+
+		// Editable: how the deployment is being run right now.
+		{"engine_version", func(md *workercore.ModelDeployment) { md.Spec.EngineVersion = "0.26.0" }, ""},
+		{"role_replicas", func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 8 }, ""},
+		{"role_extra_args", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].ExtraArgs = []string{"--max-model-len=16384"}
+		}, ""},
+		{"role_env", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Env = []workercore.InstanceEnvVar{{Name: "HF_HOME", Value: "/other"}}
+		}, ""},
+		{"template_image", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Template.Image = "vllm/vllm-openai:v0.26.0"
+		}, ""},
+		{"template_image_pull_policy", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Template.ImagePullPolicy = core.PullAlways
+		}, ""},
+		{"template_image_pull_secret", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Template.ImagePullSecret = &core.LocalObjectReference{Name: "other-registry"}
+		}, ""},
+		{"template_privileged", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Template.Privileged = true
+		}, ""},
+		{"template_ports", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{{Port: 9000}}
+		}, ""},
+		{"template_env", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Template.Env = []workercore.InstanceEnvVar{{Name: "VLLM_LOG", Value: "debug"}}
+		}, ""},
+		{"template_additional_volumes", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Template.AdditionalVolumes = []workercore.InstanceAdditionalVolume{{MountPath: "/other"}}
+		}, ""},
+
+		// The no-op every controller and GitOps agent performs constantly.
+		{"identical_reapply", func(*workercore.ModelDeployment) {}, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			old := modelDeploymentWithEveryField()
+			md := old.DeepCopy()
+			tc.edit(md)
+
+			errs := validateModelDeploymentIdentity(md, old)
+			if tc.refuse == "" {
+				assert.Empty(t, errs, "this field says how the deployment is run, not which one it is")
+
+				return
+			}
+
+			require.Len(t, errs, 1, "one changed field is one refusal, on its own path")
+			assert.Equal(t, tc.refuse, errs[0].Field, "the refusal names the field the user edited")
+			assert.Equal(t, field.ErrorTypeInvalid, errs[0].Type)
+			assert.Contains(t, errs[0].Detail, "describes a different deployment",
+				"the message states the rule, so a reader knows to create rather than to look for a conflict")
+		})
+	}
+}
+
+// TestValidateModelDeploymentIdentity_RolesAreMatchedByName pins the comparison against a reordered
+// list. roles is a listType=map keyed by name, so the two orders are the same object to the API; a
+// positional comparison would refuse a declarative apply that changed nothing.
+func TestValidateModelDeploymentIdentity_RolesAreMatchedByName(t *testing.T) {
+	old := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.Name, r.Kind = "prefill", workercore.ModelDeploymentRoleKindPrefill
+		}),
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.Name, r.Kind = "decode", workercore.ModelDeploymentRoleKindDecode
+		}),
+	)
+
+	reordered := old.DeepCopy()
+	reordered.Spec.Roles[0], reordered.Spec.Roles[1] = reordered.Spec.Roles[1], reordered.Spec.Roles[0]
+
+	assert.Empty(t, validateModelDeploymentIdentity(reordered, old),
+		"a reordered listType=map is the same set of roles")
+
+	// The negative baseline: the same reorder, with one frozen field actually changed, is still
+	// refused and still names the role's own index in the INCOMING list.
+	moved := reordered.DeepCopy()
+	moved.Spec.Roles[0].InstanceType = "a100-8x" // this is "decode" after the swap
+	errs := validateModelDeploymentIdentity(moved, old)
+	require.Len(t, errs, 1)
+	assert.Equal(t, "spec.roles[0].instanceType", errs[0].Field)
+}
+
+// TestValidateModelDeploymentIdentity_DoesNotRunOnCreate pins that there is nothing to compare
+// against on create, so the rule contributes no refusal there.
+func TestValidateModelDeploymentIdentity_DoesNotRunOnCreate(t *testing.T) {
+	assert.Nil(t, validateModelDeploymentIdentity(modelDeploymentWithEveryField(), nil))
+}
+
+// TestModelDeploymentWebhook_ValidateUpdateStatesTheRuleNotTheMechanism pins the wording a user
+// meets. The freeze was first argued as "shrink the surface two writers can disagree on" and that
+// reason is no longer the one: a message giving it would send an operator hunting for a locking
+// problem that does not exist.
+func TestModelDeploymentWebhook_ValidateUpdateStatesTheRuleNotTheMechanism(t *testing.T) {
+	r := newModelDeploymentWebhookWith(nil)
+	old := modelDeploymentWithEveryField()
+	md := old.DeepCopy()
+	md.Spec.Engine = workercore.ModelDeploymentEngineSGLang
+
+	_, err := r.ValidateUpdate(context.Background(), old, md)
+	require.Error(t, err)
+
+	got := err.Error()
+	assert.True(t, errsContain(got, "describes a different deployment"), got)
+	for _, wrongReason := range []string{"conflict", "concurrent", "lock", "race"} {
+		assert.False(t, errsContain(got, wrongReason),
+			"the message must not send the reader looking for %q", wrongReason)
+	}
+}
+
+// TestModelDeploymentWebhook_ValidateUpdateAllowsMetadataAndTheDeletionWindow covers the two edits
+// that must keep working, including the one that releases the object.
+func TestModelDeploymentWebhook_ValidateUpdateAllowsMetadataAndTheDeletionWindow(t *testing.T) {
+	r := newModelDeploymentWebhookWith(nil)
+
+	t.Run("metadata_only_edit", func(t *testing.T) {
+		old := modelDeploymentWithEveryField()
+		md := old.DeepCopy()
+		md.Labels = map[string]string{"team": "a"}
+		md.Annotations = map[string]string{"note": "scaled for the demo"}
+
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		assert.NoError(t, err, "this operator writes labels itself; freezing them would break it")
+	})
+
+	t.Run("edit_during_deletion", func(t *testing.T) {
+		old := modelDeploymentWithEveryField()
+		old.DeletionTimestamp = ptr.To(meta.Now())
+		old.Finalizers = []string{"worker.gpustack.ai/model-deployment"}
+		md := old.DeepCopy()
+		md.Finalizers = nil
+
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		assert.NoError(t, err, "a rule aimed at spec must not trap the edit that releases the object")
+	})
 }
