@@ -32,6 +32,11 @@ const (
 	modelDeploymentReasonUpToDate           = "UpToDate"
 	modelDeploymentReasonRolloutInProgress  = "RolloutInProgress"
 	modelDeploymentReasonRolloutHeldByCache = "RolloutHeldByCache"
+	// modelDeploymentReasonRolloutNotObserved is the answer of a pass that could account for no
+	// replica. It is Unknown rather than an absent condition, because the alternative -- leaving the
+	// stored value in place -- keeps an authoritative True through exactly the passes that delete
+	// every replica.
+	modelDeploymentReasonRolloutNotObserved = "RolloutNotObserved"
 )
 
 // modelDeploymentRollout is what one convergence pass decided about replicas carrying an earlier
@@ -65,16 +70,24 @@ type modelDeploymentRollout struct {
 
 // observeModelDeploymentRollout folds one pass's rollout decision into the status.
 //
-// A record that can vouch for no replica leaves the condition exactly as it was, for the same reason
-// an unobserved domain does: reporting "nothing outdated" from a pass that neither compared nor
-// created anything reads as a rollout that completed. Three passes reach the status write that way --
-// a teardown, a whole-group rebuild, and the pass between a rollout's delete and its create while the
-// names are still taken -- and the last is the worst, because the group is short at exactly that
-// moment.
+// A record that can vouch for no replica reports Unknown. It does NOT leave the stored value alone,
+// and the difference is the whole point: leaving it alone keeps whatever the last answering pass
+// wrote, which after a steady deployment is an authoritative True. A group-shape edit then deletes
+// every replica without vouching for one, and the object goes on saying every replica matches the
+// render while none exists.
+//
+// Three passes arrive here -- a teardown, a whole-group rebuild, and the pass between a rollout's
+// delete and its create while the names are still taken -- and all three are moments when the
+// replicas are least current, so the stale answer is wrong in exactly the state it is read in.
+// Unknown is the same shape CacheAttached already uses for a reading it could not take.
 func observeModelDeploymentRollout(holder *workercore.ModelDeployment, rollout *modelDeploymentRollout) {
-	// The test is on the record rather than at the call site, because "compared nothing" is a
+	// The test is on the record rather than at the call site, because "vouched for nothing" is a
 	// property of what the pass found and every caller would otherwise have to remember it.
 	if rollout == nil || rollout.accounted == 0 {
+		ModelDeploymentConditionReplicasUpToDate.Unknown(holder, modelDeploymentReasonRolloutNotObserved,
+			"this pass accounted for no replica: it compared no hash and created none, so whether the "+
+				"replicas match the current render was not established either way")
+
 		return
 	}
 
@@ -99,8 +112,12 @@ func observeModelDeploymentRollout(holder *workercore.ModelDeployment, rollout *
 				"them -- withheld rather than dropped, and it rolls out once the connection returns",
 			rollout.held, rollout.outdated))
 	case rollout.outdated > 0:
+		// DELETED, not recreated. This pass issues the deletes and requeues with no creates at all;
+		// the replacements are made by the pass that observes them gone. A reader told they were
+		// recreated would stop watching for the new replica.
 		ModelDeploymentConditionReplicasUpToDate.False(holder, modelDeploymentReasonRolloutInProgress, fmt.Sprintf(
-			"%d replicas differed from what this pass rendered and were recreated", rollout.outdated))
+			"%d replicas differed from what this pass rendered and were deleted; the pass that finds "+
+				"them gone creates the replacements", rollout.outdated))
 	default:
 		ModelDeploymentConditionReplicasUpToDate.True(holder, modelDeploymentReasonUpToDate,
 			"every replica matches what this pass rendered")

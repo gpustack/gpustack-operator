@@ -518,16 +518,22 @@ while saying nothing about.
 | Value | Reason | Meaning |
 |---|---|---|
 | `True` | `UpToDate` | every replica matches what the pass rendered |
-| `False` | `RolloutInProgress` | replicas that differed from the render were recreated this pass |
+| `False` | `RolloutInProgress` | replicas that differed from the render were **deleted** this pass; the pass that finds them gone creates the replacements |
 | `False` | `RolloutHeldByCache` | replicas that differed from the render were **left in place**: no connection resolved this pass, and recreating them on that alone would rebuild every replica whenever the store blinks |
+| `Unknown` | `RolloutNotObserved` | the pass accounted for no replica at all, so it established nothing either way |
 
 A pass answers only for the replicas it can vouch for — ones whose hash it read, or ones it created
-from the render it just performed. A pass that can vouch for none leaves the condition alone instead
-of answering, because "nothing was outdated" and "nothing was looked at" are the same zero.
+from the render it just performed. A pass that can vouch for none reports `Unknown`, because "nothing
+was outdated" and "nothing was looked at" are the same zero and only one of them is an answer.
 
-That is not a rare path. A teardown, a whole-group rebuild, and the pass between a rollout's delete
-and its create while the replica names are still held all reach the status write that way, and the
-last is the worst: reporting the rollout complete while the group is short.
+That is not a rare path, and it is not a quiet one. A teardown, a whole-group rebuild, and the pass
+between a rollout's delete and its create while the replica names are still held all reach the status
+write that way — and those are the moments the replicas are least current.
+
+> **Why `Unknown` rather than leaving the last answer standing.** Leaving it alone keeps whatever the
+> last answering pass wrote, and after a steady deployment that is an authoritative `True`. A
+> replica-count edit then deletes every replica without accounting for one, and the object goes on
+> reporting that every replica matches the render while none exists.
 
 `RolloutHeldByCache` is the answer to "I changed the image and nothing happened". Nothing else on the
 object is about that edit: the only false condition names a reuse domain whose figures could not be
