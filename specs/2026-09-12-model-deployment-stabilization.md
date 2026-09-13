@@ -764,7 +764,7 @@ agrees).
       request satisfying one can violate the other. The comment naming these as unwritten is removed.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/worker/webhooks/worker/`
 
-- [ ] **T4 · One pod group per `instanceType`**
+- [x] **T4 · One pod group per `instanceType`**
       Blocked by: None
       Owns: `pkg/worker/controllers/worker/model_deployment_pod_group.go` + its test,
       `pkg/worker/controllers/worker/model_deployment_render.go` + its test — the group metadata is
