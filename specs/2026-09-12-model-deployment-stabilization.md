@@ -867,7 +867,7 @@ look identical. T4's checkpoint claimed the observable one and was true only of 
       heterogeneous sliced shape that F2 exists to enable.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/worker/webhooks/worker/`
 
-- [ ] **T9 · The transport boundary, written down and pinned**
+- [x] **T9 · The transport boundary, written down and pinned**
       Blocked by: T2 — a file dependency, not a substantive one: both edit
       `api/worker/v1alpha1/model_deployment.go`
       Owns: `api/worker/v1alpha1/model_deployment.go` (the connector comment),
