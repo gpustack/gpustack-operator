@@ -28,20 +28,34 @@ import (
 	"gpustack.ai/gpustack/pkg/controller"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
+	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
 const (
 	// _JointAdmissionCheckName is the AdmissionCheck object every operator-owned ClusterQueue
-	// references. The name and the controller name below are the contract shared with
-	// kuberess.InstallModelDeploymentJointAdmissionCheck.
-	_JointAdmissionCheckName = "gpustack-model-deployment-joint"
+	// references, and _JointAdmissionControllerName claims it for the reconciler in this file: Kueue
+	// routes a Workload's check to whoever declares that name, so no other controller answers it.
+	//
+	// BOTH ARE TAKEN FROM THE PACKAGE THAT INSTALLS THE OBJECT rather than spelled again here. Two
+	// copies of a contract agree until someone renames one of them, and neither side reports the
+	// disagreement: the queues go on admitting, and the only thing that notices is the deployment
+	// that needed the barrier.
+	_JointAdmissionCheckName = kuberess.ModelDeploymentJointAdmissionCheckName
 
-	// _JointAdmissionControllerName claims the check for the reconciler in this file. Kueue routes a
-	// Workload's check to whoever declares this name, so no other controller answers it.
-	_JointAdmissionControllerName = "worker.gpustack.ai/model-deployment-joint"
+	_JointAdmissionControllerName = kuberess.ModelDeploymentJointAdmissionControllerName
 
 	// _JointAdmissionFieldOwner owns this controller's entries in a Workload's admissionChecks.
 	_JointAdmissionFieldOwner = "worker.gpustack.ai/model-deployment-joint"
+
+	// _JointAdmissionParkedMarker is the phrase the park message carries and the one the status
+	// reader looks for.
+	//
+	// spec.active=false DOES NOT SAY WHO WROTE IT. Kueue deactivates a Workload of its own accord and
+	// an operator can pause one group by hand, so the flag alone cannot tell the status layer that the
+	// bound is what stopped this deployment. This marker is a term of the message rather than a second
+	// field because the message is already the durable record of the verdict; adding a field would put
+	// the same fact in two places that can disagree.
+	_JointAdmissionParkedMarker = "parked rather than held"
 
 	// _JointAdmissionInfeasibleAfter is how long a deployment's set may fail to assemble before the
 	// barrier stops holding it and parks it instead.
@@ -197,10 +211,18 @@ func (r *ModelDeploymentJointAdmissionReconciler) Reconcile(
 		return ctrl.Result{}, nil
 	}
 
-	md, err := r.workloadModelDeployment(ctx, wl)
+	md, decided, err := r.workloadModelDeployment(ctx, wl)
 	if err != nil {
 		logger.Error(err, "resolve the workload's model deployment")
 		return ctrl.Result{}, err
+	}
+	// NOT KNOWING IS ANSWERED BY WAITING, NOT BY OPENING. Some of this Workload's owner replicas
+	// could not be read, so whether it belongs to a multi-group deployment is unknown -- and the
+	// Ready below is the one verdict that cannot be taken back once Kueue has admitted on it.
+	if !decided {
+		logger.V(3).Info("requeue workload whose owning replicas could not be resolved", "workload", wl.Name)
+
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
 	// EVERYTHING THAT IS NOT A MULTI-GROUP ModelDeployment IS READY AT ONCE, AND THAT CASE HAS TO BE
@@ -275,12 +297,14 @@ func (r *ModelDeploymentJointAdmissionReconciler) park(
 	checks []kueue.AdmissionCheckReference,
 	waiting string,
 ) error {
+	// The marker is spliced in rather than spelled out, so the phrase the status layer looks for and
+	// the phrase written here cannot drift apart.
 	parked := fmt.Sprintf(
-		"%s. This has not changed for %s, so the deployment is parked rather than held: its workloads "+
+		"%s. This has not changed for %s, so the deployment is %s: its workloads "+
 			"are deactivated and no longer ask for quota. An identical re-apply does not clear this — "+
 			"free the capacity the waiting groups need and reactivate the workloads, or delete the "+
 			"deployment and create it again",
-		waiting, _JointAdmissionInfeasibleAfter)
+		waiting, _JointAdmissionInfeasibleAfter, _JointAdmissionParkedMarker)
 
 	if err := r.applyVerdict(ctx, wl, checks, kueue.CheckStatePending, parked); err != nil {
 		return err
@@ -448,7 +472,18 @@ func anyWorkloadHoldsQuotaFor(wls []kueue.Workload, members sets.Set[types.UID])
 // every member of a group belongs to the same deployment by construction.
 func (r *ModelDeploymentJointAdmissionReconciler) workloadModelDeployment(
 	ctx context.Context, wl *kueue.Workload,
-) (*workercore.ModelDeployment, error) {
+) (md *workercore.ModelDeployment, decided bool, err error) {
+	// UNRESOLVABLE IS NOT THE SAME ANSWER AS NOT OURS, and collapsing them opens the barrier. A group
+	// being rebuilt has its replicas deleted while its Workload still references them, so every Get
+	// below misses and the walk ends with nothing -- which, read as "not one of ours", makes this
+	// controller answer Ready and admit a set that is mid-teardown. The same shape arrives from an
+	// informer cache that has not caught up.
+	//
+	// A WORKLOAD WITH NO Pod OWNER AT ALL IS GENUINELY NOT OURS, and that is the case this has to keep
+	// answering, because the check is referenced from every operator-owned queue: without it every
+	// foreign Workload in those queues waits forever with nothing naming the cause.
+	missing := false
+
 	for _, ref := range wl.OwnerReferences {
 		if ref.Kind != "Pod" || ref.APIVersion != "v1" {
 			continue
@@ -459,8 +494,9 @@ func (r *ModelDeploymentJointAdmissionReconciler) workloadModelDeployment(
 			ctrlcli.ObjectKey{Namespace: wl.Namespace, Name: ref.Name}, pod, ctrlclix.WithoutQuorum)
 		if err != nil {
 			if ctrlcli.IgnoreNotFound(err) != nil {
-				return nil, err
+				return nil, false, err
 			}
+			missing = true
 
 			continue
 		}
@@ -475,16 +511,17 @@ func (r *ModelDeploymentJointAdmissionReconciler) workloadModelDeployment(
 			ctrlcli.ObjectKey{Namespace: wl.Namespace, Name: owner.Name}, md, ctrlclix.WithoutQuorum)
 		if err != nil {
 			if ctrlcli.IgnoreNotFound(err) != nil {
-				return nil, err
+				return nil, false, err
 			}
+			missing = true
 
 			continue
 		}
 
-		return md, nil
+		return md, true, nil
 	}
 
-	return nil, nil
+	return nil, !missing, nil
 }
 
 // applyVerdict writes the state for every check this controller owns.
@@ -514,6 +551,22 @@ func (r *ModelDeploymentJointAdmissionReconciler) applyVerdict(
 		})
 }
 
+// carriesJointCheck reports whether a Workload carries this controller's admission check, read off
+// the object with no I/O.
+//
+// IT IS A NECESSARY CONDITION AND NOT A SUFFICIENT ONE, which is why nothing downstream of it is
+// removed: the check is referenced from every operator-owned queue, so plenty of Workloads carry it
+// that this operator did not create. What it rules out cheaply is everything in every OTHER queue.
+func carriesJointCheck(wl *kueue.Workload) bool {
+	for i := range wl.Status.AdmissionChecks {
+		if wl.Status.AdmissionChecks[i].Name == kueue.AdmissionCheckReference(_JointAdmissionCheckName) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // jointSiblings maps a Workload that changed to the other groups of the same deployment.
 //
 // WITHOUT IT THE BARRIER ONLY EVER CLOSES. A held group's verdict is a statement about a DIFFERENT
@@ -535,7 +588,18 @@ func (r *ModelDeploymentJointAdmissionReconciler) jointSiblings(
 		return nil
 	}
 
-	md, err := r.workloadModelDeployment(ctx, wl)
+	// THE CHEAPEST FILTER RUNS FIRST AND COSTS NO READ AT ALL. This mapping is called for every
+	// Workload event in the cluster, and everything below it reads objects: a Get per owner replica,
+	// then a list of the namespace's Workloads. A Workload that does not carry this controller's check
+	// cannot be one this barrier holds, and that is answerable from the object already in hand.
+	if !carriesJointCheck(wl) {
+		return nil
+	}
+
+	// An undecided resolution maps to nothing rather than requeueing: this is an event mapping, and
+	// the Workload whose replicas could not be read gets its own pass through Reconcile, which is
+	// where waiting belongs.
+	md, _, err := r.workloadModelDeployment(ctx, wl)
 	if err != nil {
 		logger.Error(err, "resolve the workload's model deployment for sibling mapping")
 		return nil

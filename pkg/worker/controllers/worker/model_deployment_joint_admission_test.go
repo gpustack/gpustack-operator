@@ -292,6 +292,28 @@ func TestModelDeploymentJointAdmission_TheBarrierIsWiredToOpen(t *testing.T) {
 			"watch already delivers that")
 	})
 
+	// THE MAPPING RUNS FOR EVERY WORKLOAD EVENT IN THE CLUSTER, and everything it does reads objects:
+	// a Get per owner replica, then a list of the namespace's Workloads. A Workload that does not
+	// carry this controller's check cannot be one this barrier holds, and that is answerable from the
+	// object already in hand, so it must be answered before any read happens.
+	t.Run("a_workload_without_this_check_costs_no_read", func(t *testing.T) {
+		// THE FIXTURE IS THE ONE THAT MAPS TO SOMETHING. It is the case above, unchanged except that
+		// this Workload carries no check of ours -- so an implementation without the short-circuit
+		// resolves the deployment and returns its sibling exactly as it does there. An empty client
+		// would have returned nothing either way and proved nothing.
+		cli := newJointClient(twoGroupFixture(true)...)
+		r := &ModelDeploymentJointAdmissionReconciler{Client: cli}
+
+		second := new(kueue.Workload)
+		require.NoError(t, cli.Get(context.Background(),
+			ctrlcli.ObjectKey{Namespace: "team-a", Name: "wl-second"}, second))
+		second.Status.AdmissionChecks = nil
+
+		assert.Empty(t, r.jointSiblings(context.Background(), second),
+			"a workload in some other queue is not this barrier's business, and deciding that must "+
+				"not cost a read per owner replica on every workload event in the cluster")
+	})
+
 	t.Run("a_workload_this_operator_does_not_own_maps_to_nothing", func(t *testing.T) {
 		pod := jointGroupPod("someone-elses", "their-group", "")
 		wl := jointWorkload("wl", true, pod)
@@ -301,6 +323,45 @@ func TestModelDeploymentJointAdmission_TheBarrierIsWiredToOpen(t *testing.T) {
 		assert.Empty(t, r.jointSiblings(context.Background(), wl),
 			"the check is referenced from every operator-owned queue, so most workloads reaching this "+
 				"mapping belong to no deployment of ours")
+	})
+}
+
+// TestModelDeploymentJointAdmission_UnresolvableIsNotForeign separates the two ways this controller
+// can fail to find a deployment behind a Workload.
+//
+// THE Ready ANSWER EXISTS FOR WORKLOADS THAT ARE NOT OURS, and it has to, because the check is
+// referenced from every operator-owned queue: without it every foreign Workload in one waits forever
+// with nothing naming the cause. But the walk to the deployment runs Workload to Pod to
+// ModelDeployment, and a Pod that cannot be read looks exactly like a Pod that leads nowhere.
+//
+// A GROUP BEING REBUILT PRODUCES THAT STATE. Its replicas are deleted while its Workload still
+// references them, so every Get misses and the walk ends empty -- read as "not ours", that admits a
+// set which is mid-teardown, and admission is the one verdict that cannot be taken back.
+func TestModelDeploymentJointAdmission_UnresolvableIsNotForeign(t *testing.T) {
+	t.Run("no_pod_owner_at_all_is_ready", func(t *testing.T) {
+		// A Workload that references no Pod is genuinely none of this operator's, and this is the
+		// case the Ready answer exists for.
+		wl := jointWorkload("wl", true)
+		wl.OwnerReferences = nil
+		cli := newJointClient(jointCheckObject(), wl)
+
+		got := reconcileJoint(t, cli, "wl")
+
+		assert.Equal(t, kueue.CheckStateReady, jointCheckState(got),
+			"a workload with no pod owner is not one of ours, and holding it would hold the queue")
+	})
+
+	t.Run("an_owner_pod_that_cannot_be_read_is_not_answered", func(t *testing.T) {
+		// The Pod is referenced and absent, which is what a rebuild leaves behind for a moment.
+		pod := jointGroupPod("qwen-prefill-0", "qwen-group", "qwen")
+		wl := jointWorkload("wl", true, pod)
+		cli := newJointClient(jointCheckObject(), wl)
+
+		got := reconcileJoint(t, cli, "wl")
+
+		assert.Equal(t, kueue.CheckStatePending, jointCheckState(got),
+			"an unreadable owner replica leaves the answer unknown, and the barrier holds rather "+
+				"than opening on a guess")
 	})
 }
 

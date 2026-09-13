@@ -68,19 +68,34 @@ func InstallNodeDevicesAdmissionCheck(ctx context.Context) error {
 	return nil
 }
 
+const (
+	// ModelDeploymentJointAdmissionCheckName is the AdmissionCheck object every operator-owned
+	// ClusterQueue references, and ModelDeploymentJointAdmissionControllerName is what claims it.
+	//
+	// THEY LIVE HERE BECAUSE THIS PACKAGE INSTALLS THE OBJECT and the controllers package already
+	// imports this one, so the contract can be a single definition the compiler enforces rather than
+	// two strings that agree today. Spelling them twice is the failure this prevents: a rename in one
+	// place leaves workloads ungated or leaves the check permanently inactive, and nothing reports
+	// either -- the queues go on admitting, and the deployment that needed the barrier is the only
+	// thing that notices.
+	ModelDeploymentJointAdmissionCheckName = "gpustack-model-deployment-joint"
+
+	// ModelDeploymentJointAdmissionControllerName routes the check to the controller declaring it.
+	ModelDeploymentJointAdmissionControllerName = "worker.gpustack.ai/model-deployment-joint"
+)
+
 // modelDeploymentJointAdmissionCheckYAML is the AdmissionCheck that gates every group of one
-// ModelDeployment on the whole set. Its name and controllerName are the contract shared with the
-// worker's ModelDeploymentJointAdmission controllers.
-const modelDeploymentJointAdmissionCheckYAML = `
+// ModelDeployment on the whole set.
+var modelDeploymentJointAdmissionCheckYAML = fmt.Sprintf(`
 apiVersion: kueue.x-k8s.io/v1beta2
 kind: AdmissionCheck
 metadata:
-  name: gpustack-model-deployment-joint
+  name: %s
   labels:
     "app.kubernetes.io/part-of": "gpustack-operator"
 spec:
-  controllerName: worker.gpustack.ai/model-deployment-joint
-`
+  controllerName: %s
+`, ModelDeploymentJointAdmissionCheckName, ModelDeploymentJointAdmissionControllerName)
 
 // InstallModelDeploymentJointAdmissionCheck applies the joint-admission AdmissionCheck, retrying
 // until Kueue's CRD is established.
