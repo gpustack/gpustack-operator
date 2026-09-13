@@ -50,8 +50,22 @@ IT="${E2E_MD_INSTANCE_TYPE:-}"
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 
 FAILS=0
+NOREADS=0
 ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+
+# NO-READ is a row whose precondition did not hold: nothing was measured, so it neither passed nor
+# failed. The three wording rows below all read ONE refusal string, so an edit that was accepted
+# leaves them with nothing to inspect -- reporting three more failures there would report one cause
+# four times.
+record() {
+  ROWS+=("$1|$2|$3")
+  case "$1" in
+    FAIL) FAILS=$((FAILS + 1)) ;;
+    NO-READ) NOREADS=$((NOREADS + 1)) ;;
+  esac
+
+  return 0
+}
 
 if [ -z "$IT" ]; then
   IT="$(k get instancetypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
@@ -109,29 +123,37 @@ else
     "the edit was ACCEPTED — the webhook is not registered for UPDATE, or the rule is not reached"
 fi
 
-case "$refusal" in
-  *spec.model*) record PASS "the refusal names the field path" "spec.model is named" ;;
-  *) record FAIL "the refusal names the field path" "[$refusal]" ;;
-esac
-
-case "$refusal" in
-  *"describes a different deployment"*)
-    record PASS "the message states the rule" "a different value describes a different deployment" ;;
-  *)
-    record FAIL "the message states the rule" "[$refusal]" ;;
-esac
-
-# THE WORDING IT MUST NOT CARRY. An earlier framing of this freeze was "shrink the surface two
-# writers can disagree on"; a message carrying that sends an operator looking for a locking problem
-# that does not exist, which costs them the time to find that it never existed.
-wrong=""
-for word in conflict concurrent lock race; do
-  case "$refusal" in *"$word"*) wrong="$wrong $word" ;; esac
-done
-if [ -z "$wrong" ]; then
-  record PASS "the message states no mechanism" "none of conflict/concurrent/lock/race"
+if [ "$rc" -eq 0 ]; then
+  # There is no refusal to inspect. These three rows are about the WORDING of one, so an accepted
+  # edit leaves them unmeasured rather than failed.
+  record NO-READ "the refusal names the field path" "the edit was accepted; no refusal to read"
+  record NO-READ "the message states the rule" "the edit was accepted; no refusal to read"
+  record NO-READ "the message states no mechanism" "the edit was accepted; no refusal to read"
 else
-  record FAIL "the message states no mechanism" "carries:$wrong"
+  case "$refusal" in
+    *spec.model*) record PASS "the refusal names the field path" "spec.model is named" ;;
+    *) record FAIL "the refusal names the field path" "[$refusal]" ;;
+  esac
+
+  case "$refusal" in
+    *"describes a different deployment"*)
+      record PASS "the message states the rule" "a different value describes a different deployment" ;;
+    *)
+      record FAIL "the message states the rule" "[$refusal]" ;;
+  esac
+
+  # THE WORDING IT MUST NOT CARRY. An earlier framing of this freeze was "shrink the surface two
+  # writers can disagree on"; a message carrying that sends an operator looking for a locking
+  # problem that does not exist, which costs them the time to find that it never existed.
+  wrong=""
+  for word in conflict concurrent lock race; do
+    case "$refusal" in *"$word"*) wrong="$wrong $word" ;; esac
+  done
+  if [ -z "$wrong" ]; then
+    record PASS "the message states no mechanism" "none of conflict/concurrent/lock/race"
+  else
+    record FAIL "the message states no mechanism" "carries:$wrong"
+  fi
 fi
 
 # THE POSITIVE SIDE. Without it every row above passes against a webhook that refuses every update.
@@ -158,11 +180,22 @@ echo "== case-69: the identity freeze, on a live object =="
   printf '%s\n' "${ROWS[@]}"
 } | column -t -s '|'
 
+if [ "$NOREADS" -ne 0 ]; then
+  echo
+  echo "${NOREADS} row(s) had NO READING: a precondition did not hold, so they neither passed nor"
+  echo "failed. Treat them as unmeasured, not as covered."
+fi
+
 if [ "$FAILS" -ne 0 ]; then
   echo
   echo "FAILED ${FAILS} check(s). Diagnose:"
   echo "  kubectl -n ${NS} get modeldeployment ${MD} -o yaml"
   echo "  kubectl get validatingwebhookconfigurations -o name | grep gpustack"
   exit 1
+fi
+
+if [ "$NOREADS" -ne 0 ]; then
+  echo "case-69: every row that could be measured PASSED, but ${NOREADS} were not measured"
+  exit 0
 fi
 echo "all case-69 checks PASS"

@@ -82,8 +82,26 @@ IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 SETTLE="${E2E_MD_SETTLE:-120}"
 
 FAILS=0
+NOREADS=0
 ROWS=()
-record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+
+# STATUS is one of PASS, FAIL, SKIP or NO-READ, and the last of those is not a shade of the others.
+#
+# A row whose PRECONDITION did not hold has no reading: it did not pass, it did not fail, and
+# nothing was measured. Recording it as FAIL inflates the failure count with consequences of one
+# cause; recording it as PASS is worse; and recording it as SKIP says it was deliberately not
+# applicable, which is a different statement. This case runs every phase and collects the whole
+# picture in one pass -- each iteration here costs a remote image build -- so the write-up has to be
+# able to say which rows were actually exercised and which were blocked by something upstream.
+record() {
+  ROWS+=("$1|$2|$3")
+  case "$1" in
+    FAIL) FAILS=$((FAILS + 1)) ;;
+    NO-READ) NOREADS=$((NOREADS + 1)) ;;
+  esac
+
+  return 0
+}
 
 if [ -z "$IT" ]; then
   IT="$(k get instancetypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
@@ -273,26 +291,38 @@ YAML
 
 apply_deployment "$MD" "$(two_roles_two_types)"
 
+two_groups=no
 if wait_for "$SETTLE" test "$(group_names "$MD" | wc -l | tr -d ' ')" = 2; then
+  two_groups=yes
   record PASS "two types are two groups" "$(group_names "$MD" | wc -l | tr -d ' ') distinct group names"
 else
   record FAIL "two types are two groups" "saw [$(group_names "$MD" | tr '\n' ' ')]"
 fi
 
-wls="$(deployment_workloads "$MD" | tr '\n' ' ')"
-n_wl="$(echo "$wls" | wc -w | tr -d ' ')"
-if [ "$n_wl" = 2 ]; then
-  record PASS "two groups compose two workloads" "$wls"
+# THE TWO ROWS BELOW MEASURE NOTHING IF THE SHAPE ABOVE DID NOT FORM, and saying so is the point of
+# the NO-READ status. "Two groups compose two workloads" against a deployment that produced one
+# group is a reading about a different situation, and counting it as a second failure would report
+# one cause twice.
+wls=""
+if [ "$two_groups" != yes ]; then
+  record NO-READ "two groups compose two workloads" "the two-group shape never formed"
+  record NO-READ "no role admitted while one group cannot be placed" "the two-group shape never formed"
 else
-  record FAIL "two groups compose two workloads" "saw $n_wl: [$wls]"
-fi
+  wls="$(deployment_workloads "$MD" | tr '\n' ' ')"
+  n_wl="$(echo "$wls" | wc -w | tr -d ' ')"
+  if [ "$n_wl" = 2 ]; then
+    record PASS "two groups compose two workloads" "$wls"
+  else
+    record FAIL "two groups compose two workloads" "saw $n_wl: [$wls]"
+  fi
 
-# NO ROLE ADMITTED -- and the control below is what makes this mean anything.
-sleep 30
-if [ "$(admitted_count)" = 0 ]; then
-  record PASS "no role admitted while one group cannot be placed" "0 admitted workloads"
-else
-  record FAIL "no role admitted while one group cannot be placed" "$(admitted_count) admitted"
+  # NO ROLE ADMITTED -- and the control below is what makes this mean anything.
+  sleep 30
+  if [ "$(admitted_count)" = 0 ]; then
+    record PASS "no role admitted while one group cannot be placed" "0 admitted workloads"
+  else
+    record FAIL "no role admitted while one group cannot be placed" "$(admitted_count) admitted"
+  fi
 fi
 
 # THE CONTROL. Without it the row above is true whether or not the joint check exists: both groups
@@ -329,8 +359,19 @@ for wl in $wls; do
   done
 done
 
-if [ "$parked_any" != yes ]; then
-  record SKIP "the bound parks the set" "this controller's check is not on these workloads"
+if [ "$two_groups" != yes ]; then
+  # Upstream, not a property of the bound: with no two-group shape there is nothing for the barrier
+  # to hold and therefore nothing for the bound to fire on.
+  record NO-READ "the bound parks the set" "the two-group shape never formed"
+  record NO-READ "the deployment reports it is parked" "the two-group shape never formed"
+  record NO-READ "the message names what clears it" "the two-group shape never formed"
+elif [ "$parked_any" != yes ]; then
+  # This one IS about the barrier: the workloads exist and this controller's check is not on them,
+  # which is a real observation rather than a missing precondition.
+  record FAIL "the bound parks the set" \
+    "this controller's check is on none of [$wls] -- the queue does not reference it"
+  record NO-READ "the deployment reports it is parked" "no check to back-date"
+  record NO-READ "the message names what clears it" "no check to back-date"
 else
   # The verdict is spec.active going false, NOT the Workload disappearing: a deleted Workload is
   # composed again by Kueue from the Pods that are still there, so a delete removes one turn of the
@@ -373,11 +414,25 @@ echo "== case-68: two groups, admitted as a set =="
   printf '%s\n' "${ROWS[@]}"
 } | column -t -s '|'
 
+# THE NO-READ COUNT IS STATED WHETHER OR NOT ANYTHING FAILED. A run that passed every row it could
+# measure, while several rows measured nothing, is not the same result as a clean run -- and the two
+# are indistinguishable from an exit code.
+if [ "$NOREADS" -ne 0 ]; then
+  echo
+  echo "${NOREADS} row(s) had NO READING: a precondition did not hold, so they neither passed nor"
+  echo "failed. Treat them as unmeasured, not as covered."
+fi
+
 if [ "$FAILS" -ne 0 ]; then
   echo
   echo "FAILED ${FAILS} check(s). Diagnose:"
   echo "  kubectl -n ${NS} get modeldeployment ${MD} -o yaml"
   echo "  kubectl -n ${NS} get workloads.kueue.x-k8s.io -o wide"
   exit 1
+fi
+
+if [ "$NOREADS" -ne 0 ]; then
+  echo "case-68: every row that could be measured PASSED, but ${NOREADS} were not measured"
+  exit 0
 fi
 echo "all case-68 checks PASS"
