@@ -290,7 +290,13 @@ func observeModelDeploymentQuota(
 	// group's Pods are removed, this is what keeps that group from being announced as merely short of
 	// its total; if they stay, the ordering is inert. Both ways the report is right, and the
 	// assumption decides only whether this ordering is load-bearing.
-	if lost, kept := modelDeploymentPreemptedInPart(md, wlByGroup); len(lost) > 0 && len(kept) > 0 {
+	lost, kept := modelDeploymentPreemptedInPart(md, wlByGroup)
+	// WHAT ELSE IS WRONG STILL GETS REPORTED, and the preemption is carried down with it. A group
+	// preempted while no sibling survived is not the state PreemptedInPart names -- nothing is being
+	// held -- but "something took a group's quota" is a fact the branches below would otherwise drop,
+	// and without it they send the reader to investigate the wrong thing.
+	taken := modelDeploymentPreemptionNote(lost)
+	if len(lost) > 0 && len(kept) > 0 {
 		ModelDeploymentConditionQuotaReserved.False(holder, modelDeploymentReasonPreemptedInPart,
 			fmt.Sprintf(
 				"a higher-priority workload reclaimed the quota of %d of this deployment's %d groups, "+
@@ -357,8 +363,8 @@ func observeModelDeploymentQuota(
 			ModelDeploymentConditionQuotaReserved.False(holder, modelDeploymentReasonPodGroupIncomplete,
 				fmt.Sprintf(
 					"%d of %d of the group's replicas exist, so Kueue composes no workload for it at "+
-						"all and there is nothing in cluster queue %q to hold quota",
-					alive, want, group.InstanceType))
+						"all and there is nothing in cluster queue %q to hold quota%s",
+					alive, want, group.InstanceType, taken))
 
 			return
 		}
@@ -386,15 +392,15 @@ func observeModelDeploymentQuota(
 		}
 		if len(groups) == 1 {
 			ModelDeploymentConditionQuotaReserved.Unknown(holder, "AdmissionInFlight", fmt.Sprintf(
-				"the group is complete at %d replicas but has no workload yet in cluster queue %q",
-				live, queue))
+				"the group is complete at %d replicas but has no workload yet in cluster queue %q%s",
+				live, queue, taken))
 
 			return
 		}
 		ModelDeploymentConditionQuotaReserved.Unknown(holder, "AdmissionInFlight", fmt.Sprintf(
 			"%d of this deployment's %d groups are complete but have no workload yet, on instance "+
-				"types %s",
-			len(withoutWorkload), len(groups), strings.Join(withoutWorkload, ", ")))
+				"types %s%s",
+			len(withoutWorkload), len(groups), strings.Join(withoutWorkload, ", "), taken))
 
 		return
 	}
@@ -417,14 +423,14 @@ func observeModelDeploymentQuota(
 
 	if len(groups) == 1 {
 		ModelDeploymentConditionQuotaReserved.False(holder, "Pending", fmt.Sprintf(
-			"the group of %d replicas is waiting for quota in cluster queue %q", live, queue))
+			"the group of %d replicas is waiting for quota in cluster queue %q%s", live, queue, taken))
 
 		return
 	}
 	ModelDeploymentConditionQuotaReserved.False(holder, "Pending", fmt.Sprintf(
 		"%d of this deployment's %d groups are waiting for quota, on instance types %s. No role is "+
-			"admitted until the whole set can run",
-		len(waiting), len(groups), strings.Join(waiting, ", ")))
+			"admitted until the whole set can run%s",
+		len(waiting), len(groups), strings.Join(waiting, ", "), taken))
 }
 
 // modelDeploymentGroupOfRole names, for each role, the pod group its replicas belong to.
@@ -494,6 +500,21 @@ func modelDeploymentWorkloadByGroup(
 // and is running — so the accelerators are held, the deployment still cannot serve, and neither half
 // of that is visible from the other half alone. Reading only "was anything preempted" answers the
 // same for both, which is the shape this is written against.
+//
+// A GROUP WITH NO WORKLOAD COUNTS AS NEITHER, and that asymmetry is deliberate. Kueue composes no
+// Workload for a group short of its declared total, so such a group holds nothing and there is
+// nothing on it to read: it cannot be a survivor holding accelerators, and it cannot be shown to have
+// been preempted. Two consequences follow, and they are not the same.
+//
+// WITH A SURVIVOR PRESENT THE PREEMPTION WINS THE REPORT, even though another group is still
+// assembling. The survivor is holding accelerators the deployment cannot use, which is the one fact
+// an operator can act on, and the assembling group resolves itself.
+//
+// WITH NO SURVIVOR THERE IS NOTHING TO HOLD, so this is not the state this reason names and the
+// report falls through to the branch that describes what else is wrong. That branch used to say
+// nothing about the preemption at all -- it sent the reader to investigate missing replicas when
+// something had taken a group's quota -- so the fact is carried down instead of the reason being
+// widened to cover a state whose harm it does not describe.
 //
 // PREEMPTION IS ASKED OF KUEUE RATHER THAN INFERRED. Kueue names it: an evicted Workload carries a
 // reason, and Preempted is one value among PodsReadyTimeout, AdmissionCheck and the queue-stopped
@@ -712,4 +733,21 @@ func jointBarrierParked(wl *kueue.Workload) bool {
 	}
 
 	return false
+}
+
+// modelDeploymentPreemptionNote is the clause the other quota answers carry when a group of this
+// deployment was preempted but the state is not the one PreemptedInPart names.
+//
+// IT IS A SUFFIX RATHER THAN A REASON OF ITS OWN, because it is not what the condition is about: the
+// branch it lands on has already said what is wrong, and this adds who took a group's quota. Giving
+// it a reason would mean two classifications of one state, and the one that resolves the reader's
+// next action is the branch's own.
+func modelDeploymentPreemptionNote(lost []string) string {
+	if len(lost) == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf(
+		". A higher-priority workload has also reclaimed the quota of the groups on instance types %s",
+		strings.Join(lost, ", "))
 }
