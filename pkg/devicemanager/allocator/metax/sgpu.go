@@ -636,11 +636,12 @@ func (m *sysfsSGPUManager) Create(bdf string, index int, vramMiB int64, alias st
 	// index itself. The operator passes its predicted lowest-free `index` (for the marker /
 	// METAX_SGPUS entry) and ASSUMES the driver honors that slot — UNVERIFIED on real
 	// hardware (see the spec's Open Questions); if a real driver diverges, switch this seam
-	// to read the created index back from List() before the marker is written. The alias is
-	// carried in METAX_SGPUS (the runtime's key), not persisted to sysfs — current MetaX
-	// exposes no subdevice tag to read back — so reclaim does not rely on it: a crash-orphan
-	// is caught by the marker and, failing that, the drained-accelerator rule in reconcile.
-	// The alias-based orphan rule only engages if a future driver exposes the tag via List.
+	// to read the created index back from List() before the marker is written.
+	//
+	// The alias is carried in METAX_SGPUS (the runtime's key), not persisted to sysfs — current
+	// MetaX exposes no subdevice tag to read back — so reclaim does not rely on it: a crash-orphan
+	// is caught by the marker and, failing that, the drained-accelerator rule in reconcile. The
+	// alias-based orphan rule only engages if a future driver exposes the tag via List.
 	_ = index
 	_ = alias
 	return os.WriteFile(filepath.Join(m.cardDir(bdf), "create"), []byte(strconv.FormatInt(vramMiB, 10)), 0o600)

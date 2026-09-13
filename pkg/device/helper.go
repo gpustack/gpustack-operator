@@ -153,9 +153,10 @@ func NormalizeName(name, prefix string, maxLength int, stripCruft bool) string {
 // pciSwitches is stored as a COPY. Its ordering is the caller's — innermost first, as
 // binding.GetPCIDevices produces it — and it has to stay stable across passes: a reordered slice is
 // NOT equal under the semantic equality the detector compares with (measured), so an unstable order
-// would make it rewrite the object every pass forever, with no wrong value anywhere to notice it
-// by. Every current caller hands over a freshly allocated slice it never touches again, so the copy
-// changes nothing today; it is what keeps the stability a property of this value rather than of
+// would make it rewrite the object every pass forever, with no wrong value anywhere to notice it by.
+//
+// Every current caller hands over a freshly allocated slice it never touches again, so the copy
+// changes nothing today. It is what keeps the stability a property of this value rather than of
 // caller discipline, since a caller passing a reused scratch buffer would reorder a stored topology
 // with no symptom but write volume. A nil and an empty slice ARE equal there, so neither needs
 // normalising.

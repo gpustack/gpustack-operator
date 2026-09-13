@@ -197,11 +197,12 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			// one accelerator. An accelerator currently in the partitioning mode is
 			// hard-partitioned and reports only its physical partition profiles; the capability
 			// is set solely when the driver actually offers one, so a mode-enabled accelerator
-			// whose driver offers nothing reports no capability rather than an empty one. Every
-			// other accelerator — mode off, mode unsupported, or the mode unreadable — offers
-			// logical slicing instead. A pending-mode transition is not partitioned yet and is
-			// re-detected after the administrator's DeviceManager restart, because the re-detect
-			// trigger does not include the partitioning mode.
+			// whose driver offers nothing reports no capability rather than an empty one.
+			//
+			// Every other accelerator — mode off, mode unsupported, or the mode unreadable —
+			// offers logical slicing instead. A pending-mode transition is not partitioned yet
+			// and is re-detected after the administrator's DeviceManager restart, because the
+			// re-detect trigger does not include the partitioning mode.
 			//
 			// A mode the driver could not read is treated as not-partitioned, as it always has
 			// been, but it is not treated in silence: since an accelerator in the mode reports
