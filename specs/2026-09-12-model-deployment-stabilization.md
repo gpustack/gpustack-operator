@@ -794,13 +794,17 @@ look identical. T4's checkpoint claimed the observable one and was true only of 
       single-group cases pass unchanged.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/worker/controllers/worker/`
 
-- [ ] **T6 · The joint-admission check**
+- [x] **T6 · The joint-admission check**
       Blocked by: T5, and T8 — a file dependency, not a substantive one: both edit
       `pkg/worker/webhooks/worker/model_deployment.go`
       Owns: `pkg/worker/controllers/worker/model_deployment_joint_admission.go` (new) + its test,
       `pkg/worker/controllers/worker/node_queue.go` + its test — a queue is where a check is
       attached, so a new check absent from `spec.admissionChecksStrategy` reaches no Workload at all
-      — and `pkg/worker/webhooks/worker/model_deployment.go` + its test, for the one refusal below
+      — and `pkg/worker/webhooks/worker/model_deployment.go` + its test, for the one refusal below.
+      Also `pkg/worker/kuberess/apps_kueue_admission_check.go`, `pkg/worker/worker.go` and
+      `pkg/worker/controllers/setup.go` — a check nobody applies and a controller nobody registers
+      are a barrier that exists only in this file — and `pkg/setting/types.go`, for the reason in
+      Prerequisite testing updates below
       Gate: review
       Acceptance: an AdmissionCheck claimed under this operator's controller name, applied at
       startup beside the node-devices one and referenced from **every operator-owned queue**, not
@@ -932,6 +936,17 @@ make this code solid enough prior to committing the changes necessary to impleme
 - A **second `InstanceType` fixture** with a different queue entrance does not exist in the controller
   package and is what makes every two-group case expressible.
 - A **fake clock** in the joint-admission tests, so T7's bound is exercised rather than waited on.
+- **A way to drop the settings cache between cases**, which T6 needs and which does not exist. A
+  successful read caches for thirty seconds and a failed one does not cache at all, so the first case
+  in a binary that seeds a value decides what every later one reads: T6's acceptance asks for the
+  setting both on and off, and without this the "off" case passes or fails on the order the cases
+  happen to run in. `setting.InvalidateCache` is added for exactly this, and a test holds it to that
+  use — a comment does not stop a call, and a production caller would turn the cache off for the
+  whole process with nothing reporting it.
+- **A settings fixture that writes into the loopback client rather than replacing it.** That holder is
+  a `varx.Once`: `TestMain` configures it and every later `Configure` is silently a no-op, so a helper
+  that swapped in a seeded fake would leave the setting reading what it read before — and the case
+  would fail for a reason that has nothing to do with the rule under test.
 - The existing single-group pod-group fixtures become **regression baselines**: T4 asserts the
   one-type rendering is byte-identical to them.
 - The e2e suite needs a way to create a second `InstanceType` in a no-accelerator cluster.
