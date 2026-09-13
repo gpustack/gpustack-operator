@@ -19,6 +19,16 @@ The leader is a Deployment plus a ClusterIP Service publishing two ports — `50
 and `9003` for the admin surface, which serves the Prometheus exposition and the HTTP admin API on one
 port.
 
+**`extraArgs` exists to reach settings this API does not name, so what may be set through it is not
+enumerated.** An upstream flag can also reach a setting this API DOES name, under a different name.
+The object then goes on reporting the value it rendered while the process runs the other one, and
+nothing reports the divergence. A key whose effect overlaps a field of this spec is a trade-off the
+administrator makes.
+
+The CXL switch was one instance of exactly that shape, and the webhook now refuses it by name — the
+`CXL` row in [KV Cache Backend](backend.md) carries which keys and why. It is recorded as the shape
+to expect, not as a live hazard.
+
 ⛔ **`port` is refused in `leader.extraArgs`, and it would have moved nothing.** It is the store's
 deprecated spelling of `rpc_port`, which this operator always renders, so the rendered one wins: the
 key reads as a port that moved without moving one.
