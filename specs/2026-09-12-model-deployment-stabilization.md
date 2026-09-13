@@ -1110,6 +1110,19 @@ asking the running binary its own revision rather than by comparing an image ref
 green: `case-69` **six** rows, `case-68` **twelve**, **zero NO-READ**. The two were run back to back
 in one namespace, which is the order in which they interfere if they are going to.
 
+**Re-run once more after the review round that followed, on a third build, with the same result.** The
+image is tagged by revision, so each build this was measured on is still pullable and the readings
+below can be reproduced rather than only believed — a verification record naming an instrument that
+no longer exists can be taken on trust and nothing else.
+
+**One row gained a second meaning in that round and is worth naming, because it is not visible in the
+row's text.** `the deployment reports it is parked` now also covers a contract that spans two
+controllers. Reporting `Parked` requires both that the Workload is deactivated AND that the joint
+check on the same object carries this barrier's verdict, because `spec.active=false` does not say who
+wrote it: Kueue deactivates Workloads of its own accord, and an operator can pause one group by hand.
+So a green on that row is now only reachable when the controller that writes the verdict and the
+reader that looks for it agree — which no unit test on either side alone can establish.
+
 What the cluster confirmed that no unit test reaches: two `instanceType`s render **two** pod groups
 with two Workloads on two queues; the joint AdmissionCheck is referenced from a **CPU-only**
 ClusterQueue and reports Active; with one group's queue held, that group cannot reserve while its
