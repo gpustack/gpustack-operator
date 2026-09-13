@@ -5,7 +5,6 @@
   ],
   "exclude": [
     "**/*_deepcopy*",
-    "**/*_test.go",
     "**/generated.*",
     "**/zz_generated*",
     ".agents/skills/**/*.sh",
@@ -21,6 +20,11 @@
     "staging/**"
   ],
   "rules": [
+    {
+      "path": "**/*_test.go",
+      "merge_system_rule": true,
+      "rule": "Go test sources. A test that cannot fail is worse than no test, because it also reports coverage, so judge each case by what would have to break for it to go red. Flag: a case that builds the subject but asserts nothing observable about it; an assertion whose predicate is also true under the defect the case names; a fixture whose setup cannot reach the branch the case claims to exercise; a case name that states a behavior the body never asserts. A test pinning a value as unchanged must drive the input domain that would change it, not one point inside it. An error path asserted only as non-nil does not distinguish which rule rejected the input — prefer asserting the field path or the rule's own message. Table-driven with a shared execution loop; cases are data, not control flow; fixtures come from shared helpers; assert final observable state rather than call sequences; fake clients over real dependencies; fail fast on setup errors rather than letting them corrupt later assertions; compare semantic equivalence rather than incidental formatting; no dependence on wall-clock time, map ordering or randomness."
+    },
     {
       "path": "api/**/*.go",
       "merge_system_rule": true,

@@ -73,7 +73,10 @@ measurement it contradicts — that is the only form of it worth a reviewer's at
 
 ## Out of scope — do not review
 
-Mirrors the `exclude` list in `.opencodereview/rule.json`, verbatim and in the same order.
+This is the list Copilot's own content-exclusion policy enforces, and this document cannot change
+it — it is configured in the repository settings. It tracked `.opencodereview/rule.json`'s `exclude`
+verbatim until that file stopped excluding `**/*_test.go`; the two now differ by exactly that entry,
+because the other reviewer reads test sources and Copilot still does not.
 
 - `**/*_deepcopy*`
 - `**/*_test.go`
