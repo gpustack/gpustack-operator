@@ -25,10 +25,9 @@ The object then goes on reporting the value it rendered while the process runs t
 nothing reports the divergence. A key whose effect overlaps a field of this spec is a trade-off the
 administrator makes.
 
-The CXL switch was one instance: `leader.allocationStrategy` renders `-allocation_strategy`, while
-`enable_cxl` replaces the allocation strategy outright, so the object would keep showing
-`FreeRatioFirst` while the process ran the CXL allocator. That one is refused by name today; it is
-recorded here as the shape to expect, not as a live hazard.
+The CXL switch was one instance of exactly that shape, and the webhook now refuses it by name — the
+`CXL` row in [KV Cache Backend](backend.md) carries which keys and why. It is recorded here as the
+shape to expect, not as a live hazard.
 
 ⛔ **`port` is refused in `leader.extraArgs`, and it would have moved nothing.** It is the store's
 deprecated spelling of `rpc_port`, which this operator always renders, so the rendered one wins: the
