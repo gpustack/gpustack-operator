@@ -95,13 +95,14 @@ func ModelDeploymentPodGroup(
 			kueuepodconst.GroupTotalCountAnnotation: strconvx.Itoa(int(modelDeploymentPodGroupTotalCount(md))),
 			// THE ROLE HASH IS LOAD-BEARING, NOT COSMETIC. Kueue reads this annotation verbatim when
 			// present and otherwise derives a digest of the Pod spec's SHAPE -- containers,
-			// nodeSelector, affinity, tolerations. Two roles that happen to render identically, same
-			// image and same request and same (or no) acceleratorKey, would derive the same digest
-			// and collapse into ONE PodSet of both their replicas. Per-role counting, per-role flavor
-			// assignment and per-role status all disappear at that point, with nothing erroring.
-			// Writing the role's own name here makes the PodSet identity the role's identity by
-			// construction, which is also why that name is validated to Kueue's PodSetReference
-			// pattern and to uniqueness.
+			// nodeSelector, affinity, tolerations.
+			//
+			// Two roles that happen to render identically, same image and same request and same (or
+			// no) acceleratorKey, would derive the same digest and collapse into ONE PodSet of both
+			// their replicas. Per-role counting, per-role flavor assignment and per-role status all
+			// disappear at that point, with nothing erroring. Writing the role's own name here makes
+			// the PodSet identity the role's identity by construction, which is also why that name
+			// is validated to Kueue's PodSetReference pattern and to uniqueness.
 			kueuepodconst.RoleHashAnnotation: role.Name,
 			// An inference deployment never finishes. Without this, Kueue applies BATCH semantics to
 			// it: a Pod reaching Succeeded is reported as reclaimable and its quota is handed back

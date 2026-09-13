@@ -244,12 +244,13 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 	// THE ENTRANCE IS READ, NOT RECOMPUTED, and the difference is the whole point of this line.
 	// role.InstanceType names an InstanceType; the label Kueue admits on names the LocalQueue that
 	// fronts that type's ClusterQueue, and the type's own status is where that name is published --
-	// by the same reconcile that creates the LocalQueue. Deriving it here from the name instead
-	// would be a second answer to one question, written by a second function: equal today, because
-	// the ClusterQueue carries the InstanceType's name and both sides spell it with
-	// FormatLocalQueueName, and silently divergent the day either half of that stops holding. The
-	// half that drifted would be this one, whose symptom is a Pod routed at a LocalQueue that does
-	// not exist -- admitted by nothing, with nothing naming the field.
+	// by the same reconcile that creates the LocalQueue.
+	//
+	// Deriving it here from the name instead would be a second answer to one question, written by a
+	// second function: equal today, because the ClusterQueue carries the InstanceType's name and
+	// both sides spell it with FormatLocalQueueName, and silently divergent the day either half of
+	// that stops holding. The half that drifted would be this one, whose symptom is a Pod routed at
+	// a LocalQueue that does not exist -- admitted by nothing, with nothing naming the field.
 	entrance := in.InstanceType.Status.Entrance
 	if entrance == "" {
 		// An InstanceType whose status has not been computed yet, exactly like an accelerator detail

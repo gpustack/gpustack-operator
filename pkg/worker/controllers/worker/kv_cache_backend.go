@@ -2251,11 +2251,12 @@ func alignLeaderServiceFn(
 		// LoadBalancer it is published to the outside — and nothing else here would notice, because
 		// the port comparison deliberately ignores the assigned nodePort, so the ports keep
 		// comparing equal while the exposure stands.
-		// Independent of the type, because this one does not need the type to move. A ClusterIP
-		// Service carrying spec.externalIPs routes those addresses to every port it declares — 9003
-		// among them — while `kubectl get svc` still says ClusterIP and the type comparison above
-		// sees nothing to converge. It is the same unauthenticated exposure as a NodePort flip,
-		// reached without changing the field that flip is watched by.
+		//
+		// externalIPs is converged independently of the type, because it does not need the type to
+		// move. A ClusterIP Service carrying spec.externalIPs routes those addresses to every port
+		// it declares — 9003 among them — while `kubectl get svc` still says ClusterIP and the type
+		// comparison above sees nothing to converge. It is the same unauthenticated exposure as a
+		// NodePort flip, reached without changing the field that flip is watched by.
 		if len(aSvc.Spec.ExternalIPs) > 0 {
 			aSvc.Spec.ExternalIPs = nil
 			skip = false
