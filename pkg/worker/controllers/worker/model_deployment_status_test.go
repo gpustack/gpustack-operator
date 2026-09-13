@@ -1041,6 +1041,14 @@ func TestObserveModelDeploymentQuota_PreemptedInPart(t *testing.T) {
 			// THE CASE THE PREDICATE EXISTS TO NOT MATCH. Everything was preempted, so nothing is
 			// held and nothing is served: an ordinary wait for capacity, and reporting it as a
 			// fragmented deployment would send an operator looking for cards nobody is holding.
+			//
+			// IT GUARDS AN ASSUMPTION RATHER THAN DESCRIBING A COMMON STATE, and that is why it must
+			// not be deleted as unreachable. Every queue this operator renders sets
+			// ReclaimWithinCohort and BorrowWithinCohort to Never, so a preemptor can only take from
+			// its own ClusterQueue and a deployment's other groups are out of its reach: reaching
+			// this state today needs two preemptors acting in two queues at once. The assumption is
+			// those two Never policies. Change either one and this stops being defensive and becomes
+			// a path the cluster takes, and the case is already here when that happens.
 			name:    "every_group_preempted_is_not_fragmented",
 			prefill: "preempted", decode: "preempted",
 			wantReason: "Pending",
