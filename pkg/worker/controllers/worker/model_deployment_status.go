@@ -90,8 +90,10 @@ const modelDeploymentReasonPodGroupIncomplete = "PodGroupIncomplete"
 //
 // IT IS A SEPARATE REASON BECAUSE THE OPERATOR ACTION IS SEPARATE. Every other wait this condition
 // reports resolves itself or names something in the deployment to fix; this one resolves only when
-// capacity elsewhere frees up, and until then the surviving groups hold accelerators the deployment
-// cannot use. Waiting is right for the others and is a decision here, because how long to wait
+// capacity elsewhere frees up, and until then the surviving groups hold accelerators for a
+// deployment that is short of what it was admitted for, and, when the reclaimed groups were every
+// group of some role kind, for one that cannot serve at all. Waiting is right for the others and is
+// a decision here, because how long to wait
 // depends on what preempted it — which is outside this object, and outside this operator.
 //
 // A REASON IS THE MACHINE-READABLE CLASSIFICATION AND A MESSAGE IS NOT A CONTRACT. An alert rule or a
@@ -297,8 +299,8 @@ func observeModelDeploymentQuota(
 	}
 
 	// A DEPLOYMENT PREEMPTED IN PART IS REPORTED BEFORE ANY OTHER WAIT, and it is a different fact
-	// from every one of them: part of it is still admitted and serving, holding the accelerators that
-	// half a deployment cannot use, while the rest waits for quota that was taken.
+	// from every one of them: part of it is still admitted and serving, holding accelerators for a
+	// deployment that is no longer whole, while the rest waits for quota that was taken.
 	//
 	// EVERY OTHER BRANCH DESCRIBES IT WRONGLY, and one of them says something FALSE. The multi-group
 	// wait below ends with "no role is admitted until the whole set can run"; here a role IS admitted,
@@ -345,15 +347,31 @@ func observeModelDeploymentQuota(
 	// group whose Pods are on their way out lands exactly there.
 	taken := modelDeploymentPreemptionNote(lost)
 	if len(lost) > 0 && len(kept) > 0 {
+		// WHAT THE SURVIVORS ARE WORTH DEPENDS ON THE SHAPE, so it is computed rather than asserted.
+		// A deployment whose every group of some role kind was reclaimed has lost that half and
+		// serves nothing; one that still has a group of every kind serves, with the reclaimed
+		// groups' capacity gone. Both reach this branch, and announcing the first for both was wrong
+		// for the shape the defaults produce: two roles naming no kind are two server roles, and one
+		// of their groups surviving is a deployment that is still answering requests.
+		// THE SENTENCE MUST NOT IMPLY THE KIND WAS EVER ADMITTED. A kind counts as unserved when no
+		// group of it is admitted, and a group that never was -- one still short of its declared
+		// total, so Kueue has composed nothing for it -- reaches this branch too, because the
+		// preemption of a sibling kind's group is answered before incompleteness is.
+		effect := "the deployment still serves, without the capacity those groups provided"
+		if unserved := modelDeploymentKindsWithoutAdmittedGroup(md, wlByGroup); len(unserved) > 0 {
+			effect = fmt.Sprintf(
+				"no group of role kind %s is admitted, so the deployment cannot serve",
+				strings.Join(unserved, ", "))
+		}
+
 		ModelDeploymentConditionQuotaReserved.False(holder, modelDeploymentReasonPreemptedInPart,
 			fmt.Sprintf(
 				"a higher-priority workload reclaimed the quota of %d of this deployment's %d groups, "+
 					"on instance types %s. The groups on %s are still admitted and hold their "+
-					"accelerators while the deployment cannot serve, and they are released only by "+
-					"deleting the deployment or by the reclaimed groups being admitted again once the "+
-					"capacity returns",
+					"accelerators, and %s. They are released only by deleting the deployment or by "+
+					"the reclaimed groups being admitted again once the capacity returns",
 				len(lost), len(modelDeploymentPodGroups(md)), strings.Join(lost, ", "),
-				strings.Join(kept, ", ")))
+				strings.Join(kept, ", "), effect))
 
 		return
 	}
@@ -548,8 +566,9 @@ func modelDeploymentWorkloadByGroup(
 // THE SECOND SET IS THE WHOLE PREDICATE. A deployment every one of whose groups was preempted is an
 // ordinary state: it holds nothing, serves nothing, and is waiting for capacity exactly as a
 // deployment that never started is. What makes this one different is that part of it kept its quota
-// and is running — so the accelerators are held, the deployment still cannot serve, and neither half
-// of that is visible from the other half alone. Reading only "was anything preempted" answers the
+// and is running — so accelerators are held for a deployment that is no longer whole, and neither
+// half of that is visible from the other half alone. Whether the rest still serves is a question
+// about the KINDS the reclaimed groups carried, answered separately and never assumed. Reading only "was anything preempted" answers the
 // same for both, which is the shape this is written against.
 //
 // A GROUP WITH NO WORKLOAD COUNTS AS NEITHER, and that asymmetry is deliberate. Kueue composes no
@@ -558,8 +577,8 @@ func modelDeploymentWorkloadByGroup(
 // been preempted. Two consequences follow, and they are not the same.
 //
 // WITH A SURVIVOR PRESENT THE PREEMPTION WINS THE REPORT, even though another group is still
-// assembling. The survivor is holding accelerators the deployment cannot use, which is the one fact
-// an operator can act on, and the assembling group resolves itself.
+// assembling. Something took capacity this deployment was admitted for, which is the one fact an
+// operator can act on, and the assembling group resolves itself.
 //
 // WITH NO SURVIVOR THERE IS NOTHING TO HOLD, so this is not the state this reason names and the
 // report falls through to the branch that describes what else is wrong. That branch used to say
@@ -610,6 +629,49 @@ func modelDeploymentWorkloadPreempted(wl *kueue.Workload) bool {
 	}
 
 	return false
+}
+
+// modelDeploymentKindsWithoutAdmittedGroup names the role kinds no admitted group carries, in the
+// order the roles first mention them.
+//
+// IT IS WHAT DECIDES WHETHER A PARTIALLY PREEMPTED DEPLOYMENT IS STILL SERVING, and it has to be
+// asked about KINDS rather than about groups. Groups are keyed by instanceType, so one kind can have
+// several: losing one prefill group out of two leaves the deployment able to prefill, while losing
+// the only decode group does not. Counting groups answers neither question.
+//
+// A ROLE WHOSE GROUP HAS NO WORKLOAD COUNTS AS NOT ADMITTED. Kueue composes none for a group short
+// of its declared total, and a group that is not admitted is not serving whatever the reason. That
+// is the accurate reading here, unlike in the preemption predicate next door, where the same state
+// means "nothing to report about this group" rather than "this group is gone".
+func modelDeploymentKindsWithoutAdmittedGroup(
+	md *workercore.ModelDeployment, wlByGroup map[string]*kueue.Workload,
+) []string {
+	groupOfRole := modelDeploymentGroupOfRole(md)
+
+	order := make([]string, 0, len(md.Spec.Roles))
+	served := make(map[string]bool, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		kind := string(ModelDeploymentEffectiveRoleKind(role))
+		if _, seen := served[kind]; !seen {
+			order = append(order, kind)
+			served[kind] = false
+		}
+
+		wl := wlByGroup[groupOfRole[role.Name]]
+		if wl != nil && kubeapistatus.ConditionType(kueue.WorkloadAdmitted).IsTrue(wl) {
+			served[kind] = true
+		}
+	}
+
+	var unserved []string
+	for _, kind := range order {
+		if !served[kind] {
+			unserved = append(unserved, kind)
+		}
+	}
+
+	return unserved
 }
 
 // modelDeploymentGroupsWithoutWorkload names the instance types of the groups Kueue has composed no

@@ -1610,3 +1610,124 @@ func TestDeriveModelDeploymentPhase_SumsAcrossKindsAndDoesNotBranchOnThem(t *tes
 		})
 	}
 }
+
+// TestObserveModelDeploymentQuota_PreemptedInPartSaysWhetherItStillServes pins the sentence the
+// partial-preemption message now branches on, on both shapes that reach it.
+//
+// THE SHAPE DECIDES, NOT THE ROLE NAMES. A role's kind is a separate field that defaults to server,
+// so two roles called "prefill" and "decode" with no kind set are two SERVER roles -- and that is
+// the shape the defaults produce. Losing one of their groups leaves the other admitted and still
+// answering requests, which is why a blanket "the deployment cannot serve" was false.
+//
+// THE COUNTERPART SETS THE KINDS EXPLICITLY, because a disaggregated deployment that loses every
+// group of one kind genuinely cannot serve, and the two sentences must not be reachable by the same
+// input. Asserting only one of them would leave the branch half-tested and green.
+func TestObserveModelDeploymentQuota_PreemptedInPartSaysWhetherItStillServes(t *testing.T) {
+	testCases := []struct {
+		name              string
+		kinds             bool
+		neverAdmitted     bool
+		wantIn, wantNotIn []string
+	}{
+		{
+			name:      "two_server_roles_on_two_instance_types_still_serve",
+			kinds:     false,
+			wantIn:    []string{"still serves", "without the capacity those groups provided"},
+			wantNotIn: []string{"cannot serve"},
+		},
+		{
+			name:      "a_disaggregated_deployment_that_lost_a_whole_kind_cannot_serve",
+			kinds:     true,
+			wantIn:    []string{"cannot serve", "role kind decode"},
+			wantNotIn: []string{"still serves"},
+		},
+		{
+			// A kind that was NEVER admitted reaches this branch as well, because a sibling kind's
+			// preemption is answered before incompleteness is. The sentence has to be true of that
+			// state too, which is what rules out saying the kind is not admitted ANY MORE: it never
+			// was. The wording is the whole subject of this case, so it is asserted literally.
+			name:          "a_kind_that_never_had_an_admitted_group_is_not_described_as_having_lost_one",
+			kinds:         true,
+			neverAdmitted: true,
+			wantIn:        []string{"role kind decode", "is admitted, so the deployment cannot serve"},
+			wantNotIn:     []string{"any more", "still serves"},
+		},
+	}
+
+	for _, c := range testCases {
+		t.Run(c.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				decode := md.Spec.Roles[0]
+				md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 1
+				decode.Name, decode.Replicas, decode.InstanceType = "decode", 1, "a100-8x"
+				if c.kinds {
+					md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+					decode.Kind = workercore.ModelDeploymentRoleKindDecode
+				}
+				md.Spec.Roles = append(md.Spec.Roles, decode)
+				if c.neverAdmitted {
+					// A SECOND GROUP OF THE PREFILL KIND, so that the reclaimed group and the
+					// admitted one belong to the same kind. Prefill therefore stays served, and
+					// decode is unserved for the single reason under test rather than for two.
+					second := md.Spec.Roles[0]
+					second.Name, second.InstanceType = "prefill-2", "h100-8x"
+					md.Spec.Roles = append(md.Spec.Roles, second)
+				}
+			})
+
+			// The fixture asserts its own shape, because the thing that decides these two cases is
+			// invisible in the role names they share.
+			kinds := map[workercore.ModelDeploymentRoleKind]struct{}{}
+			for i := range md.Spec.Roles {
+				kinds[ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i])] = struct{}{}
+			}
+			if c.kinds {
+				require.Len(t, kinds, 2, "the disaggregated case must carry two distinct kinds")
+			} else {
+				require.Len(t, kinds, 1, "the default case must carry exactly one kind")
+			}
+
+			prefill, decode := roleReplica(md, "prefill"), roleReplica(md, "decode")
+
+			// Prefill survives, decode is reclaimed: one group admitted and one preempted, which is
+			// the only arrangement this branch answers for.
+			wlPrefill := admittedWorkload(groupWorkload([]core.Pod{prefill}, true))
+			wlPrefill.Name = "wl-prefill"
+
+			pods := []core.Pod{prefill, decode}
+			wls := []*kueue.Workload{wlPrefill}
+
+			if c.neverAdmitted {
+				// Decode's group is left WITHOUT a Workload, and the reclaimed one is prefill's
+				// second group. That is the state the wording has to be true of.
+				second := roleReplica(md, "prefill-2")
+				wlSecond := preemptedWorkload(groupWorkload([]core.Pod{second}, false), "preempted")
+				wlSecond.Name = "wl-prefill-2"
+				pods = append(pods, second)
+				wls = append(wls, wlSecond)
+
+				require.Len(t, modelDeploymentPodGroups(md), 3,
+					"three groups: one admitted, one reclaimed, one that never had a Workload")
+				require.Len(t, wls, 2, "exactly one of those groups must carry no Workload at all")
+			} else {
+				wlDecode := preemptedWorkload(groupWorkload([]core.Pod{decode}, false), "preempted")
+				wlDecode.Name = "wl-decode"
+				wls = append(wls, wlDecode)
+			}
+
+			holder := new(workercore.ModelDeployment)
+			observeQuotaOver(md, pods, wls, holder)
+
+			require.Equal(t, modelDeploymentReasonPreemptedInPart,
+				ModelDeploymentConditionQuotaReserved.GetReason(holder))
+
+			msg := ModelDeploymentConditionQuotaReserved.GetMessage(holder)
+			for _, want := range c.wantIn {
+				assert.Contains(t, msg, want, "message: %s", msg)
+			}
+			for _, notWant := range c.wantNotIn {
+				assert.NotContains(t, msg, notWant, "message: %s", msg)
+			}
+		})
+	}
+}
