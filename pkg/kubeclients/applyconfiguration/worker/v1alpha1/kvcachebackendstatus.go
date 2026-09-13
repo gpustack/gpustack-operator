@@ -25,12 +25,8 @@ type KVCacheBackendStatusApplyConfiguration struct {
 	// external one echoes what was declared.
 	Endpoints []KVCacheBackendEndpointApplyConfiguration `json:"endpoints,omitempty"`
 	// Capacity is what the leader reports it has and has allocated. It is ABSENT until a scrape
-	// succeeds, and absent again is not the same as reporting zero.
-	//
-	// A POINTER because omitempty does not omit a zero-valued struct. Held by value it serialized
-	// as "capacity": {} on every failed or gated observation — an empty object where the contract
-	// says there should be no field at all, and a shape a client cannot tell from a scrape that
-	// returned nothing.
+	// succeeds, and absent again is not the same as reporting zero: an empty object here would be
+	// indistinguishable from a scrape that returned nothing.
 	Capacity *KVCacheBackendCapacityApplyConfiguration `json:"capacity,omitempty"`
 	// Members is one entry per observed store member.
 	Members []KVCacheBackendMemberStatusApplyConfiguration `json:"members,omitempty"`

@@ -27,9 +27,8 @@ type KVCacheBackendScaleInApplyConfiguration struct {
 	// record sets as the ones searched. On the same member in the same session, the same route
 	// answers 200 for a segment mounted through the member's own mount route.
 	// So this is NOT a question of identifying the member: one holding the exactly correct id for
-	// a segment it is certain is its own is refused just the same. Two earlier versions of this
-	// paragraph named an identity — a Pod address, then a client id — as what draining needs, and
-	// both were describing a problem that is never arrived at.
+	// a segment it is certain is its own is refused just the same. No identity supplied here --
+	// a Pod address, a client id -- changes that answer.
 	// - It does NOT hold the tier open, so sizing it to let in-flight peer reads finish sizes it
 	// against something that does not happen. Measured against Mooncake 0.3.13: deregistration
 	// takes effect at once and the process then waits the full value regardless, so a peer

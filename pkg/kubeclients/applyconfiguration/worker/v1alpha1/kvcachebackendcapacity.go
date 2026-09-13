@@ -10,8 +10,8 @@ import (
 // with apply.
 //
 // KVCacheBackendCapacity is the backend's capacity AS THE LEADER REPORTS IT. Both figures are
-// pointers and stay absent when the scrape failed: a zero here would read as an empty cache, and a
-// retained previous value would read as a current one.
+// ABSENT when the scrape failed: a zero here would read as an empty cache, and a retained previous
+// value would read as a current one.
 type KVCacheBackendCapacityApplyConfiguration struct {
 	Total *resource.Quantity `json:"total,omitempty"`
 	Used  *resource.Quantity `json:"used,omitempty"`

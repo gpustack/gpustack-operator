@@ -5245,7 +5245,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendCapacity(ref common.Refer
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "KVCacheBackendCapacity is the backend's capacity AS THE LEADER REPORTS IT. Both figures are pointers and stay absent when the scrape failed: a zero here would read as an empty cache, and a retained previous value would read as a current one.",
+				Description: "KVCacheBackendCapacity is the backend's capacity AS THE LEADER REPORTS IT. Both figures are ABSENT when the scrape failed: a zero here would read as an empty cache, and a retained previous value would read as a current one.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"total": {
@@ -5394,7 +5394,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref common.Referen
 					},
 					"multiTenancy": {
 						SchemaProps: spec.SchemaProps{
-							Description: "MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index behind it. Off, every request falls into one default tenant and the index degrades to a plain key hash, so two callers using different tenant names read each other's cache.\n\nIt is a FIELD rather than an extraArgs entry because another API validates against it: a KVCachePool is refused when its backend has no ledger to write quota into, and a webhook reading an unschema'd \"true\", \"1\" or \"True\" would be judging a value domain that belongs to whoever typed it. The store's global -quota_bytes flag stays in extraArgs for the converse reason: no other API needs to interpret it.\n\nA plain bool, not a pointer: unset and false both mean no ledger, and unset renders NO flag rather than an explicit false.",
+							Description: "MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index behind it. Off, every request falls into one default tenant and the index degrades to a plain key hash, so two callers using different tenant names read each other's cache.\n\nIt is a FIELD rather than an extraArgs entry because another API validates against it: a KVCachePool is refused when its backend has no ledger to write quota into, and a webhook reading an unschema'd \"true\", \"1\" or \"True\" would be judging a value domain that belongs to whoever typed it. The store's global -quota_bytes flag stays in extraArgs for the converse reason: no other API needs to interpret it.\n\nUnset and false both mean no ledger, and unset renders NO flag rather than an explicit false.",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
@@ -5449,7 +5449,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderOffload(ref common.
 				Properties: map[string]spec.Schema{
 					"enabled": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Enabled turns on offloading to the members' local disks. A plain bool, not a pointer: unset and false both mean no offloading, and unset renders NO flag rather than an explicit false.",
+							Description: "Enabled turns on offloading to the members' local disks. Unset and false both mean no offloading, and unset renders NO flag rather than an explicit false.",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
@@ -5591,7 +5591,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 					},
 					"medium": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Medium is what the SEGMENT this member group mounts is made of. One value: host memory.\n\nIt is an identity rather than a choice, which is why the field survives with a single value exactly as spec.type does: a second medium widens this enum instead of being inferred from a field that is not there.\n\n  - The four values an earlier shape offered are not member groups at all, and each stays\n    reachable elsewhere: a local disk in localDisk below, NVMe-oF as a target coordinate with\n    no Pod, a DAX device and a distributed filesystem on the leader's own process.\n  - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one\n    of those values, while this CRD was installed but the webhook was not, becomes undeletable:\n    schema validation runs on the write path only, so it reads back fine while every update is\n    refused, the controller's finalizer removal included. The exposure is development clusters\n    only, this type being absent from every tag through v0.8.6, so clearing it is the first\n    shipping release's job — confirm no leftover object exists, or write a recovery procedure.",
+							Description: "Medium is what the SEGMENT this member group mounts is made of. One value: host memory.\n\nIt is an identity rather than a choice, which is why the field survives with a single value exactly as spec.type does: a second medium widens this enum instead of being inferred from a field that is not there.\n\n  - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and\n    each is reached elsewhere: the first through localDisk below, NVMe-oF as a target\n    coordinate with no Pod, and the last two on the leader's own process.\n  - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one\n    of those values, while this CRD was installed but the webhook was not, becomes undeletable:\n    schema validation runs on the write path only, so it reads back fine while every update is\n    refused, the controller's finalizer removal included. The exposure is development clusters\n    only, this type being absent from every tag through v0.8.6, so clearing it is the first\n    shipping release's job — confirm no leftover object exists, or write a recovery procedure.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -5860,7 +5860,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendScaleIn(ref common.Refere
 				Properties: map[string]spec.Schema{
 					"gracePeriodSeconds": {
 						SchemaProps: spec.SchemaProps{
-							Description: "GracePeriodSeconds is the wait the operator asks a departing member for, after that member deregisters its local disk tier. It renders into the preStop hook as the endpoint's grace_period_seconds and nothing else reads it. A plain int32, because unset and zero mean the same thing here: deregister the tier, then do not wait.\n\n  - The TIER is the only thing deregistered on the way out. A memory segment is dropped rather\n    than drained, so shrinking a group loses the memory it held — a cost rather than a fault\n    for a cache, whose content is recomputable.\n  - No hook drains that segment because the member REFUSES to unmount it. Measured against\n    Mooncake 0.3.13, on members this operator rendered: both of the member's unmount routes\n    answer 500 for the segment its rendered startup asks for, at every grace period tried, using\n    the id the leader itself publishes for that segment; the two refusals name two different\n    record sets as the ones searched. On the same member in the same session, the same route\n    answers 200 for a segment mounted through the member's own mount route.\n    So this is NOT a question of identifying the member: one holding the exactly correct id for\n    a segment it is certain is its own is refused just the same. Two earlier versions of this\n    paragraph named an identity — a Pod address, then a client id — as what draining needs, and\n    both were describing a problem that is never arrived at.\n  - It does NOT hold the tier open, so sizing it to let in-flight peer reads finish sizes it\n    against something that does not happen. Measured against Mooncake 0.3.13: deregistration\n    takes effect at once and the process then waits the full value regardless, so a peer\n    reading a disk-resident key gets a clean miss for the whole window rather than at the end\n    of it. Another backend image may behave otherwise; what this operator guarantees is the\n    value it sends.\n  - The Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so\n    the kubelet cannot kill the container in the middle of the wait this configures.\n  - Setting it does NOT protect the same edit that shrinks the group: a Pod runs the template\n    it was CREATED from, so a departing member leaves with whatever grace it started with. To\n    make a grace apply to a shrink, change only this field and wait for the members to be\n    recreated with it — their pod-spec-hash annotation moves — then narrow the selector.\n  - The upper bound is the entrypoint's own, which refuses a larger value with HTTP 400.",
+							Description: "GracePeriodSeconds is the wait the operator asks a departing member for, after that member deregisters its local disk tier. It renders into the preStop hook as the endpoint's grace_period_seconds and nothing else reads it. A plain int32, because unset and zero mean the same thing here: deregister the tier, then do not wait.\n\n  - The TIER is the only thing deregistered on the way out. A memory segment is dropped rather\n    than drained, so shrinking a group loses the memory it held — a cost rather than a fault\n    for a cache, whose content is recomputable.\n  - No hook drains that segment because the member REFUSES to unmount it. Measured against\n    Mooncake 0.3.13, on members this operator rendered: both of the member's unmount routes\n    answer 500 for the segment its rendered startup asks for, at every grace period tried, using\n    the id the leader itself publishes for that segment; the two refusals name two different\n    record sets as the ones searched. On the same member in the same session, the same route\n    answers 200 for a segment mounted through the member's own mount route.\n    So this is NOT a question of identifying the member: one holding the exactly correct id for\n    a segment it is certain is its own is refused just the same. No identity supplied here --\n    a Pod address, a client id -- changes that answer.\n  - It does NOT hold the tier open, so sizing it to let in-flight peer reads finish sizes it\n    against something that does not happen. Measured against Mooncake 0.3.13: deregistration\n    takes effect at once and the process then waits the full value regardless, so a peer\n    reading a disk-resident key gets a clean miss for the whole window rather than at the end\n    of it. Another backend image may behave otherwise; what this operator guarantees is the\n    value it sends.\n  - The Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so\n    the kubelet cannot kill the container in the middle of the wait this configures.\n  - Setting it does NOT protect the same edit that shrinks the group: a Pod runs the template\n    it was CREATED from, so a departing member leaves with whatever grace it started with. To\n    make a grace apply to a shrink, change only this field and wait for the members to be\n    recreated with it — their pod-spec-hash annotation moves — then narrow the selector.\n  - The upper bound is the entrypoint's own, which refuses a larger value with HTTP 400.",
 							Minimum:     ptr.To[float64](0),
 							Maximum:     ptr.To[float64](3600),
 							Type:        []string{"integer"},
@@ -6015,7 +6015,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendStatus(ref common.Referen
 					},
 					"capacity": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Capacity is what the leader reports it has and has allocated. It is ABSENT until a scrape succeeds, and absent again is not the same as reporting zero.\n\nA POINTER because omitempty does not omit a zero-valued struct. Held by value it serialized as \"capacity\": {} on every failed or gated observation — an empty object where the contract says there should be no field at all, and a shape a client cannot tell from a scrape that returned nothing.",
+							Description: "Capacity is what the leader reports it has and has allocated. It is ABSENT until a scrape succeeds, and absent again is not the same as reporting zero: an empty object here would be indistinguishable from a scrape that returned nothing.",
 							Ref:         ref(v1alpha1.KVCacheBackendCapacity{}.OpenAPIModelName()),
 						},
 					},
@@ -6394,7 +6394,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingSpec(ref common.Refer
 					},
 					"quotaCeiling": {
 						SchemaProps: spec.SchemaProps{
-							Description: "QuotaCeiling is what this namespace may consume in its reuse domain, written verbatim into that one tenant's requested quota rather than kept as a total this operator maintains.\n\n  - IT IS A REQUEST, NOT A GRANT. The pool reduces every tenant's effective quota in proportion\n    when the sum of requests exceeds allocatable capacity, and Status.EffectiveQuota is what\n    was actually granted.\n  - EXCEEDING IT EVICTS RATHER THAN REFUSES, which is the opposite of what the word suggests.\n    A write past the ceiling is not rejected: the store frees room by dropping this namespace's\n    own older objects and retries. A ceiling set too low therefore costs cache inside this\n    namespace rather than failed writes, and costs it without any counter moving. Writes are\n    refused only when eviction cannot free enough, which needs those older objects held by\n    unexpired read leases.\n  - It is REQUIRED, because the state it would otherwise allow does not work: the storage layer\n    has no default policy and refuses a tenant it holds no policy for, so a Binding without\n    this field would pass admission, report Ready and refuse every byte its workloads wrote.\n    Required is also the direction that can be taken back — relaxing it later keeps every\n    object already written valid, while the reverse invalidates every object that omitted it.\n  - Held BY VALUE, like the pool's own ceiling: the schema guarantees the key is present, so a\n    pointer would only add a nil case nothing can produce. The webhook still refuses a value\n    that is not positive.",
+							Description: "QuotaCeiling is what this namespace may consume in its reuse domain, written verbatim into that one tenant's requested quota rather than kept as a total this operator maintains.\n\n  - IT IS A REQUEST, NOT A GRANT. The pool reduces every tenant's effective quota in proportion\n    when the sum of requests exceeds allocatable capacity, and Status.EffectiveQuota is what\n    was actually granted.\n  - EXCEEDING IT EVICTS RATHER THAN REFUSES, which is the opposite of what the word suggests.\n    A write past the ceiling is not rejected: the store frees room by dropping this namespace's\n    own older objects and retries. A ceiling set too low therefore costs cache inside this\n    namespace rather than failed writes, and costs it without any counter moving. Writes are\n    refused only when eviction cannot free enough, which needs those older objects held by\n    unexpired read leases.\n  - It is REQUIRED, because the state it would otherwise allow does not work: the storage layer\n    has no default policy and refuses a tenant it holds no policy for, so a Binding without\n    this field would pass admission, report Ready and refuse every byte its workloads wrote.\n  - A value that is not positive is refused at admission.",
 							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
 						},
 					},
@@ -6411,7 +6411,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingStatus(ref common.Ref
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "KVCachePoolBindingStatus is the namespace's own view of the pool: what it asked for, what the pool actually granted, what it is using, and whether it is over.\n\nEvery figure below is read from ONE tenant's series, because a Binding registers exactly one reuse domain and the storage layer's tenant IS that domain: nothing here is summed, and no figure can hide a second domain behind it.\n\nEvery observed figure is a POINTER, for one reason shared by all of them: omitempty does not omit a zero-valued struct, so a value-held figure serializes as \"0\" on exactly the passes whose contract says there must be no field at all.",
+				Description: "KVCachePoolBindingStatus is the namespace's own view of the pool: what it asked for, what the pool actually granted, what it is using, and whether it is over.\n\nEvery figure below is read from ONE tenant's series, because a Binding registers exactly one reuse domain and the storage layer's tenant IS that domain: nothing here is summed, and no figure can hide a second domain behind it.\n\nEvery observed figure below is ABSENT rather than zero when it was not observed, and the two say different things: a figure reading zero was measured as zero, and a missing figure was not measured at all. Reading an absent one as zero is the mistake this distinction exists to prevent.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"phase": {
@@ -6460,7 +6460,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingStatus(ref common.Ref
 					},
 					"effectiveQuota": {
 						SchemaProps: spec.SchemaProps{
-							Description: "EffectiveQuota is what the pool actually granted. It is LOWER than RequestedQuota whenever the sum of every tenant's request exceeds the pool's allocatable capacity: the pool then recomputes each tenant's effective quota in proportion to what that tenant requested. A pool with no mounted members grants ZERO to everyone, and that case carries its own Condition rather than appearing as an ordinary shortfall — which is what makes the pointer load-bearing, because a granted zero and an unobserved quota must not serialize the same way.",
+							Description: "EffectiveQuota is what the pool actually granted. It is LOWER than RequestedQuota whenever the sum of every tenant's request exceeds the pool's allocatable capacity: the pool then recomputes each tenant's effective quota in proportion to what that tenant requested. A pool with no mounted members grants ZERO to everyone, and that case carries its own Condition rather than appearing as an ordinary shortfall. A granted zero is reported as zero; a quota nobody could read is absent instead, because the two are different answers.",
 							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
 						},
 					},
@@ -6472,14 +6472,14 @@ func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingStatus(ref common.Ref
 					},
 					"overQuota": {
 						SchemaProps: spec.SchemaProps{
-							Description: "OverQuota is true when Usage exceeds EffectiveQuota, and it does NOT mean the domain tried to write more than it was granted. The store never charges a domain past its grant, so writing past it leaves Usage AT the grant and this false; what happens on that path instead is that the store evicts the domain's OWN objects to make room and admits the write, and a write fails only while every object holding the grant is pinned and nothing can be evicted.\n\nSo this reports ONE situation: the grant was RECUT below what the domain already holds, which is what a proportional cut does when the pool's members shrink or another Binding joins. Waiting on it as the signal that writes are being refused is waiting for something that never arrives.\n\nA POINTER for the same reason the quantities around it are, and the easiest one to get wrong: held by value with omitempty, an OBSERVED false — the ordinary, healthy case — omits itself and becomes indistinguishable from a tenant nobody could scrape.",
+							Description: "OverQuota is true when Usage exceeds EffectiveQuota, and it does NOT mean the domain tried to write more than it was granted. The store never charges a domain past its grant, so writing past it leaves Usage AT the grant and this false; what happens on that path instead is that the store evicts the domain's OWN objects to make room and admits the write, and a write fails only while every object holding the grant is pinned and nothing can be evicted.\n\nSo this reports ONE situation: the grant was RECUT below what the domain already holds, which is what a proportional cut does when the pool's members shrink or another Binding joins. Waiting on it as the signal that writes are being refused is waiting for something that never arrives.\n\nAn observed false — the ordinary, healthy case — is reported AS false. This field is absent only when the tenant could not be scraped at all. Those two readings are the easiest pair here to confuse and they mean opposite things.",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
 					},
 					"blocks": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Blocks and HitRate are OBSERVED from the master and the engine, never declared. They are absent when the scrape does not carry this tenant, because a fabricated zero hit rate on a warm cache is worse than no number at all. Blocks is a pointer for that reason one level down: zero blocks and \"not in the scrape\" are different facts, and an int64 held by value cannot tell them apart.",
+							Description: "Blocks and HitRate are OBSERVED from the master and the engine, never declared. They are absent when the scrape does not carry this tenant, because a fabricated zero hit rate on a warm cache is worse than no number at all. Zero blocks and \"not in the scrape\" are different facts here as well: zero is a measurement, absence is the lack of one.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
@@ -6564,7 +6564,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCachePoolDomain(ref common.ReferenceC
 					},
 					"blocks": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Blocks and HitRate are OBSERVED, never declared, and they are ABSENT when the scrape does not carry this domain. A fabricated zero hit rate on a warm cache is worse than no number, and zero blocks is a different fact from \"not in the scrape\", which is why Blocks is a pointer.",
+							Description: "Blocks and HitRate are OBSERVED, never declared, and they are ABSENT when the scrape does not carry this domain. A fabricated zero hit rate on a warm cache is worse than no number, and zero blocks is a different fact from \"not in the scrape\".",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
@@ -6644,7 +6644,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCachePoolQuota(ref common.ReferenceCa
 				Properties: map[string]spec.Schema{
 					"total": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Total is required, which is why it is held by value: a pool with no declared ceiling has nothing to write into any ledger.",
+							Description: "Total is required: a pool with no declared ceiling has nothing to write into any ledger.",
 							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
 						},
 					},
@@ -6822,7 +6822,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCachePoolUsage(ref common.ReferenceCa
 				Properties: map[string]spec.Schema{
 					"total": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Total is the sum of the occupancy the master reports for the tenants THIS pool owns — never its whole ledger, which a shared backend makes larger than this pool. A POINTER because omitempty does not omit a zero-valued struct, and an unobserved total must not serialize as an empty cache.\n\nWHAT occupancy means is the master's choice, not this API's, and it changed: a master exposing used bytes apart from reservations is summed as committed bytes, while one exposing a single charged figure — the shape 0.3.13 introduced — charges at the start of a write, so in-flight reservations are already inside this total. Do not read it as committed usage without knowing which the backend runs.",
+							Description: "Total is the sum of the occupancy the master reports for the tenants THIS pool owns — never its whole ledger, which a shared backend makes larger than this pool. An unobserved total is ABSENT rather than zero, because a zero here would read as an empty cache.\n\nWHAT occupancy means is the master's choice, not this API's, and it changed: a master exposing used bytes apart from reservations is summed as committed bytes, while one exposing a single charged figure — the shape 0.3.13 introduced — charges at the start of a write, so in-flight reservations are already inside this total. Do not read it as committed usage without knowing which the backend runs.",
 							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
 						},
 					},
@@ -6838,7 +6838,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeployment(ref common.ReferenceCal
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeployment is the schema for worker.gpustack.ai.\n\nIt is N replicas of one inference-engine role attached to a KV cache pool, so that the replicas hit each other's cached prefixes instead of each re-computing the same prefill.\n\nIt RENDERS PODS DIRECTLY. The admission chain keys on Pods, so rendering Pods reuses every existing gate with no new integration point. Instance could not serve as the substrate: it renders exactly one Pod, and its spec is immutable after creation, which turns a rolling update into recreate-everything.",
+				Description: "ModelDeployment is the schema for worker.gpustack.ai.\n\nIt is N replicas of one inference-engine role attached to a KV cache pool, so that the replicas hit each other's cached prefixes instead of each re-computing the same prefill.\n\nIt RENDERS PODS DIRECTLY. The admission chain keys on Pods, so rendering Pods reuses every existing gate with no new integration point.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
@@ -7235,7 +7235,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 					},
 					"desired": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Neither carries omitempty: they are counted from a Pod list that succeeded, so a zero here is an observed zero and must serialize as one. A failed list writes no status at all.",
+							Description: "Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Both are ALWAYS present: they are counted from a Pod list that succeeded, so a zero here is an observed zero. A failed list writes no status at all.",
 							Default:     0,
 							Type:        []string{"integer"},
 							Format:      "int32",
@@ -7250,7 +7250,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 					},
 					"unmanaged": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Unmanaged is true when the role replaced the whole command line, so the operator synthesized no engine argument and no client environment for it. It carries no omitempty for the same reason the counts do not: false is the ordinary case and must be visible as an answer rather than as a missing field.",
+							Description: "Unmanaged is true when the role replaced the whole command line, so the operator synthesized no engine argument and no client environment for it. It is ALWAYS present, for the same reason the counts are: false is the ordinary case and has to be visible as an answer rather than as a missing field.",
 							Default:     false,
 							Type:        []string{"boolean"},
 							Format:      "",
@@ -7258,7 +7258,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 					},
 					"kind": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Kind echoes the role's kind, so reading the status alone answers which half of a disaggregated deployment an entry describes. It carries no omitempty: every role has a kind, defaulted if the user named none, so an absent value would mean the status was written by something that did not know about kinds rather than that the role has none.\n\nThe enum is the same one the spec field carries and has to stay that way: this field is written from the spec field with the unset case resolved, so a value the writer can produce and this list does not name would make every later status write on the object fail, taking every other figure down with the kind. The marker sits on the field because the type's own enum marker is a Go-level one and does not become schema validation.\n\n\nPossible enum values:\n - `\"decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
+							Description: "Kind echoes the role's kind, so reading the status alone answers which half of a disaggregated deployment an entry describes. It is ALWAYS present: every role has a kind, defaulted if the user named none, so an absent value would mean the status was written by something that did not know about kinds rather than that the role has none.\n\nThe enum is the same one the spec field carries and has to stay that way: this field is written from the spec field with the unset case resolved, so a value the writer can produce and this list does not name would make every later status write on the object fail, taking every other figure down with the kind. The marker sits on the field because the type's own enum marker is a Go-level one and does not become schema validation.\n\n\nPossible enum values:\n - `\"decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -7303,7 +7303,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref common.Referenc
 					},
 					"engineVersion": {
 						SchemaProps: spec.SchemaProps{
-							Description: "EngineVersion is the engine's own version, e.g. \"0.25.1\" for vllm or \"0.5.18\" for sglang.\n\n  - It is free-form and UNVALIDATED, by decision: the user guarantees that the version and the\n    driver each role's hardware installed are aligned. A gate would need the runner's release\n    matrix compiled into the operator, and the failure it would prevent is already legible as\n    an ImagePullBackOff on a tag that does not exist.\n  - It is per deployment rather than per role, which is what lets one version assemble a\n    DIFFERENT image for each role: the backend half of the tag comes from the role's own\n    InstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.\n    Published version sets are measured to overlap across backends, though not across ALL of\n    them, so a per-role override may yet be needed.\n  - The lower bound is not decoration: `required` makes the key present, not the value\n    non-empty, and an empty version assembles a malformed tag naming something never typed.",
+							Description: "EngineVersion is the engine's own version, e.g. \"0.25.1\" for vllm or \"0.5.18\" for sglang.\n\n  - It is free-form and UNVALIDATED, by decision: the user guarantees that the version and the\n    driver each role's hardware installed are aligned. A gate would need the runner's release\n    matrix compiled into the operator, and the failure it would prevent is already legible as\n    an ImagePullBackOff on a tag that does not exist.\n  - It is per deployment rather than per role, which is what lets one version assemble a\n    DIFFERENT image for each role: the backend half of the tag comes from the role's own\n    InstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.\n    Published version sets do NOT overlap across every backend, so one version has to name a\n    tag that exists for each backend the roles land on.\n  - The lower bound is not decoration: `required` makes the key present, not the value\n    non-empty, and an empty version assembles a malformed tag naming something never typed.",
 							Default:     "",
 							MinLength:   ptr.To[int64](1),
 							MaxLength:   ptr.To[int64](64),
@@ -7427,7 +7427,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 					},
 					"kvCache": {
 						SchemaProps: spec.SchemaProps{
-							Description: "KVCache is the reuse domain this deployment actually attached to, read from the Binding, so that telling a cache-sharing misconfiguration from a cache that is merely cold takes one object rather than two.\n\nA POINTER because omitempty does not omit a zero-valued struct: held by value it would serialize as an empty object on every pass where the Binding could not be resolved, which a reader cannot tell from a domain whose every field happens to be empty.",
+							Description: "KVCache is the reuse domain this deployment actually attached to, read from the Binding, so that telling a cache-sharing misconfiguration from a cache that is merely cold takes one object rather than two.\n\nIt is ABSENT while the Binding cannot be resolved, rather than present and empty: an empty object here would be indistinguishable from a domain whose every field happens to be empty.",
 							Ref:         ref(v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName()),
 						},
 					},
@@ -7443,7 +7443,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentTemplate(ref common.Refe
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentTemplate overlays the container the operator renders for one replica.\n\nIT EXISTS BECAUSE InstanceTemplate'S Image IS REQUIRED AND THIS ONE'S CANNOT BE: a role that names no image has one synthesized from the accelerator backend its InstanceType observed, so requiring the field would force every user of the overlay to give up synthesis. Relaxing the marker on InstanceTemplate was rejected — that moves a guarantee the Instance's schema holds today down into a webhook, on a published API for the convenience of an unpublished one.\n\nThe fields are InstanceTemplate's, minus VolumeMount, which nothing here reads: an unused field in a schema is a promise, and strict decoding turns leaving it out into a clear refusal rather than a value silently ignored.",
+				Description: "ModelDeploymentTemplate overlays the container the operator renders for one replica.\n\nIT EXISTS BECAUSE InstanceTemplate'S Image IS REQUIRED AND THIS ONE'S CANNOT BE: a role that names no image has one synthesized from the accelerator backend its InstanceType observed, so requiring the field would force every user of the overlay to give up synthesis.\n\nThe fields are InstanceTemplate's, minus VolumeMount, which nothing here reads: an unused field in a schema is a promise, and strict decoding turns leaving it out into a clear refusal rather than a value silently ignored.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"image": {

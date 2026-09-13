@@ -26,8 +26,8 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	// - It is per deployment rather than per role, which is what lets one version assemble a
 	// DIFFERENT image for each role: the backend half of the tag comes from the role's own
 	// InstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.
-	// Published version sets are measured to overlap across backends, though not across ALL of
-	// them, so a per-role override may yet be needed.
+	// Published version sets do NOT overlap across every backend, so one version has to name a
+	// tag that exists for each backend the roles land on.
 	// - The lower bound is not decoration: `required` makes the key present, not the value
 	// non-empty, and an empty version assembles a malformed tag naming something never typed.
 	EngineVersion *string `json:"engineVersion,omitempty"`

@@ -13,18 +13,18 @@ import (
 type ModelDeploymentRoleStatusApplyConfiguration struct {
 	// Name is the role this entry describes.
 	Name *string `json:"name,omitempty"`
-	// Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Neither
-	// carries omitempty: they are counted from a Pod list that succeeded, so a zero here is an
-	// observed zero and must serialize as one. A failed list writes no status at all.
+	// Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Both are
+	// ALWAYS present: they are counted from a Pod list that succeeded, so a zero here is an observed
+	// zero. A failed list writes no status at all.
 	Desired *int32 `json:"desired,omitempty"`
 	Ready   *int32 `json:"ready,omitempty"`
 	// Unmanaged is true when the role replaced the whole command line, so the operator synthesized
-	// no engine argument and no client environment for it. It carries no omitempty for the same
-	// reason the counts do not: false is the ordinary case and must be visible as an answer rather
-	// than as a missing field.
+	// no engine argument and no client environment for it. It is ALWAYS present, for the same reason
+	// the counts are: false is the ordinary case and has to be visible as an answer rather than as a
+	// missing field.
 	Unmanaged *bool `json:"unmanaged,omitempty"`
 	// Kind echoes the role's kind, so reading the status alone answers which half of a
-	// disaggregated deployment an entry describes. It carries no omitempty: every role has a kind,
+	// disaggregated deployment an entry describes. It is ALWAYS present: every role has a kind,
 	// defaulted if the user named none, so an absent value would mean the status was written by
 	// something that did not know about kinds rather than that the role has none.
 	//

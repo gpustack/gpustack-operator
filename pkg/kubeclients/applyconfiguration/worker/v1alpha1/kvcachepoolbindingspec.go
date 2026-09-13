@@ -42,11 +42,7 @@ type KVCachePoolBindingSpecApplyConfiguration struct {
 	// - It is REQUIRED, because the state it would otherwise allow does not work: the storage layer
 	// has no default policy and refuses a tenant it holds no policy for, so a Binding without
 	// this field would pass admission, report Ready and refuse every byte its workloads wrote.
-	// Required is also the direction that can be taken back — relaxing it later keeps every
-	// object already written valid, while the reverse invalidates every object that omitted it.
-	// - Held BY VALUE, like the pool's own ceiling: the schema guarantees the key is present, so a
-	// pointer would only add a nil case nothing can produce. The webhook still refuses a value
-	// that is not positive.
+	// - A value that is not positive is refused at admission.
 	QuotaCeiling *resource.Quantity `json:"quotaCeiling,omitempty"`
 }
 

@@ -17,9 +17,9 @@ import (
 // domain and the storage layer's tenant IS that domain: nothing here is summed, and no figure can
 // hide a second domain behind it.
 //
-// Every observed figure is a POINTER, for one reason shared by all of them: omitempty does not omit
-// a zero-valued struct, so a value-held figure serializes as "0" on exactly the passes whose
-// contract says there must be no field at all.
+// Every observed figure below is ABSENT rather than zero when it was not observed, and the two say
+// different things: a figure reading zero was measured as zero, and a missing figure was not
+// measured at all. Reading an absent one as zero is the mistake this distinction exists to prevent.
 type KVCachePoolBindingStatusApplyConfiguration struct {
 	// Phase summarizes the conditions: Provisioning, Ready, Degraded, Error, Deleting.
 	Phase *string `json:"phase,omitempty"`
@@ -36,8 +36,8 @@ type KVCachePoolBindingStatusApplyConfiguration struct {
 	// sum of every tenant's request exceeds the pool's allocatable capacity: the pool then recomputes
 	// each tenant's effective quota in proportion to what that tenant requested. A pool with no
 	// mounted members grants ZERO to everyone, and that case carries its own Condition rather than
-	// appearing as an ordinary shortfall — which is what makes the pointer load-bearing, because a
-	// granted zero and an unobserved quota must not serialize the same way.
+	// appearing as an ordinary shortfall. A granted zero is reported as zero; a quota nobody could
+	// read is absent instead, because the two are different answers.
 	EffectiveQuota *resource.Quantity `json:"effectiveQuota,omitempty"`
 	// Usage is what the master reports this namespace's reuse domain as holding, and WHICH figure
 	// that is depends on the master's version rather than on this API.
@@ -58,14 +58,14 @@ type KVCachePoolBindingStatusApplyConfiguration struct {
 	// what a proportional cut does when the pool's members shrink or another Binding joins. Waiting on
 	// it as the signal that writes are being refused is waiting for something that never arrives.
 	//
-	// A POINTER for the same reason the quantities around it are, and the easiest one to get wrong:
-	// held by value with omitempty, an OBSERVED false — the ordinary, healthy case — omits itself and
-	// becomes indistinguishable from a tenant nobody could scrape.
+	// An observed false — the ordinary, healthy case — is reported AS false. This field is absent only
+	// when the tenant could not be scraped at all. Those two readings are the easiest pair here to
+	// confuse and they mean opposite things.
 	OverQuota *bool `json:"overQuota,omitempty"`
 	// Blocks and HitRate are OBSERVED from the master and the engine, never declared. They are absent
 	// when the scrape does not carry this tenant, because a fabricated zero hit rate on a warm cache
-	// is worse than no number at all. Blocks is a pointer for that reason one level down: zero blocks
-	// and "not in the scrape" are different facts, and an int64 held by value cannot tell them apart.
+	// is worse than no number at all. Zero blocks and "not in the scrape" are different facts here as
+	// well: zero is a measurement, absence is the lack of one.
 	Blocks *int64 `json:"blocks,omitempty"`
 	// HitRate is a ratio held as a STRING with a pattern, never a float. See the pool's own HitRate
 	// for why a pattern is safe on a computed ratio and what it obliges of whoever writes it.

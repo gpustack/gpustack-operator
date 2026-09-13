@@ -15,8 +15,7 @@ import (
 // can disagree; the case where the disagreement is total — a ceiling declared over a backend that
 // has mounted nothing — is a Condition rather than a silence.
 type KVCachePoolQuotaApplyConfiguration struct {
-	// Total is required, which is why it is held by value: a pool with no declared ceiling has
-	// nothing to write into any ledger.
+	// Total is required: a pool with no declared ceiling has nothing to write into any ledger.
 	Total *resource.Quantity `json:"total,omitempty"`
 }
 
