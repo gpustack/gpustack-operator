@@ -44,6 +44,24 @@
 #                deployment's QuotaReserved condition reports Parked naming what is waiting.
 #              Phase D -- per-group blast radius (runs on the Phase A shape):
 #              - scaling one role leaves the OTHER group's Pod UIDs unchanged.
+#              Phase E -- the barrier OPENS, with the sibling arriving demonstrably later:
+#              - one group RESERVES and is confirmed held (reserved=1, admitted=0 of 2);
+#              - only then is the other group made placeable, and EVERY group reaches admitted --
+#                including the one that had already reserved and was being held.
+#
+# WHY PHASE E EXISTS AT ALL, and it is not a regression row. Every phase above measures the barrier
+# CLOSING: it holds, it keeps holding, and past the bound it parks. A barrier that never opens
+# satisfies all of them perfectly. Opening is half the behaviour of this feature and no case
+# exercised it, so the half that was covered was the half that cannot notice. It stayed invisible
+# because a verdict depends on a SIBLING object's state, and in a small cluster the two groups
+# reserve within one reconcile of each other -- so each group's own event arrives after the other
+# has already reserved, and the set opens whether or not anything watches across the pair. That is a
+# timing coincidence, not wiring.
+#
+# WHICH IS ALSO WHY PHASE E PINS AN ORDER RATHER THAN AN END STATE. "Everything ended up admitted"
+# is produced by the coincidence just as well as by the wiring. Establishing that one group was
+# already holding quota before the other could place it is what makes the held group's movement
+# attributable to hearing about its sibling.
 #
 # Not covered: that a prefill and a decode replica land on different physical cards. That needs
 #              hardware, it is T12 of the stabilization spec, and no cluster case substitutes for
@@ -54,7 +72,9 @@
 # Why the phases are separate states rather than one: "no role is admitted" and "the other group's
 # Pods are unchanged by a scale" cannot both hold at once. The second needs admitted Pods to
 # compare, and the first exists only while one group cannot be placed. A case asserting both
-# against one object would be asserting one of them against a state that cannot produce it.
+# against one object would be asserting one of them against a state that cannot produce it. Phase E
+# needs a THIRD object for the same reason: Phase C deactivates the deployment it runs on, and a
+# deactivated workload is never admitted again whatever the cluster does.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on
@@ -74,6 +94,7 @@ k() { if [ -n "$KCTX" ]; then kubectl --context "$KCTX" "$@"; else kubectl "$@";
 
 MD=case68-pair
 MD_CONTROL=case68-control
+MD_OPENS=case68-opens
 IT_UNPLACEABLE=case68-nowhere
 BINDING="${E2E_MD_BINDING:-case68-no-such-binding}"
 IT="${E2E_MD_INSTANCE_TYPE:-}"
@@ -114,7 +135,8 @@ if [ -z "$IT" ]; then
 fi
 
 cleanup() {
-  k -n "$NS" delete modeldeployment "$MD" "$MD_CONTROL" --ignore-not-found --wait=false >/dev/null 2>&1
+  k -n "$NS" delete modeldeployment "$MD" "$MD_CONTROL" "$MD_OPENS" \
+    --ignore-not-found --wait=false >/dev/null 2>&1
   k delete instancetype.worker.gpustack.ai "$IT_UNPLACEABLE" --ignore-not-found --wait=false >/dev/null 2>&1
 }
 trap cleanup EXIT
@@ -155,6 +177,41 @@ admitted_count() {
   k -n "$NS" get workloads.kueue.x-k8s.io \
     -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Admitted")].status}{"\n"}{end}' 2>/dev/null \
     | grep -c '^True$'
+}
+
+# How many of ONE deployment's workloads report Admitted, as "<admitted>/<total>". The whole-cluster
+# count above cannot answer Phase E: another deployment being admitted would satisfy it, and the
+# claim there is about every group of one deployment.
+deployment_admitted() { # deployment_admitted <md>
+  local wl total=0 ok=0
+  for wl in $(deployment_workloads "$1"); do
+    total=$((total + 1))
+    if [ "$(k -n "$NS" get workload "$wl" \
+        -o jsonpath='{.status.conditions[?(@.type=="Admitted")].status}' 2>/dev/null)" = True ]; then
+      ok=$((ok + 1))
+    fi
+  done
+  echo "$ok/$total"
+}
+
+# "<reserved>/<admitted>/<total>" over one deployment's workloads.
+#
+# PHASE E NEEDS ALL THREE NUMBERS AND NOT JUST THE ADMITTED ONE. "Nothing is admitted" is also true
+# of a deployment where NOTHING HAS RESERVED YET, and from that state releasing the held type lets
+# both groups reserve in the same scheduling round -- which is the coincidence that hid the missing
+# watch in the first place. Reserved=1 with admitted=0 is the state where one group is demonstrably
+# holding quota and waiting on the other, and it is the only starting point from which "the held
+# group moved" can mean "it heard about its sibling".
+deployment_quota() { # deployment_quota <md>
+  local wl total=0 res=0 adm=0 conds
+  for wl in $(deployment_workloads "$1"); do
+    total=$((total + 1))
+    conds="$(k -n "$NS" get workload "$wl" \
+      -o jsonpath='{range .status.conditions[*]}{.type}={.status};{end}' 2>/dev/null)"
+    case "$conds" in *"QuotaReserved=True;"*) res=$((res + 1)) ;; esac
+    case "$conds" in *"Admitted=True;"*) adm=$((adm + 1)) ;; esac
+  done
+  echo "$res/$adm/$total"
 }
 
 wait_for() { # wait_for <seconds> <predicate...>
@@ -448,6 +505,59 @@ else
     *re-apply*) record PASS "the message names what clears it" "an identical re-apply is called out" ;;
     *) record FAIL "the message names what clears it" "[${msg:-none}]" ;;
   esac
+fi
+
+# ------------------------------------------------------------- Phase E: the barrier OPENS.
+#
+# EVERY PHASE ABOVE MEASURES THE BARRIER CLOSING, and a barrier that never opens passes all of them.
+# Opening is the other half of this feature, and it is the half whose trigger lives on a DIFFERENT
+# object: a held group stays Pending until its SIBLING reserves quota, and that reservation is
+# written to the sibling's workload. The held group is judged again only if something watches across
+# the pair.
+#
+# IT NEEDS ITS OWN DEPLOYMENT. Phase C deactivated the one above, and a deactivated workload is never
+# admitted again whatever the cluster does -- running this on it would measure the park, not the
+# barrier.
+#
+# THE ORDER IS THE ASSERTION, AND THE ORDER HAS TO BE ESTABLISHED RATHER THAN ASSUMED. The sibling
+# must arrive DEMONSTRABLY LATER: one group reserves and is confirmed to be sitting held, and only
+# then does the other become placeable. An assertion that merely reads the end state cannot tell a
+# working watch from two groups reserving in the same scheduling round, which is exactly how the
+# missing watch survived a cluster run. So the precondition below is reserved=1 admitted=0 and not
+# "nothing is admitted": the latter is also true before anything has reserved at all, and from there
+# releasing the type reproduces the coincidence instead of ruling it out.
+k -n "$NS" delete modeldeployment "$MD" --ignore-not-found --wait=true >/dev/null 2>&1
+
+apply_deployment "$MD_OPENS" "$(two_roles_two_types)"
+
+opens_held=no
+one_reserved_none_admitted() { [ "$(deployment_quota "$MD_OPENS")" = "1/0/2" ]; }
+if wait_for "$SETTLE" one_reserved_none_admitted; then
+  opens_held=yes
+  record PASS "one group reserves and is held while the other cannot place" "reserved=1 admitted=0 of 2"
+else
+  saw="$(deployment_quota "$MD_OPENS")"
+  record FAIL "one group reserves and is held while the other cannot place" \
+    "saw reserved/admitted/total = $saw, so the later arrival is not established and the row below would read the end state only"
+fi
+
+if [ "$opens_held" != yes ]; then
+  # Nothing was ever held, so nothing can be observed opening. Recording a FAIL here would report an
+  # upstream cause a second time.
+  record NO-READ "the barrier opens when the set becomes feasible" "the set was never held"
+else
+  # RELEASING THE TYPE IS THE ONLY CHANGE. The held group's own workload is untouched; what moves is
+  # its SIBLING's ability to reserve, which is exactly the event the held group has to hear about.
+  k patch instancetype "$IT_UNPLACEABLE" --type=merge -p '{"spec":{"inactive":false}}' >/dev/null 2>&1
+
+  both_admitted() { [ "$(deployment_admitted "$MD_OPENS")" = "2/2" ]; }
+  if wait_for "$SETTLE" both_admitted; then
+    record PASS "the barrier opens when the set becomes feasible" "2/2 admitted"
+  else
+    saw="$(deployment_admitted "$MD_OPENS")"
+    record FAIL "the barrier opens when the set becomes feasible" \
+      "$saw after ${SETTLE}s: the group that had already reserved was never judged again, so the barrier closed and stayed closed"
+  fi
 fi
 
 echo
