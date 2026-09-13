@@ -562,6 +562,30 @@ counter-argument stronger than expected — which is why it is written out rathe
   segment-identity correction, which is a name rather than a path. What it supersedes is unchanged,
   and the rules in force are on the backend page, `docs/kv-cache/backend.md`.
 
+- **Corrected again after shipping, and this one removes the subject rather than narrowing it.** Call
+  it the **unmount-reachability measurement**; later markers refer to it by that name. Measured
+  against `mooncake` 0.3.13, **the member's unmount routes cannot be pointed at the segment this
+  operator renders at all.** `MOONCAKE_GLOBAL_SEGMENT_SIZE` is mounted by the client's own `setup()`,
+  which files it in neither record set those routes read: `/api/unmount` answers `500` with
+  `segment_id not found in allocated records` and `/api/unmount_shm` answers `500` with
+  `not found in mounted records`, at every grace period, **for the id the leader itself publishes**.
+  The same `/api/unmount` returns `200` for a segment mounted through `/api/mount`, which is what
+  makes this a record-set boundary rather than a wrong id.
+- **So the identity reasoning above is not narrowed, it is unreachable.** Every bullet in this
+  document that treats a member's `client_id` — or the matching of members to segments — as the
+  blocker describes a problem that is never arrived at: a member holding the exactly correct id for a
+  segment it is certain is its own is refused just the same. The two corrections' **conclusion** is
+  unchanged and now rests on a different fact.
+- **A second reading, kept because an implementer will otherwise re-derive it wrongly.** `segment_name`
+  is `<the member's address>:<port>`, not the bare `local_hostname` the marker above claims, and that
+  port is bound fresh on every start and is **not** the one in `te_endpoint` — a restart moved both,
+  to different values. So "the fresh port lives only in `te_endpoint`" is false in both halves, and an
+  equality match on a Pod IP finds nothing while looking like a working selector.
+- **What would actually hand the keys back**, for the record this scope owes the next attempt: the
+  leader's `POST /api/v1/drain_jobs`, which migrates a segment's data to named targets. It is present
+  on 0.3.13 and it is not a shutdown hook — it needs room on the remaining members and a create-poll-
+  scale orchestration, which is the control plane's, not a departing Pod's.
+
 - **Acceptance:** a group with `localDisk` and a 30-second grace renders a `preStop` httpGet-free
   exec or HTTP POST carrying exactly `{"grace_period_seconds": 30}` to the member's own REST port,
   and `terminationGracePeriodSeconds: 90`.
@@ -926,6 +950,10 @@ type KVCacheBackendScaleIn struct {
 	// Host-network members placed on one node additionally need their own client id to distinguish
 	// them, which the member's supported interfaces do not expose.
 	//
+	// The last two sentences are superseded by the unmount-reachability measurement: the member's
+	// unmount routes cannot reach this segment at all, so member identity is never arrived at. The
+	// first sentence stands.
+	//
 	// The Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so
 	// the kubelet cannot kill the container in the middle of the wait this configures.
 	//
@@ -1211,6 +1239,10 @@ that sentence travels with the row so a later reader cannot mistake a green suit
   distinguish the name. This shipped design renders no memory-unmount hook. Recorded as an Open
   Question with the upstream change required for a transport-independent implementation, so the next
   attempt tests the right thing.
+  **Superseded by the unmount-reachability measurement**, which moves this from "attractive but
+  partial" to **not available**: the route the first sentence calls attractive refuses this operator's
+  segment outright, and the sentence about `te_endpoint` holding the only fresh port is false. The
+  rejection stands; its reason is now that the route does not reach the subject.
 - **Count the disk tier into `resources.requests.ephemeral-storage`.** Rejected: a hostPath is
   outside the kubelet's ephemeral-storage accounting entirely, so the request would reserve a figure
   nothing polices, and would then keep the member off the node that has the disk.
@@ -1259,6 +1291,10 @@ that sentence travels with the row so a later reader cannot mistake a green suit
   `segment_id` and `client_id` values, but this historical status design neither decoded those fields
   nor keyed rows by them. Under the real duplicate-name response, the listing was therefore rejected
   before the intended ambiguity verdict could be published.
+  **The first of those sentences is itself wrong, per the unmount-reachability measurement**:
+  `segment_name` is `<address>:<port>` and carries a fresh port of its own, distinct from
+  `te_endpoint`'s. It does not change this paragraph's verdict, because the join keys on
+  `te_endpoint` and never on the name.
   The segment-identity correction supersedes that status design; the attribution
   conclusion remains: no Pod exposes either id, so assigning a shared-host row to one of the Pods
   would still be a guess.
@@ -1308,6 +1344,13 @@ that sentence travels with the row so a later reader cannot mistake a green suit
   Whether to implement the non-host-network case first or ask upstream for that identity is open; this
   shipped design renders no memory-unmount hook. The member-identity reasoning in this question is
   superseded by the segment-identity correction.
+  **ANSWERED, by the unmount-reachability measurement above: no, not against 0.3.13, and not for any
+  member.** Both of this question's branches — implement the non-host-network case, or ask upstream
+  for the identity — assume a route that reaches the segment. Neither member route does, so the
+  question had no reachable answer in the form it was asked. What replaces it is narrower and belongs
+  upstream: **make the segment the client mounts at startup unmountable by the routes that already
+  exist.** Until that lands, a `preStop` here can only fail, and a failing `preStop` is recorded as an
+  event and otherwise ignored — the hook would look configured and drain nothing.
 - **Whether `NoF` deserves an object of its own.** Its registration carries a target coordinate and
   no node affinity, so it is not a member group; whether it is a leader field, a list on the backend,
   or a separate CR is undecided, and nothing needs it yet.

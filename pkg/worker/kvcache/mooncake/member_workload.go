@@ -55,11 +55,24 @@ const (
 	// store and letting the leader see the client go, rather than being cut off mid-shutdown and
 	// leaving the leader to time the client out after its client_ttl instead.
 	//
-	// It is NOT a drain window for the memory segment. No memory-unmount hook is rendered today. The
-	// member API takes a graceful unmount with a grace period, and the leader listing carries the ids
-	// it needs, which the operator records in status. A non-host-network member can be matched by its
-	// Pod IP-based segment name. Host-network members placed on one node additionally need their own
-	// client id to distinguish them, which their supported interfaces do not expose.
+	// It is NOT a drain window for the memory segment, and no memory-unmount hook is rendered.
+	//
+	// THE MEMBER'S OWN API CANNOT UNMOUNT THE SEGMENT THIS RENDERER GIVES IT, which is a stronger
+	// reason than the one this comment used to carry. The segment MOONCAKE_GLOBAL_SEGMENT_SIZE asks
+	// for is mounted by the client's own setup(), and that files it in neither record set the unmount
+	// routes look in. Measured against mooncake 0.3.13: /api/unmount answers 500 with
+	// "segment_id not found in allocated records" (real_client.cpp:1791) and /api/unmount_shm answers
+	// 500 with "not found in mounted records" (real_client.cpp:1626) -- both in under three
+	// milliseconds, at every grace period tried, for the id the LEADER itself published for that
+	// segment. The same /api/unmount returns 200 for a segment mounted through /api/mount, so the
+	// refusal is a record-set boundary and not a wrong id.
+	//
+	// SO IDENTITY WAS NEVER THE BLOCKER. The earlier reason -- that a host-network member cannot
+	// learn its own client id -- describes a problem that is never reached: a member holding exactly
+	// the right id for a segment it is certain is its own is refused just the same. Nothing about
+	// matching members to segments changes that, so no amount of work on this repository's side
+	// reaches a hook that drains. See renderMemberEnv for the segment name correction this
+	// measurement also forced.
 	//
 	// A group with a local disk tier adds its scale-in grace ON TOP of this, rather than sharing
 	// it, which is what keeps the kubelet from killing the container in the middle of a wait the
@@ -104,8 +117,9 @@ const (
 	// the tier readable. Deregistration takes effect at once, so it drains nothing; the upstream
 	// docstring says otherwise and was refuted by measurement.
 	//
-	// It needs no segment id. Memory unmount does, and no such shutdown hook is rendered; co-located
-	// host-network members also need their own client id to select the right listed segments.
+	// It needs no segment id, and that is why it is the route that exists here. Memory unmount takes
+	// one, and the segment this renderer gives a member cannot be named to it at all -- see
+	// memberShutdownSeconds for the measurement.
 	memberUnmountLocalDiskPath = "/api/unmount_local_disk"
 
 	// MemberMaxGracePeriodSeconds is the entrypoint's own ceiling on that call. Above it the
@@ -497,15 +511,21 @@ func renderMemberEnv(
 			// there — measured on a two-node cluster, a client pod got ECONNREFUSED against both
 			// the node name and the node IP, and connected on the pod IP.
 			//
-			// It also becomes the segment's NAME, verbatim: the client keeps this string and neither
-			// it nor the leader ever rewrites it. The port that is fresh on every start — one
-			// restart moved a segment endpoint from <host>:13720 to <host>:14071 — belongs to
-			// te_endpoint, which the client derives on its own under the peer-to-peer metadata
-			// plane this scope ships. The name outlives a restart; the endpoint does not.
+			// It becomes the HOST HALF of the segment's name, and NOT the whole of it. An earlier
+			// version of this comment said the name was this string verbatim and that the port
+			// fresh on every start belonged to te_endpoint alone. Measured against mooncake 0.3.13,
+			// both halves of that are wrong: the leader publishes segment_name as
+			// "<this value>:<port>", and a restart moved that port while moving te_endpoint's port
+			// to a DIFFERENT value in the same restart. There are two fresh ports, not one, and one
+			// of them is in the name.
+			//
+			// WHAT THAT COSTS ANYONE MATCHING ON IT: comparing segment_name to this value finds
+			// nothing, and finding nothing is silent. A caller that has to select by name must
+			// compare the host half, which the leader's own listing already separates.
 			//
 			// LIMITED: the name is only as unique as this value is. On the host-fabric paths the
 			// pod holds the host's network namespace, so every member group on one node reports
-			// the same name — the collision the members-mounted condition reports rather than
+			// the same host half — the collision the members-mounted condition reports rather than
 			// guesses at.
 			Name: memberEnvLocalHostname,
 			ValueFrom: &core.EnvVarSource{
