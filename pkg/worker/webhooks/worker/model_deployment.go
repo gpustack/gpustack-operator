@@ -94,12 +94,13 @@ func (r *ModelDeploymentWebhook) ReceiveDeletionUpdate() {}
 // THE COST OF LEAVING IT UNSET IS NOT A SMALLER REPLICA, it is a deployment that never starts. An
 // accelerated pool's ClusterQueue covers only that manufacturer's credits, so a role requesting no
 // accelerator requests nothing the queue covers. A Workload whose ONLY PodSet is such a role is
-// admitted, with an assignment carrying no flavors. Add a second PodSet of any kind and the
-// scheduler writes an admission carrying fewer assignments than the Workload has PodSets, the API
-// refuses it, and the Workload is requeued immediately and forever -- measured at roughly a hundred
-// scheduling cycles a second, with the deployment parked and nothing reporting why. So this
-// surfaces on a multi-role deployment whether or not its other roles ask for cards: a mixed
-// deployment is refused exactly like an all-uncovered one.
+// admitted, with an assignment carrying no flavors.
+//
+// Add a second PodSet of any kind and the scheduler writes an admission carrying fewer assignments
+// than the Workload has PodSets, the API refuses it, and the Workload is requeued immediately and
+// forever -- measured at roughly a hundred scheduling cycles a second, with the deployment parked
+// and nothing reporting why. So this surfaces on a multi-role deployment whether or not its other
+// roles ask for cards: a mixed deployment is refused exactly like an all-uncovered one.
 //
 // AN EXPLICIT ZERO IS LEFT ALONE and still reaches that state. Zero is a value the user wrote, and
 // silently replacing it would be worse than the failure: the request would stop meaning what it
@@ -591,11 +592,12 @@ func validateModelDeploymentRoleExtraArgs(
 // variable is the only pointer to the file the operator wrote, so re-pointing it swaps the entire
 // client configuration for another file's and moves every symptom one layer away from its cause.
 // Keys the operator merely defaults are not owned, so a user's value wins there with no refusal.
-// BOTH TIERS ARE CHECKED BECAUSE THE RENDERER READS BOTH. mergeModelDeploymentEnv appends
-// role.Env and role.Template.Env into one list and then skips every owned name in it. Validating
-// only the append tier let an owned key arrive through the overlay, pass admission, and be dropped
-// at render time with no refusal and no event -- which is exactly the silent outcome this rule
-// exists to prevent, reached by the one path the rule did not cover.
+//
+// BOTH TIERS ARE CHECKED BECAUSE THE RENDERER READS BOTH. mergeModelDeploymentEnv appends role.Env
+// and role.Template.Env into one list and then skips every owned name in it. Validating only the
+// append tier let an owned key arrive through the overlay, pass admission, and be dropped at render
+// time with no refusal and no event -- exactly the silent outcome this rule exists to prevent,
+// reached by the one path the rule did not cover.
 //
 // The set refused here must equal the set the renderer drops. The renderer drops unconditionally,
 // including when a role takes over the command line, so this refuses unconditionally too: a
