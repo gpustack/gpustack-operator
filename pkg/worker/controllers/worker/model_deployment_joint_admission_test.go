@@ -470,6 +470,16 @@ func TestModelDeploymentJointAdmission_TheBound(t *testing.T) {
 		assert.Contains(t, msg, "re-apply",
 			"and the action that clears it, because an identical re-apply bumps no resourceVersion, "+
 				"delivers no event, and leaves an operator watching nothing happen")
+
+		// THE OTHER HALF OF A CONTRACT THAT SPANS TWO CONTROLLERS. The status layer reports Parked
+		// only when this check carries the verdict, because spec.active=false does not say who wrote
+		// it: Kueue deactivates a Workload of its own accord, and an operator can pause one group by
+		// hand. Asserting the message here and the reader there leaves the join untested, and the
+		// join is the part that breaks -- a reworded message would pass both sides separately and
+		// report a parked deployment as merely waiting.
+		assert.True(t, jointBarrierParked(got),
+			"the status layer reads this verdict off the check to tell this barrier's park from "+
+				"anyone else's deactivation, and it must find it here")
 	})
 
 	t.Run("feasible_before_the_bound_is_admitted_normally", func(t *testing.T) {
