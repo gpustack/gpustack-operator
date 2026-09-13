@@ -172,8 +172,17 @@ type KVCacheBackendScaleIn struct {
 	//
 	//   - The TIER is the only thing deregistered on the way out. A memory segment is dropped rather
 	//     than drained, so shrinking a group loses the memory it held — a cost rather than a fault
-	//     for a cache, whose content is recomputable. Draining one needs a client id that
-	//     host-network members, which share one advertised address per node, do not expose.
+	//     for a cache, whose content is recomputable.
+	//   - No hook drains that segment because the member REFUSES to unmount it. Measured against
+	//     Mooncake 0.3.13, on members this operator rendered: both of the member's unmount routes
+	//     answer 500 for the segment its rendered startup asks for, at every grace period tried, using
+	//     the id the leader itself publishes for that segment; the two refusals name two different
+	//     record sets as the ones searched. On the same member in the same session, the same route
+	//     answers 200 for a segment mounted through the member's own mount route.
+	//     So this is NOT a question of identifying the member: one holding the exactly correct id for
+	//     a segment it is certain is its own is refused just the same. Two earlier versions of this
+	//     paragraph named an identity — a Pod address, then a client id — as what draining needs, and
+	//     both were describing a problem that is never arrived at.
 	//   - It does NOT hold the tier open, so sizing it to let in-flight peer reads finish sizes it
 	//     against something that does not happen. Measured against Mooncake 0.3.13: deregistration
 	//     takes effect at once and the process then waits the full value regardless, so a peer
