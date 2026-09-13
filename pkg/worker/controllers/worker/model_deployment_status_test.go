@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -584,4 +585,50 @@ func TestFindModelDeploymentGroupWorkload_MatchesAPlainOwnerReference(t *testing
 			assert.Equal(t, wl.Name, got.Name)
 		})
 	}
+}
+
+// TestObserveModelDeploymentQuota_CountsPerGroup is the case the deployment-wide sum fails.
+//
+// Kueue composes one Workload per group and withholds it until THAT group has its own declared
+// total, so one group can be complete while a sibling is short. Summing the deployment reads the
+// complete group as short whenever its sibling is, and names a queue that is holding nothing back --
+// pointing the operator at the pool that is fine.
+//
+// THE NUMBERS AND THE QUEUE ARE BOTH ASSERTED. A message carrying the right shape with the
+// deployment-wide numbers still reads as a correct answer, and it is the numbers an operator acts
+// on.
+func TestObserveModelDeploymentQuota_CountsPerGroup(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		decode := md.Spec.Roles[0]
+		md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 2
+		decode.Name, decode.Replicas, decode.InstanceType = "decode", 3, "a100-8x"
+		md.Spec.Roles = append(md.Spec.Roles, decode)
+	})
+
+	replica := func(role string, i int) core.Pod {
+		return core.Pod{ObjectMeta: meta.ObjectMeta{
+			Name:      fmt.Sprintf("qwen-%s-%d", role, i),
+			Namespace: md.Namespace,
+			Labels:    map[string]string{modelDeploymentLabelKeyComponent: role},
+		}}
+	}
+
+	// prefill is complete at its own 2; decode is one short of its own 3.
+	pods := []core.Pod{
+		replica("prefill", 0), replica("prefill", 1),
+		replica("decode", 0), replica("decode", 1),
+	}
+
+	holder := new(workercore.ModelDeployment)
+	observeModelDeploymentQuota(md, pods, nil, holder)
+
+	assert.Equal(t, string(meta.ConditionFalse),
+		ModelDeploymentConditionQuotaReserved.GetStatus(holder))
+	assert.Equal(t, "PodGroupIncomplete",
+		ModelDeploymentConditionQuotaReserved.GetReason(holder))
+	assert.Equal(t,
+		`2 of 3 of the group's replicas exist, so Kueue composes no workload for it at all and `+
+			`there is nothing in cluster queue "a100-8x" to hold quota`,
+		ModelDeploymentConditionQuotaReserved.GetMessage(holder),
+		"the short group's own numbers and its own queue, not the deployment's 4 of 5 on the other pool")
 }

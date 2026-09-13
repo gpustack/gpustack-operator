@@ -12,6 +12,7 @@ import (
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -181,7 +182,7 @@ func TestModelDeploymentPodGroupName_HashCoversTheNamespace(t *testing.T) {
 	assert.NotEqual(t, modelDeploymentPodGroupName(here), modelDeploymentPodGroupName(there))
 }
 
-// TestModelDeploymentPodGroupTotalCount covers the sum the group declares.
+// TestModelDeploymentPodGroupTotalCount covers the sum a group declares.
 func TestModelDeploymentPodGroupTotalCount(t *testing.T) {
 	testCases := []struct {
 		name string
@@ -208,11 +209,25 @@ func TestModelDeploymentPodGroupTotalCount(t *testing.T) {
 			}),
 			want: 2,
 		},
+		{
+			// Replicas is summed VERBATIM rather than defaulted to one: the schema defaults and
+			// bounds the field, so a zero reaches here only from a value built in Go -- and a total
+			// disagreeing with the number of Pods the reconciler creates from the same field would be
+			// worse than a zero.
+			name: "a_zero_is_summed_as_written",
+			md: podGroupDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[1].Replicas = 0
+			}),
+			want: 2,
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, modelDeploymentPodGroupTotalCount(tc.md))
+			groups := modelDeploymentPodGroups(tc.md)
+
+			require.Len(t, groups, 1, "every role here names one instanceType")
+			assert.Equal(t, tc.want, groups[0].TotalCount)
 		})
 	}
 }
@@ -465,15 +480,22 @@ func TestModelDeploymentPodGroup_StampsTheRolesOwnGroup(t *testing.T) {
 	assert.Equal(t, "decode", decode.Annotations[kueuepodconst.RoleHashAnnotation])
 }
 
-// TestModelDeploymentGroupIsResizing covers the predicate the converge loop reads.
+// TestModelDeploymentGroupsResizing covers the predicate the converge loop reads.
 //
 // EACH POD IS JUDGED AGAINST ITS OWN GROUP'S TOTAL. Against the deployment-wide sum a two-group
 // deployment reads as resizing on every pass forever -- a rebuild loop rather than a wrong number,
 // and one that nothing reports.
-func TestModelDeploymentGroupIsResizing(t *testing.T) {
-	pod := func(role, total, replicas string) core.Pod {
+//
+// THE ANSWER IS A SET, AND WHICH GROUPS ARE IN IT IS THE ASSERTION. A predicate that named every
+// group whenever any one moved would pass a test asserting only "something is resizing", while
+// restarting roles that nothing asked to restart.
+func TestModelDeploymentGroupsResizing(t *testing.T) {
+	pod := func(group, role, total, replicas string) core.Pod {
 		p := core.Pod{ObjectMeta: meta.ObjectMeta{
-			Labels:      map[string]string{modelDeploymentLabelKeyComponent: role},
+			Labels: map[string]string{
+				modelDeploymentLabelKeyComponent: role,
+				kueuepodconst.GroupNameLabel:     group,
+			},
 			Annotations: map[string]string{},
 		}}
 		if total != "" {
@@ -486,57 +508,84 @@ func TestModelDeploymentGroupIsResizing(t *testing.T) {
 		return p
 	}
 
+	// The two-type shape's group names are hashes, so the cases name them through the function that
+	// derives them rather than by writing a hash into the test.
+	two := twoTypeDeployment()
+	twoGroups := modelDeploymentPodGroups(two)
+	require.Len(t, twoGroups, 2)
+	prefillGroup, decodeGroup := twoGroups[0].Name, twoGroups[1].Name
+
 	cases := []struct {
 		name string
 		md   *workercore.ModelDeployment
 		pods []core.Pod
-		want bool
+		want []string
 	}{
 		{
 			name: "one_group_agreeing",
 			md:   podGroupDeployment(),
-			pods: []core.Pod{pod("prefill", "4", "2"), pod("decode", "4", "2")},
+			pods: []core.Pod{pod("qwen-72b", "prefill", "4", "2"), pod("qwen-72b", "decode", "4", "2")},
 		},
 		{
 			// THE CASE THE DEPLOYMENT-WIDE SUM FAILS: each Pod carries its own group's total, and a
 			// predicate reading the sum of both groups matches neither.
 			name: "two_groups_agreeing",
-			md:   twoTypeDeployment(),
-			pods: []core.Pod{pod("prefill", "2", "2"), pod("decode", "3", "3")},
+			md:   two,
+			pods: []core.Pod{
+				pod(prefillGroup, "prefill", "2", "2"),
+				pod(decodeGroup, "decode", "3", "3"),
+			},
 		},
 		{
-			name: "two_groups_one_pod_carrying_the_other_groups_total",
-			md:   twoTypeDeployment(),
-			pods: []core.Pod{pod("prefill", "3", "2"), pod("decode", "3", "3")},
-			want: true,
+			// ONLY THE GROUP THAT MOVED. The sibling agrees with its own total and must be left alone;
+			// a boolean predicate would restart it too.
+			name: "two_groups_one_moved",
+			md:   two,
+			pods: []core.Pod{
+				pod(prefillGroup, "prefill", "9", "2"),
+				pod(decodeGroup, "decode", "3", "3"),
+			},
+			want: []string{prefillGroup},
+		},
+		{
+			// A role that moved onto another instanceType: the group it LEAVES and the group it JOINS
+			// both come down, and neither name is derivable from the other.
+			name: "a_role_moved_between_types",
+			md:   two,
+			pods: []core.Pod{
+				pod(decodeGroup, "prefill", "3", "2"),
+				pod(decodeGroup, "decode", "3", "3"),
+			},
+			want: []string{decodeGroup, prefillGroup},
 		},
 		{
 			// The sum is unchanged at 4 while the split moved, which is what the per-role share is
 			// beside the total for.
-			name: "one_group_shares_moved_under_an_unchanged_total",
+			name: "shares_moved_under_an_unchanged_total",
 			md: podGroupDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Roles[0].Replicas, md.Spec.Roles[1].Replicas = 1, 3
 			}),
-			pods: []core.Pod{pod("prefill", "4", "2"), pod("decode", "4", "2")},
-			want: true,
+			pods: []core.Pod{pod("qwen-72b", "prefill", "4", "2"), pod("qwen-72b", "decode", "4", "2")},
+			want: []string{"qwen-72b"},
 		},
 		{
 			name: "a_pod_predating_the_annotations",
 			md:   podGroupDeployment(),
-			pods: []core.Pod{pod("prefill", "", "")},
-			want: true,
+			pods: []core.Pod{pod("qwen-72b", "prefill", "", "")},
+			want: []string{"qwen-72b"},
 		},
 		{
 			name: "a_pod_of_a_role_the_deployment_no_longer_has",
 			md:   podGroupDeployment(),
-			pods: []core.Pod{pod("gone", "4", "2")},
-			want: true,
+			pods: []core.Pod{pod("qwen-72b", "gone", "4", "2")},
+			want: []string{"qwen-72b"},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, modelDeploymentGroupIsResizing(tc.md, tc.pods))
+			assert.ElementsMatch(t, tc.want,
+				sets.List(modelDeploymentGroupsResizing(tc.md, tc.pods)))
 		})
 	}
 }

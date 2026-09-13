@@ -722,9 +722,14 @@ substantive ones**, and they are labelled as such so that a later reader splitti
 delete them rather than preserving a dependency that was never real. T4 is the structural change and
 everything about grouping follows it.
 
-Checkpoints: after T3 (the deferred admission debt is closed); after T4 (two `instanceType`s produce
-two groups); after T6 (a deployment is admitted as a unit across groups); after T9 (the cluster
-agrees).
+Checkpoints: after T3 (the deferred admission debt is closed); after T4 (the RENDERER forms two
+groups — no user can reach that shape yet, because admission still refuses two `instanceType`s until
+T8 deletes the rule); after T8 (a two-`instanceType` deployment is admitted and reaches two groups);
+after T6 (a deployment is admitted as a unit across groups); after T9 (the cluster agrees).
+
+⚠️ That first correction is worth reading as a pattern rather than a fix: a checkpoint describes
+**behaviour a user can observe**, while a task delivers **a function**, and in a written plan the two
+look identical. T4's checkpoint claimed the observable one and was true only of the function.
 
 - [x] **T1 · The identity fields, and the rule that selects them**
       Blocked by: None
@@ -778,7 +783,7 @@ agrees).
       across passes. The stale comment naming the withdrawn `roles[].acceleratorKey` is removed.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/worker/controllers/worker/`
 
-- [ ] **T5 · Creating, pruning and reporting a set of groups**
+- [x] **T5 · Creating, pruning and reporting a set of groups**
       Blocked by: T4
       Owns: `pkg/worker/controllers/worker/model_deployment.go` + its test,
       `pkg/worker/controllers/worker/model_deployment_status.go` + its test
@@ -841,9 +846,14 @@ agrees).
 
 - [ ] **T8 · Prefill and decode do not contend for one card**
       Blocked by: T3
-      Owns: `pkg/worker/webhooks/worker/model_deployment.go` + its test
+      Owns: `pkg/worker/webhooks/worker/model_deployment.go` + its test — including the rule refusing
+      roles on differing `instanceType`s, which F2 deletes and which no other task claims
       Gate: review
-      Acceptance: a `prefill`/`decode` pair both requesting a logical slice **from `instanceType`s
+      Acceptance: **the rule refusing roles on differing `instanceType`s is deleted, and the test
+      asserting that refusal is REPLACED by one asserting the two-group rendering rather than merely
+      removed** — this task owns it because its own acceptance below cannot be met while that rule
+      stands: a pair over two `instanceType`s is refused before any of the rules below is reached.
+      Then: a `prefill`/`decode` pair both requesting a logical slice **from `instanceType`s
       that can select the same accelerator** is refused naming both roles and the field; the same
       pair over `instanceType`s with disjoint accelerator populations is accepted, and that positive
       case is required so the rule cannot land as a blanket refusal of every sliced pair; whole-card

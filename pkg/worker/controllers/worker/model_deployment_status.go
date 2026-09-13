@@ -3,6 +3,8 @@ package worker
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -241,19 +243,49 @@ func observeModelDeploymentQuota(
 		return
 	}
 
-	// The ClusterQueue is named after the InstanceType, so the queue a refusal points at is read
-	// off the spec rather than resolved: the LocalQueue the entrance label names is derived from it.
-	queue := md.Spec.Roles[0].InstanceType
-
-	if want := int(modelDeploymentPodGroupTotalCount(md)); live < want {
-		ModelDeploymentConditionQuotaReserved.False(holder, modelDeploymentReasonPodGroupIncomplete,
-			fmt.Sprintf(
-				"%d of %d of the group's replicas exist, so Kueue composes no workload for it at "+
-					"all and there is nothing in cluster queue %q to hold quota",
-				live, want, queue))
-
-		return
+	// THE COUNT IS PER GROUP, and so is the queue it names. Kueue composes one Workload per group and
+	// withholds it until THAT group has its own declared total, so a deployment whose roles sit on
+	// different instanceTypes can have one group complete and another short. Comparing the
+	// deployment-wide sum answers about neither: it reads a complete group as short whenever a
+	// sibling is, and reports a queue that is not the one holding anything back.
+	//
+	// The ClusterQueue is named after the InstanceType, so the queue a refusal points at is read off
+	// the spec rather than resolved: the LocalQueue the entrance label names is derived from it.
+	// A replica is attributed to a group through its ROLE rather than through the membership label it
+	// carries. That is the same source every other figure on this status reads, so a Pod cannot be
+	// counted in one place and not another -- and a replica that predates the label, or one still
+	// being built, is counted against the group its role puts it in rather than against none.
+	groupOfRole := make(map[string]string, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		groupOfRole[role.Name] = modelDeploymentPodGroupFor(md, role.InstanceType).Name
 	}
+
+	for _, group := range modelDeploymentPodGroups(md) {
+		var alive int
+		for i := range pods {
+			if pods[i].DeletionTimestamp == nil &&
+				groupOfRole[modelDeploymentPodRole(&pods[i])] == group.Name {
+				alive++
+			}
+		}
+
+		if want := int(group.TotalCount); alive < want {
+			ModelDeploymentConditionQuotaReserved.False(holder, modelDeploymentReasonPodGroupIncomplete,
+				fmt.Sprintf(
+					"%d of %d of the group's replicas exist, so Kueue composes no workload for it at "+
+						"all and there is nothing in cluster queue %q to hold quota",
+					alive, want, group.InstanceType))
+
+			return
+		}
+	}
+
+	// Every group is complete, so the three outcomes below are about the Workload one of them has.
+	// The queue named is the first group's: the singular Workload this function is handed is the
+	// first in name order, and naming another group's queue beside it would point a reader at a
+	// queue that is not the one the reported Workload sits in.
+	queue := md.Spec.Roles[0].InstanceType
 
 	switch {
 	case wl == nil:
@@ -294,6 +326,27 @@ func observeModelDeploymentQuota(
 func (r *ModelDeploymentReconciler) findModelDeploymentGroupWorkload(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod,
 ) (*kueue.Workload, error) {
+	wls, err := r.findModelDeploymentGroupWorkloads(ctx, md, pods)
+	if err != nil || len(wls) == 0 {
+		return nil, err
+	}
+
+	return wls[0], nil
+}
+
+// findModelDeploymentGroupWorkloads returns EVERY Workload owning any of these Pods, in name order.
+//
+// ONE DEPLOYMENT CAN HAVE SEVERAL, and that is what the singular above cannot express. Roles on
+// different instanceTypes are different pod groups and Kueue composes one Workload each. A caller
+// that takes only the first leaves the rest in place -- and each of those still holds Kueue's
+// finalizer on its own replicas, which is the one thing that keeps them from ever leaving. The
+// symptom is a deployment stuck in Deleting with nothing erroring.
+//
+// Callers that scope the Pods scope the result: passing one group's replicas returns that group's
+// Workload and no other, which is how a rebuild reaches exactly the group it is rebuilding.
+func (r *ModelDeploymentReconciler) findModelDeploymentGroupWorkloads(
+	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod,
+) ([]*kueue.Workload, error) {
 	if len(pods) == 0 {
 		return nil, nil
 	}
@@ -309,16 +362,14 @@ func (r *ModelDeploymentReconciler) findModelDeploymentGroupWorkload(
 		return nil, fmt.Errorf("list workloads: %w", err)
 	}
 
-	var found *kueue.Workload
+	var found []*kueue.Workload
 	for i := range wlList.Items {
 		wl := &wlList.Items[i]
-		if !modelDeploymentWorkloadOwnsAny(wl, ours) {
-			continue
-		}
-		if found == nil || wl.Name < found.Name {
-			found = wl
+		if modelDeploymentWorkloadOwnsAny(wl, ours) {
+			found = append(found, wl)
 		}
 	}
+	slices.SortFunc(found, func(a, b *kueue.Workload) int { return strings.Compare(a.Name, b.Name) })
 
 	return found, nil
 }

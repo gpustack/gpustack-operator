@@ -6,6 +6,7 @@ import (
 
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
@@ -212,16 +213,18 @@ func ModelDeploymentPodGroup(
 func (r *ModelDeploymentReconciler) deleteModelDeploymentGroupWorkload(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod,
 ) error {
-	wl, err := r.findModelDeploymentGroupWorkload(ctx, md, pods)
+	wls, err := r.findModelDeploymentGroupWorkloads(ctx, md, pods)
 	if err != nil {
 		return err
 	}
-	if wl == nil {
-		return nil
-	}
 
-	if err = r.Client.Delete(ctx, wl); err != nil && !kerrors.IsNotFound(err) {
-		return fmt.Errorf("delete workload %s: %w", wl.Name, err)
+	// EVERY Workload owning these Pods, not the first. A deployment whose roles sit on different
+	// instanceTypes has one Workload per group, and each holds Kueue's finalizer on its own replicas;
+	// deleting one of them releases one group and leaves the others unable to leave at all.
+	for _, wl := range wls {
+		if err = r.Client.Delete(ctx, wl); err != nil && !kerrors.IsNotFound(err) {
+			return fmt.Errorf("delete workload %s: %w", wl.Name, err)
+		}
 	}
 
 	return nil
@@ -249,50 +252,62 @@ func (r *ModelDeploymentReconciler) deleteModelDeploymentGroupWorkload(
 // THE TOTAL A POD IS JUDGED AGAINST IS ITS OWN GROUP'S, not the deployment's. With two groups the
 // deployment-wide sum matches neither of them, so a predicate reading it answers "resizing" on every
 // pass forever -- a rebuild loop rather than a wrong number, and one that nothing reports.
-func modelDeploymentGroupIsResizing(md *workercore.ModelDeployment, pods []core.Pod) bool {
+//
+// THE ANSWER IS A SET OF GROUPS RATHER THAN A YES. One group's shape moving is no reason to tear down
+// a group that did not move, and a boolean cannot say which is which: every role of the deployment
+// would restart because one role's replica count changed.
+//
+// A POD IS JUDGED AGAINST THE GROUP IT ACTUALLY JOINED, read off its own membership label, AND the
+// group its role belongs to now is named beside it. A role moved onto another instanceType leaves one
+// group short and arrives in another that never had it. Both have to come down, and neither name is
+// derivable from the other: one is written on the Pod, the other is in the spec.
+func modelDeploymentGroupsResizing(
+	md *workercore.ModelDeployment, pods []core.Pod,
+) sets.Set[string] {
 	wantByRole := make(map[string]string, len(md.Spec.Roles))
-	perRole := make(map[string]string, len(md.Spec.Roles))
+	shareByRole := make(map[string]string, len(md.Spec.Roles))
+	groupByRole := make(map[string]string, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		perRole[role.Name] = strconvx.Itoa(int(role.Replicas))
-		wantByRole[role.Name] = strconvx.Itoa(int(modelDeploymentPodGroupFor(md, role.InstanceType).TotalCount))
+		group := modelDeploymentPodGroupFor(md, role.InstanceType)
+		groupByRole[role.Name] = group.Name
+		wantByRole[role.Name] = strconvx.Itoa(int(group.TotalCount))
+		shareByRole[role.Name] = strconvx.Itoa(int(role.Replicas))
 	}
 
+	resizing := sets.New[string]()
 	for i := range pods {
+		joined := pods[i].Labels[kueuepodconst.GroupNameLabel]
 		name := modelDeploymentPodRole(&pods[i])
 
 		want, named := wantByRole[name]
 		if !named {
-			return true
+			// Its role is gone -- renamed, or removed -- so it belongs to no group the spec now
+			// forms. The group it is sitting in is the one that has to come down.
+			resizing.Insert(joined)
+
+			continue
 		}
-		if pods[i].Annotations[kueuepodconst.GroupTotalCountAnnotation] != want {
-			return true
-		}
-		if pods[i].Annotations[modelDeploymentRoleReplicasAnnotation] != perRole[name] {
-			return true
+
+		if pods[i].Annotations[kueuepodconst.GroupTotalCountAnnotation] != want ||
+			pods[i].Annotations[modelDeploymentRoleReplicasAnnotation] != shareByRole[name] {
+			resizing.Insert(joined, groupByRole[name])
 		}
 	}
 
-	return false
+	return resizing
 }
 
-// modelDeploymentPodGroupTotalCount is how many Pods the group declares: the sum of every role's
-// replicas.
-//
-// Kueue will not compose a Workload until it has seen this many runnable Pods, so the number is what
-// makes admission all-or-nothing rather than a property anything enforces.
-//
-// Replicas is summed VERBATIM rather than defaulted to one, matching how the reconciler and the
-// status builder read it. The schema defaults the field and bounds it at one, so a zero only reaches
-// here from a value built in Go -- and a total that disagreed with the number of Pods the reconciler
-// then creates from the same field would be worse than a zero.
-func modelDeploymentPodGroupTotalCount(md *workercore.ModelDeployment) int32 {
-	var total int32
-	for i := range md.Spec.Roles {
-		total += md.Spec.Roles[i].Replicas
+// modelDeploymentPodsInGroup selects the replicas carrying one group's membership label.
+func modelDeploymentPodsInGroup(pods []core.Pod, group string) []core.Pod {
+	var members []core.Pod
+	for i := range pods {
+		if pods[i].Labels[kueuepodconst.GroupNameLabel] == group {
+			members = append(members, pods[i])
+		}
 	}
 
-	return total
+	return members
 }
 
 // modelDeploymentPodGroupNameOf is a group's identity, shared by every Pod of every role naming one

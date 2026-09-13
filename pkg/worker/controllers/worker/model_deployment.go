@@ -18,6 +18,7 @@ import (
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
+	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -239,7 +240,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// operator having stopped rather than like a rollout in progress.
 	//
 	// The predicate reads the terminating Pods too, for the same reason.
-	resizing := modelDeploymentGroupIsResizing(md, actual)
+	//
+	// IT ANSWERS PER GROUP. A deployment whose roles sit on different instanceTypes is several groups,
+	// and one group's shape moving is no reason to restart a group that did not move.
+	resizing := modelDeploymentGroupsResizing(md, actual)
 
 	// A DEPARTING REPLICA REBUILDS THE GROUP TOO, for a reason that is Kueue's rather than ours.
 	//
@@ -265,14 +269,19 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// role of the deployment. On a cluster with preemption enabled that is a routine event, not an
 	// incident. It is also the only recovery available: the evicted Pod is held by Kueue's finalizer
 	// and cannot leave until the Workload does, so the group has to come down either way.
-	leaving := slices.ContainsFunc(actual, func(pod core.Pod) bool {
-		return pod.DeletionTimestamp != nil
-	})
+	//
+	// IT IS ALSO PER GROUP. A replica leaving takes down the group it belongs to and no other: the
+	// finalizer that traps it is held by that group's Workload alone.
+	rebuild := resizing.Clone()
+	for i := range actual {
+		if actual[i].DeletionTimestamp != nil {
+			rebuild.Insert(actual[i].Labels[kueuepodconst.GroupNameLabel])
+		}
+	}
 
 	// The survivors are deleted here rather than left to the stop Kueue performs when the Workload
 	// goes. Relying on that would make the group's teardown a side effect of another controller's
 	// answer to our delete, observable only on a cluster that runs it.
-	rebuild := resizing || leaving
 
 	// Set by any delete this pass ISSUES, as opposed to any departure it OBSERVES. The two are
 	// different moments: `leaving` reads a DeletionTimestamp that was already there when the pass
@@ -290,7 +299,11 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// So the creates are suppressed and the pass requeues instead. Nothing is lost: the group needs
 	// every member before Kueue admits any of it, so a create deferred by one pass costs nothing a
 	// rebuild would not have cost anyway.
-	var departed bool
+	//
+	// SUPPRESSED FOR THE GROUP THE DELETE LANDED IN, not for the deployment. The mixed-member state
+	// this guards is a property of one group, and holding another group's creates would delay a
+	// deployment for a pass on account of something that cannot reach it.
+	departed := sets.New[string]()
 
 	// What this pass decides about replicas carrying an earlier spec, for the condition that reports
 	// it. A rebuild pass records nothing: it deletes every replica without comparing a hash, so it
@@ -304,8 +317,9 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			continue
 		}
 
-		if rebuild {
-			logger.Info("rebuilding the pod group", "pod", pod.Name, "resizing", resizing)
+		if group := pod.Labels[kueuepodconst.GroupNameLabel]; rebuild.Has(group) {
+			logger.Info("rebuilding the pod group",
+				"pod", pod.Name, "group", group, "resizing", resizing.Has(group))
 			if err = r.Client.Delete(ctx, pod); err != nil && !kerrors.IsNotFound(err) {
 				logger.Error(err, "delete replica of the rebuilt group", "pod", pod.Name)
 				return ctrl.Result{}, err
@@ -322,7 +336,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 				logger.Error(err, "delete replica", "pod", pod.Name)
 				return ctrl.Result{}, err
 			}
-			departed = true
+			departed.Insert(pod.Labels[kueuepodconst.GroupNameLabel])
 
 			continue
 		}
@@ -403,7 +417,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			logger.Error(err, "delete outdated replica", "pod", pod.Name)
 			return ctrl.Result{}, err
 		}
-		departed = true
+		departed.Insert(pod.Labels[kueuepodconst.GroupNameLabel])
 	}
 
 	// A name still held by a terminating replica is not a failure, so it does not end the pass: the
@@ -411,25 +425,44 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// window a departure event is for — a replica on its way out — no event and no status were
 	// written at all.
 	var requeue bool
-	if rebuild {
+	if rebuild.Len() > 0 {
 		// The new group is created by the pass that finds the old one gone, in one go, exactly as a
 		// deployment that never had one is. Requeuing rather than returning keeps the status write
 		// below on the path, so the rebuild is visible while it happens.
 		requeue = true
-		desired = nil
 
 		// Without this the deletes above are requests nobody can honor: the replicas carry Kueue's
 		// finalizer, and this Workload is the only thing whose removal releases it.
-		if err = r.deleteModelDeploymentGroupWorkload(ctx, md, actual); err != nil {
-			logger.Error(err, "delete group workload")
-			return ctrl.Result{}, err
+		//
+		// ONE CALL PER REBUILDING GROUP, scoped to that group's own replicas. The lookup matches a
+		// Workload by the Pods it owns, so handing it the whole set would reach every group's
+		// Workload -- including those of groups this pass is leaving alone, whose replicas would then
+		// be stopped by Kueue for a change that did not concern them.
+		for _, group := range sets.List(rebuild) {
+			members := modelDeploymentPodsInGroup(actual, group)
+			if len(members) == 0 {
+				// A group named only because a role is arriving in it: it has no replicas yet, so
+				// there is no Workload and nothing to release.
+				continue
+			}
+			if err = r.deleteModelDeploymentGroupWorkload(ctx, md, members); err != nil {
+				logger.Error(err, "delete group workload", "group", group)
+				return ctrl.Result{}, err
+			}
 		}
-	} else if departed {
-		// A delete this pass issued, short of a rebuild. The Workload is deliberately LEFT ALONE:
-		// the deletes here are the ordinary rollout, and the pass that observes the terminating
-		// replica takes the rebuild branch above, which is what removes it.
+	}
+
+	// The creates are withheld for the groups this pass rebuilt or deleted from, and ONLY for those.
+	// A rebuild's replacements are created by the pass that finds the old members gone; a group that
+	// merely lost a replica is held for one pass so the create cannot land beside a member on its way
+	// out. Neither is a reason to hold a group that this pass did not touch.
+	if held := rebuild.Union(departed); held.Len() > 0 {
 		requeue = true
-		desired = nil
+		for name := range desired {
+			if held.Has(desired[name].Labels[kueuepodconst.GroupNameLabel]) {
+				delete(desired, name)
+			}
+		}
 	}
 	// A FAILED CREATE DOES NOT END THE PASS EITHER, and that is what makes the incomplete group a
 	// REPORTED state rather than a silent one. Returning here would skip the status write below, so
