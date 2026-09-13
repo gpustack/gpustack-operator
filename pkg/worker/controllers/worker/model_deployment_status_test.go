@@ -330,7 +330,7 @@ func TestObserveModelDeploymentQuota(t *testing.T) {
 			}
 
 			holder := new(workercore.ModelDeployment)
-			observeModelDeploymentQuota(md, pods, wl, nil, holder)
+			observeModelDeploymentQuota(md, pods, wl, workloadSlice(wl), holder)
 
 			assert.Equal(t, string(tc.wantStatus),
 				ModelDeploymentConditionQuotaReserved.GetStatus(holder))
@@ -362,7 +362,8 @@ func TestObserveModelDeploymentQuota_TrueCoversEveryRole(t *testing.T) {
 	require.Len(t, pods, 4)
 
 	holder := new(workercore.ModelDeployment)
-	observeModelDeploymentQuota(md, pods, groupWorkload(pods, true), nil, holder)
+	wl := groupWorkload(pods, true)
+	observeModelDeploymentQuota(md, pods, wl, workloadSlice(wl), holder)
 
 	assert.True(t, ModelDeploymentConditionQuotaReserved.IsTrue(holder))
 	assert.Contains(t, ModelDeploymentConditionQuotaReserved.GetMessage(holder), "group of 4")
@@ -380,7 +381,8 @@ func TestObserveModelDeploymentQuota_NamesTheClusterQueue(t *testing.T) {
 	pods := []core.Pod{*readyReplica(md, 0, true)}
 
 	holder := new(workercore.ModelDeployment)
-	observeModelDeploymentQuota(md, pods, groupWorkload(pods, false), nil, holder)
+	pendingWL := groupWorkload(pods, false)
+	observeModelDeploymentQuota(md, pods, pendingWL, workloadSlice(pendingWL), holder)
 
 	assert.Contains(t, ModelDeploymentConditionQuotaReserved.GetMessage(holder), `"a100-4x"`)
 }
@@ -672,4 +674,102 @@ func TestObserveModelDeploymentQuota_ParkedIsNotWaiting(t *testing.T) {
 
 		assert.NotEqual(t, "Parked", ModelDeploymentConditionQuotaReserved.GetReason(holder))
 	})
+}
+
+// workloadSlice carries one Workload into the plural parameter, which is what a single-group
+// deployment has in a cluster.
+//
+// PASSING nil THERE IS NOT THE SAME THING and was a bug while it lasted: the plural parameter now
+// answers whether every group holds quota, so nil says "no group has a Workload" and turns a
+// reserved deployment into a waiting one. A nil passed only to make a call compile is a value
+// nobody chose.
+func workloadSlice(wl *kueue.Workload) []*kueue.Workload {
+	if wl == nil {
+		return nil
+	}
+
+	return []*kueue.Workload{wl}
+}
+
+// TestObserveModelDeploymentQuota_OneGroupReservedIsNotTheDeployment is the regression the cluster
+// found.
+//
+// MEASURED ON A CLUSTER: a two-instanceType deployment whose second group's queue was held reported
+// QuotaReserved=True with the reason Reserved, and a message naming the deployment's whole replica
+// count -- wrong in both halves at once. The cause was reading ONE Workload, whichever sorted first,
+// for a deployment that has one per group.
+//
+// THE UNIT TEST EXISTS BECAUSE THE CLUSTER CASE IS NOT A SUBSTITUTE FOR IT. The cluster case runs
+// when someone runs it; this runs on every change, and the shape it pins -- several groups, mixed
+// reservations -- is one a single-group fixture cannot express at all.
+func TestObserveModelDeploymentQuota_OneGroupReservedIsNotTheDeployment(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		decode := md.Spec.Roles[0]
+		md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 1
+		decode.Name, decode.Replicas, decode.InstanceType = "decode", 1, "a100-8x"
+		md.Spec.Roles = append(md.Spec.Roles, decode)
+	})
+
+	replica := func(role string) core.Pod {
+		return core.Pod{ObjectMeta: meta.ObjectMeta{
+			Name:      "qwen-" + role + "-0",
+			Namespace: md.Namespace,
+			UID:       types.UID("uid-" + role),
+			Labels:    map[string]string{modelDeploymentLabelKeyComponent: role},
+		}}
+	}
+	prefill, decode := replica("prefill"), replica("decode")
+	pods := []core.Pod{prefill, decode}
+
+	// One Workload per group: prefill's reserved, decode's not.
+	reserved := groupWorkload([]core.Pod{prefill}, true)
+	reserved.Name = "wl-prefill"
+	held := groupWorkload([]core.Pod{decode}, false)
+	held.Name = "wl-decode"
+
+	holder := new(workercore.ModelDeployment)
+	observeModelDeploymentQuota(md, pods, reserved, []*kueue.Workload{held, reserved}, holder)
+
+	assert.Equal(t, string(meta.ConditionFalse),
+		ModelDeploymentConditionQuotaReserved.GetStatus(holder),
+		"half a deployment holding quota is not the deployment holding quota")
+	assert.Equal(t, "Pending", ModelDeploymentConditionQuotaReserved.GetReason(holder))
+
+	msg := ModelDeploymentConditionQuotaReserved.GetMessage(holder)
+	assert.Contains(t, msg, "a100-8x", "the message names the group that is waiting")
+	assert.NotContains(t, msg, "prefill",
+		"and does not name the one that is not, which would read as the cause")
+}
+
+// TestObserveModelDeploymentQuota_EveryGroupReservedIsReserved is the other side. Without it the
+// case above passes against a rule that never reports Reserved for a multi-group deployment at all.
+func TestObserveModelDeploymentQuota_EveryGroupReservedIsReserved(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		decode := md.Spec.Roles[0]
+		md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 1
+		decode.Name, decode.Replicas, decode.InstanceType = "decode", 1, "a100-8x"
+		md.Spec.Roles = append(md.Spec.Roles, decode)
+	})
+
+	replica := func(role string) core.Pod {
+		return core.Pod{ObjectMeta: meta.ObjectMeta{
+			Name:      "qwen-" + role + "-0",
+			Namespace: md.Namespace,
+			UID:       types.UID("uid-" + role),
+			Labels:    map[string]string{modelDeploymentLabelKeyComponent: role},
+		}}
+	}
+	prefill, decode := replica("prefill"), replica("decode")
+
+	a := groupWorkload([]core.Pod{prefill}, true)
+	a.Name = "wl-prefill"
+	b := groupWorkload([]core.Pod{decode}, true)
+	b.Name = "wl-decode"
+
+	holder := new(workercore.ModelDeployment)
+	observeModelDeploymentQuota(md, []core.Pod{prefill, decode}, a, []*kueue.Workload{a, b}, holder)
+
+	assert.Equal(t, string(meta.ConditionTrue),
+		ModelDeploymentConditionQuotaReserved.GetStatus(holder))
+	assert.Equal(t, "Reserved", ModelDeploymentConditionQuotaReserved.GetReason(holder))
 }

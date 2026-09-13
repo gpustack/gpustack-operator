@@ -287,7 +287,8 @@ func observeModelDeploymentQuota(
 		groupOfRole[role.Name] = modelDeploymentPodGroupFor(md, role.InstanceType).Name
 	}
 
-	for _, group := range modelDeploymentPodGroups(md) {
+	groups := modelDeploymentPodGroups(md)
+	for _, group := range groups {
 		var alive int
 		for i := range pods {
 			if pods[i].DeletionTimestamp == nil &&
@@ -307,14 +308,16 @@ func observeModelDeploymentQuota(
 		}
 	}
 
-	// Every group is complete, so the three outcomes below are about the Workload one of them has.
-	// The queue named is the first group's: the singular Workload this function is handed is the
-	// first in name order, and naming another group's queue beside it would point a reader at a
-	// queue that is not the one the reported Workload sits in.
+	// Every group is complete, so what is left to report is whether they hold quota.
+	//
+	// THE ANSWER IS OVER EVERY GROUP, NOT OVER THE FIRST WORKLOAD. A deployment spread over several
+	// instanceTypes has one Workload per group, and reporting whichever sorts first says the
+	// deployment holds quota while half of it does not. Measured on a cluster: one group reserved,
+	// its sibling's queue was held, and this condition read Reserved with a message naming the
+	// deployment's whole replica count -- a reading that is wrong in both halves at once.
 	queue := md.Spec.Roles[0].InstanceType
 
-	switch {
-	case wl == nil:
+	if wl == nil {
 		if kuberess.IsReservedNamespace(md.Namespace) {
 			ModelDeploymentConditionQuotaReserved.False(holder, "NoQueueInReservedNamespace", fmt.Sprintf(
 				"the deployment is in reserved namespace %q and will never be scheduled", md.Namespace))
@@ -324,13 +327,82 @@ func observeModelDeploymentQuota(
 		ModelDeploymentConditionQuotaReserved.Unknown(holder, "AdmissionInFlight", fmt.Sprintf(
 			"the group is complete at %d replicas but has no workload yet in cluster queue %q",
 			live, queue))
-	case kubeapistatus.ConditionType(kueue.WorkloadQuotaReserved).IsTrue(wl):
+
+		return
+	}
+
+	waiting := modelDeploymentGroupsWithoutQuota(md, pods, wls, groupOfRole)
+	if len(waiting) == 0 {
+		// The single-group wording is kept verbatim, because for one group it is exactly right and it
+		// is what an operator reading this condition today already recognizes.
+		if len(groups) == 1 {
+			ModelDeploymentConditionQuotaReserved.True(holder, "Reserved", fmt.Sprintf(
+				"the group of %d replicas has quota reserved in cluster queue %q", live, queue))
+
+			return
+		}
 		ModelDeploymentConditionQuotaReserved.True(holder, "Reserved", fmt.Sprintf(
-			"the group of %d replicas has quota reserved in cluster queue %q", live, queue))
-	default:
+			"all %d of this deployment's groups have quota reserved", len(groups)))
+
+		return
+	}
+
+	if len(groups) == 1 {
 		ModelDeploymentConditionQuotaReserved.False(holder, "Pending", fmt.Sprintf(
 			"the group of %d replicas is waiting for quota in cluster queue %q", live, queue))
+
+		return
 	}
+	ModelDeploymentConditionQuotaReserved.False(holder, "Pending", fmt.Sprintf(
+		"%d of this deployment's %d groups are waiting for quota, on instance types %s. No role is "+
+			"admitted until the whole set can run",
+		len(waiting), len(groups), strings.Join(waiting, ", ")))
+}
+
+// modelDeploymentGroupsWithoutQuota names the instance types of the groups that hold no quota
+// reservation.
+//
+// A group is answered by the Workload owning ITS replicas. Reading one Workload for the whole
+// deployment cannot distinguish a set that is fully reserved from one where a sibling is held, and
+// those two states are the difference between a deployment that is about to run and one that never
+// will.
+func modelDeploymentGroupsWithoutQuota(
+	md *workercore.ModelDeployment,
+	pods []core.Pod,
+	wls []*kueue.Workload,
+	groupOfRole map[string]string,
+) []string {
+	members := make(map[string]sets.Set[types.UID], len(md.Spec.Roles))
+	for i := range pods {
+		group := groupOfRole[modelDeploymentPodRole(&pods[i])]
+		if group == "" {
+			continue
+		}
+		if members[group] == nil {
+			members[group] = sets.New[types.UID]()
+		}
+		members[group].Insert(pods[i].UID)
+	}
+
+	var waiting []string
+	groups := modelDeploymentPodGroups(md)
+	for _, group := range groups {
+		own := members[group.Name]
+		reserved := false
+		for _, w := range wls {
+			if own != nil && modelDeploymentWorkloadOwnsAny(w, own) &&
+				kubeapistatus.ConditionType(kueue.WorkloadQuotaReserved).IsTrue(w) {
+				reserved = true
+
+				break
+			}
+		}
+		if !reserved {
+			waiting = append(waiting, group.InstanceType)
+		}
+	}
+
+	return waiting
 }
 
 // findModelDeploymentGroupWorkload returns the one Workload Kueue composed for this deployment's pod

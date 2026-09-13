@@ -157,8 +157,14 @@ else
 fi
 
 # THE POSITIVE SIDE. Without it every row above passes against a webhook that refuses every update.
-if k -n "$NS" patch modeldeployment "$MD" --type=merge \
-  -p '{"spec":{"roles":[{"name":"alpha","kind":"server","replicas":2,"instanceType":"'"$IT"'"}]}}' \
+#
+# A JSON PATCH ON ONE FIELD, NOT A MERGE PATCH ON THE LIST, and the difference is the whole result.
+# A merge patch replaces `roles` wholesale, so a role restated without its `template` sets
+# template.command to null -- and template.command is FROZEN, so the identity rule refuses the edit.
+# Measured: this row failed with `spec.roles[0].template.command: Invalid value: null`, and the
+# refusal was CORRECT. Omitting a frozen field in a merge patch IS changing it.
+if k -n "$NS" patch modeldeployment "$MD" --type=json \
+  -p '[{"op":"replace","path":"/spec/roles/0/replicas","value":2}]' \
   >/dev/null 2>&1; then
   record PASS "an editable field is accepted" "replicas 1 -> 2"
 else

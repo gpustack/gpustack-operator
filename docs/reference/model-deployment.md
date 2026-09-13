@@ -616,6 +616,15 @@ registration are what you keep by editing, and none of them is what a frozen fie
 Judging a **new** field means asking that question, not appending to the table — a list alone grows
 by precedent and stops meaning anything.
 
+> **A merge patch that omits a frozen field is an edit to that frozen field.** `roles` is a list, and
+> `kubectl patch --type=merge` replaces a list wholesale rather than merging into it — so a role
+> restated without its `template` sets `template.command` to null, and the edit is refused naming
+> that field rather than the one you meant to change.
+>
+> Change one field with a JSON patch (`--type=json`, `/spec/roles/0/replicas`), or send the whole
+> object with `kubectl apply` or `kubectl edit`. This is not a quirk of the freeze: omitting a value
+> in a merge patch IS setting it to null, and the rule is reading what you actually sent.
+
 ### One group, or one per `instanceType`
 
 When every role names one `instanceType` the deployment is **one** pod group. When roles name

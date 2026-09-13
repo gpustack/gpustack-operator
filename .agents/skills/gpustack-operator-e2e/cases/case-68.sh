@@ -20,10 +20,12 @@
 #              InstanceType is CREATED here rather than assumed: "the cluster has two pools" has to
 #              be a fact the case makes, or it is a fact the case is waiting for.
 #
-# Inputs:      Real objects only. One InstanceType the case creates over an accelerator group no
-#              node carries (so its ClusterQueue can never admit), one ModelDeployment with two
-#              roles, and the Binding named by E2E_MD_BINDING. The runner image is a pause image;
-#              nothing here runs an engine.
+# Inputs:      Real objects only. One CPU-only InstanceType the case creates and then marks
+#              INACTIVE, which makes the reconciler hold its ClusterQueue so that group can never
+#              reserve quota; one ModelDeployment with two roles; and the Binding named by
+#              E2E_MD_BINDING. The runner image is a pause image; nothing here runs an engine.
+#              An ACCELERATABLE type with no node behind it does NOT work as the fixture -- see the
+#              comment where it is created.
 #
 # Expected:    Phase A -- the set assembles (both roles on the working type):
 #              - the deployment renders ONE pod group, and its replicas carry one group name;
@@ -229,6 +231,9 @@ two_roles_two_types() {
       kind: server
       replicas: 1
       instanceType: $IT_UNPLACEABLE
+      # NO resources block. The type is not acceleratable, so nothing defaults a card count here --
+      # and a card count is what the per-unit ceiling rule reads. Declaring one would put this role
+      # back in front of that rule.
       template:
         image: $IMAGE
         command: ["/pause"]
@@ -249,9 +254,15 @@ before_beta="$(role_uids "$MD" beta)"
 if [ -z "$before_beta" ]; then
   record SKIP "scale leaves the other group alone" "no replicas to compare; earlier phase failed"
 else
-  k -n "$NS" patch modeldeployment "$MD" --type=merge \
-    -p '{"spec":{"roles":[{"name":"alpha","kind":"server","replicas":2,"instanceType":"'"$IT"'"}]}}' \
-    >/dev/null 2>&1
+  # A JSON PATCH ON ONE FIELD, NOT A MERGE PATCH ON THE LIST. A merge patch replaces `roles`
+  # wholesale, so a role restated without its `template` sets template.command to null -- and that
+  # is a FROZEN field, so the identity rule refuses the edit. Measured: the refusal named
+  # `spec.roles[0].template.command: Invalid value: null`, and the scale below silently never
+  # happened, which turned this row into a PASS that compared two unchanged samples.
+  if ! k -n "$NS" patch modeldeployment "$MD" --type=json \
+    -p '[{"op":"replace","path":"/spec/roles/0/replicas","value":2}]' >/dev/null 2>&1; then
+    record FAIL "scale one role" "the replicas edit was refused; nothing below measured a scale"
+  fi
   sleep 20
   after_beta="$(role_uids "$MD" beta)"
   # ONE GROUP, SO THIS IS THE BASELINE AND NOT THE FEATURE. With both roles on one type the whole
@@ -269,18 +280,32 @@ k -n "$NS" delete modeldeployment "$MD" --ignore-not-found --wait=true >/dev/nul
 
 # ------------------------------------------- Phase B: two groups, exactly one of them infeasible.
 #
-# The second InstanceType is over an accelerator group no node in this cluster carries, so its
-# ClusterQueue has no capacity and its group can never be placed. That is the whole fixture: the
-# case needs ONE role infeasible, not both.
+# THE SECOND TYPE IS CPU-ONLY AND THEN MARKED INACTIVE, and both halves of that were learned the
+# hard way.
+#
+# An ACCELERATABLE type with no node behind it does not work: its status carries an accelerator
+# ceiling of zero, the defaulter fills the role's card count with one, and the admission rule that
+# checks a request against that ceiling refuses the deployment outright. The shape then never
+# reaches the scheduler at all, so nothing is "infeasible" -- it is rejected, which is a different
+# thing and makes every row below unmeasurable. Measured: "instance type ... hands out at most 0
+# accelerator(s) at once".
+#
+# A CPU-ONLY type is admitted (no card count is defaulted, so no ceiling applies), and `inactive`
+# is what makes its queue refuse to admit: the InstanceType reconciler holds the backing
+# ClusterQueue, which reports Active=False with a Hold stop policy. That is a supported, documented
+# state rather than a broken fixture -- the group can never reserve quota, and the sibling can.
+#
+# It is created and THEN patched rather than created inactive, because create-then-hold is the
+# sequence this was measured on.
 k apply -f - >/dev/null 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: InstanceType
 metadata:
   name: $IT_UNPLACEABLE
 spec:
-  displayName: case-68 unplaceable
-  acceleratable: true
-  acceleratorGroup: case68-no-such-vendor
+  displayName: case-68 held
+  acceleratable: false
+  generalGroup: case68-held
   os: linux
   arch: amd64
   localStorage: 1Gi
@@ -288,6 +313,9 @@ spec:
     cpu: "1"
     ram: 1Gi
 YAML
+sleep 10
+k patch instancetype "$IT_UNPLACEABLE" --type=merge -p '{"spec":{"inactive":true}}' >/dev/null 2>&1
+sleep 10
 
 apply_deployment "$MD" "$(two_roles_two_types)"
 
@@ -307,6 +335,7 @@ wls=""
 if [ "$two_groups" != yes ]; then
   record NO-READ "two groups compose two workloads" "the two-group shape never formed"
   record NO-READ "no role admitted while one group cannot be placed" "the two-group shape never formed"
+  record NO-READ "the deployment does not claim quota it half has" "the two-group shape never formed"
 else
   wls="$(deployment_workloads "$MD" | tr '\n' ' ')"
   n_wl="$(echo "$wls" | wc -w | tr -d ' ')"
@@ -322,6 +351,20 @@ else
     record PASS "no role admitted while one group cannot be placed" "0 admitted workloads"
   else
     record FAIL "no role admitted while one group cannot be placed" "$(admitted_count) admitted"
+  fi
+
+  # AND THE DEPLOYMENT MUST NOT CLAIM IT HOLDS QUOTA. This row exists because this cluster case
+  # found the opposite: with one group's queue held, the condition read Reserved with a message
+  # naming the deployment's whole replica count -- wrong in both halves at once. The cause was
+  # reading ONE Workload for a deployment that has one per group, and half a deployment holding
+  # quota is not the deployment holding quota.
+  reason_now="$(k -n "$NS" get modeldeployment "$MD" \
+    -o jsonpath='{.status.conditions[?(@.type=="QuotaReserved")].reason}' 2>/dev/null)"
+  if [ "$reason_now" = Reserved ]; then
+    record FAIL "the deployment does not claim quota it half has" \
+      "reason=Reserved while one group's queue is held"
+  else
+    record PASS "the deployment does not claim quota it half has" "reason=${reason_now:-none}"
   fi
 fi
 

@@ -1062,6 +1062,32 @@ Run against a local single-node cluster with the operator deployed. No accelerat
 - **Not covered, and stated so:** that the two roles do not contend for one card. That is T12, it
   needs hardware, and no cluster case substitutes for it.
 
+##### Recorded run
+
+Against a single-node EKS cluster with no accelerator, operator built from this branch. Both cases
+green: `case-69` six rows, `case-68` nine rows, **zero NO-READ**.
+
+What the cluster confirmed that no unit test reaches: two `instanceType`s render **two** pod groups
+with two Workloads on two queues; the joint AdmissionCheck is referenced from a **CPU-only**
+ClusterQueue and reports Active; with one group's queue held, that group cannot reserve while its
+sibling **can** — and no role is admitted; back-dating the check's stamp past the bound deactivates
+the workload rather than deleting it, and the deployment reports `Parked` naming what clears it.
+
+**Three things the run found that the unit tests had not.**
+
+1. **A defect, now fixed and pinned by a unit test.** With one group's queue held, `QuotaReserved`
+   read `Reserved` with a message naming the deployment's whole replica count. The cause was reading
+   ONE Workload for a deployment that has one per group. Half a deployment holding quota is not the
+   deployment holding quota.
+2. **An accelerated `InstanceType` with no node behind it cannot be the "infeasible" fixture.** Its
+   status carries an accelerator ceiling of zero, the defaulter fills the role's card count with one,
+   and the ceiling rule refuses the deployment at admission — so the shape never reaches the
+   scheduler and nothing is infeasible. A CPU-only type marked `inactive` is the fixture: the
+   reconciler holds its ClusterQueue, which is a documented state rather than a broken one.
+3. **A merge patch that omits a frozen field is an edit to that frozen field.** Restating a role
+   without its `template` sets `template.command` to null and is refused — correctly. The reference
+   page says so now, and both cases patch one field with `--type=json`.
+
 ## Alternatives
 
 **Relax the instanceType rule without replacing atomicity.** Rejected where it was first proposed and
