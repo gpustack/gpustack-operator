@@ -55,8 +55,7 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// whoever typed it. The store's global -quota_bytes flag stays in extraArgs for the converse
 	// reason: no other API needs to interpret it.
 	//
-	// A plain bool, not a pointer: unset and false both mean no ledger, and unset renders NO flag
-	// rather than an explicit false.
+	// Unset and false both mean no ledger, and unset renders NO flag rather than an explicit false.
 	MultiTenancy *bool `json:"multiTenancy,omitempty"`
 	// ExtraArgs passes flags this API does not enumerate straight through to the leader, after
 	// the derived ones. A key that collides with a flag rendered from a field above is refused

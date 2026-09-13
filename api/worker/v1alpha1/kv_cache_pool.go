@@ -70,8 +70,7 @@ type KVCachePoolSpec struct {
 // can disagree; the case where the disagreement is total — a ceiling declared over a backend that
 // has mounted nothing — is a Condition rather than a silence.
 type KVCachePoolQuota struct {
-	// Total is required, which is why it is held by value: a pool with no declared ceiling has
-	// nothing to write into any ledger.
+	// Total is required: a pool with no declared ceiling has nothing to write into any ledger.
 	//
 	// +required
 	Total resource.Quantity `json:"total" protobuf:"bytes,1,name=total"`
@@ -162,9 +161,8 @@ type KVCacheObjectReference struct {
 // KVCachePoolUsage is what the pool's tenants hold, as the master reports it.
 type KVCachePoolUsage struct {
 	// Total is the sum of the occupancy the master reports for the tenants THIS pool owns — never its
-	// whole ledger, which a shared backend makes larger than this pool. A POINTER because omitempty
-	// does not omit a zero-valued struct, and an unobserved total must not serialize as an empty
-	// cache.
+	// whole ledger, which a shared backend makes larger than this pool. An unobserved total is ABSENT
+	// rather than zero, because a zero here would read as an empty cache.
 	//
 	// WHAT occupancy means is the master's choice, not this API's, and it changed: a master exposing
 	// used bytes apart from reservations is summed as committed bytes, while one exposing a single
@@ -208,7 +206,7 @@ type KVCachePoolDomain struct {
 
 	// Blocks and HitRate are OBSERVED, never declared, and they are ABSENT when the scrape does not
 	// carry this domain. A fabricated zero hit rate on a warm cache is worse than no number, and
-	// zero blocks is a different fact from "not in the scrape", which is why Blocks is a pointer.
+	// zero blocks is a different fact from "not in the scrape".
 	Blocks *int64 `json:"blocks,omitempty" protobuf:"varint,5,opt,name=blocks"`
 
 	// HitRate is a ratio held as a STRING with a pattern, never a float, matching the shape the

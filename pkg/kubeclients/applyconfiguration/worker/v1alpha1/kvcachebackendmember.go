@@ -22,9 +22,9 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// exactly as spec.type does: a second medium widens this enum instead of being inferred from a
 	// field that is not there.
 	//
-	// - The four values an earlier shape offered are not member groups at all, and each stays
-	// reachable elsewhere: a local disk in localDisk below, NVMe-oF as a target coordinate with
-	// no Pod, a DAX device and a distributed filesystem on the leader's own process.
+	// - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and
+	// each is reached elsewhere: the first through localDisk below, NVMe-oF as a target
+	// coordinate with no Pod, and the last two on the leader's own process.
 	// - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one
 	// of those values, while this CRD was installed but the webhook was not, becomes undeletable:
 	// schema validation runs on the write path only, so it reads back fine while every update is

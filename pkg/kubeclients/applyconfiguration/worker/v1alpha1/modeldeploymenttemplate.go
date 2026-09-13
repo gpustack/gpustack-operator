@@ -14,9 +14,7 @@ import (
 //
 // IT EXISTS BECAUSE InstanceTemplate'S Image IS REQUIRED AND THIS ONE'S CANNOT BE: a role that names
 // no image has one synthesized from the accelerator backend its InstanceType observed, so requiring
-// the field would force every user of the overlay to give up synthesis. Relaxing the marker on
-// InstanceTemplate was rejected — that moves a guarantee the Instance's schema holds today down into
-// a webhook, on a published API for the convenience of an unpublished one.
+// the field would force every user of the overlay to give up synthesis.
 //
 // The fields are InstanceTemplate's, minus VolumeMount, which nothing here reads: an unused field in
 // a schema is a promise, and strict decoding turns leaving it out into a clear refusal rather than a

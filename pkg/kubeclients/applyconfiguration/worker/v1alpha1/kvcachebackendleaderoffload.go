@@ -11,8 +11,8 @@ package v1alpha1
 // returns early without it. A tier configured on the member alone is inert, which is why admission
 // requires the two halves together rather than letting one render on its own.
 type KVCacheBackendLeaderOffloadApplyConfiguration struct {
-	// Enabled turns on offloading to the members' local disks. A plain bool, not a pointer: unset
-	// and false both mean no offloading, and unset renders NO flag rather than an explicit false.
+	// Enabled turns on offloading to the members' local disks. Unset and false both mean no
+	// offloading, and unset renders NO flag rather than an explicit false.
 	Enabled *bool `json:"enabled,omitempty"`
 	// OnEvict defers the write to disk from the moment a key is stored to the moment it is evicted,
 	// so a key that is never evicted is never written to disk.

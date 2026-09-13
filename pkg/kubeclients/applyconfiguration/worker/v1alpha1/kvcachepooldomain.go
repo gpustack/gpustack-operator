@@ -27,7 +27,7 @@ type KVCachePoolDomainApplyConfiguration struct {
 	Dtype     *string `json:"dtype,omitempty"`
 	// Blocks and HitRate are OBSERVED, never declared, and they are ABSENT when the scrape does not
 	// carry this domain. A fabricated zero hit rate on a warm cache is worse than no number, and
-	// zero blocks is a different fact from "not in the scrape", which is why Blocks is a pointer.
+	// zero blocks is a different fact from "not in the scrape".
 	Blocks *int64 `json:"blocks,omitempty"`
 	// HitRate is a ratio held as a STRING with a pattern, never a float, matching the shape the
 	// measured surface itself uses. The pattern is safe here in a way an enum on an echoed vendor

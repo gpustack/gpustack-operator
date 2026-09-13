@@ -15,9 +15,7 @@ import (
 // hit each other's cached prefixes instead of each re-computing the same prefill.
 //
 // It RENDERS PODS DIRECTLY. The admission chain keys on Pods, so rendering Pods reuses every
-// existing gate with no new integration point. Instance could not serve as the substrate: it renders
-// exactly one Pod, and its spec is immutable after creation, which turns a rolling update into
-// recreate-everything.
+// existing gate with no new integration point.
 //
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -63,8 +61,8 @@ type ModelDeploymentSpec struct {
 	//   - It is per deployment rather than per role, which is what lets one version assemble a
 	//     DIFFERENT image for each role: the backend half of the tag comes from the role's own
 	//     InstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.
-	//     Published version sets are measured to overlap across backends, though not across ALL of
-	//     them, so a per-role override may yet be needed.
+	//     Published version sets do NOT overlap across every backend, so one version has to name a
+	//     tag that exists for each backend the roles land on.
 	//   - The lower bound is not decoration: `required` makes the key present, not the value
 	//     non-empty, and an empty version assembles a malformed tag naming something never typed.
 	//
@@ -298,9 +296,7 @@ const (
 //
 // IT EXISTS BECAUSE InstanceTemplate'S Image IS REQUIRED AND THIS ONE'S CANNOT BE: a role that names
 // no image has one synthesized from the accelerator backend its InstanceType observed, so requiring
-// the field would force every user of the overlay to give up synthesis. Relaxing the marker on
-// InstanceTemplate was rejected — that moves a guarantee the Instance's schema holds today down into
-// a webhook, on a published API for the convenience of an unpublished one.
+// the field would force every user of the overlay to give up synthesis.
 //
 // The fields are InstanceTemplate's, minus VolumeMount, which nothing here reads: an unused field in
 // a schema is a promise, and strict decoding turns leaving it out into a clear refusal rather than a
@@ -458,9 +454,8 @@ type ModelDeploymentStatus struct {
 	// that telling a cache-sharing misconfiguration from a cache that is merely cold takes one object
 	// rather than two.
 	//
-	// A POINTER because omitempty does not omit a zero-valued struct: held by value it would
-	// serialize as an empty object on every pass where the Binding could not be resolved, which a
-	// reader cannot tell from a domain whose every field happens to be empty.
+	// It is ABSENT while the Binding cannot be resolved, rather than present and empty: an empty
+	// object here would be indistinguishable from a domain whose every field happens to be empty.
 	KVCache *ModelDeploymentKVCacheStatus `json:"kvCache,omitempty" protobuf:"bytes,6,opt,name=kvCache"`
 }
 
@@ -471,21 +466,21 @@ type ModelDeploymentRoleStatus struct {
 	// +required
 	Name string `json:"name" protobuf:"bytes,1,name=name"`
 
-	// Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Neither
-	// carries omitempty: they are counted from a Pod list that succeeded, so a zero here is an
-	// observed zero and must serialize as one. A failed list writes no status at all.
+	// Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Both are
+	// ALWAYS present: they are counted from a Pod list that succeeded, so a zero here is an observed
+	// zero. A failed list writes no status at all.
 	Desired int32 `json:"desired" protobuf:"varint,2,name=desired"`
 
 	Ready int32 `json:"ready" protobuf:"varint,3,name=ready"`
 
 	// Unmanaged is true when the role replaced the whole command line, so the operator synthesized
-	// no engine argument and no client environment for it. It carries no omitempty for the same
-	// reason the counts do not: false is the ordinary case and must be visible as an answer rather
-	// than as a missing field.
+	// no engine argument and no client environment for it. It is ALWAYS present, for the same reason
+	// the counts are: false is the ordinary case and has to be visible as an answer rather than as a
+	// missing field.
 	Unmanaged bool `json:"unmanaged" protobuf:"varint,4,name=unmanaged"`
 
 	// Kind echoes the role's kind, so reading the status alone answers which half of a
-	// disaggregated deployment an entry describes. It carries no omitempty: every role has a kind,
+	// disaggregated deployment an entry describes. It is ALWAYS present: every role has a kind,
 	// defaulted if the user named none, so an absent value would mean the status was written by
 	// something that did not know about kinds rather than that the role has none.
 	//

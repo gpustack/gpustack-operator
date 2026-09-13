@@ -36,9 +36,8 @@ type ModelDeploymentStatusApplyConfiguration struct {
 	// that telling a cache-sharing misconfiguration from a cache that is merely cold takes one object
 	// rather than two.
 	//
-	// A POINTER because omitempty does not omit a zero-valued struct: held by value it would
-	// serialize as an empty object on every pass where the Binding could not be resolved, which a
-	// reader cannot tell from a domain whose every field happens to be empty.
+	// It is ABSENT while the Binding cannot be resolved, rather than present and empty: an empty
+	// object here would be indistinguishable from a domain whose every field happens to be empty.
 	KVCache *ModelDeploymentKVCacheStatusApplyConfiguration `json:"kvCache,omitempty"`
 }
 

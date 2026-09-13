@@ -180,9 +180,8 @@ type KVCacheBackendScaleIn struct {
 	//     record sets as the ones searched. On the same member in the same session, the same route
 	//     answers 200 for a segment mounted through the member's own mount route.
 	//     So this is NOT a question of identifying the member: one holding the exactly correct id for
-	//     a segment it is certain is its own is refused just the same. Two earlier versions of this
-	//     paragraph named an identity — a Pod address, then a client id — as what draining needs, and
-	//     both were describing a problem that is never arrived at.
+	//     a segment it is certain is its own is refused just the same. No identity supplied here --
+	//     a Pod address, a client id -- changes that answer.
 	//   - It does NOT hold the tier open, so sizing it to let in-flight peer reads finish sizes it
 	//     against something that does not happen. Measured against Mooncake 0.3.13: deregistration
 	//     takes effect at once and the process then waits the full value regardless, so a peer
@@ -326,8 +325,7 @@ type KVCacheBackendLeader struct {
 	// whoever typed it. The store's global -quota_bytes flag stays in extraArgs for the converse
 	// reason: no other API needs to interpret it.
 	//
-	// A plain bool, not a pointer: unset and false both mean no ledger, and unset renders NO flag
-	// rather than an explicit false.
+	// Unset and false both mean no ledger, and unset renders NO flag rather than an explicit false.
 	MultiTenancy bool `json:"multiTenancy,omitempty" protobuf:"varint,4,opt,name=multiTenancy"`
 
 	// ExtraArgs passes flags this API does not enumerate straight through to the leader, after
@@ -361,8 +359,8 @@ type KVCacheBackendLeaderHighAvailability struct{}
 // returns early without it. A tier configured on the member alone is inert, which is why admission
 // requires the two halves together rather than letting one render on its own.
 type KVCacheBackendLeaderOffload struct {
-	// Enabled turns on offloading to the members' local disks. A plain bool, not a pointer: unset
-	// and false both mean no offloading, and unset renders NO flag rather than an explicit false.
+	// Enabled turns on offloading to the members' local disks. Unset and false both mean no
+	// offloading, and unset renders NO flag rather than an explicit false.
 	Enabled bool `json:"enabled,omitempty" protobuf:"varint,1,opt,name=enabled"`
 
 	// OnEvict defers the write to disk from the moment a key is stored to the moment it is evicted,
@@ -448,9 +446,9 @@ type KVCacheBackendMember struct {
 	// exactly as spec.type does: a second medium widens this enum instead of being inferred from a
 	// field that is not there.
 	//
-	//   - The four values an earlier shape offered are not member groups at all, and each stays
-	//     reachable elsewhere: a local disk in localDisk below, NVMe-oF as a target coordinate with
-	//     no Pod, a DAX device and a distributed filesystem on the leader's own process.
+	//   - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and
+	//     each is reached elsewhere: the first through localDisk below, NVMe-oF as a target
+	//     coordinate with no Pod, and the last two on the leader's own process.
 	//   - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one
 	//     of those values, while this CRD was installed but the webhook was not, becomes undeletable:
 	//     schema validation runs on the write path only, so it reads back fine while every update is
@@ -727,12 +725,8 @@ type KVCacheBackendStatus struct {
 	Endpoints []KVCacheBackendEndpoint `json:"endpoints,omitempty" protobuf:"bytes,4,rep,name=endpoints"`
 
 	// Capacity is what the leader reports it has and has allocated. It is ABSENT until a scrape
-	// succeeds, and absent again is not the same as reporting zero.
-	//
-	// A POINTER because omitempty does not omit a zero-valued struct. Held by value it serialized
-	// as "capacity": {} on every failed or gated observation — an empty object where the contract
-	// says there should be no field at all, and a shape a client cannot tell from a scrape that
-	// returned nothing.
+	// succeeds, and absent again is not the same as reporting zero: an empty object here would be
+	// indistinguishable from a scrape that returned nothing.
 	Capacity *KVCacheBackendCapacity `json:"capacity,omitempty" protobuf:"bytes,5,opt,name=capacity"`
 
 	// Members is one entry per observed store member.
@@ -759,8 +753,8 @@ type KVCacheBackendStatus struct {
 }
 
 // KVCacheBackendCapacity is the backend's capacity AS THE LEADER REPORTS IT. Both figures are
-// pointers and stay absent when the scrape failed: a zero here would read as an empty cache, and a
-// retained previous value would read as a current one.
+// ABSENT when the scrape failed: a zero here would read as an empty cache, and a retained previous
+// value would read as a current one.
 type KVCacheBackendCapacity struct {
 	Total *resource.Quantity `json:"total,omitempty" protobuf:"bytes,1,opt,name=total"`
 	Used  *resource.Quantity `json:"used,omitempty" protobuf:"bytes,2,opt,name=used"`

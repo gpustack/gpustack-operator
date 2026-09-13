@@ -83,11 +83,7 @@ type KVCachePoolBindingSpec struct {
 	//   - It is REQUIRED, because the state it would otherwise allow does not work: the storage layer
 	//     has no default policy and refuses a tenant it holds no policy for, so a Binding without
 	//     this field would pass admission, report Ready and refuse every byte its workloads wrote.
-	//     Required is also the direction that can be taken back — relaxing it later keeps every
-	//     object already written valid, while the reverse invalidates every object that omitted it.
-	//   - Held BY VALUE, like the pool's own ceiling: the schema guarantees the key is present, so a
-	//     pointer would only add a nil case nothing can produce. The webhook still refuses a value
-	//     that is not positive.
+	//   - A value that is not positive is refused at admission.
 	//
 	// +required
 	QuotaCeiling resource.Quantity `json:"quotaCeiling" protobuf:"bytes,3,name=quotaCeiling"`
@@ -145,9 +141,9 @@ type KVCachePoolBindingDomain struct {
 // domain and the storage layer's tenant IS that domain: nothing here is summed, and no figure can
 // hide a second domain behind it.
 //
-// Every observed figure is a POINTER, for one reason shared by all of them: omitempty does not omit
-// a zero-valued struct, so a value-held figure serializes as "0" on exactly the passes whose
-// contract says there must be no field at all.
+// Every observed figure below is ABSENT rather than zero when it was not observed, and the two say
+// different things: a figure reading zero was measured as zero, and a missing figure was not
+// measured at all. Reading an absent one as zero is the mistake this distinction exists to prevent.
 type KVCachePoolBindingStatus struct {
 	// Phase summarizes the conditions: Provisioning, Ready, Degraded, Error, Deleting.
 	Phase string `json:"phase,omitempty" protobuf:"bytes,1,opt,name=phase"`
@@ -173,8 +169,8 @@ type KVCachePoolBindingStatus struct {
 	// sum of every tenant's request exceeds the pool's allocatable capacity: the pool then recomputes
 	// each tenant's effective quota in proportion to what that tenant requested. A pool with no
 	// mounted members grants ZERO to everyone, and that case carries its own Condition rather than
-	// appearing as an ordinary shortfall — which is what makes the pointer load-bearing, because a
-	// granted zero and an unobserved quota must not serialize the same way.
+	// appearing as an ordinary shortfall. A granted zero is reported as zero; a quota nobody could
+	// read is absent instead, because the two are different answers.
 	EffectiveQuota *resource.Quantity `json:"effectiveQuota,omitempty" protobuf:"bytes,5,opt,name=effectiveQuota"`
 
 	// Usage is what the master reports this namespace's reuse domain as holding, and WHICH figure
@@ -197,15 +193,15 @@ type KVCachePoolBindingStatus struct {
 	// what a proportional cut does when the pool's members shrink or another Binding joins. Waiting on
 	// it as the signal that writes are being refused is waiting for something that never arrives.
 	//
-	// A POINTER for the same reason the quantities around it are, and the easiest one to get wrong:
-	// held by value with omitempty, an OBSERVED false — the ordinary, healthy case — omits itself and
-	// becomes indistinguishable from a tenant nobody could scrape.
+	// An observed false — the ordinary, healthy case — is reported AS false. This field is absent only
+	// when the tenant could not be scraped at all. Those two readings are the easiest pair here to
+	// confuse and they mean opposite things.
 	OverQuota *bool `json:"overQuota,omitempty" protobuf:"varint,7,opt,name=overQuota"`
 
 	// Blocks and HitRate are OBSERVED from the master and the engine, never declared. They are absent
 	// when the scrape does not carry this tenant, because a fabricated zero hit rate on a warm cache
-	// is worse than no number at all. Blocks is a pointer for that reason one level down: zero blocks
-	// and "not in the scrape" are different facts, and an int64 held by value cannot tell them apart.
+	// is worse than no number at all. Zero blocks and "not in the scrape" are different facts here as
+	// well: zero is a measurement, absence is the lack of one.
 	Blocks *int64 `json:"blocks,omitempty" protobuf:"varint,8,opt,name=blocks"`
 
 	// HitRate is a ratio held as a STRING with a pattern, never a float. See the pool's own HitRate
