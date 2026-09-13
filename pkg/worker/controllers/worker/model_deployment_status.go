@@ -293,8 +293,25 @@ func observeModelDeploymentQuota(
 	lost, kept := modelDeploymentPreemptedInPart(md, wlByGroup)
 	// WHAT ELSE IS WRONG STILL GETS REPORTED, and the preemption is carried down with it. A group
 	// preempted while no sibling survived is not the state PreemptedInPart names -- nothing is being
-	// held -- but "something took a group's quota" is a fact the branches below would otherwise drop,
-	// and without it they send the reader to investigate the wrong thing.
+	// held -- but "something took a group's quota" is a fact that would otherwise be dropped, and
+	// without it the answer sends the reader to investigate the wrong thing.
+	//
+	// EVERY ANSWER THAT CAN BE GIVEN WHILE A GROUP OF THIS DEPLOYMENT IS PREEMPTED CARRIES IT, and the
+	// ones that do not are listed here with the reason, because "deliberately not carried" and
+	// "forgotten" read the same in code:
+	//
+	//   - NoReplicas cannot be reached with a preemption observed. The Workload of a group is resolved
+	//     through that group's replicas, so a deployment with no Pods resolves no Workload and there is
+	//     nothing on which a preemption could have been seen.
+	//   - NoQueueInReservedNamespace is the same in a different way: a reserved namespace carries no
+	//     LocalQueue, so a deployment there is never scheduled, never holds quota, and has none to lose.
+	//   - Parked supersedes it rather than missing it. Those Workloads are deactivated and no longer ask
+	//     for quota at all, so who took some of it earlier does not decide anything the reader does
+	//     next. It is also answered before this is computed, which is why it reads as an omission.
+	//
+	// AllReplicasTerminating DOES carry it, and it is the one that looks unreachable and is not: a
+	// group's replicas are resolved to a Workload whether or not they are terminating, so a preempted
+	// group whose Pods are on their way out lands exactly there.
 	taken := modelDeploymentPreemptionNote(lost)
 	if len(lost) > 0 && len(kept) > 0 {
 		ModelDeploymentConditionQuotaReserved.False(holder, modelDeploymentReasonPreemptedInPart,
@@ -331,8 +348,11 @@ func observeModelDeploymentQuota(
 	//
 	// Unknown rather than False: no replica holds quota, but none is being refused any either.
 	if live == 0 {
+		// THE PREEMPTION IS CARRIED HERE TOO, and this is the branch where it matters most: replicas
+		// on their way out is what a reclaimed group looks like from the Pod side, so "all of them are
+		// terminating" without the reason why sends the reader to look for who deleted them.
 		ModelDeploymentConditionQuotaReserved.Unknown(holder, "AllReplicasTerminating", fmt.Sprintf(
-			"all %d replicas are terminating, so none holds quota to report on", len(pods)))
+			"all %d replicas are terminating, so none holds quota to report on%s", len(pods), taken))
 
 		return
 	}

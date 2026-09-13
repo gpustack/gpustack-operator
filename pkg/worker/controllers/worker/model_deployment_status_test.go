@@ -1165,3 +1165,137 @@ func TestObserveModelDeploymentQuota_PreemptionIsCarriedIntoTheOtherAnswers(t *t
 	assert.Contains(t, msg, "h20-8x",
 		"naming the group whose quota was taken, which is not the group this branch is about")
 }
+
+// TestObserveModelDeploymentQuota_ThePreemptionNoteContract pins the CONTRACT the comment states,
+// not the one branch that was missing it.
+//
+// THE DEFECT THIS GUARDS IS A COMMENT THAT CLAIMED MORE THAN THE CODE DID. The note was appended to
+// five answers while the comment beside it read as though every answer below carried it, and four
+// early returns did not. Testing only the branch that was added back would verify the fix and leave
+// the claim itself unguarded: the next time that comment widens, nothing would notice again.
+//
+// SO BOTH SIDES OF THE CLAIM ARE ASSERTED. The answers the contract names carry the note, and the
+// ones it excludes are checked against the reason they are excluded for rather than merely left out.
+//
+// WHAT THIS DOES NOT REACH: the exact wording of each answer. A branch that carried the note and
+// dropped its own message would pass here, which the per-answer cases above are what cover.
+func TestObserveModelDeploymentQuota_ThePreemptionNoteContract(t *testing.T) {
+	twoGroups := func() *workercore.ModelDeployment {
+		return newRenderDeployment(func(md *workercore.ModelDeployment) {
+			decode := md.Spec.Roles[0]
+			md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 1
+			decode.Name, decode.Replicas, decode.InstanceType = "decode", 1, "a100-8x"
+			md.Spec.Roles = append(md.Spec.Roles, decode)
+		})
+	}
+
+	// The prefiller is the group that was reclaimed in every case below.
+	reclaimed := func(md *workercore.ModelDeployment, pod core.Pod) *kueue.Workload {
+		wl := preemptedWorkload(groupWorkload([]core.Pod{pod}, false), "preempted")
+		wl.Name = "wl-prefill"
+
+		return wl
+	}
+
+	t.Run("every_answer_the_contract_names_carries_the_note", func(t *testing.T) {
+		cases := []struct {
+			name       string
+			build      func() (*workercore.ModelDeployment, []core.Pod, []*kueue.Workload)
+			wantReason string
+		}{
+			{
+				// The branch that was missing it, and the one that looks unreachable and is not: a
+				// group's replicas resolve to a Workload whether or not they are terminating.
+				name:       "AllReplicasTerminating",
+				wantReason: "AllReplicasTerminating",
+				build: func() (*workercore.ModelDeployment, []core.Pod, []*kueue.Workload) {
+					md := twoGroups()
+					prefill, decode := roleReplica(md, "prefill"), roleReplica(md, "decode")
+					now := meta.Now()
+					prefill.DeletionTimestamp, decode.DeletionTimestamp = &now, &now
+
+					return md, []core.Pod{prefill, decode}, []*kueue.Workload{reclaimed(md, prefill)}
+				},
+			},
+			{
+				name:       "PodGroupIncomplete",
+				wantReason: modelDeploymentReasonPodGroupIncomplete,
+				build: func() (*workercore.ModelDeployment, []core.Pod, []*kueue.Workload) {
+					md := twoGroups()
+					md.Spec.Roles[1].Replicas = 2
+					prefill, decode := roleReplica(md, "prefill"), roleReplica(md, "decode")
+
+					return md, []core.Pod{prefill, decode}, []*kueue.Workload{reclaimed(md, prefill)}
+				},
+			},
+			{
+				name:       "AdmissionInFlight",
+				wantReason: "AdmissionInFlight",
+				build: func() (*workercore.ModelDeployment, []core.Pod, []*kueue.Workload) {
+					md := twoGroups()
+					prefill, decode := roleReplica(md, "prefill"), roleReplica(md, "decode")
+					_ = decode
+
+					// Both groups are complete; the decoder's has no Workload yet.
+					return md, []core.Pod{prefill, decode}, []*kueue.Workload{reclaimed(md, prefill)}
+				},
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				md, pods, wls := tc.build()
+
+				holder := new(workercore.ModelDeployment)
+				observeQuotaOver(md, pods, wls, holder)
+
+				assert.Equal(t, tc.wantReason, ModelDeploymentConditionQuotaReserved.GetReason(holder))
+				assert.Contains(t, ModelDeploymentConditionQuotaReserved.GetMessage(holder), "higher-priority",
+					"this answer is one the comment says carries the preemption, and it must: %s",
+					ModelDeploymentConditionQuotaReserved.GetMessage(holder))
+			})
+		}
+	})
+
+	// THE EXCLUSIONS ARE CHECKED AGAINST THEIR REASON, not merely observed to be absent. An exclusion
+	// nobody can tell from an oversight is an invitation to "fix" it later.
+	t.Run("NoReplicas_cannot_be_reached_with_a_preemption", func(t *testing.T) {
+		md := twoGroups()
+
+		// The claim is structural: a group's Workload is resolved through that group's replicas, so
+		// with no Pods there is no Workload on which a preemption could have been seen. Asserting it
+		// on the predicate rather than on the answer is what makes it a statement about the reason.
+		lost, kept := modelDeploymentPreemptedInPart(md,
+			modelDeploymentWorkloadByGroup(md, nil, []*kueue.Workload{
+				preemptedWorkload(groupWorkload([]core.Pod{roleReplica(md, "prefill")}, false), "preempted"),
+			}, modelDeploymentGroupOfRole(md)))
+
+		assert.Empty(t, lost, "with no replicas no Workload is resolved, so nothing can be seen preempted")
+		assert.Empty(t, kept)
+	})
+
+	t.Run("Parked_supersedes_it_and_claims_nothing_is_held", func(t *testing.T) {
+		md := twoGroups()
+		prefill, decode := roleReplica(md, "prefill"), roleReplica(md, "decode")
+
+		parked := groupWorkload([]core.Pod{decode}, true)
+		parked.Name = "wl-decode"
+		parked.Spec.Active = ptr.To(false)
+		parked.Status.AdmissionChecks = []kueue.AdmissionCheckState{{
+			Name:    kueue.AdmissionCheckReference(_JointAdmissionCheckName),
+			State:   kueue.CheckStatePending,
+			Message: "the deployment is " + _JointAdmissionParkedMarker + ": its workloads are deactivated",
+		}}
+
+		holder := new(workercore.ModelDeployment)
+		observeQuotaOver(md, []core.Pod{prefill, decode},
+			[]*kueue.Workload{reclaimed(md, prefill), parked}, holder)
+
+		assert.Equal(t, "Parked", ModelDeploymentConditionQuotaReserved.GetReason(holder),
+			"a parked deployment is answered before the preemption is even computed")
+
+		msg := ModelDeploymentConditionQuotaReserved.GetMessage(holder)
+		assert.NotContains(t, msg, "still admitted",
+			"nothing of this deployment's is holding anything: its workloads are deactivated")
+	})
+}
