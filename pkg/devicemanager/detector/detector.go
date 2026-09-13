@@ -1025,17 +1025,21 @@ func firstAcceleratorIndex(grp device.DevicesGroup) uint32 {
 	}).Index
 }
 
-// acceleratableDevicesSelectorLabels builds the selector labels stamped on a node's Devices object
-// (os/arch plus each acceleratable feature key, minus the managed mark, the .count sizing pin, and the
-// general(CPU) key) that let the worker locate the node's Devices by a single List. The acceleratable
-// feature keys are taken from the feature labels being published this pass (publishedFeatureLabels,
-// i.e. the NodeFeature's spec labels), NOT read back off the node: NFD merges those labels onto the
-// node only afterwards, so a freshly onboarded node would otherwise yield no keys until an unrelated
-// resync. os/arch are stable node labels present from registration. gpustack.ai/managed and the real
-// general(CPU) key are synced separately by NodeDevicesReconciler (this NodeFeature carries no CPU
-// labels, so ExtractGeneralNodeKey here can only yield the "generic" sentinel — the worker, which sees
-// the node's CPU labels, owns the CPU key on the Devices). The per-node .count pin sizes the
-// ResourceFlavor's node batch; it is not a Devices selector key, so it is dropped here.
+// acceleratableDevicesSelectorLabels builds the selector labels stamped on a node's Devices object —
+// os/arch plus each acceleratable feature key, minus the managed mark, the .count sizing pin and the
+// general(CPU) key — that let the worker locate the node's Devices by a single List.
+//
+//   - The acceleratable feature keys are taken from the feature labels being published this pass
+//     (publishedFeatureLabels, i.e. the NodeFeature's spec labels), NOT read back off the node: NFD
+//     merges those labels onto the node only afterwards, so a freshly onboarded node would otherwise
+//     yield no keys until an unrelated resync. os/arch are stable node labels present from
+//     registration.
+//   - gpustack.ai/managed and the real general(CPU) key are synced separately by
+//     NodeDevicesReconciler. This NodeFeature carries no CPU labels, so ExtractGeneralNodeKey here
+//     can only yield the "generic" sentinel; the worker, which sees the node's CPU labels, owns the
+//     CPU key on the Devices.
+//   - The per-node .count pin sizes the ResourceFlavor's node batch. It is not a Devices selector
+//     key, so it is dropped here.
 func acceleratableDevicesSelectorLabels(node *core.Node, publishedFeatureLabels map[string]string) map[string]string {
 	src := &core.Node{ObjectMeta: meta.ObjectMeta{Labels: map[string]string{
 		core.LabelOSStable:   node.Labels[core.LabelOSStable],

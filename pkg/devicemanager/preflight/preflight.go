@@ -140,11 +140,13 @@ func (p *Preflighter) PreflightAccelerator(ctx context.Context) device.Preflight
 	// writes rather than a reason to skip the lock. The mode toggles do not reach the driver
 	// through the host root -- they are driver calls this process makes directly -- so an
 	// unmountable host root leaves them just as able to turn a shared flag on underneath another
-	// pass, and only unable to be serialized against one. Nor does an unusable host root stop the
-	// writes that do go through it: measured on an AMD host, a pass given a path that is merely a
-	// directory created eighteen entries under it, because staging makes the tree it is pointed at.
-	// Downgraded to a dry run instead: what a pass with no host root can still answer, it answers,
-	// and what it cannot hold the node for, it does not do.
+	// pass, and only unable to be serialized against one.
+	//
+	// Nor does an unusable host root stop the writes that do go through it: measured on an AMD
+	// host, a pass given a path that is merely a directory created eighteen entries under it,
+	// because staging makes the tree it is pointed at. Downgraded to a dry run instead: what a
+	// pass with no host root can still answer, it answers, and what it cannot hold the node for,
+	// it does not do.
 	//
 	// The validation itself runs on every pass, an explicit dry run included, and before anything
 	// reads a host path. It is four stats and no writes, and what it establishes is not only whether

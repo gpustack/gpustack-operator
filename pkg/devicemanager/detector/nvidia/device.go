@@ -209,11 +209,11 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			// keyed on the current MIG mode: an accelerator that is currently MIG-enabled is
 			// hard-partitioned and reports only its physical MIG profiles. Every other accelerator —
 			// MIG off, MIG unsupported (GetMigMode returns not-supported on non-MIG accelerators), or
-			// the mode
-			// unreadable — reports the group's logical-slice capability. A pending-mode
-			// transition is not partitioned yet and is re-detected after the administrator's
-			// reset + DeviceManager restart. This runs per accelerator, fixing the old placeholder's
-			// first-accelerator-only-seed defect.
+			// the mode unreadable — reports the group's logical-slice capability.
+			//
+			// A pending-mode transition is not partitioned yet and is re-detected after the
+			// administrator's reset + DeviceManager restart. This runs per accelerator, fixing the
+			// old placeholder's first-accelerator-only-seed defect.
 			//
 			// A mode the driver could not read is treated as MIG off, as it always has been, but
 			// it is no longer treated in silence: since an accelerator in the mode reports ONLY its MIG
