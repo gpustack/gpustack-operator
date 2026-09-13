@@ -294,11 +294,13 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// an accelerator Pod is the device-plugin's Allocate failing (e.g. the cross-mode
 	// FailedPrecondition when kubelet's ListAndWatch snapshot raced a fresh reservation).
 	// Admission rejection happens before any container starts and leaves no allocation
-	// behind, so deleting and recreating the Pod is safe. The retry budget is stateless: the
-	// gap between the Instance's and the Pod's creation timestamps starts near zero and
-	// grows with every rebuild, so it doubles as the backoff (each attempt waits roughly the
-	// running gap) and the deadline — a gap beyond the window means the rejection is
-	// persistent, and the failed Pod stays as the visible error instead of hot-looping.
+	// behind, so deleting and recreating the Pod is safe.
+	//
+	// The retry budget is stateless: the gap between the Instance's and the Pod's creation
+	// timestamps starts near zero and grows with every rebuild, so it doubles as the backoff
+	// (each attempt waits roughly the running gap) and the deadline — a gap beyond the window
+	// means the rejection is persistent, and the failed Pod stays as the visible error
+	// instead of hot-looping.
 	if pod != nil && pod.DeletionTimestamp == nil &&
 		pod.Status.Phase == core.PodFailed && pod.Status.Reason == _PodReasonUnexpectedAdmissionError {
 		gap := max(pod.CreationTimestamp.Sub(inst.CreationTimestamp.Time), 0)
@@ -1040,16 +1042,16 @@ func getPortName(port workercore.InstancePort) string {
 // comes from the InstanceType, so on accelerator nodes CPU uses the smaller
 // 100m base to keep CPU from gating placement.
 //
-// For the accelerator entry the resource name and value depend on the
-// allocation mode: a partition request (a non-empty AcceleratorPartitionedProfile
-// on a manufacturer that has hardware partitioning) emits .partitioned and
-// .partitioned.<kind>-<profile>, both exactly 1, whose .partitioned.units the Pod
-// webhook folds from the profile's VRAM; a logical slice request (a logically
-// sliceable type with a non-zero memory percentage) emits the bare .sliced card
-// count plus the per-card memory/compute percentages, which the Pod webhook folds
-// into .sliced.units; everything else (a non-sliced type, or a 0% request) uses the
-// raw quantity and the exclusive resource name.
-// getResourceRequirements renders the resource keys one container asks for.
+// For the accelerator entry the resource name and value depend on the allocation mode:
+//
+//   - A partition request — a non-empty AcceleratorPartitionedProfile on a manufacturer that has
+//     hardware partitioning — emits .partitioned and .partitioned.<kind>-<profile>, both exactly 1,
+//     whose .partitioned.units the Pod webhook folds from the profile's VRAM.
+//   - A logical slice request — a logically sliceable type with a non-zero memory percentage —
+//     emits the bare .sliced card count plus the per-card memory and compute percentages, which the
+//     Pod webhook folds into .sliced.units.
+//   - Everything else, a non-sliced type or a 0% request, uses the raw quantity and the exclusive
+//     resource name.
 //
 // It takes the RESOURCES rather than the object holding them, because two CRDs now render Pods
 // against one InstanceType and the accelerator-key algebra below — which mode's key to emit, which

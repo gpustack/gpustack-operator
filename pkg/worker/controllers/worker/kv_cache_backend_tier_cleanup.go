@@ -177,6 +177,7 @@ func (r *KVCacheBackendReconciler) cleanKVCacheBackendTier(
 		// still Pending at the deadline has never run, and the likeliest reason is that the
 		// directory is not on this node at all, where "still holds data" is a false accusation. The
 		// phase is named so the two are told apart by whoever reads the event.
+		//
 		// THE MESSAGE CARRIES NO ELAPSED TIME, only the deadline it crossed. The teardown requeues
 		// every couple of seconds while any other node is still pending, so this branch fires again
 		// on each pass -- and client-go folds repeats into one Event with a count only while the

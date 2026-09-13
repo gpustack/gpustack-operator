@@ -51,6 +51,7 @@ type ModelDeploymentConnectorInput struct {
 	// wrong rather than a preference for brevity. It said the field was DELIBERATELY NOT RENDERED
 	// because no supported engine could receive a tenant: tenant_id is the 11th parameter of the
 	// client's setup() and every engine calls setup() positionally with seven or eight arguments.
+	//
 	// That is a counterfactual now. It measured the C++ client and the positional overload, while
 	// SGLang reaches the same parameter from another direction -- its Python layer reads
 	// MOONCAKE_TENANT_ID and forwards the value as a keyword argument. "The client reads no

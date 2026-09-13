@@ -113,18 +113,19 @@ func parseFamilyDemands(wl *kueue.Workload) []familyDemand {
 // Workloads carry a single entry; reading it by resource key rather than by name is what keeps the
 // choice right when they do not.
 //
-// A queue covering more is reachable by an admin who writes one and references this check from it,
-// and it has two shapes. A CPU flavor assigned beside the accelerator one pins no accelerator key,
-// so it covers no card: falling back to it would hold the Workload while reporting a capacity
-// shortage. Two MANUFACTURERS' credits both covered is the harder one — a demand merges the bases of
-// one family, so its card count spans two models, and a flavor pins ONE accelerator key, so no
-// flavor's cards can answer for both. Counting a second accelerator credits resource is therefore
-// enough to refuse: whether the two resources name two flavors or one makes no difference, and the
-// one-flavor case is the dangerous one, since a single reference reads as unambiguous while its
-// cards are a single model's. Both return empty, which holds the demand before any card is listed
-// with the assignment named as the cause. It is the same answer flavorAcceleratorKey gives an
-// ambiguous flavor, for the same reason: a population chosen arbitrarily is the one answer that can
-// be wrong in the direction that admits a workload.
+// A queue covering more is reachable by an admin who writes one and references this check from it.
+// It has two shapes, and counting a second accelerator credits resource refuses both:
+//
+//   - A CPU flavor assigned beside the accelerator one pins no accelerator key, so it covers no
+//     card, and falling back to it would hold the Workload while reporting a capacity shortage.
+//   - Two MANUFACTURERS' credits covered at once. A demand merges one family's bases so its card
+//     count spans two models, while a flavor pins ONE accelerator key and answers for neither.
+//
+// Whether the two resources name two flavors or one makes no difference, and the one-flavor case is
+// the dangerous one, reading as unambiguous while its cards are a single model's. Both return empty,
+// holding the demand before any card is listed with the assignment named as the cause — the same
+// answer flavorAcceleratorKey gives an ambiguous flavor, because a population chosen arbitrarily is
+// the one answer that can be wrong in the direction that admits a workload.
 func assignedFlavor(wl *kueue.Workload, podSet kueue.PodSetReference) kueue.ResourceFlavorReference {
 	if wl.Status.Admission == nil {
 		return ""
@@ -381,13 +382,15 @@ type flavorScope struct {
 	acceleratorKey string
 	// acceleratorCount is the per-node card count of that model the flavor pins through its
 	// "<key>.count" nodeLabel. It is part of the flavor's identity — the name encodes it, and Kueue
-	// admits a Pod onto that batch only — but the Devices selector cannot carry it, because the
-	// DeviceManager deliberately omits ".count" from a Devices object's labels. So the batch is
-	// dropped from the LIST and re-applied per card group here: without it, the 4-device and the
-	// 8-device flavor of one model claim each other's nodes, and free cards on a 4-device node make
-	// an 8-device-flavor demand Ready while its Pods stay Pending. Zero means the flavor pins no
-	// batch, which covers every count; a negative one means it pins a batch that cannot be read,
-	// which covers none (see flavorAcceleratorCount).
+	// admits a Pod onto that batch only — but a Devices selector cannot carry it, the DeviceManager
+	// deliberately omitting ".count" from a Devices object's labels, so the batch is dropped from the
+	// LIST and re-applied per card group here.
+	//
+	//   - Without it, the 4-device and the 8-device flavor of one model claim each other's nodes,
+	//     and free cards on a 4-device node make an 8-device-flavor demand Ready while its Pods
+	//     stay Pending.
+	//   - Zero means the flavor pins no batch, which covers every count; a negative one means it
+	//     pins a batch that cannot be read, which covers none (see flavorAcceleratorCount).
 	acceleratorCount int
 }
 
@@ -516,11 +519,11 @@ type cardBudget struct {
 // candidate devices at the same time, returning the check state and the message explaining
 // it. The devices are every node the Workload's assigned flavors reach, NOT one flavor's
 // pool: each card records which of those flavors cover it, and each demand is fitted only
-// against the cards of the flavor its own podset was assigned. Room is consumed as it is
-// matched, so two demands of one Workload never both claim it. The reported message is the
-// deciding demand's: the first that does not fit, or — when everything fits — the last one
-// checked, which for the single-demand Workload is simply its own verdict. A shortage is
-// always transient — Retry, never Reject.
+// against the cards of the flavor its own podset was assigned.
+//
+// Room is consumed as it is matched, so two demands of one Workload never both claim it. The
+// reported message is the deciding demand's: the first that does not fit, or — when everything
+// fits — the last one checked. A shortage is always transient: Retry, never Reject.
 //
 // Each demand's own provenance decides whether the verdict names a role; whether a Workload's
 // shape makes that worth saying is the caller's call, not this function's.
@@ -528,13 +531,14 @@ type cardBudget struct {
 // The fit is greedy: each demand takes the first cards it may use, and never gives one back to let
 // a later demand fit. That is exact while the demands' populations are disjoint or nested the way
 // the flavors this operator builds make them — a card carries one model, and one model's flavors
-// differ by node batch, so two flavors of one Workload do not reach the same card. Where an admin's
-// own flavor selectors overlap asymmetrically, a demand covering many cards can take the one card a
-// narrower demand also needed and the narrower one is then held, though a different order would
-// have placed both. The remedy would be a matching over demands and cards; the reason it is not
-// here is the direction of the error, which the greedy order cannot change: a demand only ever
-// takes cards it may itself use, so this reports a shortage that is not there — it never reports
-// room that is not there.
+// differ by node batch, so two flavors of one Workload do not reach the same card.
+//
+// Where an admin's own flavor selectors overlap asymmetrically, a demand covering many cards can
+// take the one card a narrower demand also needed, and the narrower one is then held though a
+// different order would have placed both. A matching over demands and cards would remedy that; the
+// reason it is not here is the DIRECTION of the error, which no order changes: a demand only ever
+// takes cards it may itself use, so this reports a shortage that is not there — never room that is
+// not there.
 func nodeDevicesFeasibility(pool []scopedDevices, demands []familyDemand) (kueue.CheckState, string) {
 	message := verdictMessage(kueue.CheckStateReady, nil)
 	if len(demands) == 0 {
@@ -688,15 +692,16 @@ func (r *NodeDevicesAdmissionReconciler) Reconcile(ctx context.Context, req ctrl
 	}
 
 	// Evaluate only a live, unfinished Workload that already holds a quota
-	// reservation; before reservation there is nothing to confirm, after eviction
-	// or finish the verdict is moot. Eviction needs its own test because Kueue
-	// resets the checks to Pending and drops the reservation in two separate
-	// writes, so in between an evicted Workload still reports one. Overwriting that
-	// reset with a fresh verdict wedges the Workload for good: Kueue stops resetting
-	// checks while the eviction condition is set, its scheduler refuses to reserve
-	// quota while a check is Retry, and without a reservation this controller stops
-	// evaluating. Re-reserving quota clears the eviction condition, which is what
-	// re-opens evaluation.
+	// reservation: before reservation there is nothing to confirm, and after
+	// eviction or finish the verdict is moot.
+	//
+	// Eviction needs its own test because Kueue resets the checks to Pending and
+	// drops the reservation in two separate writes, so in between an evicted
+	// Workload still reports one. Overwriting that reset with a fresh verdict wedges
+	// the Workload for good: Kueue stops resetting checks while the eviction
+	// condition is set, its scheduler refuses to reserve quota while a check is
+	// Retry, and without a reservation this controller stops evaluating. Re-reserving
+	// quota clears the eviction condition, which is what re-opens evaluation.
 	if !kueueworkload.HasQuotaReservation(wl) || kueueworkload.IsEvicted(wl) ||
 		kueueworkload.IsFinished(wl) || !kueueworkload.IsActive(wl) {
 		logger.V(3).Info("skip workload not holding quota reservation, evicted, finished or deactivated")
@@ -1000,16 +1005,17 @@ func flavorAcceleratorKey(rf *kueue.ResourceFlavor) string {
 // message differs from what the Workload already carries, so the controller does not re-apply (and
 // re-trigger itself) on a settled Workload. A Retry carries a fixed backoff.
 //
-// The comparison is against the WHOLE verdict — state, message and requeue delay — because
-// anything left out of it is a field the guard would pin to whatever got there first. The message
-// matters most and shows why: a verdict now names its cause and its role, so two Retry verdicts of
-// one Workload can differ in everything but the state — a hold for a missing flavor assignment,
-// then a card shortage, or one role falling short after another. Comparing only the state would
-// pin the FIRST cause onto the Workload for as long as the state held, telling an operator to wait
-// for an assignment that has already arrived. The delay is in for the same reason: a Retry whose
-// delay went missing would have Kueue retry immediately, which is the hot loop the backoff exists
-// to prevent. All three are deterministic functions of what was observed, so writing on a change
-// still settles: the next reconcile finds them equal.
+// The comparison is against the WHOLE verdict — state, message and requeue delay — because anything
+// left out of it is a field the guard would pin to whatever got there first.
+//
+// The message shows why: a verdict names its cause and its role, so two Retry verdicts of one
+// Workload can differ in everything but the state — a hold for a missing flavor assignment, then a
+// card shortage. Comparing only the state would pin the FIRST cause onto the Workload for as long as
+// the state held, telling an operator to wait for an assignment that has already arrived. The delay
+// is in for the same reason: a Retry that lost its delay would have Kueue retry immediately, the hot
+// loop the backoff exists to prevent.
+//
+// All three are deterministic functions of what was observed, so writing on a change still settles.
 func (r *NodeDevicesAdmissionReconciler) applyVerdict(
 	ctx context.Context,
 	wl *kueue.Workload,

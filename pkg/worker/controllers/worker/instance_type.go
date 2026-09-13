@@ -180,15 +180,18 @@ func (r *InstanceTypeReconciler) syncInactive(
 	return false, nil
 }
 
-// ensureClusterQueue guarantees the backing ClusterQueue matches the InstanceType. It creates
-// the queue when missing — first creation or a recreation after an accidental delete — stamping
-// the fixed no-borrow isolation policy into the spec at that point, and afterwards only aligns
-// the queue's schedule labels (from the spec identity). The Pod webhook reads the per-card VRAM
-// off the InstanceType spec, so the queue carries no memory note. It never fills the resource groups,
-// references the node-devices AdmissionCheck, or converges the StopPolicy: the NodeQueueReconciler
-// owns the quota and admission gating, and the teardown owns the StopPolicy while the type is
-// being deleted. A queue a user is deleting (DeletionTimestamp set) while its InstanceType lives
-// is left to finish; the reconcile recreates it once gone, so an accidental delete self-heals.
+// ensureClusterQueue guarantees the backing ClusterQueue matches the InstanceType. It creates the
+// queue when missing — first creation or a recreation after an accidental delete — stamping the
+// fixed no-borrow isolation policy into the spec at that point, and afterwards only aligns the
+// queue's schedule labels from the spec identity.
+//
+//   - The queue carries no memory note: the Pod webhook reads the per-card VRAM off the
+//     InstanceType spec.
+//   - It never fills the resource groups, references the node-devices AdmissionCheck, or converges
+//     the StopPolicy. The NodeQueueReconciler owns the quota and admission gating, and the teardown
+//     owns the StopPolicy while the type is being deleted.
+//   - A queue a user is deleting (DeletionTimestamp set) while its InstanceType lives is left to
+//     finish; the reconcile recreates it once gone, so an accidental delete self-heals.
 func (r *InstanceTypeReconciler) ensureClusterQueue(
 	ctx context.Context, it *workercore.InstanceType,
 ) (*kueue.ClusterQueue, error) {
@@ -248,14 +251,14 @@ func (r *InstanceTypeReconciler) ensureClusterQueue(
 }
 
 // createClusterQueue builds the backing ClusterQueue from the InstanceType: the spec-derived
-// schedule labels, an active StopPolicy, and the
-// fixed no-borrow isolation policy written straight into the spec — empty cohort (no cross-queue
-// borrowing to broker), never reclaim/borrow within a nonexistent cohort, only in-queue
-// lower-priority preemption, all-namespace selector. The NodeQueueReconciler fills the resource
-// groups afterwards; it adds the node-devices AdmissionCheck reference only while the cluster-wide
-// derived-from-node switch is on and that check reports Active, so a queue backing an
-// administrator's own InstanceType does carry that gate in the default mode, and carries none in
-// the mode where the administrator authors every InstanceType.
+// schedule labels, an active StopPolicy, and the fixed no-borrow isolation policy written straight
+// into the spec — empty cohort (no cross-queue borrowing to broker), never reclaim or borrow within
+// a nonexistent cohort, only in-queue lower-priority preemption, all-namespace selector.
+//
+// The NodeQueueReconciler fills the resource groups afterwards, and adds the node-devices
+// AdmissionCheck reference only while the cluster-wide derived-from-node switch is on and that check
+// reports Active. So a queue backing an administrator's own InstanceType does carry that gate in the
+// default mode, and carries none in the mode where the administrator authors every InstanceType.
 func (r *InstanceTypeReconciler) createClusterQueue(
 	ctx context.Context, it *workercore.InstanceType,
 ) (*kueue.ClusterQueue, error) {

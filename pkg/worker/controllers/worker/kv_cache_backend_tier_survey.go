@@ -33,12 +33,14 @@ const kvCacheBackendEventTierReused = "KVCacheTierNotEmpty"
 // WHY A CONDITION AND NOT ONLY AN EVENT. The question is "was the directory empty when this backend
 // started", and after the first write nothing on the cluster can still answer it: the member's own
 // data is indistinguishable from somebody else's. So it cannot be recomputed from observed state the
-// way the rest of this status is, and the alternatives were both worse. Gating on "no segment
-// mounted yet" was measured and does not work — the window between a readable survey and the first
-// segment is a few seconds wide, the reconcile does not land inside it, and on a backend that never
-// mounts a segment the gate never closes and the event repeats forever. A marker file would answer
-// it durably and would mean writing into the administrator's directory, which is the one thing this
-// feature exists to avoid doing unasked.
+// way the rest of this status is, and the two alternatives were both worse:
+//
+//   - Gating on "no segment mounted yet" was measured and does not work. The window between a
+//     readable survey and the first segment is a few seconds wide, the reconcile does not land
+//     inside it, and on a backend that never mounts a segment the gate never closes and the event
+//     repeats forever.
+//   - A marker file would answer it durably, and would mean writing into the administrator's
+//     directory — the one thing this feature exists to avoid doing unasked.
 //
 // So the condition is written once and then left alone, and Exists is what enforces that. It is a
 // deliberate piece of non-level-based state in a status that is otherwise recomputed every pass, and
