@@ -285,9 +285,9 @@ func TestModelDeploymentPodGroupIncomplete_IsAReportedStateNotASilentOne(t *test
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 	pods, err := r.listModelDeploymentPods(context.Background(), md)
 	require.NoError(t, err)
-	ours, err := r.findModelDeploymentGroupWorkload(context.Background(), md, pods)
+	ours, err := r.findModelDeploymentGroupWorkloads(context.Background(), md, pods)
 	require.NoError(t, err)
-	assert.Nil(t, ours, "an incomplete group has no Workload, which is why it needs a reason")
+	assert.Empty(t, ours, "an incomplete group has no Workload, which is why it needs a reason")
 
 	stored := getModelDeployment(t, cli)
 	assert.True(t, ModelDeploymentConditionQuotaReserved.IsFalse(stored))
