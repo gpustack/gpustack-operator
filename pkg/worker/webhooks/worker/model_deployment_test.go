@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1029,6 +1030,12 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 	plain := servingInstanceType("h20-8x", 8)
 	sliceable := servingInstanceType("h20-8x", 8, offeringLogicalSlices)
 	partitionable := servingInstanceType("h20-8x", 8, offeringPartitionProfiles("1g.10gb", "2g.20gb"))
+	// AN ALL-PARTITIONED POOL, WHOSE WHOLE-CARD CEILING IS ZERO. status.accelerator.onceMaxRequest
+	// counts FREE UNPARTITIONED cards, so a pool that has carved all of its own reports none there
+	// while its partitioned view serves requests all day. It is the only fixture on which the
+	// whole-card ceiling and a valid partitioned request disagree, and without it an acceptance case
+	// for one partitioned card passes whether or not the ceiling is applied to it.
+	allPartitioned := servingInstanceType("h20-mig", 0, offeringPartitionProfiles("1g.10gb"))
 
 	cards := func(n int64) *resource.Quantity { return resource.NewQuantity(n, resource.DecimalSI) }
 	const (
@@ -1048,6 +1055,14 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 		// both land on acceleratorPartitionedProfile, and a case asserting the path alone passes
 		// whichever of the two the code happened to run.
 		says string
+		// aboutTheRequest lists the paths whose refusal is DELIBERATELY type-independent, and it is
+		// an exemption from the type-naming assertion below rather than a relaxation of it.
+		//
+		// That assertion's reason is "the same request is correct against another type", and for the
+		// single-card rule the premise is false: two cards at fifty percent each is wrong against
+		// EVERY type, because a slice is a fraction of one card. Naming a type in such a message
+		// sends the operator to inspect a pool that has nothing to do with the problem.
+		aboutTheRequest []string
 	}{
 		{
 			name: "whole_card_at_the_ceiling", instType: plain,
@@ -1105,25 +1120,66 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 
 		// The three that hold the two rules apart.
 		{
-			name: "offered_mode_over_the_ceiling", instType: sliceable,
+			// A SLICED REQUEST IS BOUNDED BY BEING ONE CARD, NOT BY THE WHOLE-CARD CEILING. The
+			// whole-card view counts free unpartitioned cards and reads zero on an all-partitioned
+			// pool, so applying it here refused correct one-card requests while describing the type
+			// rather than the request. What is wrong with nine cards at fifty percent is that a
+			// slice is a fraction of ONE card, and that holds against every pool.
+			name: "sliced_over_one_card", instType: sliceable,
 			ress: &workercore.ModelDeploymentRoleResources{
 				Accelerator: cards(9), AcceleratorSlicedMemoryPercentage: 50,
 			},
-			refuse: []string{accelPath},
+			refuse:          []string{accelPath},
+			says:            "must be exactly 1 for a sliced request",
+			aboutTheRequest: []string{accelPath},
 		},
 		{
-			name: "unoffered_mode_within_the_ceiling", instType: plain,
+			// THE CASE THE OLD RULE REFUSED AND SHOULD NOT HAVE, and it needs the zero-ceiling pool to
+			// say anything: on a pool with free whole cards the request clears the old ceiling too, so
+			// an acceptance case there passes either way. One card against a profile this pool offers
+			// is the ordinary partitioned request, and the count is the one this webhook's OWN
+			// defaulting writes when the operator names none -- so the refusal it used to produce was
+			// one nobody could avoid and nobody could act on.
+			name: "partitioned_one_card_on_an_all_partitioned_pool", instType: allPartitioned,
+			ress: &workercore.ModelDeploymentRoleResources{
+				Accelerator: cards(1), AcceleratorPartitionedProfile: "1g.10gb",
+			},
+		},
+		{
+			// The same shape for a slice, so neither mode's acceptance rests on the other's.
+			name: "sliced_one_card_is_accepted", instType: sliceable,
+			ress: &workercore.ModelDeploymentRoleResources{
+				Accelerator: cards(1), AcceleratorSlicedMemoryPercentage: 50,
+			},
+		},
+		{
+			// The same for a partition, which is one instance on one card.
+			name: "partitioned_over_one_card", instType: partitionable,
+			ress: &workercore.ModelDeploymentRoleResources{
+				Accelerator: cards(2), AcceleratorPartitionedProfile: "2g.20gb",
+			},
+			refuse:          []string{accelPath},
+			says:            "must be exactly 1 for a partitioned request",
+			aboutTheRequest: []string{accelPath},
+		},
+		{
+			// TWO INDEPENDENT FAULTS AND BOTH ARE REPORTED: the pool offers no slicing, and four
+			// cards at fifty percent each describes nothing a scheduler can place. An operator who
+			// saw only the first would fix the type and be refused again.
+			name: "unoffered_mode_and_over_one_card", instType: plain,
 			ress: &workercore.ModelDeploymentRoleResources{
 				Accelerator: cards(4), AcceleratorSlicedMemoryPercentage: 50,
 			},
-			refuse: []string{slicePath},
+			refuse:          []string{slicePath, accelPath},
+			aboutTheRequest: []string{accelPath},
 		},
 		{
-			name: "unoffered_mode_over_the_ceiling", instType: plain,
+			name: "unoffered_mode_far_over_one_card", instType: plain,
 			ress: &workercore.ModelDeploymentRoleResources{
 				Accelerator: cards(9), AcceleratorSlicedMemoryPercentage: 50,
 			},
-			refuse: []string{slicePath, accelPath},
+			refuse:          []string{slicePath, accelPath},
+			aboutTheRequest: []string{accelPath},
 		},
 	}
 
@@ -1137,6 +1193,13 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 			for _, e := range errs {
 				got = append(got, e.Field)
 				joined += e.Error() + "\n"
+				if slices.Contains(tc.aboutTheRequest, e.Field) {
+					assert.NotContains(t, e.Error(), tc.instType.Name,
+						"this refusal is about the request and holds against every type; naming one "+
+							"sends the operator to inspect a pool that is not the problem")
+
+					continue
+				}
 				assert.Contains(t, e.Error(), tc.instType.Name,
 					"the field alone does not locate the problem: the same request is correct against another type")
 			}
@@ -1439,6 +1502,113 @@ func TestModelDeploymentWebhook_ThePairRuleReadsEveryPair(t *testing.T) {
 		"and the decoder it would share it with: %v", err)
 	assert.False(t, errsContain(err.Error(), "prefill-disjoint"),
 		"and not the prefiller on a disjoint group, which is a shape this rule exists to allow: %v", err)
+}
+
+// TestModelDeploymentWebhook_TheBarrierRuleCannotStrandAnObject covers the rule's own escape hatch.
+//
+// THIS RULE READS CLUSTER STATE, SO IT CAN START REFUSING AN OBJECT IT ONCE ACCEPTED. A deployment
+// spanning two instance types is admitted while the derived-from-node setting is on, and refused the
+// moment it goes off. Validation still runs while an object is being deleted, so the update that
+// clears the finalizer is refused too -- and instanceType is frozen by the identity rule, so the
+// operator cannot edit their way out either. The object then has no reachable state from which it
+// can be removed, which is a worse outcome than the shape this rule exists to prevent.
+//
+// BOTH SIDES ARE REQUIRED. A rule that never refused anything would pass the deletion case, and the
+// refusal is what the whole rule is for.
+func TestModelDeploymentWebhook_TheBarrierRuleCannotStrandAnObject(t *testing.T) {
+	withDerivedFromNode(t, false)
+
+	spanning := func() *workercore.ModelDeployment {
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) { r.Name = "prefill" }),
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name, r.InstanceType = "decode", "a100-8x"
+			}),
+		)
+
+		return md
+	}
+
+	live := spanning()
+	assert.NotEmpty(t, validateModelDeploymentBarrierIsInstallable(context.Background(), live),
+		"with the setting off nothing installs the barrier, and this shape needs it")
+
+	deleting := spanning()
+	deleting.DeletionTimestamp = ptr.To(meta.Now())
+	assert.Empty(t, validateModelDeploymentBarrierIsInstallable(context.Background(), deleting),
+		"a deployment being deleted is not asking to be admitted, and refusing it strands the object "+
+			"forever: the finalizer-clearing update is refused too, and instanceType cannot be edited")
+}
+
+// TestModelDeploymentWebhook_AMissingTypeDoesNotHideTheRest covers how a named-but-absent
+// InstanceType comes back.
+//
+// IT IS A FACT ABOUT THIS OBJECT'S FIELD, so it belongs with the other field errors rather than
+// ending the pass. Returned bare it did two things: the response was a plain denial instead of an
+// Invalid naming the path, and it SHORT-CIRCUITED -- one mistyped instanceType hid every other
+// validation error on the object, so the operator fixed one thing per apply.
+func TestModelDeploymentWebhook_AMissingTypeDoesNotHideTheRest(t *testing.T) {
+	withDerivedFromNode(t, true)
+
+	r := newModelDeploymentWebhookWith(nil)
+
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		role(func(role *workercore.ModelDeploymentRole) {
+			role.Name, role.InstanceType = "server", "no-such-type"
+			role.Resources = &workercore.ModelDeploymentRoleResources{
+				Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+			}
+		}),
+	)
+	// A SECOND, UNRELATED FAULT that is answerable from the object alone. Without it this case cannot
+	// tell "the missing type was reported" from "the missing type was the only thing reported".
+	md.Spec.Engine = ""
+
+	_, err := r.ValidateCreate(context.Background(), md)
+	require.Error(t, err)
+
+	assert.True(t, kerrors.IsInvalid(err),
+		"a field that names a missing object is Invalid, not a bare denial: %v", err)
+	assert.True(t, errsContain(err.Error(), "instanceType"),
+		"the refusal names the field that names the missing type: %v", err)
+	assert.True(t, errsContain(err.Error(), "engine"),
+		"and it does not short-circuit: the object's other faults are reported in the same pass: %v", err)
+}
+
+// TestModelDeploymentWebhook_AnUnsetAcceleratorGroupIsUnknown covers what two blanks mean.
+//
+// AN UNSET GROUP IS UNKNOWN, NOT A GROUP TWO TYPES SHARE. The InstanceType webhook requires the
+// field on an acceleratable type, so only objects that passed that rule carry it; two empty strings
+// comparing equal refuses a pair on the strength of what NEITHER type says. That is the wrong way for
+// this rule to be wrong -- it blocks the heterogeneous shape the split exists to enable, and the
+// operator has nothing to edit, because instanceType is frozen.
+func TestModelDeploymentWebhook_AnUnsetAcceleratorGroupIsUnknown(t *testing.T) {
+	sliced := func() *workercore.ModelDeploymentRoleResources {
+		return &workercore.ModelDeploymentRoleResources{
+			Accelerator:                       resource.NewQuantity(1, resource.DecimalSI),
+			AcceleratorSlicedMemoryPercentage: 50,
+		}
+	}
+
+	// Neither type names a group, which is what an object stored before that rule existed looks like.
+	live := []ctrlcli.Object{
+		servingInstanceType("h20-8x", 8, offeringLogicalSlices),
+		servingInstanceType("a100-8x", 8, offeringLogicalSlices),
+	}
+
+	withDerivedFromNode(t, true)
+
+	r := newModelDeploymentWebhookWith(live)
+
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		pdRole("prefill", workercore.ModelDeploymentRoleKindPrefill, "h20-8x", sliced()),
+		pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "a100-8x", sliced()),
+	)
+	md.Spec.KVCache.Connector = "auto"
+
+	_, err := r.ValidateCreate(context.Background(), md)
+	assert.NoError(t, err,
+		"two types that say nothing about their accelerator population do not thereby say they share one")
 }
 
 // withDerivedFromNode makes the derived-from-node setting read the given value for one case.

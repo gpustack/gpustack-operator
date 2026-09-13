@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -872,7 +873,25 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstInstanceTypes(
 		if !ok {
 			var err error
 			if instType, err = r.getInstanceType(ctx, role.InstanceType, i); err != nil {
-				return nil, err
+				// A FIELD ERROR JOINS THE OTHERS INSTEAD OF ENDING THE PASS. A named type that does
+				// not exist is a fact about this object's field, and returning it bare does two
+				// things wrong: the response comes back as a plain denial rather than an Invalid
+				// naming the path, and it SHORT-CIRCUITS -- one mistyped instanceType hides every
+				// other validation error on the object, so the operator fixes one thing per apply.
+				//
+				// A TRANSPORT FAILURE IS CARRIED AS A FIELD ERROR TOO AND MUST NOT BE FOLDED IN.
+				// getInstanceType reports an unreadable API with field.InternalError, which is a
+				// *field.Error like the not-found one and means something entirely different: the
+				// object may be perfectly valid and the cluster could not be asked. Folding it in
+				// would tell the operator their object is invalid on the strength of a failed read,
+				// so it still ends the pass and the failure policy decides what happens.
+				var fieldErr *field.Error
+				if !errors.As(err, &fieldErr) || fieldErr.Type == field.ErrorTypeInternal {
+					return nil, err
+				}
+				errs = append(errs, fieldErr)
+
+				continue
 			}
 			seen[role.InstanceType] = instType
 		}
@@ -951,7 +970,14 @@ func validateModelDeploymentPairCannotShareOneAccelerator(
 		}
 		for _, decode := range decodes {
 			decodeType := types[decode.InstanceType]
+			// AN UNSET GROUP IS UNKNOWN, NOT A GROUP THAT TWO TYPES SHARE. The InstanceType webhook
+			// requires the field on an acceleratable type, but only objects that passed that rule
+			// carry it, and two empty strings comparing equal would refuse a pair on the strength of
+			// what neither type says. Refusing a valid deployment because a field is blank is the
+			// wrong way for this rule to be wrong: it blocks the shape the split exists to enable,
+			// and the operator has nothing to edit, since instanceType is frozen.
 			if decodeType == nil ||
+				prefillType.Spec.AcceleratorGroup == "" || decodeType.Spec.AcceleratorGroup == "" ||
 				prefillType.Spec.AcceleratorGroup != decodeType.Spec.AcceleratorGroup {
 				continue
 			}
@@ -993,6 +1019,23 @@ func validateModelDeploymentPairCannotShareOneAccelerator(
 func validateModelDeploymentBarrierIsInstallable(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) field.ErrorList {
+	// A DEPLOYMENT BEING DELETED IS NOT ASKING TO BE ADMITTED, and refusing it strands the object.
+	// This rule reads cluster state, so it can start refusing an object that was accepted: a
+	// multi-instanceType deployment created while the setting was on is refused by this rule the
+	// moment the setting goes off. Validation still runs during the deletion window, so the update
+	// that clears the finalizer is refused too -- and since instanceType is frozen, the operator
+	// cannot edit their way out of it either. The object then has no reachable state from which it
+	// can be removed.
+	//
+	// IT IS THE SAME GATE THE TYPE-READING RULES TAKE, for the same reason rather than by analogy: a
+	// rule whose answer depends on something outside the object must not be able to hold that object
+	// hostage. What it costs is named rather than hidden -- an edit made while a deployment is being
+	// deleted can produce a multi-instanceType shape the cluster cannot gate. Nothing renders it,
+	// because the deployment is going away.
+	if md.DeletionTimestamp != nil {
+		return nil
+	}
+
 	types := sets.New[string]()
 	for i := range md.Spec.Roles {
 		types.Insert(md.Spec.Roles[i].InstanceType)
@@ -1062,6 +1105,7 @@ func validateRoleResourcesAgainstInstanceType(
 	switch {
 	case ress.AcceleratorPartitionedProfile != "":
 		errs = append(errs, validateRolePartitionProfileOffered(instType, ress, ressPath)...)
+		errs = append(errs, validateRoleSingleCardRequest(ress, "partitioned", ressPath)...)
 	case ress.AcceleratorSlicedMemoryPercentage != 0 || ress.AcceleratorSlicedCoresPercentage != 0:
 		// A pool with no logically sliceable card cannot serve the request at all: admitted, such a
 		// role stays Pending forever rather than being reshaped into a whole-card one.
@@ -1070,21 +1114,66 @@ func validateRoleResourcesAgainstInstanceType(
 				ressPath.Child("acceleratorSlicedMemoryPercentage"),
 				fmt.Sprintf("instance type %s does not offer logical slicing", instType.Name)))
 		}
-	}
-
-	// THE CEILING IS CARRIED IN THE MESSAGE rather than left for the reader to look up. "Exceeds the
-	// maximum" states that the request was wrong; the number states what would be right, and the
-	// difference is whether the next attempt is a guess.
-	if ress.Accelerator != nil {
-		if ceiling := instType.Status.Accelerator.OnceMaxRequest; ress.Accelerator.Cmp(ceiling) > 0 {
-			errs = append(errs, field.Invalid(
-				ressPath.Child("accelerator"), ress.Accelerator.String(),
-				fmt.Sprintf("instance type %s hands out at most %s accelerator(s) at once",
-					instType.Name, ceiling.String())))
+		errs = append(errs, validateRoleSingleCardRequest(ress, "sliced", ressPath)...)
+	default:
+		// THE WHOLE-CARD CEILING BOUNDS A WHOLE-CARD REQUEST AND NOTHING ELSE, which is why it sits
+		// inside this branch. status.accelerator.onceMaxRequest is the whole-card view and counts
+		// FREE UNPARTITIONED cards, so a pool whose cards are all partitioned reports zero there
+		// while its partitioned view serves requests all day. Applied to every mode it refuses a
+		// valid partitioned or sliced role with "hands out at most 0 accelerator(s) at once" -- a
+		// sentence that misdescribes the type rather than the request.
+		//
+		// AND THE REFUSED VALUE IS ONE THIS WEBHOOK WROTE. A role that names no count is defaulted to
+		// one card by the mutating half, so the operator never typed the number the rule rejects and
+		// has nothing to correct. A refusal nobody can act on is worse than no rule.
+		//
+		// The Instance webhook already draws the line here: validateExclusiveAcceleratorRequest is
+		// reached on the whole-card path only.
+		//
+		// THE CEILING IS CARRIED IN THE MESSAGE rather than left for the reader to look up. "Exceeds
+		// the maximum" states that the request was wrong; the number states what would be right, and
+		// the difference is whether the next attempt is a guess.
+		if ress.Accelerator != nil {
+			if ceiling := instType.Status.Accelerator.OnceMaxRequest; ress.Accelerator.Cmp(ceiling) > 0 {
+				errs = append(errs, field.Invalid(
+					ressPath.Child("accelerator"), ress.Accelerator.String(),
+					fmt.Sprintf("instance type %s hands out at most %s accelerator(s) at once",
+						instType.Name, ceiling.String())))
+			}
 		}
 	}
 
 	return errs
+}
+
+// validateRoleSingleCardRequest refuses a sliced or partitioned role that asks for more than one
+// card.
+//
+// A SLICE IS A FRACTION OF ONE CARD AND A PARTITION IS ONE INSTANCE ON ONE CARD, so the size of the
+// request is carried by the percentages or the profile name and the card count is always one. Two
+// cards at fifty percent each describes nothing the scheduler can place, and the resource key the
+// controller emits for it is a per-card one either way.
+//
+// IT IS WHAT BOUNDS THESE MODES NOW THAT THE WHOLE-CARD CEILING DOES NOT. The Instance webhook has
+// drawn this line all along, with validateSingleCardRequest on exactly these two paths; the rule was
+// simply missing here, and its absence was hidden because the whole-card ceiling happened to refuse
+// the same over-large requests for the wrong reason -- while refusing correct one-card requests too.
+func validateRoleSingleCardRequest(
+	ress *workercore.ModelDeploymentRoleResources, kind string, ressPath *field.Path,
+) field.ErrorList {
+	one := resource.NewQuantity(1, resource.DecimalSI)
+	if ress.Accelerator != nil && ress.Accelerator.Cmp(*one) == 0 {
+		return nil
+	}
+
+	got := "0"
+	if ress.Accelerator != nil {
+		got = ress.Accelerator.String()
+	}
+
+	return field.ErrorList{field.Invalid(
+		ressPath.Child("accelerator"), got,
+		fmt.Sprintf("accelerator request must be exactly 1 for a %s request", kind))}
 }
 
 // validateRolePartitionProfileOffered checks a partition request against the profiles the pool
