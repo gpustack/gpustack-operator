@@ -3,6 +3,9 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,6 +20,7 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
+	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 )
@@ -281,9 +285,9 @@ func TestModelDeploymentPodGroupIncomplete_IsAReportedStateNotASilentOne(t *test
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 	pods, err := r.listModelDeploymentPods(context.Background(), md)
 	require.NoError(t, err)
-	ours, err := r.findModelDeploymentGroupWorkload(context.Background(), md, pods)
+	ours, err := r.findModelDeploymentGroupWorkloads(context.Background(), md, pods)
 	require.NoError(t, err)
-	assert.Nil(t, ours, "an incomplete group has no Workload, which is why it needs a reason")
+	assert.Empty(t, ours, "an incomplete group has no Workload, which is why it needs a reason")
 
 	stored := getModelDeployment(t, cli)
 	assert.True(t, ModelDeploymentConditionQuotaReserved.IsFalse(stored))
@@ -446,7 +450,7 @@ func TestModelDeployment_RedistributingReplicasRebuildsTheGroup(t *testing.T) {
 	moved.Spec.Roles[0].Replicas = 1
 	moved.Spec.Roles[1].Replicas = 3
 	require.NoError(t, cli.Update(context.Background(), moved))
-	require.Equal(t, int32(4), modelDeploymentPodGroupTotalCount(moved),
+	require.Equal(t, int32(4), modelDeploymentPodGroups(moved)[0].TotalCount,
 		"the premise: the total did not move, so only the per-role share can carry the change")
 
 	_, err = reconcileModelDeployment(t, cli)
@@ -478,4 +482,206 @@ func TestModelDeployment_RenamingARoleWithoutChangingCountsRebuilds(t *testing.T
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	assert.Empty(t, replicaNames(t, cli), "a renamed role is a different PodSet, so the group is rebuilt")
+}
+
+// newRenderInstanceTypeB is the SECOND InstanceType, and it is what makes every two-group case
+// expressible: another name, and another queue entrance so a role placed on it lands in another pool.
+//
+// The entrance is again a value no derivation produces, for the reason the first fixture states: one
+// spelled the way a name-derived render would spell it could not tell a read from a derivation apart.
+func newRenderInstanceTypeB() *worker.InstanceType {
+	return newRenderInstanceType(func(it *worker.InstanceType) {
+		it.Name = "a100-8x"
+		it.Status.Entrance = "queue-for-a100-8x"
+	})
+}
+
+// twoTypeDeployment puts the two roles on two instanceTypes, which is two groups.
+func twoTypeRoleDeployment(mutate ...func(*workercore.ModelDeployment)) *workercore.ModelDeployment {
+	return twoRoleDeployment(append([]func(*workercore.ModelDeployment){
+		func(md *workercore.ModelDeployment) { md.Spec.Roles[1].InstanceType = "a100-8x" },
+	}, mutate...)...)
+}
+
+// groupNameCounts collects how many live replicas carry each group name.
+func groupNameCounts(t *testing.T, cli ctrlcli.Client) map[string]int {
+	t.Helper()
+
+	counts := make(map[string]int)
+	for _, pod := range replicaPods(t, cli) {
+		counts[pod.Labels[kueuepodconst.GroupNameLabel]]++
+	}
+
+	return counts
+}
+
+// TestModelDeployment_TwoTypesAreCreatedAsTwoGroupsInOnePass is F2's obligation for the split shape.
+//
+// Both groups are created by the SAME pass, for the reason the single-group case already states:
+// Kueue composes no Workload for a group short of its declared total, so a reconciler that staged one
+// group after the other would leave the first one gated with nothing reporting why.
+func TestModelDeployment_TwoTypesAreCreatedAsTwoGroupsInOnePass(t *testing.T) {
+	cli := newModelDeploymentClient(twoTypeRoleDeployment(),
+		newRenderInstanceType(), newRenderInstanceTypeB())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{
+		"qwen-decode-0", "qwen-decode-1", "qwen-prefill-0", "qwen-prefill-1",
+	}, replicaNames(t, cli), "every group's every replica, in the first pass")
+
+	// Two group names, two replicas each -- and each group's total counts only its own role, which is
+	// the number Kueue waits for before it composes that group's Workload.
+	counts := groupNameCounts(t, cli)
+	assert.Len(t, counts, 2, "two instanceTypes cannot be one Workload, so they are two groups")
+	for group, n := range counts {
+		assert.Equal(t, 2, n, "group %s", group)
+	}
+	assert.Equal(t, map[string]int{"2": 4}, groupTotals(t, cli),
+		"each group declares its own two, not the deployment's four")
+}
+
+// TestModelDeployment_OneGroupsChangeLeavesTheOtherAlone is the case a deployment-wide rebuild
+// decision fails.
+//
+// Changing one role's replica count moves ONE group's shape. The other group's replicas agree with
+// their own total and their own share, so nothing about them changed -- and restarting them would
+// reload a model's weights for an edit that could not reach them.
+//
+// THE SURVIVING NAMES ARE NOT THE ASSERTION, AND A TEST THAT USED THEM PASSES AGAINST THE BUG.
+// A deployment-wide rebuild deletes every replica and then creates the untouched group's back in the
+// SAME pass -- its creates are not the ones being held -- so the names afterwards are identical
+// either way. Measured: with the per-group decision mutated away to a deployment-wide one, a
+// name-based assertion still passed. The UID is what tells a Pod that stayed from one that was
+// replaced by an identical one.
+func TestModelDeployment_OneGroupsChangeLeavesTheOtherAlone(t *testing.T) {
+	cli := newModelDeploymentClient(twoTypeRoleDeployment(),
+		newRenderInstanceType(), newRenderInstanceTypeB())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaNames(t, cli), 4)
+
+	// A MARKER THE RENDERER NEVER WRITES is what tells a Pod that stayed from one that was replaced by
+	// an identical render. It is used rather than the UID or the resourceVersion because those are the
+	// fake client's to assign, and an assertion comparing two values it leaves empty is vacuously
+	// true -- measured: a UID-based version of this assertion passed against the mutation it exists to
+	// catch.
+	const stayed = "test.gpustack.ai/stayed"
+
+	ctx := context.Background()
+	for _, pod := range replicaPods(t, cli) {
+		if modelDeploymentPodRole(&pod) != "decode" {
+			continue
+		}
+		live := pod.DeepCopy()
+		live.Annotations[stayed] = "yes"
+		require.NoError(t, cli.Update(ctx, live))
+	}
+
+	moved := getModelDeployment(t, cli)
+	moved.Spec.Roles[0].Replicas = 3
+	require.NoError(t, cli.Update(ctx, moved))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	// prefill's group comes down whole; decode's is untouched, still holding the very same Pods.
+	assert.Equal(t, []string{"qwen-decode-0", "qwen-decode-1"}, replicaNames(t, cli),
+		"only the group whose shape moved is rebuilt")
+
+	for _, pod := range replicaPods(t, cli) {
+		assert.Equal(t, "yes", pod.Annotations[stayed],
+			"%s carries a fresh render, so the other group came down and was rebuilt after all", pod.Name)
+	}
+}
+
+// TestModelDeployment_TeardownRemovesEveryGroupsWorkload covers the half a first-match lookup fails.
+//
+// Each group has its own Workload and each holds Kueue's finalizer on its OWN replicas. Deleting one
+// of them releases one group and leaves the other's replicas unable to leave at all, which strands
+// the deployment in Deleting with nothing erroring anywhere.
+func TestModelDeployment_TeardownRemovesEveryGroupsWorkload(t *testing.T) {
+	ctx := context.Background()
+	cli := newModelDeploymentClient(twoTypeRoleDeployment(),
+		newRenderInstanceType(), newRenderInstanceTypeB())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaPods(t, cli), 4)
+
+	// One Workload per group, owned by that group's members without a controller reference -- the
+	// shape Kueue builds and the one the operator has to find them by. The names are chosen so the
+	// decode group's sorts FIRST: a lookup taking the first match would then delete it and leave the
+	// prefill group's behind, and a case whose names sorted the other way would not notice.
+	byGroup := make(map[string][]core.Pod)
+	for _, pod := range replicaPods(t, cli) {
+		group := pod.Labels[kueuepodconst.GroupNameLabel]
+		byGroup[group] = append(byGroup[group], pod)
+	}
+	require.Len(t, byGroup, 2)
+
+	names := make([]string, 0, len(byGroup))
+	for i, group := range slices.Sorted(maps.Keys(byGroup)) {
+		wl := &kueue.Workload{}
+		wl.Name, wl.Namespace = fmt.Sprintf("qwen-%d", i), "team-a"
+		for _, pod := range byGroup[group] {
+			wl.OwnerReferences = append(wl.OwnerReferences, meta.OwnerReference{
+				APIVersion: "v1", Kind: "Pod", Name: pod.Name, UID: pod.UID,
+			})
+		}
+		require.NoError(t, cli.Create(ctx, wl))
+		names = append(names, wl.Name)
+	}
+
+	require.NoError(t, cli.Delete(ctx, getModelDeployment(t, cli)))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	for _, name := range names {
+		err = cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: name}, new(kueue.Workload))
+		assert.True(t, kerrors.IsNotFound(err),
+			"every group's Workload goes, not the first: %s is still there", name)
+	}
+}
+
+// TestModelDeployment_ARebuildDoesNotDelayAnotherGroupsRepair is the half the assertions above cannot
+// reach.
+//
+// Withholding creates is what keeps a replacement from landing beside a member on its way out, and
+// that hazard belongs to ONE group. Held for the deployment, a group that merely lost a replica waits
+// a pass for a rebuild happening somewhere it cannot reach -- and it waits while short of its own
+// declared total, which is the state in which Kueue composes no Workload for it at all.
+//
+// The untouched group has to be MISSING something for this to be observable: a complete group has no
+// create to withhold, which is why every other two-group case here passes either way.
+func TestModelDeployment_ARebuildDoesNotDelayAnotherGroupsRepair(t *testing.T) {
+	ctx := context.Background()
+	cli := newModelDeploymentClient(twoTypeRoleDeployment(),
+		newRenderInstanceType(), newRenderInstanceTypeB())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaNames(t, cli), 4)
+
+	// decode loses one replica outright -- no finalizer, so it is GONE rather than departing, and its
+	// group is merely short rather than resizing.
+	gone := new(core.Pod)
+	require.NoError(t, cli.Get(ctx,
+		ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen-decode-1"}, gone))
+	require.NoError(t, cli.Delete(ctx, gone))
+
+	// ...while prefill's shape moves, which rebuilds prefill's group and nothing else.
+	moved := getModelDeployment(t, cli)
+	moved.Spec.Roles[0].Replicas = 3
+	require.NoError(t, cli.Update(ctx, moved))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"qwen-decode-0", "qwen-decode-1"}, replicaNames(t, cli),
+		"decode's missing replica is created in this pass; holding it would leave that group short "+
+			"of its own total for a rebuild it has nothing to do with")
 }

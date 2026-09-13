@@ -153,6 +153,11 @@ func (w *Worker) Prepare(ctx context.Context) error {
 		return fmt.Errorf("install node devices admission check: %w", err)
 	}
 
+	err = kuberess.InstallModelDeploymentJointAdmissionCheck(ctx)
+	if err != nil {
+		return fmt.Errorf("install model deployment joint admission check: %w", err)
+	}
+
 	return nil
 }
 

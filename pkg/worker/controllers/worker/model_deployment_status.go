@@ -3,6 +3,8 @@ package worker
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -10,6 +12,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	kueueworkload "sigs.k8s.io/kueue/pkg/workload"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
@@ -101,20 +104,26 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 	// and only the accessors know when it should move.
 	holder := &workercore.ModelDeployment{Status: *md.Status.DeepCopy()}
 
-	// ONE Workload for the whole deployment, resolved once: every replica of every role is one Kueue
-	// pod group, so both the per-role flavor and the group-level quota answer come from the same
-	// object. Reading it twice would let the two halves of the status describe two moments.
-	wl, err := r.findModelDeploymentGroupWorkload(ctx, md, pods)
+	// EVERY Workload of the deployment, resolved once: a deployment whose roles sit on several
+	// instanceTypes is several pod groups and one Workload each, and both the per-role flavor and the
+	// group-level quota answer come from this same read. Reading it twice would let the two halves of
+	// the status describe two moments.
+	wls, err := r.findModelDeploymentGroupWorkloads(ctx, md, pods)
 	if err != nil {
 		return nil, err
 	}
+	// EACH GROUP'S OWN WORKLOAD, RESOLVED ONCE. There is no such thing as "the deployment's Workload"
+	// once its roles sit on several instanceTypes, and taking whichever sorts first answers for one
+	// group while misreporting every other.
+	groupOfRole := modelDeploymentGroupOfRole(md)
+	wlByGroup := modelDeploymentWorkloadByGroup(md, pods, wls, groupOfRole)
 
-	holder.Status.Roles = modelDeploymentRoleStatuses(md, pods, wl)
+	holder.Status.Roles = modelDeploymentRoleStatuses(md, pods, wlByGroup, groupOfRole)
 	holder.Status.Endpoint = modelDeploymentEndpoint(md)
 
 	observeModelDeploymentDomain(holder, domain)
 
-	observeModelDeploymentQuota(md, pods, wl, holder)
+	observeModelDeploymentQuota(md, pods, wls, wlByGroup, groupOfRole, holder)
 
 	r.observeModelDeploymentCache(ctx, md, pods, domain, holder)
 
@@ -131,7 +140,8 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 // A role's replicas are identified by the Pod's resource note rather than by parsing its name,
 // because a name is a rendering and a note is what the renderer recorded.
 func modelDeploymentRoleStatuses(
-	md *workercore.ModelDeployment, pods []core.Pod, wl *kueue.Workload,
+	md *workercore.ModelDeployment, pods []core.Pod,
+	wlByGroup map[string]*kueue.Workload, groupOfRole map[string]string,
 ) []workercore.ModelDeploymentRoleStatus {
 	ready := make(map[string]int32, len(md.Spec.Roles))
 	for i := range pods {
@@ -155,8 +165,12 @@ func modelDeploymentRoleStatuses(
 			Ready:   ready[role.Name],
 			// A role that replaced the whole command line got no synthesized argument and no client
 			// environment, so nothing here can claim it is attached to the cache.
-			Unmanaged:      role.Template != nil && len(role.Template.Command) > 0,
-			AssignedFlavor: modelDeploymentAssignedFlavor(wl, role),
+			Unmanaged: role.Template != nil && len(role.Template.Command) > 0,
+			// THE ROLE'S OWN GROUP'S WORKLOAD, not the deployment's first. A flavor is an answer Kueue
+			// gave to one pod group, so a role is told what happened to ITS group or nothing at all.
+			// Reading whichever Workload sorts first reports a flavor this role was never assigned for
+			// every group but one, which is worse than the nil that means "no answer yet".
+			AssignedFlavor: modelDeploymentAssignedFlavor(wlByGroup[groupOfRole[role.Name]], role),
 		})
 	}
 
@@ -211,9 +225,30 @@ func modelDeploymentPodRole(pod *core.Pod) string {
 // gated Pods and an empty `kubectl get workloads` forever. Reporting the second as the first is the
 // failure this reason exists to name.
 func observeModelDeploymentQuota(
-	md *workercore.ModelDeployment, pods []core.Pod, wl *kueue.Workload,
+	md *workercore.ModelDeployment, pods []core.Pod, wls []*kueue.Workload,
+	wlByGroup map[string]*kueue.Workload, groupOfRole map[string]string,
 	holder *workercore.ModelDeployment,
 ) {
+	// A PARKED DEPLOYMENT IS REPORTED FIRST, because every other answer below would describe it
+	// wrongly. Its groups are complete and their Workloads deactivated, which the vocabulary here
+	// otherwise reads as "waiting for admission" -- the opposite of the truth once the bound has
+	// fired, and the reading that sends an operator to wait for something that is never coming.
+	//
+	// IT IS OBSERVED HERE RATHER THAN WRITTEN BY THE CONTROLLER THAT PARKED IT. Status is rebuilt from
+	// observed state on every pass by this one function, so a second writer would leave its own field
+	// behind the moment this one disagreed. The bound is measured on the Workload; this reads what
+	// that measurement left there.
+	if parked := parkedModelDeploymentWorkloads(wls); len(parked) > 0 {
+		ModelDeploymentConditionQuotaReserved.False(holder, "Parked", fmt.Sprintf(
+			"the deployment's groups could not all be placed, so %d of its workloads are deactivated "+
+				"and no longer ask for quota: %s. An identical re-apply does not clear this — free the "+
+				"capacity the deployment needs and reactivate them, or delete the deployment and "+
+				"create it again",
+			len(parked), strings.Join(parked, ", ")))
+
+		return
+	}
+
 	if len(pods) == 0 {
 		ModelDeploymentConditionQuotaReserved.Unknown(holder, "NoReplicas",
 			"no replica has been created yet")
@@ -241,42 +276,204 @@ func observeModelDeploymentQuota(
 		return
 	}
 
-	// The ClusterQueue is named after the InstanceType, so the queue a refusal points at is read
-	// off the spec rather than resolved: the LocalQueue the entrance label names is derived from it.
-	queue := md.Spec.Roles[0].InstanceType
+	// THE COUNT IS PER GROUP, and so is the queue it names. Kueue composes one Workload per group and
+	// withholds it until THAT group has its own declared total, so a deployment whose roles sit on
+	// different instanceTypes can have one group complete and another short. Comparing the
+	// deployment-wide sum answers about neither: it reads a complete group as short whenever a
+	// sibling is, and reports a queue that is not the one holding anything back.
+	//
+	// The ClusterQueue is named after the InstanceType, so the queue a refusal points at is read off
+	// the spec rather than resolved: the LocalQueue the entrance label names is derived from it.
+	// A replica is attributed to a group through its ROLE rather than through the membership label it
+	// carries. That is the same source every other figure on this status reads, so a Pod cannot be
+	// counted in one place and not another -- and a replica that predates the label, or one still
+	// being built, is counted against the group its role puts it in rather than against none.
+	groups := modelDeploymentPodGroups(md)
+	for _, group := range groups {
+		var alive int
+		for i := range pods {
+			if pods[i].DeletionTimestamp == nil &&
+				groupOfRole[modelDeploymentPodRole(&pods[i])] == group.Name {
+				alive++
+			}
+		}
 
-	if want := int(modelDeploymentPodGroupTotalCount(md)); live < want {
-		ModelDeploymentConditionQuotaReserved.False(holder, modelDeploymentReasonPodGroupIncomplete,
-			fmt.Sprintf(
-				"%d of %d of the group's replicas exist, so Kueue composes no workload for it at "+
-					"all and there is nothing in cluster queue %q to hold quota",
-				live, want, queue))
+		if want := int(group.TotalCount); alive < want {
+			ModelDeploymentConditionQuotaReserved.False(holder, modelDeploymentReasonPodGroupIncomplete,
+				fmt.Sprintf(
+					"%d of %d of the group's replicas exist, so Kueue composes no workload for it at "+
+						"all and there is nothing in cluster queue %q to hold quota",
+					alive, want, group.InstanceType))
 
-		return
+			return
+		}
 	}
 
-	switch {
-	case wl == nil:
+	// Every group is complete, so what is left to report is whether they hold quota.
+	//
+	// THE ANSWER IS OVER EVERY GROUP, NOT OVER THE FIRST WORKLOAD. A deployment spread over several
+	// instanceTypes has one Workload per group, and reporting whichever sorts first says the
+	// deployment holds quota while half of it does not. Measured on a cluster: one group reserved,
+	// its sibling's queue was held, and this condition read Reserved with a message naming the
+	// deployment's whole replica count -- a reading that is wrong in both halves at once.
+	// A SINGLE-GROUP DEPLOYMENT HAS ONE QUEUE AND ITS WORDING SAYS SO; a multi-group one has no single
+	// queue to name, and naming the first role's is a statement about one group offered as a statement
+	// about the deployment. So this is read only where the branch has already established there is one
+	// group, and the multi-group branches name the instance types they are actually talking about.
+	queue := md.Spec.Roles[0].InstanceType
+
+	if withoutWorkload := modelDeploymentGroupsWithoutWorkload(groups, wlByGroup); len(withoutWorkload) > 0 {
 		if kuberess.IsReservedNamespace(md.Namespace) {
 			ModelDeploymentConditionQuotaReserved.False(holder, "NoQueueInReservedNamespace", fmt.Sprintf(
 				"the deployment is in reserved namespace %q and will never be scheduled", md.Namespace))
 
 			return
 		}
+		if len(groups) == 1 {
+			ModelDeploymentConditionQuotaReserved.Unknown(holder, "AdmissionInFlight", fmt.Sprintf(
+				"the group is complete at %d replicas but has no workload yet in cluster queue %q",
+				live, queue))
+
+			return
+		}
 		ModelDeploymentConditionQuotaReserved.Unknown(holder, "AdmissionInFlight", fmt.Sprintf(
-			"the group is complete at %d replicas but has no workload yet in cluster queue %q",
-			live, queue))
-	case kubeapistatus.ConditionType(kueue.WorkloadQuotaReserved).IsTrue(wl):
+			"%d of this deployment's %d groups are complete but have no workload yet, on instance "+
+				"types %s",
+			len(withoutWorkload), len(groups), strings.Join(withoutWorkload, ", ")))
+
+		return
+	}
+
+	waiting := modelDeploymentGroupsWithoutQuota(groups, wlByGroup)
+	if len(waiting) == 0 {
+		// The single-group wording is kept verbatim, because for one group it is exactly right and it
+		// is what an operator reading this condition today already recognizes.
+		if len(groups) == 1 {
+			ModelDeploymentConditionQuotaReserved.True(holder, "Reserved", fmt.Sprintf(
+				"the group of %d replicas has quota reserved in cluster queue %q", live, queue))
+
+			return
+		}
 		ModelDeploymentConditionQuotaReserved.True(holder, "Reserved", fmt.Sprintf(
-			"the group of %d replicas has quota reserved in cluster queue %q", live, queue))
-	default:
+			"all %d of this deployment's groups have quota reserved", len(groups)))
+
+		return
+	}
+
+	if len(groups) == 1 {
 		ModelDeploymentConditionQuotaReserved.False(holder, "Pending", fmt.Sprintf(
 			"the group of %d replicas is waiting for quota in cluster queue %q", live, queue))
+
+		return
 	}
+	ModelDeploymentConditionQuotaReserved.False(holder, "Pending", fmt.Sprintf(
+		"%d of this deployment's %d groups are waiting for quota, on instance types %s. No role is "+
+			"admitted until the whole set can run",
+		len(waiting), len(groups), strings.Join(waiting, ", ")))
 }
 
-// findModelDeploymentGroupWorkload returns the one Workload Kueue composed for this deployment's pod
-// group, or nil when there is none.
+// modelDeploymentGroupOfRole names, for each role, the pod group its replicas belong to.
+//
+// A replica is attributed to a group through its ROLE rather than through the membership label it
+// carries, so that a replica predating the label, or one still being built, is counted against the
+// group its role puts it in rather than against none.
+func modelDeploymentGroupOfRole(md *workercore.ModelDeployment) map[string]string {
+	groupOfRole := make(map[string]string, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		groupOfRole[role.Name] = modelDeploymentPodGroupFor(md, role.InstanceType).Name
+	}
+
+	return groupOfRole
+}
+
+// modelDeploymentWorkloadByGroup resolves the Workload Kueue composed for each of this deployment's
+// pod groups, keyed by group name, and omits a group that has none yet.
+//
+// THERE IS NO SUCH THING AS "THE DEPLOYMENT'S WORKLOAD" once its roles sit on several instanceTypes.
+// Every question a caller has -- which flavor this role got, whether this group holds quota, whether
+// a group has been composed at all -- is a question about ONE group, and the Workload that answers it
+// is the one owning that group's replicas. Taking whichever sorts first answers correctly for one
+// group and misreports every other, which is a shape this package has now had twice.
+//
+// The Workloads arrive in name order, so a group with two candidates during a rebuild resolves to the
+// same one on every pass rather than flipping while the old one drains.
+func modelDeploymentWorkloadByGroup(
+	md *workercore.ModelDeployment,
+	pods []core.Pod,
+	wls []*kueue.Workload,
+	groupOfRole map[string]string,
+) map[string]*kueue.Workload {
+	members := make(map[string]sets.Set[types.UID], len(md.Spec.Roles))
+	for i := range pods {
+		group := groupOfRole[modelDeploymentPodRole(&pods[i])]
+		if group == "" {
+			continue
+		}
+		if members[group] == nil {
+			members[group] = sets.New[types.UID]()
+		}
+		members[group].Insert(pods[i].UID)
+	}
+
+	byGroup := make(map[string]*kueue.Workload, len(members))
+	for group, own := range members {
+		for _, w := range wls {
+			if modelDeploymentWorkloadOwnsAny(w, own) {
+				byGroup[group] = w
+
+				break
+			}
+		}
+	}
+
+	return byGroup
+}
+
+// modelDeploymentGroupsWithoutWorkload names the instance types of the groups Kueue has composed no
+// Workload for. A complete group in that state is mid-admission; an incomplete one is reported by the
+// branch above this one, which is why the two are not the same answer.
+func modelDeploymentGroupsWithoutWorkload(
+	groups []modelDeploymentPodGroupSpec, wlByGroup map[string]*kueue.Workload,
+) []string {
+	var missing []string
+	for _, group := range groups {
+		if wlByGroup[group.Name] == nil {
+			missing = append(missing, group.InstanceType)
+		}
+	}
+
+	return missing
+}
+
+// modelDeploymentGroupsWithoutQuota names the instance types of the groups that hold no quota
+// reservation.
+//
+// A group is answered by the Workload owning ITS replicas. Reading one Workload for the whole
+// deployment cannot distinguish a set that is fully reserved from one where a sibling is held, and
+// those two states are the difference between a deployment that is about to run and one that never
+// will.
+func modelDeploymentGroupsWithoutQuota(
+	groups []modelDeploymentPodGroupSpec, wlByGroup map[string]*kueue.Workload,
+) []string {
+	var waiting []string
+	for _, group := range groups {
+		w := wlByGroup[group.Name]
+		if w == nil || !kubeapistatus.ConditionType(kueue.WorkloadQuotaReserved).IsTrue(w) {
+			waiting = append(waiting, group.InstanceType)
+		}
+	}
+
+	return waiting
+}
+
+// findModelDeploymentGroupWorkloads returns EVERY Workload owning any of these Pods, in name order.
+//
+// THERE IS NO SINGULAR FORM OF THIS, deliberately. One that returned the first was here and had no
+// production caller left: every question is about one group, and the group is chosen by the caller
+// through modelDeploymentWorkloadByGroup rather than by sort order. A correctly written accessor that
+// only serves a world model this package has abandoned is not dead weight, it is an invitation to
+// reintroduce the defect it enables -- and it draws no review comment, because it is not wrong.
 //
 // IT MATCHES ON A PLAIN OWNER REFERENCE, NOT A CONTROLLER REFERENCE, and that is not a relaxation —
 // it is the difference between finding the Workload and never finding one. Kueue sets a CONTROLLER
@@ -290,10 +487,16 @@ func observeModelDeploymentQuota(
 //
 // A rebuild can briefly leave the OLD group's Workload owning Pods that are on their way out. The
 // scan is over the Pods this pass observed, and the result is taken in name order so that two
-// candidates cannot make the reported state flip between passes while the old one drains.
-func (r *ModelDeploymentReconciler) findModelDeploymentGroupWorkload(
+// candidates cannot make the reported state flip between passes while the old one drains. A caller
+// that takes only the first leaves the rest in place -- and each of those still holds Kueue's
+// finalizer on its own replicas, which is the one thing that keeps them from ever leaving. The
+// symptom is a deployment stuck in Deleting with nothing erroring.
+//
+// Callers that scope the Pods scope the result: passing one group's replicas returns that group's
+// Workload and no other, which is how a rebuild reaches exactly the group it is rebuilding.
+func (r *ModelDeploymentReconciler) findModelDeploymentGroupWorkloads(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod,
-) (*kueue.Workload, error) {
+) ([]*kueue.Workload, error) {
 	if len(pods) == 0 {
 		return nil, nil
 	}
@@ -309,16 +512,14 @@ func (r *ModelDeploymentReconciler) findModelDeploymentGroupWorkload(
 		return nil, fmt.Errorf("list workloads: %w", err)
 	}
 
-	var found *kueue.Workload
+	var found []*kueue.Workload
 	for i := range wlList.Items {
 		wl := &wlList.Items[i]
-		if !modelDeploymentWorkloadOwnsAny(wl, ours) {
-			continue
-		}
-		if found == nil || wl.Name < found.Name {
-			found = wl
+		if modelDeploymentWorkloadOwnsAny(wl, ours) {
+			found = append(found, wl)
 		}
 	}
+	slices.SortFunc(found, func(a, b *kueue.Workload) int { return strings.Compare(a.Name, b.Name) })
 
 	return found, nil
 }
@@ -366,4 +567,39 @@ func deriveModelDeploymentPhase(md, holder *workercore.ModelDeployment) {
 		holder.Status.Phase = ModelDeploymentPhaseStarting
 		holder.Status.PhaseMessage = ModelDeploymentConditionQuotaReserved.GetMessage(holder)
 	}
+}
+
+// parkedModelDeploymentWorkloads names the deployment's Workloads the joint barrier has deactivated.
+//
+// spec.active is what the barrier writes when it gives up holding a set, and it is durable state the
+// scheduler reads: while it is false the Workload is not considered and the group is not rebuilt
+// behind it.
+//
+// BUT THAT FLAG ALONE DOES NOT SAY WHO WROTE IT. Kueue deactivates a Workload of its own accord, and
+// so can an operator pausing one group by hand. Reporting either as "parked for infeasibility" tells
+// the reader the deployment's set could not be placed and instructs them to free capacity or delete
+// and recreate -- an answer to a question nobody asked, about a state somebody chose. So the barrier's
+// OWN check has to be carrying its verdict on the same Workload for this to be the barrier's doing.
+func parkedModelDeploymentWorkloads(wls []*kueue.Workload) []string {
+	var parked []string
+	for _, wl := range wls {
+		if !kueueworkload.IsActive(wl) && jointBarrierParked(wl) {
+			parked = append(parked, wl.Name)
+		}
+	}
+
+	return parked
+}
+
+// jointBarrierParked reports whether the joint-admission check is the reason this Workload is
+// inactive, by reading the verdict that controller left on it.
+func jointBarrierParked(wl *kueue.Workload) bool {
+	for i := range wl.Status.AdmissionChecks {
+		acs := &wl.Status.AdmissionChecks[i]
+		if acs.Name == kueue.AdmissionCheckReference(_JointAdmissionCheckName) {
+			return strings.Contains(acs.Message, _JointAdmissionParkedMarker)
+		}
+	}
+
+	return false
 }

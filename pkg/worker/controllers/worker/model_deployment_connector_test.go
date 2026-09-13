@@ -3,11 +3,13 @@ package worker
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -942,4 +944,96 @@ func TestModelDeploymentEffectiveRoleKindStaysInsideTheStatusEnum(t *testing.T) 
 			"the writer turns a spec kind of %q into a status kind of %q, which the status enum "+
 				"does not name: the API server refuses that status write whole", in, got)
 	}
+}
+
+// TestModelDeploymentConnectorEnumHasOneValue pins the reservation in the schema that is actually
+// served, not in the marker that produces it.
+//
+// The value has no Go constant to name it -- it is a schema default and a schema enum -- so the CRD
+// is where it can be read at all. Widening this enum is four things and not one: a sub-package, this
+// entry, a renderer, and the wiring that threads the value to a dispatch point that does not exist.
+// A test naming the current width is what makes the third of those a deliberate act.
+func TestModelDeploymentConnectorEnumHasOneValue(t *testing.T) {
+	crds := workercore.GetCustomResourceDefinitions()
+
+	var schema *apiext.JSONSchemaProps
+	for name, crd := range crds {
+		if !strings.Contains(strings.ToLower(name), "modeldeployment") {
+			continue
+		}
+		for i := range crd.Spec.Versions {
+			v := &crd.Spec.Versions[i]
+			if v.Schema == nil || v.Schema.OpenAPIV3Schema == nil {
+				continue
+			}
+			spec, ok := v.Schema.OpenAPIV3Schema.Properties["spec"]
+			if !ok {
+				continue
+			}
+			kvCache, ok := spec.Properties["kvCache"]
+			if !ok {
+				continue
+			}
+			if connector, ok := kvCache.Properties["connector"]; ok {
+				schema = &connector
+			}
+		}
+	}
+
+	require.NotNil(t, schema, "spec.kvCache.connector must be in the served schema")
+	require.Len(t, schema.Enum, 1, "the enum reserves the discriminator; widening it is a piece of work")
+	assert.JSONEq(t, `"auto"`, string(schema.Enum[0].Raw))
+	require.NotNil(t, schema.Default)
+	assert.JSONEq(t, `"auto"`, string(schema.Default.Raw))
+}
+
+// TestModelDeploymentConnectorFieldIsInert renders one deployment twice, with the field unset and
+// with it set to its one legal value, and pins that the two Pods are identical.
+//
+// WHAT IS PINNED IS THE ABSENCE OF A READER. The value the renderer receives is synthesized from the
+// engine, the role's kind, the manufacturer and the resolved connection; this field is read by
+// nothing. So the assertion is not that the connector is correct -- other cases cover that -- it is
+// that the day somebody threads this field into the render is the day a test says so.
+//
+// THE OPPOSITE TEST CANNOT BE WRITTEN TODAY, and that is a property of the enum rather than an
+// omission here. With one legal value a renderer that reads the field and one that ignores it produce
+// the same output on every input, so no case distinguishes them. This one holds the ground that can
+// be held: the field is inert, asserted on a render that DOES carry a connector, so a wiring that
+// made it matter would move the comparison.
+func TestModelDeploymentConnectorFieldIsInert(t *testing.T) {
+	it := newRenderInstanceType()
+
+	render := func(connector string) *core.Pod {
+		t.Helper()
+
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache.Connector = connector
+		})
+
+		in := connectorInput(md.Spec.Engine, it.Status.Detail.Manufacturer)
+		in.Kind = md.Spec.Roles[0].Kind
+		synthesized, err := SynthesizeModelDeploymentConnector(in)
+		require.NoError(t, err)
+
+		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			Deployment:   md,
+			Role:         &md.Spec.Roles[0],
+			Ordinal:      0,
+			InstanceType: it,
+			Connector:    synthesized,
+		})
+		require.NoError(t, err)
+
+		return pod
+	}
+
+	unset := render("")
+	auto := render("auto")
+
+	// The premise: this render carries a connector at all. Without it the two Pods would agree
+	// because neither has one, and the case would pass against a renderer that did read the field.
+	require.NotEmpty(t, unset.Annotations, "the render under comparison must carry the connector")
+
+	assert.Equal(t, unset, auto,
+		"the connector value is read by nothing; a difference here means somebody wired it in")
 }

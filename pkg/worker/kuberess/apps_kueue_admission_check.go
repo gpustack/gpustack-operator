@@ -67,3 +67,58 @@ func InstallNodeDevicesAdmissionCheck(ctx context.Context) error {
 
 	return nil
 }
+
+const (
+	// ModelDeploymentJointAdmissionCheckName is the AdmissionCheck object every operator-owned
+	// ClusterQueue references, and ModelDeploymentJointAdmissionControllerName is what claims it.
+	//
+	// THEY LIVE HERE BECAUSE THIS PACKAGE INSTALLS THE OBJECT and the controllers package already
+	// imports this one, so the contract can be a single definition the compiler enforces rather than
+	// two strings that agree today. Spelling them twice is the failure this prevents: a rename in one
+	// place leaves workloads ungated or leaves the check permanently inactive, and nothing reports
+	// either -- the queues go on admitting, and the deployment that needed the barrier is the only
+	// thing that notices.
+	ModelDeploymentJointAdmissionCheckName = "gpustack-model-deployment-joint"
+
+	// ModelDeploymentJointAdmissionControllerName routes the check to the controller declaring it.
+	ModelDeploymentJointAdmissionControllerName = "worker.gpustack.ai/model-deployment-joint"
+)
+
+// modelDeploymentJointAdmissionCheckYAML is the AdmissionCheck that gates every group of one
+// ModelDeployment on the whole set.
+var modelDeploymentJointAdmissionCheckYAML = fmt.Sprintf(`
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: AdmissionCheck
+metadata:
+  name: %s
+  labels:
+    "app.kubernetes.io/part-of": "gpustack-operator"
+spec:
+  controllerName: %s
+`, ModelDeploymentJointAdmissionCheckName, ModelDeploymentJointAdmissionControllerName)
+
+// InstallModelDeploymentJointAdmissionCheck applies the joint-admission AdmissionCheck, retrying
+// until Kueue's CRD is established.
+//
+// It waits on the same CRD, under the same bound, and for the same reason as the node-devices check
+// above: Kueue templates its CRDs, so nothing orders them ahead of a custom resource in the same
+// render. Apply only sets spec, so it never clobbers the controller-owned Active condition.
+func InstallModelDeploymentJointAdmissionCheck(ctx context.Context) error {
+	restCfg := system.LoopbackKubeRestConfig.Get()
+
+	err := waitx.PollUntilContextTimeout(ctx,
+		nodeDevicesAdmissionCheckInterval, nodeDevicesAdmissionCheckTimeout, true,
+		func(ctx context.Context) error {
+			err := kubeappyaml.Apply(ctx, modelDeploymentJointAdmissionCheckYAML, restCfg)
+			if err != nil {
+				klog.InfoS("waiting for kueue's AdmissionCheck CRD", "err", err)
+			}
+
+			return err
+		})
+	if err != nil {
+		return fmt.Errorf("waiting for kueue's AdmissionCheck CRD: %w", err)
+	}
+
+	return nil
+}

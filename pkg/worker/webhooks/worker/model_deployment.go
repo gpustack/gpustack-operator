@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -17,8 +18,10 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/webhook"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 // ModelDeploymentWebhook validates a v1alpha1.ModelDeployment, and defaults the one field a schema
@@ -36,15 +39,21 @@ import (
 // a comparison between two entries of a list, and a collision between what a user supplies and what
 // the operator owns.
 //
-// EVERY VALIDATION RULE IS ANSWERED FROM THE OBJECT ALONE, so no validation refusal depends on
-// cluster state. The default is the one place that reads another object, and it reads it FROM THE
-// API SERVER AND NEVER FROM A CACHE. A cache decides the outcome in both directions when it is
-// behind — a type created moments ago reads as absent and refuses a deployment that names a type
-// that exists, and a type recreated under the same name reads with its old acceleratable flag and
-// writes a count from it. The second is the worse one, because the wrong value is then persisted.
+// MOST VALIDATION RULES ARE ANSWERED FROM THE OBJECT ALONE, AND TWO ARE NOT. Whether the named
+// InstanceType offers the resource mode a role asks for, and whether the role's card count fits what
+// that type hands out at once, are facts about another object. Everything else here is decided
+// without leaving the request.
 //
-// THE PRICE IS ONE CONSISTENT READ PER ADMISSION, not per role: every role of a valid deployment
-// names the same type and the reads are memoized by name. This handler runs on a user-initiated
+// WHAT READS ANOTHER OBJECT READS IT FROM THE API SERVER AND NEVER FROM A CACHE, the default and
+// those two rules alike. A cache decides the outcome in both directions when it is behind — a type
+// created moments ago reads as absent and refuses a deployment that names a type that exists, and a
+// type recreated under the same name reads with its old acceleratable flag and writes a count from
+// it. The second is the worse one, because the wrong value is then persisted.
+//
+// THE PRICE IS ONE CONSISTENT READ PER HANDLER PASS, not per role: every role of a valid deployment
+// names the same type and each pass memoizes by name. An admission therefore pays two, one for the
+// mutating half and one for the validating half, because they are separate calls and a value carried
+// between them would be a third cache with no one watching it. This handler runs on a user-initiated
 // write to one object rather than in a reconcile loop, which is what makes that the cheaper side.
 //
 // nolint: lll
@@ -76,12 +85,20 @@ var (
 // role rules are what keep an edit in that window from producing a shape nothing consumes.
 //
 // THE MARKER IS ONE DECISION COVERING BOTH HALVES, so opting validation in opts defaulting in with
-// it. Validation is answerable from the object alone and loses nothing to deletion. Defaulting is
-// not: it reads an InstanceType and refuses when that type is absent, so the update that clears the
-// finalizer would be refused whenever the type went first -- an object its own teardown can never
-// release. Default therefore declines for an object carrying a deletion timestamp, which is what the
-// guard would have done and costs nothing, since filling a count on an object that is going away
-// changes nothing.
+// it. What each half then does inside the deletion window is decided by whether it reads another
+// object, and that line does not run between the halves -- it runs through the middle of validation.
+//
+// ANY RULE THAT READS AN InstanceType DECLINES FOR AN OBJECT BEING DELETED, in both halves. Such a
+// rule refuses when the type is absent, so the update that clears the finalizer would be refused
+// whenever the type went first -- an object its own teardown can never release. Default declines
+// wholesale, since filling a count on an object that is going away changes nothing. Validation keeps
+// every rule answerable from the object alone and drops only the two that need the type, because
+// those are the rules that would strand the object, and the rest are what keep an edit in that
+// window from producing a shape nothing consumes.
+//
+// WHAT THAT COSTS IS NAMED RATHER THAN HIDDEN: an edit made while a deployment is being deleted can
+// move a role onto a mode its type does not offer. The deployment is going away, so nothing renders
+// the result, and the alternative -- refusing it -- is the deadlock above.
 func (r *ModelDeploymentWebhook) ReceiveDeletionUpdate() {}
 
 // Default fills the accelerator count a role left unset, which is one card on an acceleratable
@@ -208,11 +225,21 @@ func (r *ModelDeploymentWebhook) getInstanceType(
 }
 
 func (r *ModelDeploymentWebhook) ValidateCreate(
-	_ context.Context, obj runtime.Object,
+	ctx context.Context, obj runtime.Object,
 ) (ctrladmission.Warnings, error) {
 	md := obj.(*workercore.ModelDeployment)
 
-	if errs := validateModelDeployment(md, nil); len(errs) > 0 {
+	errs := validateModelDeployment(md, nil)
+
+	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)
+
+	typeErrs, err := r.validateRoleResourcesAgainstInstanceTypes(ctx, md)
+	if err != nil {
+		return nil, err
+	}
+	errs = append(errs, typeErrs...)
+
+	if len(errs) > 0 {
 		return nil, kerrors.NewInvalid(md.GroupVersionKind().GroupKind(), md.Name, errs)
 	}
 
@@ -220,24 +247,183 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 }
 
 func (r *ModelDeploymentWebhook) ValidateUpdate(
-	_ context.Context, oldObj, newObj runtime.Object,
+	ctx context.Context, oldObj, newObj runtime.Object,
 ) (ctrladmission.Warnings, error) {
 	md := newObj.(*workercore.ModelDeployment)
+	old, _ := oldObj.(*workercore.ModelDeployment)
 
-	// There is nothing immutable to check. An Instance's template is frozen after creation, but that
-	// is a rule the Instance webhook enforces on InstanceSpec rather than a property of any template
-	// type, so this CR simply does not carry it: a mutable template is what makes a rollout possible.
+	// WHAT THIS DEPLOYMENT IS CANNOT BE EDITED; HOW IT IS CURRENTLY RUN CAN. The fields answering the
+	// first question are refused here, and the criterion that sorts them is stated on
+	// validateModelDeploymentIdentity rather than left as the list it produces, so the next field
+	// added has a question to be judged against.
 	//
 	// The role names the object ALREADY had are carried in, and the reason is that a rule this handler
 	// gained after an object was stored must not be able to strand that object. The Service-name rule
 	// is the one that could: a deployment's own name is immutable, so a role whose combined name is
 	// too long could never be shortened, and every later edit -- including one that removes the
 	// offending role -- would be refused. That is worse than the reconcile failure the rule prevents.
-	if errs := validateModelDeployment(md, modelDeploymentRoleNames(oldObj)); len(errs) > 0 {
+	errs := validateModelDeployment(md, modelDeploymentRoleNames(oldObj))
+	errs = append(errs, validateModelDeploymentIdentity(md, old)...)
+	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)
+
+	typeErrs, err := r.validateRoleResourcesAgainstInstanceTypes(ctx, md)
+	if err != nil {
+		return nil, err
+	}
+	errs = append(errs, typeErrs...)
+
+	if len(errs) > 0 {
 		return nil, kerrors.NewInvalid(md.GroupVersionKind().GroupKind(), md.Name, errs)
 	}
 
 	return nil, nil
+}
+
+// modelDeploymentIdentityMessage is the one reason every identity refusal carries.
+//
+// IT STATES THE RULE RATHER THAN A MECHANISM, and the difference is where it sends the reader. An
+// earlier framing of this freeze was "shrink the surface two writers can disagree on"; a message
+// carrying that sends an operator hunting for a locking problem that does not exist. What they need
+// is the question the rule answers -- this value is part of what makes the object this deployment,
+// so a different value describes a different deployment, and a different deployment is created.
+const modelDeploymentIdentityMessage = "this is part of what makes this deployment the deployment " +
+	"it is: a different value describes a different deployment, which is created rather than edited"
+
+// validateModelDeploymentIdentity refuses an update that changes what the deployment IS, and admits
+// one that changes how it is currently run.
+//
+// THE CRITERION IS THE RULE, NOT THE LIST BELOW. A field is frozen when it answers "which deployment
+// is this" -- what is served, what serves it, whose cache it shares, and the shape of the roles that
+// serve it. A field is editable when it answers "how is this deployment being run right now" -- how
+// many replicas, which build, how that build is fetched and tuned. Judging a NEW field means asking
+// that question, not appending to the list; a list alone grows by precedent and stops meaning
+// anything.
+//
+// ONE FIELD IS FROZEN AGAINST THE CRITERION and is marked here so it is not read as an oversight:
+// roles[].resources does not answer which deployment this is, but it changes what admission has to
+// find. Changing it renegotiates the scheduling, which is not materially different from deleting and
+// recreating. Its mirror image is template.privileged, which the criterion leaves editable even
+// though a different argument could move it.
+//
+// ROLES ARE MATCHED BY NAME, NEVER BY POSITION. The field is a listType=map keyed by name, so a
+// reordered list is the same set of roles and the API already treats it as one; comparing by index
+// would refuse a declarative apply that changed nothing, on the one field most likely to come back
+// serialized in another order.
+//
+// THE STORED OBJECT NEEDS NO DEFAULTING PASS BEFORE THE COMPARISON, and that is a property of this
+// webhook rather than an assumption. The mutating half is registered for CREATE as well as UPDATE,
+// so every object that reached storage was defaulted on the way in and carries the same accelerator
+// count the incoming one gets. The gap -- an object stored before the default existed, which would
+// read as nil becoming one and be refused for an edit nobody made -- is closed by this API being in
+// no released version, which is the same ground Default already stands on.
+//
+// NOTHING OUTSIDE spec IS COMPARED. Labels, annotations and finalizers stay editable because the
+// controllers that write them include this operator, and status is not a user's to send.
+func validateModelDeploymentIdentity(md, old *workercore.ModelDeployment) field.ErrorList {
+	if old == nil {
+		return nil
+	}
+
+	specPath := field.NewPath("spec")
+
+	var errs field.ErrorList
+	if !kubemeta.DeepEqual(md.Spec.Model, old.Spec.Model) {
+		errs = append(errs, field.Invalid(
+			specPath.Child("model"), md.Spec.Model, modelDeploymentIdentityMessage))
+	}
+	if md.Spec.Engine != old.Spec.Engine {
+		errs = append(errs, field.Invalid(
+			specPath.Child("engine"), md.Spec.Engine, modelDeploymentIdentityMessage))
+	}
+	if !kubemeta.DeepEqual(md.Spec.KVCache, old.Spec.KVCache) {
+		errs = append(errs, field.Invalid(
+			specPath.Child("kvCache"), md.Spec.KVCache, modelDeploymentIdentityMessage))
+	}
+
+	return append(errs, validateModelDeploymentRoleIdentity(md, old)...)
+}
+
+// validateModelDeploymentRoleIdentity refuses a change to the set of roles, or to the frozen fields
+// of a role the object already carried.
+//
+// THE SET IS PART OF THE SHAPE, so adding a role and removing one are both refused, each named where
+// a reader can act on it: an added role at its own index, a removed one at the list. Iteration runs
+// over the two slices rather than over a map, so the refusals come out in a stable order and a test
+// can assert which field was named rather than only that something was.
+func validateModelDeploymentRoleIdentity(md, old *workercore.ModelDeployment) field.ErrorList {
+	rolesPath := field.NewPath("spec", "roles")
+
+	stored := make(map[string]*workercore.ModelDeploymentRole, len(old.Spec.Roles))
+	for i := range old.Spec.Roles {
+		stored[old.Spec.Roles[i].Name] = &old.Spec.Roles[i]
+	}
+
+	var errs field.ErrorList
+	incoming := sets.New[string]()
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		incoming.Insert(role.Name)
+
+		was, ok := stored[role.Name]
+		if !ok {
+			errs = append(errs, field.Invalid(
+				rolesPath.Index(i).Child("name"), role.Name, modelDeploymentIdentityMessage))
+
+			continue
+		}
+
+		errs = append(errs, validateModelDeploymentRoleIdentityFields(rolesPath.Index(i), role, was)...)
+	}
+
+	for i := range old.Spec.Roles {
+		if name := old.Spec.Roles[i].Name; !incoming.Has(name) {
+			errs = append(errs, field.Invalid(rolesPath, name, modelDeploymentIdentityMessage))
+		}
+	}
+
+	return errs
+}
+
+// validateModelDeploymentRoleIdentityFields compares one role's frozen fields against the stored
+// role of the same name.
+//
+// template.command is frozen because it decides whether the operator configures this role at all: a
+// role that supplies one is taken over by its author, which changes cache injection and what status
+// can claim. The rest of the template is how the build is fetched, shaped and tuned, and is
+// editable. template.resources has no side here because an existing rule refuses it outright, so it
+// is never part of an update in either direction.
+func validateModelDeploymentRoleIdentityFields(
+	rolePath *field.Path, role, was *workercore.ModelDeploymentRole,
+) field.ErrorList {
+	var errs field.ErrorList
+	if role.Kind != was.Kind {
+		errs = append(errs, field.Invalid(
+			rolePath.Child("kind"), role.Kind, modelDeploymentIdentityMessage))
+	}
+	if role.InstanceType != was.InstanceType {
+		errs = append(errs, field.Invalid(
+			rolePath.Child("instanceType"), role.InstanceType, modelDeploymentIdentityMessage))
+	}
+	if !kubemeta.DeepEqual(role.Resources, was.Resources) {
+		errs = append(errs, field.Invalid(
+			rolePath.Child("resources"), role.Resources, modelDeploymentIdentityMessage))
+	}
+	if cmd, wasCmd := modelDeploymentRoleCommand(role), modelDeploymentRoleCommand(was); !kubemeta.DeepEqual(cmd, wasCmd) {
+		errs = append(errs, field.Invalid(
+			rolePath.Child("template", "command"), cmd, modelDeploymentIdentityMessage))
+	}
+
+	return errs
+}
+
+// modelDeploymentRoleCommand reads a role's command through an absent template, so that a role
+// gaining a template it did not have is not reported as a command change it did not make.
+func modelDeploymentRoleCommand(role *workercore.ModelDeploymentRole) []string {
+	if role.Template == nil {
+		return nil
+	}
+
+	return role.Template.Command
 }
 
 // modelDeploymentRoleNames is the set of role names an object already carried, or nil on create.
@@ -276,7 +462,6 @@ func validateModelDeployment(
 	errs = append(errs, validateModelDeploymentRolesCount(md)...)
 	errs = append(errs, validateModelDeploymentRoleNames(md)...)
 	errs = append(errs, validateModelDeploymentRoleServiceNames(md, existingRoles)...)
-	errs = append(errs, validateModelDeploymentRoleInstanceTypes(md)...)
 	errs = append(errs, validateModelDeploymentRoleKinds(md)...)
 
 	return errs
@@ -432,61 +617,6 @@ func validateModelDeploymentRoleServiceNames(
 	}
 
 	return errs
-}
-
-// validateModelDeploymentRoleInstanceTypes refuses roles spread over two pools.
-//
-// ONE KUEUE WORKLOAD CARRIES ONE queueName, and the queue name is derived from the instanceType. So
-// two roles on two instanceTypes cannot be one pod group, and therefore cannot be admitted
-// atomically — the property this whole shape exists to provide. Kueue enforces the same rule on the
-// Pods, unretryably, so letting it through would trade a refusal here for a group that never
-// assembles.
-//
-// THE REFUSAL SAYS THAT THE THING THE USER WANTED HAS NO ANSWER, because it does not. "These roles
-// want different hardware" is the reason a user reaches for two instanceTypes, and per-role model
-// selection within one pool is not available -- so a message that only says "pick one type" reads as
-// though the goal were achievable another way. Naming the gap is what keeps the user from searching
-// for a field that is not there.
-//
-// THE ERROR IS REPORTED ON THE LIST, NOT ON A ROLE, and that is the accurate place for it. No single
-// role is wrong here: disagreement is a property of the set, and any one of the named types could be
-// the one the user meant to keep. Anchoring on roles[0] and blaming everyone who differs from it
-// inverts the report whenever the OUTLIER IS FIRST -- [A, B, B] would blame both roles that already
-// agree with each other and say nothing about the one that has to change. Naming every type that
-// appears lets the user pick, and it is one error rather than N-1.
-func validateModelDeploymentRoleInstanceTypes(md *workercore.ModelDeployment) field.ErrorList {
-	if len(md.Spec.Roles) < 2 {
-		return nil
-	}
-
-	// Insertion-ordered rather than a set, so the message lists the types the way the object does.
-	var named []string
-	seen := sets.New[string]()
-	for i := range md.Spec.Roles {
-		it := md.Spec.Roles[i].InstanceType
-		if seen.Has(it) {
-			continue
-		}
-		seen.Insert(it)
-		// UNQUOTED, because field.Invalid renders the value with %q itself: quoting here would
-		// reach the user as an escaped quote inside a quote.
-		named = append(named, it)
-	}
-	if len(named) < 2 {
-		return nil
-	}
-
-	rolesPath := field.NewPath("spec", "roles")
-
-	return field.ErrorList{field.Invalid(
-		rolesPath, strings.Join(named, ", "),
-		"every role must name the same instanceType: the roles form one Kueue Workload, one "+
-			"Workload carries one queue name, and the queue name comes from the instanceType — "+
-			"so roles on two of them cannot be admitted together at all. Pick one of the types "+
-			"above for every role. Putting roles on different accelerator models within one pool "+
-			"is not possible today; it is tracked at "+
-			"https://github.com/gpustack/gpustack-operator/issues/199",
-	)}
 }
 
 // validateModelDeploymentRoleKinds holds the two rules about what a role is told it is.
@@ -672,12 +802,10 @@ func validateModelDeploymentRoleTemplate(
 // operator's renderer resolves the pair by precedence, which would silently grant the profile and
 // discard the percentages.
 //
-// TWO OTHER RULES BELONG HERE AND ARE STILL NOT WRITTEN: that the InstanceType actually offers the
-// requested mode, and that the request fits its per-unit ceiling. What used to prevent them was
-// that this handler read nothing from the cluster. IT NOW DOES — the default reads the InstanceType
-// — so the obstacle is gone and only the work is left. Until they are written an infeasible request
-// is still refused by the admission chain's own gates rather than at the API, which is a worse
-// message but not a wrong outcome.
+// THE TWO RULES THAT NEED THE InstanceType ARE NOT HERE, and that is a property of what they read
+// rather than a split of the subject. This one is decided from the request alone, so it holds for a
+// deployment being deleted and for one whose type has not been read; the other two are in
+// validateRoleResourcesAgainstInstanceType, which is reached only when the type could be read.
 func validateModelDeploymentRoleResources(
 	role *workercore.ModelDeploymentRole, rolePath *field.Path,
 ) field.ErrorList {
@@ -701,4 +829,381 @@ func validateModelDeploymentRoleResources(
 			ressPath.Child("acceleratorSlicedCoresPercentage"),
 		),
 	)}
+}
+
+// validateRoleResourcesAgainstInstanceTypes applies the two rules that need the InstanceType a role
+// names, and is the only validation path here that reads another object.
+//
+// THE REFUSAL LANDS AT THE API INSTEAD OF DEEPER IN THE CHAIN, which is the whole of what these two
+// rules buy. Without them an infeasible request is still refused -- by the scheduling chain's own
+// gates, on a Workload, naming neither the deployment nor the field the user wrote. The outcome was
+// never wrong; the message was, and a message an operator cannot act on costs the time to find what
+// this one states.
+//
+// AN OBJECT BEING DELETED IS NOT JUDGED BY THESE TWO. A rule that reads the type refuses when the
+// type is absent, so leaving them on would let a deleted InstanceType block the very update that
+// clears this deployment's finalizer. That is the same reasoning Default states for declining
+// wholesale, applied to the part of validation that acquired the same dependency.
+//
+// A ROLE NAMING NO TYPE, OR ASKING FOR NOTHING, IS SKIPPED rather than looked up. An empty name is a
+// field error the object-only rules already report, and looking it up would fail on the request and
+// answer with a message about reading the cluster instead of about the name.
+//
+// A TYPE THAT COULD NOT BE READ STOPS THE PASS RATHER THAN BECOMING A SECOND REFUSAL. getInstanceType
+// already distinguishes a name that does not exist from a cluster that would not answer, and the
+// defaulting half raises the same error first on every path that reaches storage.
+func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstInstanceTypes(
+	ctx context.Context, md *workercore.ModelDeployment,
+) (field.ErrorList, error) {
+	if md.DeletionTimestamp != nil {
+		return nil, nil
+	}
+
+	rolesPath := field.NewPath("spec", "roles")
+
+	var errs field.ErrorList
+	seen := make(map[string]*worker.InstanceType, 1)
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		if role.InstanceType == "" || role.Resources == nil {
+			continue
+		}
+
+		instType, ok := seen[role.InstanceType]
+		if !ok {
+			var err error
+			if instType, err = r.getInstanceType(ctx, role.InstanceType, i); err != nil {
+				// A FIELD ERROR JOINS THE OTHERS INSTEAD OF ENDING THE PASS. A named type that does
+				// not exist is a fact about this object's field, and returning it bare does two
+				// things wrong: the response comes back as a plain denial rather than an Invalid
+				// naming the path, and it SHORT-CIRCUITS -- one mistyped instanceType hides every
+				// other validation error on the object, so the operator fixes one thing per apply.
+				//
+				// A TRANSPORT FAILURE IS CARRIED AS A FIELD ERROR TOO AND MUST NOT BE FOLDED IN.
+				// getInstanceType reports an unreadable API with field.InternalError, which is a
+				// *field.Error like the not-found one and means something entirely different: the
+				// object may be perfectly valid and the cluster could not be asked. Folding it in
+				// would tell the operator their object is invalid on the strength of a failed read,
+				// so it still ends the pass and the failure policy decides what happens.
+				var fieldErr *field.Error
+				if !errors.As(err, &fieldErr) || fieldErr.Type == field.ErrorTypeInternal {
+					return nil, err
+				}
+				errs = append(errs, fieldErr)
+
+				continue
+			}
+			seen[role.InstanceType] = instType
+		}
+		if !instType.Spec.Acceleratable {
+			continue
+		}
+
+		// AN UNCOMPUTED DETAIL IS A TRANSIENT REFUSAL, NOT A PERMANENT ONE. An empty detail is the
+		// not-yet-synced state rather than "this type offers no modes", and the two are told apart by
+		// the same helper the Instance webhook asks -- a second reading of the same emptiness is what
+		// would let them drift. Written without it, a valid deployment applied in the seconds after
+		// its pool appears is refused for a mode the type does in fact offer, and the user's fix is
+		// to wait, which a field error does not say.
+		if slicingRequestNotReady(instType, roleInstanceResources(role.Resources)) {
+			return nil, kerrors.NewInternalError(
+				fmt.Errorf("instance type %s is not ready yet; retry", instType.Name))
+		}
+
+		errs = append(errs, validateRoleResourcesAgainstInstanceType(
+			instType, role.Resources, rolesPath.Index(i).Child("resources"))...)
+	}
+
+	return append(errs, validateModelDeploymentPairCannotShareOneAccelerator(md, seen, rolesPath)...), nil
+}
+
+// validateModelDeploymentPairCannotShareOneAccelerator refuses a prefill and a decode role that both
+// ask for a logical slice of an accelerator their two InstanceTypes can both select.
+//
+// THE PAIR EXISTS TO SEPARATE TWO WORKLOADS THAT CONTEND, so letting both hold a slice of ONE card
+// undoes the split while the object still reads as disaggregated. Nothing errors: the replicas start,
+// they serve, and the prefiller's bursts land on the same silicon the decoder is streaming from.
+//
+// THE QUALIFIER IS A DISJOINT ACCELERATOR POPULATION, AND TWO DIFFERENT NAMES DO NOT ESTABLISH ONE.
+// An admin can author an InstanceType against an acceleratorGroup a derived type already covers, and
+// the two are then two views of one accelerator. A rule keyed on the names being different leaves
+// open precisely the case it was written to close, and one with no qualifier at all over-refuses:
+// it blocks the heterogeneous shape that roles on two instanceTypes exist to enable.
+//
+// A PARTITIONED PAIR IS ACCEPTED EVEN ON ONE CARD. Hardware partitions are isolated from each other
+// by the device, which is the property this rule is about; a logical slice is not, and that is the
+// whole difference. A whole-card pair is accepted for the same reason at a coarser grain.
+//
+// A SINGLE-ROLE DEPLOYMENT IS UNAFFECTED. This is a statement about a pair, and a lone role sharing
+// a card with itself is what a slice is for.
+//
+// EVERY PREFILL IS COMPARED WITH EVERY DECODE, because a deployment may declare more than one role of
+// either kind: the kind rule refuses only mixing a server role with the others, not two prefillers.
+// Keeping one role per kind would compare whichever pair happened to be declared last and admit a
+// violating pair declared anywhere before it.
+func validateModelDeploymentPairCannotShareOneAccelerator(
+	md *workercore.ModelDeployment,
+	types map[string]*worker.InstanceType,
+	rolesPath *field.Path,
+) field.ErrorList {
+	var prefills, decodes []*workercore.ModelDeploymentRole
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		if !roleRequestsALogicalSlice(role) {
+			continue
+		}
+		switch role.Kind {
+		case workercore.ModelDeploymentRoleKindPrefill:
+			prefills = append(prefills, role)
+		case workercore.ModelDeploymentRoleKindDecode:
+			decodes = append(decodes, role)
+		}
+	}
+
+	var errs field.ErrorList
+	for _, prefill := range prefills {
+		prefillType := types[prefill.InstanceType]
+		if prefillType == nil {
+			// A type that could not be read, or a role naming none: the rules that report those have
+			// already done so, and answering this question from half the pair would be a guess.
+			continue
+		}
+		for _, decode := range decodes {
+			decodeType := types[decode.InstanceType]
+			// AN UNSET GROUP IS UNKNOWN, NOT A GROUP THAT TWO TYPES SHARE. The InstanceType webhook
+			// requires the field on an acceleratable type, but only objects that passed that rule
+			// carry it, and two empty strings comparing equal would refuse a pair on the strength of
+			// what neither type says. Refusing a valid deployment because a field is blank is the
+			// wrong way for this rule to be wrong: it blocks the shape the split exists to enable,
+			// and the operator has nothing to edit, since instanceType is frozen.
+			if decodeType == nil ||
+				prefillType.Spec.AcceleratorGroup == "" || decodeType.Spec.AcceleratorGroup == "" ||
+				prefillType.Spec.AcceleratorGroup != decodeType.Spec.AcceleratorGroup {
+				continue
+			}
+
+			errs = append(errs, field.Invalid(
+				rolesPath, prefill.Name+", "+decode.Name,
+				fmt.Sprintf(
+					"roles %q and %q both request a logical slice, and instance types %q and %q draw from "+
+						"the same accelerator group %q — so the two can land on one card, which is what the "+
+						"prefill/decode split exists to prevent. Give one of them an instance type over a "+
+						"different accelerator group, or request whole cards or hardware partition profiles, "+
+						"which are isolated by the device",
+					prefill.Name, decode.Name,
+					prefill.InstanceType, decode.InstanceType, prefillType.Spec.AcceleratorGroup,
+				),
+			))
+		}
+	}
+
+	return errs
+}
+
+// validateModelDeploymentBarrierIsInstallable refuses a deployment whose roles span several
+// instanceTypes when nothing in the cluster can gate the set.
+//
+// SEVERAL instanceTypes ARE SEVERAL POD GROUPS AND SEVERAL WORKLOADS, and Kueue's own atomicity
+// covers one group. What relates them is the joint-admission check, and that check reaches a Workload
+// only through a ClusterQueue that references it -- which the queue reconciler does only while the
+// derived-from-node setting is on. With it off an administrator authors queues through the
+// InstanceType API, no queue carries the check, and the barrier is not installed anywhere.
+//
+// THE SHAPE IS REFUSED RATHER THAN ADMITTED UNGUARDED. Admitting it would let a prefiller start and
+// serve while its decoder waits for capacity that never arrives -- a deployment that reads as
+// half-started and is in fact never going to finish, with nothing naming the reason. A refusal at the
+// API names the setting, which is the one thing the operator can act on.
+//
+// A SINGLE-instanceType DEPLOYMENT IS UNAFFECTED whatever the setting says: it is one group, and one
+// group is admitted as a unit by Kueue without help from anything here.
+func validateModelDeploymentBarrierIsInstallable(
+	ctx context.Context, md *workercore.ModelDeployment,
+) field.ErrorList {
+	// A DEPLOYMENT BEING DELETED IS NOT ASKING TO BE ADMITTED, and refusing it strands the object.
+	// This rule reads cluster state, so it can start refusing an object that was accepted: a
+	// multi-instanceType deployment created while the setting was on is refused by this rule the
+	// moment the setting goes off. Validation still runs during the deletion window, so the update
+	// that clears the finalizer is refused too -- and since instanceType is frozen, the operator
+	// cannot edit their way out of it either. The object then has no reachable state from which it
+	// can be removed.
+	//
+	// IT IS THE SAME GATE THE TYPE-READING RULES TAKE, for the same reason rather than by analogy: a
+	// rule whose answer depends on something outside the object must not be able to hold that object
+	// hostage. What it costs is named rather than hidden -- an edit made while a deployment is being
+	// deleted can produce a multi-instanceType shape the cluster cannot gate. Nothing renders it,
+	// because the deployment is going away.
+	if md.DeletionTimestamp != nil {
+		return nil
+	}
+
+	types := sets.New[string]()
+	for i := range md.Spec.Roles {
+		types.Insert(md.Spec.Roles[i].InstanceType)
+	}
+	if types.Len() < 2 {
+		return nil
+	}
+
+	if settings.InstanceTypeDerivedFromNode.ShouldValueBool(ctx) {
+		return nil
+	}
+
+	return field.ErrorList{field.Forbidden(
+		field.NewPath("spec", "roles"),
+		"roles on several instance types are several Kueue workloads, and what admits them together "+
+			"is an admission check referenced from the queues this operator derives. The "+
+			"instance-type-derived-from-node setting is off, so no queue carries it and the "+
+			"deployment could start one role and never the other. Put every role on one instance "+
+			"type, or turn that setting on",
+	)}
+}
+
+// roleRequestsALogicalSlice reports whether a role asks for a fraction of a card in software.
+//
+// Either percentage alone is a slice request: the defaulting half copies one into the other, so a
+// rule reading only the memory one would miss a compute-only request entirely.
+func roleRequestsALogicalSlice(role *workercore.ModelDeploymentRole) bool {
+	ress := role.Resources
+
+	return ress != nil &&
+		(ress.AcceleratorSlicedMemoryPercentage != 0 || ress.AcceleratorSlicedCoresPercentage != 0)
+}
+
+// roleInstanceResources projects a role's request onto the accelerator fields of InstanceResources.
+//
+// It exists so the readiness question is asked through the helper that already answers it for an
+// Instance, rather than by a second reading of the same emptiness that could come to disagree.
+// ModelDeploymentRoleResources mirrors those fields by name and by meaning, which is what makes this
+// a rename rather than a translation -- and the reason the projection carries no CPU, RAM or local
+// storage is that a role does not declare them.
+func roleInstanceResources(ress *workercore.ModelDeploymentRoleResources) *workercore.InstanceResources {
+	return &workercore.InstanceResources{
+		Accelerator:                       ress.Accelerator,
+		AcceleratorSlicedMemoryPercentage: ress.AcceleratorSlicedMemoryPercentage,
+		AcceleratorSlicedCoresPercentage:  ress.AcceleratorSlicedCoresPercentage,
+		AcceleratorPartitionedProfile:     ress.AcceleratorPartitionedProfile,
+	}
+}
+
+// validateRoleResourcesAgainstInstanceType refuses a request the named InstanceType cannot serve:
+// one asking for a mode it does not offer, and one asking for more cards than it hands out at once.
+//
+// THE MODE IS DECIDED BY WHAT THE REQUEST NAMES, not by what the type has. A partition profile makes
+// the request a partitioned one, a non-zero percentage makes it a sliced one, and a request naming
+// neither is a whole-card one that every acceleratable type offers. The pair naming both is refused
+// before this by the rule that owns that contradiction, so the branches here do not overlap.
+//
+// BOTH REFUSALS NAME THE TYPE, because the field alone does not locate the problem: the same request
+// is correct against another type, and what the operator has to change is one of the two.
+func validateRoleResourcesAgainstInstanceType(
+	instType *worker.InstanceType,
+	ress *workercore.ModelDeploymentRoleResources,
+	ressPath *field.Path,
+) field.ErrorList {
+	var errs field.ErrorList
+
+	switch {
+	case ress.AcceleratorPartitionedProfile != "":
+		errs = append(errs, validateRolePartitionProfileOffered(instType, ress, ressPath)...)
+		errs = append(errs, validateRoleSingleCardRequest(ress, "partitioned", ressPath)...)
+	case ress.AcceleratorSlicedMemoryPercentage != 0 || ress.AcceleratorSlicedCoresPercentage != 0:
+		// A pool with no logically sliceable card cannot serve the request at all: admitted, such a
+		// role stays Pending forever rather than being reshaped into a whole-card one.
+		if !instType.Status.Detail.IsLogicallySliceable() {
+			errs = append(errs, field.Forbidden(
+				ressPath.Child("acceleratorSlicedMemoryPercentage"),
+				fmt.Sprintf("instance type %s does not offer logical slicing", instType.Name)))
+		}
+		errs = append(errs, validateRoleSingleCardRequest(ress, "sliced", ressPath)...)
+	default:
+		// THE WHOLE-CARD CEILING BOUNDS A WHOLE-CARD REQUEST AND NOTHING ELSE, which is why it sits
+		// inside this branch. status.accelerator.onceMaxRequest is the whole-card view and counts
+		// FREE UNPARTITIONED cards, so a pool whose cards are all partitioned reports zero there
+		// while its partitioned view serves requests all day. Applied to every mode it refuses a
+		// valid partitioned or sliced role with "hands out at most 0 accelerator(s) at once" -- a
+		// sentence that misdescribes the type rather than the request.
+		//
+		// AND THE REFUSED VALUE IS ONE THIS WEBHOOK WROTE. A role that names no count is defaulted to
+		// one card by the mutating half, so the operator never typed the number the rule rejects and
+		// has nothing to correct. A refusal nobody can act on is worse than no rule.
+		//
+		// The Instance webhook already draws the line here: validateExclusiveAcceleratorRequest is
+		// reached on the whole-card path only.
+		//
+		// THE CEILING IS CARRIED IN THE MESSAGE rather than left for the reader to look up. "Exceeds
+		// the maximum" states that the request was wrong; the number states what would be right, and
+		// the difference is whether the next attempt is a guess.
+		if ress.Accelerator != nil {
+			if ceiling := instType.Status.Accelerator.OnceMaxRequest; ress.Accelerator.Cmp(ceiling) > 0 {
+				errs = append(errs, field.Invalid(
+					ressPath.Child("accelerator"), ress.Accelerator.String(),
+					fmt.Sprintf("instance type %s hands out at most %s accelerator(s) at once",
+						instType.Name, ceiling.String())))
+			}
+		}
+	}
+
+	return errs
+}
+
+// validateRoleSingleCardRequest refuses a sliced or partitioned role that asks for more than one
+// card.
+//
+// A SLICE IS A FRACTION OF ONE CARD AND A PARTITION IS ONE INSTANCE ON ONE CARD, so the size of the
+// request is carried by the percentages or the profile name and the card count is always one. Two
+// cards at fifty percent each describes nothing the scheduler can place, and the resource key the
+// controller emits for it is a per-card one either way.
+//
+// IT IS WHAT BOUNDS THESE MODES NOW THAT THE WHOLE-CARD CEILING DOES NOT. The Instance webhook has
+// drawn this line all along, with validateSingleCardRequest on exactly these two paths; the rule was
+// simply missing here, and its absence was hidden because the whole-card ceiling happened to refuse
+// the same over-large requests for the wrong reason -- while refusing correct one-card requests too.
+func validateRoleSingleCardRequest(
+	ress *workercore.ModelDeploymentRoleResources, kind string, ressPath *field.Path,
+) field.ErrorList {
+	one := resource.NewQuantity(1, resource.DecimalSI)
+	if ress.Accelerator != nil && ress.Accelerator.Cmp(*one) == 0 {
+		return nil
+	}
+
+	got := "0"
+	if ress.Accelerator != nil {
+		got = ress.Accelerator.String()
+	}
+
+	return field.ErrorList{field.Invalid(
+		ressPath.Child("accelerator"), got,
+		fmt.Sprintf("accelerator request must be exactly 1 for a %s request", kind))}
+}
+
+// validateRolePartitionProfileOffered checks a partition request against the profiles the pool
+// reports.
+//
+// THE MISSING CAPABILITY IS REPORTED BEFORE THE PROFILE LOOKUP. A pool whose cards are not in a
+// partitioning mode offers an empty profile set, and reporting that as "this profile is not offered"
+// reads as a typo -- sending the operator to correct a name that was never the problem.
+func validateRolePartitionProfileOffered(
+	instType *worker.InstanceType,
+	ress *workercore.ModelDeploymentRoleResources,
+	ressPath *field.Path,
+) field.ErrorList {
+	profilePath := ressPath.Child("acceleratorPartitionedProfile")
+
+	if !instType.Status.Detail.IsPhysicallySliceable() {
+		return field.ErrorList{field.Forbidden(profilePath,
+			fmt.Sprintf("instance type %s does not offer hardware partitioning", instType.Name))}
+	}
+
+	profiles := instType.Status.Detail.SlicedDetail.Physical.Profiles
+	offered := make([]string, 0, len(profiles))
+	for _, p := range profiles {
+		if p.Name == ress.AcceleratorPartitionedProfile {
+			return nil
+		}
+		offered = append(offered, p.Name)
+	}
+
+	return field.ErrorList{field.Invalid(profilePath, ress.AcceleratorPartitionedProfile,
+		fmt.Sprintf("instance type %s does not offer this partition profile; offered: %v",
+			instType.Name, offered))}
 }

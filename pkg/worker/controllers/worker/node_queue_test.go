@@ -644,3 +644,90 @@ func TestNodeQueueReconciler_IgnoresTerminatingFlavor(t *testing.T) {
 			"only the live flavor feeds the queue; the terminating one is dropped")
 	})
 }
+
+// jointCheck builds the joint-admission AdmissionCheck, Active or not.
+func jointCheck(active bool) *kueue.AdmissionCheck {
+	ac := &kueue.AdmissionCheck{
+		ObjectMeta: meta.ObjectMeta{Name: _JointAdmissionCheckName},
+		Spec:       kueue.AdmissionCheckSpec{ControllerName: _JointAdmissionControllerName},
+	}
+	if active {
+		ac.Status.Conditions = []meta.Condition{{
+			Type:   kueue.AdmissionCheckActive,
+			Status: meta.ConditionTrue,
+			Reason: "Ready",
+		}}
+	}
+
+	return ac
+}
+
+// TestNodeQueueReconciler_ReferencesTheJointCheckFromEveryQueue pins the difference that makes the
+// joint barrier whole.
+//
+// THE CPU-ONLY QUEUE IS THE CASE, AND IT IS THE ONLY ONE THAT DISCRIMINATES. The node-devices
+// reference is gated on `acceleratable`; borrowing that gate here would look correct on every
+// accelerated queue and leave a multi-group deployment's CPU-pool group ungated -- a barrier with a
+// hole in it, opening for exactly the deployment it was supposed to hold.
+func TestNodeQueueReconciler_ReferencesTheJointCheckFromEveryQueue(t *testing.T) {
+	enableInstanceTypeDerivedFromNode(t)
+
+	cases := []struct {
+		name          string
+		acceleratable bool
+	}{
+		{name: "accelerated_queue", acceleratable: true},
+		{name: "cpu_only_queue", acceleratable: false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			key := "nvidia-a10g"
+			if !c.acceleratable {
+				key = "generic"
+			}
+			name := nodeQueueName(key)
+
+			opts := []flavorOpt{}
+			if c.acceleratable {
+				opts = append(opts, accelerated(nodefeature.ManufacturerNVIDIA))
+			}
+			rf := newNodesFlavor("gpustack-"+key+"-linux-amd64-1d", key, 1, 4, opts...)
+
+			cli := buildNodeQueueClient(
+				newInstanceTypeQueue(key, c.acceleratable), rf, jointCheck(true))
+
+			reconcileNodeQueueN(t, cli, name, 2)
+
+			got, err := getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			require.NotNil(t, got.Spec.AdmissionChecksStrategy,
+				"every operator-owned queue carries the joint check, accelerated or not")
+
+			var found bool
+			for _, rule := range got.Spec.AdmissionChecksStrategy.AdmissionChecks {
+				if rule.Name == kueue.AdmissionCheckReference(_JointAdmissionCheckName) {
+					found = true
+				}
+			}
+			assert.True(t, found, "the joint check is referenced from a %s queue", c.name)
+		})
+	}
+}
+
+// TestNodeQueueReconciler_TheJointCheckWaitsForActive is the other half: Kueue turns a queue listing
+// an inactive check inactive, so referencing one that is not Active would stop the queue admitting
+// anything at all -- the opposite of what a barrier is for.
+func TestNodeQueueReconciler_TheJointCheckWaitsForActive(t *testing.T) {
+	enableInstanceTypeDerivedFromNode(t)
+
+	key := "generic"
+	rf := newNodesFlavor("gpustack-generic-linux-amd64-1d", key, 1, 4)
+	cli := buildNodeQueueClient(newInstanceTypeQueue(key, false), rf, jointCheck(false))
+
+	reconcileNodeQueueN(t, cli, nodeQueueName(key), 2)
+
+	got, err := getClusterQueue(t, cli, nodeQueueName(key))
+	require.NoError(t, err)
+	assert.Nil(t, got.Spec.AdmissionChecksStrategy, "an inactive check is not referenced")
+}

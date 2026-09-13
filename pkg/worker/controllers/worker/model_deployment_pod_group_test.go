@@ -12,6 +12,7 @@ import (
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -55,7 +56,8 @@ func TestModelDeploymentPodGroup(t *testing.T) {
 			"reaches its declared total")
 
 	assert.Equal(t, "4", prefill.Annotations[kueuepodconst.GroupTotalCountAnnotation],
-		"the total is over the whole deployment, not over the role")
+		"the total is over the group, not over the role -- and these two roles share one instanceType, "+
+			"so the group is the whole deployment")
 	assert.Equal(t, prefill.Annotations[kueuepodconst.GroupTotalCountAnnotation],
 		decode.Annotations[kueuepodconst.GroupTotalCountAnnotation])
 
@@ -180,7 +182,7 @@ func TestModelDeploymentPodGroupName_HashCoversTheNamespace(t *testing.T) {
 	assert.NotEqual(t, modelDeploymentPodGroupName(here), modelDeploymentPodGroupName(there))
 }
 
-// TestModelDeploymentPodGroupTotalCount covers the sum the group declares.
+// TestModelDeploymentPodGroupTotalCount covers the sum a group declares.
 func TestModelDeploymentPodGroupTotalCount(t *testing.T) {
 	testCases := []struct {
 		name string
@@ -207,11 +209,25 @@ func TestModelDeploymentPodGroupTotalCount(t *testing.T) {
 			}),
 			want: 2,
 		},
+		{
+			// Replicas is summed VERBATIM rather than defaulted to one: the schema defaults and
+			// bounds the field, so a zero reaches here only from a value built in Go -- and a total
+			// disagreeing with the number of Pods the reconciler creates from the same field would be
+			// worse than a zero.
+			name: "a_zero_is_summed_as_written",
+			md: podGroupDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[1].Replicas = 0
+			}),
+			want: 2,
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, modelDeploymentPodGroupTotalCount(tc.md))
+			groups := modelDeploymentPodGroups(tc.md)
+
+			require.Len(t, groups, 1, "every role here names one instanceType")
+			assert.Equal(t, tc.want, groups[0].TotalCount)
 		})
 	}
 }
@@ -314,6 +330,316 @@ func TestDeleteModelDeploymentGroupWorkload(t *testing.T) {
 				left = append(left, list.Items[i].Name)
 			}
 			assert.ElementsMatch(t, tc.want, left, tc.why)
+		})
+	}
+}
+
+// twoTypeDeployment is prefill 2 and decode 3 on two instanceTypes, the shape the split exists for.
+func twoTypeDeployment(mutate ...func(*workercore.ModelDeployment)) *workercore.ModelDeployment {
+	md := podGroupDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[1].Replicas = 3
+		md.Spec.Roles[1].InstanceType = "a100-8x"
+	})
+	for _, m := range mutate {
+		m(md)
+	}
+
+	return md
+}
+
+// TestModelDeploymentPodGroups covers the set of groups a deployment forms.
+//
+// THE GROUPING KEY IS THE instanceType AND NOT THE ROLE, and the three-role case is what says so: an
+// implementation keyed on the role passes every other case here and produces three groups for it.
+//
+// THE SINGLE-TYPE CASE IS A REGRESSION BASELINE, not evidence of the feature. It passes against the
+// code that had no notion of a group set at all, which is exactly why it is here.
+func TestModelDeploymentPodGroups(t *testing.T) {
+	type group struct {
+		instanceType string
+		total        int32
+	}
+
+	cases := []struct {
+		name string
+		md   *workercore.ModelDeployment
+		want []group
+	}{
+		{
+			name: "one_type_two_roles",
+			md:   podGroupDeployment(),
+			want: []group{{"h20-8x", 4}},
+		},
+		{
+			name: "two_types_one_role_each",
+			md:   twoTypeDeployment(),
+			want: []group{{"h20-8x", 2}, {"a100-8x", 3}},
+		},
+		{
+			// Two roles on one type and a third on another are TWO groups, and the first group's
+			// total counts both of its roles.
+			name: "three_roles_two_types",
+			md: twoTypeDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
+					Name: "prefill-2", Replicas: 5, InstanceType: "h20-8x",
+				})
+			}),
+			want: []group{{"h20-8x", 7}, {"a100-8x", 3}},
+		},
+		{
+			// The order is first mention, so a type named again later does not move.
+			name: "order_is_first_mention",
+			md: podGroupDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles = []workercore.ModelDeploymentRole{
+					{Name: "a", Replicas: 1, InstanceType: "a100-8x"},
+					{Name: "b", Replicas: 1, InstanceType: "h20-8x"},
+					{Name: "c", Replicas: 1, InstanceType: "a100-8x"},
+				}
+			}),
+			want: []group{{"a100-8x", 2}, {"h20-8x", 1}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			groups := modelDeploymentPodGroups(tc.md)
+
+			got := make([]group, 0, len(groups))
+			for _, g := range groups {
+				got = append(got, group{g.InstanceType, g.TotalCount})
+			}
+			assert.Equal(t, tc.want, got, "one group per instanceType, in the order the roles name them")
+		})
+	}
+}
+
+// TestModelDeploymentPodGroups_NamesAreUniqueAndStable covers the identity half.
+//
+// A name that was unique per deployment has to become unique per deployment AND instanceType: two
+// groups sharing one would be read by Kueue as one group, each waiting for the other's Pods.
+func TestModelDeploymentPodGroups_NamesAreUniqueAndStable(t *testing.T) {
+	md := twoTypeDeployment()
+
+	first := modelDeploymentPodGroups(md)
+	require.Len(t, first, 2)
+	assert.NotEqual(t, first[0].Name, first[1].Name,
+		"two groups sharing a name are one group to Kueue, and neither reaches its total")
+
+	second := modelDeploymentPodGroups(md)
+	assert.Equal(t, first, second, "the name is written into Pods, so two passes must agree")
+
+	for _, g := range first {
+		assert.Empty(t, validation.IsValidLabelValue(g.Name), "the name goes in a label value")
+	}
+
+	// The same type under a different deployment is a different group.
+	other := twoTypeDeployment(func(md *workercore.ModelDeployment) { md.Name = "qwen-7b" })
+	assert.NotEqual(t, first[0].Name, modelDeploymentPodGroups(other)[0].Name)
+
+	// And the same deployment name in another namespace likewise.
+	elsewhere := twoTypeDeployment(func(md *workercore.ModelDeployment) { md.Namespace = "team-b" })
+	assert.NotEqual(t, first[0].Name, modelDeploymentPodGroups(elsewhere)[0].Name)
+}
+
+// TestModelDeploymentPodGroups_ASoleGroupKeepsTheReadableName pins that the split did not rename the
+// case that existed before it. The fixtures assert this through the rendered Pod; this asserts it on
+// the function, so a failure says which of the two moved.
+func TestModelDeploymentPodGroups_ASoleGroupKeepsTheReadableName(t *testing.T) {
+	groups := modelDeploymentPodGroups(podGroupDeployment())
+
+	require.Len(t, groups, 1)
+	assert.Equal(t, "qwen-72b", groups[0].Name, "one group keeps the deployment's own name")
+
+	// A deployment with several groups does not, and the reason is collision rather than taste: a
+	// readable composite would share a namespace with deployment names.
+	for _, g := range modelDeploymentPodGroups(twoTypeDeployment()) {
+		assert.True(t, strings.HasPrefix(g.Name, modelDeploymentPodGroupNamePrefix),
+			"a derived name carries the prefix that says it was derived: %s", g.Name)
+	}
+}
+
+// TestModelDeploymentPodGroup_StampsTheRolesOwnGroup covers what reaches a Pod when there are two
+// groups: each role's replicas must carry THEIR group's name and THEIR group's total.
+func TestModelDeploymentPodGroup_StampsTheRolesOwnGroup(t *testing.T) {
+	md := twoTypeDeployment()
+
+	prefill := ModelDeploymentPodGroup(md, &md.Spec.Roles[0])
+	decode := ModelDeploymentPodGroup(md, &md.Spec.Roles[1])
+
+	assert.NotEqual(t, prefill.Labels[kueuepodconst.GroupNameLabel],
+		decode.Labels[kueuepodconst.GroupNameLabel],
+		"two instanceTypes cannot be one Workload, because one Workload carries one queue name")
+
+	assert.Equal(t, "2", prefill.Annotations[kueuepodconst.GroupTotalCountAnnotation],
+		"a group claiming the deployment-wide total waits for Pods that are never coming")
+	assert.Equal(t, "3", decode.Annotations[kueuepodconst.GroupTotalCountAnnotation])
+
+	// The role hash stays the role's name and does not gain the type: Kueue groups PodSets by it and
+	// status reads it to attribute a Pod.
+	assert.Equal(t, "prefill", prefill.Annotations[kueuepodconst.RoleHashAnnotation])
+	assert.Equal(t, "decode", decode.Annotations[kueuepodconst.RoleHashAnnotation])
+}
+
+// TestModelDeploymentGroupsResizing covers the predicate the converge loop reads.
+//
+// EACH POD IS JUDGED AGAINST ITS OWN GROUP'S TOTAL. Against the deployment-wide sum a two-group
+// deployment reads as resizing on every pass forever -- a rebuild loop rather than a wrong number,
+// and one that nothing reports.
+//
+// THE ANSWER IS A SET, AND WHICH GROUPS ARE IN IT IS THE ASSERTION. A predicate that named every
+// group whenever any one moved would pass a test asserting only "something is resizing", while
+// restarting roles that nothing asked to restart.
+func TestModelDeploymentGroupsResizing(t *testing.T) {
+	// A REPLICA AS THE RENDERER WOULD HAVE PRODUCED IT, taken from the same function that stamps the
+	// group metadata onto a real Pod rather than from literals written here.
+	//
+	// THE FORMAT OF THESE ANNOTATIONS IS OWNED BY NEITHER SIDE OF THE PAIR THIS TEST EXERCISES. The
+	// renderer formats the total, and the predicate below formats what it expects, in two separate
+	// expressions that agree today by coincidence. With literals in this fixture, a renderer that
+	// changed the format would keep its own tests green -- they would be updated with it -- while
+	// this one went on comparing the old spelling, and both halves would pass while the reconciler
+	// rebuilt every group on every pass forever. Coverage shows both sides covered, and mutating
+	// either implementation goes red; only changing the FORMAT slips through, because the format has
+	// no owner. Sourcing the fixture from the renderer gives it one.
+	//
+	// The disagreeing cases perturb a rendered replica rather than hand-building one, so what they
+	// vary is visible as a difference from what the spec asks for.
+	rendered := func(md *workercore.ModelDeployment, roleName string) core.Pod {
+		var role *workercore.ModelDeploymentRole
+		for i := range md.Spec.Roles {
+			if md.Spec.Roles[i].Name == roleName {
+				role = &md.Spec.Roles[i]
+			}
+		}
+		require.NotNil(t, role, "no role %q on this fixture deployment", roleName)
+
+		meta := ModelDeploymentPodGroup(md, role)
+		p := core.Pod{}
+		p.Labels = map[string]string{modelDeploymentLabelKeyComponent: roleName}
+		for k, v := range meta.Labels {
+			p.Labels[k] = v
+		}
+		p.Annotations = map[string]string{}
+		for k, v := range meta.Annotations {
+			p.Annotations[k] = v
+		}
+
+		return p
+	}
+
+	// perturbed renders the replica and then overrides one annotation, which is how a Pod that
+	// disagrees with the spec arises in a cluster: it was rendered against an earlier spec.
+	perturbed := func(p core.Pod, key, value string) core.Pod {
+		if value == "" {
+			delete(p.Annotations, key)
+		} else {
+			p.Annotations[key] = value
+		}
+
+		return p
+	}
+
+	// A replica sitting in a group its role does not belong to, which is what a role moved between
+	// instance types leaves behind. Only the membership label moves; everything else is as rendered.
+	inGroup := func(p core.Pod, group string) core.Pod {
+		p.Labels[kueuepodconst.GroupNameLabel] = group
+
+		return p
+	}
+
+	// A replica of a role the deployment no longer declares: it was rendered when the role existed,
+	// so everything about it is as the renderer left it and only its role is now unknown.
+	renamedRole := func(p core.Pod, role string) core.Pod {
+		p.Labels[modelDeploymentLabelKeyComponent] = role
+
+		return p
+	}
+
+	// The single-group shape the cases below render from. It is built once so that a case whose
+	// deployment has MOVED ON still renders its replicas from the shape they were created under,
+	// which is what a Pod disagreeing with its spec actually is.
+	one := podGroupDeployment()
+
+	// The two-type shape's group names are hashes, so the cases name them through the function that
+	// derives them rather than by writing a hash into the test.
+	two := twoTypeDeployment()
+	twoGroups := modelDeploymentPodGroups(two)
+	require.Len(t, twoGroups, 2)
+	prefillGroup, decodeGroup := twoGroups[0].Name, twoGroups[1].Name
+
+	cases := []struct {
+		name string
+		md   *workercore.ModelDeployment
+		pods []core.Pod
+		want []string
+	}{
+		{
+			name: "one_group_agreeing",
+			md:   one,
+			pods: []core.Pod{rendered(one, "prefill"), rendered(one, "decode")},
+		},
+		{
+			// THE CASE THE DEPLOYMENT-WIDE SUM FAILS: each Pod carries its own group's total, and a
+			// predicate reading the sum of both groups matches neither.
+			name: "two_groups_agreeing",
+			md:   two,
+			pods: []core.Pod{rendered(two, "prefill"), rendered(two, "decode")},
+		},
+		{
+			// ONLY THE GROUP THAT MOVED. The sibling agrees with its own total and must be left alone;
+			// a boolean predicate would restart it too.
+			name: "two_groups_one_moved",
+			md:   two,
+			pods: []core.Pod{
+				perturbed(rendered(two, "prefill"), kueuepodconst.GroupTotalCountAnnotation, "9"),
+				rendered(two, "decode"),
+			},
+			want: []string{prefillGroup},
+		},
+		{
+			// A role that moved onto another instanceType: the group it LEAVES and the group it JOINS
+			// both come down, and neither name is derivable from the other.
+			name: "a_role_moved_between_types",
+			md:   two,
+			pods: []core.Pod{
+				inGroup(perturbed(rendered(two, "prefill"),
+					kueuepodconst.GroupTotalCountAnnotation, "3"), decodeGroup),
+				rendered(two, "decode"),
+			},
+			want: []string{decodeGroup, prefillGroup},
+		},
+		{
+			// The sum is unchanged at 4 while the split moved, which is what the per-role share is
+			// beside the total for.
+			name: "shares_moved_under_an_unchanged_total",
+			md: podGroupDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Replicas, md.Spec.Roles[1].Replicas = 1, 3
+			}),
+			pods: []core.Pod{rendered(one, "prefill"), rendered(one, "decode")},
+			want: []string{"qwen-72b"},
+		},
+		{
+			name: "a_pod_predating_the_annotations",
+			md:   one,
+			pods: []core.Pod{
+				perturbed(perturbed(rendered(one, "prefill"),
+					kueuepodconst.GroupTotalCountAnnotation, ""),
+					modelDeploymentRoleReplicasAnnotation, ""),
+			},
+			want: []string{"qwen-72b"},
+		},
+		{
+			name: "a_pod_of_a_role_the_deployment_no_longer_has",
+			md:   one,
+			pods: []core.Pod{renamedRole(rendered(one, "prefill"), "gone")},
+			want: []string{"qwen-72b"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.ElementsMatch(t, tc.want,
+				sets.List(modelDeploymentGroupsResizing(tc.md, tc.pods)))
 		})
 	}
 }

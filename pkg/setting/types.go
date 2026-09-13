@@ -111,6 +111,18 @@ func (s Setting) Configure(ctx context.Context, newVal string) error {
 // which is used to reduce the number of API calls to the Kubernetes API server.
 var _Cache = cache.New(30*time.Second, cache.NoExpiration)
 
+// InvalidateCache drops every cached setting value, so the next read goes back to the delegated
+// secret.
+//
+// IT EXISTS FOR TESTS THAT COVER BOTH SIDES OF A SETTING, and without it they cannot. A successful
+// read caches for thirty seconds, and a failed one does not cache at all, so the first case in a
+// binary that seeds a value decides what every later case reads — a test asserting the "off"
+// behavior then passes or fails on the order the cases happen to run in, which is not a property
+// anything declares. The operator itself never calls this: a running process wants the cache.
+func InvalidateCache() {
+	_Cache.Flush()
+}
+
 // ValueFromRemote returns the value of the setting by directly accessing the delegated secret in Kubernetes API server,
 // which is used for remote access and does not involve the controller-runtime client cache.
 //
