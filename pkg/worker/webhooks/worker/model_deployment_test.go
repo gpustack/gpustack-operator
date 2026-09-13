@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -20,6 +21,7 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
 // modelDeployment builds a valid single-role deployment for the given engine, which every case then
@@ -535,6 +537,55 @@ func acceleratableInstanceType(name string, acceleratable bool) *worker.Instance
 	}
 }
 
+// servingInstanceType is an acceleratable InstanceType whose status the reconciler has computed: a
+// non-empty Manufacturer is what marks the detail ready, and the ceiling is what the pool hands out
+// at once.
+//
+// It offers NEITHER slicing NOR partitioning unless an option adds one, because those are the two
+// capabilities the mode rule reads and a fixture that quietly offered both would let a refusal case
+// pass for the wrong reason. The not-yet-synced state is a separate fixture rather than an option
+// here, so that "ready" is never something a case forgets to ask for.
+func servingInstanceType(
+	name string, ceiling int64, opts ...func(*worker.InstanceType),
+) *worker.InstanceType {
+	instType := acceleratableInstanceType(name, true)
+	instType.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
+	instType.Status.Accelerator.OnceMaxRequest = *resource.NewQuantity(ceiling, resource.DecimalSI)
+
+	for _, opt := range opts {
+		opt(instType)
+	}
+
+	return instType
+}
+
+// offeringLogicalSlices makes the pool report a logically sliceable card. The count is what the
+// predicate reads; the value beyond "non-zero" carries no meaning here.
+func offeringLogicalSlices(instType *worker.InstanceType) {
+	instType.Status.Detail.SlicedDetail.Logical.Count = 1
+}
+
+// offeringPartitionProfiles makes the pool report hardware partitioning AND the inventory it serves.
+// The capability count and the profile list are independent fields, and a fixture setting only the
+// list would model a pool that cannot partition while naming profiles -- a state the reconciler does
+// not produce, and one that would let the capability branch go untested.
+func offeringPartitionProfiles(profiles ...string) func(*worker.InstanceType) {
+	return func(instType *worker.InstanceType) {
+		instType.Status.Detail.SlicedDetail.Physical.Count = 1
+		for _, name := range profiles {
+			instType.Status.Detail.SlicedDetail.Physical.Profiles = append(
+				instType.Status.Detail.SlicedDetail.Physical.Profiles,
+				workercore.AcceleratorSlicedPhysicalDetailProfile{Name: name, Count: 1, MemoryMib: 10240})
+		}
+	}
+}
+
+// notSyncedInstanceType is an acceleratable type whose reconciler has not run: an empty Detail, which
+// a reader must treat as "not known yet" and never as "offers no modes".
+func notSyncedInstanceType(name string) *worker.InstanceType {
+	return acceleratableInstanceType(name, true)
+}
+
 func roleWithAccelerator(name string, accel *resource.Quantity) workercore.ModelDeploymentRole {
 	role := workercore.ModelDeploymentRole{Name: name, Replicas: 1, InstanceType: "h20-8x"}
 	if accel != nil {
@@ -910,7 +961,9 @@ func TestValidateModelDeploymentIdentity_DoesNotRunOnCreate(t *testing.T) {
 // reason is no longer the one: a message giving it would send an operator hunting for a locking
 // problem that does not exist.
 func TestModelDeploymentWebhook_ValidateUpdateStatesTheRuleNotTheMechanism(t *testing.T) {
-	r := newModelDeploymentWebhookWith(nil)
+	// The type has to be live now that two of the rules read it; without it the handler answers
+	// about the name instead, and this case would assert its wording against the wrong refusal.
+	r := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
 	old := modelDeploymentWithEveryField()
 	md := old.DeepCopy()
 	md.Spec.Engine = workercore.ModelDeploymentEngineSGLang
@@ -929,9 +982,14 @@ func TestModelDeploymentWebhook_ValidateUpdateStatesTheRuleNotTheMechanism(t *te
 // TestModelDeploymentWebhook_ValidateUpdateAllowsMetadataAndTheDeletionWindow covers the two edits
 // that must keep working, including the one that releases the object.
 func TestModelDeploymentWebhook_ValidateUpdateAllowsMetadataAndTheDeletionWindow(t *testing.T) {
+	// The deletion subtest deliberately keeps NO live InstanceType: an absent type is exactly the
+	// state that would strand the object if the rules reading it ran in that window, so the fixture
+	// has to be able to express it. The metadata subtest gets its own handler with the type present.
 	r := newModelDeploymentWebhookWith(nil)
 
 	t.Run("metadata_only_edit", func(t *testing.T) {
+		r := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+
 		old := modelDeploymentWithEveryField()
 		md := old.DeepCopy()
 		md.Labels = map[string]string{"team": "a"}
@@ -951,4 +1009,207 @@ func TestModelDeploymentWebhook_ValidateUpdateAllowsMetadataAndTheDeletionWindow
 		_, err := r.ValidateUpdate(context.Background(), old, md)
 		assert.NoError(t, err, "a rule aimed at spec must not trap the edit that releases the object")
 	})
+}
+
+// TestValidateRoleResourcesAgainstInstanceType covers the two rules that need the InstanceType.
+//
+// EACH CASE ASSERTS THE SET OF FIELD PATHS REFUSED, not that something was refused. The two rules
+// answer about different fields, so an implementation running only one of them still refuses the
+// case where both are violated — and a test asserting "an error came back" would call that a pass.
+//
+// THE INDEPENDENCE IS WHAT THE LAST THREE CASES ARE FOR. A request can satisfy the mode rule and
+// break the ceiling, or the reverse, so each rule gets a case where the OTHER one is violated. A
+// table whose acceptance cases all satisfied both rules at once would pass against an implementation
+// that had only ever run one.
+func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
+	plain := servingInstanceType("h20-8x", 8)
+	sliceable := servingInstanceType("h20-8x", 8, offeringLogicalSlices)
+	partitionable := servingInstanceType("h20-8x", 8, offeringPartitionProfiles("1g.10gb", "2g.20gb"))
+
+	cards := func(n int64) *resource.Quantity { return resource.NewQuantity(n, resource.DecimalSI) }
+	const (
+		accelPath   = "spec.roles[0].resources.accelerator"
+		slicePath   = "spec.roles[0].resources.acceleratorSlicedMemoryPercentage"
+		profilePath = "spec.roles[0].resources.acceleratorPartitionedProfile"
+	)
+
+	cases := []struct {
+		name     string
+		instType *worker.InstanceType
+		ress     *workercore.ModelDeploymentRoleResources
+		// refuse is every field path the refusals must name, and nothing else.
+		refuse []string
+		// says is a phrase the refusal must carry, for the pairs of rules that answer on ONE field
+		// path and are told apart only by what they say. A missing capability and a mistyped profile
+		// both land on acceleratorPartitionedProfile, and a case asserting the path alone passes
+		// whichever of the two the code happened to run.
+		says string
+	}{
+		{
+			name: "whole_card_at_the_ceiling", instType: plain,
+			ress: &workercore.ModelDeploymentRoleResources{Accelerator: cards(8)},
+		},
+		{
+			name: "whole_card_over_the_ceiling", instType: plain,
+			ress:   &workercore.ModelDeploymentRoleResources{Accelerator: cards(9)},
+			refuse: []string{accelPath},
+		},
+		{
+			name: "sliced_on_a_type_that_offers_slicing", instType: sliceable,
+			ress: &workercore.ModelDeploymentRoleResources{
+				Accelerator: cards(1), AcceleratorSlicedMemoryPercentage: 50,
+			},
+		},
+		{
+			name: "sliced_on_a_type_that_offers_none", instType: plain,
+			ress: &workercore.ModelDeploymentRoleResources{
+				Accelerator: cards(1), AcceleratorSlicedMemoryPercentage: 50,
+			},
+			refuse: []string{slicePath},
+		},
+		{
+			// The compute percentage alone is a slice request too; a rule reading only the memory
+			// one would let this through.
+			name: "sliced_by_cores_only_on_a_type_that_offers_none", instType: plain,
+			ress: &workercore.ModelDeploymentRoleResources{
+				Accelerator: cards(1), AcceleratorSlicedCoresPercentage: 50,
+			},
+			refuse: []string{slicePath},
+		},
+		{
+			name: "partitioned_on_a_type_that_offers_none", instType: plain,
+			ress: &workercore.ModelDeploymentRoleResources{
+				Accelerator: cards(1), AcceleratorPartitionedProfile: "1g.10gb",
+			},
+			refuse: []string{profilePath},
+			says:   "does not offer hardware partitioning",
+		},
+		{
+			name: "partition_profile_in_the_inventory", instType: partitionable,
+			ress: &workercore.ModelDeploymentRoleResources{
+				Accelerator: cards(1), AcceleratorPartitionedProfile: "2g.20gb",
+			},
+		},
+		{
+			name: "partition_profile_outside_the_inventory", instType: partitionable,
+			ress: &workercore.ModelDeploymentRoleResources{
+				Accelerator: cards(1), AcceleratorPartitionedProfile: "7g.80gb",
+			},
+			refuse: []string{profilePath},
+			says:   "does not offer this partition profile",
+		},
+
+		// The three that hold the two rules apart.
+		{
+			name: "offered_mode_over_the_ceiling", instType: sliceable,
+			ress: &workercore.ModelDeploymentRoleResources{
+				Accelerator: cards(9), AcceleratorSlicedMemoryPercentage: 50,
+			},
+			refuse: []string{accelPath},
+		},
+		{
+			name: "unoffered_mode_within_the_ceiling", instType: plain,
+			ress: &workercore.ModelDeploymentRoleResources{
+				Accelerator: cards(4), AcceleratorSlicedMemoryPercentage: 50,
+			},
+			refuse: []string{slicePath},
+		},
+		{
+			name: "unoffered_mode_over_the_ceiling", instType: plain,
+			ress: &workercore.ModelDeploymentRoleResources{
+				Accelerator: cards(9), AcceleratorSlicedMemoryPercentage: 50,
+			},
+			refuse: []string{slicePath, accelPath},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			errs := validateRoleResourcesAgainstInstanceType(
+				tc.instType, tc.ress, field.NewPath("spec", "roles").Index(0).Child("resources"))
+
+			got := make([]string, 0, len(errs))
+			joined := ""
+			for _, e := range errs {
+				got = append(got, e.Field)
+				joined += e.Error() + "\n"
+				assert.Contains(t, e.Error(), tc.instType.Name,
+					"the field alone does not locate the problem: the same request is correct against another type")
+			}
+			assert.ElementsMatch(t, tc.refuse, got)
+			if tc.says != "" {
+				assert.Contains(t, joined, tc.says,
+					"two rules answer on this path and only the wording tells the reader which one fired")
+			}
+		})
+	}
+}
+
+// TestValidateRoleResourcesAgainstInstanceType_TheCeilingIsInTheMessage pins the number, not only
+// the refusal. "Exceeds the maximum" says the request was wrong; the ceiling says what would be
+// right, and without it the next attempt is a guess.
+func TestValidateRoleResourcesAgainstInstanceType_TheCeilingIsInTheMessage(t *testing.T) {
+	errs := validateRoleResourcesAgainstInstanceType(
+		servingInstanceType("h20-8x", 8),
+		&workercore.ModelDeploymentRoleResources{Accelerator: resource.NewQuantity(9, resource.DecimalSI)},
+		field.NewPath("spec", "roles").Index(0).Child("resources"))
+
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0].Error(), "8", "the refusal carries the ceiling the request has to fit")
+}
+
+// TestModelDeploymentWebhook_ValidateRefusesAModeTheTypeDoesNotOffer drives the rule through the
+// handler, so the read of the type and the wiring into the response are covered and not only the
+// pure function.
+func TestModelDeploymentWebhook_ValidateRefusesAModeTheTypeDoesNotOffer(t *testing.T) {
+	r := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+
+	md := modelDeploymentWithEveryField()
+	md.Spec.Roles[0].Resources.AcceleratorSlicedMemoryPercentage = 50
+
+	_, err := r.ValidateCreate(context.Background(), md)
+	require.Error(t, err)
+	assert.True(t, errsContain(err.Error(), "does not offer logical slicing"), err.Error())
+	assert.True(t, errsContain(err.Error(), "h20-8x"), err.Error())
+}
+
+// TestModelDeploymentWebhook_ValidateTreatsAnUncomputedDetailAsTransient is the case that fails an
+// implementation reading an empty detail as "this type offers no modes".
+//
+// The distinction is the whole point: a permanent field error tells the user their mode is wrong,
+// and the fix is to wait. The error type is therefore the assertion — a test checking only that the
+// request was refused passes against the bug this case exists for.
+func TestModelDeploymentWebhook_ValidateTreatsAnUncomputedDetailAsTransient(t *testing.T) {
+	r := newModelDeploymentWebhookWith([]ctrlcli.Object{notSyncedInstanceType("h20-8x")})
+
+	md := modelDeploymentWithEveryField()
+	md.Spec.Roles[0].Resources.AcceleratorSlicedMemoryPercentage = 50
+
+	_, err := r.ValidateCreate(context.Background(), md)
+	require.Error(t, err)
+	assert.True(t, kerrors.IsInternalError(err),
+		"an empty detail is not-yet-synced, and the user's fix is to wait: %v", err)
+	assert.False(t, kerrors.IsInvalid(err), "a permanent refusal here names a mode the type does offer")
+}
+
+// TestModelDeploymentWebhook_ValidateSkipsTheTypeRulesDuringDeletion pins the window that would
+// otherwise deadlock: the rules reading the type refuse when the type is absent, so an object whose
+// type went first could never clear its own finalizer.
+func TestModelDeploymentWebhook_ValidateSkipsTheTypeRulesDuringDeletion(t *testing.T) {
+	r := newModelDeploymentWebhookWith(nil)
+
+	old := modelDeploymentWithEveryField()
+	old.DeletionTimestamp = ptr.To(meta.Now())
+	old.Finalizers = []string{"worker.gpustack.ai/model-deployment"}
+	md := old.DeepCopy()
+	md.Finalizers = nil
+
+	_, err := r.ValidateUpdate(context.Background(), old, md)
+	assert.NoError(t, err, "the type is gone, and refusing here is the deadlock this skip exists for")
+
+	// The same absent type on an object that is NOT being deleted still refuses, so the skip is
+	// bounded by the deletion timestamp rather than by the type being missing.
+	live := modelDeploymentWithEveryField()
+	_, err = r.ValidateCreate(context.Background(), live)
+	assert.Error(t, err, "outside the deletion window an absent type is still refused")
 }

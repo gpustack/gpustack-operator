@@ -753,7 +753,7 @@ agrees).
       reads later as a task that was never needed, and the next reader has no way to tell the two
       apart. What is recorded is where the work is, not that it was planned.
 
-- [ ] **T3 · The two resource-mode admission rules**
+- [x] **T3 · The two resource-mode admission rules**
       Blocked by: T1 — not a dependency of substance, a file one: both rewrite
       `pkg/worker/webhooks/worker/model_deployment.go` and its table-driven test, so they serialize
       Owns: `pkg/worker/webhooks/worker/model_deployment.go` + its test
