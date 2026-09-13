@@ -58,14 +58,17 @@ const (
 	// It is NOT a drain window for the memory segment, and no memory-unmount hook is rendered.
 	//
 	// THE MEMBER'S OWN API CANNOT UNMOUNT THE SEGMENT THIS RENDERER GIVES IT, which is a stronger
-	// reason than the one this comment used to carry. The segment MOONCAKE_GLOBAL_SEGMENT_SIZE asks
+	// reason than the one this comment used to carry: the segment MOONCAKE_GLOBAL_SEGMENT_SIZE asks
 	// for is mounted by the client's own setup(), and that files it in neither record set the unmount
-	// routes look in. Measured against mooncake 0.3.13: /api/unmount answers 500 with
-	// "segment_id not found in allocated records" (real_client.cpp:1791) and /api/unmount_shm answers
-	// 500 with "not found in mounted records" (real_client.cpp:1626) -- both in under three
-	// milliseconds, at every grace period tried, for the id the LEADER itself published for that
-	// segment. The same /api/unmount returns 200 for a segment mounted through /api/mount, so the
-	// refusal is a record-set boundary and not a wrong id.
+	// routes look in. Measured against mooncake 0.3.13:
+	//
+	//   - /api/unmount answers 500 with "segment_id not found in allocated records"
+	//     (real_client.cpp:1791), and /api/unmount_shm answers 500 with "not found in mounted
+	//     records" (real_client.cpp:1626).
+	//   - Both answer in under three milliseconds, at every grace period tried, for the id the
+	//     LEADER itself published for that segment.
+	//   - The same /api/unmount returns 200 for a segment mounted through /api/mount, so the refusal
+	//     is a record-set boundary and not a wrong id.
 	//
 	// SO IDENTITY WAS NEVER THE BLOCKER. The earlier reason -- that a host-network member cannot
 	// learn its own client id -- describes a problem that is never reached: a member holding exactly
@@ -741,14 +744,16 @@ func memberRequests(member workercore.KVCacheBackendMember) core.ResourceList {
 // applyMemberFabric grants what a fabric needs, and only to the path that needs it.
 //
 // RDMA and EFA share the host-fabric base: hostNetwork, the device tree and two capabilities —
-// and NEVER privileged, which would hand the member its whole node for the sake of two
-// operations. Either may add one extended-resource request, because the device tree alone grants
-// no access: the device cgroup still refuses to open the node it carries in, and a device plugin
-// allocation is what adds the rule that lets it through. The libfabric an EFA member runs on
-// travels in the image, so there is no host tree to mount and no environment to render. Every
-// other path, including the Auto that resolved to TCP, is left exactly as rendered: no security
-// context at all rather than an empty one, since an empty struct is an invitation to add a
-// capability to it.
+// and NEVER privileged, which would hand the member its whole node for the sake of two operations.
+//
+//   - Either may add one extended-resource request, because the device tree alone grants no access:
+//     the device cgroup still refuses to open the node it carries in, and a device plugin allocation
+//     is what adds the rule that lets it through.
+//   - The libfabric an EFA member runs on travels in the image, so there is no host tree to mount
+//     and no environment to render.
+//   - Every other path, including the Auto that resolved to TCP, is left exactly as rendered: no
+//     security context at all rather than an empty one, since an empty struct is an invitation to
+//     add a capability to it.
 func applyMemberFabric(ds *apps.DaemonSet, protocol, deviceResource string) {
 	if !MemberProtocolIsHostFabric(protocol) {
 		return
