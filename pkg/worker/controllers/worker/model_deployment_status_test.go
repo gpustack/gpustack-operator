@@ -942,3 +942,165 @@ func TestObserveModelDeploymentQuota_EveryGroupReservedIsReserved(t *testing.T) 
 		ModelDeploymentConditionQuotaReserved.GetStatus(holder))
 	assert.Equal(t, "Reserved", ModelDeploymentConditionQuotaReserved.GetReason(holder))
 }
+
+// preemptedWorkload marks a Workload as reclaimed by a higher-priority one, the way Kueue does.
+//
+// THE CONDITION SET IS KUEUE'S VOCABULARY AND NOT A STAND-IN. Kueue writes Preempted when it decides
+// and Evicted with the Preempted reason when it acts, and `which` selects between them so a case can
+// place itself at either moment. A fixture that invented a condition would agree with a reader that
+// invented the same one.
+func preemptedWorkload(wl *kueue.Workload, which string) *kueue.Workload {
+	switch which {
+	case "preempted":
+		wl.Status.Conditions = append(wl.Status.Conditions, meta.Condition{
+			Type: kueue.WorkloadPreempted, Status: meta.ConditionTrue,
+			Reason: kueue.InClusterQueueReason, LastTransitionTime: meta.Now(),
+		})
+	case "evicted":
+		wl.Status.Conditions = append(wl.Status.Conditions, meta.Condition{
+			Type: kueue.WorkloadEvicted, Status: meta.ConditionTrue,
+			Reason: kueue.WorkloadEvictedByPreemption, LastTransitionTime: meta.Now(),
+		})
+	}
+
+	return wl
+}
+
+// admittedWorkload marks a Workload as admitted, which is what makes a surviving group a survivor
+// rather than one more group that is waiting.
+func admittedWorkload(wl *kueue.Workload) *kueue.Workload {
+	wl.Status.Conditions = append(wl.Status.Conditions, meta.Condition{
+		Type: kueue.WorkloadAdmitted, Status: meta.ConditionTrue,
+		Reason: "Admitted", LastTransitionTime: meta.Now(),
+	})
+
+	return wl
+}
+
+// TestObserveModelDeploymentQuota_PreemptedInPart covers the second of the two failures #199 names.
+//
+// A HIGHER-PRIORITY WORKLOAD RECLAIMS ONE ROLE AND THE SURVIVING HALF KEEPS ITS CARDS WHILE SERVING
+// NOTHING. Nothing in this path used to notice: the phase is derived from ready replica counts, so
+// this reads as Degraded, the same word as "still starting" and "a replica crashed" -- three states
+// with three different operator actions behind one reading.
+//
+// THE SURVIVOR IS THE WHOLE PREDICATE, which is why the table carries the all-preempted case. A
+// deployment every group of which was preempted holds nothing and serves nothing, exactly like one
+// that never started; reading only "was anything preempted" answers the same for both.
+func TestObserveModelDeploymentQuota_PreemptedInPart(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		decode := md.Spec.Roles[0]
+		md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 1
+		decode.Name, decode.Replicas, decode.InstanceType = "decode", 1, "a100-8x"
+		md.Spec.Roles = append(md.Spec.Roles, decode)
+	})
+
+	prefill, decode := roleReplica(md, "prefill"), roleReplica(md, "decode")
+	pods := []core.Pod{prefill, decode}
+
+	build := func(prefillState, decodeState string) []*kueue.Workload {
+		mk := func(pod core.Pod, name, state string) *kueue.Workload {
+			wl := groupWorkload([]core.Pod{pod}, state != "preempted" && state != "evicted")
+			wl.Name = name
+			switch state {
+			case "admitted":
+				return admittedWorkload(wl)
+			case "preempted", "evicted":
+				return preemptedWorkload(wl, state)
+			}
+
+			return wl
+		}
+
+		return []*kueue.Workload{mk(prefill, "wl-prefill", prefillState), mk(decode, "wl-decode", decodeState)}
+	}
+
+	cases := []struct {
+		name              string
+		prefill, decode   string
+		wantReason        string
+		wantIn, wantNotIn []string
+	}{
+		{
+			// The state the issue names: the decoder's quota was taken, the prefiller is still
+			// admitted and holding its cards, and the deployment serves nothing.
+			name:    "one_group_preempted_while_a_sibling_is_admitted",
+			prefill: "admitted", decode: "preempted",
+			wantReason: "PreemptedInPart",
+			wantIn:     []string{"a100-8x", "h20-8x"},
+		},
+		{
+			// Kueue writes the two conditions at different moments; a reader of one alone answers
+			// differently depending on which write it arrives between.
+			name:    "the_evicted_form_of_the_same_state",
+			prefill: "admitted", decode: "evicted",
+			wantReason: "PreemptedInPart",
+			wantIn:     []string{"a100-8x"},
+		},
+		{
+			// THE CASE THE PREDICATE EXISTS TO NOT MATCH. Everything was preempted, so nothing is
+			// held and nothing is served: an ordinary wait for capacity, and reporting it as a
+			// fragmented deployment would send an operator looking for cards nobody is holding.
+			name:    "every_group_preempted_is_not_fragmented",
+			prefill: "preempted", decode: "preempted",
+			wantReason: "Pending",
+			wantNotIn:  []string{"higher-priority"},
+		},
+		{
+			// And the ordinary healthy shape still reports Reserved, or the rows above would pass
+			// against a rule that reported PreemptedInPart for everything.
+			name:    "neither_preempted_is_reserved",
+			prefill: "admitted", decode: "admitted",
+			wantReason: "Reserved",
+			wantNotIn:  []string{"higher-priority"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			holder := new(workercore.ModelDeployment)
+			observeQuotaOver(md, pods, build(tc.prefill, tc.decode), holder)
+
+			assert.Equal(t, tc.wantReason, ModelDeploymentConditionQuotaReserved.GetReason(holder))
+
+			msg := ModelDeploymentConditionQuotaReserved.GetMessage(holder)
+			for _, want := range tc.wantIn {
+				assert.Contains(t, msg, want, "the message names it: %s", msg)
+			}
+			for _, notWant := range tc.wantNotIn {
+				assert.NotContains(t, msg, notWant, "and does not claim this: %s", msg)
+			}
+		})
+	}
+}
+
+// TestObserveModelDeploymentQuota_PreemptedInPartDoesNotClaimNothingIsAdmitted pins the sentence that
+// was false in this state.
+//
+// The multi-group wait ends with "no role is admitted until the whole set can run". Under a partial
+// preemption a role IS admitted, and it is the reason the state matters at all: that role is holding
+// accelerators. A status that denies it sends the operator past the only thing worth acting on.
+func TestObserveModelDeploymentQuota_PreemptedInPartDoesNotClaimNothingIsAdmitted(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		decode := md.Spec.Roles[0]
+		md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 1
+		decode.Name, decode.Replicas, decode.InstanceType = "decode", 1, "a100-8x"
+		md.Spec.Roles = append(md.Spec.Roles, decode)
+	})
+
+	prefill, decode := roleReplica(md, "prefill"), roleReplica(md, "decode")
+
+	held := admittedWorkload(groupWorkload([]core.Pod{prefill}, true))
+	held.Name = "wl-prefill"
+	taken := preemptedWorkload(groupWorkload([]core.Pod{decode}, false), "preempted")
+	taken.Name = "wl-decode"
+
+	holder := new(workercore.ModelDeployment)
+	observeQuotaOver(md, []core.Pod{prefill, decode}, []*kueue.Workload{held, taken}, holder)
+
+	msg := ModelDeploymentConditionQuotaReserved.GetMessage(holder)
+	assert.NotContains(t, msg, "no role is admitted",
+		"a role is admitted, and it is the one holding the accelerators: %s", msg)
+	assert.Contains(t, msg, "still admitted",
+		"the message has to say which groups are holding, since that is what an operator acts on")
+}
