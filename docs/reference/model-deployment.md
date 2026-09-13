@@ -470,18 +470,24 @@ not attached" is a real and actionable state.
 | `False` | `BindingNotReady` | wait for it, or look at the pool it points at |
 | `False` | `BindingDeleting` | find who deleted it; the replicas keep writing to the domain they attached to |
 
-**`QuotaReserved`** — whether the deployment's **one** Workload holds Kueue quota. `True` therefore
-covers every role by construction and cannot be true for one and not another. It reads that Workload's
-own conditions rather than asking the admission gate, because the gate stops evaluating a Workload once
-it is admitted: anything derived from the gate would answer for the moment of admission and never again.
+**`QuotaReserved`** — whether **every one of** the deployment's Workloads holds Kueue quota. Roles on
+one instanceType are one Workload; roles on several are one per group. `True` is therefore an answer
+about the whole set and not about whichever Workload sorts first, because half a deployment holding
+quota is not the deployment holding quota.
+
+It reads those Workloads' own conditions rather than asking the admission gate. The gate stops
+evaluating a Workload once it is admitted, so anything derived from it would answer for the moment of
+admission and never again.
 
 | Value | Reason | Meaning |
 |---|---|---|
-| `True` | `Reserved` | the group has quota reserved in the named cluster queue |
-| `False` | `Pending` | the group is waiting for quota |
+| `True` | `Reserved` | every group has quota reserved; with one group the message names its cluster queue |
+| `False` | `Pending` | at least one group is waiting for quota, and the message names which instance types |
 | `False` | `PodGroupIncomplete` | fewer Pods exist than the group declares, so Kueue composes **no Workload at all**; the message carries `<have>/<want>` |
+| `False` | `PreemptedInPart` | a higher-priority workload reclaimed some groups while others are still admitted; the survivors hold accelerators the deployment cannot use |
+| `False` | `Parked` | the set failed to assemble for long enough that the joint check deactivated its Workloads; an identical re-apply does not clear it |
 | `False` | `NoQueueInReservedNamespace` | the deployment is in a reserved namespace, which has no LocalQueue, so it will never be scheduled |
-| `Unknown` | `AdmissionInFlight` | the group is complete and has no Workload yet — Kueue composes it asynchronously, so absence is admission in flight, not refusal |
+| `Unknown` | `AdmissionInFlight` | a group is complete and has no Workload yet — Kueue composes it asynchronously, so absence is admission in flight, not refusal |
 | `Unknown` | `NoReplicas` | no replica has been created yet |
 | `Unknown` | `AllReplicasTerminating` | every replica is on its way out, so none holds quota to report on |
 
@@ -489,6 +495,16 @@ it is admitted: anything derived from the gate would answer for the moment of ad
 but mean different things. The first clears when the missing replica exists; the second is permanent
 because reserved namespaces deliberately have no LocalQueue; the third clears when Kueue composes the
 Workload. Telling them apart is why the reason exists.
+
+`Pending`, `PreemptedInPart` and `Parked` all say the set does not hold quota, and they are separate
+because the action differs. `Pending` resolves itself when capacity appears. `Parked` is over already:
+those workloads were deactivated and no longer ask for anything. `PreemptedInPart` is the one to act
+on, and the groups that kept their quota hold accelerators until either the reclaimed groups are
+admitted again or the deployment is deleted.
+
+> **Why it is not just a slower `Pending`.** How long the wait is worth making depends on what
+> preempted the deployment, which is outside this object and outside this operator. That is a
+> decision, so it is reported rather than made.
 
 **`CacheAttached`** — whether the cache is observed to be in effect, which is a different question
 from whether it was configured. It is judged downstream of the engine and **never** on a rendered flag
