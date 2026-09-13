@@ -26,8 +26,8 @@ nothing reports the divergence. A key whose effect overlaps a field of this spec
 administrator makes.
 
 The CXL switch was one instance of exactly that shape, and the webhook now refuses it by name — the
-`CXL` row in [KV Cache Backend](backend.md) carries which keys and why. It is recorded here as the
-shape to expect, not as a live hazard.
+`CXL` row in [KV Cache Backend](backend.md) carries which keys and why. It is recorded as the shape
+to expect, not as a live hazard.
 
 ⛔ **`port` is refused in `leader.extraArgs`, and it would have moved nothing.** It is the store's
 deprecated spelling of `rpc_port`, which this operator always renders, so the rendered one wins: the
