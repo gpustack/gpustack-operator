@@ -1,13 +1,14 @@
 # Spec: ModelDeployment Stabilization
 
-Status: Planned
-Blocked on: the work itself, and nothing else. Every decision this spec opened is answered — what
-`spec` freezes and by which criterion (F1), and what a permanently infeasible deployment finally
-looks like (F3). One question is left open deliberately and blocks no task: whether a deployment
-split across two scheduling groups also deserves a group-level status. Nothing here is in progress
-and no task has started. This moves to Shipped when the implementation opens its pull request. T12 is
-separate and permanent: it needs two accelerator models or one machine with several cards, and no
-code change can lift it.
+Status: Shipped
+Blocked on: nothing. T1 to T11 are delivered, unit-tested, and exercised on a cluster — the recorded
+run is in the Test Plan. Every decision this spec opened is answered: what `spec` freezes and by
+which criterion (F1), and what a permanently infeasible deployment finally looks like (F3). One
+question is left open deliberately and blocks nothing: whether a deployment split across two
+scheduling groups also deserves a group-level status.
+T12 is routed to the verification matrix by decision and is left unticked on purpose; nothing above
+depends on it. It needs two accelerator models or one machine with several cards — hardware that
+exists, over which no cluster currently does.
 Type: Feature
 
 ## Summary
@@ -895,7 +896,7 @@ look identical. T4's checkpoint claimed the observable one and was true only of 
       the admission table; the transport convergence. The `## Contents` list stays in sync and the page stays inside its line cap.
       Verify: `make lint docs < /dev/null`
 
-- [ ] **T11 · The cluster case**
+- [x] **T11 · The cluster case**
       Blocked by: T7, T10
       Owns: two new e2e cases (numbers re-checked when the task starts, because they have collided
       before)
@@ -909,6 +910,17 @@ look identical. T4's checkpoint claimed the observable one and was true only of 
       deployed namespace
 
 - [ ] **T12 · The card-separation measurement**
+      **Routed to the verification matrix, by decision, and left unticked on purpose.** This entry
+      stays because a task deleted once it was moved reads later as a task that was never needed,
+      and the next reader has no way to tell the two apart. What is recorded is where the work went.
+      **Nothing above depends on it**, which is what makes the spec shippable without it: no
+      acceptance criterion in T1 to T11 is written in terms of this measurement.
+      ⚠️ One premise of that routing turned out to be weaker than it looked and is recorded here so
+      it is not re-derived: the hardware it needs is **not** on the accelerator-vendor axis the
+      standing procurement decision covers — that axis is about which manufacturer, while this is
+      about two products or two cards. Hardware satisfying it already exists; what does not exist is
+      a cluster over it. That makes the blocker labour rather than money, which is a different
+      question from the one the procurement decision answered.
       Blocked by: T8, T11, and **two accelerator models or one multi-card machine**
       Owns: nothing in the tree until it runs; its result is recorded in this spec's Test Plan
       Gate: review
@@ -1064,8 +1076,9 @@ Run against a local single-node cluster with the operator deployed. No accelerat
 
 ##### Recorded run
 
-Against a single-node EKS cluster with no accelerator, operator built from this branch. Both cases
-green: `case-69` six rows, `case-68` nine rows, **zero NO-READ**.
+Against a single-node cluster with no accelerator, operator built from this branch and verified by
+asking the running binary its own revision rather than by comparing an image reference. Both cases
+green: `case-69` **six** rows, `case-68` **ten**, **zero NO-READ**.
 
 What the cluster confirmed that no unit test reaches: two `instanceType`s render **two** pod groups
 with two Workloads on two queues; the joint AdmissionCheck is referenced from a **CPU-only**
@@ -1075,10 +1088,18 @@ the workload rather than deleting it, and the deployment reports `Parked` naming
 
 **Three things the run found that the unit tests had not.**
 
-1. **A defect, now fixed and pinned by a unit test.** With one group's queue held, `QuotaReserved`
+1. **A defect, now fixed and pinned in both layers.** With one group's queue held, `QuotaReserved`
    read `Reserved` with a message naming the deployment's whole replica count. The cause was reading
    ONE Workload for a deployment that has one per group. Half a deployment holding quota is not the
-   deployment holding quota.
+   deployment holding quota, and the two states are the difference between a deployment that is
+   about to run and one that never will.
+   - **The fix was confirmed by measurement rather than by inspection.** The same probe read
+     `Reserved` on the build that had the defect and `Pending` on the build that does not — so the
+     row `case-68` gained is a criterion a build either meets or does not, not a judgement about
+     whether a rebuild was warranted.
+   - **The build carrying the defect was the instrument that found it, and was not wasted.** The
+     root cause only shows when several groups mean several Workloads, and that needs a cluster: no
+     single-group fixture can express it, which is why the unit tests were green throughout.
 2. **An accelerated `InstanceType` with no node behind it cannot be the "infeasible" fixture.** Its
    status carries an accelerator ceiling of zero, the defaulter fills the role's card count with one,
    and the ceiling rule refuses the deployment at admission — so the shape never reaches the
