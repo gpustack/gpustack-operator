@@ -168,15 +168,27 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 	// queue derived": with it off the administrator authors ClusterQueues through the
 	// InstanceType API, and this reconciler still fills them but references the check on none
 	// of them. So the gate runs on every accelerated queue in the cluster, or on no queue at all.
+	//
+	// THE JOINT-ADMISSION CHECK IS REFERENCED FROM EVERY QUEUE, NOT ONLY THE ACCELERATED ONES, and
+	// that difference is load-bearing. It gates a deployment whose roles sit on several
+	// instanceTypes, and one of those groups can be on a CPU-only pool; borrowing the node-devices
+	// reference's `acceleratable` gate would leave that group ungated, and a barrier with a hole in
+	// it opens for the deployment it was supposed to hold.
+	derived := settings.InstanceTypeDerivedFromNode.ShouldValueBool(ctx)
+
+	var rules []kueue.AdmissionCheckStrategyRule
+	if acceleratable && derived && r.admissionCheckActive(ctx, _NodeDevicesAdmissionCheckName) {
+		rules = append(rules,
+			kueue.AdmissionCheckStrategyRule{Name: kueue.AdmissionCheckReference(_NodeDevicesAdmissionCheckName)})
+	}
+	if derived && r.admissionCheckActive(ctx, _JointAdmissionCheckName) {
+		rules = append(rules,
+			kueue.AdmissionCheckStrategyRule{Name: kueue.AdmissionCheckReference(_JointAdmissionCheckName)})
+	}
+
 	var admissionChecks *kueue.AdmissionChecksStrategy
-	if acceleratable &&
-		settings.InstanceTypeDerivedFromNode.ShouldValueBool(ctx) &&
-		r.nodeDevicesCheckActive(ctx) {
-		admissionChecks = &kueue.AdmissionChecksStrategy{
-			AdmissionChecks: []kueue.AdmissionCheckStrategyRule{
-				{Name: kueue.AdmissionCheckReference(_NodeDevicesAdmissionCheckName)},
-			},
-		}
+	if len(rules) > 0 {
+		admissionChecks = &kueue.AdmissionChecksStrategy{AdmissionChecks: rules}
 	}
 	if !kubemeta.DeepEqual(cq.Spec.AdmissionChecksStrategy, admissionChecks) {
 		cq.Spec.AdmissionChecksStrategy = admissionChecks
@@ -347,16 +359,16 @@ func parseResourceFlavorCapacity(rf *kueue.ResourceFlavor) int64 {
 	return 0
 }
 
-// nodeDevicesCheckActive reports whether the node-devices AdmissionCheck exists and
-// is Active. The queue references it only when true, since listing an inactive
-// check would turn the ClusterQueue inactive and stop it admitting.
-func (r *NodeQueueReconciler) nodeDevicesCheckActive(ctx context.Context) bool {
+// admissionCheckActive reports whether the named AdmissionCheck exists and is Active. The queue
+// references one only when true, since listing an inactive check would turn the ClusterQueue
+// inactive and stop it admitting.
+func (r *NodeQueueReconciler) admissionCheckActive(ctx context.Context, name string) bool {
 	ac := new(kueue.AdmissionCheck)
-	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: _NodeDevicesAdmissionCheckName}, ac,
-		ctrlclix.WithoutQuorum)
+	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: name}, ac, ctrlclix.WithoutQuorum)
 	if err != nil {
 		return false
 	}
+
 	return kubemeta.IsConditionTrue(ac.Status.Conditions, kueue.AdmissionCheckActive)
 }
 

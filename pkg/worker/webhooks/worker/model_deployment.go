@@ -20,6 +20,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/webhook"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 // ModelDeploymentWebhook validates a v1alpha1.ModelDeployment, and defaults the one field a schema
@@ -229,6 +230,8 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 
 	errs := validateModelDeployment(md, nil)
 
+	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)
+
 	typeErrs, err := r.validateRoleResourcesAgainstInstanceTypes(ctx, md)
 	if err != nil {
 		return nil, err
@@ -260,6 +263,7 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	// offending role -- would be refused. That is worse than the reconcile failure the rule prevents.
 	errs := validateModelDeployment(md, modelDeploymentRoleNames(oldObj))
 	errs = append(errs, validateModelDeploymentIdentity(md, old)...)
+	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)
 
 	typeErrs, err := r.validateRoleResourcesAgainstInstanceTypes(ctx, md)
 	if err != nil {
@@ -968,6 +972,47 @@ func validateModelDeploymentPairCannotShareOneAccelerator(
 	}
 
 	return errs
+}
+
+// validateModelDeploymentBarrierIsInstallable refuses a deployment whose roles span several
+// instanceTypes when nothing in the cluster can gate the set.
+//
+// SEVERAL instanceTypes ARE SEVERAL POD GROUPS AND SEVERAL WORKLOADS, and Kueue's own atomicity
+// covers one group. What relates them is the joint-admission check, and that check reaches a Workload
+// only through a ClusterQueue that references it -- which the queue reconciler does only while the
+// derived-from-node setting is on. With it off an administrator authors queues through the
+// InstanceType API, no queue carries the check, and the barrier is not installed anywhere.
+//
+// THE SHAPE IS REFUSED RATHER THAN ADMITTED UNGUARDED. Admitting it would let a prefiller start and
+// serve while its decoder waits for capacity that never arrives -- a deployment that reads as
+// half-started and is in fact never going to finish, with nothing naming the reason. A refusal at the
+// API names the setting, which is the one thing the operator can act on.
+//
+// A SINGLE-instanceType DEPLOYMENT IS UNAFFECTED whatever the setting says: it is one group, and one
+// group is admitted as a unit by Kueue without help from anything here.
+func validateModelDeploymentBarrierIsInstallable(
+	ctx context.Context, md *workercore.ModelDeployment,
+) field.ErrorList {
+	types := sets.New[string]()
+	for i := range md.Spec.Roles {
+		types.Insert(md.Spec.Roles[i].InstanceType)
+	}
+	if types.Len() < 2 {
+		return nil
+	}
+
+	if settings.InstanceTypeDerivedFromNode.ShouldValueBool(ctx) {
+		return nil
+	}
+
+	return field.ErrorList{field.Forbidden(
+		field.NewPath("spec", "roles"),
+		"roles on several instance types are several Kueue workloads, and what admits them together "+
+			"is an admission check referenced from the queues this operator derives. The "+
+			"instance-type-derived-from-node setting is off, so no queue carries it and the "+
+			"deployment could start one role and never the other. Put every role on one instance "+
+			"type, or turn that setting on",
+	)}
 }
 
 // roleRequestsALogicalSlice reports whether a role asks for a fraction of a card in software.

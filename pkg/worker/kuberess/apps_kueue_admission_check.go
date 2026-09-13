@@ -67,3 +67,43 @@ func InstallNodeDevicesAdmissionCheck(ctx context.Context) error {
 
 	return nil
 }
+
+// modelDeploymentJointAdmissionCheckYAML is the AdmissionCheck that gates every group of one
+// ModelDeployment on the whole set. Its name and controllerName are the contract shared with the
+// worker's ModelDeploymentJointAdmission controllers.
+const modelDeploymentJointAdmissionCheckYAML = `
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: AdmissionCheck
+metadata:
+  name: gpustack-model-deployment-joint
+  labels:
+    "app.kubernetes.io/part-of": "gpustack-operator"
+spec:
+  controllerName: worker.gpustack.ai/model-deployment-joint
+`
+
+// InstallModelDeploymentJointAdmissionCheck applies the joint-admission AdmissionCheck, retrying
+// until Kueue's CRD is established.
+//
+// It waits on the same CRD, under the same bound, and for the same reason as the node-devices check
+// above: Kueue templates its CRDs, so nothing orders them ahead of a custom resource in the same
+// render. Apply only sets spec, so it never clobbers the controller-owned Active condition.
+func InstallModelDeploymentJointAdmissionCheck(ctx context.Context) error {
+	restCfg := system.LoopbackKubeRestConfig.Get()
+
+	err := waitx.PollUntilContextTimeout(ctx,
+		nodeDevicesAdmissionCheckInterval, nodeDevicesAdmissionCheckTimeout, true,
+		func(ctx context.Context) error {
+			err := kubeappyaml.Apply(ctx, modelDeploymentJointAdmissionCheckYAML, restCfg)
+			if err != nil {
+				klog.InfoS("waiting for kueue's AdmissionCheck CRD", "err", err)
+			}
+
+			return err
+		})
+	if err != nil {
+		return fmt.Errorf("waiting for kueue's AdmissionCheck CRD: %w", err)
+	}
+
+	return nil
+}

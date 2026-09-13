@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -22,6 +23,8 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/setting"
+	"gpustack.ai/gpustack/pkg/system"
 )
 
 // modelDeployment builds a valid single-role deployment for the given engine, which every case then
@@ -1360,6 +1363,11 @@ func TestModelDeploymentWebhook_APairMayNotShareOneAccelerator(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			// The disjoint case puts the pair on two instance types, which the barrier rule refuses
+			// unless it can be installed. That rule has its own test; here it must not be what
+			// answers, or this table would be asserting it by accident.
+			withDerivedFromNode(t, true)
+
 			r := newModelDeploymentWebhookWith(live)
 
 			md := modelDeployment(workercore.ModelDeploymentEngineVLLM, tc.roles...)
@@ -1381,4 +1389,135 @@ func TestModelDeploymentWebhook_APairMayNotShareOneAccelerator(t *testing.T) {
 				"and names the field that makes them shareable: %v", err)
 		})
 	}
+}
+
+// TestModelDeploymentWebhook_ThePairRuleReadsEveryPair covers a deployment declaring more than one
+// role of one kind.
+//
+// NOTHING REFUSES TWO PREFILL ROLES. The kind rule refuses mixing a server role with the others and
+// says nothing about two of a kind, so this shape reaches the pair rule intact.
+//
+// THE FIXTURE IS BUILT SO THE LAST PAIR IS THE INNOCENT ONE. A rule keeping one role per kind ends up
+// holding the prefiller declared last, which here sits on a disjoint accelerator group, and it then
+// admits the violating pair declared before it -- two slices of one card handed to the two roles the
+// split exists to separate. Ordering the roles the other way round would let that rule pass.
+func TestModelDeploymentWebhook_ThePairRuleReadsEveryPair(t *testing.T) {
+	const (
+		sharedGroup = "nvidia-h20"
+		otherGroup  = "nvidia-a100"
+	)
+
+	sliced := func() *workercore.ModelDeploymentRoleResources {
+		return &workercore.ModelDeploymentRoleResources{
+			Accelerator:                       resource.NewQuantity(1, resource.DecimalSI),
+			AcceleratorSlicedMemoryPercentage: 50,
+		}
+	}
+
+	live := []ctrlcli.Object{
+		servingInstanceType("h20-8x", 8, offeringLogicalSlices, inAcceleratorGroup(sharedGroup)),
+		servingInstanceType("a100-8x", 8, offeringLogicalSlices, inAcceleratorGroup(otherGroup)),
+	}
+
+	withDerivedFromNode(t, true)
+
+	r := newModelDeploymentWebhookWith(live)
+
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		pdRole("prefill-shared", workercore.ModelDeploymentRoleKindPrefill, "h20-8x", sliced()),
+		pdRole("prefill-disjoint", workercore.ModelDeploymentRoleKindPrefill, "a100-8x", sliced()),
+		pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "h20-8x", sliced()),
+	)
+	md.Spec.KVCache.Connector = "auto"
+
+	_, err := r.ValidateCreate(context.Background(), md)
+	require.Error(t, err, "the prefiller declared first shares one accelerator group with the decoder")
+
+	assert.True(t, errsContain(err.Error(), "prefill-shared"),
+		"the refusal names the prefiller that can land on the decoder's card: %v", err)
+	assert.True(t, errsContain(err.Error(), "decode"),
+		"and the decoder it would share it with: %v", err)
+	assert.False(t, errsContain(err.Error(), "prefill-disjoint"),
+		"and not the prefiller on a disjoint group, which is a shape this rule exists to allow: %v", err)
+}
+
+// withDerivedFromNode makes the derived-from-node setting read the given value for one case.
+//
+// IT WRITES THE SECRET INTO THE LOOPBACK CLIENT RATHER THAN REPLACING THE CLIENT. That holder is a
+// varx.Once: TestMain configures it and every later Configure is silently a no-op, so a helper that
+// tried to swap in a seeded fake would leave the setting reading exactly what it read before -- and
+// the case asserting the "on" behavior would fail for a reason that has nothing to do with the rule.
+//
+// THE CACHE IS DROPPED ON BOTH SIDES. A successful read caches for thirty seconds and a failed one
+// does not cache at all, so without the drop on entry a case inherits whatever the previous one
+// seeded, and without the drop on exit it dictates what the next one reads. Either way the assertion
+// becomes a statement about the order the cases happen to run in.
+func withDerivedFromNode(t *testing.T, on bool) {
+	t.Helper()
+
+	ctx := context.Background()
+	cli := system.LoopbackCtrlClient.Get()
+	sec := &core.Secret{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: setting.DelegatedSecretNamespace,
+			Name:      setting.DelegatedSecretName,
+		},
+		Data: map[string][]byte{
+			"instance-type-derived-from-node": []byte(strconv.FormatBool(on)),
+		},
+	}
+
+	setting.InvalidateCache()
+	_ = cli.Delete(ctx, sec.DeepCopy())
+	require.NoError(t, cli.Create(ctx, sec))
+
+	t.Cleanup(func() {
+		setting.InvalidateCache()
+		_ = cli.Delete(ctx, sec)
+	})
+}
+
+// TestModelDeploymentWebhook_SeveralInstanceTypesNeedTheBarrier covers the refusal T6 adds, in both
+// directions.
+//
+// THE POSITIVE CASE IS WHAT MAKES THE REFUSAL MEAN ANYTHING. Without it, a rule refusing every
+// multi-instanceType deployment passes the negative case exactly as the correct rule does -- and the
+// shape it would be refusing is the one this whole design exists to enable.
+func TestModelDeploymentWebhook_SeveralInstanceTypesNeedTheBarrier(t *testing.T) {
+	twoTypes := func() *workercore.ModelDeployment {
+		return modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) { r.Name = "prefill" }),
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name, r.InstanceType = "decode", "a100-8x"
+			}),
+		)
+	}
+
+	t.Run("setting_off_refuses", func(t *testing.T) {
+		withDerivedFromNode(t, false)
+
+		errs := validateModelDeploymentBarrierIsInstallable(context.Background(), twoTypes())
+		require.Len(t, errs, 1)
+		assert.Equal(t, "spec.roles", errs[0].Field)
+		assert.Contains(t, errs[0].Detail, "instance-type-derived-from-node",
+			"the message names the setting, which is the one thing the operator can act on")
+	})
+
+	t.Run("setting_on_accepts", func(t *testing.T) {
+		withDerivedFromNode(t, true)
+
+		assert.Empty(t, validateModelDeploymentBarrierIsInstallable(context.Background(), twoTypes()),
+			"this is the shape roles on two instance types exist to make possible")
+	})
+
+	t.Run("one_type_is_unaffected_with_the_setting_off", func(t *testing.T) {
+		withDerivedFromNode(t, false)
+
+		one := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) { r.Name = "prefill" }),
+			role(func(r *workercore.ModelDeploymentRole) { r.Name = "decode" }),
+		)
+		assert.Empty(t, validateModelDeploymentBarrierIsInstallable(context.Background(), one),
+			"one group is admitted as a unit by Kueue without help from this barrier")
+	})
 }
