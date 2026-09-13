@@ -74,6 +74,11 @@ measurement it contradicts — that is the only form of it worth a reviewer's at
 ## Out of scope — do not review
 
 Mirrors the `exclude` list in `.opencodereview/rule.json`, verbatim and in the same order.
+`hack/check-review-config.sh` holds the two to that, and runs in `make lint`.
+
+A third copy is not in the tree and no gate can reach it: Copilot's real exclusions come from the
+content-exclusion policy in the repository settings, so this list describes that configuration
+rather than being it. Changing either file here leaves that third copy to update by hand.
 
 - `**/*_deepcopy*`
 - `**/*_test.go`

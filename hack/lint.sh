@@ -119,6 +119,25 @@ function lint() {
     gpustack::log::fatal "the lint hook's dispatch check could not run; its diagnostic is above"
   fi
 
+  # The two review-exclusion lists, which are kept in separate files and which one of them promises
+  # to mirror verbatim. Nothing held it to that: the docs gate's page set is README.md, AGENTS.md,
+  # CLAUDE.md, docs/** and .claude/skills/**, so `.github/` is covered by no gate at all. The drift
+  # is silent -- two reviewers disagreeing about scope produces no error and no missing output, only
+  # a review narrower than the sentence describing it, and each file stays internally consistent.
+  # Its self-test runs first because both lists are parsed out of text: a parse that matches nothing
+  # yields two empty sets that compare equal, so the check has to be shown to report that as a
+  # broken instrument rather than as agreement.
+  if ! bash "${ROOT_DIR}/hack/check-review-config-selftest.sh" "${ROOT_DIR}"; then
+    gpustack::log::fatal "the review-config check is not trustworthy: its self-test failed"
+  fi
+  local review_config_rc=0
+  bash "${ROOT_DIR}/hack/check-review-config.sh" "${ROOT_DIR}" || review_config_rc=$?
+  if [[ ${review_config_rc} -eq 1 ]]; then
+    gpustack::log::fatal "the two review-exclusion lists disagree"
+  elif [[ ${review_config_rc} -gt 1 ]]; then
+    gpustack::log::fatal "the review-config check could not run; its diagnostic is above"
+  fi
+
   # Three states, not two: the tree is clean, the tree is dirty, or git cannot answer
   # at all. Folding the last into "clean" is what made a build from a git worktree fail
   # — the checkout's .git is a file pointing outside the build context, so every git
