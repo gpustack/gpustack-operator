@@ -225,6 +225,56 @@ func TestMemberWorkload_LocalHostnameIsTheReachableAddress(t *testing.T) {
 	assert.True(t, found, "MOONCAKE_LOCAL_HOSTNAME must be set")
 }
 
+// TestMemberWorkload_TheMemorySegmentIsDeclaredAtStartupAndNotMountedAfterIt pins the fact on THIS
+// side that the refusal to render a memory-unmount hook rests on.
+//
+// The member's unmount routes reach only segments the client filed in its allocated or mounted
+// records, and a segment asked for through MOONCAKE_GLOBAL_SEGMENT_SIZE is in neither: setup() mounts
+// it at startup. Measured against mooncake 0.3.13, both routes answer 500 for such a segment at every
+// grace period, for the id the leader itself published — see memberShutdownSeconds.
+//
+// THE ONE CHANGE THAT WOULD MAKE IT UNMOUNTABLE IS THE ONE THIS ASSERTS AGAINST: drop the key and
+// mount through POST /api/mount from a postStart hook, which files the segment in the records those
+// routes read. It is not taken here, because it leaves a member Ready while holding no segment, and a
+// postStart that fails leaves one running with none while nothing reports it. Pinned so that taking
+// the trade later is a decision somebody makes rather than a side effect of tidying the environment.
+func TestMemberWorkload_TheMemorySegmentIsDeclaredAtStartupAndNotMountedAfterIt(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*workercore.KVCacheBackend)
+	}{
+		{name: "a group with no disk tier"},
+		// The group that already has a preStop, so "there is a hook here" never stands in for
+		// "there is a postStart here".
+		{name: "a group WITH a disk tier", mutate: withMemberDiskTier},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mutations := []func(*workercore.KVCacheBackend){}
+			if c.mutate != nil {
+				mutations = append(mutations, c.mutate)
+			}
+			kvcb := testMemberBackend(mutations...)
+
+			size, declared := envWithoutDownwardAPI(t, kvcb, "mooncake:v0.3.13")[memberEnvGlobalSegmentSize]
+			require.True(t, declared,
+				"the segment is asked for at startup; without this key the member mounts none at all")
+			assert.NotEmpty(t, size, "a size is what makes setup() mount a segment")
+
+			// Read out unconditionally rather than under a nil check on Lifecycle, so the assertion
+			// fires on the group that has no Lifecycle at all instead of being skipped there.
+			var postStart *core.LifecycleHandler
+			if container := memberContainer(t, kvcb, "mooncake:v0.3.13"); container.Lifecycle != nil {
+				postStart = container.Lifecycle.PostStart
+			}
+			assert.Nil(t, postStart,
+				"a postStart mount is what would move this segment into the records the unmount "+
+					"routes read, and it is the trade the memory-unmount decision declines")
+		})
+	}
+}
+
 // TestMemberWorkload_Requests pins that a member claims its memory segment and nothing else. The
 // request is what makes that claim visible to capacity planning, and a member that cannot fit stays
 // Pending rather than overcommitting the node it landed on.

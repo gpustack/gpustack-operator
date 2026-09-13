@@ -235,7 +235,14 @@ type SegmentDetail struct {
 	// ClientID is minted once by the member process, so it distinguishes members even when they
 	// advertise the same address.
 	ClientID string
-	// Name is the segment as the leader knows it.
+	// Name is the segment as the leader knows it, and it is "<member address>:<port>" rather than the
+	// bare address the member was configured with. Measured against mooncake 0.3.13: the port is bound
+	// fresh on every start and is NOT the one in TEEndpoint, which moves separately in the same
+	// restart. So a caller selecting a member's segments compares the HOST HALF; comparing the whole
+	// value to a Pod IP matches nothing, and matching nothing is silent.
+	//
+	// Nothing here joins on it -- that is TEEndpoint's job, below -- and this field is published to
+	// status as the leader's own string.
 	Name string
 	// State is the leader's own segment state, passed through unchanged. It is NOT mapped to a
 	// closed set here: this API publishes what the store reports, so a state a later store version

@@ -991,6 +991,10 @@ it restarts on **what changed** rather than on **that the template changed**.
     the C++ `Client` and one startup log line. This shipped design renders no memory-unmount hook.
     **Superseded.** The member-identity reasoning in this bullet is owned by
     the segment-identity correction; the shrink conclusion it states is not.
+    **Superseded again, by the unmount-reachability measurement** recorded in the media-and-scaling
+    specification: the member's unmount routes refuse the segment this operator renders whatever id
+    they are handed, so identity is never arrived at and the segment name carries a fresh port too.
+    The shrink conclusion is unchanged and now rests on that instead.
   - What the master DOES offer is `POST /api/v1/drain_jobs`, which **migrates** a segment's data to
     named target segments rather than unmounting it. That is a different and stronger operation than
     a graceful unmount, it needs the remaining members to have room, and it is a stateful
