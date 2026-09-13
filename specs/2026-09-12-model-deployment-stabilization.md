@@ -522,6 +522,24 @@ Acceptance:
   a mode the type does in fact offer, and the user's fix is to wait — which the message does not say.
 - The comment naming these as unwritten is removed, not left describing work that is done.
 
+**Corrected after shipping: the ceiling is a WHOLE-CARD ceiling, and the acceptance above does not
+say so.** The second bullet reads as though one ceiling bounds every request. It does not.
+`status.accelerator.onceMaxRequest` counts FREE UNPARTITIONED cards, so a pool that has carved all of
+its own reports zero there while its partitioned view serves requests all day — and the rule as
+written then refused a valid partitioned role with "hands out at most 0 accelerator(s) at once", a
+sentence describing the type rather than the request.
+
+**What makes that worse than an ordinary over-refusal is whose value it rejected.** A role naming no
+card count is defaulted to one card by this webhook's own mutating half, so the operator never typed
+the number and had nothing to correct — a refusal nobody could avoid and nobody could act on.
+
+The bullet is kept rather than edited because it is what the work was judged against. What replaces
+it: **the whole-card ceiling bounds a whole-card request only**, and what bounds the other two modes
+is that a slice is a fraction of ONE card and a partition is one instance on ONE card, so the count
+is exactly one. The `Instance` webhook had drawn that line all along; the rule was missing here, and
+its absence was invisible because the whole-card ceiling refused the same over-large requests for the
+wrong reason while refusing correct one-card requests too.
+
 #### F7 — The status kind enum, proved from the writer
 
 `status.roles[].kind` gains the enum its spec counterpart already carries.
@@ -728,7 +746,7 @@ groups — no user can reach that shape yet, because admission still refuses two
 T8 deletes the rule); after T8 (a two-`instanceType` deployment is admitted and reaches two groups);
 after T6 (a deployment is admitted as a unit across groups); after T9 (the cluster agrees).
 
-⚠️ That first correction is worth reading as a pattern rather than a fix: a checkpoint describes
+That first correction is worth reading as a pattern rather than a fix: a checkpoint describes
 **behaviour a user can observe**, while a task delivers **a function**, and in a written plan the two
 look identical. T4's checkpoint claimed the observable one and was true only of the function.
 
@@ -915,7 +933,7 @@ look identical. T4's checkpoint claimed the observable one and was true only of 
       and the next reader has no way to tell the two apart. What is recorded is where the work went.
       **Nothing above depends on it**, which is what makes the spec shippable without it: no
       acceptance criterion in T1 to T11 is written in terms of this measurement.
-      ⚠️ One premise of that routing turned out to be weaker than it looked and is recorded here so
+      One premise of that routing turned out to be weaker than it looked and is recorded here so
       it is not re-derived: the hardware it needs is **not** on the accelerator-vendor axis the
       standing procurement decision covers — that axis is about which manufacturer, while this is
       about two products or two cards. Hardware satisfying it already exists; what does not exist is
@@ -1120,6 +1138,17 @@ the workload rather than deleting it, and the deployment reports `Parked` naming
    and the ceiling rule refuses the deployment at admission — so the shape never reaches the
    scheduler and nothing is infeasible. A CPU-only type marked `inactive` is the fixture: the
    reconciler holds its ClusterQueue, which is a documented state rather than a broken one.
+   - **Corrected: that was not the fixture's problem, it was the rule's.** The entry above records a
+     product defect as a lesson for whoever writes the next case, and a reader who takes it at face
+     value routes around the refusal instead of fixing it. The rule was applying a WHOLE-CARD ceiling
+     to a request that was not for whole cards; see the correction under F6. What the entry gets
+     right is the mechanism and the reading it was measured on. What it gets wrong is whose fault it
+     names.
+   - **The fixture stays as it is.** A CPU-only type marked `inactive` is still the right one, and
+     not because of the refusal: `inactive` makes a queue refuse to admit through a documented state
+     the reconciler maintains, while the accelerated type's infeasibility would now depend on a rule
+     that has just been changed. A fixture whose property rests on an admission rule is one the next
+     change to that rule can silently empty out.
 3. **A merge patch that omits a frozen field is an edit to that frozen field.** Restating a role
    without its `template` sets `template.command` to null and is refused — correctly. The reference
    page says so now, and both cases patch one field with `--type=json`.

@@ -369,6 +369,18 @@ k -n "$NS" delete modeldeployment "$MD" --ignore-not-found --wait=true >/dev/nul
 # thing and makes every row below unmeasurable. Measured: "instance type ... hands out at most 0
 # accelerator(s) at once".
 #
+# CORRECTED: THAT WAS NOT THE FIXTURE'S PROBLEM, IT WAS THE RULE'S. The paragraph above is kept
+# because its mechanism and its measured reading are both right, but it names the wrong culprit, and
+# a reader who takes it at face value routes around a product defect instead of reporting it. The
+# rule was applying a WHOLE-CARD ceiling to a request that was not for whole cards; the whole-card
+# view counts free unpartitioned cards and reads zero on a pool that has carved all of its own. That
+# is fixed, and the card count it rejected was one the webhook's own defaulting had written.
+#
+# THE FIXTURE BELOW STAYS AS IT IS, and not because of that refusal. `inactive` makes a queue refuse
+# to admit through a documented state the reconciler maintains, while the accelerated type's
+# infeasibility would now rest on an admission rule that has just changed. A fixture whose property
+# rests on a rule is one the next change to that rule can silently empty out.
+#
 # A CPU-ONLY type is admitted (no card count is defaulted, so no ceiling applies), and `inactive`
 # is what makes its queue refuse to admit: the InstanceType reconciler holds the backing
 # ClusterQueue, which reports Active=False with a Hold stop policy. That is a supported, documented
