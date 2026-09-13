@@ -24,6 +24,29 @@ https://github.com/gpustack/gpustack-operator/security/advisories/new.
 
 **How to reproduce it (as minimally and precisely as possible)**:
 
+**How this was found** (tick one):
+- [ ] **Hit it** — running the operator, doing something I meant to do
+- [ ] **Reported** — somebody else hit it and told us
+- [ ] **Worked out** — read the code, a specification or a manifest and derived that this must happen
+
+<!-- The three are NOT ranked, and "worked out" is not a lesser answer: plenty of real defects are
+     found by reading, and a reproduction recipe can be written for a state nobody has ever been in.
+     It is asked because it changes what the fix has to clear, never how seriously the report is read.
+
+     "Hit it" and "reported" carry their own evidence that the state is reachable. "Worked out" does
+     not yet, so the body should also answer:
+
+       - Who configures the thing that triggers this, and what were they trying to do? A state only
+         this project assembles is a state to document, not one to add a rule for.
+       - Does the fix ask a user to tell us something they have already told us? A field that
+         restates a known fact adds a copy that can disagree with the original; it adds no
+         information.
+       - Would the check that catches this only ever fire on inputs we wrote ourselves?
+
+     A defect that answers none of the three may still be real and still be worth a warning, a status
+     condition or a documented caveat. What it should not become is schema: a rule is much harder to
+     take back than a paragraph. -->
+
 **Anything else we need to know?**:
 
 **Environment**:
