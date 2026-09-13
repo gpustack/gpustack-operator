@@ -203,13 +203,15 @@ func (s *ResourceServer) advertiseCard(
 	// kubelet picks tokens freely (GetPreferredAllocation does run, but its answer is only a hint
 	// kubelet is free to ignore), so a held accelerator still advertised as Healthy WILL eventually
 	// be handed to an opposite-mode pod, whose Allocate then fails with a permanent
-	// UnexpectedAdmissionError. Keep the held accelerator's tokens advertised — removing them would
-	// strand kubelet's checkpointed allocations on re-registration — but report them Unhealthy,
-	// which kubelet never assigns to new pods while leaving the holding pod's existing allocation
-	// unaffected. The hold is read from the ledger Status AND the in-process reservation, so a
-	// just-reserved accelerator is withheld in the same ListAndWatch cycle. The Visibility server
-	// is exempt: a visibility request must co-allocate the very accelerator its owner holds,
-	// whatever mode that hold is.
+	// UnexpectedAdmissionError.
+	//
+	//   - Keep the held accelerator's tokens advertised — removing them would strand kubelet's
+	//     checkpointed allocations on re-registration — but report them Unhealthy, which kubelet
+	//     never assigns to new pods while leaving the holding pod's existing allocation unaffected.
+	//   - The hold is read from the ledger Status AND the in-process reservation, so a just-reserved
+	//     accelerator is withheld in the same ListAndWatch cycle.
+	//   - The Visibility server is exempt: a visibility request must co-allocate the very
+	//     accelerator its owner holds, whatever mode that hold is.
 	health := deviceplugin.Healthy
 	if acc.Status.Unhealthy {
 		health = deviceplugin.Unhealthy
@@ -613,13 +615,16 @@ func (s *ResourceServer) selectPreferredUnits(
 //
 // The rest pack rather than spread: among the accelerators whose ledger can still take the request,
 // the fullest one goes first, so an accelerator already carrying a slice is filled before an
-// untouched sibling is broken into. That keeps whole accelerators whole, so a later large claim
-// still has somewhere to go — spreading instead strands a node with plenty of free memory unable to
-// host one big slice. It is the rule device.SelectPartitionPlacements already applies to hardware
-// partitions, for the same reason. Accelerators that cannot take the request sort last, emptiest
-// first, so that if the caller's preferred-accelerator path has to fall back to one of them it
-// over-commits the least. Ties break on the lower position, so two identical requests against
-// identical state place identically.
+// untouched sibling is broken into.
+//
+//   - That keeps whole accelerators whole, so a later large claim still has somewhere to go, where
+//     spreading instead strands a node with plenty of free memory unable to host one big slice. It
+//     is the rule device.SelectPartitionPlacements already applies to hardware partitions, for the
+//     same reason.
+//   - Accelerators that cannot take the request sort last, emptiest first, so that if the caller's
+//     preferred-accelerator path has to fall back to one of them it over-commits the least.
+//   - Ties break on the lower position, so two identical requests against identical state place
+//     identically.
 func slicedPackingOrder(
 	devs *workercore.Devices,
 	grp *workercore.DevicesGroup,
@@ -1440,13 +1445,15 @@ func applyPhysicalPlacements(
 // actuatePartition materializes the hardware partition(s) for an allocation that names a profile,
 // via the responder's actuator under that responder's own per-accelerator lock, and records each
 // chosen placement upward in d.Status BEFORE the annotation patch, so the reconciler's ledger can
-// reconstruct the accelerator's occupied set. The actuator may land on a different interval of the
-// selected accelerator than the one published as the intent — it can adopt an instance the hardware
-// already carries — so the reservation is re-published with what actually happened. The node
-// allocate mutex is already released by now; the per-accelerator lock serializes only
-// same-accelerator creates, so sibling accelerators proceed in parallel. A responder that cannot
-// actuate fails the allocation rather than starting a container with no partition. Every family
-// that names no profile gets a nil allocation and no work.
+// reconstruct the accelerator's occupied set.
+//
+//   - The actuator may land on a different interval of the selected accelerator than the one
+//     published as the intent — it can adopt an instance the hardware already carries — so the
+//     reservation is re-published with what actually happened.
+//   - The node allocate mutex is already released by now; the per-accelerator lock serializes only
+//     same-accelerator creates, so sibling accelerators proceed in parallel.
+//   - A responder that cannot actuate fails the allocation rather than starting a container with no
+//     partition. Every family that names no profile gets a nil allocation and no work.
 func (s *ResourceServer) actuatePartition(
 	ctx context.Context, d *_AllocationDecision, deviceIDs []string,
 ) (*PhysicalSlicedAllocation, error) {
@@ -1652,12 +1659,14 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 		// Fail closed: the owner container's allocation is recorded in neither the in-process
 		// reservation nor the durable annotation. Returning an error rejects this admission
 		// rather than emitting an empty visible-devices env a runtime could read as "all
-		// devices". Admission walks a Pod's init containers and then its containers in spec
-		// order, and every producer of a visibility claim today emits the owner ahead of it, so
-		// this path should not occur in practice; if it ever does, recovery is the controller
-		// recreating the Pod. Ordering the visibility container first — an init container with
-		// an always-on restart policy, say — would make it unresolvable every time, so a
-		// producer that wants that must give this path a source that does not depend on order.
+		// devices".
+		//
+		// Admission walks a Pod's init containers and then its containers in spec order, and
+		// every producer of a visibility claim today emits the owner ahead of it, so this path
+		// should not occur in practice; if it ever does, recovery is the controller recreating
+		// the Pod. Ordering the visibility container first — an init container with an always-on
+		// restart policy, say — would make it unresolvable every time, so a producer that wants
+		// that must give this path a source that does not depend on order.
 		err = fmt.Errorf("no accelerator devices allocated for pod %s by a container other than %q "+
 			"(owner=%q); refusing to grant visibility",
 			kubemeta.GetNamespacedNameKey(pod), ctr.Name, owner)

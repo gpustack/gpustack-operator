@@ -23,14 +23,15 @@ import (
 )
 
 // PodWebhook hooks core Pods routed to a GPUStack queue (selected by the
-// "kueue.x-k8s.io/queue-name" label) and normalizes each container's accelerator
-// request. Mutating: a logical slice's per-card compute budget
-// (.sliced.cores-percentage) defaults to a whole card (100) and its per-card VRAM
-// budget (.sliced.memory-percentage or .sliced.memory-mib) is folded into the
-// credit-counting .sliced.units, while a partition request folds the profile's VRAM
-// into .partitioned.units — any client-supplied units value is ignored and recomputed,
-// since it is webhook-derived only. Validating: it enforces the normative accelerator
-// request rules (see validatePodAcceleratorRequest) plus the per-family shape checks.
+// "kueue.x-k8s.io/queue-name" label) and normalizes each container's accelerator request.
+//
+//   - Mutating: a logical slice's per-card compute budget (.sliced.cores-percentage) defaults to a
+//     whole card (100), and its per-card VRAM budget (.sliced.memory-percentage or
+//     .sliced.memory-mib) is folded into the credit-counting .sliced.units, while a partition
+//     request folds the profile's VRAM into .partitioned.units. Any client-supplied units value is
+//     ignored and recomputed, since it is webhook-derived only.
+//   - Validating: it enforces the normative accelerator request rules (see
+//     validatePodAcceleratorRequest) plus the per-family shape checks.
 //
 // nolint: lll
 // +k8s:webhook-gen:validating:group="",version="v1",resource="pods",scope="Namespaced"

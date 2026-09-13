@@ -183,12 +183,14 @@ func (r *PodKVCacheWebhook) resolveBinding(
 	// The division of labor that follows: PERMANENT loss is refused, TEMPORARY non-convergence is
 	// admitted and left to heal. F4b is the permanent side - a pool whose ledger is gone stays gone
 	// until somebody acts, and no amount of waiting fixes it.
+	//
 	// Read live rather than through r.get. That helper falls back to the APIReader only on NotFound, so
 	// it repairs a cache that is missing an object but not one that is holding a stale copy of it - and
 	// the deletion check below reads exactly the field a stale copy is most likely to be behind on.
+	//
 	// Informer lag is not a knife-edge: after a watch reconnect it is seconds, which is long enough for
-	// a Binding deleted moments ago to still read as live and admit a Pod that can never write.
-	// The pool and the backend keep using r.get: nothing about them is judged on a field this young.
+	// a Binding deleted moments ago to still read as live and admit a Pod that can never write. The
+	// pool and the backend keep using r.get: nothing about them is judged on a field this young.
 	binding := &workercore.KVCachePoolBinding{}
 	key := ctrlcli.ObjectKey{Namespace: pod.Namespace, Name: name}
 	if err := r.APIReader.Get(ctx, key, binding); err != nil {
