@@ -588,6 +588,36 @@ read, which is accurate and about a different subject.
 > possible, and it is **refused** — it takes the price above on your behalf, on every deployment with
 > an edit waiting. Measured, a withheld edit lands within seconds of the store returning.
 
+**`RoleKindsReady`** — whether every role **kind** the deployment declares has at least one ready
+replica. It is deliberately **not** replica completeness: "every role has all the replicas it asked
+for" is what `phase` answers, by summing every role's counts before judging.
+
+| Value | Reason | Meaning |
+|---|---|---|
+| `True` | `AllKindsReady` | every kind present has at least one ready replica |
+| `False` | `KindsNotReady` | at least one kind has none; the message names the kinds |
+| `Unknown` | `NoRoleStatuses` | the pass accounted for no role at all, so there is nothing to judge |
+
+A deployment whose roles all share one kind — the shape you get when no role names a `kind`, since it
+defaults to `server` — reports `True` as soon as any replica is ready. That is not a blind spot. The
+degradation is real and `phase` reports it as `Degraded`; this condition answers a different question
+and is silent on that shape by design.
+
+A role that took over its command line counts toward its kind like any other. Such a role gets no
+readiness probe, so its `Ready` says its containers started rather than that anything answered on the
+serving path. `status.roles[].unmanaged` is published per role for a reader who needs the stronger
+reading.
+
+> **Why a separate condition rather than a finer `phase`.** The two answer different questions over
+> the same numbers. A sum cannot express this one: a deployment missing an entire kind and a
+> deployment one replica short produce the same sum, so the same phase. Adding the axis as a
+> condition leaves every existing consumer of `phase` reading exactly what it read before.
+
+> **Why it never claims the deployment is serving.** Whether a request can be answered depends on
+> what the engine does with a role told it is a producer, and on whether a Service's endpoints reach
+> the ready replicas. Neither is observable from this object, so this condition reports readiness by
+> kind and stops there — which is what keeps it correct however those two are later settled.
+
 ## Rollout is recreate
 
 A spec change that changes a replica's rendered Pod **deletes and recreates** it. There are no surge

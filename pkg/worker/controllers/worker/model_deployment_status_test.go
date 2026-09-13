@@ -581,6 +581,7 @@ func TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved(t *testing.T) {
 		string(ModelDeploymentConditionQuotaReserved),
 		string(ModelDeploymentConditionCacheAttached),
 		string(ModelDeploymentConditionReplicasUpToDate),
+		string(ModelDeploymentConditionRoleKindsReady),
 	}, declared)
 	assert.NotContains(t, declared, string(ModelDeploymentConditionDomainRegistered),
 		"this pass was handed no reading of the Binding, and a pass that did not look must not report")
@@ -592,6 +593,14 @@ func TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved(t *testing.T) {
 	// controller's own, so a pass that could account for none of them has no answer rather than no
 	// question, and Unknown is that answer. The domain is a reading of somebody else's object.
 	assert.True(t, ModelDeploymentConditionReplicasUpToDate.IsUnknown(holder))
+	// ROLE KINDS IS THE ONE THAT ANSWERS FALSE HERE, and the difference is what was observed rather
+	// than how much of it. The counts this pass wrote are counted from a Pod list that SUCCEEDED and
+	// returned nothing, so "no replica of any kind is ready" is an observation rather than an
+	// absence of one. Unknown is reserved for a pass that accounted for no role at all, which is a
+	// different input and reaches a different reason.
+	assert.True(t, ModelDeploymentConditionRoleKindsReady.IsFalse(holder))
+	assert.Equal(t, modelDeploymentReasonKindsNotReady,
+		ModelDeploymentConditionRoleKindsReady.GetReason(holder))
 	assert.Nil(t, status.KVCache, "and it invents no domain to report")
 }
 
@@ -1298,4 +1307,306 @@ func TestObserveModelDeploymentQuota_ThePreemptionNoteContract(t *testing.T) {
 		assert.NotContains(t, msg, "still admitted",
 			"nothing of this deployment's is holding anything: its workloads are deactivated")
 	})
+}
+
+// roleKindStatus builds one role status for the role-kind cases.
+//
+// THE KIND IS ALWAYS EXPLICIT, and that is the point of having this helper rather than reusing the
+// deployment fixtures. A role's NAME does not carry its kind: the kind is a separate field that
+// defaults to server, so a fixture built by naming two roles "prefill" and "decode" and setting
+// nothing else is a SINGLE-KIND fixture that reads as a disaggregated one. Cases below assert
+// against a kind, so a fixture that quietly carried one kind would answer every case the same way
+// and pass.
+func roleKindStatus(name string, kind workercore.ModelDeploymentRoleKind, ready int32) workercore.ModelDeploymentRoleStatus {
+	return workercore.ModelDeploymentRoleStatus{Name: name, Kind: kind, Desired: 1, Ready: ready}
+}
+
+func TestModelDeploymentKindsWithoutReady(t *testing.T) {
+	testCases := []struct {
+		name  string
+		roles []workercore.ModelDeploymentRoleStatus
+		want  []string
+	}{
+		{
+			// The discriminating fixture. One kind, one role with nothing ready: the KIND is still
+			// represented, so nothing is missing. A rule written per ROLE reports the opposite here,
+			// and this is the only arrangement in this table where the two disagree.
+			name: "single_kind_one_role_without_ready_replicas",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				roleKindStatus("a", workercore.ModelDeploymentRoleKindServer, 0),
+				roleKindStatus("b", workercore.ModelDeploymentRoleKindServer, 1),
+			},
+			want: nil,
+		},
+		{
+			name: "one_kind_has_no_ready_replica",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				roleKindStatus("p", workercore.ModelDeploymentRoleKindPrefill, 0),
+				roleKindStatus("d", workercore.ModelDeploymentRoleKindDecode, 1),
+			},
+			want: []string{string(workercore.ModelDeploymentRoleKindPrefill)},
+		},
+		{
+			name: "every_kind_has_a_ready_replica",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				roleKindStatus("p", workercore.ModelDeploymentRoleKindPrefill, 1),
+				roleKindStatus("d", workercore.ModelDeploymentRoleKindDecode, 2),
+			},
+			want: nil,
+		},
+		{
+			// Both missing, and the ORDER is the roles' order rather than a map's. The message this
+			// list renders into is compared against the stored one to decide whether to write at
+			// all, so an unstable order would rewrite the status on every pass.
+			name: "no_kind_has_a_ready_replica_reports_both_in_role_order",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				roleKindStatus("d", workercore.ModelDeploymentRoleKindDecode, 0),
+				roleKindStatus("p", workercore.ModelDeploymentRoleKindPrefill, 0),
+			},
+			want: []string{
+				string(workercore.ModelDeploymentRoleKindDecode),
+				string(workercore.ModelDeploymentRoleKindPrefill),
+			},
+		},
+		{
+			// A kind is represented if ANY of its roles has a ready replica, including when the
+			// role that has one is not the first of that kind.
+			name: "a_kind_is_represented_by_its_second_role",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				roleKindStatus("p1", workercore.ModelDeploymentRoleKindPrefill, 0),
+				roleKindStatus("p2", workercore.ModelDeploymentRoleKindPrefill, 1),
+				roleKindStatus("d", workercore.ModelDeploymentRoleKindDecode, 1),
+			},
+			want: nil,
+		},
+		{
+			// An unmanaged role counts. Its Pods carry no probes, so Ready means only that the
+			// containers started -- a weaker statement, deliberately accepted, because the operator
+			// did not build that command line and has nothing better to judge it by.
+			name: "an_unmanaged_role_represents_its_kind",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				func() workercore.ModelDeploymentRoleStatus {
+					rs := roleKindStatus("p", workercore.ModelDeploymentRoleKindPrefill, 1)
+					rs.Unmanaged = true
+
+					return rs
+				}(),
+				roleKindStatus("d", workercore.ModelDeploymentRoleKindDecode, 1),
+			},
+			want: nil,
+		},
+	}
+
+	for _, c := range testCases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, modelDeploymentKindsWithoutReady(c.roles))
+		})
+	}
+}
+
+// TestModelDeploymentKindsWithoutReady_OnlyASingleKindFixtureCanFalsifyThePerRoleRule pins the one
+// fact that decides whether the table above is worth running.
+//
+// The rule under test is "every KIND has a ready replica". The rule it must not be is "every ROLE
+// has a ready replica". Those two agree on every arrangement in which each kind has exactly one
+// role -- which is every fixture a reader would naturally write for a feature about prefill and
+// decode. They disagree on ONE shape: several roles of the SAME kind, some of them with nothing
+// ready.
+//
+// SO THE SINGLE-KIND FIXTURE IS LOAD-BEARING, and it looks like the least relevant one in the file.
+// This test states that in a form that fails if it stops being true: if a later edit makes the
+// fixtures agree under both rules, the discrimination is gone and this reports it, rather than the
+// suite going green against an implementation nobody checked.
+func TestModelDeploymentKindsWithoutReady_OnlyASingleKindFixtureCanFalsifyThePerRoleRule(t *testing.T) {
+	// perRole is the rule this implementation must NOT be, written out so the difference is executed
+	// rather than asserted in a comment.
+	perRole := func(roles []workercore.ModelDeploymentRoleStatus) bool {
+		for i := range roles {
+			if roles[i].Ready == 0 {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	singleKind := []workercore.ModelDeploymentRoleStatus{
+		roleKindStatus("a", workercore.ModelDeploymentRoleKindServer, 0),
+		roleKindStatus("b", workercore.ModelDeploymentRoleKindServer, 1),
+	}
+	multiKindOneMissing := []workercore.ModelDeploymentRoleStatus{
+		roleKindStatus("p", workercore.ModelDeploymentRoleKindPrefill, 0),
+		roleKindStatus("d", workercore.ModelDeploymentRoleKindDecode, 1),
+	}
+	multiKindBothReady := []workercore.ModelDeploymentRoleStatus{
+		roleKindStatus("p", workercore.ModelDeploymentRoleKindPrefill, 1),
+		roleKindStatus("d", workercore.ModelDeploymentRoleKindDecode, 1),
+	}
+
+	byKind := func(roles []workercore.ModelDeploymentRoleStatus) bool {
+		return len(modelDeploymentKindsWithoutReady(roles)) == 0
+	}
+
+	assert.NotEqual(t, byKind(singleKind), perRole(singleKind),
+		"the single-kind fixture is the only one that tells the two rules apart; if this stops "+
+			"disagreeing, nothing in this file can catch a per-role implementation")
+
+	assert.Equal(t, byKind(multiKindOneMissing), perRole(multiKindOneMissing),
+		"a multi-kind fixture with one kind missing agrees under both rules, so it cannot falsify")
+	assert.Equal(t, byKind(multiKindBothReady), perRole(multiKindBothReady),
+		"a multi-kind fixture with everything ready agrees under both rules, so it cannot falsify")
+}
+
+// TestObserveModelDeploymentRoleKinds_MultiKindFixturesReallyCarryTwoKinds guards the fixtures
+// themselves rather than the code.
+//
+// A fixture is only a multi-kind fixture if its kinds actually differ, and the field that decides
+// that defaults to server when unset. A later refactor routing these through a deployment helper
+// would produce roles named "prefill" and "decode" that are both server roles, and every case above
+// would still pass -- for the wrong reason and with no symptom. This asserts the property the cases
+// rely on instead of trusting how they are spelled.
+func TestObserveModelDeploymentRoleKinds_MultiKindFixturesReallyCarryTwoKinds(t *testing.T) {
+	roles := []workercore.ModelDeploymentRoleStatus{
+		roleKindStatus("p", workercore.ModelDeploymentRoleKindPrefill, 0),
+		roleKindStatus("d", workercore.ModelDeploymentRoleKindDecode, 1),
+	}
+
+	kinds := map[workercore.ModelDeploymentRoleKind]struct{}{}
+	for i := range roles {
+		kinds[roles[i].Kind] = struct{}{}
+	}
+	require.Len(t, kinds, 2, "a fixture meant to be multi-kind must carry two distinct kinds")
+}
+
+func TestObserveModelDeploymentRoleKinds(t *testing.T) {
+	testCases := []struct {
+		name        string
+		roles       []workercore.ModelDeploymentRoleStatus
+		wantStatus  string
+		wantReason  string
+		wantMessage string
+	}{
+		{
+			// No role accounted for is NOT a missing kind. Reporting False here would assert
+			// something this pass has no observation for.
+			name:        "no_role_statuses_is_unknown",
+			roles:       nil,
+			wantStatus:  "Unknown",
+			wantReason:  modelDeploymentReasonNoRoleStatuses,
+			wantMessage: "no role has been accounted for yet",
+		},
+		{
+			name: "every_kind_ready_is_true",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				roleKindStatus("p", workercore.ModelDeploymentRoleKindPrefill, 1),
+				roleKindStatus("d", workercore.ModelDeploymentRoleKindDecode, 1),
+			},
+			wantStatus:  "True",
+			wantReason:  modelDeploymentReasonAllKindsReady,
+			wantMessage: "every role kind of this deployment has at least one ready replica",
+		},
+		{
+			name: "a_missing_kind_is_false_and_named",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				roleKindStatus("p", workercore.ModelDeploymentRoleKindPrefill, 0),
+				roleKindStatus("d", workercore.ModelDeploymentRoleKindDecode, 1),
+			},
+			wantStatus:  "False",
+			wantReason:  modelDeploymentReasonKindsNotReady,
+			wantMessage: "no replica is ready for role kinds prefill",
+		},
+		{
+			// The single-kind shape, where this condition is deliberately quiet: the degradation is
+			// real and is carried by the phase, which sums the counts. Asserting True here is what
+			// records that silence as a decision rather than as a gap.
+			name: "single_kind_with_one_role_empty_is_true",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				roleKindStatus("a", workercore.ModelDeploymentRoleKindServer, 0),
+				roleKindStatus("b", workercore.ModelDeploymentRoleKindServer, 1),
+			},
+			wantStatus:  "True",
+			wantReason:  modelDeploymentReasonAllKindsReady,
+			wantMessage: "every role kind of this deployment has at least one ready replica",
+		},
+	}
+
+	for _, c := range testCases {
+		t.Run(c.name, func(t *testing.T) {
+			holder := &workercore.ModelDeployment{}
+			holder.Status.Roles = c.roles
+
+			observeModelDeploymentRoleKinds(holder)
+
+			assert.Equal(t, c.wantStatus,
+				ModelDeploymentConditionRoleKindsReady.GetStatus(holder), "status")
+			assert.Equal(t, c.wantReason,
+				ModelDeploymentConditionRoleKindsReady.GetReason(holder), "reason")
+			assert.Equal(t, c.wantMessage,
+				ModelDeploymentConditionRoleKindsReady.GetMessage(holder), "message")
+		})
+	}
+}
+
+// TestDeriveModelDeploymentPhase_SumsAcrossKindsAndDoesNotBranchOnThem pins the phase on the one
+// shape that can tell its rule apart from a kind-aware one.
+//
+// The phase sums every role's counts before judging, so an entire kind with nothing ready and a
+// single replica short produce the same value. That is its behaviour today and adding a condition
+// about role kinds does NOT change it: the two answer different questions over the same numbers.
+//
+// THE FIXTURE HAS TO BE MULTI-KIND OR THIS ASSERTS NOTHING. The existing phase table builds one role
+// and therefore one kind, and a single-kind fixture reports the same value under both rules -- so it
+// would keep passing if the derivation were rewritten to branch on kind, which is exactly the change
+// this exists to catch.
+func TestDeriveModelDeploymentPhase_SumsAcrossKindsAndDoesNotBranchOnThem(t *testing.T) {
+	testCases := []struct {
+		name        string
+		roles       []workercore.ModelDeploymentRoleStatus
+		wantPhase   string
+		wantMessage string
+	}{
+		{
+			// One whole kind empty. A kind-aware phase would have something of its own to say here;
+			// this one reports the sum, and that is the value being pinned.
+			name: "one_kind_entirely_empty_is_still_the_summed_degraded",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				{Name: "p", Kind: workercore.ModelDeploymentRoleKindPrefill, Desired: 2, Ready: 0},
+				{Name: "d", Kind: workercore.ModelDeploymentRoleKindDecode, Desired: 2, Ready: 2},
+			},
+			wantPhase:   ModelDeploymentPhaseDegraded,
+			wantMessage: "2 of 4 replicas are ready",
+		},
+		{
+			// The same sum reached with both kinds represented. Identical phase and identical
+			// message: the sum is all the phase looks at.
+			name: "both_kinds_partly_ready_reaches_the_same_answer",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				{Name: "p", Kind: workercore.ModelDeploymentRoleKindPrefill, Desired: 2, Ready: 1},
+				{Name: "d", Kind: workercore.ModelDeploymentRoleKindDecode, Desired: 2, Ready: 1},
+			},
+			wantPhase:   ModelDeploymentPhaseDegraded,
+			wantMessage: "2 of 4 replicas are ready",
+		},
+		{
+			name: "every_kind_complete_is_ready",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				{Name: "p", Kind: workercore.ModelDeploymentRoleKindPrefill, Desired: 2, Ready: 2},
+				{Name: "d", Kind: workercore.ModelDeploymentRoleKindDecode, Desired: 1, Ready: 1},
+			},
+			wantPhase: ModelDeploymentPhaseReady,
+		},
+	}
+
+	for _, c := range testCases {
+		t.Run(c.name, func(t *testing.T) {
+			md := &workercore.ModelDeployment{}
+			holder := &workercore.ModelDeployment{}
+			holder.Status.Roles = c.roles
+
+			deriveModelDeploymentPhase(md, holder)
+
+			assert.Equal(t, c.wantPhase, holder.Status.Phase, "phase")
+			assert.Equal(t, c.wantMessage, holder.Status.PhaseMessage, "phaseMessage")
+		})
+	}
 }

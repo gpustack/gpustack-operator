@@ -44,6 +44,35 @@ const (
 // condition's vocabulary sits with the code that can actually observe it.
 const (
 	ModelDeploymentConditionQuotaReserved kubeapistatus.ConditionType = "QuotaReserved"
+
+	// ModelDeploymentConditionRoleKindsReady reports whether every role kind this deployment
+	// declares has at least one ready replica.
+	//
+	// IT IS NOT REPLICA COMPLETENESS, which is the question it sits closest to and the one it will
+	// be read as. "Every role has all the replicas it asked for" is what the phase already answers,
+	// by summing every role's counts before judging — and a sum cannot express this one: a
+	// deployment missing an entire kind and a deployment merely one replica short produce the same
+	// sum, so the same phase.
+	//
+	// IT IS ALSO NOT AVAILABILITY, and the distance is larger than it looks. Whether a request can
+	// be served depends on what the engine does with a role it was told is a producer, and on
+	// whether a Service's endpoints reach the replicas that are ready. Neither is observable from
+	// this object. So this reports readiness BY KIND and claims nothing past it, which is also what
+	// keeps it correct whichever way those two questions are later answered.
+	ModelDeploymentConditionRoleKindsReady kubeapistatus.ConditionType = "RoleKindsReady"
+)
+
+// The reasons RoleKindsReady carries. Three rather than two, because "no kind is missing" and "no
+// role has been accounted for yet" are different answers that a False would merge into one.
+const (
+	modelDeploymentReasonAllKindsReady = "AllKindsReady"
+
+	modelDeploymentReasonKindsNotReady = "KindsNotReady"
+
+	// modelDeploymentReasonNoRoleStatuses is the Unknown case: the pass accounted for no role at
+	// all, so there is nothing to judge. Reporting False here would say a kind is missing, which is
+	// a claim this pass cannot make.
+	modelDeploymentReasonNoRoleStatuses = "NoRoleStatuses"
 )
 
 // modelDeploymentReasonPodGroupIncomplete is QuotaReserved's reason for a group that is short of the
@@ -143,6 +172,8 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 	r.observeModelDeploymentCache(ctx, md, pods, domain, holder)
 
 	observeModelDeploymentRollout(holder, rollout)
+
+	observeModelDeploymentRoleKinds(holder)
 
 	deriveModelDeploymentPhase(md, holder)
 
@@ -684,6 +715,79 @@ func modelDeploymentWorkloadOwnsAny(wl *kueue.Workload, pods sets.Set[types.UID]
 	}
 
 	return false
+}
+
+// observeModelDeploymentRoleKinds reports whether every role kind has a ready replica.
+//
+// IT READS THE ROLE STATUSES THIS PASS JUST COMPUTED rather than the spec, so its answer cannot
+// disagree with the counts published beside it. Reading the spec instead would let the condition
+// speak about a role whose replicas this pass failed to account for.
+func observeModelDeploymentRoleKinds(holder *workercore.ModelDeployment) {
+	roles := holder.Status.Roles
+	if len(roles) == 0 {
+		ModelDeploymentConditionRoleKindsReady.Unknown(holder, modelDeploymentReasonNoRoleStatuses,
+			"no role has been accounted for yet")
+
+		return
+	}
+
+	missing := modelDeploymentKindsWithoutReady(roles)
+	if len(missing) == 0 {
+		ModelDeploymentConditionRoleKindsReady.True(holder, modelDeploymentReasonAllKindsReady,
+			"every role kind of this deployment has at least one ready replica")
+
+		return
+	}
+
+	ModelDeploymentConditionRoleKindsReady.False(holder, modelDeploymentReasonKindsNotReady,
+		fmt.Sprintf("no replica is ready for role kinds %s", strings.Join(missing, ", ")))
+}
+
+// modelDeploymentKindsWithoutReady names the role kinds no ready replica was counted for, in the
+// order the roles first mention them.
+//
+// It is PURE: same statuses, same result, no client and no clock.
+//
+// THE THRESHOLD IS ONE READY REPLICA, NEVER ALL OF THEM. "All of them" is replica completeness,
+// which the phase already derives; asking it here would put one question in two fields, and the two
+// would be free to disagree the moment either is edited. One is what makes this a question about
+// the deployment's SHAPE: whether each half of a disaggregated deployment is represented at all.
+//
+// THE ORDER IS THE ROLES' ORDER, first mention winning, so two passes over unchanged statuses
+// produce the same message. A map's iteration order would not, and this list is rendered into a
+// condition message that is compared against the stored one to decide whether to write at all.
+//
+// AN UNMANAGED ROLE'S READY REPLICAS COUNT, and that is a decision rather than an oversight. Such a
+// role replaced the whole command line, so the renderer attached no probes to it and its Pods are
+// Ready once their containers start — a weaker statement than a probed role's Ready. It still
+// counts, because the operator did not build that command line and has nothing better to judge it
+// by, and because discounting it would leave a deployment whose roles all took over reporting a
+// missing kind forever. What it costs is that this condition's True rests, for such a kind, on the
+// kubelet's container-start signal alone; status.roles[].Unmanaged is published per role, so a
+// reader needing the stronger reading can apply it without this field folding it in.
+func modelDeploymentKindsWithoutReady(roles []workercore.ModelDeploymentRoleStatus) []string {
+	order := make([]string, 0, len(roles))
+	ready := make(map[string]bool, len(roles))
+
+	for i := range roles {
+		kind := string(roles[i].Kind)
+		if _, seen := ready[kind]; !seen {
+			order = append(order, kind)
+			ready[kind] = false
+		}
+		if roles[i].Ready > 0 {
+			ready[kind] = true
+		}
+	}
+
+	var missing []string
+	for _, kind := range order {
+		if !ready[kind] {
+			missing = append(missing, kind)
+		}
+	}
+
+	return missing
 }
 
 // deriveModelDeploymentPhase summarizes the counts into the one field a human reads first.
