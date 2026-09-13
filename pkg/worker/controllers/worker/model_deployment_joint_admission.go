@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,6 +42,20 @@ const (
 
 	// _JointAdmissionFieldOwner owns this controller's entries in a Workload's admissionChecks.
 	_JointAdmissionFieldOwner = "worker.gpustack.ai/model-deployment-joint"
+
+	// _JointAdmissionInfeasibleAfter is how long a deployment's set may fail to assemble before the
+	// barrier stops holding it and parks it instead.
+	//
+	// THE NUMBER IS A WAIT AN OPERATOR WOULD ACCEPT, not a measurement of anything. A set that cannot
+	// assemble is usually waiting for capacity, and capacity arrives on a human timescale: a node
+	// rejoining, a neighboring workload finishing, a quota being raised. Half an hour is long enough
+	// that none of those is cut short and short enough that a deployment nobody is watching does not
+	// sit on reserved quota overnight.
+	//
+	// WHAT MAKES IT SAFE TO BE WRONG IS WHICH WAY IT FAILS. Too long and quota is held that could have
+	// been released; too short and a deployment that would have started is parked, and the operator
+	// clears it. Neither loses work, and the parked state says what to do.
+	_JointAdmissionInfeasibleAfter = 30 * time.Minute
 )
 
 // ModelDeploymentJointAdmissionCheckReconciler marks the joint-admission AdmissionCheck Active.
@@ -127,6 +143,20 @@ func (r *ModelDeploymentJointAdmissionCheckReconciler) SetupController(
 // elsewhere; within this controller a set that cannot assemble waits.
 type ModelDeploymentJointAdmissionReconciler struct {
 	Client ctrlcli.Client
+
+	// Clock measures how long a set has failed to assemble. It is a field so the bound can be
+	// exercised rather than waited on: a test that slept for the real bound would be one nobody runs,
+	// and a bound nobody runs is a bound nobody has checked.
+	Clock clock.PassiveClock
+}
+
+// now reads the clock, defaulting to the real one so a reconciler built without it still works.
+func (r *ModelDeploymentJointAdmissionReconciler) now() time.Time {
+	if r.Clock == nil {
+		return time.Now()
+	}
+
+	return r.Clock.Now()
 }
 
 var _ ctrlreconcile.Reconciler = (*ModelDeploymentJointAdmissionReconciler)(nil)
@@ -183,13 +213,113 @@ func (r *ModelDeploymentJointAdmissionReconciler) Reconcile(
 			"nothing to wait for: this workload is not one group of a multi-group model deployment")
 	}
 
-	state, message, err := r.jointVerdict(ctx, md)
+	held, err := r.jointVerdict(ctx, md)
 	if err != nil {
 		logger.Error(err, "judge the deployment's groups")
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, r.applyVerdict(ctx, wl, checks, state, message)
+	// PAST THE BOUND THE HOLD BECOMES A PARK. Waiting is the right answer while the set might still
+	// assemble; after long enough it is a deployment sitting on reserved quota forever, and every
+	// pass of the reserve-hold cycle costs a scheduling round for a set nothing is going to complete.
+	// A deployment still short of its own replicas is excluded; see jointHeld.Settled for why.
+	if held.State == kueue.CheckStatePending && held.Settled &&
+		r.heldPast(wl, _JointAdmissionInfeasibleAfter) {
+		logger.Info("parking a deployment whose groups have not assembled", "workload", wl.Name)
+
+		return ctrl.Result{}, r.park(ctx, wl, checks, held.Message)
+	}
+
+	return ctrl.Result{}, r.applyVerdict(ctx, wl, checks, held.State, held.Message)
+}
+
+// heldPast reports whether this controller's check has been Pending for longer than the bound.
+//
+// THE CLOCK IS THE CHECK'S OWN LastTransitionTime, which Kueue stamps when the state changes and
+// leaves alone when it does not. That makes the elapsed time durable on the Workload rather than
+// something this controller has to remember: a restart loses no count, and a set that briefly became
+// feasible and then stopped being feasible starts again from the transition, which is what "has not
+// assembled for half an hour" has to mean.
+func (r *ModelDeploymentJointAdmissionReconciler) heldPast(wl *kueue.Workload, bound time.Duration) bool {
+	for i := range wl.Status.AdmissionChecks {
+		acs := &wl.Status.AdmissionChecks[i]
+		if acs.Name != kueue.AdmissionCheckReference(_JointAdmissionCheckName) ||
+			acs.State != kueue.CheckStatePending {
+			continue
+		}
+		if acs.LastTransitionTime.IsZero() {
+			// Never stamped, so nothing has elapsed yet. The pass that writes Pending stamps it.
+			return false
+		}
+
+		return r.now().Sub(acs.LastTransitionTime.Time) > bound
+	}
+
+	return false
+}
+
+// park stops the reserve-and-hold cycle and says what clears it.
+//
+// IT DEACTIVATES THE WORKLOAD RATHER THAN DELETING IT, and the difference is whether the cycle stops.
+// A deleted Workload is composed again by Kueue from the very Pods that are still there, so deleting
+// removes one turn of the loop and nothing else. spec.active is durable state the scheduler reads:
+// while it is false the Workload is not considered, and the group is not rebuilt behind it.
+//
+// THE MESSAGE NAMES THE ACTION THAT CLEARS IT, because the obvious one does not work. Re-applying the
+// same manifest bumps no resourceVersion and delivers no event, so an operator told only to "try
+// again" watches nothing happen and concludes the operator is wedged. What clears it is deleting the
+// deployment and creating it again, or making the capacity available and reactivating the workload.
+func (r *ModelDeploymentJointAdmissionReconciler) park(
+	ctx context.Context,
+	wl *kueue.Workload,
+	checks []kueue.AdmissionCheckReference,
+	waiting string,
+) error {
+	parked := fmt.Sprintf(
+		"%s. This has not changed for %s, so the deployment is parked rather than held: its workloads "+
+			"are deactivated and no longer ask for quota. An identical re-apply does not clear this — "+
+			"free the capacity the waiting groups need and reactivate the workloads, or delete the "+
+			"deployment and create it again",
+		waiting, _JointAdmissionInfeasibleAfter)
+
+	if err := r.applyVerdict(ctx, wl, checks, kueue.CheckStatePending, parked); err != nil {
+		return err
+	}
+
+	if !kueueworkload.IsActive(wl) {
+		return nil
+	}
+
+	patched := wl.DeepCopy()
+	patched.Spec.Active = ptr.To(false)
+	if err := r.Client.Patch(ctx, patched, ctrlcli.MergeFrom(wl)); err != nil {
+		return fmt.Errorf("deactivate workload %s: %w", wl.Name, err)
+	}
+
+	return nil
+}
+
+// jointHeld is what the barrier decided about one deployment, and why.
+type jointHeld struct {
+	// State and Message are written to every check this controller owns on the Workload.
+	State   kueue.CheckState
+	Message string
+
+	// Settled reports that the deployment has stopped changing shape: every group has every replica
+	// it declares, and what it is waiting for is capacity rather than its own replicas.
+	//
+	// ONLY A SETTLED DEPLOYMENT MAY BE PARKED. The infeasibility bound exists for a set that cannot
+	// assemble, and a deployment mid-rebuild is short of its totals for an ordinary reason that
+	// resolves on its own. Without this distinction a rebuild slower than the bound -- a large image
+	// on a cold node is enough -- parks a deployment that was about to start, and nothing in the
+	// cluster ever sets spec.active back to true, so the park is permanent.
+	//
+	// IT ERRS TOWARD HOLDING RATHER THAN PARKING, which is the direction that loses nothing: holding
+	// costs reserved quota until an operator looks, while parking a healthy rollout costs the rollout.
+	// The residue is that a deployment which finishes assembling into a genuinely infeasible cluster
+	// can be parked on the pass right after, because the bound is measured from the check's own
+	// transition and that transition did not move. Parking is recoverable and the message says how.
+	Settled bool
 }
 
 // jointVerdict answers Ready when every group of the deployment holds a quota reservation.
@@ -203,35 +333,61 @@ func (r *ModelDeploymentJointAdmissionReconciler) Reconcile(
 // not got there, and the message says which one.
 func (r *ModelDeploymentJointAdmissionReconciler) jointVerdict(
 	ctx context.Context, md *workercore.ModelDeployment,
-) (kueue.CheckState, string, error) {
+) (jointHeld, error) {
 	byGroup, err := modelDeploymentReplicaGroups(ctx, r.Client, md)
 	if err != nil {
-		return "", "", err
+		return jointHeld{}, err
 	}
 
 	wlList := new(kueue.WorkloadList)
 	if err = r.Client.List(ctx, wlList, ctrlcli.InNamespace(md.Namespace), ctrlclix.WithoutQuorum); err != nil {
-		return "", "", fmt.Errorf("list workloads: %w", err)
+		return jointHeld{}, fmt.Errorf("list workloads: %w", err)
 	}
 
-	var waiting []string
+	// A GROUP SHORT OF ITS DECLARED TOTAL IS ASSEMBLING, and that is measured rather than assumed
+	// because it is what separates a rollout from a dead end. A group being rebuilt is short by
+	// construction -- the reconciler deletes its replicas and creates them again on a later pass --
+	// and while it is short Kueue composes no Workload for it, so the siblings read it as waiting.
+	// The two look identical from the waiting side, and only the count tells them apart.
+	var waiting, assembling []string
 	for _, group := range modelDeploymentPodGroups(md) {
 		members := byGroup[group.Name]
+		if members.Len() < int(group.TotalCount) {
+			assembling = append(assembling, group.InstanceType)
+		}
 		if members != nil && anyWorkloadHoldsQuotaFor(wlList.Items, members) {
 			continue
 		}
 		waiting = append(waiting, group.InstanceType)
 	}
 	if len(waiting) == 0 {
-		return kueue.CheckStateReady, "every group of this deployment has reserved quota", nil
+		return jointHeld{
+			State:   kueue.CheckStateReady,
+			Message: "every group of this deployment has reserved quota",
+		}, nil
+	}
+	if len(assembling) > 0 {
+		return jointHeld{
+			State: kueue.CheckStatePending,
+			Message: fmt.Sprintf(
+				"holding this group while the deployment is still assembling: the groups on instance "+
+					"types %s do not yet have every replica they declare, so Kueue has composed no "+
+					"workload for them yet. Nothing is wrong with the cluster; this resolves itself as "+
+					"the replicas appear",
+				strings.Join(assembling, ", ")),
+		}, nil
 	}
 
-	return kueue.CheckStatePending, fmt.Sprintf(
-		"holding this group until the whole deployment can run: %d of %d groups have reserved quota, "+
-			"and the ones still waiting are on instance types %s. Every group keeps the quota it has "+
-			"reserved while it waits",
-		len(modelDeploymentPodGroups(md))-len(waiting), len(modelDeploymentPodGroups(md)),
-		strings.Join(waiting, ", ")), nil
+	return jointHeld{
+		State: kueue.CheckStatePending,
+		Message: fmt.Sprintf(
+			"holding this group until the whole deployment can run: %d of %d groups have reserved quota, "+
+				"and the ones still waiting are on instance types %s. Every group keeps the quota it has "+
+				"reserved while it waits",
+			len(modelDeploymentPodGroups(md))-len(waiting), len(modelDeploymentPodGroups(md)),
+			strings.Join(waiting, ", ")),
+		Settled: true,
+	}, nil
 }
 
 // modelDeploymentReplicaGroups indexes a deployment's own replicas by the pod group each one joined.

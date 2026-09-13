@@ -826,7 +826,7 @@ look identical. T4's checkpoint claimed the observable one and was true only of 
       that refuses every multi-group deployment.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/worker/controllers/worker/`
 
-- [ ] **T7 · The infeasibility bound**
+- [x] **T7 · The infeasibility bound**
       Blocked by: T6
       Owns: `pkg/worker/controllers/worker/model_deployment_joint_admission.go` + its test,
       `pkg/worker/controllers/worker/model_deployment_status.go` + its test

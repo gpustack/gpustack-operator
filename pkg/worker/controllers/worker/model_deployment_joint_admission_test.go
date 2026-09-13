@@ -3,17 +3,20 @@ package worker
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	testingclock "k8s.io/utils/clock/testing"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
+	kueueworkload "sigs.k8s.io/kueue/pkg/workload"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
@@ -333,4 +336,127 @@ func TestModelDeploymentJointAdmission_SkipsWhatItMustNotTouch(t *testing.T) {
 			"an admitted Workload has already passed the barrier; re-answering it is a verdict on a "+
 				"settled placement, and writing one would evict a running deployment")
 	})
+}
+
+// pendingSince stamps this controller's check as Pending at the given moment, which is the durable
+// clock the bound reads.
+func pendingSince(t *testing.T, cli ctrlcli.Client, name string, at time.Time) {
+	t.Helper()
+
+	wl := new(kueue.Workload)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: "team-a", Name: name}, wl))
+	for i := range wl.Status.AdmissionChecks {
+		wl.Status.AdmissionChecks[i].LastTransitionTime = meta.NewTime(at)
+	}
+	require.NoError(t, cli.Status().Update(context.Background(), wl))
+}
+
+func reconcileJointAt(t *testing.T, cli ctrlcli.Client, wlName string, at time.Time) *kueue.Workload {
+	t.Helper()
+
+	r := &ModelDeploymentJointAdmissionReconciler{Client: cli, Clock: testingclock.NewFakePassiveClock(at)}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: "team-a", Name: wlName},
+	})
+	require.NoError(t, err)
+
+	got := new(kueue.Workload)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: "team-a", Name: wlName}, got))
+
+	return got
+}
+
+// TestModelDeploymentJointAdmission_TheBound covers what happens when a set never assembles.
+//
+// THE CLOCK IS FAKE ON PURPOSE. A test that waited out the real bound is a test nobody runs, and a
+// bound nobody runs is a bound nobody has checked.
+//
+// BOTH SIDES OF THE BOUND ARE REQUIRED. A controller that parked immediately would pass the "after"
+// case, and one that never parked would pass the "before" case; only the pair says the bound is being
+// read at all.
+func TestModelDeploymentJointAdmission_TheBound(t *testing.T) {
+	start := time.Date(2026, 9, 13, 10, 0, 0, 0, time.UTC)
+
+	t.Run("before_the_bound_it_only_holds", func(t *testing.T) {
+		cli := newJointClient(twoGroupFixture(false)...)
+		pendingSince(t, cli, "wl-first", start)
+
+		got := reconcileJointAt(t, cli, "wl-first", start.Add(_JointAdmissionInfeasibleAfter-time.Minute))
+
+		assert.Equal(t, kueue.CheckStatePending, jointCheckState(got))
+		assert.True(t, kueueworkload.IsActive(got),
+			"a set that might still assemble is held, not parked")
+		assert.NotContains(t, jointCheckMessage(got), "parked")
+	})
+
+	t.Run("after_the_bound_it_parks", func(t *testing.T) {
+		cli := newJointClient(twoGroupFixture(false)...)
+		pendingSince(t, cli, "wl-first", start)
+
+		got := reconcileJointAt(t, cli, "wl-first", start.Add(_JointAdmissionInfeasibleAfter+time.Minute))
+
+		// THE CYCLE STOPS THROUGH DURABLE STATE. A deleted Workload is composed again by Kueue from
+		// the very Pods that are still there, so deleting removes one turn of the loop and nothing
+		// else; spec.active is read by the scheduler and keeps the group from being rebuilt behind it.
+		assert.False(t, kueueworkload.IsActive(got),
+			"the workload is deactivated, which is what stops the reserve-and-hold cycle")
+		assert.NotEmpty(t, got.Name, "and it still exists: parking is not a delete")
+
+		msg := jointCheckMessage(got)
+		assert.Contains(t, msg, "a100-8x", "the message names the group that could not be placed")
+		assert.Contains(t, msg, "re-apply",
+			"and the action that clears it, because an identical re-apply bumps no resourceVersion, "+
+				"delivers no event, and leaves an operator watching nothing happen")
+	})
+
+	t.Run("feasible_before_the_bound_is_admitted_normally", func(t *testing.T) {
+		cli := newJointClient(twoGroupFixture(true)...)
+		pendingSince(t, cli, "wl-first", start)
+
+		got := reconcileJointAt(t, cli, "wl-first", start.Add(_JointAdmissionInfeasibleAfter+time.Minute))
+
+		assert.Equal(t, kueue.CheckStateReady, jointCheckState(got),
+			"the bound is about a set that cannot assemble, and this one did")
+		assert.True(t, kueueworkload.IsActive(got), "and it is never parked")
+	})
+
+	// A DEPLOYMENT SHORT OF ITS OWN REPLICAS IS NOT WHAT THE BOUND IS FOR. The reconciler rebuilds a
+	// group by deleting its replicas and creating them again on a later pass, so between the two the
+	// group is short of its declared total and Kueue composes no Workload for it -- which reads from
+	// the sibling exactly like a group that cannot be placed. A bound that cannot tell them apart
+	// parks a deployment that was about to start, and nothing in the cluster sets spec.active back to
+	// true, so that park is permanent.
+	t.Run("a_deployment_still_assembling_is_never_parked", func(t *testing.T) {
+		cli := newJointClient(rebuildingFixture()...)
+		pendingSince(t, cli, "wl-first", start)
+
+		got := reconcileJointAt(t, cli, "wl-first", start.Add(_JointAdmissionInfeasibleAfter+time.Minute))
+
+		assert.Equal(t, kueue.CheckStatePending, jointCheckState(got),
+			"the group that can run still waits for the one that is being rebuilt")
+		assert.True(t, kueueworkload.IsActive(got),
+			"and the deployment is held rather than parked, because the wait has an ordinary cause")
+		assert.NotContains(t, jointCheckMessage(got), "parked")
+		assert.Contains(t, jointCheckMessage(got), "a100-8x",
+			"the message names the group still assembling, which is what an operator acts on")
+	})
+}
+
+// rebuildingFixture is a deployment mid-rebuild: the second group declares two replicas, one of them
+// exists, and Kueue has therefore composed no Workload for it. That is the state the reconciler
+// leaves behind between deleting a group's replicas and creating them again.
+func rebuildingFixture() []ctrlcli.Object {
+	md := jointDeployment("qwen", "h20-8x", "a100-8x")
+	md.Spec.Roles[1].Replicas = 2
+	groups := modelDeploymentPodGroups(md)
+
+	first := jointGroupPod("qwen-prefill-0", groups[0].Name, "qwen")
+	second := jointGroupPod("qwen-decode-0", groups[1].Name, "qwen")
+
+	return []ctrlcli.Object{
+		jointCheckObject(), md, first, second,
+		jointWorkload("wl-first", true, first),
+	}
 }

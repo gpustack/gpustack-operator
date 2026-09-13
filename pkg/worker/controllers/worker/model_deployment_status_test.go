@@ -330,7 +330,7 @@ func TestObserveModelDeploymentQuota(t *testing.T) {
 			}
 
 			holder := new(workercore.ModelDeployment)
-			observeModelDeploymentQuota(md, pods, wl, holder)
+			observeModelDeploymentQuota(md, pods, wl, nil, holder)
 
 			assert.Equal(t, string(tc.wantStatus),
 				ModelDeploymentConditionQuotaReserved.GetStatus(holder))
@@ -362,7 +362,7 @@ func TestObserveModelDeploymentQuota_TrueCoversEveryRole(t *testing.T) {
 	require.Len(t, pods, 4)
 
 	holder := new(workercore.ModelDeployment)
-	observeModelDeploymentQuota(md, pods, groupWorkload(pods, true), holder)
+	observeModelDeploymentQuota(md, pods, groupWorkload(pods, true), nil, holder)
 
 	assert.True(t, ModelDeploymentConditionQuotaReserved.IsTrue(holder))
 	assert.Contains(t, ModelDeploymentConditionQuotaReserved.GetMessage(holder), "group of 4")
@@ -380,7 +380,7 @@ func TestObserveModelDeploymentQuota_NamesTheClusterQueue(t *testing.T) {
 	pods := []core.Pod{*readyReplica(md, 0, true)}
 
 	holder := new(workercore.ModelDeployment)
-	observeModelDeploymentQuota(md, pods, groupWorkload(pods, false), holder)
+	observeModelDeploymentQuota(md, pods, groupWorkload(pods, false), nil, holder)
 
 	assert.Contains(t, ModelDeploymentConditionQuotaReserved.GetMessage(holder), `"a100-4x"`)
 }
@@ -391,7 +391,7 @@ func TestObserveModelDeploymentQuota_NoReplicas(t *testing.T) {
 	md := newRenderDeployment()
 
 	holder := new(workercore.ModelDeployment)
-	observeModelDeploymentQuota(md, nil, nil, holder)
+	observeModelDeploymentQuota(md, nil, nil, nil, holder)
 
 	assert.True(t, ModelDeploymentConditionQuotaReserved.IsUnknown(holder))
 	assert.Equal(t, "NoReplicas", ModelDeploymentConditionQuotaReserved.GetReason(holder),
@@ -416,7 +416,7 @@ func TestObserveModelDeploymentQuota_AllReplicasTerminating(t *testing.T) {
 	}
 
 	holder := new(workercore.ModelDeployment)
-	observeModelDeploymentQuota(md, pods, nil, holder)
+	observeModelDeploymentQuota(md, pods, nil, nil, holder)
 
 	assert.True(t, ModelDeploymentConditionQuotaReserved.IsUnknown(holder))
 	assert.Equal(t, "AllReplicasTerminating",
@@ -620,7 +620,7 @@ func TestObserveModelDeploymentQuota_CountsPerGroup(t *testing.T) {
 	}
 
 	holder := new(workercore.ModelDeployment)
-	observeModelDeploymentQuota(md, pods, nil, holder)
+	observeModelDeploymentQuota(md, pods, nil, nil, holder)
 
 	assert.Equal(t, string(meta.ConditionFalse),
 		ModelDeploymentConditionQuotaReserved.GetStatus(holder))
@@ -631,4 +631,45 @@ func TestObserveModelDeploymentQuota_CountsPerGroup(t *testing.T) {
 			`there is nothing in cluster queue "a100-8x" to hold quota`,
 		ModelDeploymentConditionQuotaReserved.GetMessage(holder),
 		"the short group's own numbers and its own queue, not the deployment's 4 of 5 on the other pool")
+}
+
+// TestObserveModelDeploymentQuota_ParkedIsNotWaiting covers the word the vocabulary did not have.
+//
+// A PARKED DEPLOYMENT'S GROUPS ARE COMPLETE AND ITS WORKLOADS DEACTIVATED, which every other answer
+// here reads as "waiting for admission" -- the opposite of the truth once the bound has fired, and
+// the reading that sends an operator to wait for something that is never coming.
+//
+// IT IS OBSERVED RATHER THAN WRITTEN. The bound is measured on the Workload by another controller;
+// this reads the flag that measurement left there, because status is rebuilt from observed state by
+// one function and a second writer would leave its own field behind.
+func TestObserveModelDeploymentQuota_ParkedIsNotWaiting(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+	})
+	pods := []core.Pod{*readyReplica(md, 0, true)}
+
+	active := groupWorkload(pods, true)
+	parked := groupWorkload(pods, true)
+	parked.Name = "wl-parked"
+	parked.Spec.Active = ptr.To(false)
+
+	t.Run("a_deactivated_workload_reports_parked", func(t *testing.T) {
+		holder := new(workercore.ModelDeployment)
+		observeModelDeploymentQuota(md, pods, active, []*kueue.Workload{active, parked}, holder)
+
+		assert.Equal(t, "Parked", ModelDeploymentConditionQuotaReserved.GetReason(holder))
+		msg := ModelDeploymentConditionQuotaReserved.GetMessage(holder)
+		assert.Contains(t, msg, "wl-parked", "the message names what was deactivated")
+		assert.Contains(t, msg, "re-apply",
+			"and the action that clears it, since an identical re-apply does not")
+	})
+
+	t.Run("an_active_set_is_unaffected", func(t *testing.T) {
+		// THE NEGATIVE SIDE IS REQUIRED. A rule reporting Parked whenever it found any Workload would
+		// pass the case above and turn every healthy deployment into a parked one.
+		holder := new(workercore.ModelDeployment)
+		observeModelDeploymentQuota(md, pods, active, []*kueue.Workload{active}, holder)
+
+		assert.NotEqual(t, "Parked", ModelDeploymentConditionQuotaReserved.GetReason(holder))
+	})
 }

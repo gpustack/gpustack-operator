@@ -12,6 +12,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	kueueworkload "sigs.k8s.io/kueue/pkg/workload"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
@@ -103,12 +104,17 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 	// and only the accessors know when it should move.
 	holder := &workercore.ModelDeployment{Status: *md.Status.DeepCopy()}
 
-	// ONE Workload for the whole deployment, resolved once: every replica of every role is one Kueue
-	// pod group, so both the per-role flavor and the group-level quota answer come from the same
-	// object. Reading it twice would let the two halves of the status describe two moments.
-	wl, err := r.findModelDeploymentGroupWorkload(ctx, md, pods)
+	// EVERY Workload of the deployment, resolved once: a deployment whose roles sit on several
+	// instanceTypes is several pod groups and one Workload each, and both the per-role flavor and the
+	// group-level quota answer come from this same read. Reading it twice would let the two halves of
+	// the status describe two moments.
+	wls, err := r.findModelDeploymentGroupWorkloads(ctx, md, pods)
 	if err != nil {
 		return nil, err
+	}
+	var wl *kueue.Workload
+	if len(wls) > 0 {
+		wl = wls[0]
 	}
 
 	holder.Status.Roles = modelDeploymentRoleStatuses(md, pods, wl)
@@ -116,7 +122,7 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 
 	observeModelDeploymentDomain(holder, domain)
 
-	observeModelDeploymentQuota(md, pods, wl, holder)
+	observeModelDeploymentQuota(md, pods, wl, wls, holder)
 
 	r.observeModelDeploymentCache(ctx, md, pods, domain, holder)
 
@@ -213,9 +219,29 @@ func modelDeploymentPodRole(pod *core.Pod) string {
 // gated Pods and an empty `kubectl get workloads` forever. Reporting the second as the first is the
 // failure this reason exists to name.
 func observeModelDeploymentQuota(
-	md *workercore.ModelDeployment, pods []core.Pod, wl *kueue.Workload,
+	md *workercore.ModelDeployment, pods []core.Pod, wl *kueue.Workload, wls []*kueue.Workload,
 	holder *workercore.ModelDeployment,
 ) {
+	// A PARKED DEPLOYMENT IS REPORTED FIRST, because every other answer below would describe it
+	// wrongly. Its groups are complete and their Workloads deactivated, which the vocabulary here
+	// otherwise reads as "waiting for admission" -- the opposite of the truth once the bound has
+	// fired, and the reading that sends an operator to wait for something that is never coming.
+	//
+	// IT IS OBSERVED HERE RATHER THAN WRITTEN BY THE CONTROLLER THAT PARKED IT. Status is rebuilt from
+	// observed state on every pass by this one function, so a second writer would leave its own field
+	// behind the moment this one disagreed. The bound is measured on the Workload; this reads what
+	// that measurement left there.
+	if parked := parkedModelDeploymentWorkloads(wls); len(parked) > 0 {
+		ModelDeploymentConditionQuotaReserved.False(holder, "Parked", fmt.Sprintf(
+			"the deployment's groups could not all be placed, so %d of its workloads are deactivated "+
+				"and no longer ask for quota: %s. An identical re-apply does not clear this — free the "+
+				"capacity the deployment needs and reactivate them, or delete the deployment and "+
+				"create it again",
+			len(parked), strings.Join(parked, ", ")))
+
+		return
+	}
+
 	if len(pods) == 0 {
 		ModelDeploymentConditionQuotaReserved.Unknown(holder, "NoReplicas",
 			"no replica has been created yet")
@@ -417,4 +443,20 @@ func deriveModelDeploymentPhase(md, holder *workercore.ModelDeployment) {
 		holder.Status.Phase = ModelDeploymentPhaseStarting
 		holder.Status.PhaseMessage = ModelDeploymentConditionQuotaReserved.GetMessage(holder)
 	}
+}
+
+// parkedModelDeploymentWorkloads names the deployment's Workloads the joint barrier has deactivated.
+//
+// spec.active is what the barrier writes when it gives up holding a set, and it is durable state the
+// scheduler reads: while it is false the Workload is not considered and the group is not rebuilt
+// behind it. Reading that flag is therefore reading the decision itself rather than a copy of it.
+func parkedModelDeploymentWorkloads(wls []*kueue.Workload) []string {
+	var parked []string
+	for _, wl := range wls {
+		if !kueueworkload.IsActive(wl) {
+			parked = append(parked, wl.Name)
+		}
+	}
+
+	return parked
 }
