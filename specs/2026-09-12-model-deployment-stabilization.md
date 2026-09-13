@@ -844,7 +844,7 @@ look identical. T4's checkpoint claimed the observable one and was true only of 
       opposite of the truth.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/worker/controllers/worker/`
 
-- [ ] **T8 · Prefill and decode do not contend for one card**
+- [x] **T8 · Prefill and decode do not contend for one card**
       Blocked by: T3
       Owns: `pkg/worker/webhooks/worker/model_deployment.go` + its test — including the rule refusing
       roles on differing `instanceType`s, which F2 deletes and which no other task claims

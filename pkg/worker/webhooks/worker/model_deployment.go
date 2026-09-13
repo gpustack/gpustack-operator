@@ -457,7 +457,6 @@ func validateModelDeployment(
 	errs = append(errs, validateModelDeploymentRolesCount(md)...)
 	errs = append(errs, validateModelDeploymentRoleNames(md)...)
 	errs = append(errs, validateModelDeploymentRoleServiceNames(md, existingRoles)...)
-	errs = append(errs, validateModelDeploymentRoleInstanceTypes(md)...)
 	errs = append(errs, validateModelDeploymentRoleKinds(md)...)
 
 	return errs
@@ -613,61 +612,6 @@ func validateModelDeploymentRoleServiceNames(
 	}
 
 	return errs
-}
-
-// validateModelDeploymentRoleInstanceTypes refuses roles spread over two pools.
-//
-// ONE KUEUE WORKLOAD CARRIES ONE queueName, and the queue name is derived from the instanceType. So
-// two roles on two instanceTypes cannot be one pod group, and therefore cannot be admitted
-// atomically — the property this whole shape exists to provide. Kueue enforces the same rule on the
-// Pods, unretryably, so letting it through would trade a refusal here for a group that never
-// assembles.
-//
-// THE REFUSAL SAYS THAT THE THING THE USER WANTED HAS NO ANSWER, because it does not. "These roles
-// want different hardware" is the reason a user reaches for two instanceTypes, and per-role model
-// selection within one pool is not available -- so a message that only says "pick one type" reads as
-// though the goal were achievable another way. Naming the gap is what keeps the user from searching
-// for a field that is not there.
-//
-// THE ERROR IS REPORTED ON THE LIST, NOT ON A ROLE, and that is the accurate place for it. No single
-// role is wrong here: disagreement is a property of the set, and any one of the named types could be
-// the one the user meant to keep. Anchoring on roles[0] and blaming everyone who differs from it
-// inverts the report whenever the OUTLIER IS FIRST -- [A, B, B] would blame both roles that already
-// agree with each other and say nothing about the one that has to change. Naming every type that
-// appears lets the user pick, and it is one error rather than N-1.
-func validateModelDeploymentRoleInstanceTypes(md *workercore.ModelDeployment) field.ErrorList {
-	if len(md.Spec.Roles) < 2 {
-		return nil
-	}
-
-	// Insertion-ordered rather than a set, so the message lists the types the way the object does.
-	var named []string
-	seen := sets.New[string]()
-	for i := range md.Spec.Roles {
-		it := md.Spec.Roles[i].InstanceType
-		if seen.Has(it) {
-			continue
-		}
-		seen.Insert(it)
-		// UNQUOTED, because field.Invalid renders the value with %q itself: quoting here would
-		// reach the user as an escaped quote inside a quote.
-		named = append(named, it)
-	}
-	if len(named) < 2 {
-		return nil
-	}
-
-	rolesPath := field.NewPath("spec", "roles")
-
-	return field.ErrorList{field.Invalid(
-		rolesPath, strings.Join(named, ", "),
-		"every role must name the same instanceType: the roles form one Kueue Workload, one "+
-			"Workload carries one queue name, and the queue name comes from the instanceType — "+
-			"so roles on two of them cannot be admitted together at all. Pick one of the types "+
-			"above for every role. Putting roles on different accelerator models within one pool "+
-			"is not possible today; it is tracked at "+
-			"https://github.com/gpustack/gpustack-operator/issues/199",
-	)}
 }
 
 // validateModelDeploymentRoleKinds holds the two rules about what a role is told it is.
@@ -947,7 +891,94 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstInstanceTypes(
 			instType, role.Resources, rolesPath.Index(i).Child("resources"))...)
 	}
 
-	return errs, nil
+	return append(errs, validateModelDeploymentPairCannotShareOneAccelerator(md, seen, rolesPath)...), nil
+}
+
+// validateModelDeploymentPairCannotShareOneAccelerator refuses a prefill and a decode role that both
+// ask for a logical slice of an accelerator their two InstanceTypes can both select.
+//
+// THE PAIR EXISTS TO SEPARATE TWO WORKLOADS THAT CONTEND, so letting both hold a slice of ONE card
+// undoes the split while the object still reads as disaggregated. Nothing errors: the replicas start,
+// they serve, and the prefiller's bursts land on the same silicon the decoder is streaming from.
+//
+// THE QUALIFIER IS A DISJOINT ACCELERATOR POPULATION, AND TWO DIFFERENT NAMES DO NOT ESTABLISH ONE.
+// An admin can author an InstanceType against an acceleratorGroup a derived type already covers, and
+// the two are then two views of one accelerator. A rule keyed on the names being different leaves
+// open precisely the case it was written to close, and one with no qualifier at all over-refuses:
+// it blocks the heterogeneous shape that roles on two instanceTypes exist to enable.
+//
+// A PARTITIONED PAIR IS ACCEPTED EVEN ON ONE CARD. Hardware partitions are isolated from each other
+// by the device, which is the property this rule is about; a logical slice is not, and that is the
+// whole difference. A whole-card pair is accepted for the same reason at a coarser grain.
+//
+// A SINGLE-ROLE DEPLOYMENT IS UNAFFECTED. This is a statement about a pair, and a lone role sharing
+// a card with itself is what a slice is for.
+//
+// EVERY PREFILL IS COMPARED WITH EVERY DECODE, because a deployment may declare more than one role of
+// either kind: the kind rule refuses only mixing a server role with the others, not two prefillers.
+// Keeping one role per kind would compare whichever pair happened to be declared last and admit a
+// violating pair declared anywhere before it.
+func validateModelDeploymentPairCannotShareOneAccelerator(
+	md *workercore.ModelDeployment,
+	types map[string]*worker.InstanceType,
+	rolesPath *field.Path,
+) field.ErrorList {
+	var prefills, decodes []*workercore.ModelDeploymentRole
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		if !roleRequestsALogicalSlice(role) {
+			continue
+		}
+		switch role.Kind {
+		case workercore.ModelDeploymentRoleKindPrefill:
+			prefills = append(prefills, role)
+		case workercore.ModelDeploymentRoleKindDecode:
+			decodes = append(decodes, role)
+		}
+	}
+
+	var errs field.ErrorList
+	for _, prefill := range prefills {
+		prefillType := types[prefill.InstanceType]
+		if prefillType == nil {
+			// A type that could not be read, or a role naming none: the rules that report those have
+			// already done so, and answering this question from half the pair would be a guess.
+			continue
+		}
+		for _, decode := range decodes {
+			decodeType := types[decode.InstanceType]
+			if decodeType == nil ||
+				prefillType.Spec.AcceleratorGroup != decodeType.Spec.AcceleratorGroup {
+				continue
+			}
+
+			errs = append(errs, field.Invalid(
+				rolesPath, prefill.Name+", "+decode.Name,
+				fmt.Sprintf(
+					"roles %q and %q both request a logical slice, and instance types %q and %q draw from "+
+						"the same accelerator group %q — so the two can land on one card, which is what the "+
+						"prefill/decode split exists to prevent. Give one of them an instance type over a "+
+						"different accelerator group, or request whole cards or hardware partition profiles, "+
+						"which are isolated by the device",
+					prefill.Name, decode.Name,
+					prefill.InstanceType, decode.InstanceType, prefillType.Spec.AcceleratorGroup,
+				),
+			))
+		}
+	}
+
+	return errs
+}
+
+// roleRequestsALogicalSlice reports whether a role asks for a fraction of a card in software.
+//
+// Either percentage alone is a slice request: the defaulting half copies one into the other, so a
+// rule reading only the memory one would miss a compute-only request entirely.
+func roleRequestsALogicalSlice(role *workercore.ModelDeploymentRole) bool {
+	ress := role.Resources
+
+	return ress != nil &&
+		(ress.AcceleratorSlicedMemoryPercentage != 0 || ress.AcceleratorSlicedCoresPercentage != 0)
 }
 
 // roleInstanceResources projects a role's request onto the accelerator fields of InstanceResources.

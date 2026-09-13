@@ -145,11 +145,13 @@ func TestValidateModelDeployment(t *testing.T) {
 			wantMessage: "which is not a valid Service name",
 		},
 		{
-			// One Workload carries one queue name, and the queue name comes from the instanceType.
-			// The assertion is on the sentence that names the GAP, not on the one that says "pick one
-			// type": wanting different hardware is why a user reaches for a second instanceType, and
-			// there is no field for it any more — so a message that only says "pick one" would read
-			// as though the goal were reachable another way.
+			// REPLACES the case that asserted this was refused, rather than dropping it: this input
+			// shape would otherwise have no coverage at all, and it is now the shape the design
+			// exists to enable. One Workload still carries one queue name -- what changed is that
+			// the roles become two pod groups instead of one, so two queue names are no longer a
+			// contradiction. That two groups are actually rendered is asserted where the rendering
+			// lives, in TestModelDeployment_TwoTypesAreCreatedAsTwoGroupsInOnePass; what belongs
+			// here is that admission lets the shape through.
 			name: "role_instance_types_differ",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
 				role(func(r *workercore.ModelDeploymentRole) { r.Name = "prefill" }),
@@ -157,7 +159,6 @@ func TestValidateModelDeployment(t *testing.T) {
 					r.Name, r.InstanceType = "decode", "a100-8x"
 				}),
 			),
-			wantMessage: "is not possible today",
 		},
 		{
 			// THE OUTLIER IS FIRST, which is the arrangement a roles[0]-anchored comparison reports
@@ -175,10 +176,10 @@ func TestValidateModelDeployment(t *testing.T) {
 				role(func(r *workercore.ModelDeploymentRole) { r.Name = "decode" }),
 				role(func(r *workercore.ModelDeploymentRole) { r.Name = "decode2" }),
 			),
-			// The PATH is asserted beside the content: an error on spec.roles rather than on
-			// spec.roles[N].instanceType is what "no single role is at fault" means, and it is the
-			// half a substring of the type names alone would not pin.
-			wantMessage: `spec.roles: Invalid value: "a100-8x, h20-8x"`,
+			// REPLACES the outlier-first refusal case. Its value was never the refusal: it was the
+			// ARRANGEMENT -- an outlier at index 0, which a roles[0]-anchored comparison reports
+			// backwards. Keeping the arrangement keeps that coverage pointed at whatever rule reads
+			// the set next, and three roles over two types is exactly the input the grouping keys on.
 		},
 		{
 			// The rule is vacuous at length 1, asserted so the single-role behavior cannot regress
@@ -1212,4 +1213,172 @@ func TestModelDeploymentWebhook_ValidateSkipsTheTypeRulesDuringDeletion(t *testi
 	live := modelDeploymentWithEveryField()
 	_, err = r.ValidateCreate(context.Background(), live)
 	assert.Error(t, err, "outside the deletion window an absent type is still refused")
+}
+
+// inAcceleratorGroup puts an InstanceType over a named accelerator population. Two types sharing one
+// draw from the same cards however differently they are named.
+func inAcceleratorGroup(group string) func(*worker.InstanceType) {
+	return func(instType *worker.InstanceType) {
+		instType.Spec.AcceleratorGroup = group
+	}
+}
+
+// pdRole builds one role of a prefill/decode pair.
+func pdRole(name string, kind workercore.ModelDeploymentRoleKind, instanceType string,
+	ress *workercore.ModelDeploymentRoleResources,
+) workercore.ModelDeploymentRole {
+	return workercore.ModelDeploymentRole{
+		Name: name, Kind: kind, Replicas: 1, InstanceType: instanceType, Resources: ress,
+	}
+}
+
+// TestModelDeploymentWebhook_APairMayNotShareOneAccelerator covers F4.
+//
+// THE QUALIFIER IS WHAT THE TABLE IS FOR. A rule with none refuses every sliced pair and blocks the
+// heterogeneous shape two instanceTypes exist to enable; a rule keyed on the type NAMES being
+// different accepts two names over one accelerator group, which is precisely the case the rule was
+// written to close. Only a table carrying both wrong predicates' counterexamples tells the three
+// implementations apart.
+func TestModelDeploymentWebhook_APairMayNotShareOneAccelerator(t *testing.T) {
+	const (
+		sharedGroup = "nvidia-h20"
+		otherGroup  = "nvidia-a100"
+	)
+
+	sliced := func() *workercore.ModelDeploymentRoleResources {
+		return &workercore.ModelDeploymentRoleResources{
+			Accelerator:                       resource.NewQuantity(1, resource.DecimalSI),
+			AcceleratorSlicedMemoryPercentage: 50,
+		}
+	}
+	wholeCard := func() *workercore.ModelDeploymentRoleResources {
+		return &workercore.ModelDeploymentRoleResources{
+			Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+		}
+	}
+	partitioned := func() *workercore.ModelDeploymentRoleResources {
+		return &workercore.ModelDeploymentRoleResources{
+			Accelerator:                   resource.NewQuantity(1, resource.DecimalSI),
+			AcceleratorPartitionedProfile: "1g.10gb",
+		}
+	}
+
+	// Three types: two over ONE accelerator group under different names, and one over another.
+	// The sibling is what makes "the names differ" an insufficient answer; the disjoint one is what
+	// makes "refuse every sliced pair" an over-refusal.
+	live := []ctrlcli.Object{
+		servingInstanceType("h20-8x", 8, offeringLogicalSlices, inAcceleratorGroup(sharedGroup),
+			offeringPartitionProfiles("1g.10gb")),
+		servingInstanceType("h20-8x-mig", 8, offeringLogicalSlices, inAcceleratorGroup(sharedGroup),
+			offeringPartitionProfiles("1g.10gb")),
+		servingInstanceType("a100-8x", 8, offeringLogicalSlices, inAcceleratorGroup(otherGroup),
+			offeringPartitionProfiles("1g.10gb")),
+	}
+
+	cases := []struct {
+		name   string
+		roles  []workercore.ModelDeploymentRole
+		refuse bool
+	}{
+		{
+			name: "pd_both_sliced", refuse: true,
+			roles: []workercore.ModelDeploymentRole{
+				pdRole("prefill", workercore.ModelDeploymentRoleKindPrefill, "h20-8x", sliced()),
+				pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "h20-8x", sliced()),
+			},
+		},
+		{
+			// EITHER PERCENTAGE ALONE IS A SLICE REQUEST. The defaulting half copies one into the
+			// other, so a compute-only pair holds two fractions of a card exactly as a memory-only
+			// pair does -- and a rule reading only the memory percentage lets it through.
+			name: "pd_both_sliced_by_cores_only", refuse: true,
+			roles: []workercore.ModelDeploymentRole{
+				pdRole("prefill", workercore.ModelDeploymentRoleKindPrefill, "h20-8x",
+					&workercore.ModelDeploymentRoleResources{
+						Accelerator:                      resource.NewQuantity(1, resource.DecimalSI),
+						AcceleratorSlicedCoresPercentage: 50,
+					}),
+				pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "h20-8x",
+					&workercore.ModelDeploymentRoleResources{
+						Accelerator:                      resource.NewQuantity(1, resource.DecimalSI),
+						AcceleratorSlicedCoresPercentage: 50,
+					}),
+			},
+		},
+		{
+			// TWO NAMES, ONE POPULATION. A predicate comparing the instanceType names accepts this,
+			// and the pair then lands as two views of one card -- the exact state the rule exists
+			// to refuse.
+			name: "pd_sliced_sibling_types", refuse: true,
+			roles: []workercore.ModelDeploymentRole{
+				pdRole("prefill", workercore.ModelDeploymentRoleKindPrefill, "h20-8x", sliced()),
+				pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "h20-8x-mig", sliced()),
+			},
+		},
+		{
+			// The shape the split exists to enable. A blanket refusal of every sliced pair fails
+			// here, and this is the only case that catches that.
+			name: "pd_sliced_disjoint_types",
+			roles: []workercore.ModelDeploymentRole{
+				pdRole("prefill", workercore.ModelDeploymentRoleKindPrefill, "h20-8x", sliced()),
+				pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "a100-8x", sliced()),
+			},
+		},
+		{
+			name: "pd_whole_cards",
+			roles: []workercore.ModelDeploymentRole{
+				pdRole("prefill", workercore.ModelDeploymentRoleKindPrefill, "h20-8x", wholeCard()),
+				pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "h20-8x", wholeCard()),
+			},
+		},
+		{
+			// Accepted EVEN ON ONE CARD: hardware partitions are isolated by the device, which is
+			// the property this rule is about. A slice is not, and that is the whole difference.
+			name: "pd_partitioned",
+			roles: []workercore.ModelDeploymentRole{
+				pdRole("prefill", workercore.ModelDeploymentRoleKindPrefill, "h20-8x", partitioned()),
+				pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "h20-8x", partitioned()),
+			},
+		},
+		{
+			// The rule is about a pair; a lone role sharing a card with itself is what a slice is for.
+			name: "single_role_sliced",
+			roles: []workercore.ModelDeploymentRole{
+				pdRole("server", workercore.ModelDeploymentRoleKindServer, "h20-8x", sliced()),
+			},
+		},
+		{
+			// One half of the pair sliced and the other not: the two cannot contend for one card
+			// through a slice, so the rule does not fire.
+			name: "pd_only_prefill_sliced",
+			roles: []workercore.ModelDeploymentRole{
+				pdRole("prefill", workercore.ModelDeploymentRoleKindPrefill, "h20-8x", sliced()),
+				pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "h20-8x", wholeCard()),
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newModelDeploymentWebhookWith(live)
+
+			md := modelDeployment(workercore.ModelDeploymentEngineVLLM, tc.roles...)
+			md.Spec.KVCache.Connector = "auto"
+
+			_, err := r.ValidateCreate(context.Background(), md)
+			if !tc.refuse {
+				assert.NoError(t, err)
+
+				return
+			}
+
+			require.Error(t, err)
+			for _, role := range tc.roles {
+				assert.True(t, errsContain(err.Error(), role.Name),
+					"the refusal names both roles, and %q is missing: %v", role.Name, err)
+			}
+			assert.True(t, errsContain(err.Error(), "logical slice"),
+				"and names the field that makes them shareable: %v", err)
+		})
+	}
 }
