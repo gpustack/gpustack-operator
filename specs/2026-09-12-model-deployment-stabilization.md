@@ -1005,6 +1005,7 @@ refuses the object just as convincingly.
 | `pd_whole_cards` | both request whole cards | accept |
 | `pd_partitioned` | both name a partition profile | accept |
 | `single_role_sliced` | one `server` role, sliced | accept — the rule is about a pair |
+| `every_pair_is_read` | two prefill roles, the offending one declared FIRST and the innocent one last | reject, naming the offending pair and **not** the innocent role. Nothing refuses two roles of a kind, so a rule keeping one role per kind compares the last pair and admits the earlier one; the role order is what gives this case its discrimination, and reversing it would let that rule pass |
 | `mode_not_offered` | a mode the type does not offer | reject; names mode and type |
 | `mode_offered_over_ceiling` | offered mode, request over the ceiling | reject; names the ceiling |
 | `mode_offered_within_ceiling` | both satisfied | accept |
@@ -1034,8 +1035,10 @@ refuses the object just as convincingly.
 | `all_feasible_admits` | every role feasible | Ready on every Workload |
 | `pending_before_the_bound` | an infeasible set, clock short of the bound | **Pending**, never Retry and never a rejection, **and the Workload still reads `QuotaReserved`** — the assertion that fails a Retry-based implementation, which would look the same on the Pods |
 | `multi_group_refused_without_coverage` | a multi-group deployment, derived-from-node setting off | refused, naming the setting; the same deployment with the setting on is accepted |
-| `bound_fires` | infeasible past the bound, fake clock | **Rejected**, Kueue deactivates the Workload, and the deployment's condition names the role and the action that clears it |
+| `bound_fires` | infeasible past the bound, fake clock | the check stays **Pending** and this controller sets `spec.active=false` itself, and the deployment's condition names the role and the action that clears it. **Not `Rejected`**: this check never rejects, for the reason F3 gives — a state that evicts drops the reservation the barrier is made of |
 | `bound_not_reached` | becomes feasible first | admitted; condition never appears |
+| `assembling_is_not_infeasible` | a group short of its declared total, past the bound | **held, never parked** — the reconciler rebuilds a group by deleting its replicas and creating them again, so mid-rebuild it is short by construction and Kueue composes no Workload for it. The case that fails a bound which cannot tell a rollout from a dead end, and nothing in the cluster sets `spec.active` back to true |
+| `sibling_enqueues_the_held_group` | a Workload of one group changes | the mapping returns exactly the deployment's OTHER groups' Workloads, and not the one that changed. **The case that fails a controller watching only its own object** — a held group's verdict is a statement about a sibling, so without this it is never judged again. It does **not** cover whether the builder registers the mapping; that is the e2e case, and this one's comment says so |
 
 **Enum and transport cases.**
 
@@ -1069,6 +1072,14 @@ Run against a local single-node cluster with the operator deployed. No accelerat
   would prove nothing. The bound fires and the condition names the role. A scale of one role leaves
   the other group's Pods untouched, asserted against **Pod UIDs captured before the scale**, which
   also requires the case to have admitted Pods in the first place.
+- **And the barrier OPENING, which is the other half of it.** Every assertion above is about the
+  barrier closing, and a barrier that never opens satisfies all of them. The opening case holds a
+  deployment on an inactive type, waits until **one group has reserved quota while none is admitted**,
+  and only then releases the type; every group must then reach admitted. **The order is the
+  assertion, not the end state** — "everything ended up admitted" is equally produced by two groups
+  reserving in the same scheduling round, which is how a missing watch survived a cluster run. The
+  precondition is a hard gate: if it does not hold, the opening row records NO READING rather than a
+  pass.
 - **The frozen-field case.** A live deployment refuses an edit to a frozen field with the expected
   message, and accepts a `replicas` edit.
 - **Not covered, and stated so:** that the two roles do not contend for one card. That is T12, it
@@ -1078,7 +1089,8 @@ Run against a local single-node cluster with the operator deployed. No accelerat
 
 Against a single-node cluster with no accelerator, operator built from this branch and verified by
 asking the running binary its own revision rather than by comparing an image reference. Both cases
-green: `case-69` **six** rows, `case-68` **ten**, **zero NO-READ**.
+green: `case-69` **six** rows, `case-68` **twelve**, **zero NO-READ**. The two were run back to back
+in one namespace, which is the order in which they interfere if they are going to.
 
 What the cluster confirmed that no unit test reaches: two `instanceType`s render **two** pod groups
 with two Workloads on two queues; the joint AdmissionCheck is referenced from a **CPU-only**
@@ -1086,7 +1098,7 @@ ClusterQueue and reports Active; with one group's queue held, that group cannot 
 sibling **can** — and no role is admitted; back-dating the check's stamp past the bound deactivates
 the workload rather than deleting it, and the deployment reports `Parked` naming what clears it.
 
-**Three things the run found that the unit tests had not.**
+**Five things the run found that the unit tests had not.**
 
 1. **A defect, now fixed and pinned in both layers.** With one group's queue held, `QuotaReserved`
    read `Reserved` with a message naming the deployment's whole replica count. The cause was reading
@@ -1097,9 +1109,12 @@ the workload rather than deleting it, and the deployment reports `Parked` naming
      `Reserved` on the build that had the defect and `Pending` on the build that does not — so the
      row `case-68` gained is a criterion a build either meets or does not, not a judgement about
      whether a rebuild was warranted.
-   - **The build carrying the defect was the instrument that found it, and was not wasted.** The
-     root cause only shows when several groups mean several Workloads, and that needs a cluster: no
-     single-group fixture can express it, which is why the unit tests were green throughout.
+   - **The build carrying the defect was the instrument that found it, and that is only half of what
+     happened.** It found this one, and it let the next entry through **as a pass**. The root cause
+     here only shows when several groups mean several Workloads, and that needs a cluster: no
+     single-group fixture can express it, which is why the unit tests were green throughout. What a
+     cluster run buys is separating states a fixture renders identically; it has blind spots of its
+     own, differently shaped, and the next entry is one.
 2. **An accelerated `InstanceType` with no node behind it cannot be the "infeasible" fixture.** Its
    status carries an accelerator ceiling of zero, the defaulter fills the role's card count with one,
    and the ceiling rule refuses the deployment at admission — so the shape never reaches the
@@ -1108,6 +1123,33 @@ the workload rather than deleting it, and the deployment reports `Parked` naming
 3. **A merge patch that omits a frozen field is an edit to that frozen field.** Restating a role
    without its `template` sets `template.command` to null and is refused — correctly. The reference
    page says so now, and both cases patch one field with `--type=json`.
+4. **The barrier had no opening path, and the first cluster run passed anyway.** The joint check
+   watched only the Workload it reconciles, while a held group's verdict is a statement about a
+   SIBLING object: it stays Pending until the last group reserves quota, and that reservation is
+   written to the sibling. The held group therefore received no event and stayed Pending forever.
+   The first run did not see it because both groups reserved within one reconcile of each other, so
+   every group's own event arrived after the others had already reserved — **it passed for a timing
+   reason, not because the wiring was right**, and no row asserted the barrier opening at all.
+   - **The reading that found it is a number, not a verdict.** Against the build without the watch,
+     the opening row read **`1/2`** rather than `0/2`: the group that had just become feasible was
+     admitted, because it got its own event, and the group that had already reserved was never
+     judged again. That number says which defect it is; a bare FAIL would not.
+   - **It was measured on a deliberately mismatched binary.** The cluster still ran the previous
+     build while the fix was being built, so the committed case was run unchanged against it. That
+     run is a control experiment, not an ordinary case run, and it skipped no gate: `assert-core.sh`
+     is invoked by `case-1`, not by this case.
+   - **Pinned in two layers, and the unit layer states what it cannot reach.** A unit case calls the
+     mapping directly and requires it to return exactly the held sibling. It cannot observe whether
+     the controller builder registers that mapping, which is precisely where the defect was, and its
+     own comment says so; the cluster case is what covers the registration.
+5. **A case that picks the first `InstanceType` the API returns picks one that is being deleted.**
+   The list is sorted by name, `case-68` creates and drops its own fixture type without waiting, and
+   that name sorts first — so `case-69`, started immediately after, named a terminating type and was
+   refused at admission. Both cases now skip types being deleted or marked inactive.
+   - **The worse half was that the case could not say what had happened.** Its only output was that
+     the deployment was absent, which is equally true of a refused field, a missing type, a webhook
+     that is down and a transport error. A message true of every failure carries no information, so
+     the apply's own output is kept and printed with the type that was chosen.
 
 ## Alternatives
 
