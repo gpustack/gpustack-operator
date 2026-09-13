@@ -18,15 +18,13 @@ import (
 type ModelDeploymentRoleApplyConfiguration struct {
 	// Name identifies the role, and it is also the name of the Kueue PodSet the role becomes.
 	//
-	// The pattern is Kueue's own PodSetReference shape, and it is enforced here because the name is
-	// written verbatim into each Pod's role-hash annotation: Kueue groups a pod group's Pods into
-	// PodSets by that annotation, so a name it cannot take as a PodSet reference is a name whose
-	// role does not survive the grouping.
-	//
-	// UNIQUENESS IS THE SCHEMA'S. Roles is a list-map keyed on this field, so the API server refuses
-	// a duplicate during validation, before any webhook runs. The webhook carries the same rule as a
-	// backstop for that marker being dropped, and never gets to speak while it is there. Uniqueness
-	// matters for the same reason the pattern does: two roles sharing a name collapse into one
+	// - The pattern is Kueue's own PodSetReference shape, enforced here because the name is written
+	// verbatim into each Pod's role-hash annotation: Kueue groups a pod group's Pods into PodSets
+	// by that annotation, so a name it cannot take as a PodSet reference is a name whose role does
+	// not survive the grouping.
+	// - UNIQUENESS IS THE SCHEMA'S. Roles is a list-map keyed on this field, so the API server
+	// refuses a duplicate before any webhook runs; the webhook carries the same rule only as a
+	// backstop for that marker being dropped. Two roles sharing a name would collapse into one
 	// PodSet whose count is their sum, which is a silent merge rather than an error.
 	Name *string `json:"name,omitempty"`
 	// Replicas is how many Pods this role runs. They are NOT independent Workloads: every replica of
@@ -34,9 +32,8 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	//
 	// CHANGING THIS NUMBER REBUILDS THE GROUP. It moves the total the group declares, which every Pod
 	// carries and which Kueue requires them all to agree on, so the operator deletes the group's Pods
-	// and recreates them under the new total rather than adding or trimming a few. The cost is the
-	// one the recreate rollout already states: a replica that leaves loses its cached blocks to its
-	// siblings.
+	// and recreates them under the new total rather than adding or trimming a few. A replica that
+	// leaves loses its cached blocks to its siblings.
 	Replicas *int32 `json:"replicas,omitempty"`
 	// InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.
 	// It is what the queue-name entrance label is derived from.
@@ -46,13 +43,13 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	//
 	// It carries only the ACCELERATOR half of a request, because that is the only half a workload
 	// decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit
-	// resources scaled by the requested card count, exactly as the Instance webhook derives them,
-	// so they are not expressible here at all — which is a stronger guarantee than refusing them
-	// would be, since a field that does not exist cannot be shadowed by a template either.
+	// resources scaled by the requested card count, so they are not expressible here at all — a
+	// stronger guarantee than refusing them, since a field that does not exist cannot be shadowed by
+	// a template either.
 	//
-	// InstanceType alone cannot supply this. An InstanceType's UnitResources size ONE card, and how
-	// many cards a replica wants is a property of the model being served rather than of the pool it
-	// is admitted against; two deployments on one InstanceType routinely want different counts.
+	// InstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards
+	// a replica wants is a property of the model being served, so two deployments on one InstanceType
+	// routinely want different counts.
 	Resources *ModelDeploymentRoleResourcesApplyConfiguration `json:"resources,omitempty"`
 	// ExtraArgs is appended AFTER the operator-synthesized arguments. An entry naming a key the
 	// operator owns is REJECTED rather than merged: a silent merge produces two values for one
@@ -61,36 +58,28 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// Env is appended the same way and refused on the same terms. Keys the operator merely defaults
 	// are not owned: a user's value wins there and no rejection follows.
 	Env []InstanceEnvVarApplyConfiguration `json:"env,omitempty"`
-	// Template overlays the rendered container. The operator renders first and merges this on top.
-	// A non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator
+	// Template overlays the rendered container: the operator renders first and merges this on top.
+	//
+	// - A non-empty Command is the TAKE-OVER tier — the user owns the whole argv, the operator
 	// synthesizes no engine arguments and no client environment, the role is marked unmanaged and
 	// CacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args,
-	// because a second append tier beside ExtraArgs would have no defined precedence and would make
-	// the take-over tier ambiguous — args alone would be neither take-over nor append.
-	//
-	// The template is MUTABLE, unlike the one an Instance carries. Immutability there is a rule the
-	// Instance webhook enforces on InstanceSpec rather than a property of any template type, and not
-	// carrying it here is what makes a rollout possible at all.
-	//
-	// EDITING IT RESTARTS EVERY ROLE, not just the replicas this template belongs to. Changing it
-	// changes a replica's rendered Pod, that replica is deleted — and every replica of the deployment
-	// is one member of a single Kueue pod group whose members cannot leave one at a time. So the
-	// group is rebuilt whole. The same is true of a `replicas` change, of adding or removing a role,
-	// and of a departure this operator did not initiate: a preemption, a node drain, an eviction. The
-	// mechanism and the full list are in docs/reference/model-deployment.md under "Rollout is
-	// recreate".
-	//
-	// Its Resources are refused at admission. The accelerator request belongs in the role's own
+	// because a second append tier beside ExtraArgs would have no defined precedence.
+	// - It is MUTABLE, unlike the one an Instance carries, which is what makes a rollout possible
+	// at all.
+	// - EDITING IT RESTARTS EVERY ROLE, not just the replicas this template belongs to: every
+	// replica of the deployment is one member of a single Kueue pod group whose members cannot
+	// leave one at a time, so the group is rebuilt whole. The same is true of a `replicas` change,
+	// of adding or removing a role, and of a departure this operator did not initiate — see
+	// docs/reference/model-deployment.md under "Rollout is recreate".
+	// - Its Resources are refused at admission. The accelerator request belongs in the role's own
 	// Resources and the rest is derived from the InstanceType, so a template able to shadow either
 	// would make the admission feasibility check read a ledger that does not match reality.
 	Template *ModelDeploymentTemplateApplyConfiguration `json:"template,omitempty"`
-	// Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name:
-	// Name is free-form and identifies the PodSet, while this selects behavior, and a semantic
-	// reachable by typing a string is a semantic one typo away from silently changing. Two roles
-	// may share a kind and differ in name.
-	//
-	// It defaults to Server, which is the shape a deployment written before disaggregation existed
-	// has, so such a deployment renders exactly as it did.
+	// Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name
+	// is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable
+	// by typing a string is one typo away from silently changing. Two roles may share a kind and
+	// differ in name. It defaults to Server, the shape a deployment written before disaggregation
+	// existed has, so such a deployment renders exactly as it did.
 	Kind *workerv1alpha1.ModelDeploymentRoleKind `json:"kind,omitempty"`
 }
 

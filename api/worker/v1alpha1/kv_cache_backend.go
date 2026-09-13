@@ -37,12 +37,11 @@ var _ runtime.Object = (*KVCacheBackend)(nil)
 
 // KVCacheBackendSpec defines the desired spec of KVCacheBackend.
 type KVCacheBackendSpec struct {
-	// Type is the backend IMPLEMENTATION — who does placement, eviction, replication and
-	// metadata. It is NOT the medium: where the bytes live is members[].medium, and collapsing
-	// the two is the category error this field exists to make impossible.
+	// Type is the backend IMPLEMENTATION — who does placement, eviction, replication and metadata.
+	// It is NOT the medium: where the bytes live is members[].medium.
 	//
-	// One value ships. It is spelled out rather than assumed so the object says what it is, and
-	// so a second implementation widens an enum instead of reinterpreting an absent field.
+	// One value ships, spelled out rather than assumed, so a second implementation widens an enum
+	// instead of reinterpreting an absent field.
 	//
 	// +k8s:validation:default="Mooncake"
 	// +k8s:validation:enum=["Mooncake"]
@@ -50,47 +49,38 @@ type KVCacheBackendSpec struct {
 
 	// Image is the container image every role of this backend runs.
 	//
-	// It is OPTIONAL. Left unset, the reconciler uses the cluster-wide default pinned in the
-	// "kv-cache-backend-image" Setting, which is where a version this project has verified
-	// belongs — an admin pins it once instead of restating it on every object. Set here, it
-	// overrides that default for this backend alone.
-	//
-	// It is never DERIVED from the operator's own image the way the Device Manager's is: the
-	// master and the engine client can be builds against different accelerator generations —
-	// the base wheel's master links CUDA 12 while a current vLLM image carries CUDA 13 — so a
-	// derived image would silently pair a master with a runtime it cannot load. Unset here AND
-	// unset in the Setting is refused at admission, naming both places.
+	//   - Left unset, the cluster-wide "kv-cache-backend-image" Setting applies, which is where a
+	//     version this project has verified belongs. Set here, it overrides that Setting for this
+	//     backend alone.
+	//   - Unset in BOTH places is refused at admission, naming both.
+	//   - It is never DERIVED from the operator's own image the way the Device Manager's is: the
+	//     master and the engine client can be builds against different accelerator generations, so
+	//     a derived image would silently pair a master with a runtime it cannot load.
 	//
 	// +k8s:validation:maxLength=512
 	Image string `json:"image,omitempty" protobuf:"bytes,2,opt,name=image"`
 
 	// ImagePullPolicy is the policy every role of this backend pulls its image with.
 	//
-	// It is declared here rather than inherited from the cluster-wide "image-pull-policy" Setting.
-	// That setting is a value of the bundled-application chart install and reaches nothing a
-	// controller renders, so inheriting it would make this the one API in the group whose
-	// workloads move when a chart value moves.
-	//
-	// Left unset, the operator RESOLVES the policy from the image tag by the rule the API server
-	// would otherwise have applied — Always for :latest or for an image naming no tag at all,
-	// IfNotPresent for anything else — and re-resolves it whenever the image or this field moves.
-	// It is resolved rather than left empty because a field the server fills in cannot be
-	// converged: an operator comparing against that default either rewrites the workload on every
-	// pass or has to skip the comparison, and skipping it strands the value a spec has moved off.
+	//   - Left unset, the operator RESOLVES it from the image tag by the rule the API server would
+	//     otherwise have applied: Always for :latest or for an image naming no tag at all,
+	//     IfNotPresent for anything else. It re-resolves whenever the image or this field moves,
+	//     and resolves rather than leaving the field empty so the rendered workload stays
+	//     comparable against it.
+	//   - It does NOT inherit the cluster-wide "image-pull-policy" Setting, which is a value of the
+	//     bundled-application chart install and reaches nothing a controller renders.
 	//
 	// +k8s:validation:enum=["Always","IfNotPresent","Never"]
 	ImagePullPolicy core.PullPolicy `json:"imagePullPolicy,omitempty" protobuf:"bytes,5,opt,name=imagePullPolicy,casttype=k8s.io/api/core/v1.PullPolicy"`
 
-	// ImagePullSecrets names the secrets that pull this backend's images, on every role.
+	// ImagePullSecrets names the secrets that pull this backend's images, on every role. They live
+	// in the namespace the workloads run in, which is this operator's own.
 	//
-	// Without it a private registry is unreachable: neither the leader Deployment nor a member
-	// DaemonSet runs under a service account of ours carrying credentials, and the cluster-wide
-	// "image-pull-secrets" Setting reaches only the bundled-application chart. The secrets live in
-	// the namespace the workloads run in, which is this operator's own.
-	//
-	// The list is ATOMIC — it is replaced whole rather than merged. A structural schema may key a
-	// list by a field only when that field is required and non-nullable, and LocalObjectReference's
-	// name is neither.
+	//   - Without it a private registry is unreachable: no role runs under a service account of
+	//     ours carrying credentials, and the cluster-wide "image-pull-secrets" Setting reaches only
+	//     the bundled-application chart.
+	//   - The list is ATOMIC, replaced whole rather than merged. A structural schema keys a list
+	//     only by a required, non-nullable field, and LocalObjectReference's name is neither.
 	//
 	// +listType=atomic
 	// +k8s:validation:maxItems=32
@@ -104,11 +94,9 @@ type KVCacheBackendSpec struct {
 
 	// Transport describes the data plane the members use.
 	//
-	// The empty object is the default, and it has to be. Structural-schema defaulting does not
-	// descend into an object that is ABSENT, so without this the common spec — one that never
-	// mentions a transport — would store no protocol at all and the field's own default would
-	// silently not apply. Measured against an API server: omitted leaves `transport` empty, while
-	// `transport: {}` comes back as `{"protocol":"Auto"}`.
+	// The empty object is the default, and it has to be: structural-schema defaulting does not
+	// descend into an ABSENT object, so a spec that never mentions a transport would store no
+	// protocol at all and protocol's own default would silently not apply.
 	//
 	// +k8s:validation:default={}
 	Transport KVCacheBackendTransport `json:"transport,omitempty" protobuf:"bytes,4,opt,name=transport"`
@@ -139,52 +127,24 @@ type KVCacheBackendManaged struct {
 	// Members are the groups of store members. Each entry selects nodes, names the medium those
 	// nodes contribute, and may add a local disk tier on the same nodes.
 	//
-	// A group's POSITION in this list is its identity: the rendered DaemonSet's name and its
-	// immutable selector labels are derived from it, and so is the port that group's members serve
-	// their HTTP API on. Reordering entries, or removing one ahead of others, therefore redefines
-	// every position after it — the members there are rebuilt against a different group's spec, and
-	// their cache goes with them.
+	// A group's POSITION in this list is its identity: the DaemonSet's name, its immutable selector
+	// labels and its members' HTTP port all derive from it. Giving a group a name of its own is
+	// possible and DELIBERATELY not done — a DaemonSet's selector is immutable, so introducing one
+	// deletes and recreates every member and the whole cache goes with them.
 	//
-	// MOVING A GROUP TO ANOTHER POSITION IS REFUSED AT ADMISSION, rather than accepted and reported.
-	// The rule is narrow on purpose: it refuses an update that puts, at a position that already
-	// existed, a group identical to one that LEFT another position — a swap, or the shift that
-	// removing a middle group produces. Appending a group, removing from the END of the list, and
-	// editing a group in place are all untouched, including the widening of a nodeSelector that is
-	// how a group gains nodes. It has to be that narrow because a group carries no name: an edit
-	// that merely happens to change two groups cannot be told from a reorder, so only a reorder that
-	// MOVES a group unchanged is recognizable at all, and refusing more would forbid the edits this
-	// list is meant to take.
+	//   - Appending a group, removing from the END of the list, and editing a group where it stands
+	//     are all ALLOWED, including the widening of a nodeSelector that is how a group gains nodes.
+	//   - Moving a group to another position is REFUSED at admission: it redefines every later
+	//     position and rebuilds those members against a different group's spec, cache included.
+	//   - Two shapes are knowingly not caught, because without a name neither can be told from an
+	//     ordinary edit: a reorder combined with an edit to the same group, and removing a group
+	//     that an identical later group replaces. Both leave two identical groups in the list.
+	//   - To take a group out of service without removing it, narrow its nodeSelector until it
+	//     matches no node. The group keeps its position and nothing is rebuilt.
 	//
-	// TWO SHAPES ARE KNOWINGLY NOT CAUGHT, and neither can be without a name. A reorder combined with
-	// an edit to the same group is indistinguishable from two ordinary edits. And removing a group
-	// while a LATER group is identical to the one taking its place produces the same two lists as
-	// editing that position to match an unchanged later group — which is the edit that takes the
-	// second of two look-alike groups out of service, so refusing it would forbid a documented
-	// operation. What both admitted shapes leave behind is at least visible: the resulting list holds
-	// two identical groups.
-	//
-	// To take a group out of service without removing it, narrow its nodeSelector until it matches
-	// no node. The group keeps its position, every later group keeps its DaemonSet, and nothing is
-	// rebuilt.
-	//
-	// GIVING A GROUP A NAME OF ITS OWN IS POSSIBLE AND IS DELIBERATELY NOT DONE. A name independent
-	// of position would make reordering free, and the price of introducing one is paid once, in
-	// full: a DaemonSet's spec.selector cannot be changed after creation, so every existing member
-	// DaemonSet has to be deleted and recreated, and the entire cache goes with them. The criterion
-	// is whether one full rebuild is worth it, and the trigger would be operators genuinely needing
-	// to reorder or delete middle groups often enough to amortize that migration. There is no
-	// evidence of such a need today. That is the state of the decision, not an argument for either
-	// side, and a reader who has that evidence is the one who should reopen it.
-	//
-	// What the immutability refusal protects is THE CACHE, not against a misjudgement. "Comparing
-	// groups by index misjudges them" is not the reason: it agrees with how rendering already
-	// works, since after a reorder the group at position i really does hold different content and
-	// those members would be rebuilt against another group's spec regardless.
-	//
-	// The cap of 32 is a SAFETY BOUND, not a statement about how many groups are useful. The port
-	// derivation would stay valid to 57455; what makes 32 the right place to stop is that the shapes
-	// this list is for — a hot and a cold tier, or one group per kind of hardware — are a handful,
-	// while an unbounded list can render a port outside the valid range with nothing reporting it.
+	// The cap of 32 is a SAFETY BOUND, not a statement about how many groups are useful: the port
+	// derivation stays valid to 57455, but an unbounded list can render a port outside the valid
+	// range with nothing reporting it.
 	//
 	// +required
 	// +k8s:validation:minItems=1
@@ -200,58 +160,33 @@ type KVCacheBackendManaged struct {
 
 // KVCacheBackendScaleIn is what a member does on its way out.
 //
-// It carries a duration and NOT a policy enum. The other policy a draft of this API carried —
-// migrating a member's data before it leaves — needs the store's drain job API, which is stateful
-// orchestration this scope does not enter and which reaches only the memory and NVMe-oF replicas:
-// it cannot name the segments of the disk-backed ones, and skips those keys without counting them
-// as blocked, so it reports success over a disk tier it left untouched. So a policy field would
-// ship with one value, which is a knob nobody can turn. It arrives when there are two; widening an
-// enum is not a breaking change.
+// It carries a duration and NOT a policy enum. The only other policy — migrating a member's data
+// before it leaves — needs the store's drain job API, which reaches the memory and NVMe-oF replicas
+// alone and reports success over a disk tier it left untouched, so a policy field would ship with
+// one value. It arrives when there are two; widening an enum is not a breaking change.
 type KVCacheBackendScaleIn struct {
 	// GracePeriodSeconds is the wait the operator asks a departing member for, after that member
 	// deregisters its local disk tier. It renders into the preStop hook as the endpoint's
-	// grace_period_seconds and nothing else reads it.
+	// grace_period_seconds and nothing else reads it. A plain int32, because unset and zero mean the
+	// same thing here: deregister the tier, then do not wait.
 	//
-	// LIMITED: it does not hold the tier open, so sizing it to let in-flight peer reads of the tier
-	// finish sizes it against something that does not happen. Measured against Mooncake 0.3.13:
-	// deregistration takes effect at once and the process then waits the full value regardless, so a
-	// peer reading a disk-resident key gets a clean miss for the whole window rather than at the end
-	// of it. Another backend image may behave otherwise; what this operator guarantees is the value
-	// it sends.
-	//
-	// THE TIER IS THE ONLY THING DEREGISTERED ON THE WAY OUT. The memory segment is still dropped
-	// rather than drained, and not for want of a verb: the member's own API takes a graceful unmount
-	// with a grace period, but it requires the segment ids. The leader's segment listing returns each
-	// segment's id and client id, and this operator records both in status. A non-host-network member
-	// can be matched by its Pod IP, which is also its segment name. Host-network members placed on one
-	// node share that name and address, while their client ids remain distinct; selecting safely from
-	// inside one of those members requires its own client id, which its supported interfaces do not
-	// expose.
-	//
-	// So graceful unmount for every supported transport needs upstream to expose the running member's
-	// own client id and a hook that uses it. It is NOT blocked on the shutdown hook talking to a fresh
-	// process that has forgotten its identity — a preStop runs against the same process that mounted
-	// the segments. No memory-unmount hook is rendered today, so shrinking any group drops the memory
-	// it held. That is a cost rather than a fault for a cache because the data is recomputable.
-	//
-	// The Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so
-	// the kubelet cannot kill the container in the middle of the wait this configures.
-	//
-	// A plain int32 and not a pointer: unset and zero mean the same thing here. Zero still
-	// deregisters the tier, it just does not wait afterwards, which is what a member with no grace
-	// configured should do.
-	//
-	// The upper bound is the entrypoint's own. It refuses a larger value with HTTP 400, so a
-	// manifest above it would render a shutdown hook that fails every time it runs.
-	//
-	// SETTING THIS DOES NOT PROTECT THE SAME EDIT THAT SHRINKS THE GROUP. The value is rendered into
-	// the member's Pod, and a Pod runs the template it was CREATED from — so a departing member
-	// leaves with whatever grace it started with, and only its replacements carry the new one. An
-	// apply that raises the grace and narrows nodeSelector at once therefore drains nothing.
-	//
-	// To make a grace apply to a shrink, do it in two steps: change only this field and wait for the
-	// members to be recreated with it (their pod-spec-hash annotation moves), then narrow the
-	// selector or remove the group.
+	//   - The TIER is the only thing deregistered on the way out. A memory segment is dropped rather
+	//     than drained, so shrinking a group loses the memory it held — a cost rather than a fault
+	//     for a cache, whose content is recomputable. Draining one needs a client id that
+	//     host-network members, which share one advertised address per node, do not expose.
+	//   - It does NOT hold the tier open, so sizing it to let in-flight peer reads finish sizes it
+	//     against something that does not happen. Measured against Mooncake 0.3.13: deregistration
+	//     takes effect at once and the process then waits the full value regardless, so a peer
+	//     reading a disk-resident key gets a clean miss for the whole window rather than at the end
+	//     of it. Another backend image may behave otherwise; what this operator guarantees is the
+	//     value it sends.
+	//   - The Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so
+	//     the kubelet cannot kill the container in the middle of the wait this configures.
+	//   - Setting it does NOT protect the same edit that shrinks the group: a Pod runs the template
+	//     it was CREATED from, so a departing member leaves with whatever grace it started with. To
+	//     make a grace apply to a shrink, change only this field and wait for the members to be
+	//     recreated with it — their pod-spec-hash annotation moves — then narrow the selector.
+	//   - The upper bound is the entrypoint's own, which refuses a larger value with HTTP 400.
 	//
 	// +k8s:validation:minimum=0
 	// +k8s:validation:maximum=3600
@@ -260,44 +195,29 @@ type KVCacheBackendScaleIn struct {
 
 // KVCacheBackendExternal is a backend this operator does not run.
 //
-// TWO OF THESE MAY NAME THE SAME BACKEND, AND NOTHING HERE NOTICES. For a managed backend the object
-// IS the leader, so two objects are two leaders; for an external one the object is a declaration of
-// addresses, and the same leader is reachable under more than one spelling — by service name in one
-// object and by address in another, with or without a trailing dot or an explicit default port. This
-// operator compares no addresses across objects and watches for none appearing later, deliberately:
-// every identity it could compare is editable or needs the leader reachable at admission, and the
-// comparison that is cheap enough to do catches only the copy-paste case while missing the one a
-// real deployment produces. KEEPING TWO OBJECTS OFF ONE LEADER IS YOURS.
+// TWO OF THESE MAY NAME THE SAME BACKEND, AND NOTHING HERE NOTICES. The same leader is reachable
+// under more than one spelling, and this operator compares no addresses across objects, deliberately:
+// every identity it could compare is either editable or needs the leader reachable at admission.
+// Keeping two objects off one leader is YOURS, and three things go wrong when they are not, none of
+// them a refusal on any object:
 //
-// What it costs is not a refusal somewhere else, so there are three consequences to weigh, and only
-// a reader who knows all three can decide whether the duplication is safe here.
-//
-// FIRST, THE QUOTA OF A SHARED REUSE DOMAIN FLIPS AND NEVER SETTLES. The uniqueness rule for a
-// reuse domain is enforced between Bindings whose pools name the SAME backend object, so two
-// Bindings reaching one leader through two objects are both admitted on one domain name. The leader
-// keeps ONE ledger entry per tenant, and each pool's reconciler converges that entry toward its own
-// Binding's quotaCeiling on every pass — so each pass reads the other's figure, finds it wrong, and
-// writes its own back. The entry alternates between the two ceilings for as long as both exist.
-//
-// SECOND, THE SYMPTOM OF AN UNDERSIZED QUOTA IS A LOW HIT RATE AND NOTHING ELSE. Exceeding a tenant's
-// quota does not refuse the write: the store frees room by dropping that tenant's own older objects
-// and retries, irreversibly, WITHOUT ANY COUNTER MOVING. So the flipping above does not surface as an
-// error on any object — it surfaces as a cache that keeps losing content nobody asked it to lose.
-//
-// THIRD, AND THE ONLY ONE THAT PRODUCES WRONG ANSWERS RATHER THAN SLOW ONES: two Bindings claiming
-// one domain.name with a different blockSize or dtype CORRUPT EACH OTHER'S BLOCKS. The reuse identity
-// an engine is handed is the domain NAME alone — blockSize and dtype reach no engine, they are a
-// declaration this API validates and records — so two differently-shaped caches land under one
-// identity. The writes succeed, the reads succeed, and the tensors are wrong.
+//   - The quota of a shared reuse domain flips and never settles. Uniqueness is enforced only
+//     between Bindings whose pools name the SAME backend object, so two Bindings reaching one leader
+//     through two objects are both admitted on one domain name, and each pool's reconciler writes
+//     its own quotaCeiling back over the other's on every pass.
+//   - An undersized quota shows up as a LOW HIT RATE and nothing else. Exceeding it does not refuse
+//     the write: the store frees room by dropping that tenant's own older objects and retries,
+//     irreversibly, without any counter moving.
+//   - Two Bindings claiming one domain.name with a different blockSize or dtype CORRUPT each other's
+//     blocks — the only one of the three that produces wrong answers rather than slow ones. The
+//     reuse identity an engine is handed is the domain NAME alone, so two differently-shaped caches
+//     land under one identity: the writes succeed, the reads succeed, and the tensors are wrong.
 type KVCacheBackendExternal struct {
-	// Endpoints are the addresses of a backend somebody else runs, one entry per named role.
-	// Both roles are required here, and for the same reason they are two entries and not one
-	// string: this operator reads the Admin address and publishes the Client address, so an
-	// external backend that named only one leaves either the scrape or every engine with
-	// nothing to point at.
-	//
-	// It is a list rather than a single address so that a multi-leader backend needs no API
-	// change to describe.
+	// Endpoints are the addresses of a backend somebody else runs, one entry per named role. Both
+	// roles are required: this operator reads the Admin address and publishes the Client one, so an
+	// external backend that named only one leaves either the scrape or every engine with nothing to
+	// point at. It is a list rather than a single address so that a multi-leader backend needs no
+	// API change to describe.
 	//
 	// +required
 	// +k8s:validation:minItems=1
@@ -331,11 +251,10 @@ type KVCacheBackendEndpoint struct {
 	// +k8s:validation:maxLength=259
 	Address string `json:"address" protobuf:"bytes,1,name=address"`
 
-	// Name says who the address is for, and the two readers want different things. Client is
-	// what an inference engine connects to. Admin is the port serving the Prometheus exposition
-	// and the HTTP admin API both, which is what THIS OPERATOR reads. A consumer handed the
-	// wrong one fails at connect time with nothing to point at, which is why the distinction is
-	// carried in the API rather than left to a convention.
+	// Name says who the address is for. Client is what an inference engine connects to; Admin is the
+	// port serving the Prometheus exposition and the HTTP admin API both, which is what THIS
+	// OPERATOR reads. A consumer handed the wrong one fails at connect time with nothing to point
+	// at, which is why the distinction is carried in the API rather than left to a convention.
 	//
 	// +required
 	// +k8s:validation:enum=["Client","Admin"]
@@ -345,18 +264,16 @@ type KVCacheBackendEndpoint struct {
 // KVCacheBackendLeader is the leader process: how many of it, how it places new writes, and the
 // escape hatch for flags this API does not enumerate.
 type KVCacheBackendLeader struct {
-	// Replicas is how many leader processes run. More than one requires HighAvailability: electing
-	// a leader among several needs a leadership record, and the webhook refuses the pair without
-	// one rather than silently running two leaders against the same members.
+	// Replicas is how many leader processes run, of which exactly one serves at a time. The rest are
+	// standbys: they hold no data, answer no request, and exist to take over.
 	//
-	// Exactly one of them serves at a time. The rest are standbys -- they hold no data, answer no
-	// request, and exist to take over. Raising this adds no capacity, which members do; the ceiling
-	// is here to catch the reading that it does.
-	//
-	// REQUIRED: the ceiling is duplicated in the schema on purpose, because the two layers catch
-	// different absences. The webhook's message explains; this one still holds when the webhook is
-	// not installed, which is when a second leader would be rendered rather than refused. Raise
-	// both together, and widening a maximum is not a breaking change.
+	//   - More than one REQUIRES HighAvailability. Electing a leader among several needs a leadership
+	//     record, and the webhook refuses the pair without one rather than silently running two
+	//     leaders against the same members.
+	//   - Raising this adds no capacity, which members do. The ceiling is here to catch the reading
+	//     that it does, and it is duplicated in the webhook on purpose: this one still holds when
+	//     the webhook is not installed, which is when a second leader would be rendered rather than
+	//     refused. Raise both together; widening a maximum is not a breaking change.
 	//
 	// +k8s:validation:default=1
 	// +k8s:validation:minimum=1
@@ -364,30 +281,27 @@ type KVCacheBackendLeader struct {
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,1,opt,name=replicas"`
 
 	// HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas
-	// above 1. Unset, the leader runs as a single process exactly as before: no election flag is
-	// rendered, no extra object is created, and the command line is the one it ran before this
-	// field existed.
+	// above 1. It carries no settings: the Lease is named after this backend, so there is no
+	// connection target to supply, and the API access the election needs is rendered beside the
+	// workload.
 	//
-	// It carries no settings. The Lease is named after this backend, so there is no connection
-	// target for anyone to supply, and the API access the election needs is rendered beside the
-	// workload rather than asked for here.
-	//
-	// LIMITED: with MultiTenancy on, each replica seeds its tenant quota policy once at ITS OWN
-	// start, so a standby that took over after a quota was raised applies the older, lower ceiling
-	// for up to one KVCachePool reconcile interval -- and an over-quota write in this store is not
-	// refused, it EVICTS that tenant's own older objects, irreversibly and without moving any
-	// counter. The quota itself is not lost: the pool reconciler is the authority and writes back
-	// the difference on its next pass, so what the window costs is hit rate.
+	//   - Unset, the leader runs as a single process exactly as before — no election flag, no extra
+	//     object, the command line it ran before this field existed.
+	//   - With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile
+	//     interval. Each replica seeds its tenant quota policy at its own start, so a standby that
+	//     took over after a quota was raised applies the older, lower ceiling, and an over-quota
+	//     write in this store is not refused — it evicts that tenant's own older objects,
+	//     irreversibly and without moving any counter. The quota itself is not lost: the pool
+	//     reconciler is the authority and writes the difference back on its next pass.
 	HighAvailability *KVCacheBackendLeaderHighAvailability `json:"highAvailability,omitempty" protobuf:"bytes,6,opt,name=highAvailability"`
 
 	// AllocationStrategy is how the leader picks which member takes a new write. Random spreads
 	// them; FreeRatioFirst biases toward the emptier member.
 	//
-	// The enum is deliberately the two that any pooled store would have, rather than every value
-	// the current artifact's flag accepts: the others it accepts are specific to one medium or
-	// one locality model, are reachable through ExtraArgs for anyone who needs them, and would
-	// otherwise fix this API to one implementation's vocabulary. Widening the enum later is not
-	// a breaking change.
+	// The enum is deliberately the two any pooled store would have, not every value the current
+	// artifact's flag accepts: the rest are specific to one medium or one locality model, are
+	// reachable through ExtraArgs, and would fix this API to one implementation's vocabulary.
+	// Widening the enum later is not a breaking change.
 	//
 	// +k8s:validation:default="FreeRatioFirst"
 	// +k8s:validation:enum=["Random","FreeRatioFirst"]
@@ -398,28 +312,23 @@ type KVCacheBackendLeader struct {
 	// key hash, so two callers using different tenant names read each other's cache.
 	//
 	// It is a FIELD rather than an extraArgs entry because another API validates against it: a
-	// KVCachePool is refused when its backend has no ledger to write quota into. A webhook reading
-	// an unschema'd string — "true", "1", "True" — would be judging a value domain that belongs to
-	// whoever typed it.
-	// The store's global -quota_bytes flag stays in extraArgs because no other API needs to validate
-	// or interpret it. Giving that process-only setting a field would add schema without an API
-	// contract.
+	// KVCachePool is refused when its backend has no ledger to write quota into, and a webhook
+	// reading an unschema'd "true", "1" or "True" would be judging a value domain that belongs to
+	// whoever typed it. The store's global -quota_bytes flag stays in extraArgs for the converse
+	// reason: no other API needs to interpret it.
 	//
-	// A plain bool, not a pointer, because unset and false mean the same thing here: no ledger.
-	// Unset renders NO flag rather than an explicit false, so a backend that never asked for this
-	// runs the command line it ran before the field existed.
+	// A plain bool, not a pointer: unset and false both mean no ledger, and unset renders NO flag
+	// rather than an explicit false.
 	MultiTenancy bool `json:"multiTenancy,omitempty" protobuf:"varint,4,opt,name=multiTenancy"`
 
 	// ExtraArgs passes flags this API does not enumerate straight through to the leader, after
 	// the derived ones. A key that collides with a flag rendered from a field above is refused
 	// at admission, because two sources for one flag make the rendered command ambiguous.
 	//
-	// EVERY VALUE HERE IS WORLD-READABLE, on three paths and not one. It is stored verbatim on THIS
-	// object, which is cluster-scoped, so reading it needs no access to any workload; it is then
-	// rendered into the leader container's argv as -key=value, which exposes it again to anyone who
-	// can read the Pod or the Deployment carrying it. It stays readable for the life of the object.
-	// A credential does not belong here. This operator renders no flag that carries one, so this
-	// field is the only way one arrives.
+	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
+	// rendered into the leader container's argv as -key=value, readable by anyone who can reach the
+	// Pod or the Deployment, for the life of the object. A credential does not belong here, and
+	// since this operator renders no flag that carries one, this field is the only way one arrives.
 	ExtraArgs map[string]string `json:"extraArgs,omitempty" protobuf:"bytes,3,rep,name=extraArgs"`
 
 	// Offload turns on writing evicted keys to the members' local disk tier. It is the leader's
@@ -431,35 +340,30 @@ type KVCacheBackendLeader struct {
 
 // KVCacheBackendLeaderHighAvailability turns leader election on, and carries nothing.
 //
-// It is a STRUCT rather than a bool on purpose. A bool admits `enabled: false` beside `replicas: 3`,
-// a third state admission would then have to adjudicate and every reader would have to remember.
-// Presence has no such state. Lease tuning — duration, renew deadline — can be added here later
-// without a breaking change, which is the other reason not to spend a bool on the switch.
+// It is a STRUCT rather than a bool on purpose: a bool would admit `enabled: false` beside
+// `replicas: 3`, a third state admission would have to adjudicate and every reader would have to
+// remember, while presence has no such state. Lease tuning — duration, renew deadline — can also be
+// added here later without a breaking change.
 type KVCacheBackendLeaderHighAvailability struct{}
 
 // KVCacheBackendLeaderOffload turns the local disk tier on, leader side.
 //
-// Both settings are the leader's, and Enabled gates the feature outright: the store ANDs its
-// eviction-time and promotion behavior with it, and every offload entry point returns early
-// without it. A tier configured on the member alone is inert, which is why admission requires the
-// two halves together rather than letting one render on its own.
+// Both settings are the leader's, and Enabled gates the feature outright: every offload entry point
+// returns early without it. A tier configured on the member alone is inert, which is why admission
+// requires the two halves together rather than letting one render on its own.
 type KVCacheBackendLeaderOffload struct {
-	// Enabled turns on offloading to the members' local disks.
-	//
-	// A plain bool, not a pointer, because unset and false mean the same thing: no offloading.
-	// Unset renders NO flag rather than an explicit false, so a backend that never asked for this
-	// runs the command line it ran before the field existed.
+	// Enabled turns on offloading to the members' local disks. A plain bool, not a pointer: unset
+	// and false both mean no offloading, and unset renders NO flag rather than an explicit false.
 	Enabled bool `json:"enabled,omitempty" protobuf:"varint,1,opt,name=enabled"`
 
-	// OnEvict defers the write to disk from the moment a key is stored to the moment it is
-	// evicted, so a key that is never evicted is never written to disk.
+	// OnEvict defers the write to disk from the moment a key is stored to the moment it is evicted,
+	// so a key that is never evicted is never written to disk.
 	//
-	// It REQUIRES Enabled, and Enabled REQUIRES it. The store ANDs the two, so setting this alone
-	// is accepted, echoed back in the leader's own startup log, and then does nothing. Setting
-	// Enabled alone selects write-through, which the store leaves unprotected: it holds an object
-	// queued for offload in memory only on the deferred branch this field selects, so evicting
-	// without it destroys the sole replica of an object whose bucket has not been flushed.
-	// Admission refuses both directions.
+	// It REQUIRES Enabled and Enabled REQUIRES it, and admission refuses both directions. The store
+	// ANDs the two, so this alone is accepted, echoed back in the leader's own startup log, and then
+	// does nothing. Enabled alone selects write-through, which the store leaves unprotected: an
+	// object queued for offload is held in memory only on the deferred branch this field selects, so
+	// evicting without it destroys the sole replica of an object whose bucket has not been flushed.
 	OnEvict bool `json:"onEvict,omitempty" protobuf:"varint,2,opt,name=onEvict"`
 }
 
@@ -467,92 +371,52 @@ type KVCacheBackendLeaderOffload struct {
 type KVCacheBackendTransport struct {
 	// Protocol is the transport the members are ASKED to use. Auto resolves to TCP.
 	//
-	// Whether a member came up on it is NOT visible through this API. status.members[].protocol
-	// echoes this request back rather than reporting a result — the value travels from the member's
-	// own mount request through the leader's listing unchanged — so a member that asks for a host
-	// fabric and falls back to TCP because the device is missing still reads as the fabric there,
-	// while serving. The transport the data plane installed is reported only in the member's own
-	// log. Do not read agreement between the two fields as confirmation that this one took effect.
-	//
-	// Auto is deliberately NOT a per-node probe that promotes itself to a faster fabric, for two
-	// reasons. A member group renders one DaemonSet, so a single Pod template covers every node the
-	// group selects and cannot carry a different transport per node. And promoting to RDMA means
-	// granting hostNetwork and two capabilities: a privilege is requested, never inferred on an
-	// operator's behalf.
-	//
-	// It stays in the enum rather than being dropped because it is the honest answer for an
-	// operator with no opinion, and because it is where node-level fabric discovery would attach
-	// later without an API change.
-	//
-	// TCP is the universal fallback. RDMA, EFA, HIP and Ascend are peers of one another — each is a
-	// fabric- or vendor-specific fast path, not a spelling of TCP: the ROCm build compiles a HIP
-	// transport in, the NPU build ships a separate Ascend transport library linking the CANN
-	// runtime, and EFA is AWS's fabric, reached through libfabric's SRD provider rather than
-	// ibverbs — EFA has no RC queue pairs, so the RDMA transport cannot drive it.
-	//
-	// The bar for membership here is "measured as compiled into a published artifact", which is
-	// what excludes the other ten strings that artifact's config parser accepts. It is NOT
-	// "measured to move bytes": only TCP has been exercised end to end, and RDMA, EFA, HIP and
-	// Ascend each await a run on that hardware. A member also needs the runtime its transport
-	// links — Ascend needs CANN in the member image, EFA needs libfabric in it — and the webhook
-	// cannot see inside an image or onto a node, so that pairing is the operator's to get right.
-	// What a host fabric additionally needs from the NODE is a device plugin, because carrying the
-	// device node in through a hostPath leaves the device cgroup refusing to open it. Which
-	// resource the member asks for is deviceResourceName below; EFA falls back to
-	// vpc.amazonaws.com/efa when nothing is declared, and that name is a default rather than a
-	// property of the protocol.
+	//   - TCP is the universal fallback. RDMA, EFA, HIP and Ascend are peers of one another, each a
+	//     fabric- or vendor-specific fast path rather than a spelling of TCP: EFA in particular is
+	//     reached through libfabric's SRD provider and has no RC queue pairs, so the RDMA transport
+	//     cannot drive it.
+	//   - Whether a member came up on what it asked for is NOT visible through this API.
+	//     status.members[].protocol echoes this request back rather than reporting a result, so a
+	//     member that fell back to TCP still reads as the fabric there, while serving. Only the
+	//     member's own log says which transport the data plane installed.
+	//   - Auto is deliberately NOT a per-node probe that promotes itself to a faster fabric: a member
+	//     group renders one DaemonSet, whose single Pod template cannot carry a different transport
+	//     per node, and promoting to RDMA grants hostNetwork and two capabilities — a privilege is
+	//     requested, never inferred on an operator's behalf.
+	//   - Membership in this enum means MEASURED AS COMPILED into a published artifact, which is what
+	//     excludes the other ten strings that artifact's config parser accepts. It does not mean
+	//     measured to move bytes: only TCP has been exercised end to end.
+	//   - A host fabric needs two things this API cannot check: the member image must carry the
+	//     runtime its transport links — CANN for Ascend, libfabric for EFA — and the NODE must run a
+	//     device plugin, since a hostPath alone leaves the device cgroup refusing to open the device.
+	//     Which resource the member asks for is deviceResourceName below.
 	//
 	// +k8s:validation:default="Auto"
 	// +k8s:validation:enum=["Auto","TCP","RDMA","EFA","HIP","Ascend"]
 	Protocol string `json:"protocol,omitempty" protobuf:"bytes,1,opt,name=protocol"`
 
 	// DeviceResourceName is the extended resource a host-fabric member asks one of, so the device
-	// cgroup lets it open the fabric device.
+	// cgroup lets it open the fabric device. It is CONSULTED ONLY on the RDMA and EFA protocols;
+	// beside any other it renders nothing.
 	//
-	// WHY THIS IS A FIELD AND NOT A CONSTANT. Carrying /dev/infiniband in through a hostPath puts
-	// the device node in the container's mount namespace and grants nothing: the device cgroup
-	// still denies open(), which surfaces as EPERM even for uid 0 on a node whose file mode permits
-	// everyone. A device plugin allocation is what adds the cgroup rule. But the NAME of the
-	// resource to ask for is not a property of the fabric, it is a property of whichever plugin the
-	// cluster's administrator installed: the RDMA shared-device plugin names it in its own
-	// configuration, and the SR-IOV plugin's is configurable outright. There is no name this
-	// operator could hard-code that would be right on two clusters, which is why this is declared
-	// rather than derived, and why an admission rule refusing a fabric member whose node has no
-	// plugin cannot be written -- admission does not know which resource to look for.
+	//   - It is DECLARED rather than derived: the name belongs to whichever plugin the cluster's
+	//     administrator installed, so no name hard-coded here would be right on two clusters, and no
+	//     admission rule can check a node for a plugin whose resource it cannot know.
+	//   - EFA is the exception. Its plugin advertises exactly one name, so an EFA member asks for
+	//     vpc.amazonaws.com/efa when this is unset. That is a default rather than a property of the
+	//     protocol, and setting the field overrides it.
+	//   - UNSET IS NOT A SAFE DEFAULT, IT IS THE OLD BEHAVIOR. A fabric member naming no resource
+	//     mounts the device tree and requests nothing, so the cgroup refuses the open, the store
+	//     installs TCP, and the object still reads as the fabric it asked for. Naming one instead
+	//     keeps the member off a node that advertises none, which is the safer failure but not
+	//     always the wanted one, so both stay reachable.
 	//
-	// EFA is the exception that proves it: its plugin is AWS's own and advertises exactly one name,
-	// so a member on the EFA protocol asks for that name when this field is unset. Setting the
-	// field overrides it. Leaving it unset changes nothing about any backend that exists today.
-	//
-	// UNSET IS NOT A SAFE DEFAULT, IT IS THE OLD BEHAVIOR. A member on a fabric protocol with no
-	// resource named and no built-in for its protocol mounts the device tree and requests nothing,
-	// so the device cgroup refuses the open, the store discovers no device and installs TCP, and
-	// the object still reads as the fabric it asked for. That is the failure this field exists to
-	// let an operator avoid; it is left reachable because naming a resource no plugin advertises
-	// makes the member unschedulable instead, and this operator cannot tell which of the two an
-	// administrator with no plugin would rather have.
-	//
-	// Requesting a resource also decides what a node without the device looks like: it advertises
-	// none of that resource, so the member is never placed there, rather than starting and serving
-	// over TCP under a spec that says otherwise.
-	//
-	// It is CONSULTED ONLY on the RDMA and EFA protocols, which are the two that mount the device
-	// tree. Set beside any other protocol it renders nothing, because nothing on those paths opens
-	// a fabric device, and a resource requested there would only make the member unschedulable.
-	//
-	// The bounds are the ones the API server applies to a resource name, stated here so a value it
-	// would refuse is refused on the object that declares it rather than on the DaemonSet rendered
-	// from it. The part after the slash is at most 63 characters and each label of the domain is
-	// too; a longer one is admitted by a looser pattern and then fails when it becomes a resource
-	// list key, which strands reconciliation with no member workload and no obvious cause.
-	//
-	// ONE BOUND CANNOT BE EXPRESSED HERE, and admission carries it instead. The domain as a whole
-	// is limited to 253 characters, and a regular expression cannot say that about a repeated group
-	// whose parts vary in length: labels of 63, 63, 63 and 62 characters are each inside their own
-	// limit and make a domain of 254, in a value the 317 above still admits. Every rule stated here
-	// admits that name, so the webhook refuses it rather than letting it become the resource list
-	// key the API server refuses. That half is absent when the webhook is not installed, which is
-	// why the bounds that CAN be stated here still are.
+	// The bounds below are the API server's own for a resource name: 63 characters after the slash
+	// and for each domain label, refused here rather than on the DaemonSet rendered from it, where
+	// they strand reconciliation with no obvious cause. The domain's 253-character limit is NOT among
+	// them — no regular expression can bound a repeated group whose labels vary in length, so
+	// 63.63.63.62 makes a domain of 254 that the 317 below still admits — and admission carries that
+	// one instead, so it is absent when the webhook is not installed.
 	//
 	// +k8s:validation:pattern="^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
 	// +k8s:validation:maxLength=317
@@ -572,65 +436,38 @@ type KVCacheBackendMember struct {
 	// Medium is what the SEGMENT this member group mounts is made of. One value: host memory.
 	//
 	// It is an identity rather than a choice, which is why the field survives with a single value
-	// exactly as spec.type does: the object states what the group contributes, so a second medium
-	// widens this enum instead of being inferred from a field that is not there.
+	// exactly as spec.type does: a second medium widens this enum instead of being inferred from a
+	// field that is not there.
 	//
-	// An earlier shape offered five values, and four of them named things that are not member
-	// groups at all. A local disk is not a group of its own — the leader routes an offload task to
-	// the client holding the key's memory replica, so a group with no memory segment never
-	// receives one — and it is declared in the localDisk field below, on the group that does hold
-	// the memory. NVMe-oF is a target coordinate registered once, with no node affinity and no
-	// Pod. A DAX device and a distributed filesystem are configured on the leader's own process,
-	// not on any member. Each is reachable, and none of them through this field.
-	//
-	// NARROWING THIS ENUM CARRIES A RESIDUAL RISK, KNOWINGLY ACCEPTED. An object created with one
-	// of the four removed values, while this CRD was installed but the webhook was not, becomes
-	// undeletable: CRD schema validation runs on the WRITE path only (rest.BeforeCreate /
-	// rest.BeforeUpdate), so the object still reads back fine, but every update is refused —
-	// including the controller removing its finalizer. Reads are not the failure; deletion is.
-	//
-	// The exposure is development clusters only. This type is absent from every tag from v0.7.3
-	// through v0.8.6, so no cluster running a release can hold such an object. The
-	// accepted risk is therefore bounded by the first release that ships this type, and clearing
-	// it is that release's job: before it, either confirm no leftover objects exist, or write down
-	// a recovery procedure. Widening the enum later is not a breaking change, so a fifth medium
-	// that turns out to be a member group after all costs nothing to add.
+	//   - The four values an earlier shape offered are not member groups at all, and each stays
+	//     reachable elsewhere: a local disk in localDisk below, NVMe-oF as a target coordinate with
+	//     no Pod, a DAX device and a distributed filesystem on the leader's own process.
+	//   - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one
+	//     of those values, while this CRD was installed but the webhook was not, becomes undeletable:
+	//     schema validation runs on the write path only, so it reads back fine while every update is
+	//     refused, the controller's finalizer removal included. The exposure is development clusters
+	//     only, this type being absent from every tag through v0.8.6, so clearing it is the first
+	//     shipping release's job — confirm no leftover object exists, or write a recovery procedure.
 	//
 	// +required
 	// +k8s:validation:enum=["DRAM"]
 	Medium string `json:"medium" protobuf:"bytes,2,name=medium"`
 
-	// CapacityPerMember sizes ONE member, not one node: a node can eventually run several
-	// members, one per NUMA domain. It becomes the member's global segment size and is counted
-	// into the member Pod's own resource request, so a member that does not fit stays Pending
-	// instead of overcommitting the node.
+	// CapacityPerMember sizes ONE member, not one node. It becomes the member's global segment size
+	// and is counted into the member Pod's own resource request, so a member that does not fit stays
+	// Pending instead of overcommitting the node.
 	//
-	// A GROUP CARRYING LocalDisk NEEDS AT LEAST ONE BUCKET HERE, which is the unit that tier is
-	// written in. The bytes a bucket is assembled from are held in this segment until the bucket is
-	// complete, so a segment smaller than one can never have a bucket's worth of content in it at
-	// once and the tier stays empty under every workload — the failure this bound exists to turn into
-	// a refusal, because nothing else reports it. A group with no tier has no such floor: there is
-	// nothing for it to fail to fill.
-	//
-	// SEVERAL MEMBERS PER NODE IS DECIDED AND NOT DONE, and this field is named for the shape it
-	// would take rather than the one that ships. What is deferred is splitting a node's members by
-	// NUMA domain; today one selected node runs one member.
-	//
-	// The reason to reopen it is NOT memory locality, and reading it that way is how it gets
-	// dismissed a second time. This operator already discovers the NUMA affinity of NICs and their
-	// RDMA devices, and RDMA is this backend's fast transport, so several members per node is the
-	// only mechanism that could put a segment on the same NUMA node as the interface that serves
-	// it. Without it that discovered topology has no consumer on this path.
-	//
-	// The trigger is therefore decidable rather than a matter of taste: a two-socket node whose
-	// devices report RDMA interfaces on more than one NUMA node, AND that node's member observed
-	// transferring across the socket boundary. There is no such evidence today.
-	//
-	// One group per NUMA domain is NOT the shape it would take, and the obstacle is structural
-	// rather than a cost. A group selects nodes through nodeSelector, and NUMA is a property inside
-	// a node, not a label on one -- so "the NUMA 0 of this node" is not expressible by the mechanism
-	// groups are built on. It would also multiply groups by socket count against a list capped at
-	// 32, and every group's identity is its position.
+	//   - A group carrying LocalDisk needs at least one BUCKET here, which is the unit that tier is
+	//     written in. A bucket's bytes are held in this segment until the bucket is complete, so a
+	//     smaller segment never holds a bucket's worth at once and the tier stays empty under every
+	//     workload, which nothing else reports. A group with no tier has no such floor.
+	//   - The name is "per member" for a shape that is DECIDED AND NOT DONE: several members per
+	//     node, split by NUMA domain. Today one selected node runs one member.
+	//   - What would reopen that is a two-socket node reporting RDMA interfaces on more than one NUMA
+	//     node AND that node's member observed transferring across the socket boundary, there being
+	//     nothing else on this path that consumes the NUMA affinity this operator already discovers.
+	//     One group per NUMA domain is not the shape it would take — a group selects nodes through
+	//     nodeSelector, while NUMA is a property inside a node rather than a label on one.
 	//
 	// +required
 	CapacityPerMember resource.Quantity `json:"capacityPerMember" protobuf:"bytes,3,name=capacityPerMember"`
@@ -644,47 +481,39 @@ type KVCacheBackendMember struct {
 	// each the one its own binary documents. A key that collides with one derived from a field
 	// above is refused at admission.
 	//
-	// EVERY VALUE HERE IS WORLD-READABLE, on three paths and not one. It is stored verbatim on THIS
-	// object, which is cluster-scoped, so reading it needs no access to any workload; it is then
-	// rendered into the member container's argv as -D key=value, which exposes it again to anyone
-	// who can read the Pod or the DaemonSet carrying it. It stays readable for the life of the
-	// object. A credential does not belong here. This operator renders no flag that carries one, so
-	// this field is the only way one arrives.
+	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
+	// rendered into the member container's argv as -D key=value, readable by anyone who can reach
+	// the Pod or the DaemonSet, for the life of the object. A credential does not belong here, and
+	// since this operator renders no flag that carries one, this field is the only way one arrives.
 	ExtraArgs map[string]string `json:"extraArgs,omitempty" protobuf:"bytes,5,rep,name=extraArgs"`
 
 	// ExtraEnvs passes environment variables this API does not enumerate straight through to the
 	// member container.
 	//
-	// IT IS NOT A SECOND SPELLING OF ExtraArgs, and the reason is that the two reach different
-	// places. ExtraArgs renders as the entrypoint's own "-D key=value" config override, which sets a
-	// key on the client's config object; a whole family of this store's settings — the local disk
-	// tier's flush thresholds, its promotion behavior, the rest of its eviction knobs — has no config
-	// key at all and is read from the ENVIRONMENT only. Nothing filters those out. There is simply no
-	// path to them from a command line, which is what this field is for.
+	//   - It is NOT a second spelling of ExtraArgs: the two reach different places. ExtraArgs renders
+	//     as the entrypoint's "-D key=value" config override, while a whole family of this store's
+	//     settings — the local disk tier's flush thresholds, its promotion behavior, the rest of its
+	//     eviction knobs — has no config key at all and is read from the ENVIRONMENT only.
+	//   - A name this operator already renders is REFUSED at admission, for the same reason a
+	//     colliding ExtraArgs key is: Kubernetes accepts a container carrying one name twice and
+	//     leaves the winner to the runtime, so the collision would not even be reported. That
+	//     includes the tier's bucket thresholds, which this operator sizes itself; a tuner who needs
+	//     to move them needs a field, and this hatch is deliberately not it.
 	//
-	// A NAME THIS OPERATOR ALREADY RENDERS IS REFUSED at admission, for the same reason a colliding
-	// ExtraArgs key is: two sources for one setting make the rendered container ambiguous. Kubernetes
-	// accepts a container carrying one name twice and leaves the winner to the runtime, so the
-	// collision would not even be reported. That includes the tier's bucket thresholds, which this
-	// operator now sizes itself — a tuner who needs to move them needs a field, and this hatch is
-	// deliberately not it.
-	//
-	// EVERY VALUE HERE IS WORLD-READABLE, on three paths and not one. It is stored verbatim on THIS
-	// object, which is cluster-scoped, so reading it needs no access to any workload; it is then
-	// rendered into the member container's environment, which exposes it again to anyone who can read
-	// the Pod or the DaemonSet carrying it. It stays readable for the life of the object. A
-	// credential does not belong here. This operator renders no variable that carries one, so this
-	// field is the only way one arrives.
+	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
+	// rendered into the member container's environment, readable by anyone who can reach the Pod or
+	// the DaemonSet, for the life of the object. A credential does not belong here, and since this
+	// operator renders no variable that carries one, this field is the only way one arrives.
 	ExtraEnvs map[string]string `json:"extraEnvs,omitempty" protobuf:"bytes,8,rep,name=extraEnvs"`
 
 	// Image overrides the backend's Image for this member group only. Left unset, the group runs
 	// the backend's Image.
 	//
 	// A group's NodeSelector is what makes this necessary: two groups can select nodes of different
-	// accelerator vendors or generations, and the store's client ships as one wheel per vendor —
-	// CUDA 12, CUDA 13, ROCm, NPU — each carrying the transports it was compiled with and the
-	// runtime it links. The transport itself is backend-wide, so this is not a per-group transport;
-	// it is the per-group runtime that one transport needs on differing hardware.
+	// accelerator vendors or generations, and the store's client ships as one wheel per vendor, each
+	// carrying the transports it was compiled with and the runtime it links. The transport itself is
+	// backend-wide, so this is NOT a per-group transport — it is the per-group runtime that one
+	// transport needs on differing hardware.
 	//
 	// +k8s:validation:maxLength=512
 	Image string `json:"image,omitempty" protobuf:"bytes,6,opt,name=image"`
@@ -692,25 +521,16 @@ type KVCacheBackendMember struct {
 	// LocalDisk declares a directory on the nodes this group already selects and points the store
 	// client's offload keys at it. Left unset, the group is memory only.
 	//
-	// WHAT THE TIER IS WRITTEN IN IS A BUCKET, AND THAT IS WHY THIS OPERATOR SIZES ONE. The store
-	// assembles offloaded objects into a bucket and writes nothing until that bucket is full, by
-	// bytes or by object count; objects below the threshold are carried to the next attempt
-	// indefinitely, reported as deferred for offload, and the tier stays empty while every other
-	// signal — the segment registered, the capacity published, eviction running — looks healthy. The
-	// store's own thresholds are sized for a saturated production store and are far above what a
-	// modest backend ever accumulates, so this operator renders a smaller pair of its own. They are
-	// not in this API: a tuner who needs to move them needs a field, and members[].extraEnvs refuses
-	// them for the same reason it refuses every other name this operator renders.
-	//
-	// To check what the tier actually holds rather than what it declared, read the leader's own
-	// master_allocated_file_size_bytes: that is bytes written, and reads 0 for a tier holding
-	// nothing. status.capacity reports the declared CAPACITY and will not show this.
-	//
-	// It is a LAYER on this group rather than a group of its own, and that is the store's shape
-	// rather than a simplification here: the leader routes an offload task to the client that owns
-	// the key's memory replica, so a member holding no memory segment is never chosen. Such a
-	// member would still report its disk capacity to the leader, so the backend would show a cold
-	// tier of several terabytes that never takes a byte.
+	//   - What the tier is written in is a BUCKET, and that is why this operator sizes one. The store
+	//     writes nothing until a bucket is full, by bytes or by object count, so under the store's
+	//     own thresholds — sized for a saturated production store — the tier stays empty while every
+	//     other signal looks healthy. The pair this operator renders instead is not in this API, and
+	//     members[].extraEnvs refuses those names.
+	//   - It is a LAYER on this group rather than a group of its own, which is the store's shape: the
+	//     leader routes an offload task to the client that owns the key's memory replica, so a member
+	//     holding no memory segment is never chosen and would report a cold tier that never fills.
+	//   - To check what the tier actually holds rather than what it declared, read the leader's own
+	//     master_allocated_file_size_bytes; status.capacity reports the declared CAPACITY only.
 	LocalDisk *KVCacheBackendMemberLocalDisk `json:"localDisk,omitempty" protobuf:"bytes,7,opt,name=localDisk"`
 }
 
@@ -720,28 +540,20 @@ type KVCacheBackendMember struct {
 // either half alone. Set on its own, the leader never enqueues an offload task and the disk stays
 // empty while the member reports its capacity, which is a tier that reads as present and is not.
 type KVCacheBackendMemberLocalDisk struct {
-	// Path is the directory on each selected node that holds this tier. It is mounted into the
-	// member container from the host at the same location.
+	// Path is the directory on each selected node that holds this tier, mounted into the member
+	// container from the host at the same location. It is REQUIRED and has no default: choosing a
+	// host directory on somebody else's nodes is not a default this operator may pick, because the
+	// wrong one fills a filesystem that nothing in Kubernetes accounts for.
 	//
-	// It is REQUIRED and has no default. The store defaults it to a path of its own, and choosing
-	// a host directory on somebody else's nodes is not a default this operator may pick: the wrong
-	// one fills a filesystem that nothing in Kubernetes accounts for.
-	//
-	// DECLARING A TIER REQUIRES A SHELL IN THE GROUP'S IMAGE. An init container surveys this
-	// directory before the member starts, so that reusing a path is something an administrator is
-	// told rather than discovers through a key that reads back as somebody else's. It runs
-	// `sh -c`, and an image without a shell keeps the member from starting at all.
-	//
-	// CREATING THIS DIRECTORY AND GIVING IT THE RIGHT OWNER IS YOURS, NOT THIS OPERATOR'S. Nothing
-	// here creates or chowns the path; a member whose container cannot write it fails at start.
-	// That is a deliberate omission rather than a missing feature, and the reason is recorded here
-	// so it can be judged rather than inherited: both ways of writing it need an apology attached.
-	// An init container that chowns has to name a uid, while members[].image can put a different
-	// vendor's build — and a different uid — on each group, so the uid that is right for one group
-	// is a guess for the next. A chmod 0777 instead opens the directory to every process on the
-	// node. A design where either choice needs a caveat is one that is not settled, so the switch
-	// that would render it does not exist. An operator who has a uid that holds for their whole
-	// backend has information this API does not, which is the case that would settle it.
+	//   - Declaring a tier REQUIRES a shell in the group's image. An init container surveys this
+	//     directory before the member starts, so that reusing a path is something an administrator is
+	//     told rather than discovers through a key that reads back as somebody else's. It runs
+	//     `sh -c`, and an image without a shell keeps the member from starting at all.
+	//   - Creating this directory and giving it the right owner is YOURS, not this operator's, and a
+	//     member whose container cannot write it fails at start. The omission is deliberate: an init
+	//     container that chowns has to name a uid, while members[].image can put a different vendor's
+	//     build on each group, and a chmod 0777 instead opens the directory to every process on the
+	//     node. An operator whose uid holds for a whole backend has what would settle it.
 	//
 	// +required
 	// +k8s:validation:maxLength=4096
@@ -751,32 +563,24 @@ type KVCacheBackendMemberLocalDisk struct {
 	// nothing is rendered, so a ceiling that moves upstream is a change to investigate rather than
 	// one this API silently restated.
 	//
-	// IT IS ALSO THE FIGURE EVICTION MEASURES AGAINST, and that is why Eviction below is not usable
-	// without it. The store keeps two separate ceilings for one tier — the total it may hold, and
-	// the quota its watermark eviction takes its marks as a fraction of — and the second defaults to
-	// zero, which that eviction path reads as "no quota" and returns from having evicted nothing.
-	// One value is rendered into both, so the marks are a fraction of the ceiling an operator
-	// actually declared.
-	//
-	// A set capacity must hold one BUCKET, which is the unit this tier is written in. The store
-	// stops taking offload work as soon as one more bucket would not fit under this ceiling, so a
-	// tier smaller than a bucket never receives a key. The bucket size is this operator's to choose
-	// and it is not in this API; the floor moves with it.
-	//
-	// It is NOT counted into the Pod's resource requests, unlike CapacityPerMember. The tier is a
-	// host directory, which is outside the kubelet's ephemeral-storage accounting entirely — a
-	// request against it would reserve a figure nothing polices and would then keep the member off
-	// the very node that has the disk. Watching that filesystem is the operator's, and the
-	// documentation says so.
+	//   - It is also the figure EVICTION measures against, which is why Eviction below is not usable
+	//     without it: the store's watermark quota defaults to zero, which that path reads as "no
+	//     quota" and returns from having evicted nothing. One value is rendered into both ceilings.
+	//   - A set capacity must hold one BUCKET, the unit this tier is written in: the store stops
+	//     taking offload work as soon as one more bucket would not fit, so a smaller tier never
+	//     receives a key. The bucket size is this operator's to choose, so the floor moves with it.
+	//   - It is NOT counted into the Pod's resource requests, unlike CapacityPerMember. The tier is a
+	//     host directory, outside the kubelet's ephemeral-storage accounting entirely, so a request
+	//     against it would reserve a figure nothing polices and would then keep the member off the
+	//     very node that has the disk. Watching that filesystem is the operator's.
 	Capacity resource.Quantity `json:"capacity,omitempty" protobuf:"bytes,2,opt,name=capacity"`
 
-	// KeyLimit caps how many keys this tier holds, and it is Capacity's other half rather than an
+	// KeyLimit caps how many keys this tier holds. It is Capacity's other HALF rather than an
 	// alternative to it: the store bounds the tier by bytes AND by key count, stops taking offload
 	// work when either would be exceeded, and applies its own ceiling to whichever this object
-	// leaves out. Left unset or zero, nothing is rendered, on the same rule as Capacity.
-	//
-	// It carries the same kind of floor, for the same reason: the check the store makes is against
-	// one whole bucket's worth of keys, so a limit below that is a tier that can never receive one.
+	// leaves out. Left unset or zero, nothing is rendered, on the same rule as Capacity. It carries
+	// the same bucket floor and for the same reason — the store checks against one whole bucket's
+	// worth of keys, so a limit below that is a tier that can never receive one.
 	//
 	// +k8s:validation:minimum=0
 	KeyLimit int64 `json:"keyLimit,omitempty" protobuf:"varint,3,opt,name=keyLimit"`
@@ -788,83 +592,63 @@ type KVCacheBackendMemberLocalDisk struct {
 
 	// CleanAfterDelete asks this operator to empty Path when the backend is deleted, on every node
 	// this group's NodeSelector picks AT THAT MOMENT. It DEFAULTS TO FALSE, and left alone the
-	// directory keeps whatever it holds, which is the behavior of every release before this field
-	// existed.
+	// directory keeps whatever it holds.
 	//
-	// "At that moment" is the whole of the promise and is narrower than "every node this group ever
-	// ran on". The spec is the only record of which nodes those were: nothing stores the selector's
-	// history, and by the time the cleanup runs the members are gone, so a node the group has
-	// stopped selecting cannot be enumerated, let alone reached. Narrowing NodeSelector, or removing
-	// the LocalDisk block, before deleting the backend therefore leaves the dropped nodes holding
-	// their content with nothing reported about them. Delete the backend first and edit afterwards.
+	// It is a switch rather than a default because what is on that disk is the administrator's, and
+	// deleting it is not a decision this operator may take on their behalf. That is also why it is
+	// reachable where preparing the directory is not: removing content needs no uid, creating does.
 	//
-	// Why a switch rather than a default: what is on that disk is the administrator's, and deleting
-	// it is not a decision this operator may take on their behalf. Turned on it is no longer this
-	// operator's decision but theirs, and this only carries it out.
-	//
-	// It is the counterpart to what Path says about creating the directory, and it is reachable for
-	// the reason that one is not: removing content needs no uid, while creating and chowning does,
-	// so the objection that keeps preparation out of this API does not reach deletion.
-	//
-	// WHAT IS REMOVED IS THE CONTENT, NOT THE DIRECTORY. The directory was made by whoever prepared
-	// the node, may be a mount point, and carries an owner this operator did not choose.
-	//
-	// The cleanup runs the image THIS GROUP runs, on the nodes it selects, with the backend's
-	// imagePullSecrets. That is what keeps it from waiting on a pull that the members already did.
-	//
-	// TWO THINGS IT DOES NOT PROMISE, and both are reported rather than silent:
-	//
-	//   - A node this operator cannot reach in time keeps its content. Deletion is not held open for
-	//     it, because a finalizer waiting on a node that is gone leaves an object nobody can delete.
-	//     The node gets a warning Event naming what was left, which outlives this backend for the
-	//     same reason the leftover data does.
-	//   - A node where another KVCacheBackend declares an overlapping path is SKIPPED, and gets the
-	//     same kind of Event. Nothing refuses two backends naming one directory, and emptying it for
-	//     this one would take the other one's live data with it.
+	//   - "At that moment" is the whole of the promise. Nothing stores the selector's history and the
+	//     members are gone by the time cleanup runs, so narrowing NodeSelector or removing the
+	//     LocalDisk block before deleting the backend leaves the dropped nodes holding their content
+	//     with nothing reported about them. Delete the backend first and edit afterwards.
+	//   - WHAT IS REMOVED IS THE CONTENT, NOT THE DIRECTORY, which was made by whoever prepared the
+	//     node, may be a mount point, and carries an owner this operator did not choose.
+	//   - The cleanup runs the image THIS GROUP runs, on the nodes it selects, with the backend's
+	//     imagePullSecrets, so it does not wait on a pull the members already did.
+	//   - A node this operator cannot reach in time keeps its content, and deletion is not held open
+	//     for it: a finalizer waiting on a node that is gone leaves an object nobody can delete. The
+	//     node gets a warning Event naming what was left.
+	//   - A node where another KVCacheBackend declares an overlapping path is SKIPPED, with the same
+	//     kind of Event. Nothing refuses two backends naming one directory, and emptying it for this
+	//     one would take the other one's live data with it.
 	CleanAfterDelete bool `json:"cleanAfterDelete,omitempty" protobuf:"varint,5,opt,name=cleanAfterDelete"`
 }
 
 // KVCacheBackendMemberLocalDiskEviction is what the tier does once it is full: drop what it already
 // holds to make room, or stop taking new work.
 //
-// The two are different OUTCOMES rather than two settings of one knob. Evicting, the tier goes on
+// The two are different OUTCOMES rather than two settings of one knob: evicting, the tier goes on
 // accepting writes indefinitely and its oldest content leaves; not evicting, the tier fills to its
-// Capacity and the store simply stops sending it work, so what is already there stays and stays
-// readable.
+// Capacity and the store stops sending it work, so what is already there stays readable.
 type KVCacheBackendMemberLocalDiskEviction struct {
 	// Enabled is whether this tier evicts at all. It DEFAULTS TO TRUE, so declaring this block
 	// without it asks for eviction rather than against it.
 	//
 	// A POINTER carrying a schema default, unlike the plain bools elsewhere in this API, and the
-	// asymmetry is forced: here unset has to mean TRUE. A plain bool cannot say that — `enabled:
+	// asymmetry is forced: here unset has to mean TRUE, which a plain bool cannot say — `enabled:
 	// false` and an omitted key are the same JSON — so the block would turn eviction off for
 	// everyone who declared it only to set a Watermark.
 	//
-	// Turning it off renders TWO settings, not one: an eviction policy of "none", which is the
-	// store's own name for that value, and an explicit false on its watermark-eviction switch. They
-	// belong to different layers — the policy is read by the on-disk format this operator's members
-	// use, the switch is above it and format-independent — and eviction should be off at whichever
-	// layer ends up asking.
+	// Turning it off renders TWO settings, not one: an eviction policy of "none", the store's own
+	// name for that value, and an explicit false on its watermark-eviction switch. They belong to
+	// different layers, and eviction should be off at whichever layer ends up asking.
 	//
 	// +k8s:validation:default=true
 	Enabled *bool `json:"enabled,omitempty" protobuf:"varint,1,opt,name=enabled"`
 
 	// Policy is the order in which entries leave. FIFO drops the oldest written first, LRU the least
-	// recently read.
+	// recently read. It is REFUSED together with Enabled set to false, because there is no order in
+	// which nothing leaves.
 	//
-	// The enum is the two any cache would offer, deliberately, rather than every string the store's
-	// parser happens to read. It carries NO value meaning "do not evict": that is Enabled's job, and
-	// a third value saying the same thing would be a second spelling admission would then have to
-	// adjudicate against the first.
-	//
-	// Left unset NOTHING IS RENDERED and the store's own default applies, which is first-in
-	// first-out. That is this API's rule for every setting a spec does not address, and it earns more
-	// here than usual: the store maps a policy string it does not recognize onto no eviction at all —
-	// no error, no warning, no failure to start — so a policy is only ever sent when this API is the
-	// one that chose it, and only from a fixed set of spellings.
-	//
-	// It is REFUSED together with Enabled set to false, because there is no order in which nothing
-	// leaves.
+	//   - The enum is the two any cache would offer, deliberately, rather than every string the
+	//     store's parser happens to read. It carries NO value meaning "do not evict": that is
+	//     Enabled's job, and a third value saying the same thing would be a second spelling
+	//     admission would then have to adjudicate against the first.
+	//   - Left unset NOTHING IS RENDERED and the store's own default applies, which is first-in
+	//     first-out. That earns more here than usual: the store maps a policy string it does not
+	//     recognize onto no eviction at all — no error, no warning, no failure to start — so a policy
+	//     is only ever sent when this API is the one that chose it, from a fixed set of spellings.
 	//
 	// +k8s:validation:enum=["FIFO","LRU"]
 	Policy string `json:"policy,omitempty" protobuf:"bytes,2,opt,name=policy"`
@@ -882,15 +666,13 @@ type KVCacheBackendMemberLocalDiskEviction struct {
 //
 // It is a STRUCT and not two optional fields on the block above, because either mark alone describes
 // nothing this operator would want to render: a high mark on its own leaves the store pairing it
-// with a low mark this object never states, and the pair is refused at the member's startup whenever
-// that unstated default is not below it — a member that never comes up, for a reason only in a
-// container log.
+// with a low mark this object never states, and the member refuses that pair at startup whenever the
+// unstated default is not below it, for a reason that appears only in a container log.
 type KVCacheBackendMemberLocalDiskEvictionWatermark struct {
-	// High is the percentage of Capacity at which eviction starts.
-	//
-	// A PERCENTAGE and not a quantity. The store takes a fraction of its own quota rather than a
-	// size, and a size here would restate a figure Capacity already carries — one that would quietly
-	// stop matching the moment Capacity moved.
+	// High is the percentage of Capacity at which eviction starts. A PERCENTAGE and not a quantity:
+	// the store takes a fraction of its own quota rather than a size, and a size here would restate
+	// a figure Capacity already carries — one that would quietly stop matching the moment Capacity
+	// moved.
 	//
 	// +required
 	// +k8s:validation:minimum=1
@@ -955,20 +737,10 @@ type KVCacheBackendStatus struct {
 	//
 	// It is written by the CONSUMERS, not by this backend's own reconciler, which only reads it and
 	// holds its teardown on it. Today exactly one consumer writes here: a KVCachePool claims the
-	// backend it draws from, under kind KVCachePool, when its reconciler resolves it — and drops the
-	// claim only after removing what it registered on that backend's master.
-	//
-	// It is neither a core ObjectReference nor a TypedLocalObjectReference. The first has seven
-	// fields, five of which mean nothing here, all optional — so an entirely empty entry would
-	// validate against a field a finalizer enforces on — and upstream tells new APIs not to embed
-	// it. The second is closer but cannot be KEYED: its apiGroup is optional with no default, and a
-	// structural schema takes a list map key only where the field is required or defaulted, so a
-	// list keyed on kind and name would silently merge two objects differing only by group.
-	//
-	// KVCacheObjectReference drops the group and states the constraint that replaces it — an entry
-	// may only name a kind in this API group — so all three of its fields are required and all three
-	// are keys. Entries here leave Namespace empty: a backend is cluster-scoped and so is everything
-	// that claims one.
+	// backend it draws from, under kind KVCachePool, and drops the claim only after removing what it
+	// registered on that backend's master. Entries leave Namespace empty, a backend being
+	// cluster-scoped and so is everything that claims one. KVCacheObjectReference's own doc says why
+	// the shape is neither of the two core reference types.
 	//
 	// +listType=map
 	// +listMapKey=kind
@@ -1015,30 +787,25 @@ type KVCacheBackendMemberStatus struct {
 	// It is NOT an observation. The value travels from the member's own mount request through the
 	// leader's listing unchanged, so it cannot disagree with spec.transport.protocol: a member that
 	// asks for a host fabric and comes up on TCP because the device is missing still reports the
-	// fabric here, and reports it while serving.
-	//
-	// So agreement with the spec is not confirmation that the request took effect, and reading it as
-	// confirmation is worse than having no field. The transport the data plane installed is reported
-	// only in the member's own log.
+	// fabric here, while serving. Agreement with the spec is therefore not confirmation that the
+	// request took effect; the transport the data plane installed is only in the member's own log.
 	Protocol string `json:"protocol,omitempty" protobuf:"bytes,4,opt,name=protocol"`
 
 	// State is the member's state AS THE LEADER REPORTS IT, read from the leader's own segment
 	// listing rather than inferred from the member Pod. The states the store defines, in this API's
 	// casing: OK, Draining, Drained, GracefullyUnmounting, Unmounting, Undefined.
 	//
-	// It carries no "unreached" sentinel, because there is no pass that would write one: a listing
-	// that cannot be read leaves the PREVIOUS entries in place and says so through MembersMounted,
-	// rather than rewriting them as blank. Whether what is here was just refreshed is the
-	// condition's question, and this field never answers it.
-	//
-	// Draining and the two unmounting states are what a shrink passes through, so the field can
-	// distinguish a member on its way out from one that is simply gone. That is the whole reason it
-	// carries the store's vocabulary instead of a summary of it.
-	//
-	// It carries no enum marker deliberately, unlike every enum on the spec side. The value's domain
-	// belongs to the store and not to this API: a store version that adds a state would make the
-	// whole status write fail validation — not this one field, the entire object — leaving every
-	// other status field frozen at its last value. Phase, one field up, is open for the same reason.
+	//   - Draining and the two unmounting states are what a shrink passes through, so the field can
+	//     distinguish a member on its way out from one that is simply gone. That is the whole reason
+	//     it carries the store's vocabulary instead of a summary of it.
+	//   - It carries no "unreached" sentinel, because there is no pass that would write one: a
+	//     listing that cannot be read leaves the PREVIOUS entries in place and says so through
+	//     MembersMounted, rather than rewriting them as blank. Whether what is here was just
+	//     refreshed is that condition's question, and this field never answers it.
+	//   - It carries no enum marker, deliberately, unlike every enum on the spec side. The value's
+	//     domain belongs to the store: a store version that adds a state would make the whole status
+	//     write fail validation — not this one field, the entire object — leaving every other status
+	//     field frozen at its last value. Phase, further up, is open for the same reason.
 	State string `json:"state,omitempty" protobuf:"bytes,5,opt,name=state"`
 }
 

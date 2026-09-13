@@ -11,18 +11,16 @@ import (
 // KVCachePool is the schema for worker.gpustack.ai.
 //
 // A KVCacheBackend declares the physical cache; this declares which namespaces are granted a quota on
-// it, how much of it, and under which reuse identity. It is the quota domain over exactly one
-// backend, and the registry of the reuse domains its Bindings have claimed.
+// it, how much of it, and under which reuse identity. It is Kueue's ClusterQueue to
+// KVCachePoolBinding's LocalQueue: the quota domain over exactly one backend, and the registry of the
+// reuse domains its Bindings have claimed.
 //
-// It grants and accounts; it does not admit. Nothing here keeps a pod that knows a reuse domain's
-// name from reaching that domain on the store — see KVCachePoolBinding for what the grant is and
-// what it is not.
-//
-// It is cluster-scoped, for the reason the backend it references is: the backend is a privileged
-// physical resource only an admin declares, pools must be shareable across namespaces, and a
-// cross-namespace reference FROM a namespaced object is an anti-pattern. Data-plane isolation is a
-// different axis, and the storage layer's tenant — not this object's scope — is what solves it.
-// This is Kueue's ClusterQueue to KVCachePoolBinding's LocalQueue.
+// It GRANTS AND ACCOUNTS; IT DOES NOT ADMIT — nothing here keeps a pod that knows a reuse domain's
+// name from reaching that domain on the store, and KVCachePoolBinding says what the grant is not. It
+// is cluster-scoped for the reason its backend is: only an admin declares a privileged physical
+// resource, pools must be shareable across namespaces, and a cross-namespace reference FROM a
+// namespaced object is an anti-pattern. Data-plane isolation is a different axis, solved by the
+// storage layer's tenant rather than by this object's scope.
 //
 // +genclient
 // +genclient:nonNamespaced
@@ -48,16 +46,13 @@ type KVCachePoolSpec struct {
 	// Backends names the KVCacheBackend this pool draws from. It holds NAMES rather than a typed
 	// reference so this package needs no compile-time dependency on that type.
 	//
-	// Exactly one entry is admitted, and the rule is the webhook's rather than the schema's so the
-	// refusal can carry its reason: quota lands on a single master's per-tenant ledger, and one
-	// master cannot account for bytes held in another backend. A schema bound would refuse the same
-	// object with a message that explains nothing.
-	//
-	// It is immutable, webhook-enforced. Moving a pool to another backend would strand every tenant
-	// quota on the old master's ledger with nothing left to delete them with.
-	//
-	// The reverse is NOT exclusive: one backend may be referenced by several pools, which is why the
-	// ledger and the rendered policy converge per MASTER rather than per pool.
+	//   - Exactly one entry is admitted, and the rule is the webhook's rather than the schema's so the
+	//     refusal can carry its reason: quota lands on a single master's per-tenant ledger, and one
+	//     master cannot account for bytes held in another backend.
+	//   - It is IMMUTABLE, webhook-enforced. Moving a pool to another backend would strand every
+	//     tenant quota on the old master's ledger with nothing left to delete them with.
+	//   - The reverse is NOT exclusive: one backend may be referenced by several pools, which is why
+	//     the ledger and the rendered policy converge per MASTER rather than per pool.
 	//
 	// +required
 	// +listType=atomic
@@ -101,14 +96,13 @@ type KVCachePoolStatus struct {
 	// ClientEndpoint is the address an inference engine connects to, echoed from the backend's
 	// Client endpoint.
 	//
-	// The backend's ADMIN address is deliberately republished NOWHERE. That one port serves the
-	// Prometheus exposition and the HTTP admin API both, so it is the write face of the quota
-	// ledger, while this object is cluster-scoped and readable by anyone holding a pool RBAC rule.
-	// The operator dials it; nobody reads it here.
+	// It is absent, with a Condition saying why, whenever the backend has published no endpoints yet,
+	// and is never filled from a Service name derived from the backend's own — a guessed address that
+	// happens to resolve is how a pool would silently drive the wrong master.
 	//
-	// It is absent, with a Condition saying why, whenever the backend has published no endpoints
-	// yet. It is never filled from a Service name derived from the backend's own — a guessed
-	// address that happens to resolve is how a pool would silently drive the wrong master.
+	// The backend's ADMIN address is deliberately republished NOWHERE. That one port serves the
+	// Prometheus exposition and the HTTP admin API both, so it is the write face of the quota ledger,
+	// while this object is cluster-scoped and readable by anyone holding a pool RBAC rule.
 	//
 	// +k8s:validation:maxLength=259
 	ClientEndpoint string `json:"clientEndpoint,omitempty" protobuf:"bytes,4,opt,name=clientEndpoint"`
@@ -145,17 +139,15 @@ type KVCachePoolStatus struct {
 // shape every usedBy in this family carries, so a reader learns it once.
 //
 // It names NO API GROUP, and that is a constraint rather than an omission: a usedBy entry may only
-// name a kind in this API group. Within one group, kind and name identify an object, so the group
-// would be a constant on every entry. The constraint is what makes that safe, and it is the reason
-// the list can be keyed at all — core.TypedLocalObjectReference carries an optional, defaultless
-// apiGroup, which a structural schema refuses as a list map key, so keying on kind and name alone
-// would silently merge two objects that differ only by group.
+// name a kind in this API group, within which kind and name identify an object. The constraint is
+// what lets the list be keyed at all — core.TypedLocalObjectReference carries an optional,
+// defaultless apiGroup, which a structural schema refuses as a list map key, so keying on kind and
+// name alone would silently merge two objects that differ only by group.
 //
-// All three fields are REQUIRED, and all three are list map keys — a structural schema accepts a key
+// All three fields are REQUIRED, and all three are list map keys: a structural schema accepts a key
 // only where it is required or defaulted, and two consumers collapsing into one entry would let a
-// finalizer release while a consumer still holds. Namespace is required but carries the EMPTY STRING
-// when the referent is in the holder's own scope: a cluster-scoped object naming another, or a
-// namespaced object naming something in its own namespace. Empty is a value here, not an absence.
+// finalizer release while a consumer still holds. Namespace carries the EMPTY STRING when the
+// referent is in the holder's own scope, so empty is a value here, not an absence.
 type KVCacheObjectReference struct {
 	// +required
 	Kind string `json:"kind" protobuf:"bytes,1,name=kind"`
@@ -170,16 +162,15 @@ type KVCacheObjectReference struct {
 // KVCachePoolUsage is what the pool's tenants hold, as the master reports it.
 type KVCachePoolUsage struct {
 	// Total is the sum of the occupancy the master reports for the tenants THIS pool owns — never its
-	// whole ledger, which a shared backend makes larger than this pool.
+	// whole ledger, which a shared backend makes larger than this pool. A POINTER because omitempty
+	// does not omit a zero-valued struct, and an unobserved total must not serialize as an empty
+	// cache.
 	//
 	// WHAT occupancy means is the master's choice, not this API's, and it changed: a master exposing
 	// used bytes apart from reservations is summed as committed bytes, while one exposing a single
 	// charged figure — the shape 0.3.13 introduced — charges at the start of a write, so in-flight
 	// reservations are already inside this total. Do not read it as committed usage without knowing
 	// which the backend runs.
-	//
-	// A POINTER because omitempty does not omit a zero-valued struct, and an unobserved total must
-	// not serialize as a cache that is empty.
 	Total *resource.Quantity `json:"total,omitempty" protobuf:"bytes,1,opt,name=total"`
 }
 
@@ -201,14 +192,13 @@ type KVCachePoolDomain struct {
 	// BlockSize and Dtype are echoed from the Binding that registered the domain, so a reader of
 	// the registry does not have to fetch every Binding to learn what a domain's blocks are.
 	//
-	// Both are REQUIRED, unlike the observed figures below, and the difference is where they come
-	// from: these are copied from a Binding that already requires them, so an entry missing one
-	// could only be a writer bug. Leaving them optional would let the registry answer "this domain's
-	// blocks are of unknown shape", which is not a state that exists.
+	// Both are REQUIRED, unlike the observed figures below, because they are copied from a Binding
+	// that already requires them: an entry missing one could only be a writer bug, and leaving them
+	// optional would let the registry answer "this domain's blocks are of unknown shape", which is
+	// not a state that exists.
 	//
 	// Dtype is spelled to match its JSON name exactly. DType would not, and the openapi generator
-	// records every such mismatch as a checked-in API rule violation — a list worth keeping for the
-	// names that genuinely cannot match.
+	// records every such mismatch as a checked-in API rule violation.
 	//
 	// +required
 	BlockSize int32 `json:"blockSize" protobuf:"varint,3,name=blockSize"`
@@ -222,12 +212,10 @@ type KVCachePoolDomain struct {
 	Blocks *int64 `json:"blocks,omitempty" protobuf:"varint,5,opt,name=blocks"`
 
 	// HitRate is a ratio held as a STRING with a pattern, never a float, matching the shape the
-	// measured surface itself uses.
-	//
-	// The pattern is safe here in a way an enum on an echoed vendor value would not be: this ratio is
-	// COMPUTED by this operator, so its spelling is ours to guarantee. It does oblige whoever writes
-	// it to format to this shape, because a value that fails the pattern fails the WHOLE status
-	// write — every other field frozen at its last value — and not this one field.
+	// measured surface itself uses. The pattern is safe here in a way an enum on an echoed vendor
+	// value would not be, because this ratio is COMPUTED by this operator. It does oblige whoever
+	// writes it to format to this shape: a value that fails the pattern fails the WHOLE status write,
+	// freezing every other field at its last value, not just this one.
 	//
 	// +k8s:validation:pattern="^(0(\\.[0-9]{1,4})?|1(\\.0{1,4})?)$"
 	HitRate string `json:"hitRate,omitempty" protobuf:"bytes,6,opt,name=hitRate"`
@@ -237,8 +225,7 @@ type KVCachePoolDomain struct {
 //
 // It carries no kind, unlike KVCacheObjectReference, because it is not a usedBy: it is the back
 // pointer from a registered domain to the one object that could have declared it, and only a
-// KVCachePoolBinding ever can. Both fields are required, because a Binding is namespaced and the
-// namespace is half of its identity.
+// KVCachePoolBinding ever can. Both fields are required, a Binding being namespaced.
 type KVCachePoolBindingReference struct {
 	// +required
 	Namespace string `json:"namespace" protobuf:"bytes,1,name=namespace"`

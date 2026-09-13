@@ -11,21 +11,19 @@ import (
 // KVCachePoolBinding is the schema for worker.gpustack.ai.
 //
 // It is the PROVISIONING POINT: creating one in a namespace is what gives that namespace a quota on
-// a pool and registers the reuse domain it will write under, so both are objects an admin can RBAC
-// and audit rather than strings a tenant types into a workload.
+// a pool and registers the ONE reuse domain it will write under, so both are objects an admin can
+// RBAC and audit rather than strings a tenant types into a workload.
+//
+// The storage layer's tenant IS the domain, so registering one creates a quota ledger, which is what
+// makes naming a domain a privileged act rather than something a workload could mint at will.
+// Workloads pointing at the SAME Binding share KV; a namespace needing two reuse boundaries creates
+// two Bindings, exactly as one with two scheduling boundaries has two Kueue LocalQueues.
 //
 // It is NOT an enforcement boundary, and must not be described as one. The store accepts whatever
-// tenant id a caller sends, over a Service any pod in the cluster can dial; nothing derives a
-// credential from this object. So a workload that knows another namespace's domain name can read and
-// write that domain's cache today. What a Binding governs is who is GRANTED capacity and under which
-// name — provisioning and accounting, not access control. Enforcement needs an authenticated proxy
-// or network isolation, and neither exists yet.
-//
-// It is also where a reuse domain is registered, and exactly one. Because the storage layer's tenant
-// IS the domain, registering one creates a quota ledger — which makes naming a domain a privileged
-// act, and is why it is declared here and never by a workload that could otherwise mint tenants at
-// will. Workloads pointing at the SAME Binding share KV; a namespace needing two reuse boundaries
-// creates two Bindings, exactly as one with two scheduling boundaries has two Kueue LocalQueues.
+// tenant id a caller sends, over a Service any pod in the cluster can dial, and nothing derives a
+// credential from this object — so a workload that knows another namespace's domain name can read
+// and write that domain's cache today. What a Binding governs is who is GRANTED capacity and under
+// which name. Enforcement needs an authenticated proxy or network isolation, and neither exists yet.
 //
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -59,9 +57,9 @@ type KVCachePoolBindingSpec struct {
 	// storage layer's tenant_id (isolation) and cache_salt (prefix identity), so registering a
 	// domain creates a tenant with a quota ledger of its own.
 	//
-	// It is a struct rather than a list deliberately. One Binding is one tenant, so every figure in
-	// Status is a single series rather than a sum, and no rule for dividing one ceiling among
-	// several domains has to be invented. The cardinality is structural, not a webhook rule.
+	// It is a STRUCT rather than a list deliberately, so the cardinality is structural and not a
+	// webhook rule: one Binding is one tenant, every figure in Status is a single series rather than
+	// a sum, and no rule for dividing one ceiling among several domains has to be invented.
 	//
 	// EVERY FIELD IS IMMUTABLE, webhook-enforced. Name re-points this namespace at a different
 	// ledger and strands the old one. BlockSize or Dtype changed under a warm cache is silent
@@ -70,34 +68,26 @@ type KVCachePoolBindingSpec struct {
 	// +required
 	Domain KVCachePoolBindingDomain `json:"domain" protobuf:"bytes,2,name=domain"`
 
-	// QuotaCeiling is what this namespace may consume in its reuse domain. It is written verbatim
-	// into that one tenant's requested quota, so it is the storage layer's own request figure
-	// rather than a total this operator maintains.
+	// QuotaCeiling is what this namespace may consume in its reuse domain, written verbatim into that
+	// one tenant's requested quota rather than kept as a total this operator maintains.
 	//
-	// IT IS A REQUEST, NOT A GRANT. The pool reduces every tenant's effective quota in proportion
-	// when the sum of requests exceeds allocatable capacity, and Status.EffectiveQuota is what was
-	// actually granted.
-	//
-	// EXCEEDING IT EVICTS RATHER THAN REFUSES, which is the opposite of what the word suggests. A
-	// write past the ceiling is not rejected: the store frees room by dropping this namespace's own
-	// older objects and retries. So a ceiling set too low costs cache inside this namespace, not
-	// failed writes, and it costs it without any counter moving. Writes are refused only when
-	// eviction cannot free enough, which needs those older objects held by unexpired read leases.
-	//
-	// REQUIRED, because the state it would otherwise allow does not work. The storage layer has no
-	// default policy to fall back on: a tenant it holds no policy for is refused outright, with the
-	// same error a reuse domain that was never declared gets — measured on a real master, and stated
-	// in the artifact's own header, where the code is spelled `TENANT_NOT_REGISTERED = -1701,
-	// ///< Tenant has no quota policy.` A Binding without this field would pass admission, report
-	// Ready and refuse every byte its workloads wrote.
-	//
-	// Required is also the direction that can be taken back. Should the storage layer ever grow a
-	// default quota, relaxing this to optional keeps every object already written valid; going the
-	// other way — optional today, required later — invalidates every object that omitted it.
-	//
-	// Held BY VALUE, like the pool's own ceiling and for the same reason: the schema guarantees the
-	// key is present, so there is no unset to distinguish and a pointer would only add a nil case
-	// nothing can produce. The webhook still refuses a value that is not positive.
+	//   - IT IS A REQUEST, NOT A GRANT. The pool reduces every tenant's effective quota in proportion
+	//     when the sum of requests exceeds allocatable capacity, and Status.EffectiveQuota is what
+	//     was actually granted.
+	//   - EXCEEDING IT EVICTS RATHER THAN REFUSES, which is the opposite of what the word suggests.
+	//     A write past the ceiling is not rejected: the store frees room by dropping this namespace's
+	//     own older objects and retries. A ceiling set too low therefore costs cache inside this
+	//     namespace rather than failed writes, and costs it without any counter moving. Writes are
+	//     refused only when eviction cannot free enough, which needs those older objects held by
+	//     unexpired read leases.
+	//   - It is REQUIRED, because the state it would otherwise allow does not work: the storage layer
+	//     has no default policy and refuses a tenant it holds no policy for, so a Binding without
+	//     this field would pass admission, report Ready and refuse every byte its workloads wrote.
+	//     Required is also the direction that can be taken back — relaxing it later keeps every
+	//     object already written valid, while the reverse invalidates every object that omitted it.
+	//   - Held BY VALUE, like the pool's own ceiling: the schema guarantees the key is present, so a
+	//     pointer would only add a nil case nothing can produce. The webhook still refuses a value
+	//     that is not positive.
 	//
 	// +required
 	QuotaCeiling resource.Quantity `json:"quotaCeiling" protobuf:"bytes,3,name=quotaCeiling"`
@@ -117,17 +107,15 @@ type KVCachePoolBindingPoolReference struct {
 type KVCachePoolBindingDomain struct {
 	// Name is the domain, and it becomes the storage layer's tenant_id verbatim.
 	//
-	// It must be claimed by no other Binding ON A MASTER THAT SERVES THIS BINDING'S POOL, which the
-	// webhook enforces: two Bindings on one domain over one master would share cache — possibly
-	// intended — but collide on one quota ledger, which never is. Uniqueness is per master rather
-	// than per pool because one master can serve several pools and the tenant space is
-	// master-global, and it is not cluster-wide because two masters hold two ledgers: the same
-	// domain on a pool another backend serves collides with nothing.
-	//
-	// The accepted shape is a DNS-1123 label, checked by the webhook. That is strictly inside what
-	// the master accepts as a tenant_id and is what a Kubernetes object name already looks like, so
-	// nobody learns a second naming rule. This is the ONLY place the shape is judged: every consumer
-	// downstream copies the name rather than re-judging it.
+	//   - It must be claimed by NO OTHER BINDING on a master that serves this Binding's pool, which
+	//     the webhook enforces: two Bindings on one domain over one master would share cache —
+	//     possibly intended — but collide on one quota ledger, which never is. Uniqueness is per
+	//     master rather than per pool because one master can serve several pools and the tenant space
+	//     is master-global; it is not cluster-wide because two masters hold two ledgers.
+	//   - The accepted shape is a DNS-1123 label, checked by the webhook. That is strictly inside
+	//     what the master accepts as a tenant_id and is what a Kubernetes object name already looks
+	//     like, so nobody learns a second naming rule. This is the ONLY place the shape is judged;
+	//     every consumer downstream copies the name rather than re-judging it.
 	//
 	// +required
 	// +k8s:validation:maxLength=63
@@ -140,11 +128,9 @@ type KVCachePoolBindingDomain struct {
 
 	// Dtype is the element type the cached tensors carry, in the engine's own lowercase spelling.
 	//
-	// The exhaustive set belongs to whatever spec owns workloads, so this API does not enumerate it
-	// and the webhook judges the syntactic form only. Enumerating it here would make a new engine
-	// dtype an API change.
-	//
-	// It is spelled to match its JSON name exactly; DType would not, and the openapi generator
+	// The exhaustive set belongs to whatever spec owns workloads, so this API does not enumerate it —
+	// that would make a new engine dtype an API change — and the webhook judges the syntactic form
+	// only. It is spelled to match its JSON name exactly; DType would not, and the openapi generator
 	// records every such mismatch as a checked-in API rule violation.
 	//
 	// +required
@@ -156,12 +142,12 @@ type KVCachePoolBindingDomain struct {
 // actually granted, what it is using, and whether it is over.
 //
 // Every figure below is read from ONE tenant's series, because a Binding registers exactly one reuse
-// domain and the storage layer's tenant IS that domain. Nothing here is summed, and no figure can
+// domain and the storage layer's tenant IS that domain: nothing here is summed, and no figure can
 // hide a second domain behind it.
 //
-// Every observed figure is a POINTER, for one reason shared by all of them: a resource.Quantity is a
-// struct and omitempty does not omit a zero-valued struct, so a value-held figure serializes as "0"
-// on exactly the passes whose contract says there must be no field at all.
+// Every observed figure is a POINTER, for one reason shared by all of them: omitempty does not omit
+// a zero-valued struct, so a value-held figure serializes as "0" on exactly the passes whose
+// contract says there must be no field at all.
 type KVCachePoolBindingStatus struct {
 	// Phase summarizes the conditions: Provisioning, Ready, Degraded, Error, Deleting.
 	Phase string `json:"phase,omitempty" protobuf:"bytes,1,opt,name=phase"`
@@ -194,30 +180,26 @@ type KVCachePoolBindingStatus struct {
 	// Usage is what the master reports this namespace's reuse domain as holding, and WHICH figure
 	// that is depends on the master's version rather than on this API.
 	//
-	// A master that exposes used bytes apart from reservations is read as committed bytes, and
-	// in-flight writes are deliberately left out — a burst of concurrent writes would otherwise read
-	// as consumption that never happened. A master that exposes one charged figure instead, the shape
-	// 0.3.13 introduced, charges it when a write STARTS: there is no committed figure to isolate, so
-	// in-flight reservations are inside this number and cannot be subtracted. The Binding's own
-	// QuotaObserved message says which of the two answered.
+	// A master exposing used bytes apart from reservations is read as committed bytes, in-flight
+	// writes deliberately left out — a burst of concurrent writes would otherwise read as consumption
+	// that never happened. A master exposing one charged figure instead, the shape 0.3.13 introduced,
+	// charges it when a write STARTS, so in-flight reservations are inside this number and cannot be
+	// subtracted. The Binding's own QuotaObserved message says which of the two answered.
 	Usage *resource.Quantity `json:"usage,omitempty" protobuf:"bytes,6,opt,name=usage"`
 
 	// OverQuota is true when Usage exceeds EffectiveQuota, and it does NOT mean the domain tried to
-	// write more than it was granted. The two are unrelated in the direction a reader expects, and the
-	// mechanism is the only thing that makes that credible: the store never charges a domain past its
-	// grant — the charge is refused rather than allowed to overshoot — so writing past the grant leaves
-	// Usage AT the grant and this false. What happens on that path instead is that the store evicts the
-	// domain's OWN objects to make room and admits the write; a write fails only while every object
-	// holding the grant is pinned and nothing can be evicted.
+	// write more than it was granted. The store never charges a domain past its grant, so writing past
+	// it leaves Usage AT the grant and this false; what happens on that path instead is that the store
+	// evicts the domain's OWN objects to make room and admits the write, and a write fails only while
+	// every object holding the grant is pinned and nothing can be evicted.
 	//
-	// So this reports one situation: the grant was RECUT below what the domain already holds, which is
+	// So this reports ONE situation: the grant was RECUT below what the domain already holds, which is
 	// what a proportional cut does when the pool's members shrink or another Binding joins. Waiting on
 	// it as the signal that writes are being refused is waiting for something that never arrives.
 	//
-	// A POINTER for the same reason the quantities around it are, and it is the easiest one to get
-	// wrong: held by value with omitempty, an OBSERVED false — the ordinary, healthy case — omits
-	// itself and becomes indistinguishable from a tenant nobody could scrape. A client asking "does my
-	// domain hold more than it is now granted" would get the same answer for "no" and for "unknown".
+	// A POINTER for the same reason the quantities around it are, and the easiest one to get wrong:
+	// held by value with omitempty, an OBSERVED false — the ordinary, healthy case — omits itself and
+	// becomes indistinguishable from a tenant nobody could scrape.
 	OverQuota *bool `json:"overQuota,omitempty" protobuf:"varint,7,opt,name=overQuota"`
 
 	// Blocks and HitRate are OBSERVED from the master and the engine, never declared. They are absent
@@ -232,20 +214,13 @@ type KVCachePoolBindingStatus struct {
 	// +k8s:validation:pattern="^(0(\\.[0-9]{1,4})?|1(\\.0{1,4})?)$"
 	HitRate string `json:"hitRate,omitempty" protobuf:"bytes,9,opt,name=hitRate"`
 
-	// UsedBy names the workloads in THIS namespace that hold the pool through this Binding. It is
-	// always a single-scope query — nothing here ever looks across namespaces — and a non-empty
-	// UsedBy is what the finalizer refuses deletion on.
+	// UsedBy names the workloads in THIS namespace that hold the pool through this Binding — always a
+	// single-scope query, and a non-empty UsedBy is what the finalizer refuses deletion on.
 	//
 	// IT IS WRITTEN BY THE CONSUMER, NOT BY THIS API'S OWN RECONCILER, which only reads it and
-	// enforces on it. The kind that will write it is ModelDeployment, declared by the
-	// model-deployment feature of this same operator, whose spec.kvCache.poolRef names a Binding in
-	// its own namespace. Until that feature ships there is no writer at all, so this list is empty on
-	// every pass and the finalizer always releases: the refusal is a mechanism that is complete and
-	// tested, over a fact nothing supplies yet. A reader must not take a non-empty UsedBy for
-	// something the operator will produce on its own.
-	//
-	// Entries leave Namespace empty: everything that can appear is in this Binding's own namespace,
-	// so naming it would restate the object's own metadata on every entry.
+	// enforces on it. The kind that writes it is ModelDeployment, whose spec.kvCache.poolRef names a
+	// Binding in its own namespace, so an empty list is not evidence that nobody holds the pool.
+	// Entries leave Namespace empty, everything that can appear being in this Binding's own namespace.
 	//
 	// +listType=map
 	// +listMapKey=kind

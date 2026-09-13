@@ -9,8 +9,7 @@ package v1alpha1
 //
 // It carries no kind, unlike KVCacheObjectReference, because it is not a usedBy: it is the back
 // pointer from a registered domain to the one object that could have declared it, and only a
-// KVCachePoolBinding ever can. Both fields are required, because a Binding is namespaced and the
-// namespace is half of its identity.
+// KVCachePoolBinding ever can. Both fields are required, a Binding being namespaced.
 type KVCachePoolBindingReferenceApplyConfiguration struct {
 	Namespace *string `json:"namespace,omitempty"`
 	Name      *string `json:"name,omitempty"`

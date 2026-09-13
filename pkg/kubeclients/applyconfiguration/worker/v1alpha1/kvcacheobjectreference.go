@@ -9,17 +9,15 @@ package v1alpha1
 // shape every usedBy in this family carries, so a reader learns it once.
 //
 // It names NO API GROUP, and that is a constraint rather than an omission: a usedBy entry may only
-// name a kind in this API group. Within one group, kind and name identify an object, so the group
-// would be a constant on every entry. The constraint is what makes that safe, and it is the reason
-// the list can be keyed at all — core.TypedLocalObjectReference carries an optional, defaultless
-// apiGroup, which a structural schema refuses as a list map key, so keying on kind and name alone
-// would silently merge two objects that differ only by group.
+// name a kind in this API group, within which kind and name identify an object. The constraint is
+// what lets the list be keyed at all — core.TypedLocalObjectReference carries an optional,
+// defaultless apiGroup, which a structural schema refuses as a list map key, so keying on kind and
+// name alone would silently merge two objects that differ only by group.
 //
-// All three fields are REQUIRED, and all three are list map keys — a structural schema accepts a key
+// All three fields are REQUIRED, and all three are list map keys: a structural schema accepts a key
 // only where it is required or defaulted, and two consumers collapsing into one entry would let a
-// finalizer release while a consumer still holds. Namespace is required but carries the EMPTY STRING
-// when the referent is in the holder's own scope: a cluster-scoped object naming another, or a
-// namespaced object naming something in its own namespace. Empty is a value here, not an absence.
+// finalizer release while a consumer still holds. Namespace carries the EMPTY STRING when the
+// referent is in the holder's own scope, so empty is a value here, not an absence.
 type KVCacheObjectReferenceApplyConfiguration struct {
 	Kind      *string `json:"kind,omitempty"`
 	Namespace *string `json:"namespace,omitempty"`

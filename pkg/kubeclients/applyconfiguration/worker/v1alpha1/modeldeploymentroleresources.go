@@ -17,18 +17,15 @@ import (
 type ModelDeploymentRoleResourcesApplyConfiguration struct {
 	// Accelerator is how many accelerator cards ONE REPLICA asks for.
 	//
-	// LEFT UNSET ON AN ACCELERATABLE InstanceType IT DEFAULTS TO ONE AT ADMISSION, on create and on
-	// update alike, the same way an Instance's does. A role that names no count is asking for the
-	// ordinary thing, and the value is written into the stored object rather than applied at render
-	// time, so what was admitted is what can be read back.
-	//
-	// AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote. On an acceleratable
-	// InstanceType it asks for nothing that pool's queue accounts in, since that queue accounts only
-	// in accelerator credits. Such a role is admitted only while it is the deployment's ONLY role:
-	// add a second role and the deployment is never admitted and never reports why, whether that
-	// second role asks for cards or for nothing either. So a zero is safe to state alone and unsafe
-	// to combine. A replica meant to run without an accelerator belongs on an InstanceType that is
-	// not acceleratable, where CPU is what the queue accounts in.
+	// - Left unset on an acceleratable InstanceType it DEFAULTS TO ONE at admission, on create and
+	// on update alike, the same way an Instance's does. The value is written into the stored
+	// object rather than applied at render time, so what was admitted is what can be read back.
+	// - AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote, and on an acceleratable
+	// InstanceType it asks for nothing that pool's queue accounts in. Such a role is admitted
+	// only while it is the deployment's ONLY role: add a second and the deployment is never
+	// admitted and never reports why. A zero is safe to state alone and unsafe to combine.
+	// - A replica meant to run without an accelerator belongs on an InstanceType that is not
+	// acceleratable, where CPU is what the queue accounts in.
 	Accelerator *resource.Quantity `json:"accelerator,omitempty"`
 	// AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced
 	// InstanceType, as a percentage in [0,100]. 0 disables slicing, making the request an exclusive

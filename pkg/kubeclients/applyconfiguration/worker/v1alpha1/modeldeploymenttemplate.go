@@ -12,18 +12,15 @@ import (
 //
 // ModelDeploymentTemplate overlays the container the operator renders for one replica.
 //
-// IT EXISTS BECAUSE InstanceTemplate'S Image IS REQUIRED AND THIS ONE'S CANNOT BE. A role that
-// names no image has one synthesized from the accelerator backend its InstanceType observed, so
-// requiring the field would force every user of the overlay to give up synthesis — two capabilities
-// this API offers, excluding each other for no reason other than a shared struct. Relaxing the
-// marker on InstanceTemplate was rejected: it would move a guarantee the Instance's schema holds
-// today down into a webhook, which is later, more expensive and easier to bypass, and it would do
-// that to a published API for the convenience of an unpublished one.
+// IT EXISTS BECAUSE InstanceTemplate'S Image IS REQUIRED AND THIS ONE'S CANNOT BE: a role that names
+// no image has one synthesized from the accelerator backend its InstanceType observed, so requiring
+// the field would force every user of the overlay to give up synthesis. Relaxing the marker on
+// InstanceTemplate was rejected — that moves a guarantee the Instance's schema holds today down into
+// a webhook, on a published API for the convenience of an unpublished one.
 //
-// The fields are InstanceTemplate's, minus VolumeMount, which nothing here reads — an unused field
-// in a schema is a promise, and strict decoding turns leaving it out into a clear refusal rather
-// than a value silently ignored. Numbering restarts at 1 and runs contiguously because this type is
-// new in an unreleased API; there is nothing on the wire to reserve around.
+// The fields are InstanceTemplate's, minus VolumeMount, which nothing here reads: an unused field in
+// a schema is a promise, and strict decoding turns leaving it out into a clear refusal rather than a
+// value silently ignored.
 type ModelDeploymentTemplateApplyConfiguration struct {
 	// Image is the container image to run. Leaving it empty is the ordinary case: the operator then
 	// synthesizes one from the pool's accelerator backend, the observed runtime version and the

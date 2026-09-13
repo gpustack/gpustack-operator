@@ -14,11 +14,10 @@ type KVCacheBackendEndpointApplyConfiguration struct {
 	// full 253 characters, which leaves room for a colon and a five-digit port. At 253 the schema
 	// refused an address the webhook's own host:port rule accepts.
 	Address *string `json:"address,omitempty"`
-	// Name says who the address is for, and the two readers want different things. Client is
-	// what an inference engine connects to. Admin is the port serving the Prometheus exposition
-	// and the HTTP admin API both, which is what THIS OPERATOR reads. A consumer handed the
-	// wrong one fails at connect time with nothing to point at, which is why the distinction is
-	// carried in the API rather than left to a convention.
+	// Name says who the address is for. Client is what an inference engine connects to; Admin is the
+	// port serving the Prometheus exposition and the HTTP admin API both, which is what THIS
+	// OPERATOR reads. A consumer handed the wrong one fails at connect time with nothing to point
+	// at, which is why the distinction is carried in the API rather than left to a convention.
 	Name *string `json:"name,omitempty"`
 }
 

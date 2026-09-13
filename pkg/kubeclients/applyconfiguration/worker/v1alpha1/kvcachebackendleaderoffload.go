@@ -7,26 +7,21 @@ package v1alpha1
 //
 // KVCacheBackendLeaderOffload turns the local disk tier on, leader side.
 //
-// Both settings are the leader's, and Enabled gates the feature outright: the store ANDs its
-// eviction-time and promotion behavior with it, and every offload entry point returns early
-// without it. A tier configured on the member alone is inert, which is why admission requires the
-// two halves together rather than letting one render on its own.
+// Both settings are the leader's, and Enabled gates the feature outright: every offload entry point
+// returns early without it. A tier configured on the member alone is inert, which is why admission
+// requires the two halves together rather than letting one render on its own.
 type KVCacheBackendLeaderOffloadApplyConfiguration struct {
-	// Enabled turns on offloading to the members' local disks.
-	//
-	// A plain bool, not a pointer, because unset and false mean the same thing: no offloading.
-	// Unset renders NO flag rather than an explicit false, so a backend that never asked for this
-	// runs the command line it ran before the field existed.
+	// Enabled turns on offloading to the members' local disks. A plain bool, not a pointer: unset
+	// and false both mean no offloading, and unset renders NO flag rather than an explicit false.
 	Enabled *bool `json:"enabled,omitempty"`
-	// OnEvict defers the write to disk from the moment a key is stored to the moment it is
-	// evicted, so a key that is never evicted is never written to disk.
+	// OnEvict defers the write to disk from the moment a key is stored to the moment it is evicted,
+	// so a key that is never evicted is never written to disk.
 	//
-	// It REQUIRES Enabled, and Enabled REQUIRES it. The store ANDs the two, so setting this alone
-	// is accepted, echoed back in the leader's own startup log, and then does nothing. Setting
-	// Enabled alone selects write-through, which the store leaves unprotected: it holds an object
-	// queued for offload in memory only on the deferred branch this field selects, so evicting
-	// without it destroys the sole replica of an object whose bucket has not been flushed.
-	// Admission refuses both directions.
+	// It REQUIRES Enabled and Enabled REQUIRES it, and admission refuses both directions. The store
+	// ANDs the two, so this alone is accepted, echoed back in the leader's own startup log, and then
+	// does nothing. Enabled alone selects write-through, which the store leaves unprotected: an
+	// object queued for offload is held in memory only on the deferred branch this field selects, so
+	// evicting without it destroys the sole replica of an object whose bucket has not been flushed.
 	OnEvict *bool `json:"onEvict,omitempty"`
 }
 

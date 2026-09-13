@@ -19,61 +19,34 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// Medium is what the SEGMENT this member group mounts is made of. One value: host memory.
 	//
 	// It is an identity rather than a choice, which is why the field survives with a single value
-	// exactly as spec.type does: the object states what the group contributes, so a second medium
-	// widens this enum instead of being inferred from a field that is not there.
+	// exactly as spec.type does: a second medium widens this enum instead of being inferred from a
+	// field that is not there.
 	//
-	// An earlier shape offered five values, and four of them named things that are not member
-	// groups at all. A local disk is not a group of its own — the leader routes an offload task to
-	// the client holding the key's memory replica, so a group with no memory segment never
-	// receives one — and it is declared in the localDisk field below, on the group that does hold
-	// the memory. NVMe-oF is a target coordinate registered once, with no node affinity and no
-	// Pod. A DAX device and a distributed filesystem are configured on the leader's own process,
-	// not on any member. Each is reachable, and none of them through this field.
-	//
-	// NARROWING THIS ENUM CARRIES A RESIDUAL RISK, KNOWINGLY ACCEPTED. An object created with one
-	// of the four removed values, while this CRD was installed but the webhook was not, becomes
-	// undeletable: CRD schema validation runs on the WRITE path only (rest.BeforeCreate /
-	// rest.BeforeUpdate), so the object still reads back fine, but every update is refused —
-	// including the controller removing its finalizer. Reads are not the failure; deletion is.
-	//
-	// The exposure is development clusters only. This type is absent from every tag from v0.7.3
-	// through v0.8.6, so no cluster running a release can hold such an object. The
-	// accepted risk is therefore bounded by the first release that ships this type, and clearing
-	// it is that release's job: before it, either confirm no leftover objects exist, or write down
-	// a recovery procedure. Widening the enum later is not a breaking change, so a fifth medium
-	// that turns out to be a member group after all costs nothing to add.
+	// - The four values an earlier shape offered are not member groups at all, and each stays
+	// reachable elsewhere: a local disk in localDisk below, NVMe-oF as a target coordinate with
+	// no Pod, a DAX device and a distributed filesystem on the leader's own process.
+	// - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one
+	// of those values, while this CRD was installed but the webhook was not, becomes undeletable:
+	// schema validation runs on the write path only, so it reads back fine while every update is
+	// refused, the controller's finalizer removal included. The exposure is development clusters
+	// only, this type being absent from every tag through v0.8.6, so clearing it is the first
+	// shipping release's job — confirm no leftover object exists, or write a recovery procedure.
 	Medium *string `json:"medium,omitempty"`
-	// CapacityPerMember sizes ONE member, not one node: a node can eventually run several
-	// members, one per NUMA domain. It becomes the member's global segment size and is counted
-	// into the member Pod's own resource request, so a member that does not fit stays Pending
-	// instead of overcommitting the node.
+	// CapacityPerMember sizes ONE member, not one node. It becomes the member's global segment size
+	// and is counted into the member Pod's own resource request, so a member that does not fit stays
+	// Pending instead of overcommitting the node.
 	//
-	// A GROUP CARRYING LocalDisk NEEDS AT LEAST ONE BUCKET HERE, which is the unit that tier is
-	// written in. The bytes a bucket is assembled from are held in this segment until the bucket is
-	// complete, so a segment smaller than one can never have a bucket's worth of content in it at
-	// once and the tier stays empty under every workload — the failure this bound exists to turn into
-	// a refusal, because nothing else reports it. A group with no tier has no such floor: there is
-	// nothing for it to fail to fill.
-	//
-	// SEVERAL MEMBERS PER NODE IS DECIDED AND NOT DONE, and this field is named for the shape it
-	// would take rather than the one that ships. What is deferred is splitting a node's members by
-	// NUMA domain; today one selected node runs one member.
-	//
-	// The reason to reopen it is NOT memory locality, and reading it that way is how it gets
-	// dismissed a second time. This operator already discovers the NUMA affinity of NICs and their
-	// RDMA devices, and RDMA is this backend's fast transport, so several members per node is the
-	// only mechanism that could put a segment on the same NUMA node as the interface that serves
-	// it. Without it that discovered topology has no consumer on this path.
-	//
-	// The trigger is therefore decidable rather than a matter of taste: a two-socket node whose
-	// devices report RDMA interfaces on more than one NUMA node, AND that node's member observed
-	// transferring across the socket boundary. There is no such evidence today.
-	//
-	// One group per NUMA domain is NOT the shape it would take, and the obstacle is structural
-	// rather than a cost. A group selects nodes through nodeSelector, and NUMA is a property inside
-	// a node, not a label on one -- so "the NUMA 0 of this node" is not expressible by the mechanism
-	// groups are built on. It would also multiply groups by socket count against a list capped at
-	// 32, and every group's identity is its position.
+	// - A group carrying LocalDisk needs at least one BUCKET here, which is the unit that tier is
+	// written in. A bucket's bytes are held in this segment until the bucket is complete, so a
+	// smaller segment never holds a bucket's worth at once and the tier stays empty under every
+	// workload, which nothing else reports. A group with no tier has no such floor.
+	// - The name is "per member" for a shape that is DECIDED AND NOT DONE: several members per
+	// node, split by NUMA domain. Today one selected node runs one member.
+	// - What would reopen that is a two-socket node reporting RDMA interfaces on more than one NUMA
+	// node AND that node's member observed transferring across the socket boundary, there being
+	// nothing else on this path that consumes the NUMA affinity this operator already discovers.
+	// One group per NUMA domain is not the shape it would take — a group selects nodes through
+	// nodeSelector, while NUMA is a property inside a node rather than a label on one.
 	CapacityPerMember *resource.Quantity `json:"capacityPerMember,omitempty"`
 	// LocalBufferSize is the member client's local staging buffer, counted into the Pod's
 	// memory request beside CapacityPerMember.
@@ -83,68 +56,51 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// each the one its own binary documents. A key that collides with one derived from a field
 	// above is refused at admission.
 	//
-	// EVERY VALUE HERE IS WORLD-READABLE, on three paths and not one. It is stored verbatim on THIS
-	// object, which is cluster-scoped, so reading it needs no access to any workload; it is then
-	// rendered into the member container's argv as -D key=value, which exposes it again to anyone
-	// who can read the Pod or the DaemonSet carrying it. It stays readable for the life of the
-	// object. A credential does not belong here. This operator renders no flag that carries one, so
-	// this field is the only way one arrives.
+	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
+	// rendered into the member container's argv as -D key=value, readable by anyone who can reach
+	// the Pod or the DaemonSet, for the life of the object. A credential does not belong here, and
+	// since this operator renders no flag that carries one, this field is the only way one arrives.
 	ExtraArgs map[string]string `json:"extraArgs,omitempty"`
 	// ExtraEnvs passes environment variables this API does not enumerate straight through to the
 	// member container.
 	//
-	// IT IS NOT A SECOND SPELLING OF ExtraArgs, and the reason is that the two reach different
-	// places. ExtraArgs renders as the entrypoint's own "-D key=value" config override, which sets a
-	// key on the client's config object; a whole family of this store's settings — the local disk
-	// tier's flush thresholds, its promotion behavior, the rest of its eviction knobs — has no config
-	// key at all and is read from the ENVIRONMENT only. Nothing filters those out. There is simply no
-	// path to them from a command line, which is what this field is for.
+	// - It is NOT a second spelling of ExtraArgs: the two reach different places. ExtraArgs renders
+	// as the entrypoint's "-D key=value" config override, while a whole family of this store's
+	// settings — the local disk tier's flush thresholds, its promotion behavior, the rest of its
+	// eviction knobs — has no config key at all and is read from the ENVIRONMENT only.
+	// - A name this operator already renders is REFUSED at admission, for the same reason a
+	// colliding ExtraArgs key is: Kubernetes accepts a container carrying one name twice and
+	// leaves the winner to the runtime, so the collision would not even be reported. That
+	// includes the tier's bucket thresholds, which this operator sizes itself; a tuner who needs
+	// to move them needs a field, and this hatch is deliberately not it.
 	//
-	// A NAME THIS OPERATOR ALREADY RENDERS IS REFUSED at admission, for the same reason a colliding
-	// ExtraArgs key is: two sources for one setting make the rendered container ambiguous. Kubernetes
-	// accepts a container carrying one name twice and leaves the winner to the runtime, so the
-	// collision would not even be reported. That includes the tier's bucket thresholds, which this
-	// operator now sizes itself — a tuner who needs to move them needs a field, and this hatch is
-	// deliberately not it.
-	//
-	// EVERY VALUE HERE IS WORLD-READABLE, on three paths and not one. It is stored verbatim on THIS
-	// object, which is cluster-scoped, so reading it needs no access to any workload; it is then
-	// rendered into the member container's environment, which exposes it again to anyone who can read
-	// the Pod or the DaemonSet carrying it. It stays readable for the life of the object. A
-	// credential does not belong here. This operator renders no variable that carries one, so this
-	// field is the only way one arrives.
+	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
+	// rendered into the member container's environment, readable by anyone who can reach the Pod or
+	// the DaemonSet, for the life of the object. A credential does not belong here, and since this
+	// operator renders no variable that carries one, this field is the only way one arrives.
 	ExtraEnvs map[string]string `json:"extraEnvs,omitempty"`
 	// Image overrides the backend's Image for this member group only. Left unset, the group runs
 	// the backend's Image.
 	//
 	// A group's NodeSelector is what makes this necessary: two groups can select nodes of different
-	// accelerator vendors or generations, and the store's client ships as one wheel per vendor —
-	// CUDA 12, CUDA 13, ROCm, NPU — each carrying the transports it was compiled with and the
-	// runtime it links. The transport itself is backend-wide, so this is not a per-group transport;
-	// it is the per-group runtime that one transport needs on differing hardware.
+	// accelerator vendors or generations, and the store's client ships as one wheel per vendor, each
+	// carrying the transports it was compiled with and the runtime it links. The transport itself is
+	// backend-wide, so this is NOT a per-group transport — it is the per-group runtime that one
+	// transport needs on differing hardware.
 	Image *string `json:"image,omitempty"`
 	// LocalDisk declares a directory on the nodes this group already selects and points the store
 	// client's offload keys at it. Left unset, the group is memory only.
 	//
-	// WHAT THE TIER IS WRITTEN IN IS A BUCKET, AND THAT IS WHY THIS OPERATOR SIZES ONE. The store
-	// assembles offloaded objects into a bucket and writes nothing until that bucket is full, by
-	// bytes or by object count; objects below the threshold are carried to the next attempt
-	// indefinitely, reported as deferred for offload, and the tier stays empty while every other
-	// signal — the segment registered, the capacity published, eviction running — looks healthy. The
-	// store's own thresholds are sized for a saturated production store and are far above what a
-	// modest backend ever accumulates, so this operator renders a smaller pair of its own. They are
-	// not in this API: a tuner who needs to move them needs a field, and members[].extraEnvs refuses
-	// them for the same reason it refuses every other name this operator renders.
-	//
-	// To check what the tier actually holds rather than what it declared, read the leader's own
-	// master_allocated_file_size_bytes: that is bytes written, and reads 0 for a tier holding
-	// nothing. status.capacity reports the declared CAPACITY and will not show this.
-	//
-	// It is a LAYER on this group rather than a group of its own, and that is the store's shape
-	// rather than a simplification here: the leader routes an offload task to the client that owns
-	// the key's memory replica, so a member holding no memory segment is never chosen. Such a
-	// member would still report its disk capacity to the leader, so the backend would show a cold
-	// tier of several terabytes that never takes a byte.
+	// - What the tier is written in is a BUCKET, and that is why this operator sizes one. The store
+	// writes nothing until a bucket is full, by bytes or by object count, so under the store's
+	// own thresholds — sized for a saturated production store — the tier stays empty while every
+	// other signal looks healthy. The pair this operator renders instead is not in this API, and
+	// members[].extraEnvs refuses those names.
+	// - It is a LAYER on this group rather than a group of its own, which is the store's shape: the
+	// leader routes an offload task to the client that owns the key's memory replica, so a member
+	// holding no memory segment is never chosen and would report a cold tier that never fills.
+	// - To check what the tier actually holds rather than what it declared, read the leader's own
+	// master_allocated_file_size_bytes; status.capacity reports the declared CAPACITY only.
 	LocalDisk *KVCacheBackendMemberLocalDiskApplyConfiguration `json:"localDisk,omitempty"`
 }
 

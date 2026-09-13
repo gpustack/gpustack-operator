@@ -10,16 +10,13 @@ type KVCachePoolSpecApplyConfiguration struct {
 	// Backends names the KVCacheBackend this pool draws from. It holds NAMES rather than a typed
 	// reference so this package needs no compile-time dependency on that type.
 	//
-	// Exactly one entry is admitted, and the rule is the webhook's rather than the schema's so the
+	// - Exactly one entry is admitted, and the rule is the webhook's rather than the schema's so the
 	// refusal can carry its reason: quota lands on a single master's per-tenant ledger, and one
-	// master cannot account for bytes held in another backend. A schema bound would refuse the same
-	// object with a message that explains nothing.
-	//
-	// It is immutable, webhook-enforced. Moving a pool to another backend would strand every tenant
-	// quota on the old master's ledger with nothing left to delete them with.
-	//
-	// The reverse is NOT exclusive: one backend may be referenced by several pools, which is why the
-	// ledger and the rendered policy converge per MASTER rather than per pool.
+	// master cannot account for bytes held in another backend.
+	// - It is IMMUTABLE, webhook-enforced. Moving a pool to another backend would strand every
+	// tenant quota on the old master's ledger with nothing left to delete them with.
+	// - The reverse is NOT exclusive: one backend may be referenced by several pools, which is why
+	// the ledger and the rendered policy converge per MASTER rather than per pool.
 	Backends []string `json:"backends,omitempty"`
 	// Quota is the ceiling this pool declares over its backend.
 	Quota *KVCachePoolQuotaApplyConfiguration `json:"quota,omitempty"`

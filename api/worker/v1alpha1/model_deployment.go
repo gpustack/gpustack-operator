@@ -14,10 +14,9 @@ import (
 // It is N replicas of one inference-engine role attached to a KV cache pool, so that the replicas
 // hit each other's cached prefixes instead of each re-computing the same prefill.
 //
-// It RENDERS PODS DIRECTLY. The admission chain keys on Pods — a plain Pod is a first-class citizen
-// of it and an Instance is sugar that renders one — so rendering Pods reuses every existing gate
-// with no new integration point. Instance could not serve as the substrate: it renders exactly one
-// Pod, and its spec is immutable after creation, which turns a rolling update into
+// It RENDERS PODS DIRECTLY. The admission chain keys on Pods, so rendering Pods reuses every
+// existing gate with no new integration point. Instance could not serve as the substrate: it renders
+// exactly one Pod, and its spec is immutable after creation, which turns a rolling update into
 // recreate-everything.
 //
 // +genclient
@@ -47,9 +46,9 @@ type ModelDeploymentSpec struct {
 	// which carrier the transfer configuration arrives on. Ownership is per (engine, key): a key one
 	// engine owns is an ordinary user argument on another.
 	//
-	// It does NOT decide the connector, which follows the role's hardware instead. An Ascend pool
-	// running this engine gets a different connector than an NVIDIA pool running it, because the
-	// connector is a property of the accelerator backend.
+	// It does NOT decide the connector, which follows the role's hardware instead: the connector is a
+	// property of the accelerator backend, so an Ascend pool and an NVIDIA pool running this engine
+	// get different ones.
 	//
 	// +required
 	// +k8s:validation:enum=["vllm","sglang"]
@@ -57,23 +56,17 @@ type ModelDeploymentSpec struct {
 
 	// EngineVersion is the engine's own version, e.g. "0.25.1" for vllm or "0.5.18" for sglang.
 	//
-	// It is free-form and UNVALIDATED, by decision. Together with each role's observed hardware it
-	// assembles that role's runner image; the operator checks neither that the combination was ever
-	// published nor that the version supports the installed driver. The user guarantees version
-	// alignment. A gate would need the runner's release matrix compiled into the operator, and the
-	// failure it would prevent is already legible without one, as an ImagePullBackOff on a tag that
-	// does not exist.
-	//
-	// It is per deployment rather than per role, which is what lets one engine and one version
-	// assemble a DIFFERENT image for each role: the backend half of the tag comes from the role's
-	// own InstanceType. A prefill role on NVIDIA and a decode role on Ascend therefore need no extra
-	// field. That works because the published version sets overlap across backends, which is
-	// measured rather than assumed - though not across ALL of them, so a per-role override is a
-	// thing the P/D spec may need and this one does not.
-	//
-	// The lower bound is not decoration: `required` makes the key present, not the value non-empty,
-	// and an empty version assembles a malformed tag whose ImagePullBackOff names a tag the user
-	// never typed.
+	//   - It is free-form and UNVALIDATED, by decision: the user guarantees that the version and the
+	//     driver each role's hardware installed are aligned. A gate would need the runner's release
+	//     matrix compiled into the operator, and the failure it would prevent is already legible as
+	//     an ImagePullBackOff on a tag that does not exist.
+	//   - It is per deployment rather than per role, which is what lets one version assemble a
+	//     DIFFERENT image for each role: the backend half of the tag comes from the role's own
+	//     InstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.
+	//     Published version sets are measured to overlap across backends, though not across ALL of
+	//     them, so a per-role override may yet be needed.
+	//   - The lower bound is not decoration: `required` makes the key present, not the value
+	//     non-empty, and an empty version assembles a malformed tag naming something never typed.
 	//
 	// +required
 	// +k8s:validation:minLength=1
@@ -90,8 +83,8 @@ type ModelDeploymentSpec struct {
 	//
 	// The UPPER bound lives in the validating webhook and not in this schema: it tracks Kueue's cap
 	// on Workload.spec.podSets, so the refusal can name whose limit it is, and following that number
-	// is a webhook edit rather than a schema change every stored object would have to survive. The
-	// figure is not restated here, because the one that binds is in the Kueue the cluster runs.
+	// is a webhook edit rather than a schema change every stored object must survive. The figure is
+	// not restated here, because the one that binds is in the Kueue the cluster runs.
 	//
 	// +required
 	// +k8s:validation:minItems=1
@@ -103,12 +96,9 @@ type ModelDeploymentSpec struct {
 // The engines a ModelDeployment can run, which are the values of ModelDeploymentSpec.Engine's enum.
 //
 // They are declared beside the field whose schema closes the set, so that a reader of either finds
-// the other, and so that a value outside the set cannot reach the operator through this API.
-// There is deliberately no "vllm-ascend" value. `vllm_ascend` is a Python package the runner
-// installs when the accelerator backend is CANN, not an engine a user picks: the runner's own
-// release matrix spells the service `vllm` for every Ascend image. Naming it here made the
-// connector look like a property of the engine, which it is not - it varies with the accelerator
-// backend, so the engine alone never settles what the operator injects.
+// the other. There is deliberately no "vllm-ascend": `vllm_ascend` is a Python package the runner
+// installs when the accelerator backend is CANN, not an engine a user picks, and naming it here made
+// the connector look like a property of the engine, which it is not.
 const (
 	ModelDeploymentEngineVLLM   = "vllm"
 	ModelDeploymentEngineSGLang = "sglang"
@@ -165,16 +155,14 @@ type ModelDeploymentKVCache struct {
 type ModelDeploymentRole struct {
 	// Name identifies the role, and it is also the name of the Kueue PodSet the role becomes.
 	//
-	// The pattern is Kueue's own PodSetReference shape, and it is enforced here because the name is
-	// written verbatim into each Pod's role-hash annotation: Kueue groups a pod group's Pods into
-	// PodSets by that annotation, so a name it cannot take as a PodSet reference is a name whose
-	// role does not survive the grouping.
-	//
-	// UNIQUENESS IS THE SCHEMA'S. Roles is a list-map keyed on this field, so the API server refuses
-	// a duplicate during validation, before any webhook runs. The webhook carries the same rule as a
-	// backstop for that marker being dropped, and never gets to speak while it is there. Uniqueness
-	// matters for the same reason the pattern does: two roles sharing a name collapse into one
-	// PodSet whose count is their sum, which is a silent merge rather than an error.
+	//   - The pattern is Kueue's own PodSetReference shape, enforced here because the name is written
+	//     verbatim into each Pod's role-hash annotation: Kueue groups a pod group's Pods into PodSets
+	//     by that annotation, so a name it cannot take as a PodSet reference is a name whose role does
+	//     not survive the grouping.
+	//   - UNIQUENESS IS THE SCHEMA'S. Roles is a list-map keyed on this field, so the API server
+	//     refuses a duplicate before any webhook runs; the webhook carries the same rule only as a
+	//     backstop for that marker being dropped. Two roles sharing a name would collapse into one
+	//     PodSet whose count is their sum, which is a silent merge rather than an error.
 	//
 	// +required
 	// +k8s:validation:minLength=1
@@ -187,9 +175,8 @@ type ModelDeploymentRole struct {
 	//
 	// CHANGING THIS NUMBER REBUILDS THE GROUP. It moves the total the group declares, which every Pod
 	// carries and which Kueue requires them all to agree on, so the operator deletes the group's Pods
-	// and recreates them under the new total rather than adding or trimming a few. The cost is the
-	// one the recreate rollout already states: a replica that leaves loses its cached blocks to its
-	// siblings.
+	// and recreates them under the new total rather than adding or trimming a few. A replica that
+	// leaves loses its cached blocks to its siblings.
 	//
 	// +k8s:validation:default=1
 	// +k8s:validation:minimum=1
@@ -208,13 +195,13 @@ type ModelDeploymentRole struct {
 	//
 	// It carries only the ACCELERATOR half of a request, because that is the only half a workload
 	// decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit
-	// resources scaled by the requested card count, exactly as the Instance webhook derives them,
-	// so they are not expressible here at all — which is a stronger guarantee than refusing them
-	// would be, since a field that does not exist cannot be shadowed by a template either.
+	// resources scaled by the requested card count, so they are not expressible here at all — a
+	// stronger guarantee than refusing them, since a field that does not exist cannot be shadowed by
+	// a template either.
 	//
-	// InstanceType alone cannot supply this. An InstanceType's UnitResources size ONE card, and how
-	// many cards a replica wants is a property of the model being served rather than of the pool it
-	// is admitted against; two deployments on one InstanceType routinely want different counts.
+	// InstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards
+	// a replica wants is a property of the model being served, so two deployments on one InstanceType
+	// routinely want different counts.
 	Resources *ModelDeploymentRoleResources `json:"resources,omitempty" protobuf:"bytes,4,opt,name=resources"`
 
 	// ExtraArgs is appended AFTER the operator-synthesized arguments. An entry naming a key the
@@ -233,37 +220,29 @@ type ModelDeploymentRole struct {
 	// +listMapKey=name
 	Env []InstanceEnvVar `json:"env,omitempty" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,6,rep,name=env"`
 
-	// Template overlays the rendered container. The operator renders first and merges this on top.
-	// A non-empty Command is the TAKE-OVER tier: the user owns the whole argv, the operator
-	// synthesizes no engine arguments and no client environment, the role is marked unmanaged and
-	// CacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args,
-	// because a second append tier beside ExtraArgs would have no defined precedence and would make
-	// the take-over tier ambiguous — args alone would be neither take-over nor append.
+	// Template overlays the rendered container: the operator renders first and merges this on top.
 	//
-	// The template is MUTABLE, unlike the one an Instance carries. Immutability there is a rule the
-	// Instance webhook enforces on InstanceSpec rather than a property of any template type, and not
-	// carrying it here is what makes a rollout possible at all.
-	//
-	// EDITING IT RESTARTS EVERY ROLE, not just the replicas this template belongs to. Changing it
-	// changes a replica's rendered Pod, that replica is deleted — and every replica of the deployment
-	// is one member of a single Kueue pod group whose members cannot leave one at a time. So the
-	// group is rebuilt whole. The same is true of a `replicas` change, of adding or removing a role,
-	// and of a departure this operator did not initiate: a preemption, a node drain, an eviction. The
-	// mechanism and the full list are in docs/reference/model-deployment.md under "Rollout is
-	// recreate".
-	//
-	// Its Resources are refused at admission. The accelerator request belongs in the role's own
-	// Resources and the rest is derived from the InstanceType, so a template able to shadow either
-	// would make the admission feasibility check read a ledger that does not match reality.
+	//   - A non-empty Command is the TAKE-OVER tier — the user owns the whole argv, the operator
+	//     synthesizes no engine arguments and no client environment, the role is marked unmanaged and
+	//     CacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args,
+	//     because a second append tier beside ExtraArgs would have no defined precedence.
+	//   - It is MUTABLE, unlike the one an Instance carries, which is what makes a rollout possible
+	//     at all.
+	//   - EDITING IT RESTARTS EVERY ROLE, not just the replicas this template belongs to: every
+	//     replica of the deployment is one member of a single Kueue pod group whose members cannot
+	//     leave one at a time, so the group is rebuilt whole. The same is true of a `replicas` change,
+	//     of adding or removing a role, and of a departure this operator did not initiate — see
+	//     docs/reference/model-deployment.md under "Rollout is recreate".
+	//   - Its Resources are refused at admission. The accelerator request belongs in the role's own
+	//     Resources and the rest is derived from the InstanceType, so a template able to shadow either
+	//     would make the admission feasibility check read a ledger that does not match reality.
 	Template *ModelDeploymentTemplate `json:"template,omitempty" protobuf:"bytes,7,opt,name=template"`
 
-	// Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name:
-	// Name is free-form and identifies the PodSet, while this selects behavior, and a semantic
-	// reachable by typing a string is a semantic one typo away from silently changing. Two roles
-	// may share a kind and differ in name.
-	//
-	// It defaults to Server, which is the shape a deployment written before disaggregation existed
-	// has, so such a deployment renders exactly as it did.
+	// Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name
+	// is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable
+	// by typing a string is one typo away from silently changing. Two roles may share a kind and
+	// differ in name. It defaults to Server, the shape a deployment written before disaggregation
+	// existed has, so such a deployment renders exactly as it did.
 	//
 	// +k8s:validation:default="server"
 	// +k8s:validation:enum=["server","prefill","decode"]
@@ -274,8 +253,8 @@ type ModelDeploymentRole struct {
 // deployment.
 //
 // The values are the roles an inference engine understands, not the roles this operator invents:
-// each one selects the discriminator term the engine's own KV-transfer configuration takes. A kind
-// the engine's rendering has no term for is refused at admission rather than rendered into a
+// each selects the discriminator term the engine's own KV-transfer configuration takes. A kind the
+// engine's rendering has no term for is refused at admission rather than rendered into a
 // configuration the engine would reject at start-up.
 // +enum
 type ModelDeploymentRoleKind string
@@ -296,18 +275,15 @@ const (
 
 // ModelDeploymentTemplate overlays the container the operator renders for one replica.
 //
-// IT EXISTS BECAUSE InstanceTemplate'S Image IS REQUIRED AND THIS ONE'S CANNOT BE. A role that
-// names no image has one synthesized from the accelerator backend its InstanceType observed, so
-// requiring the field would force every user of the overlay to give up synthesis — two capabilities
-// this API offers, excluding each other for no reason other than a shared struct. Relaxing the
-// marker on InstanceTemplate was rejected: it would move a guarantee the Instance's schema holds
-// today down into a webhook, which is later, more expensive and easier to bypass, and it would do
-// that to a published API for the convenience of an unpublished one.
+// IT EXISTS BECAUSE InstanceTemplate'S Image IS REQUIRED AND THIS ONE'S CANNOT BE: a role that names
+// no image has one synthesized from the accelerator backend its InstanceType observed, so requiring
+// the field would force every user of the overlay to give up synthesis. Relaxing the marker on
+// InstanceTemplate was rejected — that moves a guarantee the Instance's schema holds today down into
+// a webhook, on a published API for the convenience of an unpublished one.
 //
-// The fields are InstanceTemplate's, minus VolumeMount, which nothing here reads — an unused field
-// in a schema is a promise, and strict decoding turns leaving it out into a clear refusal rather
-// than a value silently ignored. Numbering restarts at 1 and runs contiguously because this type is
-// new in an unreleased API; there is nothing on the wire to reserve around.
+// The fields are InstanceTemplate's, minus VolumeMount, which nothing here reads: an unused field in
+// a schema is a promise, and strict decoding turns leaving it out into a clear refusal rather than a
+// value silently ignored.
 type ModelDeploymentTemplate struct {
 	// Image is the container image to run. Leaving it empty is the ordinary case: the operator then
 	// synthesizes one from the pool's accelerator backend, the observed runtime version and the
@@ -384,18 +360,15 @@ type ModelDeploymentTemplate struct {
 type ModelDeploymentRoleResources struct {
 	// Accelerator is how many accelerator cards ONE REPLICA asks for.
 	//
-	// LEFT UNSET ON AN ACCELERATABLE InstanceType IT DEFAULTS TO ONE AT ADMISSION, on create and on
-	// update alike, the same way an Instance's does. A role that names no count is asking for the
-	// ordinary thing, and the value is written into the stored object rather than applied at render
-	// time, so what was admitted is what can be read back.
-	//
-	// AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote. On an acceleratable
-	// InstanceType it asks for nothing that pool's queue accounts in, since that queue accounts only
-	// in accelerator credits. Such a role is admitted only while it is the deployment's ONLY role:
-	// add a second role and the deployment is never admitted and never reports why, whether that
-	// second role asks for cards or for nothing either. So a zero is safe to state alone and unsafe
-	// to combine. A replica meant to run without an accelerator belongs on an InstanceType that is
-	// not acceleratable, where CPU is what the queue accounts in.
+	//   - Left unset on an acceleratable InstanceType it DEFAULTS TO ONE at admission, on create and
+	//     on update alike, the same way an Instance's does. The value is written into the stored
+	//     object rather than applied at render time, so what was admitted is what can be read back.
+	//   - AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote, and on an acceleratable
+	//     InstanceType it asks for nothing that pool's queue accounts in. Such a role is admitted
+	//     only while it is the deployment's ONLY role: add a second and the deployment is never
+	//     admitted and never reports why. A zero is safe to state alone and unsafe to combine.
+	//   - A replica meant to run without an accelerator belongs on an InstanceType that is not
+	//     acceleratable, where CPU is what the queue accounts in.
 	Accelerator *resource.Quantity `json:"accelerator,omitempty" protobuf:"bytes,1,opt,name=accelerator"`
 
 	// AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced
@@ -460,9 +433,9 @@ type ModelDeploymentStatus struct {
 	// +listMapKey=name
 	Roles []ModelDeploymentRoleStatus `json:"roles,omitempty" protobuf:"bytes,5,rep,name=roles"`
 
-	// KVCache is the reuse domain this deployment actually attached to, read from the Binding. It
-	// exists so an operator can tell a cache-sharing misconfiguration from a cache that is merely
-	// cold by reading this object alone.
+	// KVCache is the reuse domain this deployment actually attached to, read from the Binding, so
+	// that telling a cache-sharing misconfiguration from a cache that is merely cold takes one object
+	// rather than two.
 	//
 	// A POINTER because omitempty does not omit a zero-valued struct: held by value it would
 	// serialize as an empty object on every pass where the Binding could not be resolved, which a
@@ -495,31 +468,29 @@ type ModelDeploymentRoleStatus struct {
 	// defaulted if the user named none, so an absent value would mean the status was written by
 	// something that did not know about kinds rather than that the role has none.
 	//
-	// The enum is the same one the spec field carries, and it has to stay that way: this field is
-	// written from the spec field with the unset case resolved, so a value the writer can produce
-	// and this list does not name would make every later status write on the object fail, taking
-	// every other figure on it down with the kind. The marker sits on the field because the type's
-	// own enum marker is a Go-level one and does not become schema validation.
+	// The enum is the same one the spec field carries and has to stay that way: this field is written
+	// from the spec field with the unset case resolved, so a value the writer can produce and this
+	// list does not name would make every later status write on the object fail, taking every other
+	// figure down with the kind. The marker sits on the field because the type's own enum marker is a
+	// Go-level one and does not become schema validation.
 	//
 	// +k8s:validation:enum=["server","prefill","decode"]
 	Kind ModelDeploymentRoleKind `json:"kind" protobuf:"bytes,5,name=kind,casttype=ModelDeploymentRoleKind"`
 
 	// AssignedFlavor is the ResourceFlavor Kueue assigned to this role's PodSet for its ACCELERATOR
-	// credits, and it is a POINTER because "not assigned yet" and "assigned" are different facts: a
-	// role waiting for quota has no flavor, and reporting that as the empty string would read as an
-	// assignment to a flavor with no name.
+	// credits.
 	//
-	// It is per role rather than per deployment because Kueue assigns a flavor per PodSet, so two
-	// roles of one deployment can be assigned different flavors and a single deployment-wide field
-	// could not report that.
-	//
-	// AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather than a
-	// gap in it. The answer is read through the same function the per-accelerator admission gate
-	// reads it with, which speaks only of accelerator credits — so a role admitted on a pool that
-	// carries no accelerator at all names a flavor for `cpu` and nothing here. Observed on a CPU-only
-	// cluster: the Workload holds an assignment, both roles are Ready, and this stays unset. The two
-	// answers are kept identical on purpose; a flavor reported here that the gate would not fit
-	// against would be worse than none.
+	//   - A POINTER, because "not assigned yet" and "assigned" are different facts: a role waiting
+	//     for quota has no flavor, and reporting that as the empty string would read as an assignment
+	//     to a flavor with no name.
+	//   - Per role rather than per deployment, because Kueue assigns a flavor per PodSet and two
+	//     roles of one deployment can be assigned different ones.
+	//   - AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather
+	//     than a gap in it. The answer is read through the same function the per-accelerator
+	//     admission gate uses, which speaks only of accelerator credits, so a role admitted on a pool
+	//     carrying no accelerator names a flavor for `cpu` and nothing here. The two answers are kept
+	//     identical on purpose: a flavor reported here that the gate would not fit against would be
+	//     worse than none.
 	AssignedFlavor *string `json:"assignedFlavor,omitempty" protobuf:"bytes,6,opt,name=assignedFlavor"`
 }
 

@@ -10,27 +10,23 @@ package v1alpha1
 type KVCachePoolBindingDomainApplyConfiguration struct {
 	// Name is the domain, and it becomes the storage layer's tenant_id verbatim.
 	//
-	// It must be claimed by no other Binding ON A MASTER THAT SERVES THIS BINDING'S POOL, which the
-	// webhook enforces: two Bindings on one domain over one master would share cache — possibly
-	// intended — but collide on one quota ledger, which never is. Uniqueness is per master rather
-	// than per pool because one master can serve several pools and the tenant space is
-	// master-global, and it is not cluster-wide because two masters hold two ledgers: the same
-	// domain on a pool another backend serves collides with nothing.
-	//
-	// The accepted shape is a DNS-1123 label, checked by the webhook. That is strictly inside what
-	// the master accepts as a tenant_id and is what a Kubernetes object name already looks like, so
-	// nobody learns a second naming rule. This is the ONLY place the shape is judged: every consumer
-	// downstream copies the name rather than re-judging it.
+	// - It must be claimed by NO OTHER BINDING on a master that serves this Binding's pool, which
+	// the webhook enforces: two Bindings on one domain over one master would share cache —
+	// possibly intended — but collide on one quota ledger, which never is. Uniqueness is per
+	// master rather than per pool because one master can serve several pools and the tenant space
+	// is master-global; it is not cluster-wide because two masters hold two ledgers.
+	// - The accepted shape is a DNS-1123 label, checked by the webhook. That is strictly inside
+	// what the master accepts as a tenant_id and is what a Kubernetes object name already looks
+	// like, so nobody learns a second naming rule. This is the ONLY place the shape is judged;
+	// every consumer downstream copies the name rather than re-judging it.
 	Name *string `json:"name,omitempty"`
 	// BlockSize is the number of tokens one cache block holds.
 	BlockSize *int32 `json:"blockSize,omitempty"`
 	// Dtype is the element type the cached tensors carry, in the engine's own lowercase spelling.
 	//
-	// The exhaustive set belongs to whatever spec owns workloads, so this API does not enumerate it
-	// and the webhook judges the syntactic form only. Enumerating it here would make a new engine
-	// dtype an API change.
-	//
-	// It is spelled to match its JSON name exactly; DType would not, and the openapi generator
+	// The exhaustive set belongs to whatever spec owns workloads, so this API does not enumerate it —
+	// that would make a new engine dtype an API change — and the webhook judges the syntactic form
+	// only. It is spelled to match its JSON name exactly; DType would not, and the openapi generator
 	// records every such mismatch as a checked-in API rule violation.
 	Dtype *string `json:"dtype,omitempty"`
 }

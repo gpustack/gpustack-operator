@@ -12,61 +12,49 @@ import (
 //
 // KVCacheBackendSpec defines the desired spec of KVCacheBackend.
 type KVCacheBackendSpecApplyConfiguration struct {
-	// Type is the backend IMPLEMENTATION — who does placement, eviction, replication and
-	// metadata. It is NOT the medium: where the bytes live is members[].medium, and collapsing
-	// the two is the category error this field exists to make impossible.
+	// Type is the backend IMPLEMENTATION — who does placement, eviction, replication and metadata.
+	// It is NOT the medium: where the bytes live is members[].medium.
 	//
-	// One value ships. It is spelled out rather than assumed so the object says what it is, and
-	// so a second implementation widens an enum instead of reinterpreting an absent field.
+	// One value ships, spelled out rather than assumed, so a second implementation widens an enum
+	// instead of reinterpreting an absent field.
 	Type *string `json:"type,omitempty"`
 	// Image is the container image every role of this backend runs.
 	//
-	// It is OPTIONAL. Left unset, the reconciler uses the cluster-wide default pinned in the
-	// "kv-cache-backend-image" Setting, which is where a version this project has verified
-	// belongs — an admin pins it once instead of restating it on every object. Set here, it
-	// overrides that default for this backend alone.
-	//
-	// It is never DERIVED from the operator's own image the way the Device Manager's is: the
-	// master and the engine client can be builds against different accelerator generations —
-	// the base wheel's master links CUDA 12 while a current vLLM image carries CUDA 13 — so a
-	// derived image would silently pair a master with a runtime it cannot load. Unset here AND
-	// unset in the Setting is refused at admission, naming both places.
+	// - Left unset, the cluster-wide "kv-cache-backend-image" Setting applies, which is where a
+	// version this project has verified belongs. Set here, it overrides that Setting for this
+	// backend alone.
+	// - Unset in BOTH places is refused at admission, naming both.
+	// - It is never DERIVED from the operator's own image the way the Device Manager's is: the
+	// master and the engine client can be builds against different accelerator generations, so
+	// a derived image would silently pair a master with a runtime it cannot load.
 	Image *string `json:"image,omitempty"`
 	// ImagePullPolicy is the policy every role of this backend pulls its image with.
 	//
-	// It is declared here rather than inherited from the cluster-wide "image-pull-policy" Setting.
-	// That setting is a value of the bundled-application chart install and reaches nothing a
-	// controller renders, so inheriting it would make this the one API in the group whose
-	// workloads move when a chart value moves.
-	//
-	// Left unset, the operator RESOLVES the policy from the image tag by the rule the API server
-	// would otherwise have applied — Always for :latest or for an image naming no tag at all,
-	// IfNotPresent for anything else — and re-resolves it whenever the image or this field moves.
-	// It is resolved rather than left empty because a field the server fills in cannot be
-	// converged: an operator comparing against that default either rewrites the workload on every
-	// pass or has to skip the comparison, and skipping it strands the value a spec has moved off.
+	// - Left unset, the operator RESOLVES it from the image tag by the rule the API server would
+	// otherwise have applied: Always for :latest or for an image naming no tag at all,
+	// IfNotPresent for anything else. It re-resolves whenever the image or this field moves,
+	// and resolves rather than leaving the field empty so the rendered workload stays
+	// comparable against it.
+	// - It does NOT inherit the cluster-wide "image-pull-policy" Setting, which is a value of the
+	// bundled-application chart install and reaches nothing a controller renders.
 	ImagePullPolicy *v1.PullPolicy `json:"imagePullPolicy,omitempty"`
-	// ImagePullSecrets names the secrets that pull this backend's images, on every role.
+	// ImagePullSecrets names the secrets that pull this backend's images, on every role. They live
+	// in the namespace the workloads run in, which is this operator's own.
 	//
-	// Without it a private registry is unreachable: neither the leader Deployment nor a member
-	// DaemonSet runs under a service account of ours carrying credentials, and the cluster-wide
-	// "image-pull-secrets" Setting reaches only the bundled-application chart. The secrets live in
-	// the namespace the workloads run in, which is this operator's own.
-	//
-	// The list is ATOMIC — it is replaced whole rather than merged. A structural schema may key a
-	// list by a field only when that field is required and non-nullable, and LocalObjectReference's
-	// name is neither.
+	// - Without it a private registry is unreachable: no role runs under a service account of
+	// ours carrying credentials, and the cluster-wide "image-pull-secrets" Setting reaches only
+	// the bundled-application chart.
+	// - The list is ATOMIC, replaced whole rather than merged. A structural schema keys a list
+	// only by a required, non-nullable field, and LocalObjectReference's name is neither.
 	ImagePullSecrets []corev1.LocalObjectReferenceApplyConfiguration `json:"imagePullSecrets,omitempty"`
 	// Connection describes how this backend is reached: managed by this operator, or external.
 	// Exactly one is set, enforced by the webhook.
 	Connection *KVCacheBackendConnectionApplyConfiguration `json:"connection,omitempty"`
 	// Transport describes the data plane the members use.
 	//
-	// The empty object is the default, and it has to be. Structural-schema defaulting does not
-	// descend into an object that is ABSENT, so without this the common spec — one that never
-	// mentions a transport — would store no protocol at all and the field's own default would
-	// silently not apply. Measured against an API server: omitted leaves `transport` empty, while
-	// `transport: {}` comes back as `{"protocol":"Auto"}`.
+	// The empty object is the default, and it has to be: structural-schema defaulting does not
+	// descend into an ABSENT object, so a spec that never mentions a transport would store no
+	// protocol at all and protocol's own default would silently not apply.
 	Transport *KVCacheBackendTransportApplyConfiguration `json:"transport,omitempty"`
 }
 

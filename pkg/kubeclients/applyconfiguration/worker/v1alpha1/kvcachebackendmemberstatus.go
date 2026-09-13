@@ -24,29 +24,24 @@ type KVCacheBackendMemberStatusApplyConfiguration struct {
 	// It is NOT an observation. The value travels from the member's own mount request through the
 	// leader's listing unchanged, so it cannot disagree with spec.transport.protocol: a member that
 	// asks for a host fabric and comes up on TCP because the device is missing still reports the
-	// fabric here, and reports it while serving.
-	//
-	// So agreement with the spec is not confirmation that the request took effect, and reading it as
-	// confirmation is worse than having no field. The transport the data plane installed is reported
-	// only in the member's own log.
+	// fabric here, while serving. Agreement with the spec is therefore not confirmation that the
+	// request took effect; the transport the data plane installed is only in the member's own log.
 	Protocol *string `json:"protocol,omitempty"`
 	// State is the member's state AS THE LEADER REPORTS IT, read from the leader's own segment
 	// listing rather than inferred from the member Pod. The states the store defines, in this API's
 	// casing: OK, Draining, Drained, GracefullyUnmounting, Unmounting, Undefined.
 	//
-	// It carries no "unreached" sentinel, because there is no pass that would write one: a listing
-	// that cannot be read leaves the PREVIOUS entries in place and says so through MembersMounted,
-	// rather than rewriting them as blank. Whether what is here was just refreshed is the
-	// condition's question, and this field never answers it.
-	//
-	// Draining and the two unmounting states are what a shrink passes through, so the field can
-	// distinguish a member on its way out from one that is simply gone. That is the whole reason it
-	// carries the store's vocabulary instead of a summary of it.
-	//
-	// It carries no enum marker deliberately, unlike every enum on the spec side. The value's domain
-	// belongs to the store and not to this API: a store version that adds a state would make the
-	// whole status write fail validation — not this one field, the entire object — leaving every
-	// other status field frozen at its last value. Phase, one field up, is open for the same reason.
+	// - Draining and the two unmounting states are what a shrink passes through, so the field can
+	// distinguish a member on its way out from one that is simply gone. That is the whole reason
+	// it carries the store's vocabulary instead of a summary of it.
+	// - It carries no "unreached" sentinel, because there is no pass that would write one: a
+	// listing that cannot be read leaves the PREVIOUS entries in place and says so through
+	// MembersMounted, rather than rewriting them as blank. Whether what is here was just
+	// refreshed is that condition's question, and this field never answers it.
+	// - It carries no enum marker, deliberately, unlike every enum on the spec side. The value's
+	// domain belongs to the store: a store version that adds a state would make the whole status
+	// write fail validation — not this one field, the entire object — leaving every other status
+	// field frozen at its last value. Phase, further up, is open for the same reason.
 	State *string `json:"state,omitempty"`
 }
 
