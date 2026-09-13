@@ -885,7 +885,7 @@ look identical. T4's checkpoint claimed the observable one and was true only of 
       interface, no dispatch abstraction, no second sub-package.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/worker/controllers/worker/`
 
-- [ ] **T10 · The reference page**
+- [x] **T10 · The reference page**
       Blocked by: T1, T3, T4, T8, T9
       Owns: `docs/reference/model-deployment.md`
       Gate: review

@@ -121,13 +121,20 @@ rather than deleted because it is the problem statement T10 was written against.
 ### Non-Goals
 
 - **Cross-manufacturer heterogeneous P/D.** Prefill on NVIDIA and decode on Ascend is not
-  expressible, and the reason is structural: `buildResourceGroups`
+  expressible **given this spec's one-Workload choice**, and that qualifier is load-bearing: the
+  reason is structural only while the deployment's roles are one Kueue Workload. `buildResourceGroups`
   (`pkg/worker/controllers/worker/node_queue.go:261`) sets an accelerated queue's `CoveredResources`
   to the single resource `credits.gpustack.ai/<manufacturer>`, derived from the pool's one
   `manufacturer` note. A ClusterQueue resource group covers one set of resources, and Kueue's own
   ClusterQueue webhook rejects a second group repeating a covered resource
   (`validateResourceGroups`). Two manufacturers' credits cannot be one queue's quota, and one
   `queueName` per Workload does the rest.
+  - ⚠️ **Corrected after shipping.** This paragraph read as a permanent impossibility and was quoted
+    as one. It is not: `2026-09-12-model-deployment-stabilization.md` gives each `instanceType` its
+    own pod group and its own Workload, and admits the set together through an AdmissionCheck instead
+    of through Kueue's intra-group rule. With a queue per role there is no second resource group to
+    repeat anything, so the mechanism named above is simply absent. What stays true is the sentence
+    with its qualifier restored.
   - Same-manufacturer, **cross-model** heterogeneous P/D *is* in scope (G2). The two are not the
     same restriction and must not be stated as one.
 - **Making the pool itself span models.** A ClusterQueue whose identity is manufacturer-level rather

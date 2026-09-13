@@ -54,8 +54,21 @@ spec:
 `KVCachePool`, or a bare endpoint URL is unrepresentable rather than merely rejected. The Binding is
 the authorization point — an admin creating one in a namespace is what grants that namespace access.
 
+**`connector` has one value, and that is the transport convergence rather than a placeholder.** The KV
+transfer converges on Mooncake because it is the implementation that supports heterogeneous prefill
+and decode. NIXL and ROCm NIXL stay reachable; nothing in this repository has run them, and the
+field's existence is not a claim that they would work.
+
+What the enum reserves is the **discriminator**, so naming a second connector later is a widening
+rather than a new field. Widening it is four things and not one: a sub-package, an entry in the enum,
+a renderer, and the wiring that threads this value to a dispatch point that does not exist yet.
+
+Today the value reaching the renderer is synthesized from the engine, the role's `kind` and the
+pool's backend, and this field is read by nothing. It is also frozen after creation, so a widened
+enum reaches new deployments only.
+
 `roles` takes **1 to 10** entries. The upper bound is Kueue's rather than this operator's — every role
-becomes one PodSet of the deployment's single Workload, and `Workload.spec.podSets` is capped at ten —
+becomes one PodSet of the Workload its group composes, and `Workload.spec.podSets` is capped at ten —
 and it lives in the validating webhook rather than in the schema so the refusal can say whose limit it
 is, and so tracking an upstream number is not a schema change every stored object must survive.
 
@@ -71,7 +84,9 @@ from the InstanceType's per-unit resources scaled by the card count, so they are
 
 Several roles in one deployment are admitted **atomically**: a pool that cannot fit all of them leaves
 all of them queued, instead of admitting the prefillers and stranding them waiting for decoders that
-never arrive.
+never arrive. Roles sharing one `instanceType` get that from Kueue's own pod-group rule; roles spread
+over several get it from an admission check this operator runs, which holds every group until the
+whole set has reserved quota.
 
 ```yaml
   roles:
@@ -84,7 +99,7 @@ never arrive.
     - name: decode
       kind: decode
       replicas: 2
-      instanceType: gpustack-nvidia-h20-linux-amd64   # identical, and it must be
+      instanceType: gpustack-nvidia-h20-linux-amd64   # may differ; see Different hardware per role
       resources:
         accelerator: 2
 ```
@@ -106,8 +121,8 @@ request to either are **not** here.
 
 | Key | Value | What it is for |
 |---|---|---|
-| label `kueue.x-k8s.io/pod-group-name` | the deployment's name, or `gpustack-fnv64-<hash>` when that is too long for a label value | membership: it is what makes the replicas one group |
-| annotation `kueue.x-k8s.io/pod-group-total-count` | the sum of every role's `replicas` | how many Pods Kueue waits for before composing anything |
+| label `kueue.x-k8s.io/pod-group-name` | the deployment's name when it forms ONE group, or `gpustack-fnv64-<hash>` when that name is too long for a label value or the deployment forms several | membership: it is what makes a group's replicas one group. Several groups hash the `instanceType` in, because a readable composite would share a namespace with deployment names and could equal one |
+| annotation `kueue.x-k8s.io/pod-group-total-count` | the sum of the replicas of THIS group's roles, and of no others | how many Pods Kueue waits for before composing anything. A group claiming the deployment-wide total waits for Pods that are never coming |
 | annotation `kueue.x-k8s.io/role-hash` | the role's `name` | the PodSet's identity, so two identically-shaped roles stay two PodSets |
 | annotation `kueue.x-k8s.io/pod-group-serving` | `"true"` | an inference deployment never finishes; without it Kueue reclaims the quota of a replica that exited |
 | annotation `modeldeployment.gpustack.ai/role-replicas` | the role's own `replicas` | ours, not Kueue's, and the only entry here Kueue does not read. It is what makes the rebuild predicate see a **reshape**: moving prefill 2 / decode 2 to prefill 1 / decode 3 leaves the total at four, so a check reading the total alone would trim one replica and add another in the same pass |
@@ -125,27 +140,26 @@ assignment and per-role status would all disappear with nothing erroring.
 > collapses into one and per-role flavor assignment goes with it. The Workload still looks well formed.
 > The operator never sets it, and a test asserts its absence.
 
-### One `instanceType` for every role
+### Different hardware per role
 
 A Kueue Workload carries one `queueName`, and that name is the one the role's `instanceType`
-publishes as its `status.entrance`. So roles
-on two `instanceType`s cannot be one group and cannot be admitted together at all — Kueue enforces the
-same rule on the Pods, unretryably, so letting it through would trade a refusal for a group that never
-assembles.
+publishes as its `status.entrance`. So roles on two `instanceType`s cannot be one Workload — and the
+answer is not to forbid the shape but to stop making it one Workload. Each `instanceType` is its own
+pod group with its own Workload, and the set is admitted together by an admission check rather than
+by Kueue's intra-group rule.
 
-Different **hardware** per role is **not** expressible today, and the refusal above says so rather
-than only saying "pick one type".
+See [One group, or one per `instanceType`](#one-group-or-one-per-instancetype) for what that costs an
+edit, and the last row of [What admission refuses](#what-admission-refuses) for the one state in
+which the shape is refused instead.
 
-[Kueue does assign a ResourceFlavor per
-PodSet](../architecture/scheduling-chain.md#stage-4-the-kueue-chain), so the mechanism exists; what
-is missing is a way for a role to ask for one model rather than another within its pool. Per-role
-queues are the route tracked at
-[issue 199](https://github.com/gpustack/gpustack-operator/issues/199).
-
-Across manufacturers is blocked today by a different mechanism: a queue's accelerator quota is
+**Across manufacturers is the same change, not a second one.** A queue's accelerator quota is
 `credits.gpustack.ai/<manufacturer>`, one resource name per manufacturer, and Kueue's own webhook
-refuses a second resource group repeating a covered resource. Per-role queues lift that too — the
-issue linked above treats cross-model and cross-manufacturer as one change, not two.
+refuses a second resource group repeating a covered resource within one queue. With a queue per role
+there is no second group to repeat anything.
+
+[Kueue assigns a ResourceFlavor per
+PodSet](../architecture/scheduling-chain.md#stage-4-the-kueue-chain), so a role still takes whatever
+its own pool assigns; what selects the hardware is the `instanceType` the role names.
 
 ### Addressing a role
 
@@ -574,11 +588,61 @@ the replica and the lease window on each of three paths — `ReplicaEvicted`, `R
 `ReplicaRestarted` — so an operator correlating a burst of failed requests with a replica that went
 away has the correlation written down rather than inferred.
 
-**Any replica leaving rebuilds the whole group.** This is stronger than the recreate policy above, and
-it is a contract rather than a symptom. Kueue holds a finalizer on every Pod of the group and releases
-it only when the group's Workload is deleted — a *serving* group is never finished, so nothing else
-releases it — and deleting that Workload makes Kueue stop the group. A departing replica therefore
-takes its siblings with it, and the deployment is rebuilt whole on the next pass.
+### Which fields are the deployment's identity
+
+Some fields cannot be edited at all, and the rule that sorts them is a question rather than a list:
+**a field is frozen when it answers *which deployment is this*, and editable when it answers *how is
+this deployment being run right now*.**
+
+| Frozen | Editable |
+|---|---|
+| `model`, `engine`, `kvCache` | `engineVersion` |
+| the set of roles, and each role's `name` and `kind` | `roles[].replicas` |
+| `roles[].instanceType` | `roles[].extraArgs`, `roles[].env` |
+| `roles[].resources` | the whole `roles[].template` except `command` |
+| `roles[].template.command` | labels and annotations |
+
+`roles[].resources` is frozen against the criterion rather than by it, and that is marked here so it
+does not read as an oversight: it does not say which deployment this is, but changing it renegotiates
+the scheduling, which is not materially different from deleting and recreating. Its mirror image is
+`template.privileged`, which the criterion leaves editable even though a different argument could
+move it.
+
+**What to do instead of editing one is create another deployment.** A frozen field is not a lock
+protecting a concurrent writer, and the refusal says so: what you are describing is a different
+deployment, so it is created rather than edited. The name, the `status` history and the cache-pool
+registration are what you keep by editing, and none of them is what a frozen field carries.
+
+Judging a **new** field means asking that question, not appending to the table — a list alone grows
+by precedent and stops meaning anything.
+
+### One group, or one per `instanceType`
+
+When every role names one `instanceType` the deployment is **one** pod group. When roles name
+different ones it is **one group per type**, because a queue name is derived from the `instanceType`,
+one Kueue Workload carries one queue name, and two of them therefore cannot be one Workload. The
+grouping key is the `instanceType` and not the role: two roles on one type are one group, and a third
+on another is a second.
+
+**How expensive an edit is depends on which shape you are in**, and that is worth knowing where it is
+not where anyone would look for it:
+
+| Shape | What a `replicas` or `template` edit rebuilds |
+|---|---|
+| every role on one `instanceType` | every role of the deployment |
+| roles split across types | only the group whose shape moved; the others keep serving |
+
+So a user who wants cheap scaling has a reason to split `instanceType`s that has nothing to do with
+hardware. The groups are still admitted as a **set** — see the last row of
+[What admission refuses](#what-admission-refuses) for what happens when that gate cannot be installed.
+
+**Any replica leaving rebuilds its group.** This is stronger than the recreate policy above, and it is
+a contract rather than a symptom. Kueue holds a finalizer on every Pod of the group and releases it
+only when the group's Workload is deleted — a *serving* group is never finished, so nothing else
+releases it — and deleting that Workload makes Kueue stop the group.
+
+A departing replica therefore takes the siblings **in its own group** with it, and that group is
+rebuilt whole on the next pass.
 
 **Most departures are not a spec change.** These all restart every role:
 
@@ -609,7 +673,11 @@ depends on the `InstanceType` the role names.
 |---|---|
 | more than 10 roles | Kueue's 10-PodSet cap on `Workload.spec.podSets` as the cause, not merely the number |
 | two roles sharing a `name` | the duplicate — refused by the **schema**, since `roles` is a list keyed on `name`, so this one never reaches the webhook |
-| roles on different `instanceType`s | every type named, on `spec.roles` rather than on any one role — disagreement is a property of the set — plus the one-queue-name reason, and that differentiating hardware within one pool is not possible today |
+| an edit to an identity field — `model`, `engine`, `kvCache`, or the shape of the roles | the field path, and that a different value describes a different **deployment**, which is created rather than edited. See [Which fields are the deployment's identity](#which-fields-are-the-deployments-identity) |
+| a resource mode the named `InstanceType` does not offer | the mode and the type — a slice on a type that offers no slicing, a partition profile on a type that cannot partition, or one outside its profile inventory, with the offered list |
+| a request over the type's per-unit ceiling | the ceiling itself, not only that the request was too large, so the next attempt is not a guess |
+| a `prefill` and a `decode` role both requesting a **logical slice** from types that draw on the same accelerator group | both roles and the slice field. Whole cards and partition profiles are accepted — including on one card, because partitions are isolated by the device |
+| roles on several `instanceType`s **when `instance-type-derived-from-node` is off** | that setting. The groups are gated as a set by an admission check this operator references from the queues it derives, and with the setting off no queue carries it |
 | a role whose `<deployment>-<role>` is not a DNS-1035 label | the combined **Service** name, which is what the pair becomes; over 63 characters or carrying a dot from a subdomain-shaped deployment name. A role the object **already had** is exempt, so a rule added later cannot strand a stored object |
 | `kind: server` beside any other kind | that a server serves whole requests by itself, so the combination describes no arrangement |
 | a `kind` the engine has no term for | the engine and the kind — today, `prefill` or `decode` on SGLang |
@@ -621,10 +689,20 @@ depends on the `InstanceType` the role names.
 | a self-declared reuse domain | nothing — the field does not exist |
 | an EMPTY `poolRef.name` | the Binding as the authorization point, and that an empty reference names none |
 
-**Every rule above is answered from the submitted object**, so no refusal in the table waits on the
-cluster. The mutating half is the one place that reads another object — it looks up the
-`InstanceType` a role names, and a name no read can find is refused there rather than in the table.
-It declines for an object being deleted; why that is necessary rather than merely tidy is in
+**Most rules above are answered from the submitted object, and two are not.** Whether the named
+`InstanceType` offers the mode a role asks for, and whether the role's card count fits what that type
+hands out at once, are facts about another object; everything else is decided without leaving the
+request. Both read the type from the API server rather than from a cache, because a cache that is
+behind decides the outcome in both directions.
+
+**Any rule that reads an `InstanceType` declines for a deployment being deleted**, in the mutating
+half and the validating half alike. Such a rule refuses when the type is absent, so leaving it on
+would let a deleted `InstanceType` block the very update that clears the deployment's finalizer — an
+object its own teardown could never release.
+
+The price is named rather than hidden: an edit made while a deployment is being deleted can move a
+role onto a mode its type does not offer, and nothing renders the result. Why that trade is necessary
+rather than merely tidy is in
 [Update validation while an object is deleted](../architecture/admission.md#update-validation-while-an-object-is-deleted).
 
 A manufacturer with no runner backend is still refused **at render time and not at admission**, and the
