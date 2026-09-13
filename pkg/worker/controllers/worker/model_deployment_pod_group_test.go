@@ -490,23 +490,75 @@ func TestModelDeploymentPodGroup_StampsTheRolesOwnGroup(t *testing.T) {
 // group whenever any one moved would pass a test asserting only "something is resizing", while
 // restarting roles that nothing asked to restart.
 func TestModelDeploymentGroupsResizing(t *testing.T) {
-	pod := func(group, role, total, replicas string) core.Pod {
-		p := core.Pod{ObjectMeta: meta.ObjectMeta{
-			Labels: map[string]string{
-				modelDeploymentLabelKeyComponent: role,
-				kueuepodconst.GroupNameLabel:     group,
-			},
-			Annotations: map[string]string{},
-		}}
-		if total != "" {
-			p.Annotations[kueuepodconst.GroupTotalCountAnnotation] = total
+	// A REPLICA AS THE RENDERER WOULD HAVE PRODUCED IT, taken from the same function that stamps the
+	// group metadata onto a real Pod rather than from literals written here.
+	//
+	// THE FORMAT OF THESE ANNOTATIONS IS OWNED BY NEITHER SIDE OF THE PAIR THIS TEST EXERCISES. The
+	// renderer formats the total, and the predicate below formats what it expects, in two separate
+	// expressions that agree today by coincidence. With literals in this fixture, a renderer that
+	// changed the format would keep its own tests green -- they would be updated with it -- while
+	// this one went on comparing the old spelling, and both halves would pass while the reconciler
+	// rebuilt every group on every pass forever. Coverage shows both sides covered, and mutating
+	// either implementation goes red; only changing the FORMAT slips through, because the format has
+	// no owner. Sourcing the fixture from the renderer gives it one.
+	//
+	// The disagreeing cases perturb a rendered replica rather than hand-building one, so what they
+	// vary is visible as a difference from what the spec asks for.
+	rendered := func(md *workercore.ModelDeployment, roleName string) core.Pod {
+		var role *workercore.ModelDeploymentRole
+		for i := range md.Spec.Roles {
+			if md.Spec.Roles[i].Name == roleName {
+				role = &md.Spec.Roles[i]
+			}
 		}
-		if replicas != "" {
-			p.Annotations[modelDeploymentRoleReplicasAnnotation] = replicas
+		require.NotNil(t, role, "no role %q on this fixture deployment", roleName)
+
+		meta := ModelDeploymentPodGroup(md, role)
+		p := core.Pod{}
+		p.Labels = map[string]string{modelDeploymentLabelKeyComponent: roleName}
+		for k, v := range meta.Labels {
+			p.Labels[k] = v
+		}
+		p.Annotations = map[string]string{}
+		for k, v := range meta.Annotations {
+			p.Annotations[k] = v
 		}
 
 		return p
 	}
+
+	// perturbed renders the replica and then overrides one annotation, which is how a Pod that
+	// disagrees with the spec arises in a cluster: it was rendered against an earlier spec.
+	perturbed := func(p core.Pod, key, value string) core.Pod {
+		if value == "" {
+			delete(p.Annotations, key)
+		} else {
+			p.Annotations[key] = value
+		}
+
+		return p
+	}
+
+	// A replica sitting in a group its role does not belong to, which is what a role moved between
+	// instance types leaves behind. Only the membership label moves; everything else is as rendered.
+	inGroup := func(p core.Pod, group string) core.Pod {
+		p.Labels[kueuepodconst.GroupNameLabel] = group
+
+		return p
+	}
+
+	// A replica of a role the deployment no longer declares: it was rendered when the role existed,
+	// so everything about it is as the renderer left it and only its role is now unknown.
+	renamedRole := func(p core.Pod, role string) core.Pod {
+		p.Labels[modelDeploymentLabelKeyComponent] = role
+
+		return p
+	}
+
+	// The single-group shape the cases below render from. It is built once so that a case whose
+	// deployment has MOVED ON still renders its replicas from the shape they were created under,
+	// which is what a Pod disagreeing with its spec actually is.
+	one := podGroupDeployment()
 
 	// The two-type shape's group names are hashes, so the cases name them through the function that
 	// derives them rather than by writing a hash into the test.
@@ -523,18 +575,15 @@ func TestModelDeploymentGroupsResizing(t *testing.T) {
 	}{
 		{
 			name: "one_group_agreeing",
-			md:   podGroupDeployment(),
-			pods: []core.Pod{pod("qwen-72b", "prefill", "4", "2"), pod("qwen-72b", "decode", "4", "2")},
+			md:   one,
+			pods: []core.Pod{rendered(one, "prefill"), rendered(one, "decode")},
 		},
 		{
 			// THE CASE THE DEPLOYMENT-WIDE SUM FAILS: each Pod carries its own group's total, and a
 			// predicate reading the sum of both groups matches neither.
 			name: "two_groups_agreeing",
 			md:   two,
-			pods: []core.Pod{
-				pod(prefillGroup, "prefill", "2", "2"),
-				pod(decodeGroup, "decode", "3", "3"),
-			},
+			pods: []core.Pod{rendered(two, "prefill"), rendered(two, "decode")},
 		},
 		{
 			// ONLY THE GROUP THAT MOVED. The sibling agrees with its own total and must be left alone;
@@ -542,8 +591,8 @@ func TestModelDeploymentGroupsResizing(t *testing.T) {
 			name: "two_groups_one_moved",
 			md:   two,
 			pods: []core.Pod{
-				pod(prefillGroup, "prefill", "9", "2"),
-				pod(decodeGroup, "decode", "3", "3"),
+				perturbed(rendered(two, "prefill"), kueuepodconst.GroupTotalCountAnnotation, "9"),
+				rendered(two, "decode"),
 			},
 			want: []string{prefillGroup},
 		},
@@ -553,8 +602,9 @@ func TestModelDeploymentGroupsResizing(t *testing.T) {
 			name: "a_role_moved_between_types",
 			md:   two,
 			pods: []core.Pod{
-				pod(decodeGroup, "prefill", "3", "2"),
-				pod(decodeGroup, "decode", "3", "3"),
+				inGroup(perturbed(rendered(two, "prefill"),
+					kueuepodconst.GroupTotalCountAnnotation, "3"), decodeGroup),
+				rendered(two, "decode"),
 			},
 			want: []string{decodeGroup, prefillGroup},
 		},
@@ -565,19 +615,23 @@ func TestModelDeploymentGroupsResizing(t *testing.T) {
 			md: podGroupDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Roles[0].Replicas, md.Spec.Roles[1].Replicas = 1, 3
 			}),
-			pods: []core.Pod{pod("qwen-72b", "prefill", "4", "2"), pod("qwen-72b", "decode", "4", "2")},
+			pods: []core.Pod{rendered(one, "prefill"), rendered(one, "decode")},
 			want: []string{"qwen-72b"},
 		},
 		{
 			name: "a_pod_predating_the_annotations",
-			md:   podGroupDeployment(),
-			pods: []core.Pod{pod("qwen-72b", "prefill", "", "")},
+			md:   one,
+			pods: []core.Pod{
+				perturbed(perturbed(rendered(one, "prefill"),
+					kueuepodconst.GroupTotalCountAnnotation, ""),
+					modelDeploymentRoleReplicasAnnotation, ""),
+			},
 			want: []string{"qwen-72b"},
 		},
 		{
 			name: "a_pod_of_a_role_the_deployment_no_longer_has",
-			md:   podGroupDeployment(),
-			pods: []core.Pod{pod("qwen-72b", "gone", "4", "2")},
+			md:   one,
+			pods: []core.Pod{renamedRole(rendered(one, "prefill"), "gone")},
 			want: []string{"qwen-72b"},
 		},
 	}
