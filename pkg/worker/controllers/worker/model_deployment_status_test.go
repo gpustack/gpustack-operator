@@ -333,8 +333,9 @@ func TestModelDeploymentStatus_KindIsEchoedAndNeverEmpty(t *testing.T) {
 	}
 }
 
-// TestObserveModelDeploymentQuota is a statement about ONE Workload, because the replicas are one
-// pod group.
+// TestObserveModelDeploymentQuota walks the single-group shape, where the deployment has one pod
+// group and therefore one Workload. The multi-group cases are their own tests below, because the
+// condition is an answer about every group and this fixture cannot express more than one.
 //
 // It reads that Workload's OWN conditions, which is not an implementation detail: the admission gate
 // stops evaluating a Workload once it is admitted, so anything derived from the gate would answer
@@ -425,9 +426,13 @@ func TestObserveModelDeploymentQuota(t *testing.T) {
 	}
 }
 
-// TestObserveModelDeploymentQuota_TrueCoversEveryRole is F8's last acceptance, and it is only
-// checkable because there is ONE Workload: the condition cannot be true for one role and not another
-// when it is a statement about a single object that covers both PodSets.
+// TestObserveModelDeploymentQuota_TrueCoversEveryRole is F8's last acceptance: True cannot be true
+// for one role and not another.
+//
+// IT USED TO HOLD BY CONSTRUCTION AND NOW IT IS ENFORCED, which is why the case matters more than it
+// did. With one Workload covering both PodSets there was no way for the condition to disagree
+// between roles. Roles on several instanceTypes are several Workloads, so what keeps this true is
+// the per-group answer rather than the shape of the object it reads.
 func TestObserveModelDeploymentQuota_TrueCoversEveryRole(t *testing.T) {
 	md := twoRoleDeployment()
 

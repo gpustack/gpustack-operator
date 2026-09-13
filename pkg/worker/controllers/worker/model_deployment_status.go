@@ -222,13 +222,14 @@ func modelDeploymentPodRole(pod *core.Pod) string {
 	return pod.Labels[modelDeploymentLabelKeyComponent]
 }
 
-// observeModelDeploymentQuota reports whether the deployment's ONE Workload holds quota.
+// observeModelDeploymentQuota reports whether EVERY ONE of the deployment's Workloads holds quota.
 //
-// The condition became a statement about a single object when the replicas became a pod group: Kueue
-// composes one Workload per group and admits it as a unit, so `True` covers every role by
-// construction and cannot be true for one role and not another.
+// Roles on one instanceType are one pod group and one Workload; roles on several are one of each per
+// group. So `True` is an answer about the whole set rather than about whichever Workload sorts first,
+// and the branches below are what make it one: half a deployment holding quota is not the deployment
+// holding quota, and reporting the first Workload's answer for the rest was a defect a cluster found.
 //
-// It reads that Workload's OWN conditions rather than asking the admission gate. The gate stops
+// It reads those Workloads' OWN conditions rather than asking the admission gate. The gate stops
 // evaluating a Workload once it is admitted, so anything derived from the gate would answer for the
 // moment of admission and never again — and a Workload that has been preempted since would still
 // read as reserved.

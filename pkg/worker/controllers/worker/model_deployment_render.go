@@ -359,8 +359,8 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 	})
 	kubemeta.ControlOnWithoutBlock(pod, md, workercore.SchemeGroupVersionKind("ModelDeployment"))
 
-	// The Kueue group metadata, which is what makes every replica of every role ONE Workload rather
-	// than one Workload each. It goes on here, before the fingerprint, for the same reason the
+	// The Kueue group metadata, which is what makes the replicas sharing an instanceType ONE Workload
+	// rather than one Workload each. It goes on here, before the fingerprint, for the same reason the
 	// connector's annotations do: the group's declared total is one of the values a spec change
 	// moves, and a fingerprint blind to it would leave every replica declaring a size the deployment
 	// no longer has.

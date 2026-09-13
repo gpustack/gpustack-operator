@@ -497,13 +497,14 @@ because reserved namespaces deliberately have no LocalQueue; the third clears wh
 Workload. Telling them apart is why the reason exists.
 
 `Pending`, `PreemptedInPart` and `Parked` all say the set does not hold quota, and they are separate
-because the action differs. `Pending` resolves itself when capacity appears, and `Parked` is already
-over: those workloads were deactivated and no longer ask for anything.
+because the action differs. `Pending` resolves itself when capacity appears. `Parked` is over already:
+those workloads were deactivated and no longer ask for anything. `PreemptedInPart` is the one to act
+on, and the groups that kept their quota hold accelerators until either the reclaimed groups are
+admitted again or the deployment is deleted.
 
-`PreemptedInPart` is the one to act on rather than wait out. Something else took the quota, the
-deployment serves nothing, and the groups that kept theirs hold accelerators until the reclaimed
-groups are admitted again or the deployment is deleted. How long that is worth waiting depends on
-what preempted it, which is outside this object.
+> **Why it is not just a slower `Pending`.** How long the wait is worth making depends on what
+> preempted the deployment, which is outside this object and outside this operator. That is a
+> decision, so it is reported rather than made.
 
 **`CacheAttached`** — whether the cache is observed to be in effect, which is a different question
 from whether it was configured. It is judged downstream of the engine and **never** on a rendered flag
