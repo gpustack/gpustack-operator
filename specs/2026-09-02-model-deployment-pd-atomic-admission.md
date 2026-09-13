@@ -18,6 +18,13 @@ existing per-accelerator AdmissionCheck grows the one thing a multi-role Workloa
 each role's demand is judged against the cards of the flavor **that role** was assigned, not against
 every card in the pool.
 
+> ⚠️ **Corrected after shipping.** Two things about the paragraph above have changed, and they have
+> different causes. `acceleratorKey` was withdrawn on 2026-09-07, so of the per-role fields named
+> here only `kind` survives; F4 carries the withdrawal and its reasoning. And the count was never
+> right: it says three and names two. That miscount is ORIGINAL — `git blame` puts these lines at
+> the commit that shipped this document, and the withdrawal never touched them. Reading it as a
+> leftover of the withdrawal would send the next reader looking for a removal step nobody missed.
+
 Two hard constraints shape the whole design, both verified in this tree:
 
 - **A Workload carries one `queueName`.** Atomic admission therefore requires every role in one
@@ -26,6 +33,10 @@ Two hard constraints shape the whole design, both verified in this tree:
 - **Kueue assigns a ResourceFlavor per PodSet.** So *inside* one ClusterQueue, two roles can still
   land on two different accelerator models — which is what makes heterogeneous P/D expressible at all
   once the pool spans models.
+
+> ⚠️ **Corrected after shipping.** The first constraint no longer holds. `roles[*].instanceType` may
+> differ, and the rule that required them identical is deleted — "this spec does not relax that and
+> cannot" was a property of this design, not of the system. F3 carries what replaced it.
 
 Heterogeneous P/D across **manufacturers** stays impossible, and the reason is structural rather
 than a missing feature: a ClusterQueue's accelerator quota is `credits.gpustack.ai/<manufacturer>`,
@@ -296,6 +307,13 @@ status:
   - type: CacheAttached
 ```
 
+> ⚠️ **Corrected after shipping.** The two `acceleratorKey` lines in the object above name a field
+> that no longer exists (F4), and the `instanceType` comment beside them states a rule that is gone
+> (F3). What a stale example costs here is MISDIRECTION rather than silence: current `kubectl`
+> defaults to `--validate=strict`, so a copy of this object is refused by name, and only a client
+> that opts out of field validation drops the key quietly. The reader who then goes looking lands in
+> F4, which describes the field as live before reaching its withdrawal note.
+
 Rendered onto **every** Pod of the group:
 
 | Key | Value | Why |
@@ -457,6 +475,17 @@ Acceptance:
 - A single-role deployment is unaffected — the rule is vacuous at length 1, asserted so that the
   single-role behaviour cannot regress.
 
+> ⚠️ **Corrected after shipping.** This section describes a refusal that no longer exists.
+> `roles[*].instanceType` may differ: each `instanceType` becomes its own pod group and its own
+> Workload, and the set is admitted together through an AdmissionCheck rather than through Kueue's
+> one-`queueName`-per-Workload rule, so the premise above is absent rather than overridden.
+> `2026-09-12-model-deployment-stabilization.md` is where that design is stated.
+>
+> The webhook rule is deleted, and the test that asserted the refusal was REPLACED by one asserting
+> the shape is accepted rather than dropped, so that input shape keeps its coverage. Of the
+> acceptance criteria above only the first is affected: it now asserts the opposite of the
+> behaviour, and the `acceleratorKey` it has the message name was withdrawn separately (F4).
+
 #### F4 — `roles[].acceleratorKey`: per-role model selection inside one pool
 
 `acceleratorKey` is the accelerator device key (the docs' `aKey`) — `<manufacturer>-<model>`, e.g.
@@ -527,6 +556,16 @@ Acceptance:
 > when it merged. But there was a functional cost: per-role accelerator-model selection within one
 > pool has no replacement until issue 199 lands, so the refusal for roles on two `instanceType`s now
 > names that gap instead of naming this field as the way around it.
+
+> ⚠️ **One sentence of the note above has itself gone stale, and this states what is true rather
+> than amending it.** There is no refusal for roles on two `instanceType`s any more (F3), so no
+> message names this gap anywhere. The gap is also narrower than the note leaves it: a role reaches
+> a different accelerator model by naming a different `instanceType`, whose identity is model-level,
+> and what has no replacement is choosing between models INSIDE one pool — which is what
+> [issue 199](https://github.com/gpustack/gpustack-operator/issues/199) is still open for.
+>
+> A correction states the terminal state and not a delta, so the next one replaces it whole instead
+> of adding a layer a reader has to compose.
 
 #### F5 — `roles[].kind`, and the connector term it selects
 
