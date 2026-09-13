@@ -8,41 +8,34 @@ package v1alpha1
 // KVCacheBackendMemberLocalDiskEviction is what the tier does once it is full: drop what it already
 // holds to make room, or stop taking new work.
 //
-// The two are different OUTCOMES rather than two settings of one knob. Evicting, the tier goes on
+// The two are different OUTCOMES rather than two settings of one knob: evicting, the tier goes on
 // accepting writes indefinitely and its oldest content leaves; not evicting, the tier fills to its
-// Capacity and the store simply stops sending it work, so what is already there stays and stays
-// readable.
+// Capacity and the store stops sending it work, so what is already there stays readable.
 type KVCacheBackendMemberLocalDiskEvictionApplyConfiguration struct {
 	// Enabled is whether this tier evicts at all. It DEFAULTS TO TRUE, so declaring this block
 	// without it asks for eviction rather than against it.
 	//
 	// A POINTER carrying a schema default, unlike the plain bools elsewhere in this API, and the
-	// asymmetry is forced: here unset has to mean TRUE. A plain bool cannot say that — `enabled:
+	// asymmetry is forced: here unset has to mean TRUE, which a plain bool cannot say — `enabled:
 	// false` and an omitted key are the same JSON — so the block would turn eviction off for
 	// everyone who declared it only to set a Watermark.
 	//
-	// Turning it off renders TWO settings, not one: an eviction policy of "none", which is the
-	// store's own name for that value, and an explicit false on its watermark-eviction switch. They
-	// belong to different layers — the policy is read by the on-disk format this operator's members
-	// use, the switch is above it and format-independent — and eviction should be off at whichever
-	// layer ends up asking.
+	// Turning it off renders TWO settings, not one: an eviction policy of "none", the store's own
+	// name for that value, and an explicit false on its watermark-eviction switch. They belong to
+	// different layers, and eviction should be off at whichever layer ends up asking.
 	Enabled *bool `json:"enabled,omitempty"`
 	// Policy is the order in which entries leave. FIFO drops the oldest written first, LRU the least
-	// recently read.
+	// recently read. It is REFUSED together with Enabled set to false, because there is no order in
+	// which nothing leaves.
 	//
-	// The enum is the two any cache would offer, deliberately, rather than every string the store's
-	// parser happens to read. It carries NO value meaning "do not evict": that is Enabled's job, and
-	// a third value saying the same thing would be a second spelling admission would then have to
-	// adjudicate against the first.
-	//
-	// Left unset NOTHING IS RENDERED and the store's own default applies, which is first-in
-	// first-out. That is this API's rule for every setting a spec does not address, and it earns more
-	// here than usual: the store maps a policy string it does not recognize onto no eviction at all —
-	// no error, no warning, no failure to start — so a policy is only ever sent when this API is the
-	// one that chose it, and only from a fixed set of spellings.
-	//
-	// It is REFUSED together with Enabled set to false, because there is no order in which nothing
-	// leaves.
+	// - The enum is the two any cache would offer, deliberately, rather than every string the
+	// store's parser happens to read. It carries NO value meaning "do not evict": that is
+	// Enabled's job, and a third value saying the same thing would be a second spelling
+	// admission would then have to adjudicate against the first.
+	// - Left unset NOTHING IS RENDERED and the store's own default applies, which is first-in
+	// first-out. That earns more here than usual: the store maps a policy string it does not
+	// recognize onto no eviction at all — no error, no warning, no failure to start — so a policy
+	// is only ever sent when this API is the one that chose it, from a fixed set of spellings.
 	Policy *string `json:"policy,omitempty"`
 	// Watermark is WHEN eviction runs: it starts once the tier passes High and stops once it is back
 	// under Low, both as a percentage of Capacity. Left unset, nothing is rendered and the store's

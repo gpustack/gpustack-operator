@@ -28,28 +28,26 @@ type ModelDeploymentRoleStatusApplyConfiguration struct {
 	// defaulted if the user named none, so an absent value would mean the status was written by
 	// something that did not know about kinds rather than that the role has none.
 	//
-	// The enum is the same one the spec field carries, and it has to stay that way: this field is
-	// written from the spec field with the unset case resolved, so a value the writer can produce
-	// and this list does not name would make every later status write on the object fail, taking
-	// every other figure on it down with the kind. The marker sits on the field because the type's
-	// own enum marker is a Go-level one and does not become schema validation.
+	// The enum is the same one the spec field carries and has to stay that way: this field is written
+	// from the spec field with the unset case resolved, so a value the writer can produce and this
+	// list does not name would make every later status write on the object fail, taking every other
+	// figure down with the kind. The marker sits on the field because the type's own enum marker is a
+	// Go-level one and does not become schema validation.
 	Kind *workerv1alpha1.ModelDeploymentRoleKind `json:"kind,omitempty"`
 	// AssignedFlavor is the ResourceFlavor Kueue assigned to this role's PodSet for its ACCELERATOR
-	// credits, and it is a POINTER because "not assigned yet" and "assigned" are different facts: a
-	// role waiting for quota has no flavor, and reporting that as the empty string would read as an
-	// assignment to a flavor with no name.
+	// credits.
 	//
-	// It is per role rather than per deployment because Kueue assigns a flavor per PodSet, so two
-	// roles of one deployment can be assigned different flavors and a single deployment-wide field
-	// could not report that.
-	//
-	// AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather than a
-	// gap in it. The answer is read through the same function the per-accelerator admission gate
-	// reads it with, which speaks only of accelerator credits — so a role admitted on a pool that
-	// carries no accelerator at all names a flavor for `cpu` and nothing here. Observed on a CPU-only
-	// cluster: the Workload holds an assignment, both roles are Ready, and this stays unset. The two
-	// answers are kept identical on purpose; a flavor reported here that the gate would not fit
-	// against would be worse than none.
+	// - A POINTER, because "not assigned yet" and "assigned" are different facts: a role waiting
+	// for quota has no flavor, and reporting that as the empty string would read as an assignment
+	// to a flavor with no name.
+	// - Per role rather than per deployment, because Kueue assigns a flavor per PodSet and two
+	// roles of one deployment can be assigned different ones.
+	// - AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather
+	// than a gap in it. The answer is read through the same function the per-accelerator
+	// admission gate uses, which speaks only of accelerator credits, so a role admitted on a pool
+	// carrying no accelerator names a flavor for `cpu` and nothing here. The two answers are kept
+	// identical on purpose: a flavor reported here that the gate would not fit against would be
+	// worse than none.
 	AssignedFlavor *string `json:"assignedFlavor,omitempty"`
 }
 

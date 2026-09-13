@@ -15,58 +15,42 @@ import (
 // either half alone. Set on its own, the leader never enqueues an offload task and the disk stays
 // empty while the member reports its capacity, which is a tier that reads as present and is not.
 type KVCacheBackendMemberLocalDiskApplyConfiguration struct {
-	// Path is the directory on each selected node that holds this tier. It is mounted into the
-	// member container from the host at the same location.
+	// Path is the directory on each selected node that holds this tier, mounted into the member
+	// container from the host at the same location. It is REQUIRED and has no default: choosing a
+	// host directory on somebody else's nodes is not a default this operator may pick, because the
+	// wrong one fills a filesystem that nothing in Kubernetes accounts for.
 	//
-	// It is REQUIRED and has no default. The store defaults it to a path of its own, and choosing
-	// a host directory on somebody else's nodes is not a default this operator may pick: the wrong
-	// one fills a filesystem that nothing in Kubernetes accounts for.
-	//
-	// DECLARING A TIER REQUIRES A SHELL IN THE GROUP'S IMAGE. An init container surveys this
+	// - Declaring a tier REQUIRES a shell in the group's image. An init container surveys this
 	// directory before the member starts, so that reusing a path is something an administrator is
 	// told rather than discovers through a key that reads back as somebody else's. It runs
 	// `sh -c`, and an image without a shell keeps the member from starting at all.
-	//
-	// CREATING THIS DIRECTORY AND GIVING IT THE RIGHT OWNER IS YOURS, NOT THIS OPERATOR'S. Nothing
-	// here creates or chowns the path; a member whose container cannot write it fails at start.
-	// That is a deliberate omission rather than a missing feature, and the reason is recorded here
-	// so it can be judged rather than inherited: both ways of writing it need an apology attached.
-	// An init container that chowns has to name a uid, while members[].image can put a different
-	// vendor's build — and a different uid — on each group, so the uid that is right for one group
-	// is a guess for the next. A chmod 0777 instead opens the directory to every process on the
-	// node. A design where either choice needs a caveat is one that is not settled, so the switch
-	// that would render it does not exist. An operator who has a uid that holds for their whole
-	// backend has information this API does not, which is the case that would settle it.
+	// - Creating this directory and giving it the right owner is YOURS, not this operator's, and a
+	// member whose container cannot write it fails at start. The omission is deliberate: an init
+	// container that chowns has to name a uid, while members[].image can put a different vendor's
+	// build on each group, and a chmod 0777 instead opens the directory to every process on the
+	// node. An operator whose uid holds for a whole backend has what would settle it.
 	Path *string `json:"path,omitempty"`
 	// Capacity caps what this tier stores, in bytes. Left unset, the store's own ceiling applies and
 	// nothing is rendered, so a ceiling that moves upstream is a change to investigate rather than
 	// one this API silently restated.
 	//
-	// IT IS ALSO THE FIGURE EVICTION MEASURES AGAINST, and that is why Eviction below is not usable
-	// without it. The store keeps two separate ceilings for one tier — the total it may hold, and
-	// the quota its watermark eviction takes its marks as a fraction of — and the second defaults to
-	// zero, which that eviction path reads as "no quota" and returns from having evicted nothing.
-	// One value is rendered into both, so the marks are a fraction of the ceiling an operator
-	// actually declared.
-	//
-	// A set capacity must hold one BUCKET, which is the unit this tier is written in. The store
-	// stops taking offload work as soon as one more bucket would not fit under this ceiling, so a
-	// tier smaller than a bucket never receives a key. The bucket size is this operator's to choose
-	// and it is not in this API; the floor moves with it.
-	//
-	// It is NOT counted into the Pod's resource requests, unlike CapacityPerMember. The tier is a
-	// host directory, which is outside the kubelet's ephemeral-storage accounting entirely — a
-	// request against it would reserve a figure nothing polices and would then keep the member off
-	// the very node that has the disk. Watching that filesystem is the operator's, and the
-	// documentation says so.
+	// - It is also the figure EVICTION measures against, which is why Eviction below is not usable
+	// without it: the store's watermark quota defaults to zero, which that path reads as "no
+	// quota" and returns from having evicted nothing. One value is rendered into both ceilings.
+	// - A set capacity must hold one BUCKET, the unit this tier is written in: the store stops
+	// taking offload work as soon as one more bucket would not fit, so a smaller tier never
+	// receives a key. The bucket size is this operator's to choose, so the floor moves with it.
+	// - It is NOT counted into the Pod's resource requests, unlike CapacityPerMember. The tier is a
+	// host directory, outside the kubelet's ephemeral-storage accounting entirely, so a request
+	// against it would reserve a figure nothing polices and would then keep the member off the
+	// very node that has the disk. Watching that filesystem is the operator's.
 	Capacity *resource.Quantity `json:"capacity,omitempty"`
-	// KeyLimit caps how many keys this tier holds, and it is Capacity's other half rather than an
+	// KeyLimit caps how many keys this tier holds. It is Capacity's other HALF rather than an
 	// alternative to it: the store bounds the tier by bytes AND by key count, stops taking offload
 	// work when either would be exceeded, and applies its own ceiling to whichever this object
-	// leaves out. Left unset or zero, nothing is rendered, on the same rule as Capacity.
-	//
-	// It carries the same kind of floor, for the same reason: the check the store makes is against
-	// one whole bucket's worth of keys, so a limit below that is a tier that can never receive one.
+	// leaves out. Left unset or zero, nothing is rendered, on the same rule as Capacity. It carries
+	// the same bucket floor and for the same reason — the store checks against one whole bucket's
+	// worth of keys, so a limit below that is a tier that can never receive one.
 	KeyLimit *int64 `json:"keyLimit,omitempty"`
 	// Eviction is what this tier does once it is full. Left unset, nothing is rendered and the
 	// store's own behavior applies, so a default that moves upstream is a change to investigate
@@ -74,39 +58,26 @@ type KVCacheBackendMemberLocalDiskApplyConfiguration struct {
 	Eviction *KVCacheBackendMemberLocalDiskEvictionApplyConfiguration `json:"eviction,omitempty"`
 	// CleanAfterDelete asks this operator to empty Path when the backend is deleted, on every node
 	// this group's NodeSelector picks AT THAT MOMENT. It DEFAULTS TO FALSE, and left alone the
-	// directory keeps whatever it holds, which is the behavior of every release before this field
-	// existed.
+	// directory keeps whatever it holds.
 	//
-	// "At that moment" is the whole of the promise and is narrower than "every node this group ever
-	// ran on". The spec is the only record of which nodes those were: nothing stores the selector's
-	// history, and by the time the cleanup runs the members are gone, so a node the group has
-	// stopped selecting cannot be enumerated, let alone reached. Narrowing NodeSelector, or removing
-	// the LocalDisk block, before deleting the backend therefore leaves the dropped nodes holding
-	// their content with nothing reported about them. Delete the backend first and edit afterwards.
+	// It is a switch rather than a default because what is on that disk is the administrator's, and
+	// deleting it is not a decision this operator may take on their behalf. That is also why it is
+	// reachable where preparing the directory is not: removing content needs no uid, creating does.
 	//
-	// Why a switch rather than a default: what is on that disk is the administrator's, and deleting
-	// it is not a decision this operator may take on their behalf. Turned on it is no longer this
-	// operator's decision but theirs, and this only carries it out.
-	//
-	// It is the counterpart to what Path says about creating the directory, and it is reachable for
-	// the reason that one is not: removing content needs no uid, while creating and chowning does,
-	// so the objection that keeps preparation out of this API does not reach deletion.
-	//
-	// WHAT IS REMOVED IS THE CONTENT, NOT THE DIRECTORY. The directory was made by whoever prepared
-	// the node, may be a mount point, and carries an owner this operator did not choose.
-	//
-	// The cleanup runs the image THIS GROUP runs, on the nodes it selects, with the backend's
-	// imagePullSecrets. That is what keeps it from waiting on a pull that the members already did.
-	//
-	// TWO THINGS IT DOES NOT PROMISE, and both are reported rather than silent:
-	//
-	// - A node this operator cannot reach in time keeps its content. Deletion is not held open for
-	// it, because a finalizer waiting on a node that is gone leaves an object nobody can delete.
-	// The node gets a warning Event naming what was left, which outlives this backend for the
-	// same reason the leftover data does.
-	// - A node where another KVCacheBackend declares an overlapping path is SKIPPED, and gets the
-	// same kind of Event. Nothing refuses two backends naming one directory, and emptying it for
-	// this one would take the other one's live data with it.
+	// - "At that moment" is the whole of the promise. Nothing stores the selector's history and the
+	// members are gone by the time cleanup runs, so narrowing NodeSelector or removing the
+	// LocalDisk block before deleting the backend leaves the dropped nodes holding their content
+	// with nothing reported about them. Delete the backend first and edit afterwards.
+	// - WHAT IS REMOVED IS THE CONTENT, NOT THE DIRECTORY, which was made by whoever prepared the
+	// node, may be a mount point, and carries an owner this operator did not choose.
+	// - The cleanup runs the image THIS GROUP runs, on the nodes it selects, with the backend's
+	// imagePullSecrets, so it does not wait on a pull the members already did.
+	// - A node this operator cannot reach in time keeps its content, and deletion is not held open
+	// for it: a finalizer waiting on a node that is gone leaves an object nobody can delete. The
+	// node gets a warning Event naming what was left.
+	// - A node where another KVCacheBackend declares an overlapping path is SKIPPED, with the same
+	// kind of Event. Nothing refuses two backends naming one directory, and emptying it for this
+	// one would take the other one's live data with it.
 	CleanAfterDelete *bool `json:"cleanAfterDelete,omitempty"`
 }
 

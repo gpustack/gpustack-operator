@@ -14,18 +14,16 @@ import (
 // KVCachePool is the schema for worker.gpustack.ai.
 //
 // A KVCacheBackend declares the physical cache; this declares which namespaces are granted a quota on
-// it, how much of it, and under which reuse identity. It is the quota domain over exactly one
-// backend, and the registry of the reuse domains its Bindings have claimed.
+// it, how much of it, and under which reuse identity. It is Kueue's ClusterQueue to
+// KVCachePoolBinding's LocalQueue: the quota domain over exactly one backend, and the registry of the
+// reuse domains its Bindings have claimed.
 //
-// It grants and accounts; it does not admit. Nothing here keeps a pod that knows a reuse domain's
-// name from reaching that domain on the store — see KVCachePoolBinding for what the grant is and
-// what it is not.
-//
-// It is cluster-scoped, for the reason the backend it references is: the backend is a privileged
-// physical resource only an admin declares, pools must be shareable across namespaces, and a
-// cross-namespace reference FROM a namespaced object is an anti-pattern. Data-plane isolation is a
-// different axis, and the storage layer's tenant — not this object's scope — is what solves it.
-// This is Kueue's ClusterQueue to KVCachePoolBinding's LocalQueue.
+// It GRANTS AND ACCOUNTS; IT DOES NOT ADMIT — nothing here keeps a pod that knows a reuse domain's
+// name from reaching that domain on the store, and KVCachePoolBinding says what the grant is not. It
+// is cluster-scoped for the reason its backend is: only an admin declares a privileged physical
+// resource, pools must be shareable across namespaces, and a cross-namespace reference FROM a
+// namespaced object is an anti-pattern. Data-plane isolation is a different axis, solved by the
+// storage layer's tenant rather than by this object's scope.
 type KVCachePoolApplyConfiguration struct {
 	v1.TypeMetaApplyConfiguration    `json:",inline"`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`

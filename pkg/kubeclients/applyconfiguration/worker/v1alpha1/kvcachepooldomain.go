@@ -16,14 +16,13 @@ type KVCachePoolDomainApplyConfiguration struct {
 	// BlockSize and Dtype are echoed from the Binding that registered the domain, so a reader of
 	// the registry does not have to fetch every Binding to learn what a domain's blocks are.
 	//
-	// Both are REQUIRED, unlike the observed figures below, and the difference is where they come
-	// from: these are copied from a Binding that already requires them, so an entry missing one
-	// could only be a writer bug. Leaving them optional would let the registry answer "this domain's
-	// blocks are of unknown shape", which is not a state that exists.
+	// Both are REQUIRED, unlike the observed figures below, because they are copied from a Binding
+	// that already requires them: an entry missing one could only be a writer bug, and leaving them
+	// optional would let the registry answer "this domain's blocks are of unknown shape", which is
+	// not a state that exists.
 	//
 	// Dtype is spelled to match its JSON name exactly. DType would not, and the openapi generator
-	// records every such mismatch as a checked-in API rule violation — a list worth keeping for the
-	// names that genuinely cannot match.
+	// records every such mismatch as a checked-in API rule violation.
 	BlockSize *int32  `json:"blockSize,omitempty"`
 	Dtype     *string `json:"dtype,omitempty"`
 	// Blocks and HitRate are OBSERVED, never declared, and they are ABSENT when the scrape does not
@@ -31,12 +30,10 @@ type KVCachePoolDomainApplyConfiguration struct {
 	// zero blocks is a different fact from "not in the scrape", which is why Blocks is a pointer.
 	Blocks *int64 `json:"blocks,omitempty"`
 	// HitRate is a ratio held as a STRING with a pattern, never a float, matching the shape the
-	// measured surface itself uses.
-	//
-	// The pattern is safe here in a way an enum on an echoed vendor value would not be: this ratio is
-	// COMPUTED by this operator, so its spelling is ours to guarantee. It does oblige whoever writes
-	// it to format to this shape, because a value that fails the pattern fails the WHOLE status
-	// write — every other field frozen at its last value — and not this one field.
+	// measured surface itself uses. The pattern is safe here in a way an enum on an echoed vendor
+	// value would not be, because this ratio is COMPUTED by this operator. It does oblige whoever
+	// writes it to format to this shape: a value that fails the pattern fails the WHOLE status write,
+	// freezing every other field at its last value, not just this one.
 	HitRate *string `json:"hitRate,omitempty"`
 }
 

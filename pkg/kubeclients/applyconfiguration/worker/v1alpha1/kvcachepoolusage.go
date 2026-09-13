@@ -12,16 +12,15 @@ import (
 // KVCachePoolUsage is what the pool's tenants hold, as the master reports it.
 type KVCachePoolUsageApplyConfiguration struct {
 	// Total is the sum of the occupancy the master reports for the tenants THIS pool owns — never its
-	// whole ledger, which a shared backend makes larger than this pool.
+	// whole ledger, which a shared backend makes larger than this pool. A POINTER because omitempty
+	// does not omit a zero-valued struct, and an unobserved total must not serialize as an empty
+	// cache.
 	//
 	// WHAT occupancy means is the master's choice, not this API's, and it changed: a master exposing
 	// used bytes apart from reservations is summed as committed bytes, while one exposing a single
 	// charged figure — the shape 0.3.13 introduced — charges at the start of a write, so in-flight
 	// reservations are already inside this total. Do not read it as committed usage without knowing
 	// which the backend runs.
-	//
-	// A POINTER because omitempty does not omit a zero-valued struct, and an unobserved total must
-	// not serialize as a cache that is empty.
 	Total *resource.Quantity `json:"total,omitempty"`
 }
 

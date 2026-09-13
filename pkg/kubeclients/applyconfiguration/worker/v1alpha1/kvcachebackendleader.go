@@ -12,70 +12,60 @@ import (
 // KVCacheBackendLeader is the leader process: how many of it, how it places new writes, and the
 // escape hatch for flags this API does not enumerate.
 type KVCacheBackendLeaderApplyConfiguration struct {
-	// Replicas is how many leader processes run. More than one requires HighAvailability: electing
-	// a leader among several needs a leadership record, and the webhook refuses the pair without
-	// one rather than silently running two leaders against the same members.
+	// Replicas is how many leader processes run, of which exactly one serves at a time. The rest are
+	// standbys: they hold no data, answer no request, and exist to take over.
 	//
-	// Exactly one of them serves at a time. The rest are standbys -- they hold no data, answer no
-	// request, and exist to take over. Raising this adds no capacity, which members do; the ceiling
-	// is here to catch the reading that it does.
-	//
-	// REQUIRED: the ceiling is duplicated in the schema on purpose, because the two layers catch
-	// different absences. The webhook's message explains; this one still holds when the webhook is
-	// not installed, which is when a second leader would be rendered rather than refused. Raise
-	// both together, and widening a maximum is not a breaking change.
+	// - More than one REQUIRES HighAvailability. Electing a leader among several needs a leadership
+	// record, and the webhook refuses the pair without one rather than silently running two
+	// leaders against the same members.
+	// - Raising this adds no capacity, which members do. The ceiling is here to catch the reading
+	// that it does, and it is duplicated in the webhook on purpose: this one still holds when
+	// the webhook is not installed, which is when a second leader would be rendered rather than
+	// refused. Raise both together; widening a maximum is not a breaking change.
 	Replicas *int32 `json:"replicas,omitempty"`
 	// HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas
-	// above 1. Unset, the leader runs as a single process exactly as before: no election flag is
-	// rendered, no extra object is created, and the command line is the one it ran before this
-	// field existed.
+	// above 1. It carries no settings: the Lease is named after this backend, so there is no
+	// connection target to supply, and the API access the election needs is rendered beside the
+	// workload.
 	//
-	// It carries no settings. The Lease is named after this backend, so there is no connection
-	// target for anyone to supply, and the API access the election needs is rendered beside the
-	// workload rather than asked for here.
-	//
-	// LIMITED: with MultiTenancy on, each replica seeds its tenant quota policy once at ITS OWN
-	// start, so a standby that took over after a quota was raised applies the older, lower ceiling
-	// for up to one KVCachePool reconcile interval -- and an over-quota write in this store is not
-	// refused, it EVICTS that tenant's own older objects, irreversibly and without moving any
-	// counter. The quota itself is not lost: the pool reconciler is the authority and writes back
-	// the difference on its next pass, so what the window costs is hit rate.
+	// - Unset, the leader runs as a single process exactly as before — no election flag, no extra
+	// object, the command line it ran before this field existed.
+	// - With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile
+	// interval. Each replica seeds its tenant quota policy at its own start, so a standby that
+	// took over after a quota was raised applies the older, lower ceiling, and an over-quota
+	// write in this store is not refused — it evicts that tenant's own older objects,
+	// irreversibly and without moving any counter. The quota itself is not lost: the pool
+	// reconciler is the authority and writes the difference back on its next pass.
 	HighAvailability *workerv1alpha1.KVCacheBackendLeaderHighAvailability `json:"highAvailability,omitempty"`
 	// AllocationStrategy is how the leader picks which member takes a new write. Random spreads
 	// them; FreeRatioFirst biases toward the emptier member.
 	//
-	// The enum is deliberately the two that any pooled store would have, rather than every value
-	// the current artifact's flag accepts: the others it accepts are specific to one medium or
-	// one locality model, are reachable through ExtraArgs for anyone who needs them, and would
-	// otherwise fix this API to one implementation's vocabulary. Widening the enum later is not
-	// a breaking change.
+	// The enum is deliberately the two any pooled store would have, not every value the current
+	// artifact's flag accepts: the rest are specific to one medium or one locality model, are
+	// reachable through ExtraArgs, and would fix this API to one implementation's vocabulary.
+	// Widening the enum later is not a breaking change.
 	AllocationStrategy *string `json:"allocationStrategy,omitempty"`
 	// MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index
 	// behind it. Off, every request falls into one default tenant and the index degrades to a plain
 	// key hash, so two callers using different tenant names read each other's cache.
 	//
 	// It is a FIELD rather than an extraArgs entry because another API validates against it: a
-	// KVCachePool is refused when its backend has no ledger to write quota into. A webhook reading
-	// an unschema'd string — "true", "1", "True" — would be judging a value domain that belongs to
-	// whoever typed it.
-	// The store's global -quota_bytes flag stays in extraArgs because no other API needs to validate
-	// or interpret it. Giving that process-only setting a field would add schema without an API
-	// contract.
+	// KVCachePool is refused when its backend has no ledger to write quota into, and a webhook
+	// reading an unschema'd "true", "1" or "True" would be judging a value domain that belongs to
+	// whoever typed it. The store's global -quota_bytes flag stays in extraArgs for the converse
+	// reason: no other API needs to interpret it.
 	//
-	// A plain bool, not a pointer, because unset and false mean the same thing here: no ledger.
-	// Unset renders NO flag rather than an explicit false, so a backend that never asked for this
-	// runs the command line it ran before the field existed.
+	// A plain bool, not a pointer: unset and false both mean no ledger, and unset renders NO flag
+	// rather than an explicit false.
 	MultiTenancy *bool `json:"multiTenancy,omitempty"`
 	// ExtraArgs passes flags this API does not enumerate straight through to the leader, after
 	// the derived ones. A key that collides with a flag rendered from a field above is refused
 	// at admission, because two sources for one flag make the rendered command ambiguous.
 	//
-	// EVERY VALUE HERE IS WORLD-READABLE, on three paths and not one. It is stored verbatim on THIS
-	// object, which is cluster-scoped, so reading it needs no access to any workload; it is then
-	// rendered into the leader container's argv as -key=value, which exposes it again to anyone who
-	// can read the Pod or the Deployment carrying it. It stays readable for the life of the object.
-	// A credential does not belong here. This operator renders no flag that carries one, so this
-	// field is the only way one arrives.
+	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
+	// rendered into the leader container's argv as -key=value, readable by anyone who can reach the
+	// Pod or the Deployment, for the life of the object. A credential does not belong here, and
+	// since this operator renders no flag that carries one, this field is the only way one arrives.
 	ExtraArgs map[string]string `json:"extraArgs,omitempty"`
 	// Offload turns on writing evicted keys to the members' local disk tier. It is the leader's
 	// half of a pair: the other half is members[].localDisk, which says where on each node those

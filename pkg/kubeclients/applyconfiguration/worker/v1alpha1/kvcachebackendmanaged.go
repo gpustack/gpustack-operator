@@ -15,52 +15,24 @@ type KVCacheBackendManagedApplyConfiguration struct {
 	// Members are the groups of store members. Each entry selects nodes, names the medium those
 	// nodes contribute, and may add a local disk tier on the same nodes.
 	//
-	// A group's POSITION in this list is its identity: the rendered DaemonSet's name and its
-	// immutable selector labels are derived from it, and so is the port that group's members serve
-	// their HTTP API on. Reordering entries, or removing one ahead of others, therefore redefines
-	// every position after it — the members there are rebuilt against a different group's spec, and
-	// their cache goes with them.
+	// A group's POSITION in this list is its identity: the DaemonSet's name, its immutable selector
+	// labels and its members' HTTP port all derive from it. Giving a group a name of its own is
+	// possible and DELIBERATELY not done — a DaemonSet's selector is immutable, so introducing one
+	// deletes and recreates every member and the whole cache goes with them.
 	//
-	// MOVING A GROUP TO ANOTHER POSITION IS REFUSED AT ADMISSION, rather than accepted and reported.
-	// The rule is narrow on purpose: it refuses an update that puts, at a position that already
-	// existed, a group identical to one that LEFT another position — a swap, or the shift that
-	// removing a middle group produces. Appending a group, removing from the END of the list, and
-	// editing a group in place are all untouched, including the widening of a nodeSelector that is
-	// how a group gains nodes. It has to be that narrow because a group carries no name: an edit
-	// that merely happens to change two groups cannot be told from a reorder, so only a reorder that
-	// MOVES a group unchanged is recognizable at all, and refusing more would forbid the edits this
-	// list is meant to take.
+	// - Appending a group, removing from the END of the list, and editing a group where it stands
+	// are all ALLOWED, including the widening of a nodeSelector that is how a group gains nodes.
+	// - Moving a group to another position is REFUSED at admission: it redefines every later
+	// position and rebuilds those members against a different group's spec, cache included.
+	// - Two shapes are knowingly not caught, because without a name neither can be told from an
+	// ordinary edit: a reorder combined with an edit to the same group, and removing a group
+	// that an identical later group replaces. Both leave two identical groups in the list.
+	// - To take a group out of service without removing it, narrow its nodeSelector until it
+	// matches no node. The group keeps its position and nothing is rebuilt.
 	//
-	// TWO SHAPES ARE KNOWINGLY NOT CAUGHT, and neither can be without a name. A reorder combined with
-	// an edit to the same group is indistinguishable from two ordinary edits. And removing a group
-	// while a LATER group is identical to the one taking its place produces the same two lists as
-	// editing that position to match an unchanged later group — which is the edit that takes the
-	// second of two look-alike groups out of service, so refusing it would forbid a documented
-	// operation. What both admitted shapes leave behind is at least visible: the resulting list holds
-	// two identical groups.
-	//
-	// To take a group out of service without removing it, narrow its nodeSelector until it matches
-	// no node. The group keeps its position, every later group keeps its DaemonSet, and nothing is
-	// rebuilt.
-	//
-	// GIVING A GROUP A NAME OF ITS OWN IS POSSIBLE AND IS DELIBERATELY NOT DONE. A name independent
-	// of position would make reordering free, and the price of introducing one is paid once, in
-	// full: a DaemonSet's spec.selector cannot be changed after creation, so every existing member
-	// DaemonSet has to be deleted and recreated, and the entire cache goes with them. The criterion
-	// is whether one full rebuild is worth it, and the trigger would be operators genuinely needing
-	// to reorder or delete middle groups often enough to amortize that migration. There is no
-	// evidence of such a need today. That is the state of the decision, not an argument for either
-	// side, and a reader who has that evidence is the one who should reopen it.
-	//
-	// What the immutability refusal protects is THE CACHE, not against a misjudgement. "Comparing
-	// groups by index misjudges them" is not the reason: it agrees with how rendering already
-	// works, since after a reorder the group at position i really does hold different content and
-	// those members would be rebuilt against another group's spec regardless.
-	//
-	// The cap of 32 is a SAFETY BOUND, not a statement about how many groups are useful. The port
-	// derivation would stay valid to 57455; what makes 32 the right place to stop is that the shapes
-	// this list is for — a hot and a cold tier, or one group per kind of hardware — are a handful,
-	// while an unbounded list can render a port outside the valid range with nothing reporting it.
+	// The cap of 32 is a SAFETY BOUND, not a statement about how many groups are useful: the port
+	// derivation stays valid to 57455, but an unbounded list can render a port outside the valid
+	// range with nothing reporting it.
 	Members []KVCacheBackendMemberApplyConfiguration `json:"members,omitempty"`
 	// ScaleIn is what a member does on its way out. Left unset, a member is stopped the way any
 	// Pod is: it gets SIGTERM and the time its own shutdown needs, and nothing waits for the

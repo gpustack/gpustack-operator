@@ -20,14 +20,13 @@ type KVCachePoolStatusApplyConfiguration struct {
 	// ClientEndpoint is the address an inference engine connects to, echoed from the backend's
 	// Client endpoint.
 	//
-	// The backend's ADMIN address is deliberately republished NOWHERE. That one port serves the
-	// Prometheus exposition and the HTTP admin API both, so it is the write face of the quota
-	// ledger, while this object is cluster-scoped and readable by anyone holding a pool RBAC rule.
-	// The operator dials it; nobody reads it here.
+	// It is absent, with a Condition saying why, whenever the backend has published no endpoints yet,
+	// and is never filled from a Service name derived from the backend's own — a guessed address that
+	// happens to resolve is how a pool would silently drive the wrong master.
 	//
-	// It is absent, with a Condition saying why, whenever the backend has published no endpoints
-	// yet. It is never filled from a Service name derived from the backend's own — a guessed
-	// address that happens to resolve is how a pool would silently drive the wrong master.
+	// The backend's ADMIN address is deliberately republished NOWHERE. That one port serves the
+	// Prometheus exposition and the HTTP admin API both, so it is the write face of the quota ledger,
+	// while this object is cluster-scoped and readable by anyone holding a pool RBAC rule.
 	ClientEndpoint *string `json:"clientEndpoint,omitempty"`
 	// Usage is what this pool's own tenants are holding. It is ABSENT until a scrape succeeds, and
 	// absent is not the same as reporting zero.

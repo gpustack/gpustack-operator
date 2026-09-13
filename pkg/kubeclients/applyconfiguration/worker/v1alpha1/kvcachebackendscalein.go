@@ -7,58 +7,33 @@ package v1alpha1
 //
 // KVCacheBackendScaleIn is what a member does on its way out.
 //
-// It carries a duration and NOT a policy enum. The other policy a draft of this API carried —
-// migrating a member's data before it leaves — needs the store's drain job API, which is stateful
-// orchestration this scope does not enter and which reaches only the memory and NVMe-oF replicas:
-// it cannot name the segments of the disk-backed ones, and skips those keys without counting them
-// as blocked, so it reports success over a disk tier it left untouched. So a policy field would
-// ship with one value, which is a knob nobody can turn. It arrives when there are two; widening an
-// enum is not a breaking change.
+// It carries a duration and NOT a policy enum. The only other policy — migrating a member's data
+// before it leaves — needs the store's drain job API, which reaches the memory and NVMe-oF replicas
+// alone and reports success over a disk tier it left untouched, so a policy field would ship with
+// one value. It arrives when there are two; widening an enum is not a breaking change.
 type KVCacheBackendScaleInApplyConfiguration struct {
 	// GracePeriodSeconds is the wait the operator asks a departing member for, after that member
 	// deregisters its local disk tier. It renders into the preStop hook as the endpoint's
-	// grace_period_seconds and nothing else reads it.
+	// grace_period_seconds and nothing else reads it. A plain int32, because unset and zero mean the
+	// same thing here: deregister the tier, then do not wait.
 	//
-	// LIMITED: it does not hold the tier open, so sizing it to let in-flight peer reads of the tier
-	// finish sizes it against something that does not happen. Measured against Mooncake 0.3.13:
-	// deregistration takes effect at once and the process then waits the full value regardless, so a
-	// peer reading a disk-resident key gets a clean miss for the whole window rather than at the end
-	// of it. Another backend image may behave otherwise; what this operator guarantees is the value
-	// it sends.
-	//
-	// THE TIER IS THE ONLY THING DEREGISTERED ON THE WAY OUT. The memory segment is still dropped
-	// rather than drained, and not for want of a verb: the member's own API takes a graceful unmount
-	// with a grace period, but it requires the segment ids. The leader's segment listing returns each
-	// segment's id and client id, and this operator records both in status. A non-host-network member
-	// can be matched by its Pod IP, which is also its segment name. Host-network members placed on one
-	// node share that name and address, while their client ids remain distinct; selecting safely from
-	// inside one of those members requires its own client id, which its supported interfaces do not
-	// expose.
-	//
-	// So graceful unmount for every supported transport needs upstream to expose the running member's
-	// own client id and a hook that uses it. It is NOT blocked on the shutdown hook talking to a fresh
-	// process that has forgotten its identity — a preStop runs against the same process that mounted
-	// the segments. No memory-unmount hook is rendered today, so shrinking any group drops the memory
-	// it held. That is a cost rather than a fault for a cache because the data is recomputable.
-	//
-	// The Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so
+	// - The TIER is the only thing deregistered on the way out. A memory segment is dropped rather
+	// than drained, so shrinking a group loses the memory it held — a cost rather than a fault
+	// for a cache, whose content is recomputable. Draining one needs a client id that
+	// host-network members, which share one advertised address per node, do not expose.
+	// - It does NOT hold the tier open, so sizing it to let in-flight peer reads finish sizes it
+	// against something that does not happen. Measured against Mooncake 0.3.13: deregistration
+	// takes effect at once and the process then waits the full value regardless, so a peer
+	// reading a disk-resident key gets a clean miss for the whole window rather than at the end
+	// of it. Another backend image may behave otherwise; what this operator guarantees is the
+	// value it sends.
+	// - The Pod's terminationGracePeriodSeconds is DERIVED from this rather than set beside it, so
 	// the kubelet cannot kill the container in the middle of the wait this configures.
-	//
-	// A plain int32 and not a pointer: unset and zero mean the same thing here. Zero still
-	// deregisters the tier, it just does not wait afterwards, which is what a member with no grace
-	// configured should do.
-	//
-	// The upper bound is the entrypoint's own. It refuses a larger value with HTTP 400, so a
-	// manifest above it would render a shutdown hook that fails every time it runs.
-	//
-	// SETTING THIS DOES NOT PROTECT THE SAME EDIT THAT SHRINKS THE GROUP. The value is rendered into
-	// the member's Pod, and a Pod runs the template it was CREATED from — so a departing member
-	// leaves with whatever grace it started with, and only its replacements carry the new one. An
-	// apply that raises the grace and narrows nodeSelector at once therefore drains nothing.
-	//
-	// To make a grace apply to a shrink, do it in two steps: change only this field and wait for the
-	// members to be recreated with it (their pod-spec-hash annotation moves), then narrow the
-	// selector or remove the group.
+	// - Setting it does NOT protect the same edit that shrinks the group: a Pod runs the template
+	// it was CREATED from, so a departing member leaves with whatever grace it started with. To
+	// make a grace apply to a shrink, change only this field and wait for the members to be
+	// recreated with it — their pod-spec-hash annotation moves — then narrow the selector.
+	// - The upper bound is the entrypoint's own, which refuses a larger value with HTTP 400.
 	GracePeriodSeconds *int32 `json:"gracePeriodSeconds,omitempty"`
 }
 

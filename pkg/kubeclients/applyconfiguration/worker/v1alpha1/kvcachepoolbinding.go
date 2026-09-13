@@ -14,21 +14,19 @@ import (
 // KVCachePoolBinding is the schema for worker.gpustack.ai.
 //
 // It is the PROVISIONING POINT: creating one in a namespace is what gives that namespace a quota on
-// a pool and registers the reuse domain it will write under, so both are objects an admin can RBAC
-// and audit rather than strings a tenant types into a workload.
+// a pool and registers the ONE reuse domain it will write under, so both are objects an admin can
+// RBAC and audit rather than strings a tenant types into a workload.
+//
+// The storage layer's tenant IS the domain, so registering one creates a quota ledger, which is what
+// makes naming a domain a privileged act rather than something a workload could mint at will.
+// Workloads pointing at the SAME Binding share KV; a namespace needing two reuse boundaries creates
+// two Bindings, exactly as one with two scheduling boundaries has two Kueue LocalQueues.
 //
 // It is NOT an enforcement boundary, and must not be described as one. The store accepts whatever
-// tenant id a caller sends, over a Service any pod in the cluster can dial; nothing derives a
-// credential from this object. So a workload that knows another namespace's domain name can read and
-// write that domain's cache today. What a Binding governs is who is GRANTED capacity and under which
-// name — provisioning and accounting, not access control. Enforcement needs an authenticated proxy
-// or network isolation, and neither exists yet.
-//
-// It is also where a reuse domain is registered, and exactly one. Because the storage layer's tenant
-// IS the domain, registering one creates a quota ledger — which makes naming a domain a privileged
-// act, and is why it is declared here and never by a workload that could otherwise mint tenants at
-// will. Workloads pointing at the SAME Binding share KV; a namespace needing two reuse boundaries
-// creates two Bindings, exactly as one with two scheduling boundaries has two Kueue LocalQueues.
+// tenant id a caller sends, over a Service any pod in the cluster can dial, and nothing derives a
+// credential from this object — so a workload that knows another namespace's domain name can read
+// and write that domain's cache today. What a Binding governs is who is GRANTED capacity and under
+// which name. Enforcement needs an authenticated proxy or network isolation, and neither exists yet.
 type KVCachePoolBindingApplyConfiguration struct {
 	v1.TypeMetaApplyConfiguration    `json:",inline"`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`

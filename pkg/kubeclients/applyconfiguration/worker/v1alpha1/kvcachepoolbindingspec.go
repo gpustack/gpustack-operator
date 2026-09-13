@@ -19,42 +19,34 @@ type KVCachePoolBindingSpecApplyConfiguration struct {
 	// storage layer's tenant_id (isolation) and cache_salt (prefix identity), so registering a
 	// domain creates a tenant with a quota ledger of its own.
 	//
-	// It is a struct rather than a list deliberately. One Binding is one tenant, so every figure in
-	// Status is a single series rather than a sum, and no rule for dividing one ceiling among
-	// several domains has to be invented. The cardinality is structural, not a webhook rule.
+	// It is a STRUCT rather than a list deliberately, so the cardinality is structural and not a
+	// webhook rule: one Binding is one tenant, every figure in Status is a single series rather than
+	// a sum, and no rule for dividing one ceiling among several domains has to be invented.
 	//
 	// EVERY FIELD IS IMMUTABLE, webhook-enforced. Name re-points this namespace at a different
 	// ledger and strands the old one. BlockSize or Dtype changed under a warm cache is silent
 	// corruption: the writes succeed, the reads succeed, and the tensors are wrong.
 	Domain *KVCachePoolBindingDomainApplyConfiguration `json:"domain,omitempty"`
-	// QuotaCeiling is what this namespace may consume in its reuse domain. It is written verbatim
-	// into that one tenant's requested quota, so it is the storage layer's own request figure
-	// rather than a total this operator maintains.
+	// QuotaCeiling is what this namespace may consume in its reuse domain, written verbatim into that
+	// one tenant's requested quota rather than kept as a total this operator maintains.
 	//
-	// IT IS A REQUEST, NOT A GRANT. The pool reduces every tenant's effective quota in proportion
-	// when the sum of requests exceeds allocatable capacity, and Status.EffectiveQuota is what was
-	// actually granted.
-	//
-	// EXCEEDING IT EVICTS RATHER THAN REFUSES, which is the opposite of what the word suggests. A
-	// write past the ceiling is not rejected: the store frees room by dropping this namespace's own
-	// older objects and retries. So a ceiling set too low costs cache inside this namespace, not
-	// failed writes, and it costs it without any counter moving. Writes are refused only when
-	// eviction cannot free enough, which needs those older objects held by unexpired read leases.
-	//
-	// REQUIRED, because the state it would otherwise allow does not work. The storage layer has no
-	// default policy to fall back on: a tenant it holds no policy for is refused outright, with the
-	// same error a reuse domain that was never declared gets — measured on a real master, and stated
-	// in the artifact's own header, where the code is spelled `TENANT_NOT_REGISTERED = -1701,
-	// ///< Tenant has no quota policy.` A Binding without this field would pass admission, report
-	// Ready and refuse every byte its workloads wrote.
-	//
-	// Required is also the direction that can be taken back. Should the storage layer ever grow a
-	// default quota, relaxing this to optional keeps every object already written valid; going the
-	// other way — optional today, required later — invalidates every object that omitted it.
-	//
-	// Held BY VALUE, like the pool's own ceiling and for the same reason: the schema guarantees the
-	// key is present, so there is no unset to distinguish and a pointer would only add a nil case
-	// nothing can produce. The webhook still refuses a value that is not positive.
+	// - IT IS A REQUEST, NOT A GRANT. The pool reduces every tenant's effective quota in proportion
+	// when the sum of requests exceeds allocatable capacity, and Status.EffectiveQuota is what
+	// was actually granted.
+	// - EXCEEDING IT EVICTS RATHER THAN REFUSES, which is the opposite of what the word suggests.
+	// A write past the ceiling is not rejected: the store frees room by dropping this namespace's
+	// own older objects and retries. A ceiling set too low therefore costs cache inside this
+	// namespace rather than failed writes, and costs it without any counter moving. Writes are
+	// refused only when eviction cannot free enough, which needs those older objects held by
+	// unexpired read leases.
+	// - It is REQUIRED, because the state it would otherwise allow does not work: the storage layer
+	// has no default policy and refuses a tenant it holds no policy for, so a Binding without
+	// this field would pass admission, report Ready and refuse every byte its workloads wrote.
+	// Required is also the direction that can be taken back — relaxing it later keeps every
+	// object already written valid, while the reverse invalidates every object that omitted it.
+	// - Held BY VALUE, like the pool's own ceiling: the schema guarantees the key is present, so a
+	// pointer would only add a nil case nothing can produce. The webhook still refuses a value
+	// that is not positive.
 	QuotaCeiling *resource.Quantity `json:"quotaCeiling,omitempty"`
 }
 

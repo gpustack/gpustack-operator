@@ -9,15 +9,13 @@ package v1alpha1
 //
 // It is a STRUCT and not two optional fields on the block above, because either mark alone describes
 // nothing this operator would want to render: a high mark on its own leaves the store pairing it
-// with a low mark this object never states, and the pair is refused at the member's startup whenever
-// that unstated default is not below it — a member that never comes up, for a reason only in a
-// container log.
+// with a low mark this object never states, and the member refuses that pair at startup whenever the
+// unstated default is not below it, for a reason that appears only in a container log.
 type KVCacheBackendMemberLocalDiskEvictionWatermarkApplyConfiguration struct {
-	// High is the percentage of Capacity at which eviction starts.
-	//
-	// A PERCENTAGE and not a quantity. The store takes a fraction of its own quota rather than a
-	// size, and a size here would restate a figure Capacity already carries — one that would quietly
-	// stop matching the moment Capacity moved.
+	// High is the percentage of Capacity at which eviction starts. A PERCENTAGE and not a quantity:
+	// the store takes a fraction of its own quota rather than a size, and a size here would restate
+	// a figure Capacity already carries — one that would quietly stop matching the moment Capacity
+	// moved.
 	High *int32 `json:"high,omitempty"`
 	// Low is the percentage of Capacity eviction stops at, and it MUST be below High. Equal marks
 	// would make every write past the mark evict, which is the thrashing a band exists to prevent.

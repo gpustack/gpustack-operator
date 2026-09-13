@@ -16,10 +16,9 @@ import (
 // It is N replicas of one inference-engine role attached to a KV cache pool, so that the replicas
 // hit each other's cached prefixes instead of each re-computing the same prefill.
 //
-// It RENDERS PODS DIRECTLY. The admission chain keys on Pods — a plain Pod is a first-class citizen
-// of it and an Instance is sugar that renders one — so rendering Pods reuses every existing gate
-// with no new integration point. Instance could not serve as the substrate: it renders exactly one
-// Pod, and its spec is immutable after creation, which turns a rolling update into
+// It RENDERS PODS DIRECTLY. The admission chain keys on Pods, so rendering Pods reuses every
+// existing gate with no new integration point. Instance could not serve as the substrate: it renders
+// exactly one Pod, and its spec is immutable after creation, which turns a rolling update into
 // recreate-everything.
 type ModelDeploymentApplyConfiguration struct {
 	v1.TypeMetaApplyConfiguration    `json:",inline"`

@@ -9,88 +9,48 @@ package v1alpha1
 type KVCacheBackendTransportApplyConfiguration struct {
 	// Protocol is the transport the members are ASKED to use. Auto resolves to TCP.
 	//
-	// Whether a member came up on it is NOT visible through this API. status.members[].protocol
-	// echoes this request back rather than reporting a result — the value travels from the member's
-	// own mount request through the leader's listing unchanged — so a member that asks for a host
-	// fabric and falls back to TCP because the device is missing still reads as the fabric there,
-	// while serving. The transport the data plane installed is reported only in the member's own
-	// log. Do not read agreement between the two fields as confirmation that this one took effect.
-	//
-	// Auto is deliberately NOT a per-node probe that promotes itself to a faster fabric, for two
-	// reasons. A member group renders one DaemonSet, so a single Pod template covers every node the
-	// group selects and cannot carry a different transport per node. And promoting to RDMA means
-	// granting hostNetwork and two capabilities: a privilege is requested, never inferred on an
-	// operator's behalf.
-	//
-	// It stays in the enum rather than being dropped because it is the honest answer for an
-	// operator with no opinion, and because it is where node-level fabric discovery would attach
-	// later without an API change.
-	//
-	// TCP is the universal fallback. RDMA, EFA, HIP and Ascend are peers of one another — each is a
-	// fabric- or vendor-specific fast path, not a spelling of TCP: the ROCm build compiles a HIP
-	// transport in, the NPU build ships a separate Ascend transport library linking the CANN
-	// runtime, and EFA is AWS's fabric, reached through libfabric's SRD provider rather than
-	// ibverbs — EFA has no RC queue pairs, so the RDMA transport cannot drive it.
-	//
-	// The bar for membership here is "measured as compiled into a published artifact", which is
-	// what excludes the other ten strings that artifact's config parser accepts. It is NOT
-	// "measured to move bytes": only TCP has been exercised end to end, and RDMA, EFA, HIP and
-	// Ascend each await a run on that hardware. A member also needs the runtime its transport
-	// links — Ascend needs CANN in the member image, EFA needs libfabric in it — and the webhook
-	// cannot see inside an image or onto a node, so that pairing is the operator's to get right.
-	// What a host fabric additionally needs from the NODE is a device plugin, because carrying the
-	// device node in through a hostPath leaves the device cgroup refusing to open it. Which
-	// resource the member asks for is deviceResourceName below; EFA falls back to
-	// vpc.amazonaws.com/efa when nothing is declared, and that name is a default rather than a
-	// property of the protocol.
+	// - TCP is the universal fallback. RDMA, EFA, HIP and Ascend are peers of one another, each a
+	// fabric- or vendor-specific fast path rather than a spelling of TCP: EFA in particular is
+	// reached through libfabric's SRD provider and has no RC queue pairs, so the RDMA transport
+	// cannot drive it.
+	// - Whether a member came up on what it asked for is NOT visible through this API.
+	// status.members[].protocol echoes this request back rather than reporting a result, so a
+	// member that fell back to TCP still reads as the fabric there, while serving. Only the
+	// member's own log says which transport the data plane installed.
+	// - Auto is deliberately NOT a per-node probe that promotes itself to a faster fabric: a member
+	// group renders one DaemonSet, whose single Pod template cannot carry a different transport
+	// per node, and promoting to RDMA grants hostNetwork and two capabilities — a privilege is
+	// requested, never inferred on an operator's behalf.
+	// - Membership in this enum means MEASURED AS COMPILED into a published artifact, which is what
+	// excludes the other ten strings that artifact's config parser accepts. It does not mean
+	// measured to move bytes: only TCP has been exercised end to end.
+	// - A host fabric needs two things this API cannot check: the member image must carry the
+	// runtime its transport links — CANN for Ascend, libfabric for EFA — and the NODE must run a
+	// device plugin, since a hostPath alone leaves the device cgroup refusing to open the device.
+	// Which resource the member asks for is deviceResourceName below.
 	Protocol *string `json:"protocol,omitempty"`
 	// DeviceResourceName is the extended resource a host-fabric member asks one of, so the device
-	// cgroup lets it open the fabric device.
+	// cgroup lets it open the fabric device. It is CONSULTED ONLY on the RDMA and EFA protocols;
+	// beside any other it renders nothing.
 	//
-	// WHY THIS IS A FIELD AND NOT A CONSTANT. Carrying /dev/infiniband in through a hostPath puts
-	// the device node in the container's mount namespace and grants nothing: the device cgroup
-	// still denies open(), which surfaces as EPERM even for uid 0 on a node whose file mode permits
-	// everyone. A device plugin allocation is what adds the cgroup rule. But the NAME of the
-	// resource to ask for is not a property of the fabric, it is a property of whichever plugin the
-	// cluster's administrator installed: the RDMA shared-device plugin names it in its own
-	// configuration, and the SR-IOV plugin's is configurable outright. There is no name this
-	// operator could hard-code that would be right on two clusters, which is why this is declared
-	// rather than derived, and why an admission rule refusing a fabric member whose node has no
-	// plugin cannot be written -- admission does not know which resource to look for.
+	// - It is DECLARED rather than derived: the name belongs to whichever plugin the cluster's
+	// administrator installed, so no name hard-coded here would be right on two clusters, and no
+	// admission rule can check a node for a plugin whose resource it cannot know.
+	// - EFA is the exception. Its plugin advertises exactly one name, so an EFA member asks for
+	// vpc.amazonaws.com/efa when this is unset. That is a default rather than a property of the
+	// protocol, and setting the field overrides it.
+	// - UNSET IS NOT A SAFE DEFAULT, IT IS THE OLD BEHAVIOR. A fabric member naming no resource
+	// mounts the device tree and requests nothing, so the cgroup refuses the open, the store
+	// installs TCP, and the object still reads as the fabric it asked for. Naming one instead
+	// keeps the member off a node that advertises none, which is the safer failure but not
+	// always the wanted one, so both stay reachable.
 	//
-	// EFA is the exception that proves it: its plugin is AWS's own and advertises exactly one name,
-	// so a member on the EFA protocol asks for that name when this field is unset. Setting the
-	// field overrides it. Leaving it unset changes nothing about any backend that exists today.
-	//
-	// UNSET IS NOT A SAFE DEFAULT, IT IS THE OLD BEHAVIOR. A member on a fabric protocol with no
-	// resource named and no built-in for its protocol mounts the device tree and requests nothing,
-	// so the device cgroup refuses the open, the store discovers no device and installs TCP, and
-	// the object still reads as the fabric it asked for. That is the failure this field exists to
-	// let an operator avoid; it is left reachable because naming a resource no plugin advertises
-	// makes the member unschedulable instead, and this operator cannot tell which of the two an
-	// administrator with no plugin would rather have.
-	//
-	// Requesting a resource also decides what a node without the device looks like: it advertises
-	// none of that resource, so the member is never placed there, rather than starting and serving
-	// over TCP under a spec that says otherwise.
-	//
-	// It is CONSULTED ONLY on the RDMA and EFA protocols, which are the two that mount the device
-	// tree. Set beside any other protocol it renders nothing, because nothing on those paths opens
-	// a fabric device, and a resource requested there would only make the member unschedulable.
-	//
-	// The bounds are the ones the API server applies to a resource name, stated here so a value it
-	// would refuse is refused on the object that declares it rather than on the DaemonSet rendered
-	// from it. The part after the slash is at most 63 characters and each label of the domain is
-	// too; a longer one is admitted by a looser pattern and then fails when it becomes a resource
-	// list key, which strands reconciliation with no member workload and no obvious cause.
-	//
-	// ONE BOUND CANNOT BE EXPRESSED HERE, and admission carries it instead. The domain as a whole
-	// is limited to 253 characters, and a regular expression cannot say that about a repeated group
-	// whose parts vary in length: labels of 63, 63, 63 and 62 characters are each inside their own
-	// limit and make a domain of 254, in a value the 317 above still admits. Every rule stated here
-	// admits that name, so the webhook refuses it rather than letting it become the resource list
-	// key the API server refuses. That half is absent when the webhook is not installed, which is
-	// why the bounds that CAN be stated here still are.
+	// The bounds below are the API server's own for a resource name: 63 characters after the slash
+	// and for each domain label, refused here rather than on the DaemonSet rendered from it, where
+	// they strand reconciliation with no obvious cause. The domain's 253-character limit is NOT among
+	// them — no regular expression can bound a repeated group whose labels vary in length, so
+	// 63.63.63.62 makes a domain of 254 that the 317 below still admits — and admission carries that
+	// one instead, so it is absent when the webhook is not installed.
 	DeviceResourceName *string `json:"deviceResourceName,omitempty"`
 }
 

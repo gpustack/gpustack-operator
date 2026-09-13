@@ -14,12 +14,12 @@ import (
 // actually granted, what it is using, and whether it is over.
 //
 // Every figure below is read from ONE tenant's series, because a Binding registers exactly one reuse
-// domain and the storage layer's tenant IS that domain. Nothing here is summed, and no figure can
+// domain and the storage layer's tenant IS that domain: nothing here is summed, and no figure can
 // hide a second domain behind it.
 //
-// Every observed figure is a POINTER, for one reason shared by all of them: a resource.Quantity is a
-// struct and omitempty does not omit a zero-valued struct, so a value-held figure serializes as "0"
-// on exactly the passes whose contract says there must be no field at all.
+// Every observed figure is a POINTER, for one reason shared by all of them: omitempty does not omit
+// a zero-valued struct, so a value-held figure serializes as "0" on exactly the passes whose
+// contract says there must be no field at all.
 type KVCachePoolBindingStatusApplyConfiguration struct {
 	// Phase summarizes the conditions: Provisioning, Ready, Degraded, Error, Deleting.
 	Phase *string `json:"phase,omitempty"`
@@ -42,29 +42,25 @@ type KVCachePoolBindingStatusApplyConfiguration struct {
 	// Usage is what the master reports this namespace's reuse domain as holding, and WHICH figure
 	// that is depends on the master's version rather than on this API.
 	//
-	// A master that exposes used bytes apart from reservations is read as committed bytes, and
-	// in-flight writes are deliberately left out — a burst of concurrent writes would otherwise read
-	// as consumption that never happened. A master that exposes one charged figure instead, the shape
-	// 0.3.13 introduced, charges it when a write STARTS: there is no committed figure to isolate, so
-	// in-flight reservations are inside this number and cannot be subtracted. The Binding's own
-	// QuotaObserved message says which of the two answered.
+	// A master exposing used bytes apart from reservations is read as committed bytes, in-flight
+	// writes deliberately left out — a burst of concurrent writes would otherwise read as consumption
+	// that never happened. A master exposing one charged figure instead, the shape 0.3.13 introduced,
+	// charges it when a write STARTS, so in-flight reservations are inside this number and cannot be
+	// subtracted. The Binding's own QuotaObserved message says which of the two answered.
 	Usage *resource.Quantity `json:"usage,omitempty"`
 	// OverQuota is true when Usage exceeds EffectiveQuota, and it does NOT mean the domain tried to
-	// write more than it was granted. The two are unrelated in the direction a reader expects, and the
-	// mechanism is the only thing that makes that credible: the store never charges a domain past its
-	// grant — the charge is refused rather than allowed to overshoot — so writing past the grant leaves
-	// Usage AT the grant and this false. What happens on that path instead is that the store evicts the
-	// domain's OWN objects to make room and admits the write; a write fails only while every object
-	// holding the grant is pinned and nothing can be evicted.
+	// write more than it was granted. The store never charges a domain past its grant, so writing past
+	// it leaves Usage AT the grant and this false; what happens on that path instead is that the store
+	// evicts the domain's OWN objects to make room and admits the write, and a write fails only while
+	// every object holding the grant is pinned and nothing can be evicted.
 	//
-	// So this reports one situation: the grant was RECUT below what the domain already holds, which is
+	// So this reports ONE situation: the grant was RECUT below what the domain already holds, which is
 	// what a proportional cut does when the pool's members shrink or another Binding joins. Waiting on
 	// it as the signal that writes are being refused is waiting for something that never arrives.
 	//
-	// A POINTER for the same reason the quantities around it are, and it is the easiest one to get
-	// wrong: held by value with omitempty, an OBSERVED false — the ordinary, healthy case — omits
-	// itself and becomes indistinguishable from a tenant nobody could scrape. A client asking "does my
-	// domain hold more than it is now granted" would get the same answer for "no" and for "unknown".
+	// A POINTER for the same reason the quantities around it are, and the easiest one to get wrong:
+	// held by value with omitempty, an OBSERVED false — the ordinary, healthy case — omits itself and
+	// becomes indistinguishable from a tenant nobody could scrape.
 	OverQuota *bool `json:"overQuota,omitempty"`
 	// Blocks and HitRate are OBSERVED from the master and the engine, never declared. They are absent
 	// when the scrape does not carry this tenant, because a fabricated zero hit rate on a warm cache
@@ -74,20 +70,13 @@ type KVCachePoolBindingStatusApplyConfiguration struct {
 	// HitRate is a ratio held as a STRING with a pattern, never a float. See the pool's own HitRate
 	// for why a pattern is safe on a computed ratio and what it obliges of whoever writes it.
 	HitRate *string `json:"hitRate,omitempty"`
-	// UsedBy names the workloads in THIS namespace that hold the pool through this Binding. It is
-	// always a single-scope query — nothing here ever looks across namespaces — and a non-empty
-	// UsedBy is what the finalizer refuses deletion on.
+	// UsedBy names the workloads in THIS namespace that hold the pool through this Binding — always a
+	// single-scope query, and a non-empty UsedBy is what the finalizer refuses deletion on.
 	//
 	// IT IS WRITTEN BY THE CONSUMER, NOT BY THIS API'S OWN RECONCILER, which only reads it and
-	// enforces on it. The kind that will write it is ModelDeployment, declared by the
-	// model-deployment feature of this same operator, whose spec.kvCache.poolRef names a Binding in
-	// its own namespace. Until that feature ships there is no writer at all, so this list is empty on
-	// every pass and the finalizer always releases: the refusal is a mechanism that is complete and
-	// tested, over a fact nothing supplies yet. A reader must not take a non-empty UsedBy for
-	// something the operator will produce on its own.
-	//
-	// Entries leave Namespace empty: everything that can appear is in this Binding's own namespace,
-	// so naming it would restate the object's own metadata on every entry.
+	// enforces on it. The kind that writes it is ModelDeployment, whose spec.kvCache.poolRef names a
+	// Binding in its own namespace, so an empty list is not evidence that nobody holds the pool.
+	// Entries leave Namespace empty, everything that can appear being in this Binding's own namespace.
 	UsedBy []KVCacheObjectReferenceApplyConfiguration `json:"usedBy,omitempty"`
 }
 

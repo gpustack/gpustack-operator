@@ -32,9 +32,9 @@ type ModelDeploymentStatusApplyConfiguration struct {
 	Endpoint *string `json:"endpoint,omitempty"`
 	// Roles is one entry per declared role.
 	Roles []ModelDeploymentRoleStatusApplyConfiguration `json:"roles,omitempty"`
-	// KVCache is the reuse domain this deployment actually attached to, read from the Binding. It
-	// exists so an operator can tell a cache-sharing misconfiguration from a cache that is merely
-	// cold by reading this object alone.
+	// KVCache is the reuse domain this deployment actually attached to, read from the Binding, so
+	// that telling a cache-sharing misconfiguration from a cache that is merely cold takes one object
+	// rather than two.
 	//
 	// A POINTER because omitempty does not omit a zero-valued struct: held by value it would
 	// serialize as an empty object on every pass where the Binding could not be resolved, which a
