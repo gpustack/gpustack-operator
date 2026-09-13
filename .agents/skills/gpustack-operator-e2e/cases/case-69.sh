@@ -49,6 +49,31 @@ BINDING="${E2E_MD_BINDING:-case69-no-such-binding}"
 IT="${E2E_MD_INSTANCE_TYPE:-}"
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 
+# The first InstanceType THAT A DEPLOYMENT CAN ACTUALLY NAME, which is not the same as the first one
+# the API returns.
+#
+# THE LIST COMES BACK SORTED BY NAME AND CARRIES TYPES ON THEIR WAY OUT. A case that creates its own
+# fixture type deletes it without waiting, so a case running straight after one leaves a terminating
+# type in the list -- and a name sorting before the real one is picked. Naming a type that is being
+# deleted is refused at admission, and the whole case then dies at fixture time for a reason that has
+# nothing to do with what it measures. Measured: this case did exactly that, immediately after
+# case-68 dropped its own `case68-nowhere`, which sorts first.
+#
+# INACTIVE IS EXCLUDED FOR THE SAME REASON IN A DIFFERENT PLACE: a deployment on one is admitted and
+# then never scheduled, so the case would wait out every timeout it has.
+usable_instance_type() {
+  k get instancetypes.worker.gpustack.ai \
+    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}{"\n"}{end}' \
+    2>/dev/null \
+    | while IFS='|' read -r name deleting inactive; do
+        [ -n "$name" ] || continue
+        [ -z "$deleting" ] || continue
+        [ "$inactive" = true ] && continue
+        echo "$name"
+        break
+      done
+}
+
 FAILS=0
 NOREADS=0
 ROWS=()
@@ -68,10 +93,10 @@ record() {
 }
 
 if [ -z "$IT" ]; then
-  IT="$(k get instancetypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+  IT="$(usable_instance_type)"
 fi
 if [ -z "$IT" ]; then
-  echo "[case-69] no InstanceType in the cluster; run case-1 first" >&2
+  echo "[case-69] no usable InstanceType in the cluster; run case-1 first" >&2
   exit 2
 fi
 
@@ -80,7 +105,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-k apply -f - >/dev/null 2>&1 <<YAML
+# THE APPLY'S OWN OUTPUT IS KEPT. A fixture that fails silently reports "not created" and nothing
+# else, and "not created" is compatible with a refused field, a missing instance type, a webhook that
+# is down and a transport error -- four causes needing four different actions. Measured: this case
+# died here once and the log said only that the deployment was absent.
+fixture_err="$(k apply -f - 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata:
@@ -103,9 +132,12 @@ spec:
         image: $IMAGE
         command: ["/pause"]
 YAML
+)"
 
 if ! k -n "$NS" get modeldeployment "$MD" >/dev/null 2>&1; then
   echo "[case-69] the fixture deployment was not created; nothing to edit" >&2
+  echo "[case-69] instance type used: $IT" >&2
+  echo "[case-69] apply said: $fixture_err" >&2
   exit 1
 fi
 

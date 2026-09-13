@@ -126,11 +126,33 @@ record() {
   return 0
 }
 
+# The first InstanceType A DEPLOYMENT CAN ACTUALLY NAME, which is not the same as the first one the
+# API returns.
+#
+# THE LIST COMES BACK SORTED BY NAME AND CARRIES TYPES ON THEIR WAY OUT. This case creates its own
+# `case68-nowhere` and deletes it without waiting, so a second run started straight after the first
+# sees it still terminating -- and `case68-nowhere` sorts before an ordinary derived type. Naming a
+# type that is being deleted is refused at admission, and the run then dies at fixture time for a
+# reason that has nothing to do with what it measures. Inactive is excluded for the mirror reason: a
+# deployment on one is admitted and then never scheduled, so the case waits out every timeout it has.
+usable_instance_type() {
+  k get instancetypes.worker.gpustack.ai \
+    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}{"\n"}{end}' \
+    2>/dev/null \
+    | while IFS='|' read -r name deleting inactive; do
+        [ -n "$name" ] || continue
+        [ -z "$deleting" ] || continue
+        [ "$inactive" = true ] && continue
+        echo "$name"
+        break
+      done
+}
+
 if [ -z "$IT" ]; then
-  IT="$(k get instancetypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+  IT="$(usable_instance_type)"
 fi
 if [ -z "$IT" ]; then
-  echo "[case-68] no InstanceType in the cluster; run case-1 first" >&2
+  echo "[case-68] no usable InstanceType in the cluster; run case-1 first" >&2
   exit 2
 fi
 
