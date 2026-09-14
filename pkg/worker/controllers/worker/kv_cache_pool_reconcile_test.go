@@ -72,6 +72,8 @@ type fakeMaster struct {
 	// to be narrower than refuse: a pass whose LIST failed never reaches the removal at all.
 	refuseDeleteStatus int
 	refuseDeleteBody   string
+	refusePutStatus    int
+	refusePutBody      string
 	deleteResponses    []fakeMasterResponse
 	deleteTenants      []string
 
@@ -154,6 +156,11 @@ func (m *fakeMaster) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tenant := r.URL.Query().Get("tenant_id")
+	if m.refusePutStatus != 0 && r.Method == http.MethodPut {
+		w.WriteHeader(m.refusePutStatus)
+		_, _ = w.Write([]byte(m.refusePutBody))
+		return
+	}
 	if r.Method == http.MethodDelete && len(m.deleteResponses) > 0 {
 		response := m.deleteResponses[0]
 		m.deleteResponses = m.deleteResponses[1:]
@@ -256,6 +263,13 @@ func (m *fakeMaster) refuseDeletes(status int, body string) {
 	defer m.mu.Unlock()
 
 	m.refuseDeleteStatus, m.refuseDeleteBody = status, body
+}
+
+func (m *fakeMaster) refusePuts(status int, body string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.refusePutStatus, m.refusePutBody = status, body
 }
 
 func (m *fakeMaster) refuseDeleteSequence(responses ...fakeMasterResponse) {
@@ -735,6 +749,33 @@ func TestKVCachePoolReconcile_ADomainClaimedTwiceIsManagedForNeither(t *testing.
 	assert.Zero(t, deletes, "and the entry, if any, is left exactly as it is")
 	assert.Empty(t, readPool(t, cli, "shared").Status.Domains,
 		"a contested domain is in no pool's registry")
+}
+
+// TestKVCachePoolReconcile_APutFailureKeepsAContestedDomainInTheSeed covers a ledger that was read
+// successfully before a later write failed. The observed contested entry remains the only source
+// for the second policy render, which the leader copies over its own policy when it restarts.
+func TestKVCachePoolReconcile_APutFailureKeepsAContestedDomainInTheSeed(t *testing.T) {
+	master := newFakeMaster()
+	address := master.start(t)
+	r, cli := newReconciler(
+		newReconcileBackend("mooncake-dram", address),
+		newTestKVCachePool("shared", "mooncake-dram"),
+		newBoundBinding("team-a", "chat", "shared", "contested", resource.MustParse("20Ti")),
+	)
+
+	reconcilePool(t, r, "shared")
+	require.Contains(t, readQuotaPolicyDocument(t, cli, "mooncake-dram"), "contested")
+	require.NoError(t, cli.Create(context.Background(),
+		newBoundBinding("team-b", "batch", "shared", "contested", resource.MustParse("10Ti"))))
+	require.NoError(t, cli.Create(context.Background(),
+		newBoundBinding("team-c", "embed", "shared", "fresh", resource.MustParse("5Ti"))))
+	master.refusePuts(503,
+		`{"success":false,"error_code":-1011,"error_message":"SERVICE_NOT_READY"}`)
+
+	reconcilePool(t, r, "shared")
+
+	assert.Contains(t, readQuotaPolicyDocument(t, cli, "mooncake-dram"), "contested",
+		"a later write failure does not erase an entry the successful ledger read already observed")
 }
 
 // TestKVCachePoolReconcile_ALedgerFaultDoesNotOutliveItself pins the level-based half of criterion

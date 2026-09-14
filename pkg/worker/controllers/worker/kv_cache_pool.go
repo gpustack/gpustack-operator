@@ -977,7 +977,7 @@ func (r *KVCachePoolReconciler) convergeTenantLedger(
 			r.reportTenantLedgerFailure(holder, err,
 				fmt.Sprintf("writing the quota of reuse domain %q", tenant.Name))
 			logger.Error(err, "put tenant quota", "tenant", tenant.Name)
-			return kvCachePoolLedgerPass{failure: err}
+			return kvCachePoolLedgerPass{failure: err, observed: observed}
 		}
 	}
 
