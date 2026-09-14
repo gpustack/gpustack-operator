@@ -150,6 +150,119 @@ func TestRenderModelDeploymentPod_EntranceLabelIsNotInTheSelector(t *testing.T) 
 	}
 }
 
+// TestRenderModelDeploymentPod_RoleKindLabel pins the value of the role-kind label, which is what
+// something in front of the replicas selects on to tell a prefiller from a decoder.
+//
+// EVERY CASE HERE SPELLS THE ROLE'S NAME DIFFERENTLY FROM ITS KIND, and that is the whole design of
+// the table. The fixture's default role is named "server" and its unset kind resolves to "server",
+// so a render that published role.Name instead of the effective kind would produce the same label
+// on it -- the assertion would pass while reading the wrong field. The last case is the sharpest:
+// a role NAMED decode whose kind is prefill, where the two answers are both legal kind words and
+// only one of them is right.
+func TestRenderModelDeploymentPod_RoleKindLabel(t *testing.T) {
+	testCases := []struct {
+		name     string
+		roleName string
+		kind     workercore.ModelDeploymentRoleKind
+		want     string
+	}{
+		{
+			name:     "an unset kind resolves to server rather than to the empty string",
+			roleName: "runner",
+			kind:     "",
+			want:     string(workercore.ModelDeploymentRoleKindServer),
+		},
+		{
+			name:     "prefill",
+			roleName: "first-half",
+			kind:     workercore.ModelDeploymentRoleKindPrefill,
+			want:     string(workercore.ModelDeploymentRoleKindPrefill),
+		},
+		{
+			name:     "decode",
+			roleName: "second-half",
+			kind:     workercore.ModelDeploymentRoleKindDecode,
+			want:     string(workercore.ModelDeploymentRoleKindDecode),
+		},
+		{
+			name:     "a role named decode whose kind is prefill is labelled prefill",
+			roleName: "decode",
+			kind:     workercore.ModelDeploymentRoleKindPrefill,
+			want:     string(workercore.ModelDeploymentRoleKindPrefill),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Name = tc.roleName
+				md.Spec.Roles[0].Kind = tc.kind
+			})
+
+			pod := renderOne(t, md, newRenderInstanceType())
+
+			assert.Equal(t, tc.want, pod.Labels[modelDeploymentLabelKeyRoleKind])
+			assert.Equal(t, tc.roleName, pod.Labels[modelDeploymentLabelKeyComponent],
+				"the role's name keeps its own key, so the two are separately selectable")
+		})
+	}
+}
+
+// TestRenderModelDeploymentPod_RoleKindLabelIsNotInTheSelector keeps the role-kind label out of what
+// a Service is created with, for the reason recorded on the constant.
+//
+// The absence assertion carries a positive baseline beside it on purpose: "the selector does not
+// contain this key" is true of a render that never produces the key at all, so on its own it would
+// pass against the tree as it stood before the key existed.
+func TestRenderModelDeploymentPod_RoleKindLabelIsNotInTheSelector(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+	})
+
+	selector := modelDeploymentSelectorLabels(md, &md.Spec.Roles[0])
+	assert.NotContains(t, selector, modelDeploymentLabelKeyRoleKind)
+
+	pod := renderOne(t, md, newRenderInstanceType())
+	require.Contains(t, pod.Labels, modelDeploymentLabelKeyRoleKind,
+		"the baseline for the absence above: the replica does carry the key the selector omits")
+}
+
+// TestRenderModelDeploymentPod_RoleKindLabelSeparatesAPair asserts the property the label exists
+// for: within ONE deployment, a selector on the kind reaches one half of a pair and not the other.
+//
+// Rendering each role and comparing the two values is what makes this more than the per-role case
+// above. A render that published a constant, or that read the deployment rather than the role, gives
+// every replica of both roles the same value and passes every single-role assertion in this file.
+func TestRenderModelDeploymentPod_RoleKindLabelSeparatesAPair(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Name = "p"
+		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+		md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
+			Name:         "d",
+			Replicas:     2,
+			InstanceType: "h20-8x",
+			Kind:         workercore.ModelDeploymentRoleKindDecode,
+			Template:     &workercore.ModelDeploymentTemplate{Image: "vllm/vllm-openai:v0.25.1"},
+		})
+	})
+
+	it := newRenderInstanceType()
+	labelOf := func(i int) string {
+		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			Deployment:   md,
+			Role:         &md.Spec.Roles[i],
+			Ordinal:      0,
+			InstanceType: it,
+		})
+		require.NoError(t, err)
+
+		return pod.Labels[modelDeploymentLabelKeyRoleKind]
+	}
+
+	assert.Equal(t, string(workercore.ModelDeploymentRoleKindPrefill), labelOf(0))
+	assert.Equal(t, string(workercore.ModelDeploymentRoleKindDecode), labelOf(1))
+}
+
 // TestRenderModelDeploymentPod_Command covers the whole argv, which the operator owns end to end
 // because InstanceTemplate has Command and no Args: there is nowhere to put arguments beside an
 // image's own entrypoint, so the append tier can only append to a command line the operator built.

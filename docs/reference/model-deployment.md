@@ -128,6 +128,7 @@ request to either are **not** here.
 | annotation `modeldeployment.gpustack.ai/role-replicas` | the role's own `replicas` | ours, not Kueue's, and the only entry here Kueue does not read. It is what makes the rebuild predicate see a **reshape**: moving prefill 2 / decode 2 to prefill 1 / decode 3 leaves the total at four, so a check reading the total alone would trim one replica and add another in the same pass |
 | label `kueue.x-k8s.io/queue-name` | the `status.entrance` **published by** the role's InstanceType | unchanged; Kueue refuses a group whose Pods disagree on it. Read from the type rather than re-derived from its name, so this operator and the reconcile that creates the LocalQueue cannot disagree about the queue |
 | label `app.kubernetes.io/component` | the role's `name` | unchanged; what a `Service` selects on and what `status.roles[]` is attributed by |
+| label `modeldeployment.gpustack.ai/role-kind` | the role's **effective** `kind`, so `server` when the field is unset | what something in front of the replicas selects on to tell a prefiller from a decoder. It is the resolved value rather than the field, because a selector matching the empty string would miss every replica of the default shape. Rendered for every deployment, a lone `server` included, so "no prefiller is running" and "this deployment does not label its roles" are different answers |
 | `spec.nodeSelector` | nothing is added | a role takes whatever flavor its pool assigns. Kueue evaluates a candidate flavor per PodSet, and with no selector to match against there is nothing to narrow the choice within one pool |
 
 The `role-hash` annotation is load-bearing rather than cosmetic. Kueue takes it verbatim when present
@@ -633,6 +634,11 @@ So a departing replica costs its siblings the blocks it held. The deployment rec
 the replica and the lease window on each of three paths — `ReplicaEvicted`, `ReplicaLeaving`,
 `ReplicaRestarted` — so an operator correlating a burst of failed requests with a replica that went
 away has the correlation written down rather than inferred.
+
+**An upgrade can trigger the same rebuild without any spec edit.** The fingerprint covers a replica's
+labels and annotations as well as its spec, so a release that adds a key every replica carries leaves
+every existing replica stale and recreates it once. The `role-kind` label listed above did exactly
+that. Nothing is required of you, but on a busy deployment the restart is worth scheduling.
 
 ### Which fields are the deployment's identity
 
