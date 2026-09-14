@@ -466,10 +466,13 @@ no gates, one key format.
 store backend accepts that one transport and raises on every other, so the injection refuses rather
 than renders.
 
-`protocol` defaults to `Auto`, which resolves to TCP — so **an all-Ascend deployment on a default pool
-does not render either**, and that refusal has nothing to do with the two manufacturers matching or
-differing. What triggers it is one `vllm-ascend` role meeting a pool that does not offer `ascend`,
-alone or paired. The refusal names both halves of the pair and what to set; see
+**The rule is one-sided, and reading it as a cross-manufacturer rule predicts the wrong thing.** What
+triggers the refusal is **one `vllm-ascend` role meeting a pool that does not offer `ascend`** —
+alone or paired, matching manufacturers or not. Only vLLM-Ascend constrains the transport; vLLM and
+SGLang accept any.
+
+So `protocol` defaulting to `Auto`, which resolves to TCP, means **an all-Ascend deployment on a
+default pool does not render either**. The refusal names both halves of the pair and what to set; see
 [Refusals and their fixes](#refusals-and-their-fixes).
 
 **How to tell which you got.** The injection record carries `engine`, and the connector follows from
