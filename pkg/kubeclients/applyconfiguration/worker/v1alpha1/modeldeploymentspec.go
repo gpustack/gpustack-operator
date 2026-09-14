@@ -41,6 +41,28 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	// is a webhook edit rather than a schema change every stored object must survive. The figure is
 	// not restated here, because the one that binds is in the Kueue the cluster runs.
 	Roles []ModelDeploymentRoleApplyConfiguration `json:"roles,omitempty"`
+	// Router optionally puts a request router in front of the roles.
+	//
+	// NOTHING RENDERS A ROUTER YET. The field is accepted and the rules stated on it are applied, but
+	// no Deployment, ConfigMap or Service is created from it and status.endpoint does not move. Every
+	// sentence below describes the contract this field commits to, not behavior already in place, and
+	// each says which of the two it is where that is not obvious.
+	//
+	// THE PARAGRAPH ABOVE EXPIRES WHOLE, on the first change that renders anything from this field.
+	// Delete it then, rather than editing it down: whoever writes that renderer is the one reader
+	// guaranteed to be looking here, and a paragraph trimmed clause by clause becomes a list of what
+	// is still missing, which is the thing nobody keeps current.
+	//
+	// IT IS EAST-WEST TRAFFIC MANAGEMENT, NOT A PREFILL/DECODE PAIRER, and the distinction decides
+	// which shapes are legal behind it. Several plain servers is one of them: a router that scores on
+	// a cache view picks between equals in a way a Service cannot, so "there is no pair here" is not a
+	// reason to refuse one. Several prefillers with several decoders is another. A rule admitting only
+	// one prefiller and one decoder would describe a pairer rather than this field.
+	//
+	// Absent means no router, and that stays a supported shape rather than a broken one: the roles are
+	// individually addressable through their own Services either way, so a deployment written before
+	// this field existed serves exactly as it did.
+	Router *ModelDeploymentRouterApplyConfiguration `json:"router,omitempty"`
 }
 
 // ModelDeploymentSpecApplyConfiguration constructs a declarative configuration of the ModelDeploymentSpec type for use with
@@ -91,5 +113,13 @@ func (b *ModelDeploymentSpecApplyConfiguration) WithRoles(values ...*ModelDeploy
 		}
 		b.Roles = append(b.Roles, *values[i])
 	}
+	return b
+}
+
+// WithRouter sets the Router field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Router field is set to the value of the last call.
+func (b *ModelDeploymentSpecApplyConfiguration) WithRouter(value *ModelDeploymentRouterApplyConfiguration) *ModelDeploymentSpecApplyConfiguration {
+	b.Router = value
 	return b
 }

@@ -461,6 +461,31 @@ func (in ModelDeploymentRoleStatus) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentRouter) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRouter"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentRouterKVEvents) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRouterKVEvents"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentRouterMetrics) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRouterMetrics"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentRouterRoleStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRouterRoleStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentRouterStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRouterStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentSpec) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentSpec"
 }

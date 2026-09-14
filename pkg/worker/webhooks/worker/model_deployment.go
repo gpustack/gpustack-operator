@@ -619,13 +619,20 @@ func validateModelDeploymentRoleServiceNames(
 	return errs
 }
 
-// validateModelDeploymentRoleKinds holds the two rules about what a role is told it is.
+// validateModelDeploymentRoleKinds holds the three rules about what a role is told it is.
 //
 // The first is about the SET: a server serves whole requests by itself, so "one plain server plus a
 // prefiller" names no shape anything consumes, and accepting it would mean rendering a transfer
 // configuration whose meaning is undefined.
 //
-// The second is about the ENGINE: a kind is only real if the engine's rendering has a term for it.
+// The second is about MULTIPLICITY, and it is deliberately asymmetric. Several roles of kind server
+// are a set of equals, and something in front of them can pick between them; several prefillers are
+// not, because nothing consuming these roles expresses a second one, so the extra role would render
+// into a configuration nothing downstream can reach. The rule therefore refuses a repeated NON-SERVER
+// kind rather than repetition in general, and server is exempt by that reasoning rather than by
+// having been overlooked.
+//
+// The third is about the ENGINE: a kind is only real if the engine's rendering has a term for it.
 // Refusing here is the whole point — the alternative is a container that starts, looks configured,
 // and behaves as though the role were never declared, or one the engine rejects at start-up with a
 // message naming none of this.
@@ -643,6 +650,10 @@ func validateModelDeploymentRoleKinds(md *workercore.ModelDeployment) field.Erro
 		}
 	}
 
+	// firstOfKind remembers where a non-server kind was first declared, so the refusal can name the
+	// role the second one collides with rather than only the index it sits at.
+	firstOfKind := make(map[workercore.ModelDeploymentRoleKind]int, len(md.Spec.Roles))
+
 	for i := range md.Spec.Roles {
 		role, kindPath := &md.Spec.Roles[i], rolesPath.Index(i).Child("kind")
 		kind := workerctrl.ModelDeploymentEffectiveRoleKind(role)
@@ -657,6 +668,22 @@ func validateModelDeploymentRoleKinds(md *workercore.ModelDeployment) field.Erro
 			)))
 
 			continue
+		}
+
+		if kind != workercore.ModelDeploymentRoleKindServer {
+			if first, seen := firstOfKind[kind]; seen {
+				errs = append(errs, field.Invalid(kindPath, kind, fmt.Sprintf(
+					"kind %q is already declared by role %q: only %q may be declared by more than one "+
+						"role, because a set of servers is a set of equals, whereas nothing consuming "+
+						"these roles expresses a second %q and the extra role would render into a "+
+						"configuration nothing downstream can reach",
+					kind, md.Spec.Roles[first].Name, workercore.ModelDeploymentRoleKindServer, kind,
+				)))
+
+				continue
+			}
+
+			firstOfKind[kind] = i
 		}
 
 		if !workerctrl.ModelDeploymentSupportsRoleKind(md.Spec.Engine, kind) {

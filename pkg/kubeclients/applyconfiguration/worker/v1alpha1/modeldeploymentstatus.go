@@ -40,6 +40,13 @@ type ModelDeploymentStatusApplyConfiguration struct {
 	// It is ABSENT while the Binding cannot be resolved, rather than present and empty: an empty
 	// object here would be indistinguishable from a domain whose every field happens to be empty.
 	KVCache *ModelDeploymentKVCacheStatusApplyConfiguration `json:"kvCache,omitempty"`
+	// Router is everything a router needs in order to front this deployment, published under BOTH
+	// modes. Under the external mode it is the entire output of this feature.
+	//
+	// It is ABSENT when spec.router is, rather than present and empty, for the same reason KVCache is:
+	// an empty object here cannot be told apart from a contract whose every string happens to be
+	// empty.
+	Router *ModelDeploymentRouterStatusApplyConfiguration `json:"router,omitempty"`
 }
 
 // ModelDeploymentStatusApplyConfiguration constructs a declarative configuration of the ModelDeploymentStatus type for use with
@@ -103,5 +110,13 @@ func (b *ModelDeploymentStatusApplyConfiguration) WithRoles(values ...*ModelDepl
 // If called multiple times, the KVCache field is set to the value of the last call.
 func (b *ModelDeploymentStatusApplyConfiguration) WithKVCache(value *ModelDeploymentKVCacheStatusApplyConfiguration) *ModelDeploymentStatusApplyConfiguration {
 	b.KVCache = value
+	return b
+}
+
+// WithRouter sets the Router field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Router field is set to the value of the last call.
+func (b *ModelDeploymentStatusApplyConfiguration) WithRouter(value *ModelDeploymentRouterStatusApplyConfiguration) *ModelDeploymentStatusApplyConfiguration {
+	b.Router = value
 	return b
 }

@@ -145,6 +145,11 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentRole{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref),
 		v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref),
 		v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref),
+		v1alpha1.ModelDeploymentRouter{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouter(ref),
+		v1alpha1.ModelDeploymentRouterKVEvents{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterKVEvents(ref),
+		v1alpha1.ModelDeploymentRouterMetrics{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterMetrics(ref),
+		v1alpha1.ModelDeploymentRouterRoleStatus{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterRoleStatus(ref),
+		v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterStatus(ref),
 		v1alpha1.ModelDeploymentSpec{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref),
 		v1alpha1.ModelDeploymentStatus{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref),
 		v1alpha1.ModelDeploymentTemplate{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_ModelDeploymentTemplate(ref),
@@ -7156,7 +7161,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 					},
 					"kind": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable by typing a string is one typo away from silently changing. Two roles may share a kind and differ in name. It defaults to Server, the shape a deployment written before disaggregation existed has, so such a deployment renders exactly as it did.\n\n\nPossible enum values:\n - `\"decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
+							Description: "Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable by typing a string is one typo away from silently changing. Two roles may share a kind and differ in name ONLY where that kind is Server, because a pair of servers is a set of equals and two prefillers are not: nothing that consumes these roles expresses a second prefiller, so a deployment declaring one would render a role no reader of the rendered configuration could reach. It defaults to Server, the shape a deployment written before disaggregation existed has, so such a deployment renders exactly as it did.\n\n\nPossible enum values:\n - `\"decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
 							Type:        []string{"string"},
 							Format:      "",
 							Enum:        []interface{}{"decode", "prefill", "server"},
@@ -7279,6 +7284,280 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouter(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRouter is the router that fronts a deployment's roles, and how much of it this operator runs.\n\nTHERE IS NO FIELD SELECTING WHO RUNS THE ROUTER, and that is a decision rather than an omission. This operator renders and owns it; a deployment fronted by a router the cluster already runs is not expressible. A field offering that choice while only one of its values rendered anything would carry no information -- every object would hold the same value -- and adding one later is an optional field with a default, which is backward compatible. Shipping the choice first and then changing what its values mean would not be.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name selects which router implementation fronts this deployment.\n\nTHE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the difference is visible in the same word twice: the transport protocol on the cache backend types spells it \"Auto\" while the connector here spells it \"auto\". The casing convention is per API type, and the reason is the one ModelDeploymentRoleKind states about itself -- these values are terms the outside tool understands, not terms this operator invents. \"llm-d\" is how that project spells itself in its module path, its API group and its label domain, so it is spelled that way here.\n\nONE VALUE TODAY IS A CHOICE TAKEN FOR NOW, NOT THE ABSENCE OF ONE. This field exists ahead of a second implementation precisely so that adding one is a widening of this enum rather than a new field appearing on an API that already shipped without it.\n\nWIDENING IT IS FOUR THINGS, NOT ONE: one entry here, one configuration renderer, the object set that router needs, AND the wiring that threads this value to a dispatch point. The schema reservation covers the first of those and nothing else, which is why a second router is a piece of work rather than a constant.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"replicas": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Replicas is how many router Pods to run. Absent means one.\n\nIT IS A POINTER AND CARRIES NO SCHEMA DEFAULT, and that is forced rather than chosen. A schema default is applied before any webhook sees the object, so a plain int32 defaulted to one arrives indistinguishable from one the user typed. Keeping the distinction readable at admission is what lets a later rule answer \"did anyone ask for this\" at all, and a default that erases the difference cannot be un-erased afterwards.\n\nMORE THAN ONE REPLICA TRADES CACHE CONSISTENCY FOR AVAILABILITY. A router that scores on a prefix cache holds that state per replica: upstream reports radix trees that do not synchronize across replicas and a hit rate falling by ten to twenty percent as a result, and reports that where replicas do exchange events the exchange improves load estimation without making two replicas route alike. More than one is permitted; the cost is stated here rather than left to be found on a dashboard.",
+							Minimum:     ptr.To[float64](1),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"image": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Image overrides the router's container image. Empty means the operator assembles one from Name, the same way a role's image is assembled when its template names none.",
+							MaxLength:   ptr.To[int64](512),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"extraArgs": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "ExtraArgs are additional flags for the router process.\n\nThe intent is that a flag the operator derives itself is refused rather than merged, so that one setting has one source. NOTHING ENFORCES THAT YET: the catalog it would consult is keyed by router rather than by engine, and the engine-keyed catalog guarding a role's extraArgs answers a different question and cannot stand in for it.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterKVEvents(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRouterKVEvents is one role's cache-event stream, as something a consumer can reach.\n\nA BIND ADDRESS IS NOT A DIALABLE ADDRESS. The engine is configured with what its publisher binds, which names no host; these are the addresses a consumer connects to. Publishing the bind string here would be publishing a value that works nowhere but inside the publishing Pod.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"endpoint": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Endpoint is the stream a consumer subscribes to.",
+							Default:     "",
+							MaxLength:   ptr.To[int64](512),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"replayEndpoint": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReplayEndpoint is where a consumer that joined late asks for the events it missed. A consumer without it starts with an empty view of a cache that is not empty.",
+							MaxLength:   ptr.To[int64](512),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"topic": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Topic is the topic the publisher was configured with. A consumer subscribing to a different one receives nothing and reports no error.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"endpoint"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterMetrics(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRouterMetrics are the serving metrics a router scores on.\n\nTHE NAMES ARE PUBLISHED RATHER THAN ASSUMED because they are the engine's, and this operator knows which engine it configured. A router holding a name that engine does not expose scores every replica identically and reports nothing wrong.\n\nTheir presence here says the operator configured an engine that exposes them. It does NOT say they are reachable from where a router runs, and it cannot: a role may name any image.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"port": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Port is the port the metrics are served on. The lower bound is not decoration: unlike the names beside it, this is a number a consumer dials, and a zero would fail only at connect time.",
+							Default:     0,
+							Minimum:     ptr.To[float64](1),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"queuedRequests": {
+						SchemaProps: spec.SchemaProps{
+							Description: "QueuedRequests names the metric holding requests waiting to be admitted by the engine.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"runningRequests": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RunningRequests names the metric holding requests the engine is currently serving.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"kvCacheUtilization": {
+						SchemaProps: spec.SchemaProps{
+							Description: "KVCacheUtilization names the metric holding how full the engine's KV cache is.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"port", "queuedRequests", "runningRequests", "kvCacheUtilization"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterRoleStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRouterRoleStatus is one role as a router sees it.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the role's name, matching spec.roles[].name.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is the role's effective kind, which is what tells a prefiller from a decoder. It is the resolved value rather than the field, because a role naming no kind is a server and a consumer matching on the empty string would find nothing.\n\nPossible enum values:\n - `\"decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"decode", "prefill", "server"},
+						},
+					},
+					"selector": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Selector is the label selector matching exactly this role's replicas, published VERBATIM so that a router is configured from observed strings rather than from a documented convention.\n\nA router given a selector survives scaling; a router given a list of addresses does not, and would have to be reconfigured and restarted every time a role grew or shrank.",
+							Type:        []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+					"endpoint": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Endpoint is this role's own address, which stays reachable whether or not a router fronts the deployment, so that one half of a pair can be addressed directly while debugging.",
+							MaxLength:   ptr.To[int64](512),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"kvEvents": {
+						SchemaProps: spec.SchemaProps{
+							Description: "KVEvents is where this role publishes its cache events, absent on a role configured not to publish.",
+							Ref:         ref(v1alpha1.ModelDeploymentRouterKVEvents{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"name", "kind"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentRouterKVEvents{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRouterStatus is the contract a router is configured from.\n\nEVERY STRING HERE IS ONE THE OPERATOR ACTUALLY RENDERED, never a default written down in documentation. A consumer reading this object and the router the operator configured therefore cannot disagree about a selector, a topic or a metric name, which is what makes this object worth publishing rather than a restatement of what the documentation already says.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name echoes the spec, so that a reader holding only this object knows which implementation the contract below was shaped for.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"endpoint": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Endpoint is the router's own address, present once the router's Service has one.",
+							MaxLength:   ptr.To[int64](512),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"poolEndpoint": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PoolEndpoint is the address of the KV cache pool this deployment attached to, in the form its client takes. A router that consults the pool needs it, and resolving it from the Binding is work this operator has already done.",
+							MaxLength:   ptr.To[int64](512),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"roles": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Roles is one entry per declared role, and its key set EQUALS the role set. A router discovers live replicas for itself; what it cannot discover is which selector names which half of a pair.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelDeploymentRouterRoleStatus{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"metrics": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Metrics are the serving metrics the roles expose and the port they are served on. They are deployment-wide because they are a property of the engine, which is a deployment-wide field.",
+							Ref:         ref(v1alpha1.ModelDeploymentRouterMetrics{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentRouterMetrics{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRouterRoleStatus{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -7341,12 +7620,18 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref common.Referenc
 							},
 						},
 					},
+					"router": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Router optionally puts a request router in front of the roles.\n\nNOTHING RENDERS A ROUTER YET. The field is accepted and the rules stated on it are applied, but no Deployment, ConfigMap or Service is created from it and status.endpoint does not move. Every sentence below describes the contract this field commits to, not behavior already in place, and each says which of the two it is where that is not obvious.\n\nTHE PARAGRAPH ABOVE EXPIRES WHOLE, on the first change that renders anything from this field. Delete it then, rather than editing it down: whoever writes that renderer is the one reader guaranteed to be looking here, and a paragraph trimmed clause by clause becomes a list of what is still missing, which is the thing nobody keeps current.\n\nIT IS EAST-WEST TRAFFIC MANAGEMENT, NOT A PREFILL/DECODE PAIRER, and the distinction decides which shapes are legal behind it. Several plain servers is one of them: a router that scores on a cache view picks between equals in a way a Service cannot, so \"there is no pair here\" is not a reason to refuse one. Several prefillers with several decoders is another. A rule admitting only one prefiller and one decoder would describe a pairer rather than this field.\n\nAbsent means no router, and that stays a supported shape rather than a broken one: the roles are individually addressable through their own Services either way, so a deployment written before this field existed serves exactly as it did.",
+							Ref:         ref(v1alpha1.ModelDeploymentRouter{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"model", "engine", "engineVersion", "kvCache", "roles"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.ModelDeploymentKVCache{}.OpenAPIModelName(), v1alpha1.ModelDeploymentModel{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRole{}.OpenAPIModelName()},
+			v1alpha1.ModelDeploymentKVCache{}.OpenAPIModelName(), v1alpha1.ModelDeploymentModel{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRole{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRouter{}.OpenAPIModelName()},
 	}
 }
 
@@ -7431,11 +7716,17 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 							Ref:         ref(v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName()),
 						},
 					},
+					"router": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Router is everything a router needs in order to front this deployment, published under BOTH modes. Under the external mode it is the entire output of this feature.\n\nIt is ABSENT when spec.router is, rather than present and empty, for the same reason KVCache is: an empty object here cannot be told apart from a contract whose every string happens to be empty.",
+							Ref:         ref(v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName()),
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName()},
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName()},
 	}
 }
 

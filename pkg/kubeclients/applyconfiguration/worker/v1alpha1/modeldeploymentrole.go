@@ -78,8 +78,11 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name
 	// is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable
 	// by typing a string is one typo away from silently changing. Two roles may share a kind and
-	// differ in name. It defaults to Server, the shape a deployment written before disaggregation
-	// existed has, so such a deployment renders exactly as it did.
+	// differ in name ONLY where that kind is Server, because a pair of servers is a set of equals and
+	// two prefillers are not: nothing that consumes these roles expresses a second prefiller, so a
+	// deployment declaring one would render a role no reader of the rendered configuration could
+	// reach. It defaults to Server, the shape a deployment written before disaggregation existed has,
+	// so such a deployment renders exactly as it did.
 	Kind *workerv1alpha1.ModelDeploymentRoleKind `json:"kind,omitempty"`
 }
 

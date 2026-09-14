@@ -89,6 +89,31 @@ type ModelDeploymentSpec struct {
 	// +listType=map
 	// +listMapKey=name
 	Roles []ModelDeploymentRole `json:"roles" protobuf:"bytes,4,rep,name=roles"`
+
+	// Router optionally puts a request router in front of the roles.
+	//
+	// NOTHING RENDERS A ROUTER YET. The field is accepted and the rules stated on it are applied, but
+	// no Deployment, ConfigMap or Service is created from it and status.endpoint does not move. Every
+	// sentence below describes the contract this field commits to, not behavior already in place, and
+	// each says which of the two it is where that is not obvious.
+	//
+	// THE PARAGRAPH ABOVE EXPIRES WHOLE, on the first change that renders anything from this field.
+	// Delete it then, rather than editing it down: whoever writes that renderer is the one reader
+	// guaranteed to be looking here, and a paragraph trimmed clause by clause becomes a list of what
+	// is still missing, which is the thing nobody keeps current.
+	//
+	// IT IS EAST-WEST TRAFFIC MANAGEMENT, NOT A PREFILL/DECODE PAIRER, and the distinction decides
+	// which shapes are legal behind it. Several plain servers is one of them: a router that scores on
+	// a cache view picks between equals in a way a Service cannot, so "there is no pair here" is not a
+	// reason to refuse one. Several prefillers with several decoders is another. A rule admitting only
+	// one prefiller and one decoder would describe a pairer rather than this field.
+	//
+	// Absent means no router, and that stays a supported shape rather than a broken one: the roles are
+	// individually addressable through their own Services either way, so a deployment written before
+	// this field existed serves exactly as it did.
+	//
+	// +optional
+	Router *ModelDeploymentRouter `json:"router,omitempty" protobuf:"bytes,6,opt,name=router"`
 }
 
 // The engines a ModelDeployment can run, which are the values of ModelDeploymentSpec.Engine's enum.
@@ -260,8 +285,11 @@ type ModelDeploymentRole struct {
 	// Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name
 	// is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable
 	// by typing a string is one typo away from silently changing. Two roles may share a kind and
-	// differ in name. It defaults to Server, the shape a deployment written before disaggregation
-	// existed has, so such a deployment renders exactly as it did.
+	// differ in name ONLY where that kind is Server, because a pair of servers is a set of equals and
+	// two prefillers are not: nothing that consumes these roles expresses a second prefiller, so a
+	// deployment declaring one would render a role no reader of the rendered configuration could
+	// reach. It defaults to Server, the shape a deployment written before disaggregation existed has,
+	// so such a deployment renders exactly as it did.
 	//
 	// +k8s:validation:default="server"
 	// +k8s:validation:enum=["server","prefill","decode"]
@@ -412,6 +440,83 @@ type ModelDeploymentRoleResources struct {
 	AcceleratorPartitionedProfile string `json:"acceleratorPartitionedProfile,omitempty" protobuf:"bytes,4,opt,name=acceleratorPartitionedProfile"` // nolint: lll
 }
 
+// ModelDeploymentRouter is the router that fronts a deployment's roles, and how much of it this
+// operator runs.
+//
+// THERE IS NO FIELD SELECTING WHO RUNS THE ROUTER, and that is a decision rather than an omission.
+// This operator renders and owns it; a deployment fronted by a router the cluster already runs is not
+// expressible. A field offering that choice while only one of its values rendered anything would
+// carry no information -- every object would hold the same value -- and adding one later is an
+// optional field with a default, which is backward compatible. Shipping the choice first and then
+// changing what its values mean would not be.
+type ModelDeploymentRouter struct {
+	// Name selects which router implementation fronts this deployment.
+	//
+	// THE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the difference is
+	// visible in the same word twice: the transport protocol on the cache backend types spells it
+	// "Auto" while the connector here spells it "auto". The casing convention is per API type, and the
+	// reason is the one ModelDeploymentRoleKind states about itself -- these values are terms the
+	// outside tool understands, not terms this operator invents. "llm-d" is how that project spells
+	// itself in its module path, its API group and its label domain, so it is spelled that way here.
+	//
+	// ONE VALUE TODAY IS A CHOICE TAKEN FOR NOW, NOT THE ABSENCE OF ONE. This field exists ahead of a
+	// second implementation precisely so that adding one is a widening of this enum rather than a new
+	// field appearing on an API that already shipped without it.
+	//
+	// WIDENING IT IS FOUR THINGS, NOT ONE: one entry here, one configuration renderer, the object set
+	// that router needs, AND the wiring that threads this value to a dispatch point. The schema
+	// reservation covers the first of those and nothing else, which is why a second router is a piece
+	// of work rather than a constant.
+	//
+	// +required
+	// +k8s:validation:enum=["llm-d"]
+	Name string `json:"name" protobuf:"bytes,1,name=name"`
+
+	// Replicas is how many router Pods to run. Absent means one.
+	//
+	// IT IS A POINTER AND CARRIES NO SCHEMA DEFAULT, and that is forced rather than chosen. A schema
+	// default is applied before any webhook sees the object, so a plain int32 defaulted to one arrives
+	// indistinguishable from one the user typed. Keeping the distinction readable at admission is what
+	// lets a later rule answer "did anyone ask for this" at all, and a default that erases the
+	// difference cannot be un-erased afterwards.
+	//
+	// MORE THAN ONE REPLICA TRADES CACHE CONSISTENCY FOR AVAILABILITY. A router that scores on a
+	// prefix cache holds that state per replica: upstream reports radix trees that do not synchronize
+	// across replicas and a hit rate falling by ten to twenty percent as a result, and reports that
+	// where replicas do exchange events the exchange improves load estimation without making two
+	// replicas route alike. More than one is permitted; the cost is stated here rather than left to be
+	// found on a dashboard.
+	//
+	// +optional
+	// +k8s:validation:minimum=1
+	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,2,opt,name=replicas"`
+
+	// Image overrides the router's container image. Empty means the operator assembles one from Name,
+	// the same way a role's image is assembled when its template names none.
+	//
+	// +optional
+	// +k8s:validation:maxLength=512
+	Image string `json:"image,omitempty" protobuf:"bytes,3,opt,name=image"`
+
+	// ExtraArgs are additional flags for the router process.
+	//
+	// The intent is that a flag the operator derives itself is refused rather than merged, so that one
+	// setting has one source. NOTHING ENFORCES THAT YET: the catalog it would consult is keyed by
+	// router rather than by engine, and the engine-keyed catalog guarding a role's extraArgs answers a
+	// different question and cannot stand in for it.
+	//
+	// +optional
+	// +listType=atomic
+	ExtraArgs []string `json:"extraArgs,omitempty" protobuf:"bytes,4,rep,name=extraArgs"`
+}
+
+// The routers a ModelDeployment can name, which are the values of ModelDeploymentRouter.Name's enum.
+//
+// Declared beside the field whose schema closes the set, so that a reader of either finds the other.
+const (
+	ModelDeploymentRouterLLMD = "llm-d"
+)
+
 // ModelDeploymentStatus defines the observed state of ModelDeployment.
 //
 // It is REBUILT FROM OBSERVED STATE ON EVERY RECONCILE, so a stale field cannot survive a
@@ -458,6 +563,14 @@ type ModelDeploymentStatus struct {
 	// It is ABSENT while the Binding cannot be resolved, rather than present and empty: an empty
 	// object here would be indistinguishable from a domain whose every field happens to be empty.
 	KVCache *ModelDeploymentKVCacheStatus `json:"kvCache,omitempty" protobuf:"bytes,6,opt,name=kvCache"`
+
+	// Router is everything a router needs in order to front this deployment, published under BOTH
+	// modes. Under the external mode it is the entire output of this feature.
+	//
+	// It is ABSENT when spec.router is, rather than present and empty, for the same reason KVCache is:
+	// an empty object here cannot be told apart from a contract whose every string happens to be
+	// empty.
+	Router *ModelDeploymentRouterStatus `json:"router,omitempty" protobuf:"bytes,7,opt,name=router"`
 }
 
 // ModelDeploymentRoleStatus is one role's observed readiness.
@@ -551,6 +664,119 @@ type ModelDeploymentKVCacheDomain struct {
 
 	// +required
 	Dtype string `json:"dtype" protobuf:"bytes,3,name=dtype"`
+}
+
+// ModelDeploymentRouterStatus is the contract a router is configured from.
+//
+// EVERY STRING HERE IS ONE THE OPERATOR ACTUALLY RENDERED, never a default written down in
+// documentation. A consumer reading this object and the router the operator configured therefore
+// cannot disagree about a selector, a topic or a metric name, which is what makes this object worth
+// publishing rather than a restatement of what the documentation already says.
+type ModelDeploymentRouterStatus struct {
+	// Name echoes the spec, so that a reader holding only this object knows which implementation the
+	// contract below was shaped for.
+	//
+	// +required
+	Name string `json:"name" protobuf:"bytes,1,name=name"`
+
+	// Endpoint is the router's own address, present once the router's Service has one.
+	//
+	// +k8s:validation:maxLength=512
+	Endpoint string `json:"endpoint,omitempty" protobuf:"bytes,2,opt,name=endpoint"`
+
+	// PoolEndpoint is the address of the KV cache pool this deployment attached to, in the form its
+	// client takes. A router that consults the pool needs it, and resolving it from the Binding is
+	// work this operator has already done.
+	//
+	// +k8s:validation:maxLength=512
+	PoolEndpoint string `json:"poolEndpoint,omitempty" protobuf:"bytes,3,opt,name=poolEndpoint"`
+
+	// Roles is one entry per declared role, and its key set EQUALS the role set. A router discovers
+	// live replicas for itself; what it cannot discover is which selector names which half of a pair.
+	//
+	// +listType=map
+	// +listMapKey=name
+	Roles []ModelDeploymentRouterRoleStatus `json:"roles,omitempty" protobuf:"bytes,4,rep,name=roles"`
+
+	// Metrics are the serving metrics the roles expose and the port they are served on. They are
+	// deployment-wide because they are a property of the engine, which is a deployment-wide field.
+	Metrics *ModelDeploymentRouterMetrics `json:"metrics,omitempty" protobuf:"bytes,5,opt,name=metrics"`
+}
+
+// ModelDeploymentRouterRoleStatus is one role as a router sees it.
+type ModelDeploymentRouterRoleStatus struct {
+	// Name is the role's name, matching spec.roles[].name.
+	Name string `json:"name" protobuf:"bytes,1,name=name"`
+
+	// Kind is the role's effective kind, which is what tells a prefiller from a decoder. It is the
+	// resolved value rather than the field, because a role naming no kind is a server and a consumer
+	// matching on the empty string would find nothing.
+	Kind ModelDeploymentRoleKind `json:"kind" protobuf:"bytes,2,name=kind,casttype=ModelDeploymentRoleKind"`
+
+	// Selector is the label selector matching exactly this role's replicas, published VERBATIM so
+	// that a router is configured from observed strings rather than from a documented convention.
+	//
+	// A router given a selector survives scaling; a router given a list of addresses does not, and
+	// would have to be reconfigured and restarted every time a role grew or shrank.
+	Selector map[string]string `json:"selector,omitempty" protobuf:"bytes,3,rep,name=selector"`
+
+	// Endpoint is this role's own address, which stays reachable whether or not a router fronts the
+	// deployment, so that one half of a pair can be addressed directly while debugging.
+	//
+	// +k8s:validation:maxLength=512
+	Endpoint string `json:"endpoint,omitempty" protobuf:"bytes,4,opt,name=endpoint"`
+
+	// KVEvents is where this role publishes its cache events, absent on a role configured not to
+	// publish.
+	KVEvents *ModelDeploymentRouterKVEvents `json:"kvEvents,omitempty" protobuf:"bytes,5,opt,name=kvEvents"`
+}
+
+// ModelDeploymentRouterKVEvents is one role's cache-event stream, as something a consumer can reach.
+//
+// A BIND ADDRESS IS NOT A DIALABLE ADDRESS. The engine is configured with what its publisher binds,
+// which names no host; these are the addresses a consumer connects to. Publishing the bind string
+// here would be publishing a value that works nowhere but inside the publishing Pod.
+type ModelDeploymentRouterKVEvents struct {
+	// Endpoint is the stream a consumer subscribes to.
+	//
+	// +k8s:validation:maxLength=512
+	Endpoint string `json:"endpoint" protobuf:"bytes,1,name=endpoint"`
+
+	// ReplayEndpoint is where a consumer that joined late asks for the events it missed. A consumer
+	// without it starts with an empty view of a cache that is not empty.
+	//
+	// +k8s:validation:maxLength=512
+	ReplayEndpoint string `json:"replayEndpoint,omitempty" protobuf:"bytes,2,opt,name=replayEndpoint"`
+
+	// Topic is the topic the publisher was configured with. A consumer subscribing to a different one
+	// receives nothing and reports no error.
+	Topic string `json:"topic,omitempty" protobuf:"bytes,3,opt,name=topic"`
+}
+
+// ModelDeploymentRouterMetrics are the serving metrics a router scores on.
+//
+// THE NAMES ARE PUBLISHED RATHER THAN ASSUMED because they are the engine's, and this operator knows
+// which engine it configured. A router holding a name that engine does not expose scores every
+// replica identically and reports nothing wrong.
+//
+// Their presence here says the operator configured an engine that exposes them. It does NOT say they
+// are reachable from where a router runs, and it cannot: a role may name any image.
+type ModelDeploymentRouterMetrics struct {
+	// Port is the port the metrics are served on. The lower bound is not decoration: unlike the names
+	// beside it, this is a number a consumer dials, and a zero would fail only at connect time.
+	//
+	// +required
+	// +k8s:validation:minimum=1
+	Port int32 `json:"port" protobuf:"varint,1,name=port"`
+
+	// QueuedRequests names the metric holding requests waiting to be admitted by the engine.
+	QueuedRequests string `json:"queuedRequests" protobuf:"bytes,2,name=queuedRequests"`
+
+	// RunningRequests names the metric holding requests the engine is currently serving.
+	RunningRequests string `json:"runningRequests" protobuf:"bytes,3,name=runningRequests"`
+
+	// KVCacheUtilization names the metric holding how full the engine's KV cache is.
+	KVCacheUtilization string `json:"kvCacheUtilization" protobuf:"bytes,4,name=kvCacheUtilization"`
 }
 
 // ModelDeploymentList holds the list of ModelDeployment.
