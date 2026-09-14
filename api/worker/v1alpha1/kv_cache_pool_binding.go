@@ -57,9 +57,10 @@ type KVCachePoolBindingSpec struct {
 	// storage layer's tenant_id (isolation) and cache_salt (prefix identity), so registering a
 	// domain creates a tenant with a quota ledger of its own.
 	//
-	// It is a STRUCT rather than a list deliberately, so the cardinality is structural and not a
-	// webhook rule: one Binding is one tenant, every figure in Status is a single series rather than
-	// a sum, and no rule for dividing one ceiling among several domains has to be invented.
+	// EXACTLY ONE DOMAIN AND NOT A LIST, deliberately, so the cardinality is enforced by the schema
+	// and not by a webhook rule: one Binding is one tenant, every figure in Status is a single series
+	// rather than a sum, and no rule for dividing one ceiling among several domains has to be
+	// invented.
 	//
 	// EVERY FIELD IS IMMUTABLE, webhook-enforced. Name re-points this namespace at a different
 	// ledger and strands the old one. BlockSize or Dtype changed under a warm cache is silent

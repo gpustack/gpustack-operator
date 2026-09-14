@@ -286,7 +286,7 @@ message InstanceMetrics {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
 
   // Sample is the current utilization sample of the Instance.
-  // Pointer fields inside are absent when the corresponding source is unavailable.
+  // Its optional fields are absent when the corresponding source is unavailable.
   optional InstanceMetricsSample sample = 2;
 }
 
