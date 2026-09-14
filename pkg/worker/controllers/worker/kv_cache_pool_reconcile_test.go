@@ -72,6 +72,8 @@ type fakeMaster struct {
 	// to be narrower than refuse: a pass whose LIST failed never reaches the removal at all.
 	refuseDeleteStatus int
 	refuseDeleteBody   string
+	deleteResponses    []fakeMasterResponse
+	deleteTenants      []string
 
 	// refuseScrape, when set, is written instead of the exposition. It is separate from refuse
 	// because the ledger and the exposition fail independently: a master can hold a perfectly good
@@ -85,6 +87,11 @@ type fakeMaster struct {
 	// — an ordering no resulting status can show, because by the end of a pass both halves are done
 	// however they were sequenced.
 	onWrite func()
+}
+
+type fakeMasterResponse struct {
+	status int
+	body   string
 }
 
 func newFakeMaster() *fakeMaster {
@@ -146,6 +153,16 @@ func (m *fakeMaster) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tenant := r.URL.Query().Get("tenant_id")
+	if r.Method == http.MethodDelete && len(m.deleteResponses) > 0 {
+		response := m.deleteResponses[0]
+		m.deleteResponses = m.deleteResponses[1:]
+		m.deleteTenants = append(m.deleteTenants, tenant)
+		w.WriteHeader(response.status)
+		_, _ = w.Write([]byte(response.body))
+		return
+	}
+
 	// Checked before the blanket refusal, because it is the narrower one: a master that answers its
 	// ledger perfectly and refuses only the removal is the TENANT_NOT_EMPTY state, and a test that
 	// refused the LIST as well would never reach the code that reads the removal's outcome.
@@ -161,7 +178,6 @@ func (m *fakeMaster) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tenant := r.URL.Query().Get("tenant_id")
 	switch r.Method {
 	case http.MethodGet:
 		if m.refuseStatus != 0 {
@@ -240,6 +256,21 @@ func (m *fakeMaster) refuseDeletes(status int, body string) {
 	defer m.mu.Unlock()
 
 	m.refuseDeleteStatus, m.refuseDeleteBody = status, body
+}
+
+func (m *fakeMaster) refuseDeleteSequence(responses ...fakeMasterResponse) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.deleteResponses = append([]fakeMasterResponse(nil), responses...)
+	m.deleteTenants = nil
+}
+
+func (m *fakeMaster) refusedDeleteTenants() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return append([]string(nil), m.deleteTenants...)
 }
 
 // refuseScrapeWith is the same for the exposition, which fails independently of the ledger.

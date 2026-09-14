@@ -268,18 +268,18 @@ a False condition and a non-Ready pool rather than as a pool that quietly grants
 
 ## Operating notes
 
-**A Binding's deletion is held for two different reasons, and the condition says which.** Read the
+**A Binding's deletion is held for three different reasons, and the condition says which.** Read the
 reason on `Releasable=False` before acting — they need different remedies:
 
 - `HeldByWorkloads` — a workload in the namespace still references the Binding (it is in
   `status.usedBy`). The message names the **workloads**. Remove them; nothing needs draining.
-- `LedgerNotReleased` — the master would not confirm the tenant is gone. Its message says which of
-  the two: the store refusing to drop the tenant while its domain is non-empty, where it names the
-  **domain** and draining it completes the release in seconds; or a ledger request that failed, where
-  the pool's own conditions carry what the master said.
+- `LedgerNotReleased` — the store refuses to drop the tenant while its domain is non-empty. The
+  message names the **domain**; drain it and the release completes on the next pass.
+- `LedgerRequestFailed` — a ledger request failed, leaving whether the tenant is gone unknown.
+  Draining changes nothing; read the pool's own conditions for what the master reported.
 
-They are separate because the action differs: removing workloads cannot clear a tenant the store
-still retains, and draining a domain cannot make an unanswering master answer.
+They are separate because the action differs: removing workloads, draining a domain and restoring
+an unanswering master are three different operations.
 
 **A master that holds no tenant ledger releases the Binding rather than holding it.** With
 multi-tenancy off there is no ledger for a quota entry to be in, so the deletion strands nothing and

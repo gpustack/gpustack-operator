@@ -1140,7 +1140,7 @@ func TestKVCachePoolBindingRelease_SeparatesASettledLedgerFromAnUnknownOne(t *te
 			name:       "the ledger read fails for another reason",
 			status:     503,
 			body:       `{"success":false,"error_code":-1011,"error_message":"SERVICE_NOT_READY"}`,
-			wantReason: KVCachePoolBindingReasonLedgerNotReleased,
+			wantReason: KVCachePoolBindingReasonLedgerRequestFailed,
 			wantMsg:    "tenant ledger did not answer this pass",
 		},
 	}
@@ -1178,6 +1178,49 @@ func TestKVCachePoolBindingRelease_SeparatesASettledLedgerFromAnUnknownOne(t *te
 			assert.Contains(t, KVCachePoolBindingConditionReleasable.GetMessage(binding), tc.wantMsg)
 		})
 	}
+}
+
+// TestKVCachePoolBindingRelease_PreservesAKnownRetainedDomainAcrossASiblingFailure covers a pass
+// whose first removal answers and whose second removal does not. The first answer remains useful:
+// its Binding needs draining, while the sibling's outcome is unknown and needs the master restored.
+func TestKVCachePoolBindingRelease_PreservesAKnownRetainedDomainAcrossASiblingFailure(t *testing.T) {
+	master := newFakeMaster()
+	address := master.start(t)
+	r, cli := newReconciler(
+		newReconcileBackend("mooncake-dram", address),
+		newTestKVCachePool("shared", "mooncake-dram"),
+		newBoundBinding("team-a", "chat", "shared", "team-a-chat", resource.MustParse("20Ti")),
+		newBoundBinding("team-b", "embed", "shared", "team-b-embed", resource.MustParse("10Ti")),
+	)
+
+	reconcilePool(t, r, "shared")
+	deleteObject(t, cli, readBinding(t, cli, "team-a", "chat"))
+	deleteObject(t, cli, readBinding(t, cli, "team-b", "embed"))
+	master.refuseDeleteSequence(
+		fakeMasterResponse{
+			status: 409,
+			body:   `{"success":false,"error_code":-1702,"error_message":"TENANT_NOT_EMPTY"}`,
+		},
+		fakeMasterResponse{
+			status: 503,
+			body:   `{"success":false,"error_code":-1011,"error_message":"SERVICE_NOT_READY"}`,
+		},
+	)
+
+	reconcilePool(t, r, "shared")
+
+	deleted := master.refusedDeleteTenants()
+	require.Len(t, deleted, 2)
+	bindings := map[string]ctrlcli.ObjectKey{
+		"team-a-chat":  {Namespace: "team-a", Name: "chat"},
+		"team-b-embed": {Namespace: "team-b", Name: "embed"},
+	}
+	retained := readBinding(t, cli, bindings[deleted[0]].Namespace, bindings[deleted[0]].Name)
+	unknown := readBinding(t, cli, bindings[deleted[1]].Namespace, bindings[deleted[1]].Name)
+	assert.Equal(t, KVCachePoolBindingReasonLedgerNotReleased,
+		conditionReason(t, retained, KVCachePoolBindingConditionReleasable))
+	assert.Equal(t, KVCachePoolBindingReasonLedgerRequestFailed,
+		conditionReason(t, unknown, KVCachePoolBindingConditionReleasable))
 }
 
 // kvCachePoolIsPresent reports a pool the API server still holds.
