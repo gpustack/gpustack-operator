@@ -158,6 +158,12 @@ which the shape is refused instead.
 refuses a second resource group repeating a covered resource within one queue. With a queue per role
 there is no second group to repeat anything.
 
+**Admission and scheduling are not the whole answer, though.** A cross-manufacturer pair is admitted,
+rendered and runs, and its two halves still do not share the KV cache. Two independent walls produce
+that, only one of which this repository could remove — read
+[Two roles on different manufacturers](kv-cache-injection.md#two-roles-on-different-manufacturers-do-not-share-the-cache)
+before pairing roles across manufacturers.
+
 [Kueue assigns a ResourceFlavor per
 PodSet](../architecture/scheduling-chain.md#stage-4-the-kueue-chain), so a role still takes whatever
 its own pool assigns; what selects the hardware is the `instanceType` the role names.

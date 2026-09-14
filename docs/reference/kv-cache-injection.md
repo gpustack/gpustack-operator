@@ -23,6 +23,7 @@ webhooks may write too.
 - [The vLLM vehicle needs vLLM 0.21.1 or newer](#the-vllm-vehicle-needs-vllm-0211-or-newer)
 - [Reading the injection record](#reading-the-injection-record)
 - [Isolation is per engine, and so is the `default` Binding](#isolation-is-per-engine-and-so-is-the-default-binding)
+- [Two roles on different manufacturers do not share the cache](#two-roles-on-different-manufacturers-do-not-share-the-cache)
 - [What a cache changes about a workload](#what-a-cache-changes-about-a-workload)
 
 ## The contract
@@ -424,6 +425,44 @@ consume a pool arrives as an annotation on a Pod created later, so a second doma
 ledger-holding backend is admitted with an **admission warning** naming what it buys. So on a vLLM-only
 pool today the operational rule is unchanged: **one reuse domain per backend is safe; a second one
 shares a cache with the first**, and each injected Pod's stamp is where you read which happened.
+
+## Two roles on different manufacturers do not share the cache
+
+**The deployment is admitted, rendered, and runs. What fails is the sharing.** Nothing refuses a
+deployment whose roles sit on accelerators from different manufacturers, and nothing about the running
+Pods looks wrong: each half opens the file this renderer projects and reports itself healthy. The two
+halves simply never read each other's blocks.
+
+Two separate walls produce that, and **they are independent** — one may move without the other, so
+read them apart rather than as a single "cross-manufacturer is unsupported".
+
+**Wall 1 — the consumer-side gates, and there are three of them across two flags.** The vLLM-Ascend
+store reads `consumer_is_to_load` and `consumer_is_to_put` from `kv_connector_extra_config`; both
+default to false and gate three separate paths — the lookup before any query, the save, and the
+release. This operator passes neither. **Flipping one upstream default would not remove this wall**,
+because the two flags sit on different paths.
+
+**And it is narrower than it looks: it applies only to a `decode` role.** These gates require
+`kv_role` to be `kv_consumer`, which this operator renders only for `kind: decode`. A `server` role —
+what an unset `kind` produces — renders `kv_both`, the writing side, and never reaches them.
+
+**Wall 2 — the two connectors have no corresponding release, and this one is structural.** vLLM's
+`MooncakeStoreConnector` and vLLM-Ascend's `AscendStoreConnector` are different classes with different
+key formats. vLLM-Ascend pins vLLM `v0.19.1`, whose connector factory does not register
+`MooncakeStoreConnector` at all; it first appears in `v0.21.0`. **This wall is symmetric** — it holds
+in both directions and is outside anything this repository can change.
+
+**So the default shape meets Wall 2 only.** Two roles with no `kind` set are two `server` roles, both
+rendering `kv_both`, so Wall 1 is never reached and the whole of the limit is Wall 2's.
+
+**Same manufacturer, different models, is unaffected.** The connector name is chosen from the engine
+and the engine from the manufacturer, so two roles on one manufacturer resolve to the same connector:
+no gates, one key format.
+
+**How to tell which you got.** Each injected Pod's stamp carries the connector name rendered for it,
+readable as described in [Reading the injection record](#reading-the-injection-record). Two halves
+showing **different** names is this limit rather than a misconfiguration: the names differ on purpose,
+because rendering vLLM's name for a vLLM-Ascend engine aborts that engine at startup.
 
 ## What a cache changes about a workload
 
