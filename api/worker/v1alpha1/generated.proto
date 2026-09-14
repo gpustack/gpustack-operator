@@ -2861,9 +2861,9 @@ message ModelDeploymentRoleResources {
   //     on update alike, the same way an Instance's does. The value is written into the stored
   //     object rather than applied at render time, so what was admitted is what can be read back.
   //   - AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote, and on an acceleratable
-  //     InstanceType it asks for nothing that pool's queue accounts in. Such a role is admitted
-  //     only while it is the deployment's ONLY role: add a second and the deployment is never
-  //     admitted and never reports why. A zero is safe to state alone and unsafe to combine.
+  //     InstanceType it asks for nothing that pool's queue accounts in. It is accepted while it is
+  //     the only role using that type, and refused when another role shares the type because the
+  //     resulting multi-PodSet Workload cannot be admitted by that queue.
   //   - A replica meant to run without an accelerator belongs on an InstanceType that is not
   //     acceleratable, where CPU is what the queue accounts in.
   optional .k8s.io.apimachinery.pkg.api.resource.Quantity accelerator = 1;

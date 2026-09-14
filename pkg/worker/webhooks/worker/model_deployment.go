@@ -119,11 +119,9 @@ func (r *ModelDeploymentWebhook) ReceiveDeletionUpdate() {}
 // and nothing reporting why. So this surfaces on a multi-role deployment whether or not its other
 // roles ask for cards: a mixed deployment is refused exactly like an all-uncovered one.
 //
-// AN EXPLICIT ZERO IS LEFT ALONE and still reaches that state. Zero is a value the user wrote, and
-// silently replacing it would be worse than the failure: the request would stop meaning what it
-// says. A CPU-only deployment belongs on a CPU-only InstanceType, whose queue covers cpu, which
-// every replica requests -- so the shape that hangs is reachable only by asking for a pool this
-// deployment does not need.
+// AN EXPLICIT ZERO IS LEFT ALONE. Zero is a value the user wrote, and silently replacing it would
+// make the request stop meaning what it says. Validation refuses the multi-PodSet shape that Kueue
+// cannot admit and points a CPU-only replica at a CPU-only InstanceType instead.
 //
 // IT RUNS ON UPDATE AS WELL AS CREATE, because roles are not frozen: a deployment edited to add a
 // second role would otherwise carry an undefaulted one and reach exactly the state above. The
@@ -858,23 +856,23 @@ func validateModelDeploymentRoleResources(
 	)}
 }
 
-// validateRoleResourcesAgainstInstanceTypes applies the two rules that need the InstanceType a role
+// validateRoleResourcesAgainstInstanceTypes applies the rules that need the InstanceType a role
 // names, and is the only validation path here that reads another object.
 //
-// THE REFUSAL LANDS AT THE API INSTEAD OF DEEPER IN THE CHAIN, which is the whole of what these two
+// THE REFUSAL LANDS AT THE API INSTEAD OF DEEPER IN THE CHAIN, which is the whole of what these
 // rules buy. Without them an infeasible request is still refused -- by the scheduling chain's own
 // gates, on a Workload, naming neither the deployment nor the field the user wrote. The outcome was
 // never wrong; the message was, and a message an operator cannot act on costs the time to find what
 // this one states.
 //
-// AN OBJECT BEING DELETED IS NOT JUDGED BY THESE TWO. A rule that reads the type refuses when the
+// AN OBJECT BEING DELETED IS NOT JUDGED BY THESE RULES. A rule that reads the type refuses when the
 // type is absent, so leaving them on would let a deleted InstanceType block the very update that
 // clears this deployment's finalizer. That is the same reasoning Default states for declining
 // wholesale, applied to the part of validation that acquired the same dependency.
 //
-// A ROLE NAMING NO TYPE, OR ASKING FOR NOTHING, IS SKIPPED rather than looked up. An empty name is a
-// field error the object-only rules already report, and looking it up would fail on the request and
-// answer with a message about reading the cluster instead of about the name.
+// A ROLE NAMING NO TYPE, OR NO RESOURCES, IS SKIPPED rather than looked up. An empty name is a field
+// error the object-only rules already report, and looking it up would fail on the request and answer
+// with a message about reading the cluster instead of about the name.
 //
 // A TYPE THAT COULD NOT BE READ STOPS THE PASS RATHER THAN BECOMING A SECOND REFUSAL. getInstanceType
 // already distinguishes a name that does not exist from a cluster that would not answer, and the
@@ -941,7 +939,45 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstInstanceTypes(
 			instType, role.Resources, rolesPath.Index(i).Child("resources"))...)
 	}
 
+	errs = append(errs, validateModelDeploymentZeroAcceleratorInMultiRoleGroup(md, seen, rolesPath)...)
+
 	return append(errs, validateModelDeploymentPairCannotShareOneAccelerator(md, seen, rolesPath)...), nil
+}
+
+// validateModelDeploymentZeroAcceleratorInMultiRoleGroup refuses a PodSet that requests nothing an
+// accelerated queue covers when another PodSet shares its Workload. Kueue cannot persist a partial
+// assignment for that Workload and otherwise retries the rejected update without backoff.
+func validateModelDeploymentZeroAcceleratorInMultiRoleGroup(
+	md *workercore.ModelDeployment,
+	instanceTypes map[string]*worker.InstanceType,
+	rolesPath *field.Path,
+) field.ErrorList {
+	groupSizes := make(map[string]int, len(instanceTypes))
+	for i := range md.Spec.Roles {
+		groupSizes[md.Spec.Roles[i].InstanceType]++
+	}
+
+	var errs field.ErrorList
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		instType := instanceTypes[role.InstanceType]
+		if instType == nil || !instType.Spec.Acceleratable || groupSizes[role.InstanceType] < 2 ||
+			role.Resources == nil || role.Resources.Accelerator == nil || role.Resources.Accelerator.Sign() != 0 {
+			continue
+		}
+
+		errs = append(errs, field.Invalid(
+			rolesPath.Index(i).Child("resources", "accelerator"), role.Resources.Accelerator.String(),
+			fmt.Sprintf(
+				"must be greater than zero because multiple roles using acceleratable instance type %q "+
+					"form one Workload whose queue accounts only in accelerator credits; request at least "+
+					"one accelerator or use a non-acceleratable instance type for this CPU-only role",
+				role.InstanceType,
+			),
+		))
+	}
+
+	return errs
 }
 
 // validateModelDeploymentPairCannotShareOneAccelerator refuses a prefill and a decode role that both

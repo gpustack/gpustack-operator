@@ -720,8 +720,8 @@ func TestModelDeploymentWebhook_Default(t *testing.T) {
 			},
 		},
 		{
-			// AN EXPLICIT ZERO IS A VALUE THE USER WROTE. It is kept even though it reaches the
-			// state above, because replacing it would make the request stop meaning what it says.
+			// AN EXPLICIT ZERO IS A VALUE THE USER WROTE. It is kept because replacing it would
+			// make the request stop meaning what it says; validation owns unsafe combinations.
 			name:          "an explicit zero is kept",
 			acceleratable: true,
 			roles:         []workercore.ModelDeploymentRole{roleWithAccelerator("server", resource.NewQuantity(0, resource.DecimalSI))},
@@ -766,6 +766,93 @@ func TestModelDeploymentWebhook_Default(t *testing.T) {
 				assert.Zero(t, want.Cmp(*got.Accelerator),
 					"role %d: want %s, got %s", i, want, got.Accelerator)
 			}
+		})
+	}
+}
+
+// TestModelDeploymentWebhook_ValidateRefusesZeroAcceleratorInAMultiRoleGroup covers the explicit
+// value that defaulting deliberately leaves alone. Roles sharing one InstanceType form PodSets in
+// one Workload, and an accelerated queue cannot admit that Workload when one PodSet requests none
+// of the accelerator credits the queue covers.
+func TestModelDeploymentWebhook_ValidateRefusesZeroAcceleratorInAMultiRoleGroup(t *testing.T) {
+	withDerivedFromNode(t, true)
+
+	zero := resource.NewQuantity(0, resource.DecimalSI)
+	one := resource.NewQuantity(1, resource.DecimalSI)
+	zeroOnA100 := roleWithAccelerator("decode", zero)
+	zeroOnA100.InstanceType = "a100-8x"
+
+	testCases := []struct {
+		name      string
+		roles     []workercore.ModelDeploymentRole
+		types     []ctrlcli.Object
+		refusedAt []string
+	}{
+		{
+			name: "two zero-card roles sharing an accelerated type",
+			roles: []workercore.ModelDeploymentRole{
+				roleWithAccelerator("prefill", zero),
+				roleWithAccelerator("decode", zero),
+			},
+			types: []ctrlcli.Object{servingInstanceType("h20-8x", 8)},
+			refusedAt: []string{
+				"spec.roles[0].resources.accelerator",
+				"spec.roles[1].resources.accelerator",
+			},
+		},
+		{
+			name: "one zero-card role beside a covered role",
+			roles: []workercore.ModelDeploymentRole{
+				roleWithAccelerator("prefill", zero),
+				roleWithAccelerator("decode", one),
+			},
+			types:     []ctrlcli.Object{servingInstanceType("h20-8x", 8)},
+			refusedAt: []string{"spec.roles[0].resources.accelerator"},
+		},
+		{
+			name:  "one zero-card role on an accelerated type",
+			roles: []workercore.ModelDeploymentRole{roleWithAccelerator("server", zero)},
+			types: []ctrlcli.Object{servingInstanceType("h20-8x", 8)},
+		},
+		{
+			name: "zero-card roles in separate scheduling groups",
+			roles: []workercore.ModelDeploymentRole{
+				roleWithAccelerator("prefill", zero),
+				zeroOnA100,
+			},
+			types: []ctrlcli.Object{
+				servingInstanceType("h20-8x", 8),
+				servingInstanceType("a100-8x", 8),
+			},
+		},
+		{
+			name: "zero-card roles sharing a CPU-only type",
+			roles: []workercore.ModelDeploymentRole{
+				roleWithAccelerator("prefill", zero),
+				roleWithAccelerator("decode", zero),
+			},
+			types: []ctrlcli.Object{acceleratableInstanceType("h20-8x", false)},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newModelDeploymentWebhookWith(tc.types)
+			md := modelDeployment(workercore.ModelDeploymentEngineVLLM, tc.roles...)
+			_, err := w.ValidateCreate(context.Background(), md)
+
+			if len(tc.refusedAt) == 0 {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.Error(t, err)
+			for _, path := range tc.refusedAt {
+				assert.Contains(t, err.Error(), path)
+			}
+			assert.Contains(t, err.Error(), "request at least one accelerator")
+			assert.Contains(t, err.Error(), "non-acceleratable instance type")
 		})
 	}
 }
