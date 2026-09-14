@@ -7,8 +7,8 @@ package v1alpha1
 //
 // KVCachePoolSpec defines the desired spec of KVCachePool.
 type KVCachePoolSpecApplyConfiguration struct {
-	// Backends names the KVCacheBackend this pool draws from. It holds NAMES rather than a typed
-	// reference so this package needs no compile-time dependency on that type.
+	// Backends names the KVCacheBackend this pool draws from. Each entry is the backend's NAME, not
+	// an object reference: there is no kind or namespace to write alongside it.
 	//
 	// - Exactly one entry is admitted, and the rule is the webhook's rather than the schema's so the
 	// refusal can carry its reason: quota lands on a single master's per-tenant ledger, and one

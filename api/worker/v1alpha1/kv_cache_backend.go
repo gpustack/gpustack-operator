@@ -632,10 +632,9 @@ type KVCacheBackendMemberLocalDiskEviction struct {
 	// Enabled is whether this tier evicts at all. It DEFAULTS TO TRUE, so declaring this block
 	// without it asks for eviction rather than against it.
 	//
-	// A POINTER carrying a schema default, unlike the plain bools elsewhere in this API, and the
-	// asymmetry is forced: here unset has to mean TRUE, which a plain bool cannot say — `enabled:
-	// false` and an omitted key are the same JSON — so the block would turn eviction off for
-	// everyone who declared it only to set a Watermark.
+	// OMITTING THIS KEY AND WRITING `enabled: false` ARE DIFFERENT, and the default is what makes
+	// them different: only the explicit false turns eviction off. Without that, declaring this block
+	// merely to set a Watermark would stop the tier evicting for everyone who did so.
 	//
 	// Turning it off renders TWO settings, not one: an eviction policy of "none", the store's own
 	// name for that value, and an explicit false on its watermark-eviction switch. They belong to
