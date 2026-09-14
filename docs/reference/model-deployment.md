@@ -110,7 +110,11 @@ whole set has reserved quota.
 
 `name` identifies the role and becomes the Kueue PodSet name; `kind` selects behaviour and is closed.
 They are separate because a semantic reachable by typing a free-form string is a semantic one typo away
-from silently changing. Two roles may share a `kind` and differ in `name`.
+from silently changing.
+
+Two roles may share a `kind` and differ in `name` only where that `kind` is `server`: a pair of
+servers is a set of equals, whereas nothing consuming these roles expresses a second prefiller, so a
+deployment declaring one would render a role nothing downstream can reach.
 
 `kind` adds **one term** to the synthesized transfer configuration — the role discriminator the engine's
 own KV-transfer configuration takes, vLLM's `kv_role` and its per-engine equivalents. Nothing else

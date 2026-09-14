@@ -1448,6 +1448,16 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleResourcesApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRouter"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRouterApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRouterKVEvents"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRouterKVEventsApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRouterMetrics"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRouterMetricsApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRouterRoleStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRouterRoleStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRouterStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRouterStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentSpec"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentStatus"):

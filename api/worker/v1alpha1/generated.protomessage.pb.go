@@ -192,6 +192,16 @@ func (*ModelDeploymentRoleResources) ProtoMessage() {}
 
 func (*ModelDeploymentRoleStatus) ProtoMessage() {}
 
+func (*ModelDeploymentRouter) ProtoMessage() {}
+
+func (*ModelDeploymentRouterKVEvents) ProtoMessage() {}
+
+func (*ModelDeploymentRouterMetrics) ProtoMessage() {}
+
+func (*ModelDeploymentRouterRoleStatus) ProtoMessage() {}
+
+func (*ModelDeploymentRouterStatus) ProtoMessage() {}
+
 func (*ModelDeploymentSpec) ProtoMessage() {}
 
 func (*ModelDeploymentStatus) ProtoMessage() {}
