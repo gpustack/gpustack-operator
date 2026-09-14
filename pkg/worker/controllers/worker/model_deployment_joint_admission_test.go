@@ -407,17 +407,48 @@ func TestModelDeploymentJointAdmission_UnresolvableIsNotForeign(t *testing.T) {
 			"a workload with no pod owner is not one of ours, and holding it would hold the queue")
 	})
 
-	t.Run("an_owner_pod_that_cannot_be_read_is_not_answered", func(t *testing.T) {
+	t.Run("an_owner_pod_that_cannot_be_read_is_held_and_says_so", func(t *testing.T) {
 		// The Pod is referenced and absent, which is what a rebuild leaves behind for a moment.
 		pod := jointGroupPod("qwen-prefill-0", "qwen-group", "qwen")
 		wl := jointWorkload("wl", true, pod)
 		cli := newJointClient(jointCheckObject(), wl)
+
+		// THE STATE ALONE CANNOT CARRY THIS ASSERTION. The fixture arrives Pending already, so
+		// asserting Pending after the pass is true whether the controller wrote a verdict or wrote
+		// nothing at all -- and writing nothing is the defect. The message is what separates them,
+		// which is why it is pinned here rather than merely being non-empty.
+		require.Empty(t, jointCheckMessage(wl),
+			"the fixture must arrive without a message, or this case cannot see one being written")
 
 		got := reconcileJoint(t, cli, "wl")
 
 		assert.Equal(t, kueue.CheckStatePending, jointCheckState(got),
 			"an unreadable owner replica leaves the answer unknown, and the barrier holds rather "+
 				"than opening on a guess")
+		assert.Equal(t, _JointAdmissionUndecidedMessage, jointCheckMessage(got),
+			"a workload nothing is admitting has to say why, and this is the one verdict this "+
+				"controller used to leave blank")
+	})
+
+	t.Run("the_undecided_message_is_not_an_ordinary_hold", func(t *testing.T) {
+		// BOTH STATES ARE Pending, so the message is the only thing an operator can tell them apart
+		// by. A hold names the groups being waited on and clears itself; this one means a read
+		// failed and may need acting on.
+		//
+		// THE HOLD WORDING IS TAKEN FROM A HELD WORKLOAD rather than written out here. Spelling it
+		// out would make this case compare two strings this file owns, and it would go on passing
+		// after the real hold message changed to something that reads the same as the undecided one.
+		cli := newJointClient(twoGroupFixture(false)...)
+
+		held := reconcileJoint(t, cli, "wl-first")
+		require.Equal(t, kueue.CheckStatePending, jointCheckState(held),
+			"the comparison is only meaningful between two Pending verdicts")
+
+		holdMessage := jointCheckMessage(held)
+		require.NotEmpty(t, holdMessage, "an ordinary hold must say something to be compared with")
+		assert.NotEqual(t, holdMessage, _JointAdmissionUndecidedMessage,
+			"an operator reading the check must be able to tell a set that is still assembling from "+
+				"replicas this controller could not read")
 	})
 }
 
