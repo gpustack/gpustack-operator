@@ -58,6 +58,19 @@ func role(mutate func(*workercore.ModelDeploymentRole)) workercore.ModelDeployme
 	return r
 }
 
+// routedModelDeployment builds a one-server-role deployment carrying spec.router, so the router cases
+// differ from one another in the router alone and never in the roles.
+func routedModelDeployment(mutate func(*workercore.ModelDeploymentRouter)) *workercore.ModelDeployment {
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+	router := &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	if mutate != nil {
+		mutate(router)
+	}
+	md.Spec.Router = router
+
+	return md
+}
+
 // numberedRoles builds n roles that differ only in name, for the cases about how many there may be.
 // Every other rule passes on them, so a refusal is the count rule's and nothing else's.
 func numberedRoles(n int) []workercore.ModelDeploymentRole {
@@ -250,6 +263,57 @@ func TestValidateModelDeployment(t *testing.T) {
 			md:   modelDeployment(workercore.ModelDeploymentEngineSGLang),
 		},
 		{
+			// Nothing consuming these roles expresses a second prefiller, so the extra role would
+			// render into a configuration nothing downstream can reach.
+			name: "role_kinds_two_prefills",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.Kind = "prefill-a", workercore.ModelDeploymentRoleKindPrefill
+				}),
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.Kind = "prefill-b", workercore.ModelDeploymentRoleKindPrefill
+				}),
+			),
+			wantMessage: `kind "prefill" is already declared by role "prefill-a"`,
+		},
+		{
+			// The other non-server kind, so the rule is not a check spelled against prefill alone.
+			name: "role_kinds_two_decodes",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.Kind = "decode-a", workercore.ModelDeploymentRoleKindDecode
+				}),
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.Kind = "decode-b", workercore.ModelDeploymentRoleKindDecode
+				}),
+			),
+			wantMessage: `kind "decode" is already declared by role "decode-a"`,
+		},
+		{
+			// THE CASE THE RULE EXISTS TO NOT CATCH, and the one the two above cannot stand without: a
+			// table holding only repeated non-server kinds passes just as well against a rule refusing
+			// ANY repeated kind, which would refuse this. A set of servers is a set of equals and
+			// something in front of them can pick between them.
+			name: "role_kinds_two_servers",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.Kind = "server-a", workercore.ModelDeploymentRoleKindServer
+				}),
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.Kind = "server-b", workercore.ModelDeploymentRoleKindServer
+				}),
+			),
+		},
+		{
+			// Three, so the exemption is not "a second server is tolerated" read as a bound.
+			name: "role_kinds_three_servers",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) { r.Name = "server-a" }),
+				role(func(r *workercore.ModelDeploymentRole) { r.Name = "server-b" }),
+				role(func(r *workercore.ModelDeploymentRole) { r.Name = "server-c" }),
+			),
+		},
+		{
 			name: "extra_args_owned_key",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
 				r.ExtraArgs = []string{`--kv-transfer-config={"kv_connector":"Other"}`}
@@ -439,6 +503,29 @@ func TestValidateModelDeployment(t *testing.T) {
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
 				r.Template = &workercore.ModelDeploymentTemplate{Image: "vllm/vllm-openai:latest"}
 			})),
+		},
+		{
+			// Every field set, and all of them legal: this operator runs the router, so there is no mode
+			// in which any of them is meaningless. The case is here because the type once carried a mode
+			// that made three of them conditional, and its removal has to be visible as acceptance rather
+			// than as an absent test.
+			name: "router_with_every_field",
+			md: routedModelDeployment(func(r *workercore.ModelDeploymentRouter) {
+				r.Replicas, r.Image, r.ExtraArgs = ptr.To(int32(2)), "ghcr.io/example/router:v1", []string{"--verbose"}
+			}),
+		},
+		{
+			// A deployment whose roles are all servers may be routed. A router here is east-west
+			// traffic management rather than a prefill/decode pairer: one that scores on a cache view
+			// picks between several servers in a way a Service cannot.
+			name: "router_in_front_of_servers_only",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Roles = append(md.Spec.Roles,
+					role(func(r *workercore.ModelDeploymentRole) { r.Name = "server-b" }))
+
+				return md
+			}(),
 		},
 	}
 
@@ -1457,8 +1544,14 @@ func TestModelDeploymentWebhook_APairMayNotShareOneAccelerator(t *testing.T) {
 // TestModelDeploymentWebhook_ThePairRuleReadsEveryPair covers a deployment declaring more than one
 // role of one kind.
 //
-// NOTHING REFUSES TWO PREFILL ROLES. The kind rule refuses mixing a server role with the others and
-// says nothing about two of a kind, so this shape reaches the pair rule intact.
+// TWO PREFILL ROLES ARE NOW REFUSED BY THE KIND RULE, so this fixture trips two rules rather than
+// one, and the pair rule is the one under test here. It is kept because the pair rule iterates every
+// prefill against every decode and that loop is the defense that survives if the kind rule is ever
+// relaxed -- a rule proven only on shapes another rule already excludes is a rule nobody has tested.
+//
+// THE ASSERTIONS THEREFORE NAME WHICH RULE REFUSED, rather than searching the whole aggregate. Both
+// rules mention "prefill-shared", so an aggregate-wide substring check passes on the kind rule's
+// message alone and would keep passing if the pair rule were deleted.
 //
 // THE FIXTURE IS BUILT SO THE LAST PAIR IS THE INNOCENT ONE. A rule keeping one role per kind ends up
 // holding the prefiller declared last, which here sits on a disjoint accelerator group, and it then
@@ -1496,12 +1589,26 @@ func TestModelDeploymentWebhook_ThePairRuleReadsEveryPair(t *testing.T) {
 	_, err := r.ValidateCreate(context.Background(), md)
 	require.Error(t, err, "the prefiller declared first shares one accelerator group with the decoder")
 
-	assert.True(t, errsContain(err.Error(), "prefill-shared"),
-		"the refusal names the prefiller that can land on the decoder's card: %v", err)
-	assert.True(t, errsContain(err.Error(), "decode"),
-		"and the decoder it would share it with: %v", err)
-	assert.False(t, errsContain(err.Error(), "prefill-disjoint"),
-		"and not the prefiller on a disjoint group, which is a shape this rule exists to allow: %v", err)
+	// pairRefusal is the one refusal carrying the pair rule's own wording. Requiring it to exist is
+	// what makes the assertions below about THIS rule: without it they would read the kind rule's
+	// message, which names two of the same roles.
+	var pairRefusal string
+	for _, line := range strings.Split(err.Error(), "\n") {
+		if errsContain(line, "both request a logical slice") {
+			pairRefusal = line
+
+			break
+		}
+	}
+	require.NotEmpty(t, pairRefusal, "the pair rule refused as well as the kind rule: %v", err)
+
+	assert.True(t, errsContain(pairRefusal, "prefill-shared"),
+		"the refusal names the prefiller that can land on the decoder's card: %s", pairRefusal)
+	assert.True(t, errsContain(pairRefusal, "decode"),
+		"and the decoder it would share it with: %s", pairRefusal)
+	assert.False(t, errsContain(pairRefusal, "prefill-disjoint"),
+		"and not the prefiller on a disjoint group, which is a shape this rule exists to allow: %s",
+		pairRefusal)
 }
 
 // TestModelDeploymentWebhook_TheBarrierRuleCannotStrandAnObject covers the rule's own escape hatch.

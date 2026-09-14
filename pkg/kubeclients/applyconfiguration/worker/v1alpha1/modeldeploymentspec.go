@@ -43,6 +43,16 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	Roles []ModelDeploymentRoleApplyConfiguration `json:"roles,omitempty"`
 	// Router optionally puts a request router in front of the roles.
 	//
+	// NOTHING RENDERS A ROUTER YET. The field is accepted and the rules stated on it are applied, but
+	// no Deployment, ConfigMap or Service is created from it and status.endpoint does not move. Every
+	// sentence below describes the contract this field commits to, not behavior already in place, and
+	// each says which of the two it is where that is not obvious.
+	//
+	// THE PARAGRAPH ABOVE EXPIRES WHOLE, on the first change that renders anything from this field.
+	// Delete it then, rather than editing it down: whoever writes that renderer is the one reader
+	// guaranteed to be looking here, and a paragraph trimmed clause by clause becomes a list of what
+	// is still missing, which is the thing nobody keeps current.
+	//
 	// IT IS EAST-WEST TRAFFIC MANAGEMENT, NOT A PREFILL/DECODE PAIRER, and the distinction decides
 	// which shapes are legal behind it. Several plain servers is one of them: a router that scores on
 	// a cache view picks between equals in a way a Service cannot, so "there is no pair here" is not a

@@ -5295,27 +5295,22 @@ func (m *ModelDeploymentRouter) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 			copy(dAtA[i:], m.ExtraArgs[iNdEx])
 			i = encodeVarintGenerated(dAtA, i, uint64(len(m.ExtraArgs[iNdEx])))
 			i--
-			dAtA[i] = 0x2a
+			dAtA[i] = 0x22
 		}
 	}
 	i -= len(m.Image)
 	copy(dAtA[i:], m.Image)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Image)))
 	i--
-	dAtA[i] = 0x22
+	dAtA[i] = 0x1a
 	if m.Replicas != nil {
 		i = encodeVarintGenerated(dAtA, i, uint64(*m.Replicas))
 		i--
-		dAtA[i] = 0x18
+		dAtA[i] = 0x10
 	}
 	i -= len(m.Name)
 	copy(dAtA[i:], m.Name)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Name)))
-	i--
-	dAtA[i] = 0x12
-	i -= len(m.Mode)
-	copy(dAtA[i:], m.Mode)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Mode)))
 	i--
 	dAtA[i] = 0xa
 	return len(dAtA) - i, nil
@@ -5504,7 +5499,7 @@ func (m *ModelDeploymentRouterStatus) MarshalToSizedBuffer(dAtA []byte) (int, er
 			i = encodeVarintGenerated(dAtA, i, uint64(size))
 		}
 		i--
-		dAtA[i] = 0x32
+		dAtA[i] = 0x2a
 	}
 	if len(m.Roles) > 0 {
 		for iNdEx := len(m.Roles) - 1; iNdEx >= 0; iNdEx-- {
@@ -5517,27 +5512,22 @@ func (m *ModelDeploymentRouterStatus) MarshalToSizedBuffer(dAtA []byte) (int, er
 				i = encodeVarintGenerated(dAtA, i, uint64(size))
 			}
 			i--
-			dAtA[i] = 0x2a
+			dAtA[i] = 0x22
 		}
 	}
 	i -= len(m.PoolEndpoint)
 	copy(dAtA[i:], m.PoolEndpoint)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.PoolEndpoint)))
 	i--
-	dAtA[i] = 0x22
+	dAtA[i] = 0x1a
 	i -= len(m.Endpoint)
 	copy(dAtA[i:], m.Endpoint)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Endpoint)))
 	i--
-	dAtA[i] = 0x1a
+	dAtA[i] = 0x12
 	i -= len(m.Name)
 	copy(dAtA[i:], m.Name)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Name)))
-	i--
-	dAtA[i] = 0x12
-	i -= len(m.Mode)
-	copy(dAtA[i:], m.Mode)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Mode)))
 	i--
 	dAtA[i] = 0xa
 	return len(dAtA) - i, nil
@@ -7652,8 +7642,6 @@ func (m *ModelDeploymentRouter) Size() (n int) {
 	}
 	var l int
 	_ = l
-	l = len(m.Mode)
-	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.Name)
 	n += 1 + l + sovGenerated(uint64(l))
 	if m.Replicas != nil {
@@ -7734,8 +7722,6 @@ func (m *ModelDeploymentRouterStatus) Size() (n int) {
 	}
 	var l int
 	_ = l
-	l = len(m.Mode)
-	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.Name)
 	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.Endpoint)
@@ -9315,7 +9301,6 @@ func (this *ModelDeploymentRouter) String() string {
 		return "nil"
 	}
 	s := strings.Join([]string{`&ModelDeploymentRouter{`,
-		`Mode:` + fmt.Sprintf("%v", this.Mode) + `,`,
 		`Name:` + fmt.Sprintf("%v", this.Name) + `,`,
 		`Replicas:` + valueToStringGenerated(this.Replicas) + `,`,
 		`Image:` + fmt.Sprintf("%v", this.Image) + `,`,
@@ -9383,7 +9368,6 @@ func (this *ModelDeploymentRouterStatus) String() string {
 	}
 	repeatedStringForRoles += "}"
 	s := strings.Join([]string{`&ModelDeploymentRouterStatus{`,
-		`Mode:` + fmt.Sprintf("%v", this.Mode) + `,`,
 		`Name:` + fmt.Sprintf("%v", this.Name) + `,`,
 		`Endpoint:` + fmt.Sprintf("%v", this.Endpoint) + `,`,
 		`PoolEndpoint:` + fmt.Sprintf("%v", this.PoolEndpoint) + `,`,
@@ -25890,38 +25874,6 @@ func (m *ModelDeploymentRouter) Unmarshal(dAtA []byte) error {
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Mode", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Mode = ModelDeploymentRouterMode(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
 			}
 			var stringLen uint64
@@ -25952,7 +25904,7 @@ func (m *ModelDeploymentRouter) Unmarshal(dAtA []byte) error {
 			}
 			m.Name = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
-		case 3:
+		case 2:
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Replicas", wireType)
 			}
@@ -25972,7 +25924,7 @@ func (m *ModelDeploymentRouter) Unmarshal(dAtA []byte) error {
 				}
 			}
 			m.Replicas = &v
-		case 4:
+		case 3:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Image", wireType)
 			}
@@ -26004,7 +25956,7 @@ func (m *ModelDeploymentRouter) Unmarshal(dAtA []byte) error {
 			}
 			m.Image = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
-		case 5:
+		case 4:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field ExtraArgs", wireType)
 			}
@@ -26708,38 +26660,6 @@ func (m *ModelDeploymentRouterStatus) Unmarshal(dAtA []byte) error {
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Mode", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Mode = ModelDeploymentRouterMode(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
 			}
 			var stringLen uint64
@@ -26770,7 +26690,7 @@ func (m *ModelDeploymentRouterStatus) Unmarshal(dAtA []byte) error {
 			}
 			m.Name = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
-		case 3:
+		case 2:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Endpoint", wireType)
 			}
@@ -26802,7 +26722,7 @@ func (m *ModelDeploymentRouterStatus) Unmarshal(dAtA []byte) error {
 			}
 			m.Endpoint = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
-		case 4:
+		case 3:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field PoolEndpoint", wireType)
 			}
@@ -26834,7 +26754,7 @@ func (m *ModelDeploymentRouterStatus) Unmarshal(dAtA []byte) error {
 			}
 			m.PoolEndpoint = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
-		case 5:
+		case 4:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Roles", wireType)
 			}
@@ -26868,7 +26788,7 @@ func (m *ModelDeploymentRouterStatus) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
-		case 6:
+		case 5:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Metrics", wireType)
 			}

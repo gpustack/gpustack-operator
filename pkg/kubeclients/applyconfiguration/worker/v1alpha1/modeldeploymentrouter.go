@@ -2,31 +2,20 @@
 
 package v1alpha1
 
-import (
-	workerv1alpha1 "gpustack.ai/gpustack/api/worker/v1alpha1"
-)
-
 // ModelDeploymentRouterApplyConfiguration represents a declarative configuration of the ModelDeploymentRouter type for use
 // with apply.
 //
 // ModelDeploymentRouter is the router that fronts a deployment's roles, and how much of it this
 // operator runs.
 //
-// Three of its five fields apply to one mode only. They are here rather than in a nested
-// mode-specific struct because a user reading the type should see the whole surface at once, and
-// because a field that is meaningless in the current mode is REFUSED rather than ignored -- a field
-// silently dropped is a field its author believes took effect.
+// THERE IS NO FIELD SELECTING WHO RUNS THE ROUTER, and that is a decision rather than an omission.
+// This operator renders and owns it; a deployment fronted by a router the cluster already runs is not
+// expressible. A field offering that choice while only one of its values rendered anything would
+// carry no information -- every object would hold the same value -- and adding one later is an
+// optional field with a default, which is backward compatible. Shipping the choice first and then
+// changing what its values mean would not be.
 type ModelDeploymentRouterApplyConfiguration struct {
-	// Mode decides who runs the router. Managed means this operator renders and owns it; External
-	// means the cluster already runs one and this operator only publishes what that router needs.
-	//
-	// It is required when this struct is present. The two modes render disjoint sets of objects, so a
-	// default would pick one of them on behalf of a user who was asking only for the contract in
-	// status.
-	Mode *workerv1alpha1.ModelDeploymentRouterMode `json:"mode,omitempty"`
-	// Name selects which router implementation fronts this deployment. It is required under BOTH
-	// modes: External deploys nothing, but the admission check comparing what a router requires
-	// against what the engine exposes still has to know which router is asking.
+	// Name selects which router implementation fronts this deployment.
 	//
 	// THE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the difference is
 	// visible in the same word twice: the transport protocol on the cache backend types spells it
@@ -44,14 +33,13 @@ type ModelDeploymentRouterApplyConfiguration struct {
 	// reservation covers the first of those and nothing else, which is why a second router is a piece
 	// of work rather than a constant.
 	Name *string `json:"name,omitempty"`
-	// Replicas is how many router Pods to run. Managed only.
+	// Replicas is how many router Pods to run. Absent means one.
 	//
-	// IT IS A POINTER AND CARRIES NO SCHEMA DEFAULT, and that is forced rather than chosen.
-	// Structural-schema defaulting runs before any webhook, so a plain int32 defaulted to one would
-	// reach admission as one whether or not the user typed it, and the rule refusing a managed-only
-	// field under External would then refuse a field nobody set. The renderer defaults it to one
-	// instead. Image and ExtraArgs need no such treatment: an explicitly empty value means there
-	// exactly what an absent one means, so only a non-empty one is refused.
+	// IT IS A POINTER AND CARRIES NO SCHEMA DEFAULT, and that is forced rather than chosen. A schema
+	// default is applied before any webhook sees the object, so a plain int32 defaulted to one arrives
+	// indistinguishable from one the user typed. Keeping the distinction readable at admission is what
+	// lets a later rule answer "did anyone ask for this" at all, and a default that erases the
+	// difference cannot be un-erased afterwards.
 	//
 	// MORE THAN ONE REPLICA TRADES CACHE CONSISTENCY FOR AVAILABILITY. A router that scores on a
 	// prefix cache holds that state per replica: upstream reports radix trees that do not synchronize
@@ -60,16 +48,15 @@ type ModelDeploymentRouterApplyConfiguration struct {
 	// replicas route alike. More than one is permitted; the cost is stated here rather than left to be
 	// found on a dashboard.
 	Replicas *int32 `json:"replicas,omitempty"`
-	// Image overrides the router's container image. Managed only. Empty means the operator assembles
-	// one from Name, the same way a role's image is assembled when its template names none.
+	// Image overrides the router's container image. Empty means the operator assembles one from Name,
+	// the same way a role's image is assembled when its template names none.
 	Image *string `json:"image,omitempty"`
-	// ExtraArgs are additional flags for the router process. Managed only.
+	// ExtraArgs are additional flags for the router process.
 	//
-	// A flag the operator derives itself is REFUSED rather than merged, so that one setting has one
-	// source. The catalog deciding which those are is keyed by ROUTER, not by engine: the engine-keyed
-	// catalog guarding a role's extraArgs answers a different question and shares only its shape. Like
-	// that one, it keys on a flag's name while what it protects is a setting, so a second spelling of
-	// one setting is not caught.
+	// The intent is that a flag the operator derives itself is refused rather than merged, so that one
+	// setting has one source. NOTHING ENFORCES THAT YET: the catalog it would consult is keyed by
+	// router rather than by engine, and the engine-keyed catalog guarding a role's extraArgs answers a
+	// different question and cannot stand in for it.
 	ExtraArgs []string `json:"extraArgs,omitempty"`
 }
 
@@ -77,14 +64,6 @@ type ModelDeploymentRouterApplyConfiguration struct {
 // apply.
 func ModelDeploymentRouter() *ModelDeploymentRouterApplyConfiguration {
 	return &ModelDeploymentRouterApplyConfiguration{}
-}
-
-// WithMode sets the Mode field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Mode field is set to the value of the last call.
-func (b *ModelDeploymentRouterApplyConfiguration) WithMode(value workerv1alpha1.ModelDeploymentRouterMode) *ModelDeploymentRouterApplyConfiguration {
-	b.Mode = &value
-	return b
 }
 
 // WithName sets the Name field in the declarative configuration to the given value

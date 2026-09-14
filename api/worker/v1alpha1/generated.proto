@@ -2945,25 +2945,14 @@ message ModelDeploymentRoleStatus {
 // ModelDeploymentRouter is the router that fronts a deployment's roles, and how much of it this
 // operator runs.
 //
-// Three of its five fields apply to one mode only. They are here rather than in a nested
-// mode-specific struct because a user reading the type should see the whole surface at once, and
-// because a field that is meaningless in the current mode is REFUSED rather than ignored -- a field
-// silently dropped is a field its author believes took effect.
+// THERE IS NO FIELD SELECTING WHO RUNS THE ROUTER, and that is a decision rather than an omission.
+// This operator renders and owns it; a deployment fronted by a router the cluster already runs is not
+// expressible. A field offering that choice while only one of its values rendered anything would
+// carry no information -- every object would hold the same value -- and adding one later is an
+// optional field with a default, which is backward compatible. Shipping the choice first and then
+// changing what its values mean would not be.
 message ModelDeploymentRouter {
-  // Mode decides who runs the router. Managed means this operator renders and owns it; External
-  // means the cluster already runs one and this operator only publishes what that router needs.
-  //
-  // It is required when this struct is present. The two modes render disjoint sets of objects, so a
-  // default would pick one of them on behalf of a user who was asking only for the contract in
-  // status.
-  //
-  // +required
-  // +k8s:validation:enum=["managed","external"]
-  optional string mode = 1;
-
-  // Name selects which router implementation fronts this deployment. It is required under BOTH
-  // modes: External deploys nothing, but the admission check comparing what a router requires
-  // against what the engine exposes still has to know which router is asking.
+  // Name selects which router implementation fronts this deployment.
   //
   // THE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the difference is
   // visible in the same word twice: the transport protocol on the cache backend types spells it
@@ -2983,16 +2972,15 @@ message ModelDeploymentRouter {
   //
   // +required
   // +k8s:validation:enum=["llm-d"]
-  optional string name = 2;
+  optional string name = 1;
 
-  // Replicas is how many router Pods to run. Managed only.
+  // Replicas is how many router Pods to run. Absent means one.
   //
-  // IT IS A POINTER AND CARRIES NO SCHEMA DEFAULT, and that is forced rather than chosen.
-  // Structural-schema defaulting runs before any webhook, so a plain int32 defaulted to one would
-  // reach admission as one whether or not the user typed it, and the rule refusing a managed-only
-  // field under External would then refuse a field nobody set. The renderer defaults it to one
-  // instead. Image and ExtraArgs need no such treatment: an explicitly empty value means there
-  // exactly what an absent one means, so only a non-empty one is refused.
+  // IT IS A POINTER AND CARRIES NO SCHEMA DEFAULT, and that is forced rather than chosen. A schema
+  // default is applied before any webhook sees the object, so a plain int32 defaulted to one arrives
+  // indistinguishable from one the user typed. Keeping the distinction readable at admission is what
+  // lets a later rule answer "did anyone ask for this" at all, and a default that erases the
+  // difference cannot be un-erased afterwards.
   //
   // MORE THAN ONE REPLICA TRADES CACHE CONSISTENCY FOR AVAILABILITY. A router that scores on a
   // prefix cache holds that state per replica: upstream reports radix trees that do not synchronize
@@ -3003,26 +2991,25 @@ message ModelDeploymentRouter {
   //
   // +optional
   // +k8s:validation:minimum=1
-  optional int32 replicas = 3;
+  optional int32 replicas = 2;
 
-  // Image overrides the router's container image. Managed only. Empty means the operator assembles
-  // one from Name, the same way a role's image is assembled when its template names none.
+  // Image overrides the router's container image. Empty means the operator assembles one from Name,
+  // the same way a role's image is assembled when its template names none.
   //
   // +optional
   // +k8s:validation:maxLength=512
-  optional string image = 4;
+  optional string image = 3;
 
-  // ExtraArgs are additional flags for the router process. Managed only.
+  // ExtraArgs are additional flags for the router process.
   //
-  // A flag the operator derives itself is REFUSED rather than merged, so that one setting has one
-  // source. The catalog deciding which those are is keyed by ROUTER, not by engine: the engine-keyed
-  // catalog guarding a role's extraArgs answers a different question and shares only its shape. Like
-  // that one, it keys on a flag's name while what it protects is a setting, so a second spelling of
-  // one setting is not caught.
+  // The intent is that a flag the operator derives itself is refused rather than merged, so that one
+  // setting has one source. NOTHING ENFORCES THAT YET: the catalog it would consult is keyed by
+  // router rather than by engine, and the engine-keyed catalog guarding a role's extraArgs answers a
+  // different question and cannot stand in for it.
   //
   // +optional
   // +listType=atomic
-  repeated string extraArgs = 5;
+  repeated string extraArgs = 4;
 }
 
 // ModelDeploymentRouterKVEvents is one role's cache-event stream, as something a consumer can reach.
@@ -3056,7 +3043,11 @@ message ModelDeploymentRouterKVEvents {
 // Their presence here says the operator configured an engine that exposes them. It does NOT say they
 // are reachable from where a router runs, and it cannot: a role may name any image.
 message ModelDeploymentRouterMetrics {
-  // Port is the port the metrics are served on.
+  // Port is the port the metrics are served on. The lower bound is not decoration: unlike the names
+  // beside it, this is a number a consumer dials, and a zero would fail only at connect time.
+  //
+  // +required
+  // +k8s:validation:minimum=1
   optional int32 port = 1;
 
   // QueuedRequests names the metric holding requests waiting to be admitted by the engine.
@@ -3100,40 +3091,38 @@ message ModelDeploymentRouterRoleStatus {
 // ModelDeploymentRouterStatus is the contract a router is configured from.
 //
 // EVERY STRING HERE IS ONE THE OPERATOR ACTUALLY RENDERED, never a default written down in
-// documentation. A router configured from this object and a router the operator configures itself
-// therefore cannot disagree, which is the only reason the external mode can claim parity with the
-// managed one.
+// documentation. A consumer reading this object and the router the operator configured therefore
+// cannot disagree about a selector, a topic or a metric name, which is what makes this object worth
+// publishing rather than a restatement of what the documentation already says.
 message ModelDeploymentRouterStatus {
-  // Mode and Name echo the spec, so that a reader holding only this object knows which contract
-  // they are looking at and which implementation it was shaped for.
-  optional string mode = 1;
+  // Name echoes the spec, so that a reader holding only this object knows which implementation the
+  // contract below was shaped for.
+  //
+  // +required
+  optional string name = 1;
 
-  optional string name = 2;
-
-  // Endpoint is the router's own address. It is present under the managed mode once the router's
-  // Service has one, and ABSENT under the external mode, where this operator deploys nothing and has
-  // no address to report.
+  // Endpoint is the router's own address, present once the router's Service has one.
   //
   // +k8s:validation:maxLength=512
-  optional string endpoint = 3;
+  optional string endpoint = 2;
 
   // PoolEndpoint is the address of the KV cache pool this deployment attached to, in the form its
   // client takes. A router that consults the pool needs it, and resolving it from the Binding is
   // work this operator has already done.
   //
   // +k8s:validation:maxLength=512
-  optional string poolEndpoint = 4;
+  optional string poolEndpoint = 3;
 
   // Roles is one entry per declared role, and its key set EQUALS the role set. A router discovers
   // live replicas for itself; what it cannot discover is which selector names which half of a pair.
   //
   // +listType=map
   // +listMapKey=name
-  repeated ModelDeploymentRouterRoleStatus roles = 5;
+  repeated ModelDeploymentRouterRoleStatus roles = 4;
 
   // Metrics are the serving metrics the roles expose and the port they are served on. They are
   // deployment-wide because they are a property of the engine, which is a deployment-wide field.
-  optional ModelDeploymentRouterMetrics metrics = 6;
+  optional ModelDeploymentRouterMetrics metrics = 5;
 }
 
 // ModelDeploymentSpec defines the desired state of ModelDeployment.
@@ -3194,6 +3183,16 @@ message ModelDeploymentSpec {
   repeated ModelDeploymentRole roles = 4;
 
   // Router optionally puts a request router in front of the roles.
+  //
+  // NOTHING RENDERS A ROUTER YET. The field is accepted and the rules stated on it are applied, but
+  // no Deployment, ConfigMap or Service is created from it and status.endpoint does not move. Every
+  // sentence below describes the contract this field commits to, not behavior already in place, and
+  // each says which of the two it is where that is not obvious.
+  //
+  // THE PARAGRAPH ABOVE EXPIRES WHOLE, on the first change that renders anything from this field.
+  // Delete it then, rather than editing it down: whoever writes that renderer is the one reader
+  // guaranteed to be looking here, and a paragraph trimmed clause by clause becomes a list of what
+  // is still missing, which is the thing nobody keeps current.
   //
   // IT IS EAST-WEST TRAFFIC MANAGEMENT, NOT A PREFILL/DECODE PAIRER, and the distinction decides
   // which shapes are legal behind it. Several plain servers is one of them: a router that scores on

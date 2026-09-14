@@ -2,27 +2,20 @@
 
 package v1alpha1
 
-import (
-	workerv1alpha1 "gpustack.ai/gpustack/api/worker/v1alpha1"
-)
-
 // ModelDeploymentRouterStatusApplyConfiguration represents a declarative configuration of the ModelDeploymentRouterStatus type for use
 // with apply.
 //
 // ModelDeploymentRouterStatus is the contract a router is configured from.
 //
 // EVERY STRING HERE IS ONE THE OPERATOR ACTUALLY RENDERED, never a default written down in
-// documentation. A router configured from this object and a router the operator configures itself
-// therefore cannot disagree, which is the only reason the external mode can claim parity with the
-// managed one.
+// documentation. A consumer reading this object and the router the operator configured therefore
+// cannot disagree about a selector, a topic or a metric name, which is what makes this object worth
+// publishing rather than a restatement of what the documentation already says.
 type ModelDeploymentRouterStatusApplyConfiguration struct {
-	// Mode and Name echo the spec, so that a reader holding only this object knows which contract
-	// they are looking at and which implementation it was shaped for.
-	Mode *workerv1alpha1.ModelDeploymentRouterMode `json:"mode,omitempty"`
-	Name *string                                   `json:"name,omitempty"`
-	// Endpoint is the router's own address. It is present under the managed mode once the router's
-	// Service has one, and ABSENT under the external mode, where this operator deploys nothing and has
-	// no address to report.
+	// Name echoes the spec, so that a reader holding only this object knows which implementation the
+	// contract below was shaped for.
+	Name *string `json:"name,omitempty"`
+	// Endpoint is the router's own address, present once the router's Service has one.
 	Endpoint *string `json:"endpoint,omitempty"`
 	// PoolEndpoint is the address of the KV cache pool this deployment attached to, in the form its
 	// client takes. A router that consults the pool needs it, and resolving it from the Binding is
@@ -40,14 +33,6 @@ type ModelDeploymentRouterStatusApplyConfiguration struct {
 // apply.
 func ModelDeploymentRouterStatus() *ModelDeploymentRouterStatusApplyConfiguration {
 	return &ModelDeploymentRouterStatusApplyConfiguration{}
-}
-
-// WithMode sets the Mode field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Mode field is set to the value of the last call.
-func (b *ModelDeploymentRouterStatusApplyConfiguration) WithMode(value workerv1alpha1.ModelDeploymentRouterMode) *ModelDeploymentRouterStatusApplyConfiguration {
-	b.Mode = &value
-	return b
 }
 
 // WithName sets the Name field in the declarative configuration to the given value

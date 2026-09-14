@@ -4257,15 +4257,14 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											XListType: ptr.To[string]("map"),
 										},
 										"router": {
-											Description: "Router optionally puts a request router in front of the roles.\nIT IS EAST-WEST TRAFFIC MANAGEMENT, NOT A PREFILL/DECODE PAIRER, and the distinction decides\nwhich shapes are legal behind it. Several plain servers is one of them: a router that scores on\na cache view picks between equals in a way a Service cannot, so \"there is no pair here\" is not a\nreason to refuse one. Several prefillers with several decoders is another. A rule admitting only\none prefiller and one decoder would describe a pairer rather than this field.\nAbsent means no router, and that stays a supported shape rather than a broken one: the roles are\nindividually addressable through their own Services either way, so a deployment written before\nthis field existed serves exactly as it did.",
+											Description: "Router optionally puts a request router in front of the roles.\nNOTHING RENDERS A ROUTER YET. The field is accepted and the rules stated on it are applied, but\nno Deployment, ConfigMap or Service is created from it and status.endpoint does not move. Every\nsentence below describes the contract this field commits to, not behavior already in place, and\neach says which of the two it is where that is not obvious.\nTHE PARAGRAPH ABOVE EXPIRES WHOLE, on the first change that renders anything from this field.\nDelete it then, rather than editing it down: whoever writes that renderer is the one reader\nguaranteed to be looking here, and a paragraph trimmed clause by clause becomes a list of what\nis still missing, which is the thing nobody keeps current.\nIT IS EAST-WEST TRAFFIC MANAGEMENT, NOT A PREFILL/DECODE PAIRER, and the distinction decides\nwhich shapes are legal behind it. Several plain servers is one of them: a router that scores on\na cache view picks between equals in a way a Service cannot, so \"there is no pair here\" is not a\nreason to refuse one. Several prefillers with several decoders is another. A rule admitting only\none prefiller and one decoder would describe a pairer rather than this field.\nAbsent means no router, and that stays a supported shape rather than a broken one: the roles are\nindividually addressable through their own Services either way, so a deployment written before\nthis field existed serves exactly as it did.",
 											Type:        "object",
 											Required: []string{
-												"mode",
 												"name",
 											},
 											Properties: map[string]v1.JSONSchemaProps{
 												"extraArgs": {
-													Description: "ExtraArgs are additional flags for the router process. Managed only.\nA flag the operator derives itself is REFUSED rather than merged, so that one setting has one\nsource. The catalog deciding which those are is keyed by ROUTER, not by engine: the engine-keyed\ncatalog guarding a role's extraArgs answers a different question and shares only its shape. Like\nthat one, it keys on a flag's name while what it protects is a setting, so a second spelling of\none setting is not caught.",
+													Description: "ExtraArgs are additional flags for the router process.\nThe intent is that a flag the operator derives itself is refused rather than merged, so that one\nsetting has one source. NOTHING ENFORCES THAT YET: the catalog it would consult is keyed by\nrouter rather than by engine, and the engine-keyed catalog guarding a role's extraArgs answers a\ndifferent question and cannot stand in for it.",
 													Type:        "array",
 													Items: &v1.JSONSchemaPropsOrArray{
 														Schema: &v1.JSONSchemaProps{
@@ -4276,24 +4275,12 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													XListType: ptr.To[string]("atomic"),
 												},
 												"image": {
-													Description: "Image overrides the router's container image. Managed only. Empty means the operator assembles\none from Name, the same way a role's image is assembled when its template names none.",
+													Description: "Image overrides the router's container image. Empty means the operator assembles one from Name,\nthe same way a role's image is assembled when its template names none.",
 													Type:        "string",
 													MaxLength:   ptr.To[int64](512),
 												},
-												"mode": {
-													Description: "Mode decides who runs the router. Managed means this operator renders and owns it; External\nmeans the cluster already runs one and this operator only publishes what that router needs.\nIt is required when this struct is present. The two modes render disjoint sets of objects, so a\ndefault would pick one of them on behalf of a user who was asking only for the contract in\nstatus.",
-													Type:        "string",
-													Enum: []v1.JSON{
-														{
-															Raw: []byte(`"managed"`),
-														},
-														{
-															Raw: []byte(`"external"`),
-														},
-													},
-												},
 												"name": {
-													Description: "Name selects which router implementation fronts this deployment. It is required under BOTH\nmodes: External deploys nothing, but the admission check comparing what a router requires\nagainst what the engine exposes still has to know which router is asking.\nTHE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the difference is\nvisible in the same word twice: the transport protocol on the cache backend types spells it\n\"Auto\" while the connector here spells it \"auto\". The casing convention is per API type, and the\nreason is the one ModelDeploymentRoleKind states about itself -- these values are terms the\noutside tool understands, not terms this operator invents. \"llm-d\" is how that project spells\nitself in its module path, its API group and its label domain, so it is spelled that way here.\nONE VALUE TODAY IS A CHOICE TAKEN FOR NOW, NOT THE ABSENCE OF ONE. This field exists ahead of a\nsecond implementation precisely so that adding one is a widening of this enum rather than a new\nfield appearing on an API that already shipped without it.\nWIDENING IT IS FOUR THINGS, NOT ONE: one entry here, one configuration renderer, the object set\nthat router needs, AND the wiring that threads this value to a dispatch point. The schema\nreservation covers the first of those and nothing else, which is why a second router is a piece\nof work rather than a constant.",
+													Description: "Name selects which router implementation fronts this deployment.\nTHE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the difference is\nvisible in the same word twice: the transport protocol on the cache backend types spells it\n\"Auto\" while the connector here spells it \"auto\". The casing convention is per API type, and the\nreason is the one ModelDeploymentRoleKind states about itself -- these values are terms the\noutside tool understands, not terms this operator invents. \"llm-d\" is how that project spells\nitself in its module path, its API group and its label domain, so it is spelled that way here.\nONE VALUE TODAY IS A CHOICE TAKEN FOR NOW, NOT THE ABSENCE OF ONE. This field exists ahead of a\nsecond implementation precisely so that adding one is a widening of this enum rather than a new\nfield appearing on an API that already shipped without it.\nWIDENING IT IS FOUR THINGS, NOT ONE: one entry here, one configuration renderer, the object set\nthat router needs, AND the wiring that threads this value to a dispatch point. The schema\nreservation covers the first of those and nothing else, which is why a second router is a piece\nof work rather than a constant.",
 													Type:        "string",
 													Enum: []v1.JSON{
 														{
@@ -4302,7 +4289,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													},
 												},
 												"replicas": {
-													Description: "Replicas is how many router Pods to run. Managed only.\nIT IS A POINTER AND CARRIES NO SCHEMA DEFAULT, and that is forced rather than chosen.\nStructural-schema defaulting runs before any webhook, so a plain int32 defaulted to one would\nreach admission as one whether or not the user typed it, and the rule refusing a managed-only\nfield under External would then refuse a field nobody set. The renderer defaults it to one\ninstead. Image and ExtraArgs need no such treatment: an explicitly empty value means there\nexactly what an absent one means, so only a non-empty one is refused.\nMORE THAN ONE REPLICA TRADES CACHE CONSISTENCY FOR AVAILABILITY. A router that scores on a\nprefix cache holds that state per replica: upstream reports radix trees that do not synchronize\nacross replicas and a hit rate falling by ten to twenty percent as a result, and reports that\nwhere replicas do exchange events the exchange improves load estimation without making two\nreplicas route alike. More than one is permitted; the cost is stated here rather than left to be\nfound on a dashboard.",
+													Description: "Replicas is how many router Pods to run. Absent means one.\nIT IS A POINTER AND CARRIES NO SCHEMA DEFAULT, and that is forced rather than chosen. A schema\ndefault is applied before any webhook sees the object, so a plain int32 defaulted to one arrives\nindistinguishable from one the user typed. Keeping the distinction readable at admission is what\nlets a later rule answer \"did anyone ask for this\" at all, and a default that erases the\ndifference cannot be un-erased afterwards.\nMORE THAN ONE REPLICA TRADES CACHE CONSISTENCY FOR AVAILABILITY. A router that scores on a\nprefix cache holds that state per replica: upstream reports radix trees that do not synchronize\nacross replicas and a hit rate falling by ten to twenty percent as a result, and reports that\nwhere replicas do exchange events the exchange improves load estimation without making two\nreplicas route alike. More than one is permitted; the cost is stated here rather than left to be\nfound on a dashboard.",
 													Type:        "integer",
 													Format:      "int32",
 													Minimum:     ptr.To[float64](1),
@@ -4501,12 +4488,11 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											Description: "Router is everything a router needs in order to front this deployment, published under BOTH\nmodes. Under the external mode it is the entire output of this feature.\nIt is ABSENT when spec.router is, rather than present and empty, for the same reason KVCache is:\nan empty object here cannot be told apart from a contract whose every string happens to be\nempty.",
 											Type:        "object",
 											Required: []string{
-												"mode",
 												"name",
 											},
 											Properties: map[string]v1.JSONSchemaProps{
 												"endpoint": {
-													Description: "Endpoint is the router's own address. It is present under the managed mode once the router's\nService has one, and ABSENT under the external mode, where this operator deploys nothing and has\nno address to report.",
+													Description: "Endpoint is the router's own address, present once the router's Service has one.",
 													Type:        "string",
 													MaxLength:   ptr.To[int64](512),
 												},
@@ -4525,9 +4511,10 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Type:        "string",
 														},
 														"port": {
-															Description: "Port is the port the metrics are served on.",
+															Description: "Port is the port the metrics are served on. The lower bound is not decoration: unlike the names\nbeside it, this is a number a consumer dials, and a zero would fail only at connect time.",
 															Type:        "integer",
 															Format:      "int32",
+															Minimum:     ptr.To[float64](1),
 														},
 														"queuedRequests": {
 															Description: "QueuedRequests names the metric holding requests waiting to be admitted by the engine.",
@@ -4540,12 +4527,9 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													},
 													Nullable: true,
 												},
-												"mode": {
-													Description: "Mode and Name echo the spec, so that a reader holding only this object knows which contract\nthey are looking at and which implementation it was shaped for.",
-													Type:        "string",
-												},
 												"name": {
-													Type: "string",
+													Description: "Name echoes the spec, so that a reader holding only this object knows which implementation the\ncontract below was shaped for.",
+													Type:        "string",
 												},
 												"poolEndpoint": {
 													Description: "PoolEndpoint is the address of the KV cache pool this deployment attached to, in the form its\nclient takes. A router that consults the pool needs it, and resolving it from the Binding is\nwork this operator has already done.",

@@ -7288,21 +7288,12 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouter(ref common.Refere
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentRouter is the router that fronts a deployment's roles, and how much of it this operator runs.\n\nThree of its five fields apply to one mode only. They are here rather than in a nested mode-specific struct because a user reading the type should see the whole surface at once, and because a field that is meaningless in the current mode is REFUSED rather than ignored -- a field silently dropped is a field its author believes took effect.",
+				Description: "ModelDeploymentRouter is the router that fronts a deployment's roles, and how much of it this operator runs.\n\nTHERE IS NO FIELD SELECTING WHO RUNS THE ROUTER, and that is a decision rather than an omission. This operator renders and owns it; a deployment fronted by a router the cluster already runs is not expressible. A field offering that choice while only one of its values rendered anything would carry no information -- every object would hold the same value -- and adding one later is an optional field with a default, which is backward compatible. Shipping the choice first and then changing what its values mean would not be.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
-					"mode": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Mode decides who runs the router. Managed means this operator renders and owns it; External means the cluster already runs one and this operator only publishes what that router needs.\n\nIt is required when this struct is present. The two modes render disjoint sets of objects, so a default would pick one of them on behalf of a user who was asking only for the contract in status.\n\n\nPossible enum values:\n - `\"external\"` has this operator render no router and publish the contract a router needs. It exists because a cluster that already runs one endpoint picker should not be given a second one underneath it.\n - `\"managed\"` has this operator render the router and own it, so it is garbage-collected with the deployment.",
-							Default:     "",
-							Type:        []string{"string"},
-							Format:      "",
-							Enum:        []interface{}{"external", "managed"},
-						},
-					},
 					"name": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Name selects which router implementation fronts this deployment. It is required under BOTH modes: External deploys nothing, but the admission check comparing what a router requires against what the engine exposes still has to know which router is asking.\n\nTHE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the difference is visible in the same word twice: the transport protocol on the cache backend types spells it \"Auto\" while the connector here spells it \"auto\". The casing convention is per API type, and the reason is the one ModelDeploymentRoleKind states about itself -- these values are terms the outside tool understands, not terms this operator invents. \"llm-d\" is how that project spells itself in its module path, its API group and its label domain, so it is spelled that way here.\n\nONE VALUE TODAY IS A CHOICE TAKEN FOR NOW, NOT THE ABSENCE OF ONE. This field exists ahead of a second implementation precisely so that adding one is a widening of this enum rather than a new field appearing on an API that already shipped without it.\n\nWIDENING IT IS FOUR THINGS, NOT ONE: one entry here, one configuration renderer, the object set that router needs, AND the wiring that threads this value to a dispatch point. The schema reservation covers the first of those and nothing else, which is why a second router is a piece of work rather than a constant.",
+							Description: "Name selects which router implementation fronts this deployment.\n\nTHE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the difference is visible in the same word twice: the transport protocol on the cache backend types spells it \"Auto\" while the connector here spells it \"auto\". The casing convention is per API type, and the reason is the one ModelDeploymentRoleKind states about itself -- these values are terms the outside tool understands, not terms this operator invents. \"llm-d\" is how that project spells itself in its module path, its API group and its label domain, so it is spelled that way here.\n\nONE VALUE TODAY IS A CHOICE TAKEN FOR NOW, NOT THE ABSENCE OF ONE. This field exists ahead of a second implementation precisely so that adding one is a widening of this enum rather than a new field appearing on an API that already shipped without it.\n\nWIDENING IT IS FOUR THINGS, NOT ONE: one entry here, one configuration renderer, the object set that router needs, AND the wiring that threads this value to a dispatch point. The schema reservation covers the first of those and nothing else, which is why a second router is a piece of work rather than a constant.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -7310,7 +7301,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouter(ref common.Refere
 					},
 					"replicas": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Replicas is how many router Pods to run. Managed only.\n\nIT IS A POINTER AND CARRIES NO SCHEMA DEFAULT, and that is forced rather than chosen. Structural-schema defaulting runs before any webhook, so a plain int32 defaulted to one would reach admission as one whether or not the user typed it, and the rule refusing a managed-only field under External would then refuse a field nobody set. The renderer defaults it to one instead. Image and ExtraArgs need no such treatment: an explicitly empty value means there exactly what an absent one means, so only a non-empty one is refused.\n\nMORE THAN ONE REPLICA TRADES CACHE CONSISTENCY FOR AVAILABILITY. A router that scores on a prefix cache holds that state per replica: upstream reports radix trees that do not synchronize across replicas and a hit rate falling by ten to twenty percent as a result, and reports that where replicas do exchange events the exchange improves load estimation without making two replicas route alike. More than one is permitted; the cost is stated here rather than left to be found on a dashboard.",
+							Description: "Replicas is how many router Pods to run. Absent means one.\n\nIT IS A POINTER AND CARRIES NO SCHEMA DEFAULT, and that is forced rather than chosen. A schema default is applied before any webhook sees the object, so a plain int32 defaulted to one arrives indistinguishable from one the user typed. Keeping the distinction readable at admission is what lets a later rule answer \"did anyone ask for this\" at all, and a default that erases the difference cannot be un-erased afterwards.\n\nMORE THAN ONE REPLICA TRADES CACHE CONSISTENCY FOR AVAILABILITY. A router that scores on a prefix cache holds that state per replica: upstream reports radix trees that do not synchronize across replicas and a hit rate falling by ten to twenty percent as a result, and reports that where replicas do exchange events the exchange improves load estimation without making two replicas route alike. More than one is permitted; the cost is stated here rather than left to be found on a dashboard.",
 							Minimum:     ptr.To[float64](1),
 							Type:        []string{"integer"},
 							Format:      "int32",
@@ -7318,7 +7309,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouter(ref common.Refere
 					},
 					"image": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Image overrides the router's container image. Managed only. Empty means the operator assembles one from Name, the same way a role's image is assembled when its template names none.",
+							Description: "Image overrides the router's container image. Empty means the operator assembles one from Name, the same way a role's image is assembled when its template names none.",
 							MaxLength:   ptr.To[int64](512),
 							Type:        []string{"string"},
 							Format:      "",
@@ -7331,7 +7322,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouter(ref common.Refere
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "ExtraArgs are additional flags for the router process. Managed only.\n\nA flag the operator derives itself is REFUSED rather than merged, so that one setting has one source. The catalog deciding which those are is keyed by ROUTER, not by engine: the engine-keyed catalog guarding a role's extraArgs answers a different question and shares only its shape. Like that one, it keys on a flag's name while what it protects is a setting, so a second spelling of one setting is not caught.",
+							Description: "ExtraArgs are additional flags for the router process.\n\nThe intent is that a flag the operator derives itself is refused rather than merged, so that one setting has one source. NOTHING ENFORCES THAT YET: the catalog it would consult is keyed by router rather than by engine, and the engine-keyed catalog guarding a role's extraArgs answers a different question and cannot stand in for it.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -7345,7 +7336,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouter(ref common.Refere
 						},
 					},
 				},
-				Required: []string{"mode", "name"},
+				Required: []string{"name"},
 			},
 		},
 	}
@@ -7398,8 +7389,9 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterMetrics(ref common
 				Properties: map[string]spec.Schema{
 					"port": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Port is the port the metrics are served on.",
+							Description: "Port is the port the metrics are served on. The lower bound is not decoration: unlike the names beside it, this is a number a consumer dials, and a zero would fail only at connect time.",
 							Default:     0,
+							Minimum:     ptr.To[float64](1),
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
@@ -7502,28 +7494,20 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterStatus(ref common.
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentRouterStatus is the contract a router is configured from.\n\nEVERY STRING HERE IS ONE THE OPERATOR ACTUALLY RENDERED, never a default written down in documentation. A router configured from this object and a router the operator configures itself therefore cannot disagree, which is the only reason the external mode can claim parity with the managed one.",
+				Description: "ModelDeploymentRouterStatus is the contract a router is configured from.\n\nEVERY STRING HERE IS ONE THE OPERATOR ACTUALLY RENDERED, never a default written down in documentation. A consumer reading this object and the router the operator configured therefore cannot disagree about a selector, a topic or a metric name, which is what makes this object worth publishing rather than a restatement of what the documentation already says.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
-					"mode": {
+					"name": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Mode and Name echo the spec, so that a reader holding only this object knows which contract they are looking at and which implementation it was shaped for.\n\nPossible enum values:\n - `\"external\"` has this operator render no router and publish the contract a router needs. It exists because a cluster that already runs one endpoint picker should not be given a second one underneath it.\n - `\"managed\"` has this operator render the router and own it, so it is garbage-collected with the deployment.",
+							Description: "Name echoes the spec, so that a reader holding only this object knows which implementation the contract below was shaped for.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"external", "managed"},
-						},
-					},
-					"name": {
-						SchemaProps: spec.SchemaProps{
-							Default: "",
-							Type:    []string{"string"},
-							Format:  "",
 						},
 					},
 					"endpoint": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Endpoint is the router's own address. It is present under the managed mode once the router's Service has one, and ABSENT under the external mode, where this operator deploys nothing and has no address to report.",
+							Description: "Endpoint is the router's own address, present once the router's Service has one.",
 							MaxLength:   ptr.To[int64](512),
 							Type:        []string{"string"},
 							Format:      "",
@@ -7566,7 +7550,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterStatus(ref common.
 						},
 					},
 				},
-				Required: []string{"mode", "name"},
+				Required: []string{"name"},
 			},
 		},
 		Dependencies: []string{
@@ -7638,7 +7622,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref common.Referenc
 					},
 					"router": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Router optionally puts a request router in front of the roles.\n\nIT IS EAST-WEST TRAFFIC MANAGEMENT, NOT A PREFILL/DECODE PAIRER, and the distinction decides which shapes are legal behind it. Several plain servers is one of them: a router that scores on a cache view picks between equals in a way a Service cannot, so \"there is no pair here\" is not a reason to refuse one. Several prefillers with several decoders is another. A rule admitting only one prefiller and one decoder would describe a pairer rather than this field.\n\nAbsent means no router, and that stays a supported shape rather than a broken one: the roles are individually addressable through their own Services either way, so a deployment written before this field existed serves exactly as it did.",
+							Description: "Router optionally puts a request router in front of the roles.\n\nNOTHING RENDERS A ROUTER YET. The field is accepted and the rules stated on it are applied, but no Deployment, ConfigMap or Service is created from it and status.endpoint does not move. Every sentence below describes the contract this field commits to, not behavior already in place, and each says which of the two it is where that is not obvious.\n\nTHE PARAGRAPH ABOVE EXPIRES WHOLE, on the first change that renders anything from this field. Delete it then, rather than editing it down: whoever writes that renderer is the one reader guaranteed to be looking here, and a paragraph trimmed clause by clause becomes a list of what is still missing, which is the thing nobody keeps current.\n\nIT IS EAST-WEST TRAFFIC MANAGEMENT, NOT A PREFILL/DECODE PAIRER, and the distinction decides which shapes are legal behind it. Several plain servers is one of them: a router that scores on a cache view picks between equals in a way a Service cannot, so \"there is no pair here\" is not a reason to refuse one. Several prefillers with several decoders is another. A rule admitting only one prefiller and one decoder would describe a pairer rather than this field.\n\nAbsent means no router, and that stays a supported shape rather than a broken one: the roles are individually addressable through their own Services either way, so a deployment written before this field existed serves exactly as it did.",
 							Ref:         ref(v1alpha1.ModelDeploymentRouter{}.OpenAPIModelName()),
 						},
 					},
