@@ -473,7 +473,7 @@ type ModelDeploymentRouter struct {
 
 	// Replicas is how many router Pods to run. Absent means one.
 	//
-	// IT IS A POINTER AND CARRIES NO SCHEMA DEFAULT, and that is forced rather than chosen. A schema
+	// It is an optional field, and that is forced rather than chosen. A schema
 	// default is applied before any webhook sees the object, so a plain int32 defaulted to one arrives
 	// indistinguishable from one the user typed. Keeping the distinction readable at admission is what
 	// lets a later rule answer "did anyone ask for this" at all, and a default that erases the
