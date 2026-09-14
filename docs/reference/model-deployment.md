@@ -741,6 +741,7 @@ depends on the `InstanceType` the role names.
 | an edit to an identity field — `model`, `engine`, `kvCache`, or the shape of the roles | the field path, and that a different value describes a different **deployment**, which is created rather than edited. See [Which fields are the deployment's identity](#which-fields-are-the-deployments-identity) |
 | a resource mode the named `InstanceType` does not offer | the mode and the type — a slice on a type that offers no slicing, a partition profile on a type that cannot partition, or one outside its profile inventory, with the offered list |
 | a request over the type's per-unit ceiling | the ceiling itself, not only that the request was too large, so the next attempt is not a guess |
+| an explicit `accelerator: 0` on an acceleratable `InstanceType` shared by another role | the accelerator field, the shared type, and two recommended remedies: request at least one accelerator or move the CPU-only role to a non-acceleratable type |
 | a `prefill` and a `decode` role both requesting a **logical slice** from types that draw on the same accelerator group | both roles and the slice field. Whole cards and partition profiles are accepted — including on one card, because partitions are isolated by the device |
 | roles on several `instanceType`s **when `instance-type-derived-from-node` is off** | that setting. The groups are gated as a set by an admission check this operator references from the queues it derives, and with the setting off no queue carries it |
 | a role whose `<deployment>-<role>` is not a DNS-1035 label | the combined **Service** name, which is what the pair becomes; over 63 characters or carrying a dot from a subdomain-shaped deployment name. A role the object **already had** is exempt, so a rule added later cannot strand a stored object |
@@ -754,11 +755,11 @@ depends on the `InstanceType` the role names.
 | a self-declared reuse domain | nothing — the field does not exist |
 | an EMPTY `poolRef.name` | the Binding as the authorization point, and that an empty reference names none |
 
-**Most rules above are answered from the submitted object, and two are not.** Whether the named
-`InstanceType` offers the mode a role asks for, and whether the role's card count fits what that type
-hands out at once, are facts about another object; everything else is decided without leaving the
-request. Both read the type from the API server rather than from a cache, because a cache that is
-behind decides the outcome in both directions.
+**Most rules above are answered from the submitted object, and three are not.** Whether the named
+`InstanceType` offers the mode a role asks for, whether the role's card count fits what that type
+hands out at once, and whether a shared type is acceleratable are facts about another object;
+everything else is decided without leaving the request. All three read the type from the API server
+rather than from a cache, because a cache that is behind decides the outcome in both directions.
 
 **Any rule that reads an `InstanceType` declines for a deployment being deleted**, in the mutating
 half and the validating half alike. Such a rule refuses when the type is absent, so leaving it on
