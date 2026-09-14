@@ -262,10 +262,17 @@ func TestModelDeploymentCrossManufacturer_ThePoolTransportDecidesWhetherItRender
 // TestModelDeploymentCrossManufacturer_TheTwoHalvesRenderDifferentConnectors is the observation the
 // file exists for, and the two expected values are NOT equal on purpose.
 //
-// vLLM-Ascend pins a vLLM release whose connector factory has no MooncakeStoreConnector registered
-// at all, so rendering vLLM's name for that engine aborts it at startup. The two names being equal
-// is therefore the defect the per-engine mapping exists to prevent, not the success condition -- a
-// case written to accept equality would pass exactly when the deployment is broken.
+// Each engine resolves connector names against its own project's registry, so the two names being
+// equal is the defect the per-engine mapping exists to prevent, not the success condition -- a case
+// written to accept equality would pass exactly when one half is rendered a spelling its own engine
+// never registered.
+//
+// WHAT A PASS HERE DOES NOT SAY: that a cross-manufacturer pair shares a cache. It does not. The key
+// each side stores under is assembled by that project's own store client, which nothing in this
+// repository selects; when the two disagree, both engines start, both serve, and each side's lookups
+// return nothing for the other's entries. That failure is SILENT, so a reader arriving from a
+// cross-manufacturer cache that does nothing has no engine log to read and should not expect this
+// assertion to have caught it.
 //
 // The rendering package already pins the name each ENGINE resolves to. What is pinned here is the
 // step before it: a role's own manufacturer is what selects the engine, so one deployment holding

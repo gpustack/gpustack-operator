@@ -349,9 +349,8 @@ no tenant among them. A `tenant_id` in the file would be read by nobody.
 
 An earlier revision of this page said the answer was `no` *because* the webhook selected vLLM's
 generic connector instead, and implied selecting the Ascend one would change it. The webhook now
-selects it and the answer did not change: `v0.19.1rc1` has no tenant anywhere. Selecting the right
-connector fixes a startup failure — the engine's factory resolves connector names against a
-registry, and vLLM's name is absent from that release's — and forwards nothing.
+selects it and the answer did not change: `v0.19.1rc1` has no tenant anywhere. Which connector is
+selected settles which registry has to know the name; it forwards no tenant either way.
 
 **So the `default` Binding is required for `vllm` and `vllm-ascend`, and not for `sglang`.** A pool
 serving only SGLang workloads needs no such Binding: each Pod writes under its own domain, which its
