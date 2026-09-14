@@ -774,6 +774,11 @@ Terminating, and the case was fixed so it stops happening — but it is the only
 that the held state is **reachable through the mechanism rather than only through a fixture**. A
 fixture proves the branch; only this proves the branch is ever taken.
 
+**Corrected after shipping:** `LedgerNotReleased` now names only that non-empty-domain hold. A ledger
+request that fails instead reports `LedgerRequestFailed`, because restoring the master rather than
+draining the domain is what can release it. The split keeps the remediation machine-readable rather
+than requiring consumers to parse the condition message.
+
 **The four scale measurements (criterion 9).** Recorded on the same local cluster, against one master
 with a synthetic object population. Each row is filled by T13 with the number and the population it
 was measured at; an empty cell is an unmet acceptance, not an omission.

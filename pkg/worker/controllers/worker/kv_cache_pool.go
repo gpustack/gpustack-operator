@@ -977,7 +977,7 @@ func (r *KVCachePoolReconciler) convergeTenantLedger(
 			r.reportTenantLedgerFailure(holder, err,
 				fmt.Sprintf("writing the quota of reuse domain %q", tenant.Name))
 			logger.Error(err, "put tenant quota", "tenant", tenant.Name)
-			return kvCachePoolLedgerPass{failure: err}
+			return kvCachePoolLedgerPass{failure: err, observed: observed}
 		}
 	}
 
@@ -1018,7 +1018,7 @@ func (r *KVCachePoolReconciler) convergeTenantLedger(
 			r.reportTenantLedgerFailure(holder, err,
 				fmt.Sprintf("removing the quota of reuse domain %q", entry.TenantID))
 			logger.Error(err, "delete tenant quota", "tenant", entry.TenantID)
-			return kvCachePoolLedgerPass{failure: err}
+			return kvCachePoolLedgerPass{failure: err, retained: retained, observed: observed}
 		}
 	}
 
@@ -1052,9 +1052,9 @@ type kvCachePoolLedgerPass struct {
 	// master that reported no ledger from one whose ledger could not be read at all.
 	failure error
 	// retained names the entries the master would not remove because their domain still holds
-	// objects. It is the one NON-converged outcome that is not a failure — the next pass asks again —
-	// so it is carried rather than folded into converged alone: a Binding whose own domain is in here
-	// can say why its deletion is waiting, instead of reporting a ledger that would not answer.
+	// objects. It is carried rather than folded into converged alone, and survives a later failure in
+	// the same pass: a Binding whose own domain is in here can say why its deletion is waiting, instead
+	// of discarding an answer the master already gave.
 	retained []string
 	// observed is the ledger as it was READ this pass. It is carried so a re-render can reproduce an
 	// entry the pass deliberately did not write — a contested domain's, whose figure must come from
@@ -1238,13 +1238,12 @@ const (
 	// grant, and releasing it under a workload would leave that workload writing into a pool
 	// nothing records it as using.
 	KVCachePoolBindingReasonHeldByWorkloads = "HeldByWorkloads"
-	// KVCachePoolBindingReasonLedgerNotReleased is a Binding nothing in the cluster holds any more,
-	// waiting on the MASTER: it refuses to drop a quota whose domain still holds objects, or a ledger
-	// request failed and left whether the entry is gone unknown. The message says which. It is
-	// separate from HeldByWorkloads because the action is different — drain the domain or restore the
-	// master, rather than stop the workloads — and because this one is the only hold no object in the
-	// cluster explains.
+	// KVCachePoolBindingReasonLedgerNotReleased is a Binding whose domain still holds objects, so the
+	// master refuses to drop its quota. Draining the domain releases it.
 	KVCachePoolBindingReasonLedgerNotReleased = "LedgerNotReleased"
+	// KVCachePoolBindingReasonLedgerRequestFailed is a Binding whose ledger request failed and left
+	// whether its entry is gone unknown. The pool's conditions carry what the master reported.
+	KVCachePoolBindingReasonLedgerRequestFailed = "LedgerRequestFailed"
 )
 
 // syncKVCachePoolBindings writes each Binding's own figures from the ONE scrape the pass took.
@@ -2063,19 +2062,6 @@ func (r *KVCachePoolReconciler) releaseKVCachePoolBinding(
 					"any more — drain the domain and the release completes on the next pass", domain))
 		}
 
-		// A NON-EMPTY retained list means the removal loop ran to the end, so every entry it wanted
-		// gone except those is gone — including this one. Holding it here would make one undrained
-		// domain block the release of every sibling that drained cleanly, which is a deadlock built
-		// out of two unrelated namespaces.
-		if len(ledger.retained) > 0 {
-			logger.V(2).Info("releasing a binding whose own entry is gone, on a pass another " +
-				"domain held")
-			return r.unlockKVCachePoolBinding(ctx, kvcpb)
-		}
-
-		// An EMPTY retained list on a non-converged pass is a ledger that failed outright — the
-		// listing, a write, or a removal that was not the drain refusal.
-		//
 		// A master that answered it holds NO tenant ledger is the one such failure that SETTLES the
 		// question rather than leaving it open, and the pool's own teardown reads it the same way:
 		// with multi-tenancy off there is no ledger for an entry to be in, so this release has nothing
@@ -2086,15 +2072,26 @@ func (r *KVCachePoolReconciler) releaseKVCachePoolBinding(
 			return r.unlockKVCachePoolBinding(ctx, kvcpb)
 		}
 
-		// Every other failure leaves whether this domain's entry is gone UNKNOWN, so the finalizer
-		// holds; and it says so, because the alternative is a blank Deleting message for the far more
-		// common transient failure. An unknown may not be read as the settled answer above: a Binding
-		// released over an entry still on the master leaves capacity nothing can reclaim.
-		logger.V(2).Info("holding a binding's release: the ledger did not converge this pass")
-		return r.holdKVCachePoolBindingRelease(ctx, kvcpb, KVCachePoolBindingReasonLedgerNotReleased,
-			fmt.Sprintf("deletion is held: the master's tenant ledger did not answer this pass, so "+
-				"whether the quota of reuse domain %q is gone cannot be established. The pool's own "+
-				"conditions carry what the master said; the release retries every pass", domain))
+		if ledger.failure != nil {
+			// Every other failure leaves whether this domain's entry is gone UNKNOWN, so the finalizer
+			// holds. A retained sibling does not settle an operation the pass never reached or whose
+			// answer it did not get.
+			logger.V(2).Info("holding a binding's release: the ledger did not converge this pass")
+			return r.holdKVCachePoolBindingRelease(ctx, kvcpb,
+				KVCachePoolBindingReasonLedgerRequestFailed,
+				fmt.Sprintf("deletion is held: the master's tenant ledger did not answer this pass, so "+
+					"whether the quota of reuse domain %q is gone cannot be established. The pool's own "+
+					"conditions carry what the master said; the release retries every pass", domain))
+		}
+
+		// With no failure, a non-empty retained list means the removal loop ran to the end, so every
+		// entry it wanted gone except those is gone — including this one. Holding it here would make
+		// one undrained domain block every sibling that drained cleanly.
+		if len(ledger.retained) > 0 {
+			logger.V(2).Info("releasing a binding whose own entry is gone, on a pass another " +
+				"domain held")
+			return r.unlockKVCachePoolBinding(ctx, kvcpb)
+		}
 	}
 
 	return r.unlockKVCachePoolBinding(ctx, kvcpb)
