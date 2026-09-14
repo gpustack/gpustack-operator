@@ -16,15 +16,22 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
-// NO LABEL OF OUR OWN CARRIES THE ROLE, and that is a decision rather than an omission.
+// NO LABEL OF OUR OWN CARRIES THE ROLE'S NAME, and that is a decision rather than an omission.
 // app.kubernetes.io/component already holds the role's name on every replica: it is in the selector
 // labels the Service selects on, and it is what modelDeploymentPodRole reads to attribute a Pod to a
 // role in status. A second selectable carrier would be two answers to one question, written by two
 // functions, agreeing today -- and the one that drifted would be the one nothing reads on the
 // failure path, whose symptom is a Service with no endpoints or a role reporting nobody ready.
 //
-// A key in this project's own domain stays available: adding one later is additive, while removing
-// one already published breaks whoever selected on it.
+// ONE KEY IN THIS PROJECT'S DOMAIN NOW CARRIES THE ROLE'S KIND: modelDeploymentLabelKeyRoleKind.
+// That is not the case above and does not weaken it. A kind is a closed set of three values that
+// something in front of the replicas selects on to tell a prefiller from a decoder; a name is a
+// user's free-form string that only this deployment's own objects ever match. So the kind key has
+// no second writer to drift from -- it is derived from the same ModelDeploymentEffectiveRoleKind
+// the status echo uses -- while a name key would have had app.kubernetes.io/component.
+//
+// Adding that key was additive, which is why it was available to add: removing one already
+// published breaks whoever selected on it.
 
 const (
 	// modelDeploymentPodGroupNamePrefix marks a group name this operator derived rather than took

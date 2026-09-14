@@ -44,6 +44,26 @@ const (
 	modelDeploymentLabelKeyComponent = "app.kubernetes.io/component"
 	modelDeploymentLabelValueName    = "model-deployment"
 
+	// modelDeploymentLabelKeyRoleKind carries the role's EFFECTIVE kind, so that something in front
+	// of the replicas can tell a prefiller from a decoder by selector. It is the resolved value, not
+	// the field: a role that names no kind is a server, and a selector matching the empty string
+	// would miss every replica of the default shape.
+	//
+	// It is rendered for every deployment, including one whose only role is a server. A key that
+	// appeared only under disaggregation would make "no prefiller exists" and "this deployment does
+	// not label roles" the same query result.
+	//
+	// It is NOT in the selector labels. A Service's selector cannot change without orphaning the
+	// replicas it used to front, and while a role's kind is immutable today, the reason this key
+	// stays out is the same one that keeps the entrance label out: the selector carries identity,
+	// and the kind is a property of the role rather than a name for it.
+	//
+	// Adding it rolls every existing deployment once. The Pod spec hash covers the labels -- see
+	// modelDeploymentPodSpecHash -- so every replica rendered before this key existed has a stale
+	// fingerprint, and the recreate rollout replaces it. The rebuild is the one the recreate policy
+	// already describes, and a replica that leaves loses its cached blocks to its siblings.
+	modelDeploymentLabelKeyRoleKind = "modeldeployment." + systemname.LabelPrefix + "role-kind"
+
 	// modelDeploymentPodSpecHashAnnotation carries the fingerprint of the Pod a role's spec renders
 	// to. The rollout is recreate rather than surge, so this is the whole of how a replica built
 	// before a spec change is told from one built after it.
@@ -408,22 +428,26 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 }
 
 // modelDeploymentPodLabels is what a replica carries: the selector, the queue-name entrance label
-// that routes it into the role's pool, and the part-of label every object this operator renders
-// carries.
+// that routes it into the role's pool, the role-kind label whatever fronts the replicas selects on,
+// and the part-of label every object this operator renders carries.
 //
 // The entrance label sits outside the selector deliberately. It follows the role's InstanceType,
 // which a spec update can change, and a selector that moved with it would orphan every replica
-// already running.
+// already running. The role-kind label is outside it for the reason stated on the constant.
 //
 // The entrance arrives as a VALUE, read from the InstanceType's status by the caller rather than
 // derived from role.InstanceType here, so that this operator and the reconcile that creates the
 // LocalQueue cannot disagree about the queue's name. See renderModelDeploymentPod for what deriving
 // it would cost.
+//
+// The kind is resolved through ModelDeploymentEffectiveRoleKind rather than read off the field, so
+// this label and status.roles[].kind can never name the same role differently.
 func modelDeploymentPodLabels(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, entrance string,
 ) map[string]string {
 	labels := modelDeploymentSelectorLabels(md, role)
 	labels[kueuectrlconst.QueueLabel] = entrance
+	labels[modelDeploymentLabelKeyRoleKind] = string(ModelDeploymentEffectiveRoleKind(role))
 	labels["app.kubernetes.io/part-of"] = "gpustack-operator-worker"
 
 	return labels
