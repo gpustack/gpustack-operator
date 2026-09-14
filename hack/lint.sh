@@ -138,6 +138,25 @@ function lint() {
     gpustack::log::fatal "the review-config check could not run; its diagnostic is above"
   fi
 
+  # The API field descriptions a cluster renders, which no other gate reads. golangci-lint sees the
+  # doc comments as comments and the generated files as generated, and neither view asks who the
+  # sentence is addressed to. The defect it guards is a sentence about Go reaching whoever runs
+  # `kubectl explain`; three such descriptions were found and rewritten by hand, and the same two
+  # classes still covered five more, which is the shape of a defect that gets fixed one instance at
+  # a time forever. Its self-test runs first because the check is a vocabulary matched against
+  # generated text, and both halves fail silently: a term matching nothing reports a clean tree,
+  # and a term matched as a bare substring reports so much that the check gets switched off.
+  if ! bash "${ROOT_DIR}/hack/check-api-descriptions-selftest.sh" "${ROOT_DIR}"; then
+    gpustack::log::fatal "the API-description check is not trustworthy: its self-test failed"
+  fi
+  local api_descriptions_rc=0
+  bash "${ROOT_DIR}/hack/check-api-descriptions.sh" "${ROOT_DIR}" || api_descriptions_rc=$?
+  if [[ ${api_descriptions_rc} -eq 1 ]]; then
+    gpustack::log::fatal "an API description a cluster renders describes Go rather than the field"
+  elif [[ ${api_descriptions_rc} -gt 1 ]]; then
+    gpustack::log::fatal "the API-description check could not run; its diagnostic is above"
+  fi
+
   # Three states, not two: the tree is clean, the tree is dirty, or git cannot answer
   # at all. Folding the last into "clean" is what made a build from a git worktree fail
   # — the checkout's .git is a file pointing outside the build context, so every git

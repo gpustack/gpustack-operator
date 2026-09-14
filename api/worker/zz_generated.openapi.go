@@ -1051,7 +1051,7 @@ func schema_gpustack_api_worker_v1_InstanceMetrics(ref common.ReferenceCallback)
 					},
 					"sample": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Sample is the current utilization sample of the Instance. Pointer fields inside are absent when the corresponding source is unavailable.",
+							Description: "Sample is the current utilization sample of the Instance. Its optional fields are absent when the corresponding source is unavailable.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1.InstanceMetricsSample{}.OpenAPIModelName()),
 						},
@@ -5438,7 +5438,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderHighAvailability(re
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "KVCacheBackendLeaderHighAvailability turns leader election on, and carries nothing.\n\nIt is a STRUCT rather than a bool on purpose: a bool would admit `enabled: false` beside `replicas: 3`, a third state admission would have to adjudicate and every reader would have to remember, while presence has no such state. Lease tuning — duration, renew deadline — can also be added here later without a breaking change.",
+				Description: "KVCacheBackendLeaderHighAvailability turns leader election on, and carries nothing.\n\nDECLARING THE BLOCK IS THE SWITCH, and there is no key inside it to turn the feature back off. An `enabled: false` beside `replicas: 3` would be a third state that admission would have to adjudicate and every reader would have to remember, while presence has no such state. Lease tuning — duration, renew deadline — can also be added here later without a breaking change.",
 				Type:        []string{"object"},
 			},
 		},
@@ -5760,7 +5760,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberLocalDiskEvictionWa
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "KVCacheBackendMemberLocalDiskEvictionWatermark is the band eviction works between.\n\nIt is a STRUCT and not two optional fields on the block above, because either mark alone describes nothing this operator would want to render: a high mark on its own leaves the store pairing it with a low mark this object never states, and the member refuses that pair at startup whenever the unstated default is not below it, for a reason that appears only in a container log.",
+				Description: "KVCacheBackendMemberLocalDiskEvictionWatermark is the band eviction works between.\n\nBOTH MARKS ARE GIVEN TOGETHER, rather than one at a time on the block above, because either mark alone describes nothing this operator would want to render: a high mark on its own leaves the store pairing it with a low mark this object never states, and the member refuses that pair at startup whenever the unstated default is not below it, for a reason that appears only in a container log.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"high": {
@@ -6392,7 +6392,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingSpec(ref common.Refer
 					},
 					"domain": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Domain is the reuse identity this Binding registers, and it is REQUIRED. It maps to the storage layer's tenant_id (isolation) and cache_salt (prefix identity), so registering a domain creates a tenant with a quota ledger of its own.\n\nIt is a STRUCT rather than a list deliberately, so the cardinality is structural and not a webhook rule: one Binding is one tenant, every figure in Status is a single series rather than a sum, and no rule for dividing one ceiling among several domains has to be invented.\n\nEVERY FIELD IS IMMUTABLE, webhook-enforced. Name re-points this namespace at a different ledger and strands the old one. BlockSize or Dtype changed under a warm cache is silent corruption: the writes succeed, the reads succeed, and the tensors are wrong.",
+							Description: "Domain is the reuse identity this Binding registers, and it is REQUIRED. It maps to the storage layer's tenant_id (isolation) and cache_salt (prefix identity), so registering a domain creates a tenant with a quota ledger of its own.\n\nEXACTLY ONE DOMAIN AND NOT A LIST, deliberately, so the cardinality is enforced by the schema and not by a webhook rule: one Binding is one tenant, every figure in Status is a single series rather than a sum, and no rule for dividing one ceiling among several domains has to be invented.\n\nEVERY FIELD IS IMMUTABLE, webhook-enforced. Name re-points this namespace at a different ledger and strands the old one. BlockSize or Dtype changed under a warm cache is silent corruption: the writes succeed, the reads succeed, and the tensors are wrong.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1alpha1.KVCachePoolBindingDomain{}.OpenAPIModelName()),
 						},
@@ -6903,7 +6903,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCache(ref common.Refer
 					},
 					"connector": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Connector selects how the engine's transfer configuration is produced. \"auto\" synthesizes it from the pool's backend type and the engine. There is no \"none\" — synthesizing nothing is reachable through a full command replacement, which also marks the role unmanaged and moves CacheAttached to Unknown.\n\nTHE KV TRANSFER CONVERGES ON MOONCAKE, and that is why the enum has one value. Mooncake is the implementation that supports heterogeneous prefill and decode, which is the shape this API exists to express. NIXL and ROCm NIXL stay reachable; nothing here has run them, and no claim that they would work is made by this field's existence.\n\nTHE RESERVATION IS IN THE SCHEMA AND IN NOTHING ELSE. This field is read by no code: binding resolution passes a domain, an endpoint and a protocol; connector synthesis takes an engine, a kind, a manufacturer and that connection; and the renderer dispatches on the ENGINE. The struct named Connector in the render path is the synthesized result, not this value. So the discriminator is reserved for an API that names a second one, and the seam it would dispatch through does not exist yet.\n\nWIDENING THE ENUM IS FOUR THINGS, NOT ONE: one sub-package under pkg/worker/kvcache, one entry here, one renderer, AND the wiring that threads this value to a dispatch point. That last item is what the reservation does not already cover, and it is the reason a second implementation is a piece of work rather than a constant.\n\nA WIDENED ENUM REACHES NEW DEPLOYMENTS ONLY. This field answers which deployment this is, so it is frozen after creation: an existing deployment is recreated onto a second connector rather than edited onto one. That is stated here because \"widening the enum\" otherwise reads as a migration path for deployments that are already running.",
+							Description: "Connector selects how the engine's transfer configuration is produced. \"auto\" synthesizes it from the pool's backend type and the engine. There is no \"none\" — synthesizing nothing is reachable through a full command replacement, which also marks the role unmanaged and moves CacheAttached to Unknown.\n\nTHE KV TRANSFER CONVERGES ON MOONCAKE, and that is why the enum has one value. Mooncake is the implementation that supports heterogeneous prefill and decode, which is the shape this API exists to express. NIXL and ROCm NIXL stay reachable; nothing here has run them, and no claim that they would work is made by this field's existence.\n\nTHE RESERVATION IS IN THE SCHEMA AND IN NOTHING ELSE. This field is read by no code: binding resolution passes a domain, an endpoint and a protocol; connector synthesis takes an engine, a kind, a manufacturer and that connection; and the renderer dispatches on the ENGINE. So the discriminator is reserved for an API that names a second one, and the seam it would dispatch through does not exist yet.\n\nWIDENING THE ENUM IS FOUR THINGS, NOT ONE: one sub-package under pkg/worker/kvcache, one entry here, one renderer, AND the wiring that threads this value to a dispatch point. That last item is what the reservation does not already cover, and it is the reason a second implementation is a piece of work rather than a constant.\n\nA WIDENED ENUM REACHES NEW DEPLOYMENTS ONLY. This field answers which deployment this is, so it is frozen after creation: an existing deployment is recreated onto a second connector rather than edited onto one. That is stated here because \"widening the enum\" otherwise reads as a migration path for deployments that are already running.",
 							Type:        []string{"string"},
 							Format:      "",
 						},

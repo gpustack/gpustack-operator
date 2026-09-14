@@ -347,10 +347,10 @@ type KVCacheBackendLeader struct {
 
 // KVCacheBackendLeaderHighAvailability turns leader election on, and carries nothing.
 //
-// It is a STRUCT rather than a bool on purpose: a bool would admit `enabled: false` beside
-// `replicas: 3`, a third state admission would have to adjudicate and every reader would have to
-// remember, while presence has no such state. Lease tuning — duration, renew deadline — can also be
-// added here later without a breaking change.
+// DECLARING THE BLOCK IS THE SWITCH, and there is no key inside it to turn the feature back off.
+// An `enabled: false` beside `replicas: 3` would be a third state that admission would have to
+// adjudicate and every reader would have to remember, while presence has no such state. Lease
+// tuning — duration, renew deadline — can also be added here later without a breaking change.
 type KVCacheBackendLeaderHighAvailability struct{}
 
 // KVCacheBackendLeaderOffload turns the local disk tier on, leader side.
@@ -670,10 +670,11 @@ type KVCacheBackendMemberLocalDiskEviction struct {
 
 // KVCacheBackendMemberLocalDiskEvictionWatermark is the band eviction works between.
 //
-// It is a STRUCT and not two optional fields on the block above, because either mark alone describes
-// nothing this operator would want to render: a high mark on its own leaves the store pairing it
-// with a low mark this object never states, and the member refuses that pair at startup whenever the
-// unstated default is not below it, for a reason that appears only in a container log.
+// BOTH MARKS ARE GIVEN TOGETHER, rather than one at a time on the block above, because either mark
+// alone describes nothing this operator would want to render: a high mark on its own leaves the
+// store pairing it with a low mark this object never states, and the member refuses that pair at
+// startup whenever the unstated default is not below it, for a reason that appears only in a
+// container log.
 type KVCacheBackendMemberLocalDiskEvictionWatermark struct {
 	// High is the percentage of Capacity at which eviction starts. A PERCENTAGE and not a quantity:
 	// the store takes a fraction of its own quota rather than a size, and a size here would restate

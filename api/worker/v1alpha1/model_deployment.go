@@ -170,8 +170,7 @@ type ModelDeploymentKVCache struct {
 	//
 	// THE RESERVATION IS IN THE SCHEMA AND IN NOTHING ELSE. This field is read by no code: binding
 	// resolution passes a domain, an endpoint and a protocol; connector synthesis takes an engine, a
-	// kind, a manufacturer and that connection; and the renderer dispatches on the ENGINE. The struct
-	// named Connector in the render path is the synthesized result, not this value. So the
+	// kind, a manufacturer and that connection; and the renderer dispatches on the ENGINE. So the
 	// discriminator is reserved for an API that names a second one, and the seam it would dispatch
 	// through does not exist yet.
 	//

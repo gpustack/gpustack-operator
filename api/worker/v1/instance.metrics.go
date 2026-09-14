@@ -22,7 +22,7 @@ type InstanceMetrics struct {
 	meta.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
 
 	// Sample is the current utilization sample of the Instance.
-	// Pointer fields inside are absent when the corresponding source is unavailable.
+	// Its optional fields are absent when the corresponding source is unavailable.
 	Sample InstanceMetricsSample `json:"sample" protobuf:"bytes,2,opt,name=sample"`
 }
 
