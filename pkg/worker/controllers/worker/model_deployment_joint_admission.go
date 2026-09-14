@@ -263,21 +263,16 @@ func (r *ModelDeploymentJointAdmissionReconciler) Reconcile(
 // feasible and then stopped being feasible starts again from the transition, which is what "has not
 // assembled for half an hour" has to mean.
 func (r *ModelDeploymentJointAdmissionReconciler) heldPast(wl *kueue.Workload, bound time.Duration) bool {
-	for i := range wl.Status.AdmissionChecks {
-		acs := &wl.Status.AdmissionChecks[i]
-		if acs.Name != kueue.AdmissionCheckReference(_JointAdmissionCheckName) ||
-			acs.State != kueue.CheckStatePending {
-			continue
-		}
-		if acs.LastTransitionTime.IsZero() {
-			// Never stamped, so nothing has elapsed yet. The pass that writes Pending stamps it.
-			return false
-		}
-
-		return r.now().Sub(acs.LastTransitionTime.Time) > bound
+	acs := jointCheckEntry(wl)
+	if acs == nil || acs.State != kueue.CheckStatePending {
+		return false
+	}
+	if acs.LastTransitionTime.IsZero() {
+		// Never stamped, so nothing has elapsed yet. The pass that writes Pending stamps it.
+		return false
 	}
 
-	return false
+	return r.now().Sub(acs.LastTransitionTime.Time) > bound
 }
 
 // park stops the reserve-and-hold cycle and says what clears it.
@@ -551,6 +546,18 @@ func (r *ModelDeploymentJointAdmissionReconciler) applyVerdict(
 		})
 }
 
+// jointCheckEntry returns this controller's admission check entry on a Workload, or nil when the
+// Workload does not carry it. Read off the object with no I/O.
+//
+// EVERY READER OF THAT ENTRY GOES THROUGH HERE, so the name is compared in one place and callers
+// get the entry rather than a yes-or-no. The questions asked of it differ -- presence, how long it
+// has been Pending, what its message says, and in tests which state it reached -- and a helper
+// returning only a bool would leave the rest rescanning the slice for the entry they need.
+func jointCheckEntry(wl *kueue.Workload) *kueue.AdmissionCheckState {
+	return kueueadmissioncheck.FindAdmissionCheck(
+		wl.Status.AdmissionChecks, kueue.AdmissionCheckReference(_JointAdmissionCheckName))
+}
+
 // carriesJointCheck reports whether a Workload carries this controller's admission check, read off
 // the object with no I/O.
 //
@@ -558,13 +565,7 @@ func (r *ModelDeploymentJointAdmissionReconciler) applyVerdict(
 // removed: the check is referenced from every operator-owned queue, so plenty of Workloads carry it
 // that this operator did not create. What it rules out cheaply is everything in every OTHER queue.
 func carriesJointCheck(wl *kueue.Workload) bool {
-	for i := range wl.Status.AdmissionChecks {
-		if wl.Status.AdmissionChecks[i].Name == kueue.AdmissionCheckReference(_JointAdmissionCheckName) {
-			return true
-		}
-	}
-
-	return false
+	return jointCheckEntry(wl) != nil
 }
 
 // jointSiblings maps a Workload that changed to the other groups of the same deployment.
