@@ -1551,7 +1551,7 @@ func TestObserveModelDeploymentRoleKinds(t *testing.T) {
 // shape that can tell its rule apart from a kind-aware one.
 //
 // The phase sums every role's counts before judging, so an entire kind with nothing ready and a
-// single replica short produce the same value. That is its behaviour today and adding a condition
+// single replica short produce the same value. That is its behavior today and adding a condition
 // about role kinds does NOT change it: the two answer different questions over the same numbers.
 //
 // THE FIXTURE HAS TO BE MULTI-KIND OR THIS ASSERTS NOTHING. The existing phase table builds one role
