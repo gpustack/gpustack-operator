@@ -24,19 +24,26 @@
 #              own manifest as a server-side dry run and skips only on an actual refusal, printing
 #              what the server said, so the skip retires itself the day either refusal is lifted
 #              instead of outliving its reason. The loop body carries both in full. What is lost
-#              while it stands is this case's own finding: the row
-#              that caught MooncakeStoreConnector being a name that factory does not know is the one
+#              while it stands is this case's own finding: the row that caught MooncakeStoreConnector
+#              being a name that factory did not know, at the release read at the time, is the one
 #              going unrun, leaving the rendered name pinned by a Go test and by the off-cluster
 #              registry reading recorded below, neither of which is a factory answering on a cluster.
 #
 #              WHY THE WRONG NAME READ AS RIGHT, which is why the FAIL below prints the whole
-#              registry rather than only the verdict. After plugin registration vLLM-Ascend's factory
-#              holds four names beginning with Mooncake - MooncakeConnector, MooncakeConnectorV1,
-#              MooncakeConnectorStoreV1 and MooncakeLayerwiseConnector - and the name we rendered,
-#              MooncakeStoreConnector, is not one of them. It is not a typo of any of the four: it is
-#              a legal-looking combination of their parts that names nothing. Surrounded by four real
-#              neighbours a name like that survives every review that reads it, so the check has to
-#              be a lookup rather than a reading, and a reader who sees the failure needs the
+#              registry rather than only the verdict. THE NAMES BELOW ARE A SNAPSHOT OF ONE READING,
+#              AND NOTHING THIS CASE ASSERTS DEPENDS ON THEM: the verdict is taken from the registry
+#              the engine holds at run time, so this snapshot can go stale without the assertion
+#              going wrong. That gap is the reason to say so here rather than in a note - a reader
+#              arrives at this header BECAUSE the case failed, so they are reading the narrative
+#              while the lookup that just ran is newer than it.
+#
+#              In the reading recorded below - vllm-ascend v0.19.1rc1, read 2026-09-04 - that factory
+#              held four names beginning with Mooncake: MooncakeConnector, MooncakeConnectorV1,
+#              MooncakeConnectorStoreV1 and MooncakeLayerwiseConnector. The name we rendered then,
+#              MooncakeStoreConnector, was not one of them, and was not a typo of any of the four: it
+#              was a legal-looking combination of their parts that named nothing. Surrounded by four
+#              real neighbours a name like that survives every review that reads it, so the check has
+#              to be a lookup rather than a reading, and a reader who sees the failure needs the
 #              neighbours in front of them to pick the right one.
 #
 #              The name is NOT hard-coded. It is read back out of the Pod the webhook just mutated
@@ -344,7 +351,8 @@ for row in "vllm:E2E_VLLM_IMAGE" "vllm-ascend:E2E_VLLM_ASCEND_IMAGE"; do
   # one, which is also why the dry run does not need this row's own image to be set.
   #
   # THE COST IS THIS CASE'S OWN FINDING: the row that caught MooncakeStoreConnector being a name
-  # vLLM-Ascend's factory does not know is the one going unrun. What is left of that guard is
+  # vLLM-Ascend's factory did not know, at the release read at the time, is the one going unrun.
+  # What is left of that guard is
   # TestRender_VLLMFamilyVehicleIsAFile pinning AscendStoreConnector as the name we render, plus the
   # off-cluster reading in this case's header - one `docker run` against the image listing the whole
   # registry, recorded there with its date. Neither is this file asserting it, and the summary below

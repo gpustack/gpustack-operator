@@ -23,12 +23,12 @@ const (
 	// vllmStoreConnector is the name vLLM PROPER registers for the Mooncake store
 	// (`kv_connector/factory.py:223-226`, read at v0.25.1).
 	//
-	// A name the factory cannot resolve is a startup failure rather than a silent one, since
-	// `create_connector` looks it up in a registry and raises `ValueError: Unsupported connector
-	// type` on a miss. That cuts BOTH ways and the second way is the one that was missed: a name
-	// correct for one engine is a misspelling for another, and this constant is not
-	// engine-independent. It is resolvable only where vLLM's own registry is the one being
-	// searched - see vllmConnectorFor.
+	// `create_connector` looks the name up in a registry and raises `ValueError: Unsupported
+	// connector type` on a miss, so a name that engine does not know stops it at startup. That does
+	// NOT make this constant engine-independent: it is one project's registry spelling, and which
+	// spellings any other engine's factory resolves is upstream state this repository neither
+	// controls nor observes. Reach it through vllmConnectorFor, which selects by engine, rather than
+	// rendering it directly.
 	vllmStoreConnector = "MooncakeStoreConnector"
 
 	// vllmAscendStoreConnector is the name vLLM-Ascend registers for its own store
@@ -47,10 +47,16 @@ const (
 //
 // The vLLM family shares a renderer because it shares a VEHICLE - a file at MOONCAKE_CONFIG_PATH,
 // read by a `MooncakeStoreConfig.from_file` on both sides whose common keys carry the same meaning.
-// It does NOT share a connector registry: vLLM-Ascend pins vLLM v0.19.1, a release whose factory has
-// no `MooncakeStoreConnector` at all (`factory.py:207,209` there registers `MooncakeConnector` and
-// nothing else). Rendering vLLM's name for it aborts the engine before it ever opens the file this
-// renderer projects.
+// It does NOT share a connector registry. Each project registers its own spelling, and which
+// spellings any one of them resolves is upstream state this repository neither controls nor
+// observes, so the name is selected per engine and never assumed to travel between them.
+//
+// What a per-engine name does NOT buy: two roles on different manufacturers sharing a cache. The
+// key each side stores under is assembled by that project's own store client, which nothing this
+// renderer emits selects or aligns. When the two disagree the failure is SILENT - both engines
+// start, both serve, and each side's lookups return nothing for the other's entries. There is no
+// engine log to read, so a cross-manufacturer cache that does nothing is not evidence that this
+// function picked a wrong name.
 func vllmConnectorFor(engine Engine) (string, error) {
 	switch engine {
 	case EngineVLLM:
