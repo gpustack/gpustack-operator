@@ -448,9 +448,11 @@ what an unset `kind` produces — renders `kv_both`, the writing side, and never
 
 **Wall 2 — the two connectors have no corresponding release, and this one is structural.** vLLM's
 `MooncakeStoreConnector` and vLLM-Ascend's `AscendStoreConnector` are different classes with different
-key formats. vLLM-Ascend pins vLLM `v0.19.1`, whose connector factory does not register
-`MooncakeStoreConnector` at all; it first appears in `v0.21.0`. **This wall is symmetric** — it holds
-in both directions and is outside anything this repository can change.
+key formats, and the **vLLM** release vLLM-Ascend pins registers no `MooncakeStoreConnector` at all.
+**This wall is symmetric**: it holds both directions and is outside what this repository can change.
+
+That pinned release is vLLM `v0.19.1`. It is a **different project** from the vLLM-Ascend release
+`v0.19.1rc1` named elsewhere on this page; the two numbers happen to collide.
 
 **So the default shape meets Wall 2 only.** Two roles with no `kind` set are two `server` roles, both
 rendering `kv_both`, so Wall 1 is never reached and the whole of the limit is Wall 2's.
@@ -459,10 +461,24 @@ rendering `kv_both`, so Wall 1 is never reached and the whole of the limit is Wa
 and the engine from the manufacturer, so two roles on one manufacturer resolve to the same connector:
 no gates, one key format.
 
-**How to tell which you got.** Each injected Pod's stamp carries the connector name rendered for it,
-readable as described in [Reading the injection record](#reading-the-injection-record). Two halves
-showing **different** names is this limit rather than a misconfiguration: the names differ on purpose,
-because rendering vLLM's name for a vLLM-Ascend engine aborts that engine at startup.
+**That sentence is about the cache, though, not about whether the deployment renders at all.** A
+`vllm-ascend` role is refused before any of this applies unless the pool's transport is `ascend`: its
+store backend accepts that one transport and raises on every other, so the injection refuses rather
+than renders.
+
+`protocol` defaults to `Auto`, which resolves to TCP — so **an all-Ascend deployment on a default pool
+does not render either**, and that refusal has nothing to do with the two manufacturers matching or
+differing. What triggers it is one `vllm-ascend` role meeting a pool that does not offer `ascend`,
+alone or paired. The refusal names both halves of the pair and what to set; see
+[Refusals and their fixes](#refusals-and-their-fixes).
+
+**How to tell which you got.** The injection record carries `engine`, and the connector follows from
+it: `vllm` renders `MooncakeStoreConnector`, `vllm-ascend` renders `AscendStoreConnector`. Read it as
+described in [Reading the injection record](#reading-the-injection-record).
+
+Two halves stamped with **different** engines is this limit, not a misconfiguration. The connector
+names differ on purpose — rendering vLLM's name for a vLLM-Ascend engine aborts that engine at
+startup.
 
 ## What a cache changes about a workload
 

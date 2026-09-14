@@ -158,9 +158,9 @@ which the shape is refused instead.
 refuses a second resource group repeating a covered resource within one queue. With a queue per role
 there is no second group to repeat anything.
 
-**Admission and scheduling are not the whole answer, though.** A cross-manufacturer pair is admitted,
-rendered and runs, and its two halves still do not share the KV cache. Two independent walls produce
-that, only one of which this repository could remove — read
+**Admission and scheduling are not the whole answer, though.** A cross-manufacturer pair still does
+not share the KV cache, and a role on an Ascend accelerator is refused outright unless its pool
+offers the matching transport. Read
 [Two roles on different manufacturers](kv-cache-injection.md#two-roles-on-different-manufacturers-do-not-share-the-cache)
 before pairing roles across manufacturers.
 
