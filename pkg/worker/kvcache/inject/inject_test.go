@@ -1,7 +1,6 @@
 package inject
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -210,107 +209,50 @@ func TestRender_SGLangCarriesTheResolvedConnection(t *testing.T) {
 	assert.Nil(t, device.ValueFrom, "empty and written, not omitted")
 }
 
-// TestRender_TenantGoesOnlyToAnEngineThatReadsOne replaces an earlier test that asserted no tenant
-// reached any artifact at all. That assertion encoded a fact which turned out to be wrong for the
-// SGLang build this project actually deploys: its config class carries a tenant_id, its environment
-// loader reads MOONCAKE_TENANT_ID, and its store call forwards a non-default value. vLLM's has none
-// of that, so a variable written for it would be decoration that reads as a guarantee.
-//
-// The two engines are therefore the two sides of this control, and neither half means anything alone:
-// the negative one passes against a renderer that emits nothing at all, the positive one against a
-// renderer that emits everywhere.
-func TestRender_TenantGoesOnlyToAnEngineThatReadsOne(t *testing.T) {
+// TestRender_TenantGoesToEveryEngineThatReadsOne pins the vehicle each engine uses for the reuse
+// domain. The vLLM family reads tenant_id from its file; SGLang reads MOONCAKE_TENANT_ID.
+func TestRender_TenantGoesToEveryEngineThatReadsOne(t *testing.T) {
 	const domain = "team-a-chat"
 
-	testCases := []struct {
-		engine Engine
-		want   bool
-	}{
-		{engine: EngineVLLM, want: false},
-		{engine: EngineVLLMAscend, want: false},
-		{engine: EngineSGLang, want: true},
-	}
-	require.NotEqual(t, testCases[0].want, testCases[len(testCases)-1].want,
-		"both answers must appear, or this cannot tell a rendered value from a constant")
-
-	for _, tc := range testCases {
-		t.Run(string(tc.engine), func(t *testing.T) {
+	for _, engine := range Engines() {
+		t.Run(string(engine), func(t *testing.T) {
 			result, err := Render(Input{
-				Engine: tc.engine, Domain: domain, Connection: testConnectionFor(tc.engine),
+				Engine: engine, Domain: domain, Connection: testConnectionFor(engine),
 			})
 			require.NoError(t, err)
 
-			rendered, err := json.Marshal(result)
-			require.NoError(t, err)
-
-			assert.Equal(t, tc.want, result.TenantInjected,
-				"the renderer reports the action it took")
-			// There is no file-carried case here any more, and it did NOT come back when this package
-			// started rendering AscendStoreConnector for vLLM-Ascend. An earlier revision predicted it
-			// would - "if the Ascend connector is ever rendered, this branch comes back" - and the
-			// prediction was wrong because it read the tenant answer off the connector NAME. The
-			// pinned v0.19.1rc1 has no tenant anywhere (grep over vllm_ascend/, excluding tests: zero
-			// hits), so selecting that connector fixes a startup failure and forwards nothing.
-			// Which connector we render and whether a tenant travels are independent facts.
-			switch {
-			case tc.want:
+			assert.True(t, result.TenantInjected, "the renderer reports the action it took")
+			switch engine {
+			case EngineSGLang:
 				assert.Equal(t, domain, envValue(t, result.Env, "MOONCAKE_TENANT_ID").Value,
 					"the reuse domain is what the engine is told to write under")
 			default:
-				// Asserted on the emitted Env and the rendered file, never on the marshaled Result:
-				// that struct also carries TenantEnvName, which names the variable without emitting
-				// it. Scanning the whole document for a substring caught that metadata and called it
-				// an emission - the second time a "document does not contain X" assertion has failed
-				// on something the document only describes.
-				assert.NotContains(t, envNames(result.Env), "MOONCAKE_TENANT_ID",
-					"this engine reads no tenant, so a variable for it would be decoration")
-				assert.NotContains(t, renderedConfig(t, Input{
-					Engine: tc.engine, Domain: domain, Connection: testConnectionFor(tc.engine),
-				}), "tenant_id", "nor a key in its file")
+				assert.Equal(t, domain, renderedConfig(t, Input{
+					Engine: engine, Domain: domain, Connection: testConnectionFor(engine),
+				})["tenant_id"], "the reuse domain is written into the file the engine reads")
 			}
-			_ = rendered
 		})
 	}
-}
-
-// TestRender_TenantFollowsTheFactsTable substitutes the measured answer and requires the emission to
-// change with it.
-//
-// Without this, the table would be documentation: the renderer could hardcode "SGLang gets a tenant"
-// and every other test would still pass, because SGLang is the only engine whose entry says true. The
-// entry is what a reviewer re-reads when a new build ships, so the code has to be reading it too.
-func TestRender_TenantFollowsTheFactsTable(t *testing.T) {
-	const domain = "team-a-chat"
-
-	emitted := func(t *testing.T) bool {
-		t.Helper()
-		result, err := Render(Input{Engine: EngineSGLang, Domain: domain, Connection: testConnection()})
-		require.NoError(t, err)
-		return result.TenantInjected
-	}
-
-	assert.True(t, emitted(t), "the shipped entry measures this engine as forwarding")
-
-	original := engineTenantSupport[EngineSGLang]
-	t.Cleanup(func() { engineTenantSupport[EngineSGLang] = original })
-	truncating := original
-	truncating.ForwardsTenant = false
-	engineTenantSupport[EngineSGLang] = truncating
-
-	assert.False(t, emitted(t),
-		"an entry measured as truncating must stop the emission, or the table is not being read")
 }
 
 // TestRender_TenantOmittedForAnEmptyDomain. An empty value is normalised back to the store default by
 // the engine, so emitting one would be indistinguishable from not setting it - while still looking, on
 // the Pod, like something was configured.
 func TestRender_TenantOmittedForAnEmptyDomain(t *testing.T) {
-	result, err := Render(Input{Engine: EngineSGLang, Domain: "", Connection: testConnection()})
-	require.NoError(t, err)
+	for _, engine := range Engines() {
+		t.Run(string(engine), func(t *testing.T) {
+			result, err := Render(Input{Engine: engine, Connection: testConnectionFor(engine)})
+			require.NoError(t, err)
 
-	assert.False(t, result.TenantInjected)
-	assert.NotContains(t, envNames(result.Env), "MOONCAKE_TENANT_ID",
-		"an empty domain emits no tenant variable at all")
+			assert.False(t, result.TenantInjected)
+			assert.NotContains(t, envNames(result.Env), "MOONCAKE_TENANT_ID")
+			if engine != EngineSGLang {
+				assert.NotContains(t, renderedConfig(t, Input{
+					Engine: engine, Connection: testConnectionFor(engine),
+				}), "tenant_id", "an empty domain emits no tenant key")
+			}
+		})
+	}
 }
 
 // TestRender_Refusals covers every case where rendering anything would produce a container that starts

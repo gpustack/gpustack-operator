@@ -44,16 +44,8 @@ const (
 	sglangGlobalSegmentEnv  = "MOONCAKE_GLOBAL_SEGMENT_SIZE"
 	sglangLocalHostnameEnv  = "MOONCAKE_LOCAL_HOSTNAME"
 
-	// sglangTenantEnv is what makes a reuse domain real on this engine, and it is the one variable
-	// here whose effect depends on the build rather than only on the spelling.
-	//
-	// Read at v0.5.18: all three config paths take a tenant_id, the environment one from this
-	// variable; the store call then forwards it as a keyword argument, but ONLY when it differs from
-	// the literal "default" - which is exactly why omitting a tenant and passing "default" behave
-	// identically against a master. A client library too old to accept the argument raises rather
-	// than dropping it, so a build mismatch on that side stops the Pod instead of silently losing
-	// isolation. An SGLang build older than this variable simply never reads it, and that direction
-	// has no signal at all, which is why the stamp claims an injection and never an outcome.
+	// sglangTenantEnv carries the Binding's reuse domain. Whether the selected image reads it is the
+	// image owner's compatibility responsibility.
 	sglangTenantEnv = "MOONCAKE_TENANT_ID"
 
 	// sglangBackendArg enables the store. Like vLLM's connector argument it has no environment
@@ -84,10 +76,8 @@ const (
 // used to cite had every one of them drifted - that upstream file has since grown past 1300 lines -
 // and a stale line number survives review precisely because it looks checked.
 func renderSGLang(in Input) (*Result, error) {
-	// Gated on the role table, not on this file knowing its own engine, for the same reason the
-	// tenant emission below is: the admission webhook asks that table before anything is rendered, so
-	// a renderer restating the answer is a second implementation of it that would drift from the one
-	// a user's refusal was decided by.
+	// Gated on the role table rather than restated in this renderer, so admission and rendering use
+	// the same role contract.
 	if !SupportsRole(in.Engine, in.Role) {
 		return nil, newRefusal(ReasonRoleUnsupported,
 			"engine %q has no known prefill/decode equivalent for role %q; accepting the role and "+
@@ -103,12 +93,8 @@ func renderSGLang(in Input) (*Result, error) {
 	// The tenant is omitted entirely for an empty domain rather than emitted empty, because this
 	// engine normalises a blank value back to the store default - so an empty variable would be
 	// indistinguishable from not setting one, while still looking, on the Pod, like configuration.
-	// Gated on the facts table, not on this file knowing its own engine. That keeps the table a live
-	// constraint rather than documentation: substituting the entry changes what this renderer emits,
-	// so a test can prove the emission follows the measurement instead of a hardcoded belief about
-	// SGLang. It is also what makes the entry worth re-reading when a new build ships.
 	env := []core.EnvVar{}
-	tenantInjected := SupportsTenant(in.Engine) && in.Domain != ""
+	tenantInjected := in.Domain != ""
 	tenantEnvName := ""
 	if tenantInjected {
 		env = append(env, core.EnvVar{Name: sglangTenantEnv, Value: in.Domain})

@@ -36,10 +36,8 @@ const (
 	// `MooncakeConnectorStoreV1` for the same class two entries above; either name resolves, and
 	// this one is chosen for saying which project owns the class.
 	//
-	// What this does NOT mean: that selecting it forwards a tenant. vLLM-Ascend has no tenant
-	// anywhere in that release (grep over `vllm_ascend/`, excluding tests: zero hits), so this
-	// engine's row in engineTenantSupport stays false after the change. The connector name and the
-	// tenant answer are independent, and reading one off the other is what put the wrong name here.
+	// The connector name does not imply anything about tenant support; that belongs to the engine
+	// image and is not a selection criterion here.
 	vllmAscendStoreConnector = "AscendStoreConnector"
 )
 
@@ -108,10 +106,8 @@ func renderVLLM(in Input) (*Result, error) {
 		return nil, err
 	}
 
-	// No tenant is written into this file, for either engine on it - see the note on the config
-	// struct. This renderer now selects TWO different connectors, one per engine, and neither has a
-	// tenant key to read; the file is the same either way.
-	config, err := renderVLLMClientConfig(in.Connection)
+	tenantInjected := in.Domain != ""
+	config, err := renderVLLMClientConfig(in.Connection, in.Domain)
 	if err != nil {
 		return nil, err
 	}
@@ -131,10 +127,7 @@ func renderVLLM(in Input) (*Result, error) {
 	transferConfig := string(transferDoc)
 
 	return &Result{
-		// Nothing on this path writes a tenant, so the action this reports is always "none". Derived
-		// from the renderer's own emission rather than from the engine table, so it stays true if a
-		// later revision does emit one.
-		TenantInjected: false,
+		TenantInjected: tenantInjected,
 		Env: []core.EnvVar{
 			{Name: vllmConfigPathEnv, Value: ConfigFilePath},
 		},

@@ -74,13 +74,13 @@ const (
 
 // vllmClientConfig is vLLM's Mooncake configuration file, in that engine's own spelling.
 //
-// The struct is the schema, and being closed is the point: vLLM's reader takes eight named keys one by
-// one with no passthrough (`worker.py:129-142`), so a key outside the set is not merely ignored, no
+// The struct is the schema, and being closed is the point: vLLM's reader takes named keys one by one
+// with no passthrough, so a key outside the set is not merely ignored, no
 // code path ever sees it. Rendering through a struct rather than a map makes an unreadable key a
 // compile error instead of a silent addition.
 //
-// TWO readers consume this one file, and they are closed at different sets: vLLM-Ascend's takes six
-// of the same names and has no `mode` (`mooncake_backend.py:115-124`, v0.19.1rc1). We render `mode`
+// TWO readers consume this one file, and they are closed at different sets: vLLM-Ascend does not
+// use `mode`. We render `mode`
 // anyway, and that is safe for a reason worth stating rather than assuming - vLLM does not pass
 // `mode` to `store.setup()` either (`worker.py:1040-1048`); it only validates the pair against
 // `global_segment_size` and logs it. The value that drives both engines is the size, and both read
@@ -100,27 +100,18 @@ type vllmClientConfig struct {
 	Mode                string `json:"mode"`
 	GlobalSegmentSize   int64  `json:"global_segment_size"`
 	LocalBufferSize     int64  `json:"local_buffer_size"`
+	TenantID            string `json:"tenant_id,omitempty"`
 }
-
-// There is deliberately no tenant key, and it stays absent for BOTH engines rendered onto this file
-// even though they are now configured with different connectors - vllm with MooncakeStoreConnector,
-// vllm-ascend with AscendStoreConnector (see vllmConnectorFor). Neither reader has a tenant: vLLM's
-// takes eight named keys with no tenant among them (worker.py:126-142, v0.25.1), and vLLM-Ascend's
-// takes six, also without one (mooncake_backend.py:115-124, v0.19.1rc1) - that release has no tenant
-// anywhere, tests excluded.
-//
-// An earlier revision said the key "comes back with that connector", meaning AscendStoreConnector.
-// That connector is now what this project renders and the key did not come back, because the
-// prediction read a tenant capability off a connector name. The two are independent.
 
 // renderVLLMClientConfig builds the file's content for a resolved connection.
 //
-// Every field is written, none defaulted by omission. The engine's default for an absent key is not
-// something a reader should have to know to predict the container's behavior, and in two cases -
+// Every connection and role field is written, none defaulted by omission. The engine's default for
+// an absent key is not something a reader should have to know to predict the container's behavior,
+// and in two cases -
 // `global_segment_size` and `local_buffer_size` - the default is GiB of host memory nobody asked for
-// (4 on vLLM, 1 on vLLM-Ascend). Writing every field is also what keeps that difference from
-// mattering: two engines with different defaults produce the same container when nothing defaults.
-func renderVLLMClientConfig(conn Connection) ([]byte, error) {
+// (4 on vLLM, 1 on vLLM-Ascend). The tenant is the exception: an empty domain is omitted because the
+// engines normalize it to the same default as an absent key.
+func renderVLLMClientConfig(conn Connection, tenant string) ([]byte, error) {
 	cfg := vllmClientConfig{
 		MetadataServer:      MetadataServer,
 		MasterServerAddress: conn.MasterAddress,
@@ -129,6 +120,7 @@ func renderVLLMClientConfig(conn Connection) ([]byte, error) {
 		Mode:                ModeStandaloneStore,
 		GlobalSegmentSize:   GlobalSegmentSize,
 		LocalBufferSize:     LocalBufferSize,
+		TenantID:            tenant,
 	}
 
 	out, err := json.Marshal(cfg)

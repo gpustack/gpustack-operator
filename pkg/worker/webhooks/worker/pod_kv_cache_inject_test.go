@@ -71,6 +71,10 @@ func TestPodKVCacheInject_VLLMCarriesTheFileVehicle(t *testing.T) {
 
 	assert.Contains(t, pod.Annotations, inject.ClientConfigAnnotationKey,
 		"the downwardAPI projection reads the file back out of this annotation")
+	var config map[string]any
+	require.NoError(t, json.Unmarshal([]byte(pod.Annotations[inject.ClientConfigAnnotationKey]), &config))
+	assert.Equal(t, "team-a-chat", config["tenant_id"],
+		"the projected file carries the Binding's reuse domain")
 }
 
 // TestPodKVCacheInject_ManufacturerSelectsTheVLLMRuntime checks the declared runtime variant at
@@ -197,7 +201,7 @@ func TestPodKVCacheInject_SGLangCarriesTheEnvironmentVehicle(t *testing.T) {
 	// the emission while leaving the report intact turned out to be possible, and only an assertion
 	// at this level catches that class.
 	assert.Equal(t, "team-a-chat", env["MOONCAKE_TENANT_ID"],
-		"this engine reads a tenant, so the Binding's reuse domain is what it is told to write under")
+		"the renderer supplies the Binding's reuse domain")
 }
 
 // TestPodKVCacheInject_StampRecordsWhatWasDecided pins every field, and the isolation one is why the
@@ -210,44 +214,33 @@ func TestPodKVCacheInject_StampRecordsWhatWasDecided(t *testing.T) {
 	record := stampOf(t, pod)
 	assert.Equal(t, "chat", record.Binding)
 	assert.Equal(t, "vllm", record.Engine)
-	assert.Equal(t, "v0.25.1", record.EngineVersion)
 	assert.Equal(t, "file", record.Vehicle)
 	assert.Equal(t, "team-a-chat", record.Domain)
-	assert.False(t, record.TenantInjected,
-		"vLLM's config class has no tenant key, so nothing was written for it to read")
+	assert.True(t, record.TenantInjected)
+	assert.NotContains(t, pod.Annotations[KVCacheInjectedAnnotationKey], `"engineVersion"`,
+		"the stamp does not claim an engine version admission never inspected")
 }
 
 // TestPodKVCacheInject_StampTenantFollowsTheEngine is the paired control for the field above.
-//
-// The assertion there observes vLLM, which injects nothing, so on its own it passes just as well
-// against a field hard-coded to false. What discriminates is that the two accepted engines answer
-// DIFFERENTLY: SGLang reads a tenant variable and is given one, vLLM has no tenant key in its config
-// class and is given none. No substituted verdict is needed for that - the engines themselves are the
-// two sides.
 //
 // The field records what was injected and never whether isolation resulted, so there is deliberately
 // no assertion here about the latter: whether the engine build honors the variable is not knowable
 // at admission, and a test claiming otherwise would be pinning an over-claim.
 func TestPodKVCacheInject_StampTenantFollowsTheEngine(t *testing.T) {
-	testCases := []struct {
-		engine string
-		want   bool
-	}{
+	testCases := []string{
 		// vllm-ascend is absent because it cannot arrive here: the annotation refuses it, and the
 		// operator derives it further in. Its stamp is covered where it is reachable, in the
-		// inject package's own table.
-		{engine: "vllm", want: false},
-		{engine: "sglang", want: true},
+		// inject package's renderer tests.
+		"vllm",
+		"sglang",
 	}
-	require.NotEqual(t, testCases[0].want, testCases[len(testCases)-1].want,
-		"the table must contain both answers, or it cannot tell a rendered value from a constant")
 
-	for _, tc := range testCases {
-		t.Run(tc.engine, func(t *testing.T) {
-			pod := kvCachePodForEngine(tc.engine)
+	for _, engine := range testCases {
+		t.Run(engine, func(t *testing.T) {
+			pod := kvCachePodForEngine(engine)
 			require.NoError(t, admit(t, pod))
-			assert.Equal(t, tc.want, stampOf(t, pod).TenantInjected,
-				"the stamp reports what this engine's renderer emitted")
+			assert.True(t, stampOf(t, pod).TenantInjected,
+				"the stamp reports that the renderer wrote the Binding's domain")
 		})
 	}
 }

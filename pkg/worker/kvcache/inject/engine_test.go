@@ -10,32 +10,12 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 )
 
-// TestEngines_AreAllKnown pins the enum against the table. An engine value the synthesis accepts but
-// the table does not describe would reach SupportsTenant, get a false from a missing entry, and be
-// refused for a reason nobody measured -- indistinguishable from a measured refusal.
-func TestEngines_AreAllKnown(t *testing.T) {
-	for _, engine := range Engines() {
-		t.Run(string(engine), func(t *testing.T) {
-			facts, ok := engineFactsFor(engine)
-			require.True(t, ok, "engine %q is accepted but has no entry in the facts table", engine)
-			assert.NotEmpty(t, facts.Version,
-				"every entry records the version it was measured at, or a later reader cannot tell "+
-					"whether the fact is still current")
-			assert.NotEmpty(t, facts.TenantSource,
-				"every entry names the source line the fact was read from, so the discriminating "+
-					"check can be re-run without finding the file again")
-		})
-	}
-}
-
 // TestEngines_HaveMeasuredTransportConstraint is the transport table's counterpart to the pin above.
 //
 // An engine with no entry is LET THROUGH by checkTransport, so a missing row is not a compile error
 // and not a refusal -- it is silently the permissive answer. This is what makes the omission visible.
 //
-// The version and the source line are required for the same reason they are on the tenant table, and
-// here they carry more weight: an entry whose Required is empty says "this engine refuses nothing",
-// and without a source that is indistinguishable from a row nobody measured.
+// The version and source line keep an empty Required distinguishable from a row nobody measured.
 func TestEngines_HaveMeasuredTransportConstraint(t *testing.T) {
 	var sawConstrained, sawUnconstrained bool
 
@@ -100,7 +80,7 @@ func TestCheckTransport(t *testing.T) {
 		// SGLang compares protocol to "rdma" and carries on either way, so this row is the one that
 		// would break if a re-check ever mistook that comparison for a requirement.
 		{name: "sglang accepts rdma", engine: EngineSGLang, protocol: "rdma", accepted: true},
-		// An unmeasured engine claims less. Render refuses it earlier for having no facts at all, so
+		// An unmeasured engine claims less. Render refuses it earlier as an unknown engine, so
 		// this pins that the permissive direction is the one the missing entry lands on.
 		{name: "an unmeasured engine is not refused here", engine: Engine("mystery-engine"), protocol: "tcp", accepted: true},
 	}
@@ -157,54 +137,6 @@ func TestCheckTransport_MessageNamesThePair(t *testing.T) {
 		"the transport is the backend's, and a reader looking for it on the Binding finds nothing")
 	assert.Contains(t, message, "v0.19.1rc1",
 		"the version behind the answer, so the refusal says why rather than only what")
-}
-
-// TestSupportsTenant_PinsTheMeasuredAnswerPerEngine states each entry explicitly, so that changing one
-// is a deliberate act with a failing test attached rather than an unnoticed edit.
-//
-// It did exactly that: an earlier revision asserted that EVERY engine truncates, and re-measuring
-// SGLang at the version this project actually deploys turned it red. That is the test working. What
-// it could not do was notice that the entry had been measured at the wrong ref in the first place -
-// a table can only pin what someone read, not whether they read the right thing.
-//
-// The table below must contain BOTH answers. With one answer it cannot distinguish a per-engine
-// measurement from a constant, which is the failure mode that let the wrong entry sit unchallenged.
-func TestSupportsTenant_PinsTheMeasuredAnswerPerEngine(t *testing.T) {
-	want := map[Engine]bool{
-		EngineVLLM: false,
-		// False because the release we pin carries no tenant at all - not because of which connector
-		// this package renders. That distinction is the point: renderVLLM now writes
-		// AscendStoreConnector for this engine, the engine's own store path, and this value did not
-		// move. A previous note here predicted it would.
-		EngineVLLMAscend: false,
-		EngineSGLang:     true,
-	}
-	require.Len(t, want, len(Engines()), "every accepted engine needs a pinned answer")
-
-	var sawTrue, sawFalse bool
-	for _, engine := range Engines() {
-		expected, ok := want[engine]
-		require.True(t, ok, "engine %q has no pinned answer", engine)
-		if expected {
-			sawTrue = true
-		} else {
-			sawFalse = true
-		}
-
-		t.Run(string(engine), func(t *testing.T) {
-			assert.Equal(t, expected, SupportsTenant(engine),
-				"the measurement for %q changed; its source line and version must change with it", engine)
-		})
-	}
-	assert.True(t, sawTrue && sawFalse,
-		"both answers must appear, or this pins a constant rather than a per-engine measurement")
-}
-
-// TestSupportsTenant_UnknownEngine keeps an unrecognized value on the refusing side. A missing map
-// entry already yields the zero value, so this asserts the safe direction is the one the zero value
-// happens to land on -- a property worth pinning rather than inheriting.
-func TestSupportsTenant_UnknownEngine(t *testing.T) {
-	assert.False(t, SupportsTenant(Engine("mystery-engine")))
 }
 
 // TestParseEngine covers the only place an engine string enters the package.

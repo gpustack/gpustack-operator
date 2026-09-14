@@ -2,6 +2,8 @@
 package inject
 
 import (
+	"slices"
+
 	core "k8s.io/api/core/v1"
 )
 
@@ -60,12 +62,10 @@ type Result struct {
 // would leave a container that starts normally, looks configured, and does not use the cache - the
 // failure mode that is invisible from outside the Pod and therefore the one worth failing loudly for.
 //
-// The reuse domain IS an input, and it is never a reason to refuse. Whether it gets rendered is the
-// facts table's answer for that engine: one that reads a tenant is given the domain, one that does not
-// is given nothing, because a key nothing reads would be decoration that reads as a guarantee. A
-// refusal keyed on the domain would reject every caller, since every Binding declares one.
+// The reuse domain IS an input, and it is never a reason to refuse. A non-empty domain is always
+// rendered; whether the engine build reads it is the image owner's compatibility responsibility.
 func Render(in Input) (*Result, error) {
-	if _, ok := engineFactsFor(in.Engine); !ok {
+	if !slices.Contains(Engines(), in.Engine) {
 		return nil, newRefusal(ReasonEngineUnknown,
 			"engine %q is not one this operator can configure; set one of %v", in.Engine, Engines())
 	}
@@ -95,8 +95,7 @@ func Render(in Input) (*Result, error) {
 	case EngineSGLang:
 		return renderSGLang(in)
 	default:
-		// Unreachable: the facts table above accepts exactly the engines this switch covers, and
-		// TestEngines_AreAllKnown pins the two lists to each other.
+		// Unreachable: the Engines check above accepts exactly the values this switch covers.
 		return nil, newRefusal(ReasonEngineUnknown, "engine %q has no renderer", in.Engine)
 	}
 }
