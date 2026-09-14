@@ -148,8 +148,8 @@ A member on `efa` needs libfabric in its image, and one that can drive the node'
 distro build. `mirrored-mooncake` installs AWS's, ahead of that copy in its loader cache.
 
 Nothing has to be built to run this **without high availability**.
-`docker.io/kvcacheai/mooncake:0.3.13` is published for amd64 and arm64 and carries **both**
-`mooncake_master` and `mc_store_rest_server`, so one `spec.image` serves the leader and the members.
+The example image above is published for amd64 and arm64 and carries **both** `mooncake_master` and
+`mc_store_rest_server`, so one `spec.image` serves the leader and the members.
 It runs on a host with no GPU: its `libcuda.so.1` is a stub and its `libcudart.so.12` is the real
 library, and neither reaches a driver.
 
@@ -471,9 +471,9 @@ node, unmounts that member's segment **immediately** — there is no drain.
 > and **it cannot be pointed at the segment this operator gives a member**. That segment is mounted by
 > the client's own startup, which files it in neither record set the unmount routes read, so both of
 > them refuse it: `/api/unmount` answers `500` with `segment_id not found in allocated records`, and
-> `/api/unmount_shm` answers `500` with `not found in mounted records`. Measured against `mooncake`
-> 0.3.13, at every grace period, **using the id the leader itself publishes for that segment** — while
-> the same `/api/unmount` returns `200` for a segment mounted through `/api/mount`.
+> `/api/unmount_shm` answers `500` with `not found in mounted records`. Measured against the example
+> image above, at every grace period, **using the id the leader itself publishes for that segment** —
+> while the same `/api/unmount` returns `200` for a segment mounted through `/api/mount`.
 
 > **So this is not a matter of identifying the right member.** An earlier version of this page said a
 > transport-independent hook was waiting on upstream to expose a member's own `client_id`. A member
@@ -491,10 +491,10 @@ node, unmounts that member's segment **immediately** — there is no drain.
 [local disk tier](local-disk-tier.md) gets a `preStop` hook that deregisters the tier with the
 leader and then waits out the grace. A group with no tier renders no hook and the setting is inert.
 
-**Measured against `mooncake` 0.3.13 on a two-node cluster**, deregistration takes effect **at once**:
-a peer reading a key that lives only on that tier gets a clean miss for the whole window rather than
-at the end of it. Sizing this value so that in-flight peer reads can finish sizes it against
-something that does not happen.
+**With the example image above on a two-node cluster**, deregistration takes effect **at once**: a
+peer reading a key that lives only on that tier gets a clean miss for the whole window rather than at
+the end of it. Sizing this value so that in-flight peer reads can finish sizes it against something
+that does not happen.
 
 The same measurement shows the wait is unconditional rather than a drain — the process holds for the
 full value even when nothing is still reading. What it buys is local time for the departing member to

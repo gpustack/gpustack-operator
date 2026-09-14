@@ -20,19 +20,13 @@ import (
 
 // isolation is what the stamp records about a Pod's declared reuse domain.
 //
-// It carries no judgement about whether isolation results, and that omission is deliberate. Whether an
-// injected tenant takes effect depends on the engine BUILD, which this project does not check, so a
-// verdict here would have to guess - and guessing "isolated" for a build that ignores the variable is
-// the one direction that misleads. What is recorded instead is the domain and the version the engine
-// facts were read at; what was DONE about the tenant is recorded by the renderer, which knows.
+// It carries no judgement about whether isolation results. Whether an injected tenant takes effect
+// depends on the engine build, which this project does not check. What was done about the tenant is
+// recorded by the renderer, which knows.
 type isolation struct {
 	// Domain is the reuse identity the Binding declared. Empty only for an object that never went
 	// through Binding admission, where the domain is required.
 	Domain string
-
-	// EngineVersion is the version the answer was measured at, carried so the stamp says why rather
-	// than only what.
-	EngineVersion string
 }
 
 // resolution is everything Default needs after reading the cluster: what to render, and what to say
@@ -103,12 +97,9 @@ func (r *PodKVCacheWebhook) resolve(ctx context.Context, pod *core.Pod) (*resolu
 			"address to point %q at; retry once the pool reports one", pool.Name, engine)
 	}
 
-	version, _ := inject.TenantSupportSource(engine)
-
 	return &resolution{
-		// The reuse domain goes to the renderer, which emits it only for an engine that reads one.
-		// It is never a reason to refuse: an engine that ignores the variable is not a Pod anyone
-		// should be stopped from creating.
+		// The reuse domain always goes to the renderer. Engine compatibility is the image owner's
+		// responsibility and is never a reason to refuse the Pod.
 		Input: inject.Input{
 			Engine: engine,
 			Role:   role,
@@ -119,8 +110,7 @@ func (r *PodKVCacheWebhook) resolve(ctx context.Context, pod *core.Pod) (*resolu
 			},
 		},
 		Isolation: isolation{
-			Domain:        binding.Spec.Domain.Name,
-			EngineVersion: version,
+			Domain: binding.Spec.Domain.Name,
 		},
 	}, nil
 }

@@ -98,6 +98,7 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 			"global_segment_size":   float64(0),
 			"local_buffer_size":     float64(134217728),
 			"mode":                  "standalone-store",
+			"tenant_id":             "team-a-shared",
 		}
 	}
 
@@ -148,13 +149,8 @@ func TestSynthesizeModelDeploymentConnector(t *testing.T) {
 			// The one value that cannot be known at admission time arrives as a fieldRef, which is
 			// the whole reason this engine does not get a file.
 			//
-			// MOONCAKE_TENANT_ID IS NEW HERE, and it is a fix rather than an addition. This engine
-			// DOES forward a tenant at the version this project ships: its loader reads that
-			// variable and passes the value on as a keyword argument, so the domain reaches the
-			// store. The renderer decides this per engine from a table carrying the version and
-			// source line each answer was measured at -- the two vLLM entries forward none and get
-			// none. Nothing in this file restates that answer; the fixture supplies a domain and
-			// this case pins what came back for THIS engine.
+			// The Binding's domain is always rendered. This engine carries it in
+			// MOONCAKE_TENANT_ID rather than in the file used by the vLLM family.
 			name:         "sglang_golden",
 			engine:       workercore.ModelDeploymentEngineSGLang,
 			manufacturer: nodefeature.ManufacturerNVIDIA,
@@ -497,13 +493,6 @@ func TestSynthesizeModelDeploymentConnector_KeysNeverRendered(t *testing.T) {
 		key  string
 		why  string
 	}{
-		{
-			name: "no_tenant_id",
-			key:  "tenant_id",
-			why: "no supported engine passes a tenant to the cache client: it is setup()'s 11th " +
-				"parameter and every engine calls setup() positionally with seven or eight " +
-				"arguments, so rendering the key would document a wiring that is not happening",
-		},
 		{
 			name: "no_local_hostname",
 			key:  "local_hostname",

@@ -9,7 +9,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
-// vllmReadableKeys is every key vLLM's own file reader takes, transcribed from `worker.py:129-142`.
+// vllmReadableKeys is every key vLLM's own file reader takes, transcribed from
+// `MooncakeStoreConfig.from_file` in `worker.py`.
 //
 // It is a literal list rather than anything derived from the renderer, and that independence is the
 // whole point: a subset assertion against a list built from the code under test would accept whatever
@@ -24,6 +25,7 @@ var vllmReadableKeys = sets.New(
 	"global_segment_size",
 	"local_buffer_size",
 	"enable_offload",
+	"tenant_id",
 )
 
 // sglangReadableVariables is every variable SGLang's `load_from_env` reads, transcribed from
@@ -40,6 +42,7 @@ var sglangReadableVariables = sets.New(
 	"MOONCAKE_CHECK_SERVER",
 	"MOONCAKE_STANDALONE_STORAGE",
 	"MOONCAKE_CLIENT",
+	"MOONCAKE_TENANT_ID",
 )
 
 // testConnection is a resolved connection, as the caller would hand one over.
@@ -130,8 +133,8 @@ func TestVLLMConfig_CarriesTheResolvedConnection(t *testing.T) {
 }
 
 // TestVLLMConfig_ProtocolIsWrittenOnEveryTransport pins that the key is present whatever the transport
-// is. The engines disagree on the default for an absent protocol - vLLM assumes rdma, SGLang tcp - so
-// omitting it would pick one of them by accident.
+// is. vLLM and SGLang currently both default an absent key to rdma, while vLLM-Ascend defaults it to
+// ascend. The renderer writes the resolved pool transport instead of depending on any engine default.
 func TestVLLMConfig_ProtocolIsWrittenOnEveryTransport(t *testing.T) {
 	for _, protocol := range []string{"tcp", "rdma", "efa", "ascend"} {
 		t.Run(protocol, func(t *testing.T) {

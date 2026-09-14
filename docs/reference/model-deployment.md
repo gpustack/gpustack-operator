@@ -37,7 +37,7 @@ spec:
   model:
     name: Qwen/Qwen2.5-72B-Instruct      # served, never provisioned
   engine: vllm                           # vllm | sglang
-  engineVersion: "0.25.1"                # free-form; you guarantee alignment
+  engineVersion: "0.27.1"                # free-form; you guarantee alignment
   kvCache:
     poolRef:
       name: team-a-dram                  # a KVCachePoolBinding IN THIS NAMESPACE
@@ -186,10 +186,11 @@ rather than tidiness.
 > quota ceiling. The mechanism is stated once, under
 > [One Binding, one reuse domain](../kv-cache/pool.md#one-binding-one-reuse-domain).
 
-The resulting semantics:
+The requested semantics:
 
 - Two deployments referencing the **same** Binding share KV.
-- Two referencing **different** Bindings do not.
+- Two referencing **different** Bindings use different tenant identifiers. They are isolated only
+  when their engine images read and forward those identifiers.
 - Name matching between workloads disappears, and with it a whole class of typo.
 - A namespace needing two reuse boundaries creates **two Bindings** on the same pool — the same shape
   as a namespace having several Kueue `LocalQueue`s.
@@ -198,35 +199,20 @@ The resulting semantics:
 reads the attached domain off this object alone. A wrong `blockSize` or `dtype` is silent cache
 pollution: writes succeed, reads succeed, and the tensors are wrong.
 
-**Whether the domain reaches the storage layer depends on the engine, and the answer is measured per
-engine version rather than stated here.** `SupportsTenant` and `TenantSupportSource` in
-`pkg/worker/kvcache/inject` carry it beside the version and source line it was read at.
-
-Read that table before relying on the domain reaching the store; this page states no answer of its
-own, because an answer written here goes stale silently while the table carries the version it was
-measured at. What IS this page's own: the variable an engine reads the domain from is
-operator-owned wherever one exists, so supplying it in `env` or `extraArgs` is refused — it is a
-second path to a value [the API already refuses](#the-reuse-domain-is-inherited).
+For an operator-managed role, the operator renders a non-empty Binding domain as the engine's tenant
+identifier. It does not inspect the engine image version or decide whether that build supports
+tenant isolation. The tenant variable is operator-owned, so supplying it in `env` or `extraArgs` is
+refused — it is a second path to a value [the API already refuses](#the-reuse-domain-is-inherited).
 
 **"A tenant was injected" is not "the workload is isolated."** The operator records what it
 rendered, never what the container did with it: whether the build inside the image reads the value
 is not knowable at render time.
 
-So on an engine that forwards, treat a second Binding as a boundary the operator asked for, not one
-it verified. On one that does not, two deployments on **two** Bindings share one cache today. Either
-way the semantics are this API's and the enforcement is the engine's — the same caveat
-[KV Cache Pool](../kv-cache/pool.md#what-a-binding-does-not-do) states for capacity.
-
-> **Why this page names no engine's answer** — an answer copied to a second place is a second
-> implementation of it: the copy and the table agree today and diverge on whichever release lands
-> next, with nothing failing in between. This page previously said no supported engine could receive
-> a tenant, reasoning that `tenant_id` is the 11th positional parameter of the store client's
-> `setup()` while every engine calls it positionally with seven or eight arguments. **That reasoning
-> is a counterfactual now.** It measured the C++ client and the positional overload, and SGLang
-> reaches the same parameter from a different direction — its Python layer reads
-> `MOONCAKE_TENANT_ID` and passes the value as a keyword argument. "The client reads no environment
-> variable" stayed true while "no tenant reaches the client" became false, because the measurement
-> point sat downstream of the path that actually carries it.
+Users who require tenant isolation must select a compatible engine image and verify it themselves;
+see
+[Tenant compatibility is the image owner's responsibility](kv-cache-injection.md#tenant-compatibility-is-the-image-owners-responsibility)
+for what the image must consume. The API states the requested boundary, while the engine enforces it
+— the same caveat [KV Cache Pool](../kv-cache/pool.md#what-a-binding-does-not-do) states for capacity.
 
 ## The three override tiers
 
@@ -339,7 +325,7 @@ hardware its InstanceType observed. A stated image always wins.
 gpustack/runner:<backend><runtimeVersion>[-<variant>]-<engine><engineVersion>
 ```
 
-`gpustack/runner:cuda12.9-vllm0.25.1` on an NVIDIA pool; `gpustack/runner:cann9.0-910b-sglang0.5.18`
+`gpustack/runner:cuda12.9-vllm0.27.1` on an NVIDIA pool; `gpustack/runner:cann9.0-910b-sglang0.5.18`
 on an Ascend 910B one. The shape is verified against the runner project's 338 published records with
 zero mismatches. The platform is **not** part of the tag: no published tag carries an architecture,
 and the 338 records collapse to 208 distinct names, the signature of one multi-arch manifest each.
@@ -798,10 +784,9 @@ selects transfer-engine ports. AscendDirect binds its transfer ports inside the 
 network namespace, so a declaration here cannot prevent a collision with another process in that
 same namespace.
 
-For AscendDirect in Mooncake `v0.3.13.post1`, the transfer-port window is calculated only after
-scheduling, when `utils.cpp` resolves a logical device to its physical device ID. The device plugin
-decides that assignment, so admission cannot know the window's position. Other engine versions or
-images can use different rules.
+AscendDirect calculates the transfer-port window only after scheduling, when it resolves a logical
+device to its physical device ID. The device plugin decides that assignment, so admission cannot
+know the window's position. Images can use different rules.
 
 | Input | Rule |
 |---|---|

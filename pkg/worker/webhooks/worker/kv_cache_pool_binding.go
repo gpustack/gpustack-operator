@@ -256,10 +256,9 @@ func (r *KVCachePoolBindingWebhook) validateKVCachePoolBindingDomainIsUnclaimed(
 			"ceiling in the single ledger entry it keeps per tenant. Two masters hold two "+
 			"ledgers, so a "+
 			"Binding claiming this domain against a pool on another backend is fine — register "+
-			"a domain no other Binding on a shared master holds. That does not rescue a needed "+
-			"\"default\" domain here: the engines that forward no tenant write under that "+
-			"literal name, so a Binding registering anything else registers a domain those "+
-			"Pods never write to",
+			"a domain no other Binding on a shared master holds. That does not permit a second "+
+			"\"default\" domain: an older engine build may ignore the injected tenant and write "+
+			"under that literal name, but the master still keeps only one ledger entry for it",
 		kvcpb.Spec.Domain.Name, holder.Namespace, holder.Name,
 		strings.Join(shared, " and ")))}
 }

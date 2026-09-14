@@ -344,9 +344,9 @@ func TestKVCachePoolBindingWebhook_ADuplicateDomainIsTrueOfOneMasterOnly(t *test
 			"served by none of them, so \"served by\" would assert what was never read")
 	assert.Contains(t, msg, "Two masters hold two ledgers",
 		"the admitted case is stated too, so nobody reads the refusal as cluster-wide")
-	assert.Contains(t, msg, "does not rescue a needed",
-		"the advice to rename dead-ends on the one name an engine picks, so it says so: renaming "+
-			"is admitted and the Pods that made the domain necessary still write elsewhere")
+	assert.Contains(t, msg, "does not permit a second",
+		"an engine ignoring its injected tenant does not exempt the fallback name from the "+
+			"master's uniqueness rule")
 	assert.NotContains(t, msg, "exception",
 		"calling \"default\" an exception reads as an exemption from the uniqueness rule this "+
 			"very message is enforcing, which sends the reader back to retry the refused Binding")

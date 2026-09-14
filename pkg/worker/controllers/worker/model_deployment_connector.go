@@ -44,23 +44,8 @@ type ModelDeploymentConnectorInput struct {
 	Manufacturer string
 
 	// Domain is the reuse identity the Binding declares. It is passed through to the shared renderer,
-	// which decides per engine whether to emit it -- `inject.SupportsTenant` reads a table carrying
-	// the version and source line each answer was measured at.
-	//
-	// NOTHING HERE RESTATES THAT ANSWER, and the reason is the shape of how the previous comment went
-	// wrong rather than a preference for brevity. It said the field was DELIBERATELY NOT RENDERED
-	// because no supported engine could receive a tenant: tenant_id is the 11th parameter of the
-	// client's setup() and every engine calls setup() positionally with seven or eight arguments.
-	//
-	// That is a counterfactual now. It measured the C++ client and the positional overload, while
-	// SGLang reaches the same parameter from another direction -- its Python layer reads
-	// MOONCAKE_TENANT_ID and forwards the value as a keyword argument. "The client reads no
-	// environment variable" stayed true while "no tenant reaches the client" went false, because the
-	// measurement point sat downstream of the path that carries it.
-	//
-	// A copy of that answer is a second implementation of it, agreeing with the table today and
-	// diverging on whichever engine release lands next, with nothing failing in between. The test
-	// for this field asserts what the renderer was HANDED, not what any engine does with it.
+	// which always emits a non-empty value. Whether the engine build reads it is the image owner's
+	// compatibility responsibility.
 	Domain string
 
 	// MasterServerAddress is the address of the store master, observed from the pool.
@@ -174,10 +159,8 @@ var modelDeploymentOwnedKeys = map[string]struct {
 	// the kv-cache side. Data isolation between domains IS measured (case-47), and it is a different
 	// claim. Owning the key is right either way, which is why it does not wait on the answer.
 	//
-	// It appears in this table because the renderer emits it for THIS engine, at the version this
-	// project ships. Nothing here decides that -- the shared renderer reads a measured table -- so
-	// if an engine starts or stops forwarding a tenant, the invariant test that pairs this table
-	// with the renderer is what says so.
+	// It appears in this table because the renderer always emits it for this engine. Whether the
+	// selected image reads it is not decided here.
 	workercore.ModelDeploymentEngineSGLang: {
 		Args: []string{"--hicache-storage-backend", "--hicache-storage-backend-extra-config"},
 		Env: []string{
@@ -293,9 +276,9 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 // accelerator decides which package runs and the user does not name it. The renderer has two,
 // because the two packages register different connector names.
 //
-// A WRONG MAPPING HERE IS INVISIBLE IN THE TENANT OUTPUT: both vLLM entries in the renderer's facts
-// table forward no tenant, so swapping them changes nothing a tenant assertion could observe. What
-// it does change is the connector name, which is why that is what the test for this pins.
+// A WRONG MAPPING HERE IS INVISIBLE IN THE TENANT OUTPUT: both vLLM entries render tenant_id, so
+// swapping them changes nothing a tenant assertion could observe. What it does change is the
+// connector name, which is why that is what the test for this pins.
 func modelDeploymentInjectEngine(engine, manufacturer string) (inject.Engine, error) {
 	switch engine {
 	case workercore.ModelDeploymentEngineVLLM:

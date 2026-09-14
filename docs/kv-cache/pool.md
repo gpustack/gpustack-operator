@@ -110,8 +110,8 @@ somebody else registered is a separate question, answered in
   no ledger — observed on the pool, or declared by a managed backend — puts every request into one
   default tenant, so a second distinct domain against it is **rejected at admission**. Everything
   else is admitted with a **warning**, a backend nothing has established yet included: the store's
-  half is then unproven rather than proven, and the identity must also survive
-  [the engine](../reference/kv-cache-injection.md#isolation-is-per-engine-and-so-is-the-default-binding).
+  half is then unproven rather than proven, and the image must meet the
+  [engine's tenant compatibility floor](../reference/kv-cache-injection.md#tenant-compatibility-is-the-image-owners-responsibility).
 - **A workload may not *register* its own domain.** It necessarily sends a domain name at runtime —
   that is how the store is addressed — but on a multi-tenant master the name has to be one an admin
   already registered through a Binding. Every distinct registered name is a new tenant with its own

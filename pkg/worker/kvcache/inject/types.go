@@ -21,8 +21,7 @@ import (
 // beyond a cache that is never used.
 type Engine string
 
-// The engines this package renders for. Each has its own entry in the facts table and its own
-// renderer, so adding one is a table row plus a file rather than a branch in shared code.
+// The engines this package renders for.
 const (
 	EngineVLLM       Engine = "vllm"
 	EngineVLLMAscend Engine = "vllm-ascend"
@@ -30,9 +29,6 @@ const (
 )
 
 // Engines returns every engine this package RENDERS FOR, in a stable order.
-//
-// It exists so callers and tests enumerate one list instead of restating it: a value renderable but
-// missing from here would be undescribed by the facts table.
 //
 // It is WIDER than the set a user may name -- see SelectableEngines.
 func Engines() []Engine {
@@ -110,8 +106,7 @@ func ParseRole(value string) (Role, error) {
 // calling Render would have to build a whole Input to ask.
 //
 // The renderers read this table rather than restating it, so it is a live constraint rather than
-// documentation -- the same reason engineTenantSupport is read instead of each renderer knowing its
-// own engine. Substituting an entry changes what renders.
+// documentation. Substituting an entry changes what renders.
 var engineRoleSupport = map[Engine][]Role{
 	// Both vLLM-family engines share renderVLLM, whose vllmKVRole maps all three onto kv_both,
 	// kv_producer and kv_consumer.
@@ -156,15 +151,8 @@ type Input struct {
 	// Role is the prefill/decode role, RoleNone when the caller declared none.
 	Role Role
 
-	// Domain is the reuse domain the Binding declared, carried here so an engine that FORWARDS a
-	// tenant can be given one. Note the direction: an earlier revision carried a domain here so the
-	// synthesis could REFUSE on it, which is the opposite use and is gone.
-	//
-	// Whether it is emitted is per engine and nothing else - the renderer that reads a tenant emits
-	// it, the one that does not, does not. There is no version check, and there cannot be one here:
-	// nothing on this path inspects the container image, so a build older than the one measured would
-	// be handed a variable it never reads. That is why the stamp records what was INJECTED rather than
-	// whether isolation resulted.
+	// Domain is the reuse domain the Binding declared. Every renderer emits a non-empty value; there
+	// is no engine-version check because this path does not inspect the container image.
 	Domain string
 
 	// Connection is what the pool and its backend published.

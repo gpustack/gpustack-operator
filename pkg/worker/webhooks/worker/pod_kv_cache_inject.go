@@ -52,17 +52,14 @@ type injectionRecord struct {
 	// contract says so explicitly - a workload that knows another domain's name reaches it, Binding
 	// or no Binding (see "What a Binding does not do" in docs/kv-cache/pool.md, and #168).
 	//
-	// It is NOT necessarily the Binding the writes are ACCOUNTED to, and the difference is visible in
-	// this project's own e2e: when no tenant reaches the store, the client writes under the master's
-	// own "default" name, so usage lands on whichever Binding registered THAT domain. Case 53 asserts
-	// the split directly - usage rises on the default-domain Binding while this one stays at zero.
-	// Reading this field as the accounting object sends an operator to the wrong status.
+	// It is NOT necessarily the Binding the writes are ACCOUNTED to. An engine build that ignores the
+	// injected tenant writes under the master's own "default" name, so usage lands on whichever
+	// Binding registered that domain. Reading this field as the accounting object can therefore send
+	// an operator to the wrong status.
 	Binding string `json:"binding"`
 
-	// Engine and EngineVersion are what was configured and the version the isolation answer was
-	// measured at, so the record says why rather than only what.
-	Engine        string `json:"engine"`
-	EngineVersion string `json:"engineVersion"`
+	// Engine is what was configured.
+	Engine string `json:"engine"`
 
 	// Vehicle is "file" or "environment". A Pod on the environment vehicle whose cache is cold is a
 	// Pod to check for a config path of its own, which is the one silent outcome this design accepts.
@@ -75,9 +72,7 @@ type injectionRecord struct {
 	// records an ACTION rather than an outcome. That distinction is the whole design of this field.
 	//
 	// Whether the tenant takes effect depends on the engine BUILD, which admission cannot see: it
-	// never inspects the image, and the EngineVersion below is the release the facts table was measured
-	// at rather than a reading of the container. A build older than that would be handed a variable it
-	// never reads, and would then share a cache while a stamp claiming isolation said otherwise.
+	// never inspects the image. An older build may be handed a value it never reads.
 	// Over-claiming in that direction is the failure
 	// this field exists to avoid, so it says what we did - which is certain - and never what
 	// resulted, which is not.
@@ -87,15 +82,7 @@ type injectionRecord struct {
 	// instead - a Mooncake too old to accept the argument raises rather than dropping it, so the Pod
 	// stops rather than losing isolation quietly.
 	//
-	// Reading it, FALSE: this webhook wrote no tenant, and that has one of two causes which need
-	// different Bindings. Both must be checked, because acting on the first one alone registers a
-	// name the Pod never sends:
-	//   - Nothing rendered one - the engine forwards no tenant on the path we configure, or the
-	//     Binding declared no domain. Writes land on the store's own default tenant, so the pool
-	//     needs a Binding registering the literal name "default" or nothing can be written at all.
-	//   - The environment vehicle is not used. Its tenant comes from the Binding even if the
-	//     container declared the same variable, so a missing rendered tenant means this engine does
-	//     not forward one.
+	// Reading it, FALSE: the renderer received no domain and wrote no tenant.
 	TenantInjected bool `json:"tenantInjected"`
 
 	// LaunchProgram is the executable left after transparent launchers are removed. It is empty only
@@ -173,7 +160,6 @@ func (r *PodKVCacheWebhook) injectPod(pod *core.Pod, res *resolution, out *injec
 	record, err := json.Marshal(injectionRecord{
 		Binding:             pod.Annotations[KVCacheBindingAnnotationKey],
 		Engine:              string(res.Input.Engine),
-		EngineVersion:       res.Isolation.EngineVersion,
 		Vehicle:             vehicle,
 		Domain:              res.Isolation.Domain,
 		TenantInjected:      out.TenantInjected,

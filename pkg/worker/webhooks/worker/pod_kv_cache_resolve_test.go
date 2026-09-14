@@ -104,22 +104,13 @@ func TestPodKVCacheResolve_HappyPath(t *testing.T) {
 		"the API spelling TCP is mapped to the artifact's own through mooncake.MemberProtocol")
 }
 
-// TestPodKVCacheResolve_CarriesTheDomainAndVersion. Both fields exist for the stamp and nothing else,
-// so this pins where each comes from.
-//
-// There is no longer a verdict here about whether isolation is enforced. That field, and the
-// substitutable seam that fed it, were removed when the decision moved into the renderer: whether a
-// tenant is emitted is the facts table's answer read inside the inject package, and the control that
-// substitutes it now lives beside it, in TestRender_TenantFollowsTheFactsTable. A seam one layer
-// further from the behavior it guards can stay green while that behavior changes.
-func TestPodKVCacheResolve_CarriesTheDomainAndVersion(t *testing.T) {
+// TestPodKVCacheResolve_CarriesTheDomain pins that the Binding is the domain's only source.
+func TestPodKVCacheResolve_CarriesTheDomain(t *testing.T) {
 	got, err := newPodKVCacheWebhook(kvCacheFixture()...).resolve(context.Background(), kvCachePod())
 	require.NoError(t, err)
 
 	assert.Equal(t, "team-a-chat", got.Isolation.Domain,
 		"the domain comes from the Binding, never from a Pod annotation")
-	assert.Equal(t, "v0.25.1", got.Isolation.EngineVersion,
-		"the version is carried so the stamp says why, not only what")
 }
 
 // TestPodKVCacheResolve_Refusals covers every input this webhook declines to serve.
