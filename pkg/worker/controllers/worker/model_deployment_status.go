@@ -911,14 +911,9 @@ func parkedModelDeploymentWorkloads(wls []*kueue.Workload) []string {
 // jointBarrierParked reports whether the joint-admission check is the reason this Workload is
 // inactive, by reading the verdict that controller left on it.
 func jointBarrierParked(wl *kueue.Workload) bool {
-	for i := range wl.Status.AdmissionChecks {
-		acs := &wl.Status.AdmissionChecks[i]
-		if acs.Name == kueue.AdmissionCheckReference(_JointAdmissionCheckName) {
-			return strings.Contains(acs.Message, _JointAdmissionParkedMarker)
-		}
-	}
+	acs := jointCheckEntry(wl)
 
-	return false
+	return acs != nil && strings.Contains(acs.Message, _JointAdmissionParkedMarker)
 }
 
 // modelDeploymentPreemptionNote is the clause the other quota answers carry when a group of this

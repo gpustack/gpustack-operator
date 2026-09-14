@@ -123,11 +123,14 @@ func reconcileJoint(t *testing.T, cli ctrlcli.Client, wlName string) *kueue.Work
 	return got
 }
 
+// jointCheckState is the check's State field, or "" when the Workload does not carry the check.
+//
+// It reads through the production lookup rather than scanning the slice again. A copy here would be
+// a second implementation of the thing these tests are asserting about, so a change to how the entry
+// is found could leave every assertion below still green against the old rule.
 func jointCheckState(wl *kueue.Workload) kueue.CheckState {
-	for i := range wl.Status.AdmissionChecks {
-		if wl.Status.AdmissionChecks[i].Name == kueue.AdmissionCheckReference(_JointAdmissionCheckName) {
-			return wl.Status.AdmissionChecks[i].State
-		}
+	if acs := jointCheckEntry(wl); acs != nil {
+		return acs.State
 	}
 
 	return ""
@@ -233,11 +236,64 @@ func TestModelDeploymentJointAdmission_TheWholeSetOrNone(t *testing.T) {
 	})
 }
 
+// TestJointCheckEntry pins the contract the readers of this check depend on.
+//
+// THE ENTRY RATHER THAN A BOOL IS THE POINT. Three readers ask three different questions of it --
+// presence, how long it has been Pending, and what its message says -- and a lookup that answered
+// only "is it there" would leave two of them scanning the slice again, which is the duplication this
+// helper exists to remove.
+//
+// RETURNING A COPY WOULD PASS AN EQUALITY ASSERTION AND STILL BE WRONG, so the found case asserts
+// identity by writing through the returned pointer and reading the Workload back. A copy is the
+// likely shape of a future rewrite, and nothing else here would notice it.
+func TestJointCheckEntry(t *testing.T) {
+	joint := kueue.AdmissionCheckState{
+		Name:    kueue.AdmissionCheckReference(_JointAdmissionCheckName),
+		State:   kueue.CheckStatePending,
+		Message: "held",
+	}
+	other := kueue.AdmissionCheckState{Name: "some-other-check", State: kueue.CheckStateReady}
+
+	testCases := []struct {
+		name   string
+		checks []kueue.AdmissionCheckState
+		want   bool
+	}{
+		{name: "no_checks_at_all", checks: nil, want: false},
+		{name: "only_another_controllers_check", checks: []kueue.AdmissionCheckState{other}, want: false},
+		{name: "the_joint_check_alone", checks: []kueue.AdmissionCheckState{joint}, want: true},
+		{
+			name:   "the_joint_check_beside_another",
+			checks: []kueue.AdmissionCheckState{other, joint},
+			want:   true,
+		},
+	}
+
+	for _, c := range testCases {
+		t.Run(c.name, func(t *testing.T) {
+			wl := &kueue.Workload{Status: kueue.WorkloadStatus{AdmissionChecks: c.checks}}
+
+			got := jointCheckEntry(wl)
+			if !c.want {
+				assert.Nil(t, got)
+				return
+			}
+
+			require.NotNil(t, got)
+			assert.Equal(t, kueue.AdmissionCheckReference(_JointAdmissionCheckName), got.Name)
+
+			got.Message = "written through the returned pointer"
+			assert.Equal(t, "written through the returned pointer", jointCheckMessage(wl),
+				"the entry is the one on the Workload, not a copy of it")
+		})
+	}
+}
+
+// jointCheckMessage is the check's Message field, or "" when the Workload does not carry the check.
+// It goes through the production lookup for the same reason jointCheckState does.
 func jointCheckMessage(wl *kueue.Workload) string {
-	for i := range wl.Status.AdmissionChecks {
-		if wl.Status.AdmissionChecks[i].Name == kueue.AdmissionCheckReference(_JointAdmissionCheckName) {
-			return wl.Status.AdmissionChecks[i].Message
-		}
+	if acs := jointCheckEntry(wl); acs != nil {
+		return acs.Message
 	}
 
 	return ""
