@@ -497,9 +497,9 @@ type ModelDeploymentRoleStatus struct {
 	// AssignedFlavor is the ResourceFlavor Kueue assigned to this role's PodSet for its ACCELERATOR
 	// credits.
 	//
-	//   - A POINTER, because "not assigned yet" and "assigned" are different facts: a role waiting
-	//     for quota has no flavor, and reporting that as the empty string would read as an assignment
-	//     to a flavor with no name.
+	//   - NOT ASSIGNED YET AND ASSIGNED ARE DIFFERENT FACTS, so a role waiting for quota reports no
+	//     flavor at all rather than an empty name, which would read as an assignment to a flavor
+	//     called "".
 	//   - Per role rather than per deployment, because Kueue assigns a flavor per PodSet and two
 	//     roles of one deployment can be assigned different ones.
 	//   - AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather
