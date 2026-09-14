@@ -131,11 +131,11 @@ this operator does not render today.
 Two observability variables, `MC_TE_METRIC` and `MC_STORE_CLIENT_METRIC_BANDWIDTH`, are set to `1`
 when the container has not spoken about them. A value you set yourself is left alone.
 
-**A variable you declare yourself wins — except the one that selects the mechanism.** The injection
-fills in what a container has not declared and never overrules an `env` entry the workload carries.
-`MOONCAKE_CONFIG_PATH` is the exception: it names the file rather than carrying a value inside it, so
-declaring it yourself is **refused at admission** rather than honoured. Two containers pointing at
-two different configurations is an ambiguity nothing would report.
+**A variable you declare yourself wins, with two exceptions.** `MOONCAKE_CONFIG_PATH` selects the
+mechanism, so declaring it yourself is **refused at admission** rather than honoured. Two containers
+pointing at two different configurations is an ambiguity nothing would report.
+`MOONCAKE_TENANT_ID` is overwritten with the Binding's domain because the workload cannot select
+another reuse domain. Every other `env` entry the workload carries is left alone.
 
 This applies only to `env`: a value supplied through `envFrom` is invisible to the check and **will
 be overwritten with no symptom**, so declare Mooncake variables in `env`.

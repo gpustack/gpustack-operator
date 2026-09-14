@@ -74,10 +74,9 @@ const (
 
 // vllmClientConfig is vLLM's Mooncake configuration file, in that engine's own spelling.
 //
-// The struct is the schema, and being closed is the point: vLLM's reader takes named keys one by one
-// with no passthrough, so a key outside the set is not merely ignored, no
-// code path ever sees it. Rendering through a struct rather than a map makes an unreadable key a
-// compile error instead of a silent addition.
+// The struct is the schema this operator emits. Rendering through a struct rather than a map makes
+// every emitted key an explicit code change. Whether the selected engine image reads each key is
+// the image owner's compatibility responsibility.
 //
 // TWO readers consume this one file, and they are closed at different sets: vLLM-Ascend does not
 // use `mode`. We render `mode`

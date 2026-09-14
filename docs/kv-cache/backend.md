@@ -471,9 +471,9 @@ node, unmounts that member's segment **immediately** — there is no drain.
 > and **it cannot be pointed at the segment this operator gives a member**. That segment is mounted by
 > the client's own startup, which files it in neither record set the unmount routes read, so both of
 > them refuse it: `/api/unmount` answers `500` with `segment_id not found in allocated records`, and
-> `/api/unmount_shm` answers `500` with `not found in mounted records`. Measured against `mooncake`
-> 0.3.13, at every grace period, **using the id the leader itself publishes for that segment** — while
-> the same `/api/unmount` returns `200` for a segment mounted through `/api/mount`.
+> `/api/unmount_shm` answers `500` with `not found in mounted records`. Measured against the example
+> image above, at every grace period, **using the id the leader itself publishes for that segment** —
+> while the same `/api/unmount` returns `200` for a segment mounted through `/api/mount`.
 
 > **So this is not a matter of identifying the right member.** An earlier version of this page said a
 > transport-independent hook was waiting on upstream to expose a member's own `client_id`. A member

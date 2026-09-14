@@ -37,7 +37,7 @@ spec:
   model:
     name: Qwen/Qwen2.5-72B-Instruct      # served, never provisioned
   engine: vllm                           # vllm | sglang
-  engineVersion: "0.28.0"                # free-form; you guarantee alignment
+  engineVersion: "0.27.1"                # free-form; you guarantee alignment
   kvCache:
     poolRef:
       name: team-a-dram                  # a KVCachePoolBinding IN THIS NAMESPACE
@@ -199,20 +199,20 @@ The requested semantics:
 reads the attached domain off this object alone. A wrong `blockSize` or `dtype` is silent cache
 pollution: writes succeed, reads succeed, and the tensors are wrong.
 
-The operator always renders a non-empty Binding domain as the engine's tenant identifier. It does
-not inspect the engine image version or decide whether that build supports tenant isolation. The
-tenant variable is operator-owned, so supplying it in `env` or `extraArgs` is refused — it is a
-second path to a value [the API already refuses](#the-reuse-domain-is-inherited).
+For an operator-managed role, the operator renders a non-empty Binding domain as the engine's tenant
+identifier. It does not inspect the engine image version or decide whether that build supports
+tenant isolation. The tenant variable is operator-owned, so supplying it in `env` or `extraArgs` is
+refused — it is a second path to a value [the API already refuses](#the-reuse-domain-is-inherited).
 
 **"A tenant was injected" is not "the workload is isolated."** The operator records what it
 rendered, never what the container did with it: whether the build inside the image reads the value
 is not knowable at render time.
 
-Users who require tenant isolation must select a compatible engine image; see
+Users who require tenant isolation must select a compatible engine image and verify it themselves;
+see
 [Tenant compatibility is the image owner's responsibility](kv-cache-injection.md#tenant-compatibility-is-the-image-owners-responsibility)
-for the verified version floors. The API states the requested boundary, while the engine enforces
-it — the same caveat [KV Cache Pool](../kv-cache/pool.md#what-a-binding-does-not-do) states for
-capacity.
+for what the image must consume. The API states the requested boundary, while the engine enforces it
+— the same caveat [KV Cache Pool](../kv-cache/pool.md#what-a-binding-does-not-do) states for capacity.
 
 ## The three override tiers
 
@@ -325,7 +325,7 @@ hardware its InstanceType observed. A stated image always wins.
 gpustack/runner:<backend><runtimeVersion>[-<variant>]-<engine><engineVersion>
 ```
 
-`gpustack/runner:cuda12.9-vllm0.28.0` on an NVIDIA pool; `gpustack/runner:cann9.0-910b-sglang0.5.18`
+`gpustack/runner:cuda12.9-vllm0.27.1` on an NVIDIA pool; `gpustack/runner:cann9.0-910b-sglang0.5.18`
 on an Ascend 910B one. The shape is verified against the runner project's 338 published records with
 zero mismatches. The platform is **not** part of the tag: no published tag carries an architecture,
 and the 338 records collapse to 208 distinct names, the signature of one multi-arch manifest each.
