@@ -57,6 +57,21 @@ const (
 	// the same fact in two places that can disagree.
 	_JointAdmissionParkedMarker = "parked rather than held"
 
+	// _JointAdmissionUndecidedMessage is what the check says while this controller cannot tell
+	// whether the Workload is one group of a multi-group deployment.
+	//
+	// IT MUST NOT READ AS AN ORDINARY HOLD, and the message is the only thing that can carry the
+	// difference: both states are Pending, so a reader with only the state learns that something is
+	// waiting and not what for. A hold names the groups being waited on and clears itself as they
+	// reserve quota. This one says a read failed, which is either a group mid-rebuild -- transient,
+	// and nothing to do -- or replicas that are gone for good, which an operator has to act on.
+	//
+	// SAYING IT IS RETRYING IS PART OF THE DIFFERENCE. Without that an operator cannot tell this
+	// from a verdict that has settled, and the whole point of the state is that it has not.
+	_JointAdmissionUndecidedMessage = "cannot decide yet: some of this workload's owner replicas " +
+		"could not be read, so whether it is one group of a multi-group model deployment is unknown. " +
+		"Holding rather than admitting on a guess, and retrying"
+
 	// _JointAdmissionInfeasibleAfter is how long a deployment's set may fail to assemble before the
 	// barrier stops holding it and parks it instead.
 	//
@@ -219,8 +234,21 @@ func (r *ModelDeploymentJointAdmissionReconciler) Reconcile(
 	// NOT KNOWING IS ANSWERED BY WAITING, NOT BY OPENING. Some of this Workload's owner replicas
 	// could not be read, so whether it belongs to a multi-group deployment is unknown -- and the
 	// Ready below is the one verdict that cannot be taken back once Kueue has admitted on it.
+	//
+	// THE WAIT IS WRITTEN DOWN AS WELL AS TAKEN. Requeueing alone leaves an operator looking at a
+	// Workload that is not being admitted and carries no verdict from this controller at all -- the
+	// state the paragraph above and this file's other comments say the check exists to prevent. The
+	// requeue stays: the verdict is Pending rather than final, because the state it describes is
+	// real and usually brief, and answering it definitively is the defect this branch removed.
 	if !decided {
 		logger.V(3).Info("requeue workload whose owning replicas could not be resolved", "workload", wl.Name)
+
+		if err := r.applyVerdict(
+			ctx, wl, checks, kueue.CheckStatePending, _JointAdmissionUndecidedMessage,
+		); err != nil {
+			logger.Error(err, "write the undecided verdict")
+			return ctrl.Result{}, err
+		}
 
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
