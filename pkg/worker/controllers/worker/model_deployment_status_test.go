@@ -1611,18 +1611,20 @@ func TestDeriveModelDeploymentPhase_SumsAcrossKindsAndDoesNotBranchOnThem(t *tes
 	}
 }
 
-// TestObserveModelDeploymentQuota_PreemptedInPartSaysWhetherItStillServes pins the sentence the
-// partial-preemption message now branches on, on both shapes that reach it.
+// TestObserveModelDeploymentQuota_PreemptedInPartSaysWhatWasLost pins the sentence the
+// partial-preemption message branches on, on every shape that reaches it.
 //
 // THE SHAPE DECIDES, NOT THE ROLE NAMES. A role's kind is a separate field that defaults to server,
 // so two roles called "prefill" and "decode" with no kind set are two SERVER roles -- and that is
-// the shape the defaults produce. Losing one of their groups leaves the other admitted and still
-// answering requests, which is why a blanket "the deployment cannot serve" was false.
+// the shape the defaults produce. Losing one of their groups leaves the other admitted, which is
+// why a blanket claim about the whole deployment was false.
 //
-// THE COUNTERPART SETS THE KINDS EXPLICITLY, because a disaggregated deployment that loses every
-// group of one kind genuinely cannot serve, and the two sentences must not be reachable by the same
-// input. Asserting only one of them would leave the branch half-tested and green.
-func TestObserveModelDeploymentQuota_PreemptedInPartSaysWhetherItStillServes(t *testing.T) {
+// NEITHER SENTENCE CLAIMS THE DEPLOYMENT STOPPED, and one of them used to. A prefill role supplies
+// ingress throughput while a decode role's nodes can complete a request by themselves, so losing
+// every group of one kind is not the same as being unable to answer. What the branch reports is
+// WHAT was lost -- capacity, or a role outright -- and availability is the phase's answer, which
+// sums replicas across roles without branching on kind.
+func TestObserveModelDeploymentQuota_PreemptedInPartSaysWhatWasLost(t *testing.T) {
 	testCases := []struct {
 		name              string
 		kinds             bool
@@ -1630,16 +1632,19 @@ func TestObserveModelDeploymentQuota_PreemptedInPartSaysWhetherItStillServes(t *
 		wantIn, wantNotIn []string
 	}{
 		{
-			name:      "two_server_roles_on_two_instance_types_still_serve",
+			name:      "two_server_roles_on_two_instance_types_lose_capacity_only",
 			kinds:     false,
 			wantIn:    []string{"still serves", "without the capacity those groups provided"},
-			wantNotIn: []string{"cannot serve"},
+			wantNotIn: []string{"cannot serve", "the loss of that role"},
 		},
 		{
-			name:      "a_disaggregated_deployment_that_lost_a_whole_kind_cannot_serve",
+			// EVERY GROUP OF ONE KIND IS GONE, and the sentence has to say that without saying the
+			// deployment stopped. Losing prefill leaves decode, which can complete a request by
+			// itself; the deployment is degraded and the phase is what carries that.
+			name:      "a_disaggregated_deployment_that_lost_a_whole_kind_says_which_role",
 			kinds:     true,
-			wantIn:    []string{"cannot serve", "role kind decode"},
-			wantNotIn: []string{"still serves"},
+			wantIn:    []string{"no admitted group of role kind decode", "loss of that role rather than of capacity"},
+			wantNotIn: []string{"cannot serve", "still serves"},
 		},
 		{
 			// A kind that was NEVER admitted reaches this branch as well, because a sibling kind's
@@ -1649,8 +1654,8 @@ func TestObserveModelDeploymentQuota_PreemptedInPartSaysWhetherItStillServes(t *
 			name:          "a_kind_that_never_had_an_admitted_group_is_not_described_as_having_lost_one",
 			kinds:         true,
 			neverAdmitted: true,
-			wantIn:        []string{"role kind decode", "is admitted, so the deployment cannot serve"},
-			wantNotIn:     []string{"any more", "still serves"},
+			wantIn:        []string{"no admitted group of role kind decode at all"},
+			wantNotIn:     []string{"any more", "still serves", "cannot serve"},
 		},
 	}
 

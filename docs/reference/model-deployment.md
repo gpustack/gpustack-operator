@@ -485,7 +485,7 @@ admission and never again.
 | `True` | `Reserved` | every group has quota reserved; with one group the message names its cluster queue |
 | `False` | `Pending` | at least one group is waiting for quota, and the message names which instance types |
 | `False` | `PodGroupIncomplete` | fewer Pods exist than the group declares, so Kueue composes **no Workload at all**; the message carries `<have>/<want>` |
-| `False` | `PreemptedInPart` | a higher-priority workload reclaimed some groups while others are still admitted; the message says whether any role kind has no admitted group, and so whether the deployment still serves |
+| `False` | `PreemptedInPart` | a higher-priority workload reclaimed some groups while others are still admitted; the message says whether any role kind has no admitted group, and so whether the loss is of capacity or of a whole role |
 | `False` | `Parked` | the set failed to assemble for long enough that the joint check deactivated its Workloads; an identical re-apply does not clear it |
 | `False` | `NoQueueInReservedNamespace` | the deployment is in a reserved namespace, which has no LocalQueue, so it will never be scheduled |
 | `Unknown` | `AdmissionInFlight` | a group is complete and has no Workload yet — Kueue composes it asynchronously, so absence is admission in flight, not refusal |

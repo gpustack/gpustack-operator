@@ -92,7 +92,8 @@ const modelDeploymentReasonPodGroupIncomplete = "PodGroupIncomplete"
 // reports resolves itself or names something in the deployment to fix; this one resolves only when
 // capacity elsewhere frees up, and until then the surviving groups hold accelerators for a
 // deployment that is short of what it was admitted for, and, when the reclaimed groups were every
-// group of some role kind, for one that cannot serve at all. Waiting is right for the others and is
+// group of some role kind, for one that has lost that role entirely. Waiting is right for the
+// others and is
 // a decision here, because how long to wait
 // depends on what preempted it — which is outside this object, and outside this operator.
 //
@@ -347,20 +348,26 @@ func observeModelDeploymentQuota(
 	// group whose Pods are on their way out lands exactly there.
 	taken := modelDeploymentPreemptionNote(lost)
 	if len(lost) > 0 && len(kept) > 0 {
-		// WHAT THE SURVIVORS ARE WORTH DEPENDS ON THE SHAPE, so it is computed rather than asserted.
-		// A deployment whose every group of some role kind was reclaimed has lost that half and
-		// serves nothing; one that still has a group of every kind serves, with the reclaimed
-		// groups' capacity gone. Both reach this branch, and announcing the first for both was wrong
-		// for the shape the defaults produce: two roles naming no kind are two server roles, and one
-		// of their groups surviving is a deployment that is still answering requests.
-		// THE SENTENCE MUST NOT IMPLY THE KIND WAS EVER ADMITTED. A kind counts as unserved when no
-		// group of it is admitted, and a group that never was -- one still short of its declared
-		// total, so Kueue has composed nothing for it -- reaches this branch too, because the
-		// preemption of a sibling kind's group is answered before incompleteness is.
+		// WHAT WAS LOST DEPENDS ON THE SHAPE, so it is computed rather than asserted. Losing some
+		// groups of every kind costs capacity; losing every group of one kind costs that role
+		// outright, and an operator's next step differs between them.
+		//
+		// NEITHER SENTENCE SAYS THE DEPLOYMENT STOPPED, and the earlier one that did was wrong. A
+		// prefill role supplies ingress throughput while a decode role's nodes can complete a
+		// request by themselves, so a deployment that keeps decode is degraded and still serving.
+		// Which losses leave it able to answer is a question about the roles and the routing in
+		// front of them, not one this branch can settle from quota alone -- and the phase already
+		// carries availability, by summing replicas across roles without branching on kind.
+		//
+		// THE SENTENCE MUST NOT IMPLY THE KIND WAS EVER ADMITTED. A kind counts here when no group
+		// of it is admitted, and a group that never was -- one still short of its declared total,
+		// so Kueue has composed nothing for it -- reaches this branch too, because the preemption of
+		// a sibling kind's group is answered before incompleteness is.
 		effect := "the deployment still serves, without the capacity those groups provided"
 		if unserved := modelDeploymentKindsWithoutAdmittedGroup(md, wlByGroup); len(unserved) > 0 {
 			effect = fmt.Sprintf(
-				"no group of role kind %s is admitted, so the deployment cannot serve",
+				"the deployment has no admitted group of role kind %s at all, which is the loss of "+
+					"that role rather than of capacity",
 				strings.Join(unserved, ", "))
 		}
 
