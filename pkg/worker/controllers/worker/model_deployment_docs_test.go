@@ -3,6 +3,8 @@ package worker
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -59,4 +61,104 @@ func TestModelDeploymentOwnedKeysDocs(t *testing.T) {
 			}
 		})
 	}
+}
+
+// _ModelDeploymentAPITypesPath is the file whose Conditions field comment lists the status axes.
+//
+// Relative to this package. That comment is copied into the CRD and the OpenAPI document by
+// generation, so it is what `kubectl explain modeldeployment.status.conditions` prints.
+const _ModelDeploymentAPITypesPath = "../../../../api/worker/v1alpha1/model_deployment.go"
+
+// _ModelDeploymentConditionDecl matches one condition-type declaration belonging to this kind. The
+// prefix is what excludes the other kinds' conditions, which live in this same package.
+var _ModelDeploymentConditionDecl = regexp.MustCompile(
+	`ModelDeploymentCondition[A-Za-z]+\s+kubeapistatus\.ConditionType\s*=\s*"([A-Za-z]+)"`)
+
+// TestModelDeploymentConditionAxesAreListedOnTheField pins the axis list in the Conditions field
+// comment to the condition types this package declares.
+//
+// THIS EXISTS BECAUSE THE LIST WENT STALE THE FIRST TIME AN AXIS WAS ADDED. RoleKindsReady landed
+// with the reference page updated and the controller updated and this comment not, so the rendered
+// schema named four axes while status carried five. Nothing failed: prose has no compiler, and the
+// generated artifacts faithfully carried the stale sentence to every reader of `kubectl explain`.
+//
+// The set is DERIVED from the declarations rather than written out here. A list in this file would
+// be a third copy of the same enumeration, stale in the same way and for the same reason, and it
+// would stay silent about exactly the axis nobody remembered to add to it.
+//
+// One-way, like the owned-key test above: every declared axis must be named in the comment. A name
+// in the comment that no constant declares is not asserted, so prose may still explain something.
+func TestModelDeploymentConditionAxesAreListedOnTheField(t *testing.T) {
+	sources, err := filepath.Glob("*.go")
+	require.NoError(t, err)
+
+	axes := make([]string, 0, 8)
+
+	for _, source := range sources {
+		if strings.HasSuffix(source, "_test.go") {
+			continue
+		}
+
+		body, err := os.ReadFile(source)
+		require.NoErrorf(t, err, "reading %s", source)
+
+		for _, match := range _ModelDeploymentConditionDecl.FindAllStringSubmatch(string(body), -1) {
+			axes = append(axes, match[1])
+		}
+	}
+
+	// Without this the test passes by finding nothing: a declaration whose spelling drifts away from
+	// the pattern would empty the set, and an assertion over an empty set says nothing at all.
+	require.NotEmptyf(t, axes, "%s matched no condition declaration in this package, so this test "+
+		"would assert nothing", _ModelDeploymentConditionDecl)
+
+	types, err := os.ReadFile(_ModelDeploymentAPITypesPath)
+	require.NoErrorf(t, err, "the axis list lives in %s", _ModelDeploymentAPITypesPath)
+
+	comment := modelDeploymentConditionsFieldComment(string(types))
+	require.NotEmptyf(t, comment, "%s carries no Conditions field comment to check",
+		_ModelDeploymentAPITypesPath)
+
+	for _, axis := range axes {
+		assert.Containsf(t, comment, axis,
+			"%q is a condition this deployment reports and the Conditions field comment does not "+
+				"name it: an axis missing from that list is an axis `kubectl explain` denies exists",
+			axis)
+	}
+}
+
+// modelDeploymentConditionsFieldComment returns the comment block introducing the Conditions field,
+// which is the run of comment lines starting at the one that opens it.
+//
+// Taken as a block rather than as the whole file so that naming an axis anywhere else — in another
+// field's comment, or in a constant — does not satisfy the assertion above.
+func modelDeploymentConditionsFieldComment(types string) string {
+	const opener = "// Conditions is the finer view"
+
+	lines := strings.Split(types, "\n")
+
+	start := -1
+
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), opener) {
+			start = i
+			break
+		}
+	}
+
+	if start < 0 {
+		return ""
+	}
+
+	block := make([]string, 0, 8)
+
+	for _, line := range lines[start:] {
+		if !strings.HasPrefix(strings.TrimSpace(line), "//") {
+			break
+		}
+
+		block = append(block, line)
+	}
+
+	return strings.Join(block, "\n")
 }

@@ -426,8 +426,9 @@ type ModelDeploymentStatus struct {
 	PhaseMessage string `json:"phaseMessage,omitempty" protobuf:"bytes,2,opt,name=phaseMessage"`
 
 	// Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,
-	// CacheAttached, ReplicasUpToDate. They are independent — "quota reserved but cache not
-	// attached" is a real and actionable state — which is what a single phase string cannot carry.
+	// CacheAttached, ReplicasUpToDate, RoleKindsReady. They are independent — "quota reserved but
+	// cache not attached" is a real and actionable state — which is what a single phase string
+	// cannot carry.
 	//
 	// +patchMergeKey=type
 	// +patchStrategy=merge
