@@ -29,6 +29,8 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/setting"
+	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 	"gpustack.ai/gpustack/pkg/worker/kvcache"
@@ -927,6 +929,12 @@ func TestKVCacheBackendReconciler_WithoutAnImage(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			ctx := context.Background()
+
+			// The setting ships a default, so "no image anywhere" is a state a case has to ask
+			// for. It used to be what every case saw for free, which is exactly why this line
+			// has to exist now rather than be assumed.
+			clearKVCacheBackendImageSetting(ctx, t)
+
 			kvcb := newKVCacheBackendObject()
 			kvcb.Spec.Image = ""
 			if c.wasPublished {
@@ -4969,4 +4977,30 @@ func TestKVCacheBackendConverge_MovingToLatestMovesThePullPolicy(t *testing.T) {
 	require.NoError(t, cli.Get(ctx, deployKey, deploy))
 	assert.Equal(t, core.PullAlways, deploy.Spec.Template.Spec.Containers[0].ImagePullPolicy,
 		"the tag moved, so the default derived from it moves with it")
+}
+
+// clearKVCacheBackendImageSetting writes the setting as blank for one case and drops the cached
+// value on the way in and the way out, so the case reads "cleared" whatever order the binary runs
+// it in. A successful read caches for thirty seconds, so without the invalidation the first case
+// to seed a value would decide what every later one sees.
+func clearKVCacheBackendImageSetting(ctx context.Context, t *testing.T) {
+	t.Helper()
+
+	cli := system.LoopbackCtrlClient.Get()
+	sec := &core.Secret{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: setting.DelegatedSecretNamespace,
+			Name:      setting.DelegatedSecretName,
+		},
+		Data: map[string][]byte{"kv-cache-backend-image": []byte("")},
+	}
+
+	setting.InvalidateCache()
+	_ = cli.Delete(ctx, sec.DeepCopy())
+	require.NoError(t, cli.Create(ctx, sec))
+
+	t.Cleanup(func() {
+		setting.InvalidateCache()
+		_ = cli.Delete(ctx, sec)
+	})
 }

@@ -148,6 +148,127 @@ func TestComputeModelDeploymentStatus_Roles(t *testing.T) {
 	assert.False(t, status.Roles[0].Unmanaged)
 }
 
+func TestProjectModelDeploymentRouterStatus_FollowsTheRender(t *testing.T) {
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment())
+	require.NoError(t, err)
+	objects.Contract.Endpoint = "http://perturbed-router.test:8081"
+	objects.Contract.Metrics.QueuedRequests = "perturbed_queue_metric"
+	objects.Contract.Roles[0].Endpoint = "http://perturbed-role.test:8000"
+	objects.Contract.Roles[0].KVEvents.Topic = "perturbed-topic"
+
+	status := projectModelDeploymentRouterStatus(
+		&objects.Contract, "tcp://perturbed-pool.test:50051")
+
+	assert.Equal(t, objects.Contract.Endpoint, status.Endpoint)
+	assert.Equal(t, objects.Contract.Metrics.QueuedRequests, status.Metrics.QueuedRequests)
+	assert.Equal(t, objects.Contract.Roles[0].Endpoint, status.Roles[0].Endpoint)
+	assert.Equal(t, objects.Contract.Roles[0].KVEvents.Topic, status.Roles[0].KVEvents.Topic)
+	assert.Equal(t, "tcp://perturbed-pool.test:50051", status.PoolEndpoint)
+}
+
+func TestRenderModelDeploymentRouterStatus_RoleSetIsExact(t *testing.T) {
+	md := routedModelDeployment()
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	require.NoError(t, err)
+
+	want := make([]string, 0, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		want = append(want, md.Spec.Roles[i].Name)
+	}
+	got := make([]string, 0, len(objects.Contract.Roles))
+	for i := range objects.Contract.Roles {
+		got = append(got, objects.Contract.Roles[i].Name)
+		assert.Equal(t, string(objects.Contract.Roles[i].Kind),
+			objects.Contract.Roles[i].Selector[modelDeploymentLabelKeyRoleKind])
+	}
+	assert.ElementsMatch(t, want, got)
+}
+
+func TestComputeModelDeploymentRouterStatus_ProjectsPoolClientEndpoint(t *testing.T) {
+	md := routedModelDeployment()
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	require.NoError(t, err)
+	pool := &workercore.KVCachePool{
+		ObjectMeta: meta.ObjectMeta{Name: "pool-a"},
+		Status: workercore.KVCachePoolStatus{
+			ClientEndpoint: "tcp://pool-client.test:50051",
+		},
+	}
+	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, objects.Deployment, pool)}
+	domain := &modelDeploymentDomain{KVCache: &workercore.ModelDeploymentKVCacheStatus{Pool: pool.Name}}
+
+	status, err := r.computeModelDeploymentStatus(context.Background(), md, nil, domain, nil)
+	require.NoError(t, err)
+	require.NotNil(t, status.Router)
+	assert.Equal(t, pool.Status.ClientEndpoint, status.Router.PoolEndpoint)
+}
+
+func TestComputeModelDeploymentStatus_RouterReadinessControlsEndpointAndPhase(t *testing.T) {
+	md := routedModelDeployment()
+	pods := readyRouterRolePods(md)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name          string
+		readyReplicas int32
+		rolesReady    bool
+		wantEndpoint  string
+		wantPhase     string
+		wantMessage   string
+	}{
+		{
+			name: "endpoint_absent_while_router_unready", wantPhase: ModelDeploymentPhaseDegraded,
+			rolesReady: true, wantMessage: `router "llm-d" has no ready replicas`,
+		},
+		{
+			name: "endpoint_present_when_router_ready", readyReplicas: 1,
+			rolesReady: true, wantEndpoint: objects.Contract.Endpoint, wantPhase: ModelDeploymentPhaseReady,
+		},
+		{
+			name: "degraded_names_the_replicas", readyReplicas: 1,
+			wantEndpoint: objects.Contract.Endpoint, wantPhase: ModelDeploymentPhaseDegraded,
+			wantMessage: "3 of 4 replicas are ready",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			observedPods := make([]core.Pod, len(pods))
+			copy(observedPods, pods)
+			if !tc.rolesReady {
+				observedPods[0].Status.Conditions = nil
+			}
+			deployment := objects.Deployment.DeepCopy()
+			deployment.Status.ReadyReplicas = tc.readyReplicas
+			r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, deployment)}
+
+			status, err := r.computeModelDeploymentStatus(context.Background(), md, observedPods, nil, nil)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantEndpoint, status.Endpoint)
+			assert.Equal(t, tc.wantPhase, status.Phase)
+			assert.Equal(t, tc.wantMessage, status.PhaseMessage)
+			require.NotNil(t, status.Router)
+			assert.Equal(t, objects.Contract.Endpoint, status.Router.Endpoint)
+		})
+	}
+}
+
+func readyRouterRolePods(md *workercore.ModelDeployment) []core.Pod {
+	pods := make([]core.Pod, 0, 4)
+	for i := range md.Spec.Roles {
+		for ordinal := int32(0); ordinal < md.Spec.Roles[i].Replicas; ordinal++ {
+			pod := core.Pod{ObjectMeta: meta.ObjectMeta{Labels: map[string]string{
+				modelDeploymentLabelKeyComponent: md.Spec.Roles[i].Name,
+			}}}
+			pod.Status.Conditions = []core.PodCondition{{Type: core.PodReady, Status: core.ConditionTrue}}
+			pods = append(pods, pod)
+		}
+	}
+
+	return pods
+}
+
 // TestComputeModelDeploymentStatus_Unmanaged pins the flag that tells a reader why no cache
 // condition will ever be True for this role.
 func TestComputeModelDeploymentStatus_Unmanaged(t *testing.T) {
@@ -582,6 +703,7 @@ func TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved(t *testing.T) {
 		string(ModelDeploymentConditionCacheAttached),
 		string(ModelDeploymentConditionReplicasUpToDate),
 		string(ModelDeploymentConditionRoleKindsReady),
+		string(ModelDeploymentConditionKVEventsPublishing),
 	}, declared)
 	assert.NotContains(t, declared, string(ModelDeploymentConditionDomainRegistered),
 		"this pass was handed no reading of the Binding, and a pass that did not look must not report")
@@ -1603,7 +1725,7 @@ func TestDeriveModelDeploymentPhase_SumsAcrossKindsAndDoesNotBranchOnThem(t *tes
 			holder := &workercore.ModelDeployment{}
 			holder.Status.Roles = c.roles
 
-			deriveModelDeploymentPhase(md, holder)
+			deriveModelDeploymentPhase(md, holder, true)
 
 			assert.Equal(t, c.wantPhase, holder.Status.Phase, "phase")
 			assert.Equal(t, c.wantMessage, holder.Status.PhaseMessage, "phaseMessage")

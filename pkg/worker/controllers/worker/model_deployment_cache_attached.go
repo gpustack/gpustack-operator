@@ -23,6 +23,7 @@ const ModelDeploymentConditionCacheAttached kubeapistatus.ConditionType = "Cache
 const (
 	modelDeploymentReasonCacheActive            = "CacheActive"
 	modelDeploymentReasonCacheOperationsFailing = "CacheOperationsFailing"
+	modelDeploymentReasonCacheNotApplicable     = "NotApplicable"
 	modelDeploymentReasonUnmanaged              = "Unmanaged"
 	modelDeploymentReasonNoReplicaReady         = "NoReplicaReady"
 	modelDeploymentReasonNoObservationAvailable = "NoObservationAvailable"
@@ -82,6 +83,13 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentCache(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod,
 	domain *modelDeploymentDomain, holder *workercore.ModelDeployment,
 ) {
+	if md.Spec.KVCache == nil {
+		ModelDeploymentConditionCacheAttached.True(holder, modelDeploymentReasonCacheNotApplicable,
+			"no shared KV cache was requested; direct prefill/decode transfer is reported by the router contract")
+
+		return
+	}
+
 	if role := modelDeploymentUnmanagedRole(md); role != "" {
 		// The operator synthesized no argument and no client environment for that role, so it does
 		// not claim the observation is about its own doing. Whatever the pool reports.

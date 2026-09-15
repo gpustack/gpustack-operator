@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +24,8 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 const (
@@ -77,6 +80,8 @@ const (
 	modelDeploymentDefaultPort int32 = 8000
 	// modelDeploymentDefaultPortName names that port on the container and on the Service fronting it.
 	modelDeploymentDefaultPortName = "http"
+	// A managed decoder's routing proxy owns the serving port, while vLLM listens behind it here.
+	modelDeploymentInternalPort int32 = 8200
 	// modelDeploymentEngineHostArg and modelDeploymentEnginePortArg are the two flags that decide
 	// where an engine listens. They are FILLED RATHER THAN OWNED: a role that passes either one
 	// keeps its own value, which is the rule the non-Kubernetes worker applies to the same two flags.
@@ -231,7 +236,7 @@ func modelDeploymentSelectorLabels(
 // InstanceType whose accelerator detail has not been computed yet, a role with no image. Falling
 // back to a whole-card or an empty request would produce a Pod that runs and charges the wrong
 // quota, which is the failure this whole path exists to avoid.
-func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) {
+func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput) (*core.Pod, error) {
 	md, role := in.Deployment, in.Role
 
 	tmpl := role.Template
@@ -288,9 +293,18 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 	command := tmpl.Command
 	// gradable is false for a take-over role, whose argv the operator did not build.
 	var (
-		scheme   core.URIScheme
-		gradable bool
+		scheme     core.URIScheme
+		gradable   bool
+		enginePort = modelDeploymentServicePort(role).ContainerPort
 	)
+	directDecode := !takeOver && in.Connector.DirectTransfer &&
+		ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindDecode
+	if directDecode {
+		enginePort = modelDeploymentInternalPort
+		if enginePort == modelDeploymentServicePort(role).ContainerPort {
+			enginePort++
+		}
+	}
 	if !takeOver {
 		command, err = ModelDeploymentEngineCommand(md.Spec.Engine, md.Spec.Model.Name)
 		if err != nil {
@@ -305,8 +319,18 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 		// disagree: a connector argument carrying one of these flags would be honored by the fill
 		// and invisible to the gate.
 		scheme, gradable = modelDeploymentEngineTransport(command)
-		command = appendModelDeploymentBindArgs(
-			command, modelDeploymentServicePort(role).ContainerPort)
+		command = appendModelDeploymentBindArgs(command, enginePort)
+		if directDecode {
+			enginePort, err = modelDeploymentCommandPort(command)
+			if err != nil {
+				return nil, fmt.Errorf("role %q cannot place its routing proxy: %w", role.Name, err)
+			}
+			if enginePort == modelDeploymentServicePort(role).ContainerPort {
+				return nil, fmt.Errorf("role %q uses port %d for both its routing proxy and model server",
+					role.Name, enginePort)
+			}
+			gradable = true
+		}
 	}
 
 	// The connector's volume and mount arrive already built, and they are taken as a unit with the
@@ -322,7 +346,16 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 		mounts = append(mounts, in.Connector.VolumeMounts...)
 	}
 
-	startupProbe, readinessProbe, livenessProbe := modelDeploymentProbes(role, scheme, gradable)
+	probeScheme := scheme
+	if directDecode {
+		probeScheme = core.URISchemeHTTP
+	}
+	startupProbe, readinessProbe, livenessProbe := modelDeploymentProbes(role, probeScheme, gradable)
+	ports := appendModelDeploymentConnectorPorts(modelDeploymentContainerPorts(tmpl), in.Connector, takeOver)
+	if directDecode {
+		ports[0].Name = "model-server"
+		ports[0].ContainerPort = enginePort
+	}
 
 	mainC := core.Container{
 		Name:            "main",
@@ -331,7 +364,7 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 		Command:         command,
 		Resources: getResourceRequirements(
 			ress, in.InstanceType, true, in.GeneralResourcesOvercommit, true, false),
-		Ports:          modelDeploymentContainerPorts(tmpl),
+		Ports:          ports,
 		Env:            mergeModelDeploymentEnv(md.Spec.Engine, role, in.Connector, takeOver),
 		VolumeMounts:   mounts,
 		StartupProbe:   startupProbe,
@@ -365,6 +398,11 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 			Volumes:    vols,
 			Containers: []core.Container{mainC},
 		},
+	}
+	if directDecode {
+		pod.Spec.InitContainers = []core.Container{
+			renderModelDeploymentRoutingSidecar(ctx, role, enginePort, scheme),
+		}
 	}
 	if in.RuntimeClassName != "" {
 		pod.Spec.RuntimeClassName = ptr.To(in.RuntimeClassName)
@@ -425,6 +463,95 @@ func renderModelDeploymentPod(in ModelDeploymentRenderInput) (*core.Pod, error) 
 	pod.Annotations[modelDeploymentPodSpecHashAnnotation] = modelDeploymentPodSpecHash(pod)
 
 	return pod, nil
+}
+
+func modelDeploymentCommandPort(command []string) (int32, error) {
+	for i := len(command) - 1; i >= 0; i-- {
+		if ModelDeploymentArgName(command[i]) != modelDeploymentEnginePortArg {
+			continue
+		}
+		_, value, inline := strings.Cut(command[i], "=")
+		if !inline {
+			if i+1 >= len(command) {
+				return 0, fmt.Errorf("%s has no value", modelDeploymentEnginePortArg)
+			}
+			value = command[i+1]
+		}
+		port, err := strconv.ParseInt(value, 10, 32)
+		if err != nil || port < 1 || port > 65535 {
+			return 0, fmt.Errorf("%s has invalid value %q", modelDeploymentEnginePortArg, value)
+		}
+		return int32(port), nil
+	}
+	return 0, fmt.Errorf("%s is missing", modelDeploymentEnginePortArg)
+}
+
+// modelDeploymentRedirectedImage applies the cluster's registry and namespace redirection to an
+// image this operator chose, so an air-gapped installation reaches its own mirror instead of the
+// public one. The settings that drive it take an image reference of the form `namespace/name:tag`,
+// which is why every default they redirect is written that way rather than with a registry host.
+//
+// An image named on the object itself is the user's own reference and is NEVER passed through here:
+// redirecting it would silently resolve their reference to a different one.
+func modelDeploymentRedirectedImage(ctx context.Context, image string) string {
+	if cn := settings.ContainerNamespace.ShouldValue(ctx); cn != "" {
+		if _, suffix, found := strings.Cut(image, "/"); found {
+			image = cn + "/" + suffix
+		}
+	}
+	if rn := settings.ContainerRegistry.ShouldValue(ctx); rn != "" {
+		image = rn + "/" + image
+	}
+	return image
+}
+
+func renderModelDeploymentRoutingSidecar(
+	ctx context.Context,
+	role *workercore.ModelDeploymentRole, enginePort int32, engineScheme core.URIScheme,
+) core.Container {
+	externalPort := modelDeploymentServicePort(role)
+	args := []string{
+		fmt.Sprintf("--port=%d", externalPort.ContainerPort),
+		fmt.Sprintf("--model-server-port=%d", enginePort),
+		"--kv-connector=mooncake",
+		fmt.Sprintf("--mooncake-bootstrap-port=%d", inject.VLLMMooncakeBootstrapPort),
+		"--secure-proxy=false",
+	}
+	if engineScheme == core.URISchemeHTTPS {
+		args = append(args, "--enable-tls=decoder", "--tls-insecure-skip-verify=decoder")
+	}
+
+	return core.Container{
+		Name:            "routing-proxy",
+		Image:           modelDeploymentRedirectedImage(ctx, settings.ModelDeploymentRoutingSidecarImage.ShouldValue(ctx)),
+		ImagePullPolicy: core.PullIfNotPresent,
+		Args:            args,
+		RestartPolicy:   ptr.To(core.ContainerRestartPolicyAlways),
+		Ports: []core.ContainerPort{{
+			Name: externalPort.Name, Protocol: core.ProtocolTCP,
+			ContainerPort: externalPort.ContainerPort,
+		}},
+		Env: []core.EnvVar{{
+			Name: "POD_IP",
+			ValueFrom: &core.EnvVarSource{FieldRef: &core.ObjectFieldSelector{
+				FieldPath: "status.podIP",
+			}},
+		}},
+		SecurityContext: &core.SecurityContext{
+			AllowPrivilegeEscalation: ptr.To(false),
+			RunAsNonRoot:             ptr.To(true),
+		},
+	}
+}
+
+func appendModelDeploymentConnectorPorts(
+	ports []core.ContainerPort, connector ModelDeploymentConnectorRender, takeOver bool,
+) []core.ContainerPort {
+	if takeOver {
+		return ports
+	}
+
+	return append(ports, connector.Ports...)
 }
 
 // modelDeploymentPodLabels is what a replica carries: the selector, the queue-name entrance label

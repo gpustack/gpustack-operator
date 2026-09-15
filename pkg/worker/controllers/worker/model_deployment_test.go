@@ -132,6 +132,24 @@ func replicaNames(t *testing.T, cli ctrlcli.Client) []string {
 	return names
 }
 
+func TestModelDeploymentOwnedResourceRequiresAResourceNote(t *testing.T) {
+	role := new(core.Pod)
+	systemmeta.NoteResource(role, ModelDeploymentResourceType,
+		map[string]string{ModelDeploymentResourceNoteRole: "prefill"})
+	router := new(core.Pod)
+	systemmeta.NoteResource(router, ModelDeploymentResourceType,
+		map[string]string{modelDeploymentResourceNoteRouter: "llm-d"})
+	withoutNote := new(core.Pod)
+	systemmeta.NoteResource(withoutNote, ModelDeploymentResourceType, nil)
+	wrongType := role.DeepCopy()
+	systemmeta.NoteResource(wrongType, "instances", nil)
+
+	assert.True(t, modelDeploymentOwnedResource(role))
+	assert.True(t, modelDeploymentOwnedResource(router))
+	assert.False(t, modelDeploymentOwnedResource(withoutNote))
+	assert.False(t, modelDeploymentOwnedResource(wrongType))
+}
+
 // replicaHashes reads back the fingerprint each running replica was built from, which is what a
 // rollout actually moves.
 func replicaHashes(t *testing.T, cli ctrlcli.Client) map[string]string {

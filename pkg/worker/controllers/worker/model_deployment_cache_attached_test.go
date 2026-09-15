@@ -77,6 +77,18 @@ func readyDomain(mutate ...func(*modelDeploymentDomain)) *modelDeploymentDomain 
 	return d
 }
 
+func TestModelDeploymentCacheAttached_WithoutSharedCacheIsNotApplicable(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.KVCache = nil })
+	scraper := &fakeModelDeploymentCacheScraper{}
+
+	got := cacheAttachedOf(t, md, readyPods(md, 1), nil, scraper)
+
+	assert.True(t, ModelDeploymentConditionCacheAttached.IsTrue(got))
+	assert.Equal(t, modelDeploymentReasonCacheNotApplicable,
+		ModelDeploymentConditionCacheAttached.GetReason(got))
+	assert.Empty(t, scraper.calls, "there is no shared-store metric to scrape")
+}
+
 // TestModelDeploymentCacheAttached_Table walks every row of F8's table.
 func TestModelDeploymentCacheAttached_Table(t *testing.T) {
 	testCases := []struct {

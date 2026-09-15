@@ -6,7 +6,9 @@ import (
 	"slices"
 	"strings"
 
+	app "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -166,7 +168,11 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 	wlByGroup := modelDeploymentWorkloadByGroup(md, pods, wls, groupOfRole)
 
 	holder.Status.Roles = modelDeploymentRoleStatuses(md, pods, wlByGroup, groupOfRole)
-	holder.Status.Endpoint = modelDeploymentEndpoint(md)
+	if md.Spec.Router == nil {
+		holder.Status.Endpoint = modelDeploymentEndpoint(md)
+	} else {
+		holder.Status.Endpoint = ""
+	}
 
 	observeModelDeploymentDomain(holder, domain)
 
@@ -178,9 +184,68 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 
 	observeModelDeploymentRoleKinds(holder)
 
-	deriveModelDeploymentPhase(md, holder)
+	observeModelDeploymentKVEvents(md, holder)
+
+	routerReady, err := r.observeModelDeploymentRouter(ctx, md, domain, holder)
+	if err != nil {
+		return nil, err
+	}
+
+	deriveModelDeploymentPhase(md, holder, routerReady)
 
 	return &holder.Status, nil
+}
+
+func (r *ModelDeploymentReconciler) observeModelDeploymentRouter(
+	ctx context.Context, md *workercore.ModelDeployment, domain *modelDeploymentDomain,
+	holder *workercore.ModelDeployment,
+) (bool, error) {
+	if md.Spec.Router == nil {
+		holder.Status.Router = nil
+		return true, nil
+	}
+
+	objects, err := renderModelDeploymentRouterObjects(ctx, md)
+	if err != nil {
+		return false, err
+	}
+	poolEndpoint := ""
+	if domain != nil && domain.KVCache != nil {
+		pool := new(workercore.KVCachePool)
+		err = r.Client.Get(ctx, ctrlcli.ObjectKey{Name: domain.KVCache.Pool}, pool)
+		if err != nil && !kerrors.IsNotFound(err) {
+			return false, err
+		}
+		if err == nil {
+			poolEndpoint = pool.Status.ClientEndpoint
+		}
+	}
+	status := projectModelDeploymentRouterStatus(&objects.Contract, poolEndpoint)
+	holder.Status.Router = status
+
+	deployment := new(app.Deployment)
+	err = r.Client.Get(ctx, ctrlcli.ObjectKey{Namespace: md.Namespace, Name: objects.Deployment.Name}, deployment)
+	if kerrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if deployment.Status.ReadyReplicas == 0 {
+		return false, nil
+	}
+
+	holder.Status.Endpoint = status.Endpoint
+	return true, nil
+}
+
+func projectModelDeploymentRouterStatus(
+	contract *workercore.ModelDeploymentRouterStatus, poolEndpoint string,
+) *workercore.ModelDeploymentRouterStatus {
+	status := contract.DeepCopy()
+	status.PoolEndpoint = poolEndpoint
+
+	return status
 }
 
 // modelDeploymentRoleStatuses counts, per role, how many replicas the spec asks for and how many of
@@ -866,7 +931,7 @@ func modelDeploymentKindsWithoutReady(roles []workercore.ModelDeploymentRoleStat
 // ready is Starting whatever the reason — to a reader, a replica that has not been admitted and one
 // that has not finished loading its weights are the same state, and phaseMessage is what
 // distinguishes them.
-func deriveModelDeploymentPhase(md, holder *workercore.ModelDeployment) {
+func deriveModelDeploymentPhase(md, holder *workercore.ModelDeployment, routerReady bool) {
 	if md.DeletionTimestamp != nil {
 		holder.Status.Phase = ModelDeploymentPhaseDeleting
 		holder.Status.PhaseMessage = "the replicas are being torn down"
@@ -881,6 +946,9 @@ func deriveModelDeploymentPhase(md, holder *workercore.ModelDeployment) {
 	}
 
 	switch {
+	case ready == desired && md.Spec.Router != nil && !routerReady:
+		holder.Status.Phase = ModelDeploymentPhaseDegraded
+		holder.Status.PhaseMessage = fmt.Sprintf("router %q has no ready replicas", md.Spec.Router.Name)
 	case ready == desired:
 		holder.Status.Phase = ModelDeploymentPhaseReady
 		holder.Status.PhaseMessage = ""

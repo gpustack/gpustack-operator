@@ -64,6 +64,10 @@ type modelDeploymentDomain struct {
 func (r *ModelDeploymentReconciler) resolveModelDeploymentDomain(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) (*modelDeploymentDomain, error) {
+	if md.Spec.KVCache == nil {
+		return nil, nil
+	}
+
 	kvcpb, err := r.getModelDeploymentBinding(ctx, md)
 	if err != nil {
 		return nil, err
@@ -202,6 +206,10 @@ func (r *ModelDeploymentReconciler) releaseModelDeploymentBinding(
 func (r *ModelDeploymentReconciler) syncModelDeploymentBindingClaim(
 	ctx context.Context, md *workercore.ModelDeployment, claim bool,
 ) error {
+	if md.Spec.KVCache == nil {
+		return nil
+	}
+
 	kvcpb, err := r.getModelDeploymentBinding(ctx, md)
 	if err != nil {
 		return err
@@ -253,6 +261,10 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentBindingClaim(
 func (r *ModelDeploymentReconciler) getModelDeploymentBinding(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) (*workercore.KVCachePoolBinding, error) {
+	if md.Spec.KVCache == nil {
+		return nil, nil
+	}
+
 	kvcpb := new(workercore.KVCachePoolBinding)
 	err := r.Client.Get(ctx,
 		ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Spec.KVCache.PoolRef.Name},

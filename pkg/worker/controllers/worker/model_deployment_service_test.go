@@ -114,6 +114,25 @@ func TestModelDeploymentService_OnePerRoleBesideTheDeploymentWide(t *testing.T) 
 	assert.Equal(t, byName["qwen-prefill"].Spec.Selector, byName["qwen"].Spec.Selector)
 }
 
+func TestRenderModelDeploymentService_KVEventPorts(t *testing.T) {
+	md := routedModelDeployment()
+	services := renderModelDeploymentServices(md)
+	require.Len(t, services, 3)
+
+	portsByName := func(service *core.Service) map[string]int32 {
+		ports := make(map[string]int32, len(service.Spec.Ports))
+		for _, port := range service.Spec.Ports {
+			ports[port.Name] = port.Port
+		}
+		return ports
+	}
+
+	assert.Equal(t, map[string]int32{"http": 8000, "kv-events": 5557, "kv-replay": 5558},
+		portsByName(services[1]), "the prefill role Service makes both published addresses dialable")
+	assert.Equal(t, map[string]int32{"http": 8000}, portsByName(services[2]),
+		"a decode-only role is not required to publish cache events")
+}
+
 // TestModelDeploymentService_RemovingARoleRemovesItsService covers what an owner reference does NOT
 // collect.
 //
