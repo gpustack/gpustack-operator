@@ -80,6 +80,21 @@ func TestRenderLLMD_CarriesTheKVEventsContract(t *testing.T) {
 	assert.Contains(t, config, "promptTokens: 0")
 }
 
+func TestRenderLLMD_NoDecodeRoleMeansNoPublisherExclusion(t *testing.T) {
+	config, err := Render(LLMD, Input{
+		Roles: []Role{
+			{Kind: "server", RoleLabelKey: "modeldeployment.gpustack.ai/role-kind"},
+		},
+		Namespace: "team-a",
+		KVEvents:  KVEvents{Engine: "vllm", Port: 5557, ReplayPort: 5558, Topic: "kv@"},
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, config, "precise-prefix-cache-producer")
+	assert.NotContains(t, config, "!=decode",
+		"the exclusion is keyed on the decode kind's own label, so it exists only with a decode role")
+}
+
 func TestRenderLLMD_DecodeDoesNotScorePrefixOverlap(t *testing.T) {
 	config, err := Render(LLMD, Input{Roles: []Role{
 		{Kind: "prefill", RoleLabelKey: "modeldeployment.gpustack.ai/role-kind"},

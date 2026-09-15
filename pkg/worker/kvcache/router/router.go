@@ -111,13 +111,16 @@ func renderLLMD(input Input) (string, error) {
 	prefixProducer := "approx-prefix-cache-producer"
 	if input.KVEvents.Port > 0 {
 		prefixProducer = "precise-prefix-cache-producer"
-		// Excludes decoders from the set of Pods the producer subscribes to. Appended rather than
-		// assigned, and guarded, because an empty selector would otherwise render a leading comma -
-		// which Kubernetes rejects as a label selector, and which no current caller produces. The
-		// guard is here because this function is a library and its callers are not its contract.
+		// Excludes decoders from the set of Pods the producer subscribes to. The exclusion is keyed
+		// on the decode kind's own label, so it exists only when a decode role is among the inputs -
+		// keying it on whichever kind sorts first would pin it to an arbitrary role. Appended rather
+		// than assigned, and guarded, because an empty selector would otherwise render a leading
+		// comma - which Kubernetes rejects as a label selector, and which no current caller
+		// produces. The guard is here because this function is a library and its callers are not
+		// its contract.
 		publisherSelector := input.EndpointSelector
-		if len(orderedKinds) > 0 {
-			exclusion := kinds[orderedKinds[0]] + "!=" + roleKindDecode
+		if key, ok := kinds[roleKindDecode]; ok {
+			exclusion := key + "!=" + roleKindDecode
 			if publisherSelector == "" {
 				publisherSelector = exclusion
 			} else {

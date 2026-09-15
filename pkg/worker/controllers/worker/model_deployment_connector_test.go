@@ -365,6 +365,39 @@ func TestModelDeploymentUsesDirectTransfer(t *testing.T) {
 		sglang, &sglang.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
 }
 
+func TestModelDeploymentPublishesKVEvents(t *testing.T) {
+	base := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+	})
+
+	assert.True(t, modelDeploymentPublishesKVEvents(
+		base, &base.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+
+	// The consequence the shared gate exists for: on Ascend the render refuses the event
+	// publisher, so publishing must read false rather than error-loop the reconcile.
+	assert.False(t, modelDeploymentPublishesKVEvents(
+		base, &base.Spec.Roles[0], nodefeature.ManufacturerAscend))
+
+	// The two predicates share the router-name/engine/manufacturer gate, so a router that is not
+	// the managed one gets no publisher -- unreachable through the API today, and exactly the
+	// divergence a second router name would otherwise inherit.
+	otherRouter := base.DeepCopy()
+	otherRouter.Spec.Router.Name = "another-router"
+	assert.False(t, modelDeploymentPublishesKVEvents(
+		otherRouter, &otherRouter.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+
+	decode := base.DeepCopy()
+	decode.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+	assert.False(t, modelDeploymentPublishesKVEvents(
+		decode, &decode.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+
+	unmanaged := base.DeepCopy()
+	unmanaged.Spec.Roles[0].Template.Command = []string{"/bin/my-server"}
+	assert.False(t, modelDeploymentPublishesKVEvents(
+		unmanaged, &unmanaged.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+}
+
 // TestSynthesizeModelDeploymentConnector_ServerIsTheSingleRoleRender is the regression guard that
 // this spec does not change what a deployment written before it renders.
 //

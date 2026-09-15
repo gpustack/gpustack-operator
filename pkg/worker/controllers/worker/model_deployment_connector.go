@@ -131,12 +131,23 @@ type ModelDeploymentConnectorRender struct {
 	DirectTransfer bool
 }
 
+// modelDeploymentRoutesManagedVLLM is the gate both connector decisions share: the managed llm-d
+// router in front of a vLLM engine, off Ascend. It exists so the two predicates below cannot drift
+// apart on the dimensions they agree on -- with only one router name admitted today the router-name
+// clause looks redundant, and it is exactly the clause a second router name would silently inherit.
+//
+// Ascend is excluded because the Ascend render knows only the store connector: asked to publish
+// events it refuses, and a refused render is an error loop, not a deployment without events.
+func modelDeploymentRoutesManagedVLLM(md *workercore.ModelDeployment, manufacturer string) bool {
+	return md.Spec.Router != nil && md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
+		md.Spec.Engine == workercore.ModelDeploymentEngineVLLM &&
+		manufacturer != nodefeature.ManufacturerAscend
+}
+
 func modelDeploymentUsesDirectTransfer(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
 ) bool {
-	if md.Spec.Router == nil || md.Spec.Router.Name != workercore.ModelDeploymentRouterLLMD ||
-		md.Spec.Engine != workercore.ModelDeploymentEngineVLLM ||
-		manufacturer == nodefeature.ManufacturerAscend {
+	if !modelDeploymentRoutesManagedVLLM(md, manufacturer) {
 		return false
 	}
 
@@ -354,9 +365,9 @@ func ModelDeploymentEffectiveRoleKind(
 }
 
 func modelDeploymentPublishesKVEvents(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
 ) bool {
-	return md.Spec.Router != nil && md.Spec.Engine == workercore.ModelDeploymentEngineVLLM &&
+	return modelDeploymentRoutesManagedVLLM(md, manufacturer) &&
 		(role.Template == nil || len(role.Template.Command) == 0) &&
 		ModelDeploymentEffectiveRoleKind(role) != workercore.ModelDeploymentRoleKindDecode
 }

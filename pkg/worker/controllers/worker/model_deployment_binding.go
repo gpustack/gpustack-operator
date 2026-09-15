@@ -26,10 +26,12 @@ const ModelDeploymentKind = "ModelDeployment"
 // resolved and its reuse domain was read.
 const ModelDeploymentConditionDomainRegistered kubeapistatus.ConditionType = "DomainRegistered"
 
-// The reasons DomainRegistered carries. Three rather than two, because the three send a reader to
-// three different places: create the Binding, wait for it (or look at the pool), find who deleted it.
+// The reasons DomainRegistered carries. Four rather than two, because the four send a reader to
+// four different places: nowhere, create the Binding, wait for it (or look at the pool), find who
+// deleted it.
 const (
 	modelDeploymentReasonRegistered      = "Registered"
+	modelDeploymentReasonNotApplicable   = "NotApplicable"
 	modelDeploymentReasonBindingNotFound = "BindingNotFound"
 	modelDeploymentReasonBindingNotReady = "BindingNotReady"
 	modelDeploymentReasonBindingDeleting = "BindingDeleting"
@@ -61,11 +63,20 @@ type modelDeploymentDomain struct {
 // The read is scoped to the deployment's OWN namespace and there is no other lookup: poolRef is a
 // LocalObjectReference, so the name it carries can only ever mean an object here. The pool is named
 // from the Binding rather than read, because the projection wants its name and nothing else.
+//
+// A deployment declaring no cache gets an explicit not-applicable reading rather than nil, because
+// nil is reserved for a pass that did not look and a cache-less deployment is an ANSWER, not a gap:
+// without it the object would carry no DomainRegistered condition at all, and an absent condition
+// and an inapplicable one are different states.
 func (r *ModelDeploymentReconciler) resolveModelDeploymentDomain(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) (*modelDeploymentDomain, error) {
 	if md.Spec.KVCache == nil {
-		return nil, nil
+		return &modelDeploymentDomain{
+			Ready:   true,
+			Reason:  modelDeploymentReasonNotApplicable,
+			Message: "the deployment declares no KV cache pool, so there is no Binding to resolve",
+		}, nil
 	}
 
 	kvcpb, err := r.getModelDeploymentBinding(ctx, md)

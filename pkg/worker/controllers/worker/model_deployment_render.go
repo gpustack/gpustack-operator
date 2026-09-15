@@ -291,6 +291,10 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 	takeOver := len(tmpl.Command) > 0
 
 	command := tmpl.Command
+	// declaredPorts is the template's port list, computed once: the connector's synthesized ports
+	// are deduplicated against it below, and a direct decoder's engine port must clear every entry
+	// in it, not only the one the Service fronts.
+	declaredPorts := modelDeploymentContainerPorts(tmpl)
 	// gradable is false for a take-over role, whose argv the operator did not build.
 	var (
 		scheme     core.URIScheme
@@ -301,7 +305,7 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 		ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindDecode
 	if directDecode {
 		enginePort = modelDeploymentInternalPort
-		if enginePort == modelDeploymentServicePort(role).ContainerPort {
+		for modelDeploymentPortTaken(declaredPorts, enginePort) {
 			enginePort++
 		}
 	}
@@ -325,9 +329,12 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 			if err != nil {
 				return nil, fmt.Errorf("role %q cannot place its routing proxy: %w", role.Name, err)
 			}
-			if enginePort == modelDeploymentServicePort(role).ContainerPort {
-				return nil, fmt.Errorf("role %q uses port %d for both its routing proxy and model server",
-					role.Name, enginePort)
+			for _, declared := range declaredPorts {
+				if enginePort == declared.ContainerPort {
+					return nil, fmt.Errorf(
+						"role %q places its model server on port %d, which the template already "+
+							"declares as %q", role.Name, enginePort, declared.Name)
+				}
 			}
 			gradable = true
 		}
@@ -351,7 +358,10 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 		probeScheme = core.URISchemeHTTP
 	}
 	startupProbe, readinessProbe, livenessProbe := modelDeploymentProbes(role, probeScheme, gradable)
-	ports := appendModelDeploymentConnectorPorts(modelDeploymentContainerPorts(tmpl), in.Connector, takeOver)
+	ports, err := appendModelDeploymentConnectorPorts(declaredPorts, in.Connector, takeOver)
+	if err != nil {
+		return nil, err
+	}
 	if directDecode {
 		ports[0].Name = "model-server"
 		ports[0].ContainerPort = enginePort
@@ -491,11 +501,17 @@ func modelDeploymentCommandPort(command []string) (int32, error) {
 // public one. The settings that drive it take an image reference of the form `namespace/name:tag`,
 // which is why every default they redirect is written that way rather than with a registry host.
 //
+// The namespace replacement is skipped when the first segment is a REGISTRY HOST -- one carrying a
+// dot or a port, or `localhost` -- because the settings are user-controlled and a value already
+// carrying a registry would otherwise have its host replaced by the namespace, silently resolving
+// to a different image than the one configured.
+//
 // An image named on the object itself is the user's own reference and is NEVER passed through here:
 // redirecting it would silently resolve their reference to a different one.
 func modelDeploymentRedirectedImage(ctx context.Context, image string) string {
 	if cn := settings.ContainerNamespace.ShouldValue(ctx); cn != "" {
-		if _, suffix, found := strings.Cut(image, "/"); found {
+		if first, suffix, found := strings.Cut(image, "/"); found &&
+			!strings.ContainsAny(first, ".:") && first != "localhost" {
 			image = cn + "/" + suffix
 		}
 	}
@@ -544,14 +560,48 @@ func renderModelDeploymentRoutingSidecar(
 	}
 }
 
+// appendModelDeploymentConnectorPorts merges the connector's synthesized ports into the
+// container's declared ones. A synthesized port whose number the template already declares under
+// the same name is one endpoint declared twice, so the duplicate is dropped; the same number
+// under a different name is two endpoints claiming one socket, which no merge can settle, so the
+// render is refused.
 func appendModelDeploymentConnectorPorts(
 	ports []core.ContainerPort, connector ModelDeploymentConnectorRender, takeOver bool,
-) []core.ContainerPort {
+) ([]core.ContainerPort, error) {
 	if takeOver {
-		return ports
+		return ports, nil
 	}
 
-	return append(ports, connector.Ports...)
+	for _, synthesized := range connector.Ports {
+		declared := false
+		for _, p := range ports {
+			if p.ContainerPort != synthesized.ContainerPort {
+				continue
+			}
+			if p.Name != synthesized.Name {
+				return nil, fmt.Errorf(
+					"the connector publishes port %d as %q but the template declares it as %q",
+					synthesized.ContainerPort, synthesized.Name, p.Name)
+			}
+			declared = true
+		}
+		if !declared {
+			ports = append(ports, synthesized)
+		}
+	}
+
+	return ports, nil
+}
+
+// modelDeploymentPortTaken reports whether the number already appears among a container's
+// declared ports.
+func modelDeploymentPortTaken(ports []core.ContainerPort, port int32) bool {
+	for _, p := range ports {
+		if p.ContainerPort == port {
+			return true
+		}
+	}
+	return false
 }
 
 // modelDeploymentPodLabels is what a replica carries: the selector, the queue-name entrance label

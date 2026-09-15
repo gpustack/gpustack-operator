@@ -23,7 +23,7 @@ const (
 )
 
 func observeModelDeploymentKVEvents(
-	md, holder *workercore.ModelDeployment,
+	md, holder *workercore.ModelDeployment, manufacturers map[string]string,
 ) {
 	if md.Spec.Router == nil {
 		for i := range md.Spec.Roles {
@@ -53,7 +53,7 @@ func observeModelDeploymentKVEvents(
 				fmt.Sprintf("role %q replaced the whole command line, so the operator cannot say whether it publishes cache events", role.Name))
 			return
 		}
-		if !modelDeploymentPublishesKVEvents(md, role) {
+		if !modelDeploymentPublishesKVEvents(md, role, manufacturers[role.Name]) {
 			ModelDeploymentConditionKVEventsPublishing.False(holder,
 				modelDeploymentReasonKVEventsPublisherDisabled,
 				fmt.Sprintf("role %q produces cache blocks but its rendered configuration does not enable event publishing", role.Name))

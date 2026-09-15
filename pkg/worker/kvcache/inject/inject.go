@@ -64,6 +64,12 @@ type Result struct {
 }
 
 // KVEvents is the dialable cache-event contract produced alongside the engine's bind configuration.
+//
+// The Endpoint is the per-role ClusterIP Service, and a connection to it is pinned to one backing
+// Pod: with more than one replica a consumer sees only one producer's stream. The managed router
+// therefore consumes the stream through per-Pod discovery instead of this endpoint. The ZMQ
+// publisher binds a wildcard address and authenticates nothing, so the events plane expects
+// network isolation - it sits in the same trust domain as the data plane.
 type KVEvents struct {
 	Endpoint       string
 	ReplayEndpoint string

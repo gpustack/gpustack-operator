@@ -59,7 +59,7 @@ func TestObserveModelDeploymentKVEventsPublishing(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			holder := new(workercore.ModelDeployment)
-			observeModelDeploymentKVEvents(tc.deployment, holder)
+			observeModelDeploymentKVEvents(tc.deployment, holder, nil)
 
 			assert.Equal(t, string(tc.status), ModelDeploymentConditionKVEventsPublishing.GetStatus(holder))
 			assert.Equal(t, tc.reason, ModelDeploymentConditionKVEventsPublishing.GetReason(holder))
@@ -70,12 +70,12 @@ func TestObserveModelDeploymentKVEventsPublishing(t *testing.T) {
 func TestObserveModelDeploymentKVEventsPublishing_PreservesTransitionTime(t *testing.T) {
 	md := routedModelDeployment()
 	holder := new(workercore.ModelDeployment)
-	observeModelDeploymentKVEvents(md, holder)
+	observeModelDeploymentKVEvents(md, holder, nil)
 	require.Len(t, holder.Status.Conditions, 1)
 
 	want := meta.NewTime(time.Unix(1, 0))
 	holder.Status.Conditions[0].LastTransitionTime = want
-	observeModelDeploymentKVEvents(md, holder)
+	observeModelDeploymentKVEvents(md, holder, nil)
 
 	assert.Equal(t, want, holder.Status.Conditions[0].LastTransitionTime)
 }

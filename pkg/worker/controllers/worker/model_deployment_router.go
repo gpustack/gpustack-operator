@@ -53,7 +53,7 @@ type ModelDeploymentRouterObjects struct {
 }
 
 func renderModelDeploymentRouterObjects(
-	ctx context.Context, md *workercore.ModelDeployment,
+	ctx context.Context, md *workercore.ModelDeployment, manufacturers map[string]string,
 ) (ModelDeploymentRouterObjects, error) {
 	name := md.Name + "-router"
 	labels := map[string]string{
@@ -104,7 +104,7 @@ func renderModelDeploymentRouterObjects(
 		roleStatus := workercore.ModelDeploymentRouterRoleStatus{
 			Name: role.Name, Kind: kind, Selector: selector, Endpoint: modelDeploymentRoleEndpoint(md, role),
 		}
-		if modelDeploymentPublishesKVEvents(md, role) {
+		if modelDeploymentPublishesKVEvents(md, role, manufacturers[role.Name]) {
 			events := inject.VLLMKVEvents(md.Name + "-" + role.Name + "." + md.Namespace + ".svc")
 			roleStatus.KVEvents = &workercore.ModelDeploymentRouterKVEvents{
 				Endpoint: events.Endpoint, ReplayEndpoint: events.ReplayEndpoint, Topic: events.Topic,
@@ -260,6 +260,16 @@ func modelDeploymentTokenizerRole(md *workercore.ModelDeployment) *workercore.Mo
 		}
 	}
 
+	// No prefill: a server does both halves of a request, so its tokenizer is the one a router
+	// scoring whole requests should agree with. Admission does not require a routed deployment to
+	// declare either kind, so the positional fallback stays -- but as the LAST resort, deterministic
+	// rather than "whatever sorts first" by accident.
+	for i := range roles {
+		if ModelDeploymentEffectiveRoleKind(&roles[i]) == workercore.ModelDeploymentRoleKindServer {
+			return &roles[i]
+		}
+	}
+
 	return &roles[0]
 }
 
@@ -274,7 +284,8 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentRouter(
 	var rendered ModelDeploymentRouterObjects
 	if md.Spec.Router != nil {
 		var err error
-		rendered, err = renderModelDeploymentRouterObjects(ctx, md)
+		rendered, err = renderModelDeploymentRouterObjects(
+			ctx, md, r.modelDeploymentRoleManufacturers(ctx, md))
 		if err != nil {
 			return err
 		}
@@ -299,13 +310,13 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentRouter(
 		func() ctrlcli.Object { return new(core.Service) }, new(core.ServiceList),
 		func(actual, expected ctrlcli.Object) bool {
 			changed := alignModelDeploymentService(actual.(*core.Service), expected.(*core.Service))
-			return alignModelDeploymentRouterMetadata(actual, expected) || changed
+			return alignModelDeploymentChildMetadata(actual, expected) || changed
 		}, modelDeploymentResourceNoteRouter, "service"); err != nil {
 		return err
 	}
 	if err := r.syncModelDeploymentOwnedChildren(ctx, md, objectIfPresent(rendered.ServiceAccount, wanted),
 		func() ctrlcli.Object { return new(core.ServiceAccount) }, new(core.ServiceAccountList),
-		alignModelDeploymentRouterMetadata, modelDeploymentResourceNoteRouter, "serviceaccount"); err != nil {
+		alignModelDeploymentChildMetadata, modelDeploymentResourceNoteRouter, "serviceaccount"); err != nil {
 		return err
 	}
 	if err := r.syncModelDeploymentOwnedChildren(ctx, md, objectIfPresent(rendered.Role, wanted),
@@ -317,7 +328,7 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentRouter(
 				role.Rules = want.Rules
 				changed = true
 			}
-			return alignModelDeploymentRouterMetadata(actual, expected) || changed
+			return alignModelDeploymentChildMetadata(actual, expected) || changed
 		}, modelDeploymentResourceNoteRouter, "role"); err != nil {
 		return err
 	}
@@ -330,7 +341,7 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentRouter(
 				binding.Subjects = want.Subjects
 				changed = true
 			}
-			return alignModelDeploymentRouterMetadata(actual, expected) || changed
+			return alignModelDeploymentChildMetadata(actual, expected) || changed
 		}, modelDeploymentResourceNoteRouter, "rolebinding")
 }
 
@@ -385,7 +396,7 @@ func alignModelDeploymentRouterDeployment(actual, expected *app.Deployment) (cha
 		}
 	}
 
-	return alignModelDeploymentRouterMetadata(actual, expected) || changed
+	return alignModelDeploymentChildMetadata(actual, expected) || changed
 }
 
 func alignModelDeploymentRouterConfigMap(actual, expected *core.ConfigMap) (changed bool) {
@@ -393,10 +404,14 @@ func alignModelDeploymentRouterConfigMap(actual, expected *core.ConfigMap) (chan
 		actual.Data = expected.Data
 		changed = true
 	}
-	return alignModelDeploymentRouterMetadata(actual, expected) || changed
+	return alignModelDeploymentChildMetadata(actual, expected) || changed
 }
 
-func alignModelDeploymentRouterMetadata(actual, expected ctrlcli.Object) (changed bool) {
+// alignModelDeploymentChildMetadata converges a child's labels and resource note onto the rendered
+// ones. The note half is LOAD-BEARING rather than cosmetic: it is written at Create only, while the
+// prune gate skips any child whose note is empty -- so a stripped note would make the object
+// permanently exempt from pruning, and this is what keeps the gate honest.
+func alignModelDeploymentChildMetadata(actual, expected ctrlcli.Object) (changed bool) {
 	if !maps.Equal(actual.GetLabels(), expected.GetLabels()) {
 		actual.SetLabels(maps.Clone(expected.GetLabels()))
 		changed = true
@@ -451,6 +466,11 @@ const modelDeploymentRouterEnvoyConfig = `static_resources:
               routes:
               - match: {prefix: "/"}
                 route: {cluster: original_destination_cluster, timeout: 86400s}
+                # The original-destination cluster routes on x-gateway-destination-endpoint, and
+                # failure_mode_allow lets a request through when the EPP -- the only legitimate
+                # writer of that header -- is down. A client-supplied copy must never reach the
+                # cluster, or the caller picks the upstream instead of the endpoint selector.
+                request_headers_to_remove: ["x-gateway-destination-endpoint"]
           http_filters:
           - name: envoy.filters.http.ext_proc
             typed_config:

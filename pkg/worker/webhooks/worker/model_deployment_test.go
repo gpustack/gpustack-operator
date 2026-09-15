@@ -586,6 +586,128 @@ func TestValidateModelDeployment(t *testing.T) {
 			wantMessage: "managed router supports plaintext engine endpoints only",
 		},
 		{
+			// The ZMQ publisher is synthesized onto the same container, so the collision is two
+			// processes binding one port -- which the replica reports as a crash, not admission.
+			name: "router_role_declares_kv_events_port",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Roles[0].Template = &workercore.ModelDeploymentTemplate{
+					Ports: []workercore.InstancePort{{Port: 5557, Protocol: core.ProtocolTCP}},
+				}
+				return md
+			}(),
+			wantMessage: `role "server" declares port 5557, which the operator reserves`,
+		},
+		{
+			name: "router_role_declares_kv_replay_port",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Roles[0].Template = &workercore.ModelDeploymentTemplate{
+					Ports: []workercore.InstancePort{{Port: 8000, Protocol: core.ProtocolTCP}, {Port: 5558, Protocol: core.ProtocolTCP}},
+				}
+				return md
+			}(),
+			wantMessage: `role "server" declares port 5558, which the operator reserves`,
+		},
+		{
+			name: "router_role_declares_mooncake_bootstrap_port",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Roles[0].Template = &workercore.ModelDeploymentTemplate{
+					Ports: []workercore.InstancePort{{Port: 8998, Protocol: core.ProtocolTCP}},
+				}
+				return md
+			}(),
+			wantMessage: `role "server" declares port 8998, which the operator reserves`,
+		},
+		{
+			// The reserved ports are vLLM's synthesized listeners; on another engine nothing binds
+			// them and the same declaration is an ordinary port.
+			name: "router_role_declares_5557_on_sglang",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Engine = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Roles[0].Template = &workercore.ModelDeploymentTemplate{
+					Ports: []workercore.InstancePort{{Port: 5557, Protocol: core.ProtocolTCP}},
+				}
+				return md
+			}(),
+		},
+		{
+			// A direct decode role is fronted by a proxy that takes the serving port, so a role that
+			// pins its model server to that same port fails the render on every pass -- permanently.
+			name: "router_direct_decode_binds_the_serving_port",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name, r.Kind = "prefill", workercore.ModelDeploymentRoleKindPrefill
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name, r.Kind = "decode", workercore.ModelDeploymentRoleKindDecode
+						r.ExtraArgs = []string{"--port=8000"}
+					}),
+				)
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				return md
+			}(),
+			wantMessage: `role "decode" passes --port=8000, the port its Service publishes`,
+		},
+		{
+			// The same flag in the split spelling, so the check cannot be ducked by formatting.
+			name: "router_direct_decode_binds_the_serving_port_split_spelling",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name, r.Kind = "prefill", workercore.ModelDeploymentRoleKindPrefill
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name, r.Kind = "decode", workercore.ModelDeploymentRoleKindDecode
+						r.ExtraArgs = []string{"--port", "8000"}
+					}),
+				)
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				return md
+			}(),
+			wantMessage: `role "decode" passes --port=8000, the port its Service publishes`,
+		},
+		{
+			// Any other value is the proxy's own target port and is exactly what the render wants.
+			name: "router_direct_decode_binds_another_port",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name, r.Kind = "prefill", workercore.ModelDeploymentRoleKindPrefill
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name, r.Kind = "decode", workercore.ModelDeploymentRoleKindDecode
+						r.ExtraArgs = []string{"--port=8200"}
+					}),
+				)
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				return md
+			}(),
+		},
+		{
+			// A take-over decode role gets no proxy, so its --port is the whole command line's own
+			// business and naming the serving port is correct rather than fatal.
+			name: "router_unmanaged_decode_binds_the_serving_port",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name, r.Kind = "prefill", workercore.ModelDeploymentRoleKindPrefill
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name, r.Kind = "decode", workercore.ModelDeploymentRoleKindDecode
+						r.Template = &workercore.ModelDeploymentTemplate{
+							Command: []string{"/bin/my-server", "--port=8000"},
+						}
+					}),
+				)
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				return md
+			}(),
+		},
+		{
 			name: "kv_cache_absent",
 			md: func() *workercore.ModelDeployment {
 				md := routedModelDeployment(nil)

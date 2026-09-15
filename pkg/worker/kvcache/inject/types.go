@@ -187,12 +187,16 @@ const (
 	// ReasonRoleUnknown is a role value outside the accepted set.
 	ReasonRoleUnknown Reason = "RoleUnknown"
 
-	// ReasonRoleUnsupported is a role declared for an engine whose equivalent knob is not yet
-	// known. Accepting and ignoring it would be the silent wrong result this package exists to
-	// avoid.
+	// ReasonRoleUnsupported is a role - or a capability requested alongside one - that the engine
+	// has no known knob for: a role the engine cannot express, or point-to-point transfer or KV
+	// event publishing asked of an engine that renders neither. Accepting and ignoring it would
+	// be the silent wrong result this package exists to avoid.
 	ReasonRoleUnsupported Reason = "RoleUnsupported"
 
-	// ReasonConnectionIncomplete is a Connection missing a value the engine cannot start without.
+	// ReasonConnectionIncomplete is an input missing something rendering cannot proceed without:
+	// a Connection missing a value the engine cannot start without, an input that requests none
+	// of the store, direct transfer, or event publishing, an engine that cannot run without a
+	// shared store, or an event publisher with no dialable host.
 	ReasonConnectionIncomplete Reason = "ConnectionIncomplete"
 
 	// ReasonTransportUnsupported is a pool transport the engine's store backend refuses. It is

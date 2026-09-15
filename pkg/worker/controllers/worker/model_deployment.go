@@ -508,9 +508,13 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		logger.Error(err, "sync service")
 		return ctrl.Result{}, err
 	}
-	if err = r.syncModelDeploymentRouter(ctx, md); err != nil {
-		logger.Error(err, "sync router")
-		return ctrl.Result{}, err
+	// A ROUTER SYNC FAILURE DOES NOT ABORT THE PASS, for the same reason a failed create does not:
+	// the cause is projected onto the status written below, and returning here would skip the one
+	// write that says what is wrong. The error is still returned after that write, so the pass is
+	// retried exactly as if it had failed here.
+	routerErr := r.syncModelDeploymentRouter(ctx, md)
+	if routerErr != nil {
+		logger.Error(routerErr, "sync router")
 	}
 
 	// Read the replicas back rather than reusing the list this pass started from: status must
@@ -532,6 +536,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// retried — but after the status has told a reader why the group is short.
 	if createErr != nil {
 		return ctrl.Result{}, createErr
+	}
+
+	if routerErr != nil {
+		return ctrl.Result{}, routerErr
 	}
 
 	if requeue {
@@ -596,7 +604,7 @@ func (r *ModelDeploymentReconciler) recordModelDeploymentRuntimeVersionSkew(
 func (r *ModelDeploymentReconciler) syncModelDeploymentService(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) error {
-	rendered := renderModelDeploymentServices(md)
+	rendered := renderModelDeploymentServices(md, r.modelDeploymentRoleManufacturers(ctx, md))
 	expected := make([]ctrlcli.Object, len(rendered))
 	for i := range rendered {
 		expected[i] = rendered[i]
@@ -609,7 +617,11 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentService(
 		func() ctrlcli.Object { return new(core.Service) },
 		new(core.ServiceList),
 		func(actual, expected ctrlcli.Object) bool {
-			return alignModelDeploymentService(actual.(*core.Service), expected.(*core.Service))
+			// The metadata align is what keeps a role-owned Service inside the prune gate: the
+			// resource note is written at Create only, and the gate exempts a child whose note is
+			// gone.
+			changed := alignModelDeploymentService(actual.(*core.Service), expected.(*core.Service))
+			return alignModelDeploymentChildMetadata(actual, expected) || changed
 		},
 		ModelDeploymentResourceNoteRole,
 		"service",
@@ -722,7 +734,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 		// registers, and only the role's InstanceType knows it.
 		//
 		directTransfer := modelDeploymentUsesDirectTransfer(md, role, instType.Status.Detail.Manufacturer)
-		publishKVEvents := modelDeploymentPublishesKVEvents(md, role)
+		publishKVEvents := modelDeploymentPublishesKVEvents(md, role, instType.Status.Detail.Manufacturer)
 		if connection != nil || directTransfer || publishKVEvents {
 			roleConnection := ModelDeploymentConnectorInput{}
 			if connection != nil {
@@ -787,6 +799,35 @@ func (r *ModelDeploymentReconciler) getModelDeploymentInstanceType(
 	}
 
 	return instType, nil
+}
+
+// modelDeploymentRoleManufacturers resolves each role's accelerator manufacturer, keyed by role
+// name, for the routed-path decisions that depend on it. An unrouted deployment gets nil, because
+// nothing it renders reads a manufacturer.
+//
+// The read is BEST-EFFORT, and deliberately narrower than getModelDeploymentInstanceType's: a role
+// whose type cannot be read simply has no entry, and every consumer treats a missing entry as "not
+// known to be Ascend" -- the answer these paths gave before they looked. The pod render already
+// fails the pass on an unreadable type, so a gap here means the type went away mid-pass, and one
+// pass with the old answer beats failing a sync over it.
+func (r *ModelDeploymentReconciler) modelDeploymentRoleManufacturers(
+	ctx context.Context, md *workercore.ModelDeployment,
+) map[string]string {
+	if md.Spec.Router == nil {
+		return nil
+	}
+
+	manufacturers := make(map[string]string, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		instType := new(worker.InstanceType)
+		if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: md.Spec.Roles[i].InstanceType}, instType,
+			ctrlclix.WithoutQuorum); err != nil {
+			continue
+		}
+		manufacturers[md.Spec.Roles[i].Name] = instType.Status.Detail.Manufacturer
+	}
+
+	return manufacturers
 }
 
 // getModelDeploymentRuntimeClassName reports the runtime class an accelerated replica needs, and ""

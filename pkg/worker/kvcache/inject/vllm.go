@@ -6,6 +6,7 @@ package inject
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	core "k8s.io/api/core/v1"
 )
@@ -154,13 +155,29 @@ func renderVLLM(in Input) (*Result, error) {
 		if protocol == "" {
 			protocol = "tcp"
 		}
+		// checkTransport never gates this value: it runs only when hasStore, and its vLLM row
+		// admits every transport because that row measures the STORE's backend. The point-to-point
+		// connector has its own accepted set, so this arm checks it here.
+		if !slices.Contains([]string{"tcp", "rdma", "efa"}, protocol) {
+			return nil, newRefusal(ReasonTransportUnsupported,
+				"the point-to-point connector accepts one of {tcp, rdma, efa} and this pool "+
+					"offers %q, so it would raise at startup instead of transferring blocks",
+				protocol)
+		}
 		direct := vllmTransferConfig{
 			KVConnector: "MooncakeConnector", KVRole: kvRole,
 			KVConnectorExtraConfig: &vllmConnectorExtraConfig{MooncakeProtocol: protocol},
 		}
 		if !hasStore {
+			// The decode arm renders only the role and the protocol: the bootstrap address is
+			// expected to arrive per-request via kv_transfer_params. That is verified behavior
+			// from a real-cluster run; the upstream per-request path has not been read.
 			transferConfigValue = &direct
 		} else {
+			// The inner store connector's kv_consumer/kv_both roles are hardcoded: upstream
+			// per-inner-connector kv_role semantics are unverified. A real-cluster run observed
+			// a Prometheus-metrics registration assert naming MooncakeConnector on the kv_both
+			// role, which recovered after one APIServer restart.
 			storeRole := "kv_consumer"
 			if in.Role == RolePrefill {
 				storeRole = "kv_both"

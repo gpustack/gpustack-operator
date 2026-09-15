@@ -21,7 +21,8 @@ type ModelDeploymentStatusApplyConfiguration struct {
 	// PhaseMessage carries the reason for the phase.
 	PhaseMessage *string `json:"phaseMessage,omitempty"`
 	// Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,
-	// CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing. They are independent —
+	// CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady. They are
+	// independent —
 	// "quota reserved but cache not attached" is a real and actionable state — which is what a single
 	// phase string cannot carry.
 	//

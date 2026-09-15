@@ -7667,7 +7667,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved, CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing. They are independent — \"quota reserved but cache not attached\" is a real and actionable state — which is what a single phase string cannot carry.\n\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher that was configured and then crashed therefore remains True until a live consumer observes it.",
+							Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved, CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady. They are independent — \"quota reserved but cache not attached\" is a real and actionable state — which is what a single phase string cannot carry.\n\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher that was configured and then crashed therefore remains True until a live consumer observes it.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{

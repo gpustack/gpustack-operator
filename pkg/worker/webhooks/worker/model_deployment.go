@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -23,6 +24,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/webhook"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/router"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -528,6 +530,9 @@ func validateModelDeploymentRouter(md *workercore.ModelDeployment) field.ErrorLi
 					role.Name)))
 		}
 		ports = append(ports, workerctrl.ModelDeploymentRoleServingPort(role))
+		if md.Spec.Engine == workercore.ModelDeploymentEngineVLLM {
+			errs = append(errs, validateModelDeploymentRouterVLLMPorts(md, role)...)
+		}
 	}
 	slices.Sort(ports)
 	ports = slices.Compact(ports)
@@ -537,6 +542,89 @@ func validateModelDeploymentRouter(md *workercore.ModelDeployment) field.ErrorLi
 	}
 
 	return errs
+}
+
+// validateModelDeploymentRouterVLLMPorts refuses the port choices that collide with listeners the
+// operator synthesizes onto a routed vLLM replica. Both rules live at admission because the
+// collision they prevent is permanent there: the replica renders, and then a process binds a port
+// something else already holds.
+func validateModelDeploymentRouterVLLMPorts(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) field.ErrorList {
+	var errs field.ErrorList
+
+	// The reserved ports are the KV event publisher, its replay port and the Mooncake bootstrap
+	// listener, which the render places on the same container the role's template ports describe.
+	// The serving port is one of the declared ports when a template exists, and the default when it
+	// does not, so the declared set is the whole collision surface.
+	if role.Template != nil {
+		for _, port := range role.Template.Ports {
+			if !slices.Contains(modelDeploymentRouterReservedPorts, port.Port) {
+				continue
+			}
+			errs = append(errs, field.Invalid(field.NewPath("spec", "router"), md.Spec.Router,
+				fmt.Sprintf("role %q declares port %d, which the operator reserves for a listener it "+
+					"synthesizes onto every routed vLLM replica; reserved ports are %d, %d and %d",
+					role.Name, port.Port,
+					inject.VLLMKVEventsPort, inject.VLLMKVEventsReplayPort, inject.VLLMMooncakeBootstrapPort)))
+		}
+	}
+
+	// A direct decode role is fronted by a routing proxy that takes the serving port, and the model
+	// server has to move off it. The render moves it only when the operator placed the flag; a role
+	// passing --port itself keeps the value, and the render then fails on the collision on every
+	// pass. The manufacturer is not knowable here, so the rule fires wherever the proxy MIGHT be
+	// rendered -- on Ascend none is, and refusing the flag there costs nothing, because the fill
+	// would have set that very value.
+	if md.Spec.Router.Name != workercore.ModelDeploymentRouterLLMD ||
+		workerctrl.ModelDeploymentEffectiveRoleKind(role) != workercore.ModelDeploymentRoleKindDecode ||
+		(role.Template != nil && len(role.Template.Command) > 0) {
+		return errs
+	}
+	if port, ok := modelDeploymentRoleExplicitServingPort(role); ok &&
+		port == workerctrl.ModelDeploymentRoleServingPort(role) {
+		errs = append(errs, field.Invalid(field.NewPath("spec", "router"), md.Spec.Router,
+			fmt.Sprintf("role %q passes --port=%d, the port its Service publishes; the routing proxy "+
+				"a direct decode role is fronted by takes that port, so the model server must leave it",
+				role.Name, port)))
+	}
+
+	return errs
+}
+
+// modelDeploymentRouterReservedPorts are the container ports the operator synthesizes onto a routed
+// vLLM replica. They are the inject package's own constants rather than restated numbers, so the
+// refusal and the render cannot drift apart.
+var modelDeploymentRouterReservedPorts = []int32{
+	inject.VLLMKVEventsPort, inject.VLLMKVEventsReplayPort, inject.VLLMMooncakeBootstrapPort,
+}
+
+// modelDeploymentRoleExplicitServingPort is the value of the last --port a role passes, in either
+// spelling, matching how the rendered command line is read back. The engine's base argv and the
+// connector's arguments carry no listen flag, so the role's own arguments are the only place one
+// can come from. An unparsable or valueless occurrence reports false: it is the render's problem to
+// name, not this rule's.
+func modelDeploymentRoleExplicitServingPort(role *workercore.ModelDeploymentRole) (int32, bool) {
+	port, found := int32(0), false
+	for i, arg := range role.ExtraArgs {
+		if workerctrl.ModelDeploymentArgName(arg) != "--port" {
+			continue
+		}
+		_, value, inline := strings.Cut(arg, "=")
+		if !inline {
+			if i+1 >= len(role.ExtraArgs) {
+				return 0, false
+			}
+			value = role.ExtraArgs[i+1]
+		}
+		parsed, err := strconv.ParseInt(value, 10, 32)
+		if err != nil {
+			return 0, false
+		}
+		port, found = int32(parsed), true
+	}
+
+	return port, found
 }
 
 // validateModelDeploymentKVCache refuses a Binding reference with an empty name.

@@ -62,6 +62,12 @@ const (
 	// this object. So this reports readiness BY KIND and claims nothing past it, which is also what
 	// keeps it correct whichever way those two questions are later answered.
 	ModelDeploymentConditionRoleKindsReady kubeapistatus.ConditionType = "RoleKindsReady"
+
+	// ModelDeploymentConditionRouterReady reports whether the managed router rendered and has a
+	// ready replica. A render refusal is projected HERE rather than returned: it is a spec problem,
+	// and failing the whole status pass over it would freeze every other axis while naming none.
+	// The convergence path still returns the same error, so the pass is still retried.
+	ModelDeploymentConditionRouterReady kubeapistatus.ConditionType = "RouterReady"
 )
 
 // The reasons RoleKindsReady carries. Three rather than two, because "no kind is missing" and "no
@@ -103,6 +109,17 @@ const modelDeploymentReasonPodGroupIncomplete = "PodGroupIncomplete"
 // runbook that wants to tell "wait for it" from "go and look at what took the quota" has to branch on
 // something stable, and substring-matching a sentence is not that.
 const modelDeploymentReasonPreemptedInPart = "PreemptedInPart"
+
+// The reasons RouterReady carries. NotApplicable is True for the same reason KVEventsPublishing
+// reports one: an absent condition and an inapplicable one are different states, and a reader
+// should not have to infer the second from the first.
+const (
+	modelDeploymentReasonRouterReady          = "Ready"
+	modelDeploymentReasonRouterNotApplicable  = "NotApplicable"
+	modelDeploymentReasonRouterRenderFailed   = "RenderFailed"
+	modelDeploymentReasonRouterNotDeployed    = "NotDeployed"
+	modelDeploymentReasonRouterNoReadyReplica = "NoReadyReplicas"
+)
 
 // syncModelDeploymentStatus rebuilds the status from what was observed this pass and writes it only
 // if it differs from what is stored.
@@ -184,9 +201,13 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 
 	observeModelDeploymentRoleKinds(holder)
 
-	observeModelDeploymentKVEvents(md, holder)
+	// Resolved once for both routed-path observers, and nil for an unrouted deployment, which has
+	// nothing that reads a manufacturer.
+	manufacturers := r.modelDeploymentRoleManufacturers(ctx, md)
 
-	routerReady, err := r.observeModelDeploymentRouter(ctx, md, domain, holder)
+	observeModelDeploymentKVEvents(md, holder, manufacturers)
+
+	routerReady, err := r.observeModelDeploymentRouter(ctx, md, domain, holder, manufacturers)
 	if err != nil {
 		return nil, err
 	}
@@ -198,16 +219,24 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 
 func (r *ModelDeploymentReconciler) observeModelDeploymentRouter(
 	ctx context.Context, md *workercore.ModelDeployment, domain *modelDeploymentDomain,
-	holder *workercore.ModelDeployment,
+	holder *workercore.ModelDeployment, manufacturers map[string]string,
 ) (bool, error) {
 	if md.Spec.Router == nil {
 		holder.Status.Router = nil
+		ModelDeploymentConditionRouterReady.True(holder,
+			modelDeploymentReasonRouterNotApplicable, "the deployment declares no router")
 		return true, nil
 	}
 
-	objects, err := renderModelDeploymentRouterObjects(ctx, md)
+	objects, err := renderModelDeploymentRouterObjects(ctx, md, manufacturers)
 	if err != nil {
-		return false, err
+		// A render refusal is a spec problem, not a cluster one: it is projected as the condition
+		// and the rest of the status computes anyway, because returning here would freeze every
+		// other field while naming none of them. The convergence path returns the same error, so
+		// the pass is still retried.
+		ModelDeploymentConditionRouterReady.False(holder,
+			modelDeploymentReasonRouterRenderFailed, err.Error())
+		return false, nil
 	}
 	poolEndpoint := ""
 	if domain != nil && domain.KVCache != nil {
@@ -226,15 +255,23 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentRouter(
 	deployment := new(app.Deployment)
 	err = r.Client.Get(ctx, ctrlcli.ObjectKey{Namespace: md.Namespace, Name: objects.Deployment.Name}, deployment)
 	if kerrors.IsNotFound(err) {
+		ModelDeploymentConditionRouterReady.Unknown(holder,
+			modelDeploymentReasonRouterNotDeployed, "the router's Deployment does not exist yet")
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
 	if deployment.Status.ReadyReplicas == 0 {
+		ModelDeploymentConditionRouterReady.False(holder,
+			modelDeploymentReasonRouterNoReadyReplica,
+			fmt.Sprintf("router %q has no ready replicas", md.Spec.Router.Name))
 		return false, nil
 	}
 
+	ModelDeploymentConditionRouterReady.True(holder,
+		modelDeploymentReasonRouterReady,
+		fmt.Sprintf("router %q has %d ready replicas", md.Spec.Router.Name, deployment.Status.ReadyReplicas))
 	holder.Status.Endpoint = status.Endpoint
 	return true, nil
 }
@@ -948,7 +985,10 @@ func deriveModelDeploymentPhase(md, holder *workercore.ModelDeployment, routerRe
 	switch {
 	case ready == desired && md.Spec.Router != nil && !routerReady:
 		holder.Status.Phase = ModelDeploymentPhaseDegraded
-		holder.Status.PhaseMessage = fmt.Sprintf("router %q has no ready replicas", md.Spec.Router.Name)
+		// The observer always sets the condition on the paths that report not-ready, and its
+		// message is the accurate one: it can say the router failed to render, which "has no ready
+		// replicas" cannot.
+		holder.Status.PhaseMessage = ModelDeploymentConditionRouterReady.GetMessage(holder)
 	case ready == desired:
 		holder.Status.Phase = ModelDeploymentPhaseReady
 		holder.Status.PhaseMessage = ""

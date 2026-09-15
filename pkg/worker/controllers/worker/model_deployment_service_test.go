@@ -116,7 +116,7 @@ func TestModelDeploymentService_OnePerRoleBesideTheDeploymentWide(t *testing.T) 
 
 func TestRenderModelDeploymentService_KVEventPorts(t *testing.T) {
 	md := routedModelDeployment()
-	services := renderModelDeploymentServices(md)
+	services := renderModelDeploymentServices(md, nil)
 	require.Len(t, services, 3)
 
 	portsByName := func(service *core.Service) map[string]int32 {

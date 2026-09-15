@@ -4304,7 +4304,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 									Type: "object",
 									Properties: map[string]v1.JSONSchemaProps{
 										"conditions": {
-											Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,\nCacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing. They are independent —\n\"quota reserved but cache not attached\" is a real and actionable state — which is what a single\nphase string cannot carry.\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher\nthat was configured and then crashed therefore remains True until a live consumer observes it.",
+											Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,\nCacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady. They are\nindependent —\n\"quota reserved but cache not attached\" is a real and actionable state — which is what a single\nphase string cannot carry.\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher\nthat was configured and then crashed therefore remains True until a live consumer observes it.",
 											Type:        "array",
 											Items: &v1.JSONSchemaPropsOrArray{
 												Schema: &v1.JSONSchemaProps{

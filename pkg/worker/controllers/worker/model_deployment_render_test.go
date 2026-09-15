@@ -481,6 +481,72 @@ func TestRenderModelDeploymentPod_KVEventPorts(t *testing.T) {
 		core.ContainerPort{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5558})
 }
 
+// TestRenderModelDeploymentPod_ConnectorPortCollision covers the merge between the connector's
+// fixed synthesized ports and the ports already on the container: one endpoint declared twice
+// renders once, and the same number under a different name is refused.
+func TestRenderModelDeploymentPod_ConnectorPortCollision(t *testing.T) {
+	connector := ModelDeploymentConnectorRender{Ports: []core.ContainerPort{
+		{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557},
+		{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5558},
+	}}
+
+	t.Run("a port already carrying the same number and name is not duplicated", func(t *testing.T) {
+		ports, err := appendModelDeploymentConnectorPorts(
+			[]core.ContainerPort{
+				{Name: "http", Protocol: core.ProtocolTCP, ContainerPort: 8000},
+				{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557},
+			}, connector, false)
+		require.NoError(t, err)
+
+		var declared int
+		for _, p := range ports {
+			if p.ContainerPort == 5557 {
+				declared++
+			}
+		}
+		assert.Equal(t, 1, declared, "one endpoint declared twice renders once")
+		assert.Contains(t, ports,
+			core.ContainerPort{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5558})
+	})
+
+	t.Run("the same number under a different name is refused", func(t *testing.T) {
+		// A template's port name is synthesized from its number, so a user-declared port on the
+		// publisher's number always lands here rather than in the dedupe arm above.
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{
+				{Name: "http", Protocol: core.ProtocolTCP, Port: 8000},
+				{Name: "events", Protocol: core.ProtocolTCP, Port: 5557},
+			}
+		})
+		_, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+			Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+			Connector: connector,
+		})
+		require.Error(t, err, "two endpoints claiming one socket cannot be merged silently")
+		assert.Contains(t, err.Error(), "5557")
+	})
+
+	t.Run("a direct decoder's engine port colliding with a declared port is refused", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+			md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+			md.Spec.Roles[0].ExtraArgs = []string{"--port", "9100"}
+			md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{
+				{Name: "http", Protocol: core.ProtocolTCP, Port: 8000},
+				{Name: "side", Protocol: core.ProtocolTCP, Port: 9100},
+			}
+		})
+		_, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+			Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+			Connector: ModelDeploymentConnectorRender{
+				Args: []string{"--kv-transfer-config", `{}`}, DirectTransfer: true,
+			},
+		})
+		require.Error(t, err, "the engine port must clear every declared port, not only the served one")
+		assert.Contains(t, err.Error(), "9100")
+	})
+}
+
 // TestRenderModelDeploymentPod_Env covers the merge across tiers: what the operator owns is
 // rendered first and cannot be replaced, what it defaults yields to a user's value, and the
 // template overlay wins over the role's own append tier.

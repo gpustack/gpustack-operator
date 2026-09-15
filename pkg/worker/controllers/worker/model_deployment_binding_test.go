@@ -100,6 +100,28 @@ func TestModelDeploymentBinding_ResolvesTheDomainInItsOwnNamespace(t *testing.T)
 	}, observed.KVCache)
 }
 
+// TestModelDeploymentBinding_NoCacheIsAnAnswerNotAGap pins the cache-less reading: nil is reserved
+// for a pass that did not look, so a deployment declaring no cache gets an explicit not-applicable
+// observation -- and the condition exists to say so, rather than the object carrying five of its
+// six axes with no hint the sixth does not apply.
+func TestModelDeploymentBinding_NoCacheIsAnAnswerNotAGap(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.KVCache = nil })
+	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+
+	observed, err := r.resolveModelDeploymentDomain(context.Background(), md)
+	require.NoError(t, err)
+	require.NotNil(t, observed, "a cache-less deployment is an answer, not a pass that did not look")
+	assert.True(t, observed.Ready)
+	assert.Equal(t, modelDeploymentReasonNotApplicable, observed.Reason)
+	assert.Nil(t, observed.KVCache, "no domain is projected for a cache the deployment never asked for")
+
+	holder := new(workercore.ModelDeployment)
+	observeModelDeploymentDomain(holder, observed)
+	assert.True(t, ModelDeploymentConditionDomainRegistered.IsTrue(holder))
+	assert.Equal(t, modelDeploymentReasonNotApplicable,
+		ModelDeploymentConditionDomainRegistered.GetReason(holder))
+}
+
 // TestModelDeploymentBinding_NeverReadsAnotherNamespace states the security property F2 rests on,
 // as a refusal by the client rather than as a claim in a comment. poolRef is a
 // LocalObjectReference, so a name it carries can only mean an object in this namespace; a read that

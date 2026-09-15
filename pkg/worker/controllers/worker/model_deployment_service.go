@@ -20,11 +20,17 @@ import (
 //
 // The deployment-wide one is FIRST, and the order is part of the contract: the caller garbage
 // collects by name, and status reads its endpoint.
-func renderModelDeploymentServices(md *workercore.ModelDeployment) []*core.Service {
+//
+// manufacturers carries each role's accelerator manufacturer, keyed by role name, with a missing
+// entry read as "not known to be Ascend": the KV event ports are part of the render only where the
+// replicas behind the Service publish, and that decision is the connector's.
+func renderModelDeploymentServices(
+	md *workercore.ModelDeployment, manufacturers map[string]string,
+) []*core.Service {
 	svcs := make([]*core.Service, 0, len(md.Spec.Roles)+1)
 	svcs = append(svcs, renderModelDeploymentService(md))
 	for i := range md.Spec.Roles {
-		svcs = append(svcs, renderModelDeploymentRoleService(md, &md.Spec.Roles[i]))
+		svcs = append(svcs, renderModelDeploymentRoleService(md, &md.Spec.Roles[i], manufacturers))
 	}
 
 	return svcs
@@ -72,9 +78,10 @@ func renderModelDeploymentService(md *workercore.ModelDeployment) *core.Service 
 // two objects away from the field that caused it.
 func renderModelDeploymentRoleService(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	manufacturers map[string]string,
 ) *core.Service {
 	svc := renderModelDeploymentServiceFor(md, role, md.Name+"-"+role.Name)
-	if modelDeploymentPublishesKVEvents(md, role) {
+	if modelDeploymentPublishesKVEvents(md, role, manufacturers[role.Name]) {
 		for _, port := range inject.KVEventsPorts() {
 			svc.Spec.Ports = append(svc.Spec.Ports, core.ServicePort{
 				Name: port.Name, Protocol: port.Protocol, Port: port.ContainerPort,

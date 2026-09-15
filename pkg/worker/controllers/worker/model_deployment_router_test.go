@@ -45,7 +45,7 @@ func routerObjectsAsClients(objects ModelDeploymentRouterObjects) []ctrlcli.Obje
 
 func TestRenderModelDeploymentRouterObjects_OwnedAndDiscoverable(t *testing.T) {
 	md := routedModelDeployment()
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
 	require.NoError(t, err)
 
 	for _, object := range routerObjectsAsClients(objects) {
@@ -73,7 +73,7 @@ func TestRenderModelDeploymentRouterObjects_OwnedAndDiscoverable(t *testing.T) {
 }
 
 func TestRenderModelDeploymentRouterObjects_PodStaysOutsideAdmission(t *testing.T) {
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment())
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil)
 	require.NoError(t, err)
 
 	pod := objects.Deployment.Spec.Template
@@ -86,9 +86,9 @@ func TestRenderModelDeploymentRouterObjects_PodStaysOutsideAdmission(t *testing.
 
 func TestRenderModelDeploymentRouterObjects_ConfigHashIsDeterministic(t *testing.T) {
 	md := routedModelDeployment()
-	first, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	first, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
 	require.NoError(t, err)
-	second, err := renderModelDeploymentRouterObjects(context.Background(), md.DeepCopy())
+	second, err := renderModelDeploymentRouterObjects(context.Background(), md.DeepCopy(), nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, first.ConfigMap.Data, second.ConfigMap.Data)
@@ -97,11 +97,11 @@ func TestRenderModelDeploymentRouterObjects_ConfigHashIsDeterministic(t *testing
 
 func TestRenderModelDeploymentRouterObjects_RoleOrderDoesNotChangeTokenizer(t *testing.T) {
 	md := routedModelDeployment()
-	before, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	before, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
 	require.NoError(t, err)
 
 	md.Spec.Roles[0], md.Spec.Roles[1] = md.Spec.Roles[1], md.Spec.Roles[0]
-	after, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	after, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, before.ConfigMap.Data, after.ConfigMap.Data)
@@ -120,12 +120,12 @@ func TestHashRouterConfig_IgnoresMapInsertionOrder(t *testing.T) {
 
 func TestRenderModelDeploymentRouterObjects_ScalingDoesNotRoll(t *testing.T) {
 	md := routedModelDeployment()
-	before, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	before, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
 	require.NoError(t, err)
 
 	md.Spec.Roles[0].Replicas++
 	md.Spec.Roles[1].Replicas += 2
-	after, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	after, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, before.ConfigMap.Data, after.ConfigMap.Data)
@@ -136,11 +136,11 @@ func TestRenderModelDeploymentRouterObjects_ScalingDoesNotRoll(t *testing.T) {
 
 func TestRenderModelDeploymentRouterObjects_ConfigChangeMovesTheHash(t *testing.T) {
 	md := routedModelDeployment()
-	before, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	before, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
 	require.NoError(t, err)
 
 	md.Spec.Router.ExtraArgs = []string{"--zap-log-level=debug"}
-	after, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	after, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
 	require.NoError(t, err)
 
 	assert.NotEqual(t,
@@ -150,7 +150,7 @@ func TestRenderModelDeploymentRouterObjects_ConfigChangeMovesTheHash(t *testing.
 }
 
 func TestRenderModelDeploymentRouterObjects_CarriesEngineContracts(t *testing.T) {
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment())
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil)
 	require.NoError(t, err)
 
 	config := objects.ConfigMap.Data[modelDeploymentRouterConfigKey]
@@ -173,7 +173,7 @@ func TestRenderModelDeploymentRouterObjects_MetricsUseServingPort(t *testing.T) 
 			md.Spec.Roles[i].Template.Ports = []workercore.InstancePort{{Port: 8100}}
 		}
 	})
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
 	require.NoError(t, err)
 
 	assert.Contains(t, objects.ConfigMap.Data[modelDeploymentRouterConfigKey], "port: 8100")
@@ -187,12 +187,12 @@ func TestRenderModelDeploymentRouterObjects_RefusesDifferentServingPorts(t *test
 		md.Spec.Roles[1].Template = &template
 	})
 
-	_, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	_, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
 	require.EqualError(t, err, "router requires every role to use the same serving port; got [8000 8100]")
 }
 
 func TestRenderModelDeploymentRouterObjects_ProbesBothRouterContainers(t *testing.T) {
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment())
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil)
 	require.NoError(t, err)
 
 	envoy := objects.Deployment.Spec.Template.Spec.Containers[0]
@@ -206,7 +206,7 @@ func TestRenderModelDeploymentRouterObjects_ProbesBothRouterContainers(t *testin
 }
 
 func TestRenderModelDeploymentRouterObjects_CarriesRuntimeIdentityAndStreamingTrailers(t *testing.T) {
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment())
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil)
 	require.NoError(t, err)
 
 	epp := objects.Deployment.Spec.Template.Spec.Containers[1]
@@ -223,6 +223,9 @@ func TestRenderModelDeploymentRouterObjects_CarriesRuntimeIdentityAndStreamingTr
 	assert.Contains(t, envoy, "response_trailer_mode: SEND")
 	assert.Contains(t, envoy, "typed_extension_protocol_options:")
 	assert.Contains(t, envoy, "explicit_http_config:")
+	// The original-destination cluster follows x-gateway-destination-endpoint, so a client-supplied
+	// copy of that header is what would pick the upstream. Only the EPP may set it.
+	assert.Contains(t, envoy, `request_headers_to_remove: ["x-gateway-destination-endpoint"]`)
 }
 
 func TestRenderModelDeploymentRouterObjects_UnmanagedProducerPublishesNoKVEvents(t *testing.T) {
@@ -230,7 +233,7 @@ func TestRenderModelDeploymentRouterObjects_UnmanagedProducerPublishesNoKVEvents
 		md.Spec.Roles[0].Template.Command = []string{"vllm", "serve", "custom-model"}
 	})
 
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
 	require.NoError(t, err)
 
 	assert.Nil(t, objects.Contract.Roles[0].KVEvents)
@@ -240,7 +243,7 @@ func TestRenderModelDeploymentRouterObjects_EndpointUsesRouterTransport(t *testi
 	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].ExtraArgs = []string{"--ssl-keyfile=/tls/key.pem"}
 	})
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, "http://qwen-router.team-a.svc:8081", objects.Contract.Endpoint)
@@ -406,7 +409,7 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			objects, err := renderModelDeploymentRouterObjects(context.Background(), c.md)
+			objects, err := renderModelDeploymentRouterObjects(context.Background(), c.md, nil)
 			require.NoError(t, err)
 
 			images := map[string]string{}

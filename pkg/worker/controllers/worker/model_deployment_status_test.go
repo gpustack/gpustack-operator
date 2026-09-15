@@ -149,7 +149,7 @@ func TestComputeModelDeploymentStatus_Roles(t *testing.T) {
 }
 
 func TestProjectModelDeploymentRouterStatus_FollowsTheRender(t *testing.T) {
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment())
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil)
 	require.NoError(t, err)
 	objects.Contract.Endpoint = "http://perturbed-router.test:8081"
 	objects.Contract.Metrics.QueuedRequests = "perturbed_queue_metric"
@@ -168,7 +168,7 @@ func TestProjectModelDeploymentRouterStatus_FollowsTheRender(t *testing.T) {
 
 func TestRenderModelDeploymentRouterStatus_RoleSetIsExact(t *testing.T) {
 	md := routedModelDeployment()
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
 	require.NoError(t, err)
 
 	want := make([]string, 0, len(md.Spec.Roles))
@@ -186,7 +186,7 @@ func TestRenderModelDeploymentRouterStatus_RoleSetIsExact(t *testing.T) {
 
 func TestComputeModelDeploymentRouterStatus_ProjectsPoolClientEndpoint(t *testing.T) {
 	md := routedModelDeployment()
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
 	require.NoError(t, err)
 	pool := &workercore.KVCachePool{
 		ObjectMeta: meta.ObjectMeta{Name: "pool-a"},
@@ -206,7 +206,7 @@ func TestComputeModelDeploymentRouterStatus_ProjectsPoolClientEndpoint(t *testin
 func TestComputeModelDeploymentStatus_RouterReadinessControlsEndpointAndPhase(t *testing.T) {
 	md := routedModelDeployment()
 	pods := readyRouterRolePods(md)
-	objects, err := renderModelDeploymentRouterObjects(context.Background(), md)
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -704,6 +704,10 @@ func TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved(t *testing.T) {
 		string(ModelDeploymentConditionReplicasUpToDate),
 		string(ModelDeploymentConditionRoleKindsReady),
 		string(ModelDeploymentConditionKVEventsPublishing),
+		// Declared on every pass like the others, because an unrouted deployment's NotApplicable is
+		// an answer rather than an absence: nothing will ever route, and that is reported, not
+		// inferred from the condition being missing.
+		string(ModelDeploymentConditionRouterReady),
 	}, declared)
 	assert.NotContains(t, declared, string(ModelDeploymentConditionDomainRegistered),
 		"this pass was handed no reading of the Binding, and a pass that did not look must not report")
