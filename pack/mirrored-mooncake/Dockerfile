@@ -292,6 +292,19 @@ RUN <<EOF
     # the wheel for another interpreter, and that failure does not appear here -- it appears in the
     # runtime stage as an import error, or as a silently incompatible install.
     py_version="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+
+    # 0.3.11's build_wheel.sh puts ${BUILD_DIR}/mooncake-common on LD_LIBRARY_PATH but not its
+    # k8s-lease subdirectory (0.3.12's does), so auditwheel cannot locate libk8s_lease_wrapper.so,
+    # which the store extension links against, and the repair dies with "required library could
+    # not be located". Pointing the variable at the build output lets auditwheel vendor the
+    # wrapper into the wheel's .libs; the runtime stage's manual copy for this release stays,
+    # because the wrapper assertion below reads that path.
+    case "${MOONCAKE_VERSION}" in
+        0.3.11*)
+            export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/work/build/mooncake-common/k8s-lease"
+            ;;
+    esac
+
     PYTHON_VERSION="${py_version}" BUILD_DIR=build bash scripts/build_wheel.sh
 
     # One wheel, named. A glob that silently matched two would install whichever pip preferred.
