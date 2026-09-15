@@ -556,8 +556,9 @@ func validateModelDeploymentRouterVLLMPorts(
 	// The reserved ports are the KV event publisher, its replay port and the Mooncake bootstrap
 	// listener, which the render places on the same container the role's template ports describe.
 	// The serving port is one of the declared ports when a template exists, and the default when it
-	// does not, so the declared set is the whole collision surface.
-	if role.Template != nil {
+	// does not, so the declared set is the whole collision surface. A take-over role is exempt:
+	// the render synthesizes none of those listeners onto it, so nothing is there to collide with.
+	if role.Template != nil && len(role.Template.Command) == 0 {
 		for _, port := range role.Template.Ports {
 			if !slices.Contains(modelDeploymentRouterReservedPorts, port.Port) {
 				continue

@@ -634,6 +634,19 @@ func TestValidateModelDeployment(t *testing.T) {
 			}(),
 		},
 		{
+			// A take-over role owns its command line and the render synthesizes no listener onto
+			// it, so a reserved number is an ordinary port there too.
+			name: "router_take_over_role_declares_kv_events_port",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Roles[0].Template = &workercore.ModelDeploymentTemplate{
+					Command: []string{"/bin/my-server"},
+					Ports:   []workercore.InstancePort{{Port: 5557, Protocol: core.ProtocolTCP}},
+				}
+				return md
+			}(),
+		},
+		{
 			// A direct decode role is fronted by a proxy that takes the serving port, so a role that
 			// pins its model server to that same port fails the render on every pass -- permanently.
 			name: "router_direct_decode_binds_the_serving_port",

@@ -458,6 +458,14 @@ const modelDeploymentRouterEnvoyConfig = `static_resources:
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
           stat_prefix: router
+          # The original-destination cluster routes on x-gateway-destination-endpoint, and
+          # failure_mode_allow lets a request through when the EPP -- the only legitimate
+          # writer of that header -- is down. A client-supplied copy must never reach the
+          # filter chain, or the caller picks the upstream instead of the endpoint selector.
+          # The removal sits at the connection manager, which applies to downstream headers
+          # BEFORE the filters run: the route level would execute after ext_proc and strip
+          # the copy the EPP just set.
+          request_headers_to_remove: ["x-gateway-destination-endpoint"]
           route_config:
             name: router
             virtual_hosts:
@@ -466,11 +474,6 @@ const modelDeploymentRouterEnvoyConfig = `static_resources:
               routes:
               - match: {prefix: "/"}
                 route: {cluster: original_destination_cluster, timeout: 86400s}
-                # The original-destination cluster routes on x-gateway-destination-endpoint, and
-                # failure_mode_allow lets a request through when the EPP -- the only legitimate
-                # writer of that header -- is down. A client-supplied copy must never reach the
-                # cluster, or the caller picks the upstream instead of the endpoint selector.
-                request_headers_to_remove: ["x-gateway-destination-endpoint"]
           http_filters:
           - name: envoy.filters.http.ext_proc
             typed_config:
