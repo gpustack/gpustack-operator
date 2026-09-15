@@ -53,10 +53,9 @@ type ModelDeploymentRouterApplyConfiguration struct {
 	Image *string `json:"image,omitempty"`
 	// ExtraArgs are additional flags for the router process.
 	//
-	// The intent is that a flag the operator derives itself is refused rather than merged, so that one
-	// setting has one source. NOTHING ENFORCES THAT YET: the catalog it would consult is keyed by
-	// router rather than by engine, and the engine-keyed catalog guarding a role's extraArgs answers a
-	// different question and cannot stand in for it.
+	// A flag the operator derives itself is refused rather than merged, so that one setting has one
+	// source. The owned catalog is keyed by router because the engine-keyed catalog guarding a role's
+	// extraArgs answers a different question and cannot stand in for it.
 	ExtraArgs []string `json:"extraArgs,omitempty"`
 }
 

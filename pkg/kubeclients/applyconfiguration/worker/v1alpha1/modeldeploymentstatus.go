@@ -15,21 +15,26 @@ import (
 // disagreement with the Pods.
 type ModelDeploymentStatusApplyConfiguration struct {
 	// Phase summarizes the conditions: Starting, Ready, Degraded, Deleting. Ready means every role's
-	// ready count equals its desired count; Degraded means at least one replica is ready and at
-	// least one is not.
+	// ready count equals its desired count and, when declared, the router has a ready replica.
+	// Degraded means a serving component is ready while another required one is not.
 	Phase *string `json:"phase,omitempty"`
 	// PhaseMessage carries the reason for the phase.
 	PhaseMessage *string `json:"phaseMessage,omitempty"`
 	// Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,
-	// CacheAttached, ReplicasUpToDate, RoleKindsReady. They are independent — "quota reserved but
-	// cache not attached" is a real and actionable state — which is what a single phase string
-	// cannot carry.
-	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
-	// Endpoint is the one address every replica serves behind, in the form
-	// <scheme>://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.
+	// CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing. They are independent —
+	// "quota reserved but cache not attached" is a real and actionable state — which is what a single
+	// phase string cannot carry.
 	//
-	// The scheme is https where the first role's own arguments put its listener on TLS, and http
-	// otherwise. A client reads it from here rather than assuming either one.
+	// KVEventsPublishing reports rendered configuration rather than observing the stream. A publisher
+	// that was configured and then crashed therefore remains True until a live consumer observes it.
+	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
+	// Endpoint is the address clients use. Without a router it is the deployment-wide Service, in the
+	// form <scheme>://<name>.<namespace>.svc:<port>. With a router it is the router's Service and is
+	// absent until the router has a ready replica.
+	//
+	// A role endpoint uses https where that role's own arguments put its listener on TLS. The managed
+	// router endpoint uses the router's own transport instead, which is http. A client reads the
+	// selected value from here rather than assuming either one.
 	Endpoint *string `json:"endpoint,omitempty"`
 	// Roles is one entry per declared role.
 	Roles []ModelDeploymentRoleStatusApplyConfiguration `json:"roles,omitempty"`
@@ -40,8 +45,7 @@ type ModelDeploymentStatusApplyConfiguration struct {
 	// It is ABSENT while the Binding cannot be resolved, rather than present and empty: an empty
 	// object here would be indistinguishable from a domain whose every field happens to be empty.
 	KVCache *ModelDeploymentKVCacheStatusApplyConfiguration `json:"kvCache,omitempty"`
-	// Router is everything a router needs in order to front this deployment, published under BOTH
-	// modes. Under the external mode it is the entire output of this feature.
+	// Router is the observed contract of the managed router requested by spec.router.
 	//
 	// It is ABSENT when spec.router is, rather than present and empty, for the same reason KVCache is:
 	// an empty object here cannot be told apart from a contract whose every string happens to be

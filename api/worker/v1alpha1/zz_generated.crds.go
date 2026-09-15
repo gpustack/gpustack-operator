@@ -3754,7 +3754,6 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 										"model",
 										"engine",
 										"engineVersion",
-										"kvCache",
 										"roles",
 									},
 									Properties: map[string]v1.JSONSchemaProps{
@@ -3777,7 +3776,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											MinLength:   ptr.To[int64](1),
 										},
 										"kvCache": {
-											Description: "KVCache attaches the deployment to a KV cache pool.",
+											Description: "KVCache optionally attaches the deployment to a shared KV cache pool. A managed vLLM\nprefill/decode deployment without it still uses its router's point-to-point connector; it does\nnot render the shared-store connector or its client configuration.",
 											Type:        "object",
 											Required: []string{
 												"poolRef",
@@ -3809,6 +3808,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													},
 												},
 											},
+											Nullable: true,
 										},
 										"model": {
 											Description: "Model names what the engine serves.",
@@ -4264,7 +4264,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											},
 											Properties: map[string]v1.JSONSchemaProps{
 												"extraArgs": {
-													Description: "ExtraArgs are additional flags for the router process.\nThe intent is that a flag the operator derives itself is refused rather than merged, so that one\nsetting has one source. NOTHING ENFORCES THAT YET: the catalog it would consult is keyed by\nrouter rather than by engine, and the engine-keyed catalog guarding a role's extraArgs answers a\ndifferent question and cannot stand in for it.",
+													Description: "ExtraArgs are additional flags for the router process.\nA flag the operator derives itself is refused rather than merged, so that one setting has one\nsource. The owned catalog is keyed by router because the engine-keyed catalog guarding a role's\nextraArgs answers a different question and cannot stand in for it.",
 													Type:        "array",
 													Items: &v1.JSONSchemaPropsOrArray{
 														Schema: &v1.JSONSchemaProps{
@@ -4304,7 +4304,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 									Type: "object",
 									Properties: map[string]v1.JSONSchemaProps{
 										"conditions": {
-											Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,\nCacheAttached, ReplicasUpToDate, RoleKindsReady. They are independent — \"quota reserved but\ncache not attached\" is a real and actionable state — which is what a single phase string\ncannot carry.",
+											Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,\nCacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing. They are independent —\n\"quota reserved but cache not attached\" is a real and actionable state — which is what a single\nphase string cannot carry.\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher\nthat was configured and then crashed therefore remains True until a live consumer observes it.",
 											Type:        "array",
 											Items: &v1.JSONSchemaPropsOrArray{
 												Schema: &v1.JSONSchemaProps{
@@ -4368,7 +4368,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											XListType: ptr.To[string]("map"),
 										},
 										"endpoint": {
-											Description: "Endpoint is the one address every replica serves behind, in the form\n<scheme>://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.\nThe scheme is https where the first role's own arguments put its listener on TLS, and http\notherwise. A client reads it from here rather than assuming either one.",
+											Description: "Endpoint is the address clients use. Without a router it is the deployment-wide Service, in the\nform <scheme>://<name>.<namespace>.svc:<port>. With a router it is the router's Service and is\nabsent until the router has a ready replica.\nA role endpoint uses https where that role's own arguments put its listener on TLS. The managed\nrouter endpoint uses the router's own transport instead, which is http. A client reads the\nselected value from here rather than assuming either one.",
 											Type:        "string",
 											MaxLength:   ptr.To[int64](512),
 										},
@@ -4417,7 +4417,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											Nullable: true,
 										},
 										"phase": {
-											Description: "Phase summarizes the conditions: Starting, Ready, Degraded, Deleting. Ready means every role's\nready count equals its desired count; Degraded means at least one replica is ready and at\nleast one is not.",
+											Description: "Phase summarizes the conditions: Starting, Ready, Degraded, Deleting. Ready means every role's\nready count equals its desired count and, when declared, the router has a ready replica.\nDegraded means a serving component is ready while another required one is not.",
 											Type:        "string",
 										},
 										"phaseMessage": {
@@ -4485,7 +4485,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											XListType: ptr.To[string]("map"),
 										},
 										"router": {
-											Description: "Router is everything a router needs in order to front this deployment, published under BOTH\nmodes. Under the external mode it is the entire output of this feature.\nIt is ABSENT when spec.router is, rather than present and empty, for the same reason KVCache is:\nan empty object here cannot be told apart from a contract whose every string happens to be\nempty.",
+											Description: "Router is the observed contract of the managed router requested by spec.router.\nIt is ABSENT when spec.router is, rather than present and empty, for the same reason KVCache is:\nan empty object here cannot be told apart from a contract whose every string happens to be\nempty.",
 											Type:        "object",
 											Required: []string{
 												"name",

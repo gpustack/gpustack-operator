@@ -8,6 +8,16 @@ import (
 	extension "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
+func TestModelDeploymentKVCacheIsOptional(t *testing.T) {
+	crd := GetCustomResourceDefinitions()["ModelDeployment"]
+	require.NotNil(t, crd, "ModelDeployment is not registered")
+	require.Len(t, crd.Spec.Versions, 1)
+
+	spec := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
+	assert.NotContains(t, spec.Required, "kvCache")
+	assert.Equal(t, "object", spec.Properties["kvCache"].Type)
+}
+
 // roleSchema returns the schema of one entry under the given top-level section, as the generated
 // CRD carries it.
 //

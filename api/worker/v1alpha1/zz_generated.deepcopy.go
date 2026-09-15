@@ -2313,7 +2313,11 @@ func (in *ModelDeploymentRouterStatus) DeepCopy() *ModelDeploymentRouterStatus {
 func (in *ModelDeploymentSpec) DeepCopyInto(out *ModelDeploymentSpec) {
 	*out = *in
 	out.Model = in.Model
-	out.KVCache = in.KVCache
+	if in.KVCache != nil {
+		in, out := &in.KVCache, &out.KVCache
+		*out = new(ModelDeploymentKVCache)
+		**out = **in
+	}
 	if in.Roles != nil {
 		in, out := &in.Roles, &out.Roles
 		*out = make([]ModelDeploymentRole, len(*in))

@@ -7322,7 +7322,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouter(ref common.Refere
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "ExtraArgs are additional flags for the router process.\n\nThe intent is that a flag the operator derives itself is refused rather than merged, so that one setting has one source. NOTHING ENFORCES THAT YET: the catalog it would consult is keyed by router rather than by engine, and the engine-keyed catalog guarding a role's extraArgs answers a different question and cannot stand in for it.",
+							Description: "ExtraArgs are additional flags for the router process.\n\nA flag the operator derives itself is refused rather than merged, so that one setting has one source. The owned catalog is keyed by router because the engine-keyed catalog guarding a role's extraArgs answers a different question and cannot stand in for it.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -7592,8 +7592,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref common.Referenc
 					},
 					"kvCache": {
 						SchemaProps: spec.SchemaProps{
-							Description: "KVCache attaches the deployment to a KV cache pool.",
-							Default:     map[string]interface{}{},
+							Description: "KVCache optionally attaches the deployment to a shared KV cache pool. A managed vLLM prefill/decode deployment without it still uses its router's point-to-point connector; it does not render the shared-store connector or its client configuration.",
 							Ref:         ref(v1alpha1.ModelDeploymentKVCache{}.OpenAPIModelName()),
 						},
 					},
@@ -7627,7 +7626,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref common.Referenc
 						},
 					},
 				},
-				Required: []string{"model", "engine", "engineVersion", "kvCache", "roles"},
+				Required: []string{"model", "engine", "engineVersion", "roles"},
 			},
 		},
 		Dependencies: []string{
@@ -7644,7 +7643,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 				Properties: map[string]spec.Schema{
 					"phase": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Phase summarizes the conditions: Starting, Ready, Degraded, Deleting. Ready means every role's ready count equals its desired count; Degraded means at least one replica is ready and at least one is not.",
+							Description: "Phase summarizes the conditions: Starting, Ready, Degraded, Deleting. Ready means every role's ready count equals its desired count and, when declared, the router has a ready replica. Degraded means a serving component is ready while another required one is not.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -7668,7 +7667,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved, CacheAttached, ReplicasUpToDate, RoleKindsReady. They are independent — \"quota reserved but cache not attached\" is a real and actionable state — which is what a single phase string cannot carry.",
+							Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved, CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing. They are independent — \"quota reserved but cache not attached\" is a real and actionable state — which is what a single phase string cannot carry.\n\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher that was configured and then crashed therefore remains True until a live consumer observes it.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -7682,7 +7681,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 					},
 					"endpoint": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Endpoint is the one address every replica serves behind, in the form <scheme>://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.\n\nThe scheme is https where the first role's own arguments put its listener on TLS, and http otherwise. A client reads it from here rather than assuming either one.",
+							Description: "Endpoint is the address clients use. Without a router it is the deployment-wide Service, in the form <scheme>://<name>.<namespace>.svc:<port>. With a router it is the router's Service and is absent until the router has a ready replica.\n\nA role endpoint uses https where that role's own arguments put its listener on TLS. The managed router endpoint uses the router's own transport instead, which is http. A client reads the selected value from here rather than assuming either one.",
 							MaxLength:   ptr.To[int64](512),
 							Type:        []string{"string"},
 							Format:      "",
@@ -7718,7 +7717,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 					},
 					"router": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Router is everything a router needs in order to front this deployment, published under BOTH modes. Under the external mode it is the entire output of this feature.\n\nIt is ABSENT when spec.router is, rather than present and empty, for the same reason KVCache is: an empty object here cannot be told apart from a contract whose every string happens to be empty.",
+							Description: "Router is the observed contract of the managed router requested by spec.router.\n\nIt is ABSENT when spec.router is, rather than present and empty, for the same reason KVCache is: an empty object here cannot be told apart from a contract whose every string happens to be empty.",
 							Ref:         ref(v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName()),
 						},
 					},
