@@ -1462,6 +1462,10 @@ message KVCacheBackendLeader {
   //   - More than one REQUIRES HighAvailability. Electing a leader among several needs a leadership
   //     record, and the webhook refuses the pair without one rather than silently running two
   //     leaders against the same members.
+  //   - Raising this past one TURNS THE ELECTION ON, and the flip is re-evaluated on every
+  //     reconcile rather than decided at create. It restarts the leader and rolls every member —
+  //     the member's master entry changes shape with it — so the store's cached contents do not
+  //     survive the crossing. The same holds on the way back down to one.
   //   - Raising this adds no capacity, which members do. The ceiling is here to catch the reading
   //     that it does, and it is duplicated in the webhook on purpose: this one still holds when
   //     the webhook is not installed, which is when a second leader would be rendered rather than
@@ -1479,6 +1483,11 @@ message KVCacheBackendLeader {
   //
   //   - Unset, the leader runs as a single process exactly as before — no election flag, no extra
   //     object, the command line it ran before this field existed.
+  //   - Set with Replicas at 1, it is INERT: one process has nothing to elect between, so no
+  //     election flag, Lease or API token is rendered until Replicas rises above 1. That makes
+  //     this safe to set up front on a store image built without the k8s-lease backend, whose
+  //     master fails at startup the moment the election flags appear — the flags arrive only
+  //     when there is something for them to elect.
   //   - With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile
   //     interval. Each replica seeds its tenant quota policy at its own start, so a standby that
   //     took over after a quota was raised applies the older, lower ceiling, and an over-quota

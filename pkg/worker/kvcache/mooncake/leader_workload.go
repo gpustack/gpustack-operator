@@ -134,6 +134,10 @@ func LeaderEndpoints(kvcb *workercore.KVCacheBackend) []workercore.KVCacheBacken
 // allocating against one pool. One process is the only safe reading of that object, and the
 // divergence from spec.replicas is visible in `kubectl get deploy` rather than in a log line.
 //
+// The same clamp covers highAvailability with one replica, where it is a no-op on the number: the
+// election the field asks for does not exist below two processes (see leaderNeedsAPIAccess), so the
+// count the field names is the count that renders anyway.
+//
 // Everything else the replica count decides -- the update strategy, the rollout deadline -- reads
 // this rather than the field, so the three cannot disagree about whether there is an election.
 func LeaderReplicas(leader workercore.KVCacheBackendLeader) int32 {

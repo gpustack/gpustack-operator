@@ -69,7 +69,9 @@ func RenderLeaderFlags(kvcb *workercore.KVCacheBackend) []string {
 		fmt.Sprintf("-metrics_port=%d", LeaderMetricsPort),
 	}
 
-	// The election, rendered as one group or not at all. Splitting it is what a partial render would
+	// The election, rendered as one group or not at all, and only when one runs: highAvailability
+	// with a single replica has nothing to elect -- see leaderNeedsAPIAccess. Splitting the group
+	// is what a partial render would
 	// do, and each half alone is a specific failure: -enable_ha without a connection string exits at
 	// startup, and a connection string without -enable_ha is accepted and ignored with a warning.
 	//
@@ -89,7 +91,7 @@ func RenderLeaderFlags(kvcb *workercore.KVCacheBackend) []string {
 	// following the Lease is handed 0.0.0.0 -- an address that resolves back to the member itself.
 	// The Pod IP is the only value that is unique per replica and reachable from another Pod, and
 	// it also binds correctly, because the artifact hands the same string to its RPC server.
-	if leader.HighAvailability != nil {
+	if leaderNeedsAPIAccess(leader) {
 		flags = append(flags,
 			"-enable_ha=true",
 			"-ha_backend_type=k8s",

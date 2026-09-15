@@ -244,9 +244,7 @@ func TestRenderLeaderFlags_HighAvailability(t *testing.T) {
 // golden list above: every replica would advertise the same string. The assertion is therefore that
 // the value is unresolved argv, paired with the Deployment defining the variable it names.
 func TestRenderLeaderFlags_AdvertisedAddressIsPerReplica(t *testing.T) {
-	withHA := RenderLeaderFlags(testBackend(func(kvcb *workercore.KVCacheBackend) {
-		kvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
-	}))
+	withHA := RenderLeaderFlags(haBackend())
 	assert.Contains(t, withHA, "-rpc_address=$(KUBERNETES_POD_IP)",
 		"a value the Pod resolves, not one this operator could know when it renders")
 
@@ -283,12 +281,9 @@ func TestRenderLeaderFlags_AdvertisedAddressIsPerReplica(t *testing.T) {
 // guards is SAMENESS: a connstring built from a constant, or from a field both objects share, reads
 // correctly in a single golden list and puts two stores in one election.
 func TestRenderLeaderFlags_ElectionTargetsAreDistinctPerBackend(t *testing.T) {
-	ha := &workercore.KVCacheBackendLeaderHighAvailability{}
-
 	render := func(name string) []string {
-		kvcb := testBackend(func(kvcb *workercore.KVCacheBackend) {
+		kvcb := haBackend(func(kvcb *workercore.KVCacheBackend) {
 			kvcb.Name = name
-			kvcb.Spec.Connection.Managed.Leader.HighAvailability = ha
 		})
 		return RenderLeaderFlags(kvcb)
 	}

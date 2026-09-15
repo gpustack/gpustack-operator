@@ -221,8 +221,9 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](MaxLeaderReplicas + 1)
 			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 		}, "at most"},
-		// One replica with the field is accepted rather than refused as pointless. A Lease held by a
-		// single leader is what lets its replacement pick the same record up after a restart.
+		// One replica with the field is accepted rather than refused as pointless: the field is inert
+		// below two replicas and turns live the moment replicas rises, so setting it up front is how
+		// a later scale-up stays a one-field change.
 		{"replicas 1 with the field", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
 			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}

@@ -1224,8 +1224,11 @@ func TestKVCacheBackendReconciler_ConvergesAHighAvailabilitySwitch(t *testing.T)
 		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, got))
 		if on {
 			got.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+			// The election exists only above one replica, so asking for it means standbys.
+			got.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
 		} else {
 			got.Spec.Connection.Managed.Leader.HighAvailability = nil
+			got.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
 		}
 		require.NoError(t, cli.Update(ctx, got))
 		require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
@@ -1407,6 +1410,9 @@ func turnOnHighAvailability(t *testing.T, cli ctrlcli.Client, name string) error
 	got := new(workercore.KVCacheBackend)
 	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: name}, got))
 	got.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+	// The field alone renders no election: one replica has nothing to elect between, so an election
+	// takes standbys.
+	got.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
 	require.NoError(t, cli.Update(ctx, got))
 
 	r := &KVCacheBackendReconciler{
