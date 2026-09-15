@@ -1,6 +1,13 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "cleanupDrainBudgetSeconds": {
+      "default": "210",
+      "description": "Seconds the pre-delete drain spends waiting for this operator's custom resources to\nfinish deleting, so each finalizer's teardown runs while its controller is still up (a\nKVCacheBackend empties every node's cache tier; a KVCachePoolBinding drops its tenant from\nthe cache master's quota ledger). The Job's own deadline is derived from this, so RAISING IT\nALONE IS NOT ENOUGH: helm waits on a delete hook for `--timeout` (5m by default) and then\nfails the uninstall, so a larger budget needs a larger `--timeout` beside it. The default is\nsized to fit inside the default `--timeout`. Whatever has not drained by then is reported,\nand the post-delete cleanup removes it by force. The floor of 1 is enforced by the schema\nbecause a zero or negative budget makes the drain a no-op that still reports success -\nthe silent skip this whole phase exists to prevent.",
+      "minimum": 1,
+      "required": [],
+      "title": "cleanupDrainBudgetSeconds"
+    },
     "cleanupOnUninstall": {
       "default": false,
       "description": "Run a post-delete cleanup Job on `helm uninstall` that removes the leftovers\nthe worker creates at runtime but Helm does not manage: the Kueue / Node Feature\nDiscovery / CSI Helm releases, the finalizers pinning Kueue and Instance objects,\nand the aggregated APIServices / webhooks. Of the CRDs it removes this chart's own\nand the Kueue ones this release installed; Node Feature Discovery's are LEFT IN\nPLACE, because its subchart ships them in a way that records no Helm ownership and\ndeleting them would be a guess with a cluster-wide blast radius. Disabled by\ndefault because the CRDs it does remove may be shared with other workloads; enable\nonly when this release exclusively owns them (e.g. CI / e2e).",

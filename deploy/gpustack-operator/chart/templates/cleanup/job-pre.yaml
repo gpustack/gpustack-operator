@@ -1,0 +1,68 @@
+{{- if .Values.cleanupOnUninstall }}
+{{- /*
+  Pre-delete hook Job that drains this operator's custom resources while its
+  controllers are still running, so the teardown each finalizer holds for gets
+  its one chance to run. Weight 0 runs it after the ConfigMap/RBAC at weight -5.
+
+  The default budget is sized against HELM'S timeout, not against how long a
+  teardown can take. helm waits for a delete hook for --timeout (5m by default)
+  and then fails the uninstall, so a budget past that turns a slow drain into a
+  release that cannot be removed. What does not drain inside it is reported and
+  left to the post-delete cleanup, which strips and deletes regardless.
+
+  TWO VALUES MOVE TOGETHER, and neither alone does anything. This Job stops
+  itself at activeDeadlineSeconds whatever --timeout says, and helm gives up at
+  --timeout whatever this Job is still doing. So a large cache tier needs
+  cleanupDrainBudgetSeconds raised AND a larger --timeout; the deadline is
+  derived here rather than exposed, so only one of the two is a knob.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "gpustack-operator.fullname" . }}-drain
+  namespace: {{ include "gpustack-operator.namespace" . }}
+  labels:
+    {{- include "gpustack-operator.commonLabels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: {{ add (int .Values.cleanupDrainBudgetSeconds) 60 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gpustack-operator.commonLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- /*
+        No nodeSelector, deliberately, and `global.nodeSelector` is not inherited here.
+        A selector naming a label the release itself produces, an NFD one being the
+        obvious case, would leave this Job Pending until the deadline expires on a
+        cluster where that labeller is the very thing being uninstalled.
+      */}}
+      serviceAccountName: {{ include "gpustack-operator.fullname" . }}-cleanup
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ if kindIs "string" . }}{{ . }}{{ else }}{{ .name }}{{ end }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: drain
+          image: {{ include "gpustack-operator.image" (dict "root" . "overrides" dict) | quote }}
+          imagePullPolicy: {{ include "gpustack-operator.imagePullPolicy" (dict "root" . "overrides" dict) }}
+          command: ["/usr/bin/env", "bash", "/scripts/drain.sh"]
+          args:
+            - {{ include "gpustack-operator.namespace" . | quote }}
+            - {{ .Values.cleanupDrainBudgetSeconds | quote }}
+          volumeMounts:
+            - name: cleanup-script
+              mountPath: /scripts
+      volumes:
+        - name: cleanup-script
+          configMap:
+            name: {{ include "gpustack-operator.fullname" . }}-cleanup
+            defaultMode: 0755
+{{- end }}

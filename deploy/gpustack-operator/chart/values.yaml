@@ -18,6 +18,21 @@
 # only when this release exclusively owns them (e.g. CI / e2e).
 cleanupOnUninstall: false
 
+# @schema
+# minimum: 1
+# @schema
+# -- Seconds the pre-delete drain spends waiting for this operator's custom resources to
+# finish deleting, so each finalizer's teardown runs while its controller is still up (a
+# KVCacheBackend empties every node's cache tier; a KVCachePoolBinding drops its tenant from
+# the cache master's quota ledger). The Job's own deadline is derived from this, so RAISING IT
+# ALONE IS NOT ENOUGH: helm waits on a delete hook for `--timeout` (5m by default) and then
+# fails the uninstall, so a larger budget needs a larger `--timeout` beside it. The default is
+# sized to fit inside the default `--timeout`. Whatever has not drained by then is reported,
+# and the post-delete cleanup removes it by force. The floor of 1 is enforced by the schema
+# because a zero or negative budget makes the drain a no-op that still reports success -
+# the silent skip this whole phase exists to prevent.
+cleanupDrainBudgetSeconds: 210
+
 # -- Global values shared across the chart and its subcharts.
 global:
   # -- Image registry override applied to every image this chart renders, the subcharts'

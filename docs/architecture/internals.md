@@ -73,8 +73,9 @@ with no repair loop and nothing to say so.
 > - Helm never deletes CRDs on upgrade, and the operator's own come from Go rather than `crds/`;
 > - the migration hooks prune only what carries a legacy sub-release's Helm labels, which the worker's
 >   APIServices lack;
-> - `cleanup.sh` runs only on uninstall, behind `cleanupOnUninstall` (default false), with no incoming
->   replica to inherit anything.
+> - `drain.sh` and `cleanup.sh` run only on uninstall, behind `cleanupOnUninstall` (default false),
+>   as a `pre-delete` and a `post-delete` hook. Neither event fires on an upgrade or a rollback, and
+>   an uninstall has no incoming replica to inherit anything.
 >
 > Realigning the spec every tick would instead have the outgoing replica fight the incoming one through
 > *every* rolling update: likelier, and worse.
