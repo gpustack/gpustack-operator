@@ -45,7 +45,7 @@ func modelDeployment(engine string, roles ...workercore.ModelDeploymentRole) *wo
 			Model:         workercore.ModelDeploymentModel{Name: "Qwen/Qwen2.5-72B-Instruct"},
 			Engine:        engine,
 			EngineVersion: "0.25.1",
-			KVCache:       workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
+			KVCache:       &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
 			Roles:         roles,
 		},
 	}
@@ -513,6 +513,85 @@ func TestValidateModelDeployment(t *testing.T) {
 			md: routedModelDeployment(func(r *workercore.ModelDeploymentRouter) {
 				r.Replicas, r.Image, r.ExtraArgs = ptr.To(int32(2)), "ghcr.io/example/router:v1", []string{"--verbose"}
 			}),
+		},
+		{
+			name: "router_extra_args_owned_key",
+			md: routedModelDeployment(func(r *workercore.ModelDeploymentRouter) {
+				r.ExtraArgs = []string{"--endpoint-selector=mine"}
+			}),
+			wantMessage: "spec.router.extraArgs[0]",
+		},
+		{
+			name: "router_secure_serving_is_owned",
+			md: routedModelDeployment(func(r *workercore.ModelDeploymentRouter) {
+				r.ExtraArgs = []string{"--secure-serving=true"}
+			}),
+			wantMessage: "spec.router.extraArgs[0]",
+		},
+		{
+			name: "router_extra_args_unowned_key",
+			md: routedModelDeployment(func(r *workercore.ModelDeploymentRouter) {
+				r.ExtraArgs = []string{"--zap-log-level=debug"}
+			}),
+		},
+		{
+			name: "router_metric_unavailable",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Engine = "engine-without-metrics"
+				return md
+			}(),
+			wantMessage: `metric "queued requests" required by router "llm-d" is unavailable on engine "engine-without-metrics"`,
+		},
+		{
+			name: "router_roles_use_different_serving_ports",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "prefill"
+						r.Template = &workercore.ModelDeploymentTemplate{
+							Ports: []workercore.InstancePort{{Port: 8000}},
+						}
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "decode"
+						r.Template = &workercore.ModelDeploymentTemplate{
+							Ports: []workercore.InstancePort{{Port: 8100}},
+						}
+					}),
+				)
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				return md
+			}(),
+			wantMessage: "every routed role must use the same serving port; got [8000 8100]",
+		},
+		{
+			name: "router_role_serving_port_is_not_tcp",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Roles[0].Template = &workercore.ModelDeploymentTemplate{
+					Ports: []workercore.InstancePort{{Port: 8000, Protocol: core.ProtocolUDP}},
+				}
+				return md
+			}(),
+			wantMessage: "every routed role must use TCP serving ports",
+		},
+		{
+			name: "router_role_uses_tls",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Roles[0].ExtraArgs = []string{"--ssl-keyfile=/tls/key.pem"}
+				return md
+			}(),
+			wantMessage: "managed router supports plaintext engine endpoints only",
+		},
+		{
+			name: "kv_cache_absent",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.KVCache = nil
+				return md
+			}(),
 		},
 		{
 			// A deployment whose roles are all servers may be routed. A router here is east-west
@@ -1133,6 +1212,57 @@ func TestValidateModelDeploymentIdentity_RolesAreMatchedByName(t *testing.T) {
 // against on create, so the rule contributes no refusal there.
 func TestValidateModelDeploymentIdentity_DoesNotRunOnCreate(t *testing.T) {
 	assert.Nil(t, validateModelDeploymentIdentity(modelDeploymentWithEveryField(), nil))
+}
+
+func TestValidateModelDeploymentRouterName(t *testing.T) {
+	cases := []struct {
+		name    string
+		old     *workercore.ModelDeploymentRouter
+		current *workercore.ModelDeploymentRouter
+		refuse  bool
+	}{
+		{
+			name: "router name changed outside the schema",
+			old:  &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD},
+			// This becomes reachable through the API server when the router-name enum widens.
+			current: &workercore.ModelDeploymentRouter{Name: "another-router"},
+			refuse:  true,
+		},
+		{
+			name:    "router name unchanged",
+			old:     &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD},
+			current: &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD},
+		},
+		{
+			name:    "router added",
+			current: &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD},
+		},
+		{
+			name: "router removed",
+			old:  &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			old := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+			old.Spec.Router = tc.old
+			md := old.DeepCopy()
+			md.Spec.Router = tc.current
+
+			errs := validateModelDeploymentRouterName(md, old)
+			if !tc.refuse {
+				assert.Empty(t, errs)
+				return
+			}
+
+			require.Len(t, errs, 1)
+			assert.Equal(t, "spec.router.name", errs[0].Field)
+			assert.Equal(t, field.ErrorTypeInvalid, errs[0].Type)
+			assert.Equal(t, "field is immutable", errs[0].Detail)
+			assert.NotEqual(t, modelDeploymentIdentityMessage, errs[0].Detail)
+		})
+	}
 }
 
 // TestModelDeploymentWebhook_ValidateUpdateStatesTheRuleNotTheMechanism pins the wording a user

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
+	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,6 +23,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/webhook"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/router"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -262,6 +265,7 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	// offending role -- would be refused. That is worse than the reconcile failure the rule prevents.
 	errs := validateModelDeployment(md, modelDeploymentRoleNames(oldObj))
 	errs = append(errs, validateModelDeploymentIdentity(md, old)...)
+	errs = append(errs, validateModelDeploymentRouterName(md, old)...)
 	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)
 
 	typeErrs, err := r.validateRoleResourcesAgainstInstanceTypes(ctx, md)
@@ -286,6 +290,18 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 // so a different value describes a different deployment, and a different deployment is created.
 const modelDeploymentIdentityMessage = "this is part of what makes this deployment the deployment " +
 	"it is: a different value describes a different deployment, which is created rather than edited"
+
+// validateModelDeploymentRouterName allows a router to be added or removed, but not changed in
+// place. Changing the implementation is a delete and create with an interval between them.
+func validateModelDeploymentRouterName(md, old *workercore.ModelDeployment) field.ErrorList {
+	if old == nil || old.Spec.Router == nil || md.Spec.Router == nil ||
+		old.Spec.Router.Name == md.Spec.Router.Name {
+		return nil
+	}
+
+	return field.ErrorList{field.Invalid(
+		field.NewPath("spec", "router", "name"), md.Spec.Router.Name, "field is immutable")}
+}
 
 // validateModelDeploymentIdentity refuses an update that changes what the deployment IS, and admits
 // one that changes how it is currently run.
@@ -461,6 +477,64 @@ func validateModelDeployment(
 	errs = append(errs, validateModelDeploymentRoleNames(md)...)
 	errs = append(errs, validateModelDeploymentRoleServiceNames(md, existingRoles)...)
 	errs = append(errs, validateModelDeploymentRoleKinds(md)...)
+	errs = append(errs, validateModelDeploymentRouter(md)...)
+
+	return errs
+}
+
+var modelDeploymentRouterOwnedArgs = map[string][]string{
+	workercore.ModelDeploymentRouterLLMD: {
+		"--endpoint-selector",
+		"--endpoint-target-ports",
+		"--config-file",
+		"--secure-serving",
+		"--grpc-health-port",
+		"--metrics-endpoint-auth",
+	},
+}
+
+func validateModelDeploymentRouter(md *workercore.ModelDeployment) field.ErrorList {
+	if md.Spec.Router == nil {
+		return nil
+	}
+
+	var errs field.ErrorList
+	argsPath := field.NewPath("spec", "router", "extraArgs")
+	for i, arg := range md.Spec.Router.ExtraArgs {
+		name := workerctrl.ModelDeploymentArgName(arg)
+		if !slices.Contains(modelDeploymentRouterOwnedArgs[md.Spec.Router.Name], name) {
+			continue
+		}
+		errs = append(errs, field.Invalid(argsPath.Index(i), arg, fmt.Sprintf(
+			"%q is set by the operator for router %q and must not be supplied here, because two "+
+				"values for it cannot be told apart", name, md.Spec.Router.Name)))
+	}
+
+	if _, err := router.MetricsForEngine(md.Spec.Engine); err != nil {
+		errs = append(errs, field.Invalid(field.NewPath("spec", "engine"), md.Spec.Engine, err.Error()))
+	}
+
+	ports := make([]int32, 0, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		if port := workerctrl.ModelDeploymentRoleServingProtocol(role); port != core.ProtocolTCP {
+			errs = append(errs, field.Invalid(field.NewPath("spec", "router"), md.Spec.Router,
+				fmt.Sprintf("every routed role must use TCP serving ports; role %q uses %s",
+					role.Name, port)))
+		}
+		if workerctrl.ModelDeploymentRoleServingScheme(role) == core.URISchemeHTTPS {
+			errs = append(errs, field.Invalid(field.NewPath("spec", "router"), md.Spec.Router,
+				fmt.Sprintf("managed router supports plaintext engine endpoints only; role %q uses HTTPS",
+					role.Name)))
+		}
+		ports = append(ports, workerctrl.ModelDeploymentRoleServingPort(role))
+	}
+	slices.Sort(ports)
+	ports = slices.Compact(ports)
+	if len(ports) != 1 {
+		errs = append(errs, field.Invalid(field.NewPath("spec", "router"), md.Spec.Router,
+			fmt.Sprintf("every routed role must use the same serving port; got %v", ports)))
+	}
 
 	return errs
 }
@@ -475,6 +549,10 @@ func validateModelDeployment(
 // The bound itself is needed because `required` makes the KEY present, not the VALUE non-empty: an
 // object carrying `poolRef: {name: ""}` satisfies the schema completely.
 func validateModelDeploymentKVCache(md *workercore.ModelDeployment) field.ErrorList {
+	if md.Spec.KVCache == nil {
+		return nil
+	}
+
 	if md.Spec.KVCache.PoolRef.Name != "" {
 		return nil
 	}
