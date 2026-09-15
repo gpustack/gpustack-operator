@@ -46,6 +46,10 @@ spec:
           capacityPerMember: 4Gi
 ```
 
+⚠️ The example's `0.3.13` tag is on the wrong minor line for current runner builds — pin `spec.image`
+per [The store version must match the engine's
+client](#the-store-version-must-match-the-engines-client) before copying it.
+
 `connection.managed` and `connection.external` are both optional pointers and **exactly one** must be
 set; neither and both are refused at admission with a message naming the two. Several member groups
 are allowed; at most one of them may carry a [local disk tier](local-disk-tier.md).

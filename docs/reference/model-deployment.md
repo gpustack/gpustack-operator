@@ -190,6 +190,18 @@ request is ever split across them. Attaching a pool does not change that.
 
 Conversely a router with no pool is complete. What each shape renders is the table above.
 
+`spec.router.replicas` is optional, and absent means one. More than one trades cache consistency for
+availability: a router scoring on a prefix cache holds that state per replica — upstream reports radix
+trees that do not synchronize across replicas and a hit rate falling by ten to twenty percent as a
+result. Where replicas do exchange events, the exchange improves load estimation without making two
+replicas route alike.
+
+`spec.router.extraArgs` takes additional flags for the router process. A flag the operator derives
+itself is **refused rather than merged**, so one setting has one source. The owned catalog is keyed by
+router; for `llm-d` it is `--endpoint-selector`, `--endpoint-target-ports`, `--config-file`,
+`--secure-serving`, `--grpc-health-port` and `--metrics-endpoint-auth`, and the refusal names the flag
+and the router.
+
 ### What every Pod of the group carries
 
 | Key | Value | What it is for |
@@ -242,11 +254,9 @@ decoder is reachable **as** a decoder. The managed router uses these stable role
 tokenizer and cache-event contracts; they also remain useful for addressing one half directly while
 debugging.
 
-Without `spec.router`, `status.endpoint` stays the deployment-wide Service, which fronts the
-**first** role. With `spec.router`, the operator creates a Deployment, ConfigMap, Service,
-ServiceAccount, Role and RoleBinding named `<deployment>-router`. `status.endpoint` is empty until
-that Deployment has a ready replica, then names the router Service. Removing `spec.router` prunes all
-six objects and restores the deployment-wide endpoint.
+With `spec.router`, the operator renders six objects named `<deployment>-router`: a Deployment,
+ConfigMap, Service, ServiceAccount, Role and RoleBinding. Removing `spec.router` prunes all six.
+What `status.endpoint` publishes in each shape is under [Status](#status).
 
 ## The reuse domain is inherited
 
@@ -542,14 +552,15 @@ That is the field's contract rather than a gap in it. The answer is read through
 per-accelerator admission gate uses, and a flavor reported here that the gate would not fit against
 would be worse than none.
 
-Six conditions carry the axes a single phase cannot. They are independent: "quota reserved but cache
-not attached" is a real and actionable state.
+Seven conditions carry the axes a single phase cannot. They are independent: "quota reserved but
+cache not attached" is a real and actionable state.
 
 **`DomainRegistered`** — whether the referenced Binding resolved and its domain was read.
 
 | Value | Reason | Where it sends you |
 |---|---|---|
 | `True` | `Registered` | nowhere; the domain in `status.kvCache` is current |
+| `True` | `NotApplicable` | nowhere; the deployment declares no `kvCache`, so there is no Binding to resolve |
 | `False` | `BindingNotFound` | create the Binding — an admin doing so is what grants access |
 | `False` | `BindingNotReady` | wait for it, or look at the pool it points at |
 | `False` | `BindingDeleting` | find who deleted it; the replicas keep writing to the domain they attached to |
@@ -713,6 +724,19 @@ crashes remains `True`.
 | `False` | `PublisherDisabled` | a producing role's rendered Pods do not enable publishing |
 | `False` | `NoRouter` | a prefill/decode pair has no router to consume events |
 | `Unknown` | `RoleUnmanaged` | a producing role replaced its command line, so the operator cannot inspect what it does |
+
+**`RouterReady`** — whether the managed router rendered and has a ready replica. A render refusal is
+projected here rather than returned: it is a spec problem, so the rest of the status — phase, the
+other conditions, the role counts — keeps computing instead of going stale with no axis naming the
+cause.
+
+| Value | Reason | Meaning |
+|---|---|---|
+| `True` | `Ready` | the router's Deployment has ready replicas |
+| `True` | `NotApplicable` | the deployment declares no `spec.router` |
+| `False` | `RenderFailed` | the router's object set could not be rendered; the message carries the refusal |
+| `False` | `NoReadyReplicas` | the router's Deployment exists but no replica is ready |
+| `Unknown` | `NotDeployed` | the router's Deployment has not been created yet |
 
 ## Rollout is recreate
 
