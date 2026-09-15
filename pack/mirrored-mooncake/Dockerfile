@@ -42,7 +42,24 @@
 # reason this image has no oplog: master.cpp refuses to start with `enable_oplog` unless the backend
 # is etcd, so oplog following is given up permanently here. A standby rebuilds from snapshot
 # bootstrap and remounts instead, which is independent of the backend type. For a cache, that trades
-# replay latency, not durability.
+# replay latency, not durability. The exclusion arrived in 0.3.11: it does not exist in 0.3.10,
+# which is why the smoke test's etcd control is version-conditional below.
+#
+# VERSIONS: MOONCAKE_VERSION selects the release, and the version-dependent steps below each say
+# which releases they apply to and why. The matrix they implement, read out of the upstream tags:
+#
+#   - 0.3.10: no k8s-lease backend at all, so an image of it serves a single-replica leader with
+#     election off (the shape leaderNeedsAPIAccess in pkg/worker/kvcache/mooncake/ha_rbac.go
+#     renders for it). It is built because some vLLM releases bundle a 0.3.10 Mooncake client,
+#     and a store that version-mismatched with its engines fails their registration handshake.
+#   - 0.3.11: the backend exists and compiles in, but build_wheel.sh neither packages the
+#     wrapper .so nor excludes libfabric from the repaired wheel, and mc_store_rest_server is
+#     still the broken async entry point. The build patches all three below.
+#   - 0.3.12: packaging is whole -- wrapper copied, libfabric excluded, sync_main entry point.
+#   - 0.3.13 (the default): as 0.3.12.
+#
+# Build evidence exists for 0.3.10.post2 and 0.3.13.post1; 0.3.11 and 0.3.12 follow from reading
+# the tags, and their first build is the check.
 
 # REQUIRED: both stages carry the SAME Python and the SAME Debian release. The wheel's extension
 # modules are built WITH_SOABI, so they are tagged for one interpreter version and will not import
@@ -236,6 +253,13 @@ EOF
 # the one compiled with the leadership backends above. Pointing it elsewhere, or installing the
 # published wheel beside it, yields an image whose two copies of the binary differ in exactly the
 # switch this whole image exists for.
+#
+# patchelf goes in UP FRONT, unconditionally: 0.3.10's build_wheel.sh does not install it from PyPI
+# (0.3.13's does), and bookworm's distro patchelf 0.14.3 fails auditwheel >= 6.8. For a release
+# whose script installs its own, this is a redundant upgrade of the same package and costs one
+# small download.
+RUN pip install --no-cache-dir -U patchelf
+
 RUN <<EOF
     set -exo pipefail
 
@@ -259,6 +283,20 @@ RUN <<EOF
         find /work/mooncake-wheel/dist -maxdepth 1 -name '*.whl' >&2
         exit 1
     fi
+
+    # The lease backend's Go half, staged where the runtime stage can mount it. 0.3.11 COMPILES
+    # the backend but its build_wheel.sh does not copy the wrapper into the wheel (that arrived
+    # in 0.3.12; 0.3.10 has no backend at all), so the runtime stage installs it by hand for
+    # exactly that release. The directory is created even when nothing goes in it, because the
+    # runtime stage mounts it unconditionally and a missing mount source fails the build.
+    mkdir -p /work/lease-out
+    case "${MOONCAKE_VERSION}" in
+        0.3.11*)
+            wrapper="/work/build/mooncake-common/k8s-lease/libk8s_lease_wrapper.so"
+            test -f "${wrapper}"
+            cp "${wrapper}" /work/lease-out/
+            ;;
+    esac
 EOF
 
 # =============================================================================
@@ -363,10 +401,75 @@ RUN <<EOF
     fi
 EOF
 
-RUN --mount=from=builder,source=/work/mooncake-wheel/dist,target=/wheel <<EOF
+RUN --mount=from=builder,source=/work/mooncake-wheel/dist,target=/wheel \
+    --mount=from=builder,source=/work/lease-out,target=/lease <<EOF
     set -exo pipefail
     pip install --no-cache-dir /wheel/*.whl
     rm -rf /root/.cache/pip
+
+    pkg="$(python3 -c 'import mooncake, os; print(os.path.dirname(mooncake.__file__))')"
+    case "${MOONCAKE_VERSION}" in
+        0.3.10*|0.3.11*)
+            # Two repairs for the releases before 0.3.12; 0.3.12 vendors neither library and its
+            # console script works, so for it and later this whole branch is skipped.
+            #
+            # One: auditwheel vendored BOTH libfabric and the AWS libefa provider INTO the wheel
+            # under mangled sonames, chained engine .so -> libfabric -> libefa -- where the
+            # vendored libefa binds the distro libibverbs, which is too old for it
+            # (IBVERBS_PRIVATE_34). Give the wheel the same resolution 0.3.12+ gets natively
+            # (build_wheel.sh gained `--exclude libfabric.so*` in 0.3.12): rewrite every
+            # DT_NEEDED that names a vendored copy onto the plain soname (which ldconfig
+            # resolves to the AWS install gated above), then drop the vendored files. Deleting
+            # without the rewrite leaves a dangling DT_NEEDED and every import dies on the
+            # mangled name -- measured on 0.3.10. The scan is by file TYPE, not by name: the
+            # bundled C++ binaries (mooncake_master, transfer_engine_bench) carry the
+            # dependency too, and they have no .so suffix.
+            pip install --no-cache-dir patchelf
+            sp="$(dirname "${pkg}")"
+            libs="${sp}/mooncake_transfer_engine.libs"
+            for short in libefa libfabric; do
+                for vendored in "${libs}/${short}"-*.so.*; do
+                    [[ -e "${vendored}" ]] || continue
+                    mangled="$(basename "${vendored}")"
+                    find "${sp}" -type f | while read -r so; do
+                        if patchelf --print-needed "${so}" 2>/dev/null | grep -qx "${mangled}"; then
+                            patchelf --replace-needed "${mangled}" "${short}.so.1" "${so}"
+                            echo "[info] ${so}: ${mangled} -> ${short}.so.1"
+                        fi
+                    done
+                    rm -fv "${vendored}"
+                done
+            done
+            pip uninstall -y patchelf
+
+            # Two: the mc_store_rest_server console script is BROKEN before 0.3.12 --
+            # mooncake_store_service.main is `async def` and the generated wrapper calls it
+            # without awaiting, so it prints an unawaited coroutine and exits 1 on EVERY
+            # invocation. (0.3.12 added sync_main and pointed the entry point at it.) The
+            # operator renders memberEntrypoint="mc_store_rest_server" unconditionally
+            # (pkg/worker/kvcache/mooncake/member_workload.go), so the image replaces the
+            # script with a shim that reaches the module's own `asyncio.run(main())` guard.
+            # That keeps the member command version-agnostic: the workload and the smoke test
+            # below name the same entrypoint for every release.
+            shim="$(command -v mc_store_rest_server)"
+            cat >"${shim}" <<'SHIM'
+#!/bin/bash
+exec python3 -m mooncake.mooncake_store_service "$@"
+SHIM
+            chmod +x "${shim}"
+            ;;
+    esac
+
+    case "${MOONCAKE_VERSION}" in
+        0.3.11*)
+            # 0.3.11 compiles the lease backend but its build_wheel.sh does not package the
+            # wrapper .so (the copy arrived in 0.3.12; 0.3.10 has no backend to package). The
+            # builder stage staged it; install it beside the package exactly where the 0.3.12+
+            # wheel would put it, because the master loads it from there and the smoke test
+            # below asserts it is present.
+            cp /lease/libk8s_lease_wrapper.so "${pkg}/"
+            ;;
+    esac
 EOF
 
 # Build-time smoke test, in two halves: the entrypoints exist, and the backends are the ones asked
@@ -391,14 +494,27 @@ RUN <<EOF
         exit 1
     fi
 
-    # The Go c-shared half of the lease backend, packaged INSIDE the wheel. Its absence is the one
-    # way this image could carry a master that links the backend and then cannot load it.
+    # The Go c-shared half of the lease backend, present INSIDE the installed package. Its absence
+    # is the one way this image could carry a master that links the backend and then cannot load
+    # it. 0.3.10 predates the backend entirely, so for it the wrapper cannot exist and the
+    # assertion is skipped -- that image serves a single-replica leader with election off, which
+    # is also what the inverted k8s probe in half two asserts. For 0.3.11 the file is the copy
+    # the install stage made; for 0.3.12+ it came in the wheel.
     pkg="$(python3 -c 'import mooncake, os; print(os.path.dirname(mooncake.__file__))')"
-    test -f "${pkg}/libk8s_lease_wrapper.so"
+    case "${MOONCAKE_VERSION}" in
+        0.3.10*)
+            echo "[info] 0.3.10 has no k8s-lease backend; skipping the wrapper assertion."
+            ;;
+        *)
+            test -f "${pkg}/libk8s_lease_wrapper.so"
+            ;;
+    esac
 
     # A member is a Python entrypoint, so "it is installed" and "it can start" are different
     # claims. --help exercises the import chain, which is where a missing provider library or a
-    # wrong-ABI extension actually surfaces.
+    # wrong-ABI extension actually surfaces. This names the console script for every release: in
+    # 0.3.10 that script is the shim installed above, so the smoke test exercises exactly the
+    # entrypoint the operator's member workload will invoke.
     mc_store_rest_server --help >/dev/null
 
     # The EFA transport is compiled IN, asserted by what this run must NOT print. A target-mode
@@ -448,7 +564,8 @@ EOF
 # The k8s backend is expected to fail to reach an API server in a build container: there is no
 # kubeconfig and no service account. That failure is the strongest evidence in the whole test,
 # because it can only be produced by the Go wrapper having been CALLED, which is a stronger
-# statement than it having been linked.
+# statement than it having been linked. For 0.3.10, which predates the backend, the k8s and etcd
+# assertions invert -- the case block below spells out both polarities.
 RUN <<EOF
     set -exo pipefail
 
@@ -475,19 +592,36 @@ RUN <<EOF
     # some line does not match, which every multi-line log satisfies whether or not the refusal is
     # also in there -- an assertion that cannot fail.
     #
-    # LIMITED: the four strings below are upstream log text at MOONCAKE_VERSION, not an API. Bumping
+    # LIMITED: the strings below are upstream log text at MOONCAKE_VERSION, not an API. Bumping
     # the version means re-reading them out of that release before trusting a failure here: a
     # reworded message fails this stage twenty minutes into the build, and the grep that fails says
     # nothing about which token went stale.
     grep -q "Master runtime state" /tmp/k8s.log
     grep -q "Master runtime state" /tmp/redis.log
-    ! grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/k8s.log
     ! grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/redis.log
 
-    # Controls: etcd must still be refused (proves the exclusion held and the check was not disabled
-    # wholesale), and an unparseable value must be refused differently (proves the type parser still
+    case "${MOONCAKE_VERSION}" in
+        0.3.10*)
+            # The k8s subject is INVERTED: the flag parses and the supervisor runs, but
+            # coordinator creation answers UNAVAILABLE_IN_CURRENT_MODE because the k8s-lease
+            # backend does not exist in this release. Asserting the refusal documents that from
+            # the artifact instead of from the source tree -- this image serves a single-replica
+            # leader with election off. The etcd control inverts with it: the K8S_LEASE/ETCD
+            # exclusion does not exist yet either, so etcd is compiled in and clears the check
+            # exactly as redis does.
+            grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/k8s.log
+            ! grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/etcd.log
+            ;;
+        *)
+            ! grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/k8s.log
+            # Control: etcd must still be refused (proves the exclusion held and the check was
+            # not disabled wholesale).
+            grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/etcd.log
+            ;;
+    esac
+
+    # Control: an unparseable value must be refused differently (proves the type parser still
     # runs).
-    grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/etcd.log
     grep -q "INVALID_PARAMS" /tmp/bogus.log
 
     rm -f /tmp/k8s.log /tmp/redis.log /tmp/etcd.log /tmp/bogus.log
