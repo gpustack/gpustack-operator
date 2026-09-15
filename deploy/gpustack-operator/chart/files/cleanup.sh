@@ -231,15 +231,84 @@ kubectl get clusterrolebindings -l app.kubernetes.io/part-of=gpustack-operator -
 #    The name pattern only nominates: a co-located standalone Kueue/NFD/CSI install in another
 #    namespace matches it too, so a candidate is deleted only when Helm's ownership annotation
 #    points its release at THIS namespace — everything the sweep targets is Helm-owned.
+#
+#    AN OBJECT WITH NO OWNERSHIP ANNOTATION AT ALL is the case that annotation test silently let
+#    through, and it is the one that blocks a reinstall hardest: helm refuses to adopt an existing
+#    object that carries no meta.helm.sh/release-name, so the install fails on "invalid ownership
+#    metadata" naming a key that is missing rather than wrong. Measured: two Kueue ClusterRoles
+#    (kueue-batch-admin-role, kueue-batch-user-role) survived a teardown without those annotations
+#    and failed three consecutive installs until they were deleted by hand.
+#
+#    Such an object falls back to its LABELS, which Helm does not write and therefore does not
+#    remove: app.kubernetes.io/managed-by=Helm plus an app.kubernetes.io/instance naming this
+#    release. The fallback applies only when the annotation is ABSENT; an annotation pointing
+#    somewhere else is still an answer, and still means no.
+#
+#    THOSE LABELS CANNOT TELL TWO NAMESPACES APART, and nothing in Helm's label set can: it carries
+#    the release NAME and never its namespace, while a release name is unique per namespace rather
+#    than per cluster. So a second install of this same chart under the same name in another
+#    namespace stamps a byte-identical pair, and no additional label fixes that - part-of, name and
+#    version are constants of the chart, not of the install.
+#
+#    The question is therefore put to helm, once, before the sweep: does a LIVE release of this name
+#    exist in ANOTHER namespace? Only such a release can own the byte-identical labels the fallback
+#    would otherwise misread, and only that is a reason to switch it off.
+#
+#    Both halves of that question are load-bearing, and dropping either one disables the fallback
+#    exactly where it is needed most:
+#      - LIVE. Helm keeps history records for uninstalled and superseded releases, so `--all` counts
+#        releases that own nothing. A dead record cannot carry a label on a live ClusterRole.
+#      - ANOTHER NAMESPACE. A failed install leaves a record in THIS namespace, and a failed install
+#        is the ordinary way these annotation-less leftovers appear in the first place - so matching
+#        this namespace's own record would let the failure that created the mess prevent its cleanup.
+#
+#    A QUESTION THAT COULD NOT BE ASKED IS NOT A NO. No helm binary, or a helm that errors, both
+#    leave the fallback OFF: the guard's whole purpose is to withhold a delete when ownership is
+#    uncertain, and "the query failed" is the most uncertain answer there is. Note that the failure
+#    has to be captured separately - a pipeline's status is its LAST command's, so piping helm into
+#    awk would report awk's success over helm's failure, and empty input makes awk agree.
+foreign_release_holds_this_name="" # non-empty disables the label fallback
+if ! command -v helm >/dev/null 2>&1; then
+  foreign_release_holds_this_name="yes"
+else
+  # --filter takes a REGEX, and a release name may legally carry regex metacharacters: Helm accepts
+  # DNS-1123 subdomains, so a dot is valid in one and would match any character here.
+  release_re="$(printf '%s' "${RELEASE}" | sed 's/[][\\.*^$(){}?+|/]/\\&/g')"
+  if ! helm_releases="$(helm list --all-namespaces --deployed --failed --pending \
+      --filter "^${release_re}\$" 2>/dev/null)"; then
+    foreign_release_holds_this_name="yes"
+    echo "[cleanup] helm could not be queried; annotation-less leftovers left alone"
+  # Read from the table rather than -q, because -q prints names without the namespace that the
+  # second half of the question needs. NR>1 skips the header; a name and a namespace contain no
+  # spaces, so positional fields are exact here.
+  elif printf '%s\n' "${helm_releases}" \
+      | awk -v ns="${NS}" 'NR > 1 && $2 != ns { found = 1 } END { exit !found }'; then
+    foreign_release_holds_this_name="yes"
+    echo "[cleanup] a live release named ${RELEASE} exists in another namespace;" \
+      "annotation-less leftovers left alone"
+  fi
+fi
+
 orphan_sweep() {
   local kind="$1"
   kubectl get "${kind}" -o name 2>/dev/null \
     | grep -Ei 'gpustack|kueue|nfd|node-feature|csi-nfs|csi-s3' \
     | grep -vE -- '-cleanup$' \
     | while read -r obj; do
-        owner_ns="$(kubectl get "${obj}" \
-          -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}' 2>/dev/null)"
-        [ "${owner_ns}" = "${NS}" ] || continue
+        # One read for all three fields rather than one per field. A sweep over three kinds on a
+        # large cluster issues one of these per candidate, and the fallback path needed two more.
+        # Joined on "|", which none of a namespace, a release name or "Helm" can contain.
+        meta="$(kubectl get "${obj}" -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}{"|"}{.metadata.labels.app\.kubernetes\.io/managed-by}{"|"}{.metadata.labels.app\.kubernetes\.io/instance}' 2>/dev/null)"
+        owner_ns="${meta%%|*}"
+        instance="${meta##*|}"
+        managed_by="${meta#*|}"
+        managed_by="${managed_by%%|*}"
+        if [ -n "${owner_ns}" ]; then
+          [ "${owner_ns}" = "${NS}" ] || continue
+        else
+          [ -z "${foreign_release_holds_this_name}" ] || continue
+          [ "${managed_by}" = "Helm" ] && [ "${instance}" = "${RELEASE}" ] || continue
+        fi
         echo "[cleanup] delete orphaned ${obj}"
         kubectl delete "${obj}" --ignore-not-found 2>/dev/null || true
       done
