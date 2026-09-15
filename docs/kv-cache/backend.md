@@ -112,8 +112,9 @@ several pools, which is the only reason a backend and a quota domain are separat
 
 **`spec.image` is explicit and never derived from the operator's own image**, which breaks
 deliberately with how the Device Manager image is derived from the worker image. Leave it unset and
-the cluster-wide `kv-cache-backend-image` Setting supplies it; unset in both places is refused at
-admission, naming both.
+the cluster-wide `kv-cache-backend-image` Setting supplies it. That Setting ships a default, so a
+backend naming no image runs this project's own build; unset in both places — which takes an
+administrator clearing the Setting — is refused at admission, naming both.
 
 **Clearing that Setting later does not strand a backend admitted under it.** Admission re-asks for a
 fallback only when an update moves `spec.image` itself. Every other update is admitted whatever the
@@ -161,11 +162,15 @@ that cannot.
 > needs a versioned `cudaFreeHost` from a real runtime. An image carrying two stubs runs the master and
 > fails every member.
 
-**That split is also why the `kv-cache-backend-image` Setting ships blank**, rather than pinned to the
-image above. One value would have to be right for every backend in the cluster at once, and which
-build a member needs depends on the transport its backend asks for and the hardware its group selects.
-Unset, a mismatch is an admission refusal naming both places to fix; defaulted, it is a loader error
-at runtime.
+**That split is what the `kv-cache-backend-image` default cannot cover.** Its value is this project's
+own CPU build, carrying TCP and EFA over DRAM, and one value cannot be right for every backend at
+once: which build a member needs depends on the transport its backend asks for and the hardware its
+group selects. A backend on a vendor fabric names its `spec.image`, which always wins over the
+Setting.
+
+The failure mode moved with the default, and that is what having one costs. Blank made a mismatch an
+admission refusal naming both places to fix; a default makes a wrong image a loader error at runtime,
+which is quieter and further from whoever can fix it. Clearing the Setting restores the refusal.
 
 **A private registry needs `spec.imagePullSecrets`**, and an explicit policy needs
 `spec.imagePullPolicy`. Both are backend-wide: they apply to the leader and to every member group,

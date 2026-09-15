@@ -38,7 +38,7 @@ spec:
     name: Qwen/Qwen2.5-72B-Instruct      # served, never provisioned
   engine: vllm                           # vllm | sglang
   engineVersion: "0.27.1"                # free-form; you guarantee alignment
-  kvCache:
+  kvCache:                               # OPTIONAL; omit it and no shared pool is attached
     poolRef:
       name: team-a-dram                  # a KVCachePoolBinding IN THIS NAMESPACE
     connector: auto                      # the only value; defaulted
@@ -116,10 +116,79 @@ Two roles may share a `kind` and differ in `name` only where that `kind` is `ser
 servers is a set of equals, whereas nothing consuming these roles expresses a second prefiller, so a
 deployment declaring one would render a role nothing downstream can reach.
 
-`kind` adds **one term** to the synthesized transfer configuration — the role discriminator the engine's
-own KV-transfer configuration takes, vLLM's `kv_role` and its per-engine equivalents. Nothing else
-changes. Pairing a prefiller with a decoder, negotiating a transport between them, and routing a
-request to either are **not** here.
+Without `spec.router`, `kind` adds the role discriminator to the engine's shared-store connector and
+nothing pairs the two roles.
+
+With the managed `llm-d` router, what a native vLLM role runs depends on whether `spec.kvCache` is
+set, and the two shapes are different documents rather than one with a field toggled:
+
+| `spec.kvCache` | Connector rendered | What carries the blocks |
+| --- | --- | --- |
+| omitted | `MooncakeConnector` alone | the direct prefill-to-decode transfer, and nothing else |
+| set | `MultiConnector` wrapping `MooncakeConnector` and `MooncakeStoreConnector` | the direct transfer, with the shared pool attached alongside it |
+
+A pair needs no shared pool to hand blocks over, which is why omitting `spec.kvCache` is a supported
+shape rather than a degraded one. Attaching a pool adds reuse ACROSS deployments; it is not what
+makes the pair work.
+
+In both shapes the decode Pod runs llm-d's routing proxy as a restartable sidecar; it executes the
+prefill leg named by the router and then forwards the request to the decoder.
+
+SGLang has no P/D role rendering, and the Ascend connector has a different runtime-selected
+transport contract, so neither is presented as this native vLLM path.
+
+### Two ways to configure a pair
+
+Both are complete objects. The only difference is the `kvCache` block, and it is the difference
+between "these two roles hand blocks to each other" and "these two roles hand blocks to each other
+AND share a pool with every other deployment bound to it".
+
+**Without a shared pool** — the ordinary shape for a pair serving one model:
+
+```yaml
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: qwen-pd
+  namespace: team-a
+spec:
+  model:
+    name: Qwen/Qwen2.5-72B-Instruct
+  engine: vllm                           # the native P/D path is vLLM only
+  engineVersion: "0.27.1"
+  router:
+    name: llm-d                          # required to pair the roles; the only value today
+  roles:
+    - name: prefill
+      kind: prefill
+      replicas: 2
+      instanceType: gpustack-nvidia-h20-linux-amd64
+      resources:
+        accelerator: 2
+    - name: decode
+      kind: decode
+      replicas: 2
+      instanceType: gpustack-nvidia-h20-linux-amd64
+      resources:
+        accelerator: 2
+```
+
+**With a shared pool** — the same object plus one block:
+
+```yaml
+spec:
+  # ... everything above, unchanged ...
+  kvCache:
+    poolRef:
+      name: team-a-dram                  # a KVCachePoolBinding in THIS namespace
+```
+
+**`spec.router` is what pairs the roles, and `spec.kvCache` is not a substitute for it.** A
+deployment declaring `prefill` and `decode` with no router is admitted and renders two roles that
+nothing routes between: each gets the shared-store connector with its role discriminator, and no
+request is ever split across them. Attaching a pool does not change that.
+
+Conversely a router with no pool is complete. What each shape renders is the table above.
 
 ### What every Pod of the group carries
 
@@ -169,12 +238,15 @@ its own pool assigns; what selects the hardware is the `instanceType` the role n
 ### Addressing a role
 
 Each role gets a `ClusterIP` Service named `<deployment>-<role>`, beside the deployment-wide one, so a
-decoder is reachable **as** a decoder. Nothing in the operator dials these names — no router exists yet
-— they are there for whatever pairs the roles.
+decoder is reachable **as** a decoder. The managed router uses these stable role addresses for the
+tokenizer and cache-event contracts; they also remain useful for addressing one half directly while
+debugging.
 
-`status.endpoint` stays the deployment-wide Service, which fronts the **first** role. It is not a
-router and must not be read as one: a Service selecting every role would round-robin a request onto a
-process configured as a producer and one configured as a consumer.
+Without `spec.router`, `status.endpoint` stays the deployment-wide Service, which fronts the
+**first** role. With `spec.router`, the operator creates a Deployment, ConfigMap, Service,
+ServiceAccount, Role and RoleBinding named `<deployment>-router`. `status.endpoint` is empty until
+that Deployment has a ready replica, then names the router Service. Removing `spec.router` prunes all
+six objects and restores the deployment-wide endpoint.
 
 ## The reuse domain is inherited
 
@@ -266,7 +338,7 @@ Ownership is per **(engine, key)**: a key one engine owns is an ordinary user ar
 
 | Engine | Owned arguments | Owned environment |
 |---|---|---|
-| `vllm` | `--kv-transfer-config` | `MOONCAKE_CONFIG_PATH` |
+| `vllm` | `--kv-transfer-config`, `--kv-events-config` | `MOONCAKE_CONFIG_PATH`, `VLLM_MOONCAKE_BOOTSTRAP_PORT` |
 | `sglang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config` | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME`, **`MOONCAKE_TENANT_ID`** |
 
 One `vllm` row covers **both backends**. The owned keys follow the engine while only the connector
@@ -306,6 +378,20 @@ Binding's domain. It is a second path to a value [the API already refuses](#the-
 On the vLLM family the operator mounts the rendered client JSON at
 `/etc/gpustack/kvcache/mooncake.json`, read-only. **There is no ConfigMap**: the file is a downwardAPI
 projection of the Pod's own `kvcache.gpustack.ai/client-config` annotation.
+
+When `spec.router` is present, a role that produces cache blocks also receives a
+`--kv-events-config` document. It enables the ZMQ publisher on `tcp://*:5557`, enables replay on
+`tcp://*:5558`, retains 10,000 batches, uses a high-water mark and queue depth of 100,000, and
+publishes topic `kv@`.
+
+**That applies to the vLLM engine only.** A routed SGLang deployment renders no publisher arguments
+and reports `KVEventsPublishing=False/PublisherDisabled`. That is the accurate reading rather than a
+fault: nothing in that engine's rendering emits the stream.
+
+The wildcard addresses are bind addresses only. The role's Service hostname with ports 5557 and
+5558 is the dialable form published in status, and both ports are declared on the producing
+container. A decode-only role does not need to publish. A role with `template.command` receives none
+of this configuration because the operator does not own its command line.
 
 Nothing is created beside the Pod, no RBAC for one is needed, and the configuration's lifetime is
 exactly the replica's. It is also part of the Pod's spec hash, which is what moves the replicas when
@@ -367,12 +453,19 @@ appearing as an unattributable `ImagePullBackOff`.
 ## Status
 
 `status.phase` is the field to read first: `Starting`, `Ready`, `Degraded` or `Deleting`. `Degraded`
-means some replicas are ready and some are not — serving, at less than the capacity asked for.
+means some required serving capacity is ready and some is not: either some role replicas are down, or
+all role replicas are ready but a declared router has no ready replica.
 `status.roles[]` carries `name`, `kind`, `desired`, `ready`, `unmanaged` and `assignedFlavor` per role.
 
-`status.endpoint` is the address the deployment-wide Service serves on, in the form
+Without a router, `status.endpoint` is the address the deployment-wide Service serves on, in the form
 `<scheme>://<name>.<namespace>.svc:<port>`. The scheme is read from the same role the port is — the
-first one — and is `https` only where that role passes `--ssl-certfile` or `--ssl-keyfile`.
+first one — and is `https` only where that role passes `--ssl-certfile` or `--ssl-keyfile`. With a
+router it is absent until the router is ready, then uses the router Service's own `http` transport.
+
+`status.router` publishes the contract used to render the router: its implementation and address,
+the cache pool's client endpoint, the metrics names and port, and one entry for every role containing
+the effective kind, selector, direct endpoint and any dialable KV-event endpoints. The event entries
+are absent when the corresponding rendered Pods do not carry publisher configuration.
 
 > **Why** — either flag alone is enough, and the rest of the `--ssl-*` family is not enough. Both
 > engines hand every ssl argument to uvicorn, which turns on TLS for those two and for nothing else,
@@ -449,7 +542,7 @@ That is the field's contract rather than a gap in it. The answer is read through
 per-accelerator admission gate uses, and a flavor reported here that the gate would not fit against
 would be worse than none.
 
-Four conditions carry the axes a single phase cannot. They are independent: "quota reserved but cache
+Six conditions carry the axes a single phase cannot. They are independent: "quota reserved but cache
 not attached" is a real and actionable state.
 
 **`DomainRegistered`** — whether the referenced Binding resolved and its domain was read.
@@ -608,6 +701,18 @@ reading.
 > what the engine does with a role told it is a producer, and on whether a Service's endpoints reach
 > the ready replicas. Neither is observable from this object, so this condition reports readiness by
 > kind and stops there — which is what keeps it correct however those two are later settled.
+
+**`KVEventsPublishing`** — whether every role that produces cache blocks has publisher configuration
+in its rendered Pods. It reports configuration, not live traffic: a configured publisher that later
+crashes remains `True`.
+
+| Value | Reason | Meaning |
+|---|---|---|
+| `True` | `Publishing` | every producing role is configured to publish |
+| `True` | `NotApplicable` | an unrouted deployment declares only `server` roles |
+| `False` | `PublisherDisabled` | a producing role's rendered Pods do not enable publishing |
+| `False` | `NoRouter` | a prefill/decode pair has no router to consume events |
+| `Unknown` | `RoleUnmanaged` | a producing role replaced its command line, so the operator cannot inspect what it does |
 
 ## Rollout is recreate
 
@@ -774,8 +879,10 @@ configured, so a NetworkPolicy or port reservation has to be a range rather than
 benign on a client mounting no segment of its own — which is what every replica here is.
 
 **A replica serves on port 8000** unless the role's template names its own container port. The
-Service in front of the replicas takes that port, `status.endpoint` reports it, and the engine is
-told to open it — a declared port reaches the engine's `--port` rather than only the Service.
+Service and `status.endpoint` keep that external port. On a managed native-vLLM decoder the routing
+proxy owns it and vLLM listens behind the proxy on an internal port; every other role tells the engine
+itself to open the external port. The startup, readiness and liveness probes follow the external
+listener, so a decoder becomes Ready only when the proxy can reach the engine.
 
 ### Transfer ports are runtime-selected
 
