@@ -473,11 +473,12 @@ func TestResolveModelDeploymentConnection(t *testing.T) {
 	}
 
 	testCases := []struct {
-		name     string
-		domain   *modelDeploymentDomain
-		objs     []ctrlcli.Object
-		wantNil  bool
-		wantProt string
+		name       string
+		domain     *modelDeploymentDomain
+		objs       []ctrlcli.Object
+		wantNil    bool
+		wantDomain string
+		wantProt   string
 	}{
 		{
 			name: "no reading of the binding at all", domain: nil, wantNil: true,
@@ -523,10 +524,26 @@ func TestResolveModelDeploymentConnection(t *testing.T) {
 			wantNil: true,
 		},
 		{
-			name:     "everything published",
-			domain:   &modelDeploymentDomain{Ready: true, KVCache: readyKVCache()},
-			objs:     []ctrlcli.Object{pool(nil), backend},
-			wantProt: "rdma",
+			name:       "everything published",
+			domain:     &modelDeploymentDomain{Ready: true, KVCache: readyKVCache()},
+			objs:       []ctrlcli.Object{pool(nil), backend},
+			wantDomain: "team-a",
+			wantProt:   "rdma",
+		},
+		{
+			// A ledger-less master collapses every tenant name into its default one, so the
+			// connector carries NO domain: the engines render no tenant identity, and the store
+			// serves the single tenant it has.
+			name:   "a pool whose master holds no tenant ledger",
+			domain: &modelDeploymentDomain{Ready: true, KVCache: readyKVCache()},
+			objs: []ctrlcli.Object{
+				pool(func(p *workercore.KVCachePool) {
+					KVCachePoolConditionQuotaLedgerAvailable.False(p,
+						KVCachePoolReasonMultiTenancyDisabled, "off")
+				}), backend,
+			},
+			wantDomain: "",
+			wantProt:   "rdma",
 		},
 	}
 
@@ -545,7 +562,7 @@ func TestResolveModelDeploymentConnection(t *testing.T) {
 
 			require.NotNil(t, got)
 			assert.Equal(t, "master:50051", got.MasterServerAddress)
-			assert.Equal(t, "team-a", got.Domain)
+			assert.Equal(t, tc.wantDomain, got.Domain)
 			// Already in the artifact's own spelling, lowercased and Auto-resolved by the package
 			// that owns the backend. This field is documented as arriving mapped, and nothing here
 			// maps it a second time.

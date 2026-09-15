@@ -64,14 +64,15 @@ func (r *KVCachePoolWebhook) ValidateCreate(
 	// The backend is read only when the object's own shape already names exactly one. Reading it
 	// otherwise would answer "not found" for the empty name and bury the count rule that is the
 	// actual fault.
+	var warnings ctrladmission.Warnings
 	if len(errs) == 0 {
-		errs = append(errs, r.validateKVCachePoolBackend(ctx, kvcp)...)
+		warnings, errs = r.validateKVCachePoolBackend(ctx, kvcp)
 	}
 	if len(errs) > 0 {
 		return nil, kerrors.NewInvalid(workercore.Kind("KVCachePool"), kvcp.Name, errs)
 	}
 
-	return nil, nil
+	return warnings, nil
 }
 
 func (r *KVCachePoolWebhook) ValidateUpdate(
@@ -138,23 +139,24 @@ func validateKVCachePoolSpec(kvcp *workercore.KVCachePool) field.ErrorList {
 	return errs
 }
 
-// validateKVCachePoolBackend refuses a pool whose backend cannot serve it.
+// validateKVCachePoolBackend refuses a pool whose backend cannot serve it, and warns on one that
+// serves it without a tenant ledger.
 //
-// Two questions, and they fail differently: a backend that is not there yet is a reference to fix,
-// while one running without its tenant ledger is a backend to change. The second is F5's
-// precondition — with no ledger every quota write comes back UNAVAILABLE_IN_CURRENT_MODE, and worse
-// than the failed write is what succeeds: every request falls into one default tenant, so two
-// domains read each other's blocks with nothing reporting it.
+// A backend that is not there yet is a reference to fix, and stays a refusal. A managed backend
+// declared without multi-tenancy is a single-tenant topology rather than a fault: every request
+// falls into the default tenant and no per-tenant quota can be written, which is what the warning
+// says — and the Binding webhook is what keeps such a master to exactly one reuse domain, so the
+// collision this operator once refused the pool over has no second domain to happen against.
 func (r *KVCachePoolWebhook) validateKVCachePoolBackend(
 	ctx context.Context, kvcp *workercore.KVCachePool,
-) field.ErrorList {
+) (ctrladmission.Warnings, field.ErrorList) {
 	backendPath := field.NewPath("spec", "backends").Index(0)
 
 	kvcb := &workercore.KVCacheBackend{}
 	key := ctrlcli.ObjectKey{Name: kvcp.Spec.Backends[0]}
 	if err := r.Client.Get(ctx, key, kvcb); err != nil {
 		if !kerrors.IsNotFound(err) {
-			return field.ErrorList{field.InternalError(backendPath,
+			return nil, field.ErrorList{field.InternalError(backendPath,
 				fmt.Errorf("get kv cache backend: %w", err))}
 		}
 		// The cache may simply not hold it yet — a pool created in the same breath as its backend is
@@ -166,26 +168,27 @@ func (r *KVCachePoolWebhook) validateKVCachePoolBackend(
 		// object being submitted, which is the one place an author would not look.
 		if err = r.APIReader.Get(ctx, key, kvcb, ctrlclix.WithoutQuorum); err != nil {
 			if !kerrors.IsNotFound(err) {
-				return field.ErrorList{field.InternalError(backendPath,
+				return nil, field.ErrorList{field.InternalError(backendPath,
 					fmt.Errorf("get kv cache backend: %w", err))}
 			}
-			return field.ErrorList{field.NotFound(backendPath, key.Name)}
+			return nil, field.ErrorList{field.NotFound(backendPath, key.Name)}
 		}
 	}
 
-	// Only a managed backend can be asked. An external one runs somebody else's master, and this
-	// operator does not know how that process was started — so the question is answered where it can
-	// be, by the reconciler reading the master's own 409.
+	// Only a managed backend's ledger is known at admission: this operator renders the flag onto
+	// the leader's own command line. An external one runs somebody else's master, and how that
+	// process was started is answered where it can be — by the reconciler reading the master's own
+	// 409, and by the Pod webhook refusing injection until the pool reports it.
 	managed := kvcb.Spec.Connection.Managed
 	if managed == nil || managed.Leader.MultiTenancy {
-		return nil
+		return nil, nil
 	}
 
-	return field.ErrorList{field.Invalid(backendPath, key.Name,
-		fmt.Sprintf("backend %q runs without multi-tenancy, so it holds no tenant ledger: every "+
-			`quota this pool wrote would be refused, and every request would fall into one default `+
-			`tenant where two reuse domains read each other's blocks. Set `+
-			`"spec.connection.managed.leader.multiTenancy" on that backend`, key.Name))}
+	return ctrladmission.Warnings{fmt.Sprintf(
+		"backend %q runs without multi-tenancy: it holds no tenant ledger, so no per-tenant quota "+
+			"is in force — every write falls into the default tenant, bounded only by the store's "+
+			"global capacity — and the master serves exactly one reuse domain",
+		key.Name)}, nil
 }
 
 // validateKVCachePoolImmutable freezes the reference a pool's whole identity rests on.

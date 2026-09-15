@@ -230,8 +230,9 @@ func TestPodKVCacheResolve_Refusals(t *testing.T) {
 	}
 }
 
-// TestPodKVCacheResolve_QuotaLedgerGate is F4b, and its three failing shapes get three messages
-// because they call for three different actions: change a configuration, or wait, or wait.
+// TestPodKVCacheResolve_QuotaLedgerGate is F4b. Its refusing shapes get distinct messages because
+// they call for different actions — an outage to wait out past the refusal, a wait to retry — and
+// its one admitted-besides-available shape is asserted on what it renders: no tenant identity.
 //
 // TestPodKVCacheResolve_RefusesATerminatingBinding. A Binding under deletion is still returned by
 // Get, so nothing about the read distinguishes it. The domain it names is on its way out of the
@@ -271,6 +272,9 @@ func TestPodKVCacheResolve_QuotaLedgerGate(t *testing.T) {
 		set     func(pool *workercore.KVCachePool)
 		wantErr bool
 		wantMsg string
+		// wantNoTenant asserts the renderer is handed an empty domain: the Pod is injected, but with
+		// no tenant identity — the one shape a ledger-less master serves honestly.
+		wantNoTenant bool
 	}{
 		{
 			name:    "reported available",
@@ -278,12 +282,20 @@ func TestPodKVCacheResolve_QuotaLedgerGate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "reported off",
+			name: "reported off — a declared single-tenant topology",
 			set: func(pool *workercore.KVCachePool) {
 				condition.False(pool, workerctrl.KVCachePoolReasonMultiTenancyDisabled, "off")
 			},
+			wantErr:      false,
+			wantNoTenant: true,
+		},
+		{
+			name: "reported off for another cause — an outage is not a topology",
+			set: func(pool *workercore.KVCachePool) {
+				condition.False(pool, "LedgerUnreachable", "dial timeout")
+			},
 			wantErr: true,
-			wantMsg: workerctrl.KVCachePoolReasonMultiTenancyDisabled,
+			wantMsg: "LedgerUnreachable",
 		},
 		{
 			name:    "reported unknown",
@@ -306,20 +318,30 @@ func TestPodKVCacheResolve_QuotaLedgerGate(t *testing.T) {
 			pool.Status.Conditions = nil
 			tc.set(pool)
 
-			_, err := newPodKVCacheWebhook(objs...).resolve(context.Background(), kvCachePod())
-			if !tc.wantErr {
-				require.NoError(t, err)
+			res, err := newPodKVCacheWebhook(objs...).resolve(context.Background(), kvCachePod())
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantMsg)
 				return
 			}
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tc.wantMsg)
+			require.NoError(t, err)
+			if tc.wantNoTenant {
+				assert.Empty(t, res.Input.Domain,
+					"a ledger-less master collapses every tenant name into its default one, so no "+
+						"tenant identity is rendered")
+				assert.Equal(t, "team-a-chat", res.Isolation.Domain,
+					"the stamp keeps the DECLARED domain; TenantInjected records that it was not")
+			} else {
+				assert.Equal(t, "team-a-chat", res.Input.Domain)
+			}
 		})
 	}
 }
 
-// TestPodKVCacheResolve_UnreportedAndOffAreDistinguishable. Both refuse, and a single shared message
-// would tell an operator to go and enable something that may already be enabled.
-func TestPodKVCacheResolve_UnreportedAndOffAreDistinguishable(t *testing.T) {
+// TestPodKVCacheResolve_OffIsAdmittedWhileUnreportedStillWaits pins the two answers that look alike
+// on the condition and are opposites at the gate: a master observed to hold no ledger is a topology
+// the Pod joins without a tenant, while a pool that has not said yet is a wait that refuses.
+func TestPodKVCacheResolve_OffIsAdmittedWhileUnreportedStillWaits(t *testing.T) {
 	condition := workerctrl.KVCachePoolConditionQuotaLedgerAvailable
 
 	off := kvCacheFixture()
@@ -333,10 +355,11 @@ func TestPodKVCacheResolve_UnreportedAndOffAreDistinguishable(t *testing.T) {
 	_, offErr := newPodKVCacheWebhook(off...).resolve(context.Background(), kvCachePod())
 	_, unreportedErr := newPodKVCacheWebhook(unreported...).resolve(context.Background(), kvCachePod())
 
-	require.Error(t, offErr)
+	require.NoError(t, offErr,
+		"reported-off is a declared single-tenant topology: injected, without a tenant identity")
 	require.Error(t, unreportedErr)
-	assert.NotEqual(t, offErr.Error(), unreportedErr.Error(),
-		"reported-off is a configuration to change and not-yet-reported is a wait")
+	assert.Contains(t, unreportedErr.Error(), "does not report",
+		"not-yet-reported is a wait, and a wait is a refusal at a mutating webhook")
 }
 
 // TestPodKVCacheResolve_InfrastructureErrorIsNotReportedAsNotFound is the reason every read here

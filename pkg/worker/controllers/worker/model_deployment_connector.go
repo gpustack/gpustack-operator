@@ -43,9 +43,10 @@ type ModelDeploymentConnectorInput struct {
 	// has not converged.
 	Manufacturer string
 
-	// Domain is the reuse identity the Binding declares. It is passed through to the shared renderer,
-	// which always emits a non-empty value. Whether the engine build reads it is the image owner's
-	// compatibility responsibility.
+	// Domain is the reuse identity the Binding declares — or empty, when the pool's master holds no
+	// tenant ledger to keep it apart in: a ledger-less master is handed no tenant at all rather than
+	// one it would collapse into its default. Whether the engine build reads a rendered value is the
+	// image owner's compatibility responsibility.
 	Domain string
 
 	// MasterServerAddress is the address of the store master, observed from the pool.

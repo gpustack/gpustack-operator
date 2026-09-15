@@ -116,7 +116,7 @@ func (s TenantSample) Occupancy() (bytes *int64, inflight bool) {
 }
 
 // TenantQuotaMetrics is one scrape of the tenant surface: every tenant the document mentioned, plus
-// the master's three global gauges.
+// the master's global gauges.
 //
 // It is ONE document for the whole pool. A pass reads it once and every Binding takes its own
 // tenant's series out of it, which is what keeps the request count independent of the Binding count.
@@ -135,6 +135,11 @@ type TenantQuotaMetrics struct {
 	// which is what a pool under pressure looks like.
 	RequestedBytesSum *int64
 	EffectiveBytesSum *int64
+
+	// TotalCapacityBytes is the master-wide capacity gauge, read out of the same exposition. Unlike
+	// AllocatableCapacityBytes it is emitted whether or not the tenant subsystem runs, so on a master
+	// with no tenant ledger it is the only capacity figure there is.
+	TotalCapacityBytes *int64
 }
 
 // Tenant returns one tenant's figures and whether the document carried that tenant at all.
@@ -180,6 +185,7 @@ func DecodeTenantQuotaMetrics(body []byte) (TenantQuotaMetrics, error) {
 		metricTenantAllocatableCapacityBytes: &metrics.AllocatableCapacityBytes,
 		metricTenantRequestedBytesSum:        &metrics.RequestedBytesSum,
 		metricTenantEffectiveBytesSum:        &metrics.EffectiveBytesSum,
+		metricTotalCapacityBytes:             &metrics.TotalCapacityBytes,
 	}
 
 	for _, line := range strings.Split(string(body), "\n") {

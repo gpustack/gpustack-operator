@@ -226,6 +226,21 @@ func TestDecodeTenantQuotaMetrics_AFamilyThatNeverFiredIsAbsentToo(t *testing.T)
 	assert.Nil(t, got.AllocatableCapacityBytes, "and neither does a global gauge that was not there")
 }
 
+// TestDecodeTenantQuotaMetrics_TheMasterWideGaugeIsReadToo covers the master whose exposition
+// carries no tenant-quota series at all: multi-tenancy off emits only the master-wide families, and
+// the capacity the pool then reports comes off master_total_capacity_bytes.
+func TestDecodeTenantQuotaMetrics_TheMasterWideGaugeIsReadToo(t *testing.T) {
+	got, err := DecodeTenantQuotaMetrics([]byte(
+		"master_total_capacity_bytes 2147483648\nmaster_allocated_bytes 0\n"))
+	require.NoError(t, err)
+
+	require.NotNil(t, got.TotalCapacityBytes)
+	assert.Equal(t, int64(2147483648), *got.TotalCapacityBytes)
+	assert.Nil(t, got.AllocatableCapacityBytes,
+		"the tenant-quota gauge stays absent — it is what says this master has no ledger")
+	assert.Empty(t, got.Tenants)
+}
+
 // TestDecodeTenantQuotaMetrics_MalformedIsAnErrorNotAPartialSampleSet is why this parser is stricter
 // than the capacity one. It is line-oriented, so a body cut mid-stream yields every series before
 // the cut — and publishing that prefix would report a tenant that sat after the cut as ABSENT, which

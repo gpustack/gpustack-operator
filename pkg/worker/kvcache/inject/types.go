@@ -151,8 +151,10 @@ type Input struct {
 	// Role is the prefill/decode role, RoleNone when the caller declared none.
 	Role Role
 
-	// Domain is the reuse domain the Binding declared. Every renderer emits a non-empty value; there
-	// is no engine-version check because this path does not inspect the container image.
+	// Domain is the reuse domain the Binding declared. A non-empty value is emitted by every engine
+	// that carries a tenant identity; an empty one — a master that holds no tenant ledger — renders
+	// no tenant at all. There is no engine-version check because this path does not inspect the
+	// container image.
 	Domain string
 
 	// Connection is what the pool and its backend published.

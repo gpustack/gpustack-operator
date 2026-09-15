@@ -336,8 +336,17 @@ func (r *ModelDeploymentReconciler) resolveModelDeploymentConnection(
 		return nil, fmt.Errorf("getting kv cache backend %q: %w", pool.Spec.Backends[0], err)
 	}
 
+	tenant := domain.KVCache.Domain.Name
+	if !KVCacheMasterSeparatesTenants(kvcb, pool) {
+		// A ledger-less master collapses every tenant name into its default one, so the deployment
+		// is rendered WITHOUT the domain rather than with an identity the store cannot honor. The
+		// status projection keeps the declared name either way — it is the record of what was asked
+		// for, and the conditions on the pool say why it is not forwarded.
+		tenant = ""
+	}
+
 	return &ModelDeploymentConnectorInput{
-		Domain:              domain.KVCache.Domain.Name,
+		Domain:              tenant,
 		MasterServerAddress: pool.Status.ClientEndpoint,
 		// Through the one function that owns this mapping, never by reading Spec.Transport.Protocol
 		// here. It resolves Auto and falls back to Auto for an empty value, and a second reader
