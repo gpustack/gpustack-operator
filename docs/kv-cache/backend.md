@@ -4,7 +4,7 @@
 > three things that surprise operators: capacity is observed rather than derived, shrinking a group
 > discards the cache that member held, and a member group's identity is its position in a list.
 > **Audience** operators, contributors · **Prerequisites** [Architecture](../architecture.md) ·
-> **Read time** ~13 min
+> **Read time** ~14 min
 
 A `KVCacheBackend` declares a pooled KV cache for inference workloads. The operator runs a **leader**
 (one metadata process) and a **member** group (one store process per selected node), then reports what
@@ -185,6 +185,37 @@ tag by the same rule the API server would have applied** — `Always` for `:late
 > [high availability](leader.md#high-availability) renders carry no registry credentials either — they grant
 > Lease access and nothing else — so without these fields no image here could come from a private
 > registry at all.
+
+### The store version must match the engine's client
+
+**A store and an engine-embedded Mooncake client interoperate only within one minor line.** The
+criterion is the RPC wire signature, not the version string: the handshake answers `2.0.0` for every
+0.3.x release, so a mismatched pair is not refused at startup — every probe reads green, and the
+first write fails at transfer time. Measured: a 0.3.13.post1 store against a 0.3.10.post2 client
+starts fully healthy and then fails every write with `RPC_FAIL (-900)`.
+
+| pair | interoperates | basis |
+|---|---|---|
+| identical release (0.3.10.post2 ↔ 0.3.10.post2) | yes | measured end to end |
+| same minor, different post (0.3.12 ↔ 0.3.12.post1) | yes | RPC signatures unchanged between the two tags; the risk is confined to a method only the newer side knows |
+| 0.3.10 ↔ 0.3.13 | no | measured, above |
+| 0.3.11 ↔ 0.3.12 | no | 0.3.12 adds `tenant_id` to `GetReplicaList` and its batch form |
+| 0.3.12 ↔ 0.3.13 | no | 0.3.13 replaces the key string with a new `ObjectMeta` struct in `PutEnd`/`UpsertEnd` and extends `GetReplicaListResponse`; the method names are unchanged, so the client reaches the handler and mis-decodes the arguments |
+
+Multi-tenancy moves none of these lines. With it off — the master's own default — every request
+resolves to the default tenant and no write is refused, and the cross-minor failures above were all
+measured with it off.
+
+**The client's version is a property of the engine image, not of anything on this CR.** Current
+runner builds (vLLM 0.25.1, 0.27.1) embed mooncake-transfer-engine **0.3.10.post2**, so a backend
+serving them names `spec.image` with the 0.3.10-line build — the [default](../settings.md) is on
+the 0.3.13 line and fails them as measured above. Direct P/D transfer (`MooncakeConnector`, no
+`spec.kvCache`) is engine to engine and exempt from this matching.
+
+Two boundaries, recorded so nobody rediscovers them: upstream has **no 0.3.12.post2** — the 0.3.12
+line ends at 0.3.12.post1 — and nothing older than 0.3.10 is built or exercised by this project.
+High availability carries its own per-version rule — the k8s-lease backend exists only from
+0.3.11 — see [High availability](leader.md#high-availability).
 
 ## The metadata plane
 
