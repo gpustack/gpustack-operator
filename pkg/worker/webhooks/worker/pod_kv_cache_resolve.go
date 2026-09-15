@@ -50,7 +50,7 @@ func (r *PodKVCacheWebhook) resolve(ctx context.Context, pod *core.Pod) (*resolu
 
 	// The message says what refusing this key does and does not buy, because the shape invites the
 	// stronger reading. "The store accepts whatever tenant a client sends" was the earlier wording
-	// and it is wrong HERE: injection only proceeds against a master reporting a tenant ledger
+	// and it is wrong HERE: a tenant is forwarded only against a master reporting a tenant ledger
 	// (checkQuotaLedger), and such a master refuses a name absent from it. Overstating the store's
 	// permissiveness and overstating the Binding's authority are the same error in two directions.
 	if _, ok := pod.Annotations[KVCacheDomainAnnotationKey]; ok {
@@ -98,12 +98,14 @@ func (r *PodKVCacheWebhook) resolve(ctx context.Context, pod *core.Pod) (*resolu
 	}
 
 	return &resolution{
-		// The reuse domain always goes to the renderer. Engine compatibility is the image owner's
-		// responsibility and is never a reason to refuse the Pod.
+		// The reuse domain goes to the renderer only while the master can hold it apart: a master
+		// with no tenant ledger collapses every tenant name into its default one, so forwarding the
+		// domain would claim an isolation the store does not deliver. The stamp below keeps the
+		// DECLARED domain either way, and TenantInjected records which of the two happened.
 		Input: inject.Input{
 			Engine: engine,
 			Role:   role,
-			Domain: binding.Spec.Domain.Name,
+			Domain: injectableDomain(binding, backend, pool),
 			Connection: inject.Connection{
 				MasterAddress: pool.Status.ClientEndpoint,
 				Protocol:      mooncake.MemberProtocol(backend),
@@ -113,6 +115,20 @@ func (r *PodKVCacheWebhook) resolve(ctx context.Context, pod *core.Pod) (*resolu
 			Domain: binding.Spec.Domain.Name,
 		},
 	}, nil
+}
+
+// injectableDomain is the reuse domain a Pod is configured with: the Binding's own name while the
+// master separates tenants, and empty when it does not — an empty domain renders no tenant identity
+// at all, which is the only configuration a ledger-less master can serve honestly.
+func injectableDomain(
+	binding *workercore.KVCachePoolBinding,
+	backend *workercore.KVCacheBackend,
+	pool *workercore.KVCachePool,
+) string {
+	if !workerctrl.KVCacheMasterSeparatesTenants(backend, pool) {
+		return ""
+	}
+	return binding.Spec.Domain.Name
 }
 
 // resolveManufacturer selects the one vLLM runtime variant whose connector differs. This affects
@@ -171,8 +187,10 @@ func (r *PodKVCacheWebhook) resolveBinding(
 	// degradation is the wrong direction.
 	//
 	// The division of labor that follows: PERMANENT loss is refused, TEMPORARY non-convergence is
-	// admitted and left to heal. F4b is the permanent side - a pool whose ledger is gone stays gone
-	// until somebody acts, and no amount of waiting fixes it.
+	// admitted and left to heal. F4b is the permanent side - a pool whose ledger cannot be answered
+	// for stays that way until somebody acts, and no amount of waiting fixes it. The one answer that
+	// is neither permanent nor temporary - a master observed to hold no ledger at all - is a declared
+	// topology rather than a loss, and is admitted without a tenant identity.
 	//
 	// Read live rather than through r.get. That helper falls back to the APIReader only on NotFound, so
 	// it repairs a cache that is missing an object but not one that is holding a stale copy of it - and
@@ -251,15 +269,21 @@ func (r *PodKVCacheWebhook) resolveBackend(
 	return backend, nil
 }
 
-// checkQuotaLedger is F4b: refuse a pool whose master holds no tenant ledger.
+// checkQuotaLedger is F4b: a pool whose master cannot answer for its tenant ledger keeps new Pods
+// off it, while a pool whose master is DECLARED or OBSERVED to hold none is joined without a
+// tenant identity.
 //
-// The three failing shapes get three messages, because they call for different actions. Reported off
-// is a configuration to change; not reported yet is a wait; Unknown is also a wait, and treating it as
-// "on" would be reading an admission of ignorance as an answer.
+// The two False answers are split because they call for opposite actions. MultiTenancyDisabled is
+// a configuration fact — a single-tenant topology, which the master serves honestly once no
+// tenant is forwarded — so the Pod proceeds and the renderer drops the domain. Every other False
+// is a master that should hold a ledger and did not answer: injecting there would turn one master
+// outage into silent, unisolated writes, so it stays a refusal. Absent and Unknown are waits, and
+// treating either as "on" would be reading an admission of ignorance as an answer.
 //
-// This gate stays a refusal where F4a became a stamp, and the difference is whose action introduced the
-// fault: the pool is the thing the Pod asked to join, and its answer is observed continuously by a
-// controller rather than inferred from an upstream version.
+// The MultiTenancyDisabled branch stamps rather than refuses because the degradation this gate
+// once stood against is refused earlier now: turning multi-tenancy off under a claimed backend is
+// forbidden at backend admission, so a ledger-less pool met here is a topology its operator
+// declared, not a fault that crept in.
 func (r *PodKVCacheWebhook) checkQuotaLedger(pool *workercore.KVCachePool) error {
 	condition := workerctrl.KVCachePoolConditionQuotaLedgerAvailable
 
@@ -271,12 +295,12 @@ func (r *PodKVCacheWebhook) checkQuotaLedger(pool *workercore.KVCachePool) error
 	case condition.IsUnknown(pool):
 		return fmt.Errorf("pool %q reports %s as Unknown, which is a wait rather than an answer; "+
 			"retry once it settles", pool.Name, condition)
-	case condition.IsFalse(pool):
+	case condition.IsFalse(pool) &&
+		condition.GetReason(pool) != workerctrl.KVCachePoolReasonMultiTenancyDisabled:
 		// The controller's own message is carried through rather than restated. False has more than
-		// one cause: MultiTenancyDisabled is a configuration fact, LedgerUnreachable is the master
-		// being temporarily unreachable. An error asserting "its master holds no tenant ledger" sends
-		// an operator to reconfigure multi-tenancy during what may be an outage - and a message
-		// naming the wrong cause is worse than one naming none.
+		// one cause, and an error asserting "its master holds no tenant ledger" sends an operator to
+		// reconfigure multi-tenancy during what may be an outage - a message naming the wrong cause
+		// is worse than one naming none.
 		return fmt.Errorf("pool %q reports %s as False (%s): %s",
 			pool.Name, condition, condition.GetReason(pool), condition.GetMessage(pool))
 	}

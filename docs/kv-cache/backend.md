@@ -4,7 +4,7 @@
 > three things that surprise operators: capacity is observed rather than derived, shrinking a group
 > discards the cache that member held, and a member group's identity is its position in a list.
 > **Audience** operators, contributors · **Prerequisites** [Architecture](../architecture.md) ·
-> **Read time** ~13 min
+> **Read time** ~14 min
 
 A `KVCacheBackend` declares a pooled KV cache for inference workloads. The operator runs a **leader**
 (one metadata process) and a **member** group (one store process per selected node), then reports what
@@ -45,6 +45,10 @@ spec:
           medium: DRAM               # the one value: what this group's SEGMENT is made of
           capacityPerMember: 4Gi
 ```
+
+⚠️ The example's `0.3.13` tag is on the wrong minor line for current runner builds — pin `spec.image`
+per [The store version must match the engine's
+client](#the-store-version-must-match-the-engines-client) before copying it.
 
 `connection.managed` and `connection.external` are both optional pointers and **exactly one** must be
 set; neither and both are refused at admission with a message naming the two. Several member groups
@@ -112,8 +116,9 @@ several pools, which is the only reason a backend and a quota domain are separat
 
 **`spec.image` is explicit and never derived from the operator's own image**, which breaks
 deliberately with how the Device Manager image is derived from the worker image. Leave it unset and
-the cluster-wide `kv-cache-backend-image` Setting supplies it; unset in both places is refused at
-admission, naming both.
+the cluster-wide `kv-cache-backend-image` Setting supplies it. That Setting ships a default, so a
+backend naming no image runs this project's own build; unset in both places — which takes an
+administrator clearing the Setting — is refused at admission, naming both.
 
 **Clearing that Setting later does not strand a backend admitted under it.** Admission re-asks for a
 fallback only when an update moves `spec.image` itself. Every other update is admitted whatever the
@@ -161,11 +166,15 @@ that cannot.
 > needs a versioned `cudaFreeHost` from a real runtime. An image carrying two stubs runs the master and
 > fails every member.
 
-**That split is also why the `kv-cache-backend-image` Setting ships blank**, rather than pinned to the
-image above. One value would have to be right for every backend in the cluster at once, and which
-build a member needs depends on the transport its backend asks for and the hardware its group selects.
-Unset, a mismatch is an admission refusal naming both places to fix; defaulted, it is a loader error
-at runtime.
+**That split is what the `kv-cache-backend-image` default cannot cover.** Its value is this project's
+own CPU build, carrying TCP and EFA over DRAM, and one value cannot be right for every backend at
+once: which build a member needs depends on the transport its backend asks for and the hardware its
+group selects. A backend on a vendor fabric names its `spec.image`, which always wins over the
+Setting.
+
+The failure mode moved with the default, and that is what having one costs. Blank made a mismatch an
+admission refusal naming both places to fix; a default makes a wrong image a loader error at runtime,
+which is quieter and further from whoever can fix it. Clearing the Setting restores the refusal.
 
 **A private registry needs `spec.imagePullSecrets`**, and an explicit policy needs
 `spec.imagePullPolicy`. Both are backend-wide: they apply to the leader and to every member group,
@@ -180,6 +189,37 @@ tag by the same rule the API server would have applied** — `Always` for `:late
 > [high availability](leader.md#high-availability) renders carry no registry credentials either — they grant
 > Lease access and nothing else — so without these fields no image here could come from a private
 > registry at all.
+
+### The store version must match the engine's client
+
+**A store and an engine-embedded Mooncake client interoperate only within one minor line.** The
+criterion is the RPC wire signature, not the version string: the handshake answers `2.0.0` for every
+0.3.x release, so a mismatched pair is not refused at startup — every probe reads green, and the
+first write fails at transfer time. Measured: a 0.3.13.post1 store against a 0.3.10.post2 client
+starts fully healthy and then fails every write with `RPC_FAIL (-900)`.
+
+| pair | interoperates | basis |
+|---|---|---|
+| identical release (0.3.10.post2 ↔ 0.3.10.post2) | yes | measured end to end |
+| same minor, different post (0.3.12 ↔ 0.3.12.post1) | yes | RPC signatures unchanged between the two tags; the risk is confined to a method only the newer side knows |
+| 0.3.10 ↔ 0.3.13 | no | measured, above |
+| 0.3.11 ↔ 0.3.12 | no | 0.3.12 adds `tenant_id` to `GetReplicaList` and its batch form |
+| 0.3.12 ↔ 0.3.13 | no | 0.3.13 replaces the key string with a new `ObjectMeta` struct in `PutEnd`/`UpsertEnd` and extends `GetReplicaListResponse`; the method names are unchanged, so the client reaches the handler and mis-decodes the arguments |
+
+Multi-tenancy moves none of these lines. With it off — the master's own default — every request
+resolves to the default tenant and no write is refused, and the cross-minor failures above were all
+measured with it off.
+
+**The client's version is a property of the engine image, not of anything on this CR.** Current
+runner builds (vLLM 0.25.1, 0.27.1) embed mooncake-transfer-engine **0.3.10.post2**, so a backend
+serving them names `spec.image` with the 0.3.10-line build — the [default](../settings.md) is on
+the 0.3.13 line and fails them as measured above. Direct P/D transfer (`MooncakeConnector`, no
+`spec.kvCache`) is engine to engine and exempt from this matching.
+
+Two boundaries, recorded so nobody rediscovers them: upstream has **no 0.3.12.post2** — the 0.3.12
+line ends at 0.3.12.post1 — and nothing older than 0.3.10 is built or exercised by this project.
+High availability carries its own per-version rule — the k8s-lease backend exists only from
+0.3.11 — see [High availability](leader.md#high-availability).
 
 ## The metadata plane
 

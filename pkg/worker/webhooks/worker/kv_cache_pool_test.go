@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -115,12 +116,6 @@ func TestKVCachePoolWebhook_ValidateCreate(t *testing.T) {
 			wantMsg: `spec.backends[0]: Not found: "absent"`,
 		},
 		{
-			name:    "a backend running without its tenant ledger",
-			objs:    []ctrlcli.Object{newKVCacheBackend()},
-			mutate:  func(*workercore.KVCachePool) {},
-			wantMsg: "runs without multi-tenancy",
-		},
-		{
 			// An external backend is somebody else's master, started by somebody else's command
 			// line. Admission cannot know whether the ledger is on, so it does not pretend to: the
 			// reconciler reads the master's own 409 and reports it, which is the check that holds
@@ -161,6 +156,23 @@ func TestKVCachePoolWebhook_ValidateCreate(t *testing.T) {
 		_, err := wh.ValidateCreate(context.Background(), newKvcp)
 		return err
 	})
+}
+
+// TestKVCachePoolWebhook_ValidateCreate_SingleTenantBackendWarns pins the middle ground between the
+// two refusals: a managed backend declared without multi-tenancy is ADMITTED, because a single-tenant
+// store is a topology rather than a broken one — and the admission says what the shape costs, because
+// "no per-tenant quota is in force" is not something the object itself can say.
+func TestKVCachePoolWebhook_ValidateCreate_SingleTenantBackendWarns(t *testing.T) {
+	wh := newKVCachePoolWebhook(newKVCacheBackend())
+
+	warnings, err := wh.ValidateCreate(context.Background(), newKVCachePool())
+
+	require.NoError(t, err, "a ledger-less master is a declared single-tenant topology, not a fault")
+	require.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0], "runs without multi-tenancy")
+	assert.Contains(t, warnings[0], "no per-tenant quota")
+	assert.Contains(t, warnings[0], "exactly one reuse domain",
+		"the warning carries the one isolation consequence the object cannot: one domain per master")
 }
 
 // TestKVCachePoolWebhook_ValidateUpdate covers what an update may and may not move.

@@ -36,6 +36,8 @@ locals {
         public_ip  = var.cpu_instance_types.public_ip
         node_count = var.cpu_node_count
         gpu        = null
+        # The CPU group pulls no engine images, so it never outgrows the module-wide default.
+        boot_disk_size_gb = null
       }
     },
     {
@@ -59,6 +61,8 @@ locals {
         # and the tests that need several nodes need plain ones, which is what cpu_node_count buys.
         node_count = 1
         gpu        = { drivers_preset = coalesce(cfg.drivers_preset, data.external.gpu_compat[name].result.drivers_preset) }
+        # Null falls through to var.node_boot_disk_size_gb in the boot_disk block below.
+        boot_disk_size_gb = cfg.boot_disk_size_gb
       }
     },
   )
@@ -271,7 +275,7 @@ resource "nebius_mk8s_v1_node_group" "this" {
 
     boot_disk = {
       type           = var.node_boot_disk_type
-      size_gibibytes = var.node_boot_disk_size_gb
+      size_gibibytes = coalesce(each.value.boot_disk_size_gb, var.node_boot_disk_size_gb)
     }
 
     network_interfaces = [{

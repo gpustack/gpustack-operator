@@ -24,6 +24,7 @@ webhooks may write too.
 - [Reading the injection record](#reading-the-injection-record)
 - [vLLM-Ascend requires the `ascend` transport](#vllm-ascend-requires-the-ascend-transport)
 - [What a cache changes about a workload](#what-a-cache-changes-about-a-workload)
+- [What it leaves alone, and one flag that replaces it](#what-it-leaves-alone-and-one-flag-that-replaces-it)
 
 ## The contract
 
@@ -345,7 +346,31 @@ E transfer_metadata.cpp:991] Local segment descriptor not found
 The projected client configuration is readable by anyone who can read the Pod. It carries addresses, a
 protocol and a domain name, and no credential.
 
+## What it leaves alone, and one flag that replaces it
+
+**Injection does not touch the engine's own prefix caching, and switching that off is not a
+workaround for anything.** vLLM's `enable_prefix_caching` defaults on and reuses blocks in GPU HBM;
+SGLang's radix cache does the same.
+
+What the transfer engine registers is that SAME memory, so the network card can map it. Nothing is
+copied and nothing is allocated twice, so the two are not competing — disabling prefix caching buys
+no memory back and loses the engine's own reuse.
+
+Host DRAM is where an overlap could happen, and neither engine puts KV there unless asked. vLLM's
+`--swap-space` is deprecated and ignored, and `kv_offloading_size` defaults off; SGLang's host tier
+needs `--enable-hierarchical-cache`, which is off. This injection renders none of the three, so the
+only host DRAM it adds is the staging buffer above.
+
+> **NEVER set `kv_offloading_size` on a container this injects into.** Setting it makes vLLM
+> overwrite `kv_connector` with `OffloadingConnector` — unconditionally, with no conflict check,
+> because `kv_connector` holds one value. The connector this operator rendered is simply gone.
+>
+> The container then starts, serves, and uses no shared cache, with nothing in it saying so. The two
+> are alternative second-tier caches — one on the node's own DRAM, one on the cluster's pool — so
+> choose between them rather than configuring both.
+
 ---
+
 
 **See also** — [KV Cache Pool](../kv-cache/pool.md) (the grant and the reuse domain this page consumes) ·
 [KV Cache Backend](../kv-cache/backend.md) (the store the pool draws from) ·

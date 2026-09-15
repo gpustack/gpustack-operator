@@ -5584,16 +5584,18 @@ func (m *ModelDeploymentSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 			dAtA[i] = 0x22
 		}
 	}
-	{
-		size, err := m.KVCache.MarshalToSizedBuffer(dAtA[:i])
-		if err != nil {
-			return 0, err
+	if m.KVCache != nil {
+		{
+			size, err := m.KVCache.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
 		}
-		i -= size
-		i = encodeVarintGenerated(dAtA, i, uint64(size))
+		i--
+		dAtA[i] = 0x1a
 	}
-	i--
-	dAtA[i] = 0x1a
 	i -= len(m.Engine)
 	copy(dAtA[i:], m.Engine)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Engine)))
@@ -7751,8 +7753,10 @@ func (m *ModelDeploymentSpec) Size() (n int) {
 	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.Engine)
 	n += 1 + l + sovGenerated(uint64(l))
-	l = m.KVCache.Size()
-	n += 1 + l + sovGenerated(uint64(l))
+	if m.KVCache != nil {
+		l = m.KVCache.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
 	if len(m.Roles) > 0 {
 		for _, e := range m.Roles {
 			l = e.Size()
@@ -9389,7 +9393,7 @@ func (this *ModelDeploymentSpec) String() string {
 	s := strings.Join([]string{`&ModelDeploymentSpec{`,
 		`Model:` + strings.Replace(strings.Replace(this.Model.String(), "ModelDeploymentModel", "ModelDeploymentModel", 1), `&`, ``, 1) + `,`,
 		`Engine:` + fmt.Sprintf("%v", this.Engine) + `,`,
-		`KVCache:` + strings.Replace(strings.Replace(this.KVCache.String(), "ModelDeploymentKVCache", "ModelDeploymentKVCache", 1), `&`, ``, 1) + `,`,
+		`KVCache:` + strings.Replace(this.KVCache.String(), "ModelDeploymentKVCache", "ModelDeploymentKVCache", 1) + `,`,
 		`Roles:` + repeatedStringForRoles + `,`,
 		`EngineVersion:` + fmt.Sprintf("%v", this.EngineVersion) + `,`,
 		`Router:` + strings.Replace(this.Router.String(), "ModelDeploymentRouter", "ModelDeploymentRouter", 1) + `,`,
@@ -26967,6 +26971,9 @@ func (m *ModelDeploymentSpec) Unmarshal(dAtA []byte) error {
 			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
+			}
+			if m.KVCache == nil {
+				m.KVCache = &ModelDeploymentKVCache{}
 			}
 			if err := m.KVCache.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err

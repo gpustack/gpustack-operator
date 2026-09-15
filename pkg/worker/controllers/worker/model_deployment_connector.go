@@ -43,9 +43,10 @@ type ModelDeploymentConnectorInput struct {
 	// has not converged.
 	Manufacturer string
 
-	// Domain is the reuse identity the Binding declares. It is passed through to the shared renderer,
-	// which always emits a non-empty value. Whether the engine build reads it is the image owner's
-	// compatibility responsibility.
+	// Domain is the reuse identity the Binding declares — or empty, when the pool's master holds no
+	// tenant ledger to keep it apart in: a ledger-less master is handed no tenant at all rather than
+	// one it would collapse into its default. Whether the engine build reads a rendered value is the
+	// image owner's compatibility responsibility.
 	Domain string
 
 	// MasterServerAddress is the address of the store master, observed from the pool.
@@ -61,6 +62,16 @@ type ModelDeploymentConnectorInput struct {
 	// also pointless, and a third implementation of one table is a place for the next transport to
 	// be added in two of three.
 	Protocol string
+
+	// PublishKVEvents is true for a routed role that produces cache blocks.
+	PublishKVEvents bool
+
+	// KVEventsHost is the role Service hostname a consumer dials instead of the publisher's wildcard
+	// bind address.
+	KVEventsHost string
+
+	// DirectTransfer composes point-to-point P/D transfer with the shared store.
+	DirectTransfer bool
 }
 
 // TWO FIELDS THIS STRUCT USED TO CARRY ARE GONE, and neither is a capability that was lost.
@@ -109,6 +120,40 @@ type ModelDeploymentConnectorRender struct {
 	// PodSpec byte-identical while the contents changed -- the replicas would keep a stale
 	// configuration and a check on the hash would go green over it.
 	PodAnnotations map[string]string
+
+	// Ports are additional ports opened by the synthesized connector configuration.
+	Ports []core.ContainerPort
+
+	// KVEvents is the rendered, dialable event contract, absent when this role does not publish.
+	KVEvents *inject.KVEvents
+
+	// DirectTransfer is true when Args include the point-to-point P/D connector.
+	DirectTransfer bool
+}
+
+// modelDeploymentRoutesManagedVLLM is the gate both connector decisions share: the managed llm-d
+// router in front of a vLLM engine, off Ascend. It exists so the two predicates below cannot drift
+// apart on the dimensions they agree on -- with only one router name admitted today the router-name
+// clause looks redundant, and it is exactly the clause a second router name would silently inherit.
+//
+// Ascend is excluded because the Ascend render knows only the store connector: asked to publish
+// events it refuses, and a refused render is an error loop, not a deployment without events.
+func modelDeploymentRoutesManagedVLLM(md *workercore.ModelDeployment, manufacturer string) bool {
+	return md.Spec.Router != nil && md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
+		md.Spec.Engine == workercore.ModelDeploymentEngineVLLM &&
+		manufacturer != nodefeature.ManufacturerAscend
+}
+
+func modelDeploymentUsesDirectTransfer(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
+) bool {
+	if !modelDeploymentRoutesManagedVLLM(md, manufacturer) {
+		return false
+	}
+
+	kind := ModelDeploymentEffectiveRoleKind(role)
+	return kind == workercore.ModelDeploymentRoleKindPrefill ||
+		kind == workercore.ModelDeploymentRoleKindDecode
 }
 
 // THE SIZE AND TOPOLOGY CONSTANTS ARE `inject`'S, not redeclared here: `GlobalSegmentSize`,
@@ -134,8 +179,8 @@ var modelDeploymentOwnedKeys = map[string]struct {
 	// its value was IDENTICAL to this one, because the owned keys follow the engine while only the
 	// connector name follows the backend.
 	workercore.ModelDeploymentEngineVLLM: {
-		Args: []string{"--kv-transfer-config"},
-		Env:  []string{"MOONCAKE_CONFIG_PATH"},
+		Args: []string{"--kv-transfer-config", "--kv-events-config"},
+		Env:  []string{"MOONCAKE_CONFIG_PATH", "VLLM_MOONCAKE_BOOTSTRAP_PORT"},
 	},
 	// SGLang is configured through the environment, so its owned set covers both the variables it
 	// actually reads AND the two keys that would divert it onto a different loader. Ownership here
@@ -250,6 +295,9 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 			MasterAddress: in.MasterServerAddress,
 			Protocol:      in.Protocol,
 		},
+		PublishKVEvents: in.PublishKVEvents,
+		KVEventsHost:    in.KVEventsHost,
+		DirectTransfer:  in.DirectTransfer,
 	})
 	if err != nil {
 		return ModelDeploymentConnectorRender{}, err
@@ -266,6 +314,9 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		Volumes:        res.Volumes,
 		VolumeMounts:   res.VolumeMounts,
 		PodAnnotations: res.PodAnnotations,
+		Ports:          res.Ports,
+		KVEvents:       res.KVEvents,
+		DirectTransfer: res.DirectTransfer,
 	}, nil
 }
 
@@ -311,6 +362,14 @@ func ModelDeploymentEffectiveRoleKind(
 	}
 
 	return role.Kind
+}
+
+func modelDeploymentPublishesKVEvents(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
+) bool {
+	return modelDeploymentRoutesManagedVLLM(md, manufacturer) &&
+		(role.Template == nil || len(role.Template.Command) == 0) &&
+		ModelDeploymentEffectiveRoleKind(role) != workercore.ModelDeploymentRoleKindDecode
 }
 
 // modelDeploymentInjectRole maps this API's role kind onto the renderer's role.

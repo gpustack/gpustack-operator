@@ -126,6 +126,31 @@ const (
 	KVCachePoolReasonQuotaPolicyNotWritable = "QuotaPolicyNotWritable"
 )
 
+// KVCacheMasterSeparatesTenants reports whether the master serving a pool can hold two reuse
+// domains apart. It is the renderer's question: a master that cannot separates no tenant names, so
+// forwarding one would claim an isolation the store does not deliver.
+//
+// The OBSERVATION answers first — the pool's QuotaLedgerAvailable condition, which the reconciler
+// writes from the master's own responses and which therefore covers an external master this
+// operator never started. True separates; False with reason MultiTenancyDisabled does not. Every
+// other reading (absent, Unknown, False for another cause) is no answer, and then the DECLARATION
+// answers for a managed backend — exact, because this operator renders that flag onto the leader's
+// own command line — while an unreadable external one keeps the tenant, matching the gates that
+// hold a Pod off such a pool until it reports.
+func KVCacheMasterSeparatesTenants(kvcb *workercore.KVCacheBackend, kvcp *workercore.KVCachePool) bool {
+	condition := KVCachePoolConditionQuotaLedgerAvailable
+	switch {
+	case condition.IsTrue(kvcp):
+		return true
+	case condition.IsFalse(kvcp) && condition.GetReason(kvcp) == KVCachePoolReasonMultiTenancyDisabled:
+		return false
+	}
+	if managed := kvcb.Spec.Connection.Managed; managed != nil {
+		return managed.Leader.MultiTenancy
+	}
+	return true
+}
+
 // The two reasons a pool's release is held.
 const (
 	// KVCachePoolReasonHeldByBindings is a grant that has not been withdrawn: releasing under a
@@ -282,7 +307,7 @@ func (r *KVCachePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	admin := &mooncake.AdminClient{Address: adminAddress, HTTP: r.AdminHTTP}
-	ledger := r.convergeTenantLedger(ctx, admin, master, holder)
+	ledger := r.convergeTenantLedger(ctx, kvcb, admin, master, holder)
 	observeKVCachePoolUsage(holder, ledger)
 
 	// A domain the master REFUSED to drop goes back into the seed, and this second render is what puts
@@ -940,21 +965,44 @@ func alignQuotaPolicyConfigMapFn(
 // one is what keeps an external master's own tenants — created by whoever runs it — from being
 // deleted by a pool that happens to point at it.
 //
+// A master that holds no ledger at all short-circuits every rule above: the answer comes from the
+// managed backend's own declaration, or from the master refusing the first read with
+// UNAVAILABLE_IN_CURRENT_MODE, and either way there is nothing to converge — so the pass reports
+// the fact, still takes its metrics scrape, and comes back converged with noLedger set. Converged
+// is what lets a releasing Binding's finalizer off: with no ledger there is no entry it could
+// strand, the same reading releaseKVCachePoolBinding gives the master's own 409.
+//
 // It writes Conditions rather than returning an error. Every failure here is the master's answer,
 // and an answer is an observation to report: a requeue would re-ask a question whose answer will not
 // change until somebody edits the backend.
 func (r *KVCachePoolReconciler) convergeTenantLedger(
 	ctx context.Context,
+	kvcb *workercore.KVCacheBackend,
 	admin *mooncake.AdminClient,
 	master *kvCachePoolMaster,
 	holder *workercore.KVCachePool,
 ) kvCachePoolLedgerPass {
 	logger := ctrllog.FromContext(ctx)
 
+	// The declaration is exact for a managed backend — this operator renders the flag onto the
+	// leader's command line — so a managed master declared without multi-tenancy is never asked a
+	// question it can only refuse.
+	if managed := kvcb.Spec.Connection.Managed; managed != nil && !managed.Leader.MultiTenancy {
+		r.reportTenantLedgerAbsent(holder)
+		metrics, scraped := r.observeAllocatableCapacity(ctx, admin, holder, true)
+		return kvCachePoolLedgerPass{converged: true, noLedger: true, metrics: metrics, scraped: scraped}
+	}
+
 	observed, err := admin.ListTenantQuotas(ctx)
 	if err != nil {
 		r.reportTenantLedgerFailure(holder, err, "reading the tenant ledger")
 		logger.Error(err, "list tenant quotas")
+		if errors.Is(err, mooncake.ErrMultiTenancyDisabled) {
+			// An external master answers for itself, and this is its answer. The pass then takes the
+			// same shape the declared one does: nothing to converge, but a scrape still to take.
+			metrics, scraped := r.observeAllocatableCapacity(ctx, admin, holder, true)
+			return kvCachePoolLedgerPass{converged: true, noLedger: true, metrics: metrics, scraped: scraped}
+		}
 		return kvCachePoolLedgerPass{failure: err}
 	}
 
@@ -1028,7 +1076,7 @@ func (r *KVCachePoolReconciler) convergeTenantLedger(
 		fmt.Sprintf("the master's ledger holds the %d reuse domain(s) asked for on this backend, "+
 			"across every pool bound to it", len(master.tenants)))
 
-	metrics, scraped := r.observeAllocatableCapacity(ctx, admin, holder)
+	metrics, scraped := r.observeAllocatableCapacity(ctx, admin, holder, false)
 	return kvCachePoolLedgerPass{
 		converged: len(retained) == 0,
 		retained:  retained,
@@ -1048,6 +1096,10 @@ func (r *KVCachePoolReconciler) convergeTenantLedger(
 // ordinary state, and the Bindings then keep the figures they had.
 type kvCachePoolLedgerPass struct {
 	converged bool
+	// noLedger says the master holds no tenant ledger at all — declared so on a managed backend, or
+	// observed refusing the ledger's every call. The pass converged because there was nothing to
+	// converge, and the Bindings read this to report unenforced quota rather than absent figures.
+	noLedger bool
 	// failure is the ledger operation error that made this pass non-converged. It distinguishes a
 	// master that reported no ledger from one whose ledger could not be read at all.
 	failure error
@@ -1064,8 +1116,23 @@ type kvCachePoolLedgerPass struct {
 	scraped  bool
 }
 
-// reportTenantLedgerFailure turns the master's refusal into the two conditions criterion 11 names.
-//
+// reportTenantLedgerAbsent writes the two axes for a master that holds no tenant ledger, however
+// the pass learned it — the managed backend's declaration or the master's own refusal. The message
+// states the fact and its two consequences rather than pointing at a flag to flip: a ledger-less
+// master is a topology an operator can declare, not only a fault to repair, and the flip is refused
+// under a claimed backend besides.
+func (r *KVCachePoolReconciler) reportTenantLedgerAbsent(holder *workercore.KVCachePool) {
+	KVCachePoolConditionQuotaLedgerAvailable.False(holder,
+		KVCachePoolReasonMultiTenancyDisabled,
+		"the master runs without multi-tenancy: it holds no tenant ledger, so every write falls "+
+			"into the default tenant and no per-tenant quota is in force. Such a master serves "+
+			"exactly one reuse domain, and usage is not accounted per domain")
+	KVCachePoolConditionQuotaPolicyWritable.Unknown(holder,
+		KVCachePoolReasonMultiTenancyDisabled,
+		"a master with no tenant ledger accepts no quota to persist, so whether its quota policy "+
+			"source is writable was not observed")
+}
+
 // The distinction is the point. Multi-tenancy off is a BACKEND to reconfigure and nothing this pool
 // can converge; a policy source that cannot be rewritten is a MOUNT to fix and the quota would
 // otherwise read as one that simply will not apply. Everything else is neither, and says so rather
@@ -1084,16 +1151,7 @@ func (r *KVCachePoolReconciler) reportTenantLedgerFailure(
 ) {
 	switch {
 	case errors.Is(err, mooncake.ErrMultiTenancyDisabled):
-		KVCachePoolConditionQuotaLedgerAvailable.False(holder,
-			KVCachePoolReasonMultiTenancyDisabled,
-			fmt.Sprintf("the master refused %s because it runs without multi-tenancy: it holds no "+
-				"tenant ledger, and every request falls into one default tenant where two reuse "+
-				"domains read each other's blocks. Set "+
-				`"spec.connection.managed.leader.multiTenancy" on the backend`, doing))
-		KVCachePoolConditionQuotaPolicyWritable.Unknown(holder,
-			KVCachePoolReasonMultiTenancyDisabled,
-			"a master with no tenant ledger accepts no quota to persist, so whether its quota policy "+
-				"source is writable was not observed. Turn multi-tenancy on and this pass answers it")
+		r.reportTenantLedgerAbsent(holder)
 	case errors.Is(err, mooncake.ErrQuotaPolicyNotWritable):
 		// This refusal is itself the ledger's answer: the master took the request, found the tenant
 		// ledger to write it into, and failed on the policy source underneath. Reporting the ledger
@@ -1173,6 +1231,7 @@ func observeKVCachePoolUsage(holder *workercore.KVCachePool, ledger kvCachePoolL
 // would put the pass's request count under the control of how many namespaces bound to the pool.
 func (r *KVCachePoolReconciler) observeAllocatableCapacity(
 	ctx context.Context, admin *mooncake.AdminClient, holder *workercore.KVCachePool,
+	noLedger bool,
 ) (mooncake.TenantQuotaMetrics, bool) {
 	metrics, err := admin.TenantQuotaMetrics(ctx)
 	if err != nil {
@@ -1181,7 +1240,14 @@ func (r *KVCachePoolReconciler) observeAllocatableCapacity(
 		return mooncake.TenantQuotaMetrics{}, false
 	}
 
-	switch capacity := metrics.AllocatableCapacityBytes; {
+	capacity := metrics.AllocatableCapacityBytes
+	if capacity == nil && noLedger {
+		// A master with no tenant ledger emits no tenant-quota gauge at all; what it has is the
+		// master-wide gauge, and every write into the default tenant is bounded by it alike.
+		capacity = metrics.TotalCapacityBytes
+	}
+
+	switch {
 	case capacity == nil:
 		KVCachePoolConditionCapacityAllocatable.False(holder, "CapacityNotObserved",
 			"the master's exposition carries no allocatable capacity")
@@ -1196,6 +1262,12 @@ func (r *KVCachePoolReconciler) observeAllocatableCapacity(
 				"zero and no write can succeed. Its members have either not mounted their segments "+
 				"yet, or not finished remounting them after the master restarted")
 	default:
+		if noLedger && metrics.AllocatableCapacityBytes == nil {
+			KVCachePoolConditionCapacityAllocatable.True(holder, "Allocatable",
+				fmt.Sprintf("the master holds no tenant ledger, so its whole %d bytes are the "+
+					"store's global capacity, bounding every write alike", *capacity))
+			break
+		}
 		KVCachePoolConditionCapacityAllocatable.True(holder, "Allocatable",
 			fmt.Sprintf("the master has %d bytes to divide between its reuse domains", *capacity))
 	}
@@ -1287,7 +1359,7 @@ func (r *KVCachePoolReconciler) syncKVCachePoolBindings(
 			ObjectMeta: *kvcpb.ObjectMeta.DeepCopy(),
 			Status:     *kvcpb.Status.DeepCopy(),
 		}
-		r.observeKVCachePoolBinding(holder, kvcpb, master, ledger.metrics, ledger.scraped)
+		r.observeKVCachePoolBinding(holder, kvcpb, master, ledger.metrics, ledger.scraped, ledger.noLedger)
 
 		desired := summarizeKVCachePoolBinding(holder)
 		if kubemeta.DeepEqual(desired, kvcpb.Status) {
@@ -1318,6 +1390,7 @@ func (r *KVCachePoolReconciler) observeKVCachePoolBinding(
 	master *kvCachePoolMaster,
 	metrics mooncake.TenantQuotaMetrics,
 	scraped bool,
+	noLedger bool,
 ) {
 	domain := kvcpb.Spec.Domain.Name
 
@@ -1346,6 +1419,24 @@ func (r *KVCachePoolReconciler) observeKVCachePoolBinding(
 	}
 	KVCachePoolBindingConditionDomainExclusive.True(holder, "Exclusive",
 		fmt.Sprintf("reuse domain %q is claimed by this binding alone", domain))
+
+	if noLedger {
+		// A master with no tenant ledger has no per-tenant figures to read and grants no per-tenant
+		// quota — and a write through this Binding still succeeds, into the default tenant, bounded
+		// by the store's global capacity. Both axes are True because the Binding is as usable as this
+		// topology lets one be; the messages are what keeps "granted" from reading as "enforced".
+		holder.Status.RequestedQuota, holder.Status.EffectiveQuota = nil, nil
+		holder.Status.Usage, holder.Status.OverQuota = nil, nil
+
+		KVCachePoolBindingConditionQuotaObserved.True(holder, "NoTenantLedger",
+			fmt.Sprintf("the master holds no tenant ledger, so there are no per-tenant figures for "+
+				"reuse domain %q: every write falls into the default tenant, and usage is not "+
+				"accounted per domain", domain))
+		KVCachePoolBindingConditionQuotaGranted.True(holder, "Unenforced",
+			fmt.Sprintf("the master holds no tenant ledger, so no per-tenant quota is in force for "+
+				"reuse domain %q: writes are bounded only by the store's global capacity", domain))
+		return
+	}
 
 	if !scraped {
 		// Every figure already on the object stays. See this function's caller.
@@ -1521,8 +1612,14 @@ func (r *KVCachePoolReconciler) summarizeKVCachePool(
 	// the first ledger refusal never reached the capacity read — and scanning in axis order would
 	// then report "capacity has not been observed yet" for a pool whose actual problem is a master
 	// with no ledger, which is the sentence an operator needs.
+	//
+	// MultiTenancyDisabled is the one non-True reading that is NOT a fault: a ledger-less master is
+	// a declared single-tenant topology, and this pool is then as converged as that topology lets it
+	// be. Every other non-True reading — including False for any other reason on the same axis — is
+	// the fault it always was.
 	for _, axis := range axes {
-		if axis.Exists(holder) && !axis.IsTrue(holder) {
+		if axis.Exists(holder) && !axis.IsTrue(holder) &&
+			axis.GetReason(holder) != KVCachePoolReasonMultiTenancyDisabled {
 			status.Phase, status.PhaseMessage = KVCachePoolPhaseError, axis.GetMessage(holder)
 			return status
 		}
@@ -1533,6 +1630,14 @@ func (r *KVCachePoolReconciler) summarizeKVCachePool(
 				fmt.Sprintf("%s has not been observed yet", axis)
 			return status
 		}
+	}
+
+	if KVCachePoolConditionQuotaLedgerAvailable.IsFalse(holder) &&
+		KVCachePoolConditionQuotaLedgerAvailable.GetReason(holder) == KVCachePoolReasonMultiTenancyDisabled {
+		status.Phase, status.PhaseMessage = KVCachePoolPhaseReady,
+			"the master runs without multi-tenancy: a single-tenant pool with no per-tenant quota "+
+				"in force, serving exactly one reuse domain"
+		return status
 	}
 
 	status.Phase, status.PhaseMessage = KVCachePoolPhaseReady,

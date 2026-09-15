@@ -6,19 +6,65 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	rbac "k8s.io/api/rbac/v1"
+	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
-// haBackend is the shared fixture with the election turned on.
+// haBackend is the shared fixture with the election turned on, which takes standbys: one replica
+// has nothing to elect between, so the field alone renders no election.
 func haBackend(mutate ...func(*workercore.KVCacheBackend)) *workercore.KVCacheBackend {
 	all := append([]func(*workercore.KVCacheBackend){
 		func(kvcb *workercore.KVCacheBackend) {
 			kvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+			kvcb.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
 		},
 	}, mutate...)
 	return testBackend(all...)
+}
+
+// TestTheElectionExistsOnlyAboveOneReplica pins the gate itself, and across the WHOLE surface the
+// predicate feeds rather than only the RBAC half: a single-replica backend that sets
+// highAvailability must render exactly the non-election shape everywhere, because each rendering
+// that disagreed would strand one side -- a member following a Lease no leader takes, or a leader
+// campaigning for one on an image that has no lease backend.
+//
+// The boundary is asserted at two rather than at one: the flip ON is the behavior a scale-up
+// depends on, and a gate that never opened would pass every assertion about staying shut.
+func TestTheElectionExistsOnlyAboveOneReplica(t *testing.T) {
+	one := testBackend(func(kvcb *workercore.KVCacheBackend) {
+		kvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+	})
+
+	for _, flag := range RenderLeaderFlags(one) {
+		assert.NotContains(t, flag, "enable_ha",
+			"one process has nothing to elect between, so the field stays inert")
+	}
+	assert.False(t, RenderLeaderRBAC(one).Wanted())
+	assert.False(t, RenderMemberRBAC(one).Wanted())
+	assert.Empty(t, leaderServiceAccountName(one))
+	assert.Empty(t, memberServiceAccountName(one))
+	assert.Equal(t, LeaderServiceHost(one)+":50051", MemberMasterEntry(one),
+		"and the member is pointed at the Service, not at a Lease nobody takes")
+
+	deploy := RenderLeaderDeployment(one, "mooncake:v0.3.13")
+	require.NotNil(t, deploy.Spec.Replicas)
+	assert.Equal(t, int32(1), *deploy.Spec.Replicas)
+	for _, e := range deploy.Spec.Template.Spec.Containers[0].Env {
+		assert.NotEqual(t, LeaderPodIPEnv, e.Name,
+			"the advertised address is read only by an election, so one replica does not define it")
+	}
+
+	two := testBackend(func(kvcb *workercore.KVCacheBackend) {
+		kvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+		kvcb.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](2)
+	})
+	assert.Contains(t, RenderLeaderFlags(two), "-enable_ha=true",
+		"the same field turns live the moment there is something to elect")
+	assert.True(t, RenderLeaderRBAC(two).Wanted())
+	assert.Equal(t, "k8s://"+kuberess.SystemNamespaceName+"/mooncake-dram-leader",
+		MemberMasterEntry(two))
 }
 
 // TestRenderLeaderRBAC_FollowsTheField pins that the access exists exactly when the election does.

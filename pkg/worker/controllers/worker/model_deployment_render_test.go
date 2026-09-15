@@ -1,6 +1,8 @@
 package worker
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,7 +29,7 @@ func newRenderDeployment(mutate ...func(*workercore.ModelDeployment)) *workercor
 			Model:         workercore.ModelDeploymentModel{Name: "Qwen/Qwen2.5-72B-Instruct"},
 			Engine:        workercore.ModelDeploymentEngineVLLM,
 			EngineVersion: "0.25.1",
-			KVCache:       workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
+			KVCache:       &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
 			Roles: []workercore.ModelDeploymentRole{{
 				Name:         "server",
 				Replicas:     2,
@@ -80,7 +82,7 @@ func newRenderInstanceType(mutate ...func(*worker.InstanceType)) *worker.Instanc
 func renderOne(t *testing.T, md *workercore.ModelDeployment, it *worker.InstanceType) *core.Pod {
 	t.Helper()
 
-	pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 		Deployment:   md,
 		Role:         &md.Spec.Roles[0],
 		Ordinal:      0,
@@ -106,7 +108,7 @@ func envValue(pod *core.Pod, name string) (string, bool) {
 // pool, the resource note a watch filters on, and the controller reference that makes it ours.
 func TestRenderModelDeploymentPod_Identity(t *testing.T) {
 	md := newRenderDeployment()
-	pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 		Deployment:   md,
 		Role:         &md.Spec.Roles[0],
 		Ordinal:      3,
@@ -132,6 +134,55 @@ func TestRenderModelDeploymentPod_Identity(t *testing.T) {
 	assert.Equal(t, md.UID, pod.OwnerReferences[0].UID)
 	assert.True(t, ptr.Deref(pod.OwnerReferences[0].Controller, false),
 		"the reference must be a CONTROLLER reference, or the owned-Pod watch never fires")
+}
+
+func TestRenderModelDeploymentPod_DecodeUsesRoutingSidecar(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		externalPort int32
+	}{
+		{name: "default serving port", externalPort: 8000},
+		{name: "custom serving port", externalPort: 9000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+				md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{{
+					Name: "http", Protocol: core.ProtocolTCP, Port: tc.externalPort,
+				}}
+			})
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				Connector: ModelDeploymentConnectorRender{
+					Args: []string{"--kv-transfer-config", `{}`}, DirectTransfer: true,
+				},
+			})
+			require.NoError(t, err)
+
+			require.Len(t, pod.Spec.InitContainers, 1)
+			sidecar := pod.Spec.InitContainers[0]
+			assert.Equal(t, "routing-proxy", sidecar.Name)
+			assert.Equal(t, "gpustack/mirrored-llm-d-router-disagg-sidecar:v0.10.0", sidecar.Image)
+			require.NotNil(t, sidecar.RestartPolicy)
+			assert.Equal(t, core.ContainerRestartPolicyAlways, *sidecar.RestartPolicy)
+			assert.Contains(t, sidecar.Args, fmt.Sprintf("--port=%d", tc.externalPort))
+			assert.Contains(t, sidecar.Args, "--model-server-port=8200")
+			assert.Contains(t, sidecar.Args, "--kv-connector=mooncake")
+			assert.Contains(t, sidecar.Args, "--mooncake-bootstrap-port=8998")
+			assert.Contains(t, sidecar.Args, "--secure-proxy=false")
+			require.Len(t, sidecar.Ports, 1)
+			assert.Equal(t, tc.externalPort, sidecar.Ports[0].ContainerPort)
+
+			main := pod.Spec.Containers[0]
+			assert.Contains(t, main.Command, "8200")
+			assert.NotEqual(t, tc.externalPort, main.Ports[0].ContainerPort)
+			assert.Equal(t, int32(8200), main.Ports[0].ContainerPort)
+			assert.Equal(t, tc.externalPort, main.StartupProbe.HTTPGet.Port.IntVal)
+			assert.Equal(t, tc.externalPort, main.ReadinessProbe.HTTPGet.Port.IntVal)
+			assert.Equal(t, tc.externalPort, main.LivenessProbe.HTTPGet.Port.IntVal)
+		})
+	}
 }
 
 // TestRenderModelDeploymentPod_EntranceLabelIsNotInTheSelector states why the two label sets are
@@ -248,7 +299,7 @@ func TestRenderModelDeploymentPod_RoleKindLabelSeparatesAPair(t *testing.T) {
 
 	it := newRenderInstanceType()
 	labelOf := func(i int) string {
-		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment:   md,
 			Role:         &md.Spec.Roles[i],
 			Ordinal:      0,
@@ -339,7 +390,7 @@ func TestRenderModelDeploymentPod_Command(t *testing.T) {
 				md.Spec.Roles[0].ExtraArgs = tc.extraArgs
 			})
 
-			pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 				Deployment:   md,
 				Role:         &md.Spec.Roles[0],
 				InstanceType: newRenderInstanceType(),
@@ -361,13 +412,17 @@ func TestRenderModelDeploymentPod_TakeOver(t *testing.T) {
 		md.Spec.Roles[0].Template.Command = []string{"/bin/my-server", "--flag"}
 	})
 
-	pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 		Deployment:   md,
 		Role:         &md.Spec.Roles[0],
 		InstanceType: newRenderInstanceType(),
 		Connector: ModelDeploymentConnectorRender{
-			Args:         []string{`--kv-transfer-config={}`},
-			Env:          []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: inject.ConfigFilePath}},
+			Args: []string{`--kv-transfer-config={}`},
+			Env:  []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: inject.ConfigFilePath}},
+			Ports: []core.ContainerPort{
+				{Name: "kv-events", ContainerPort: 5557},
+				{Name: "kv-replay", ContainerPort: 5558},
+			},
 			Volumes:      []core.Volume{{Name: inject.ConfigVolumeName}},
 			VolumeMounts: []core.VolumeMount{{Name: inject.ConfigVolumeName, MountPath: inject.ConfigMountPath}},
 			PodAnnotations: map[string]string{
@@ -385,6 +440,10 @@ func TestRenderModelDeploymentPod_TakeOver(t *testing.T) {
 
 	assert.Empty(t, pod.Spec.Volumes, "and the file itself is not mounted either")
 	assert.Empty(t, pod.Spec.Containers[0].VolumeMounts, "nor is it mounted into the container")
+	for _, port := range pod.Spec.Containers[0].Ports {
+		assert.NotContains(t, []int32{5557, 5558}, port.ContainerPort,
+			"a take-over role gets no publisher port")
+	}
 
 	// THE ANNOTATION IS WITHHELD TOO, and it is the piece most likely to be forgotten: it is not
 	// part of the PodSpec, so every assertion above passes while it lands. On a take-over role it
@@ -401,6 +460,91 @@ func TestRenderModelDeploymentPod_TakeOver(t *testing.T) {
 		"the operator cannot gate a command line it did not build")
 	assert.Nil(t, pod.Spec.Containers[0].ReadinessProbe,
 		"nor grade its readiness on a route it cannot know the container serves")
+}
+
+func TestRenderModelDeploymentPod_KVEventPorts(t *testing.T) {
+	md := newRenderDeployment()
+	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+		Deployment:   md,
+		Role:         &md.Spec.Roles[0],
+		InstanceType: newRenderInstanceType(),
+		Connector: ModelDeploymentConnectorRender{Ports: []core.ContainerPort{
+			{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557},
+			{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5558},
+		}},
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, pod.Spec.Containers[0].Ports,
+		core.ContainerPort{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557})
+	assert.Contains(t, pod.Spec.Containers[0].Ports,
+		core.ContainerPort{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5558})
+}
+
+// TestRenderModelDeploymentPod_ConnectorPortCollision covers the merge between the connector's
+// fixed synthesized ports and the ports already on the container: one endpoint declared twice
+// renders once, and the same number under a different name is refused.
+func TestRenderModelDeploymentPod_ConnectorPortCollision(t *testing.T) {
+	connector := ModelDeploymentConnectorRender{Ports: []core.ContainerPort{
+		{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557},
+		{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5558},
+	}}
+
+	t.Run("a port already carrying the same number and name is not duplicated", func(t *testing.T) {
+		ports, err := appendModelDeploymentConnectorPorts(
+			[]core.ContainerPort{
+				{Name: "http", Protocol: core.ProtocolTCP, ContainerPort: 8000},
+				{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557},
+			}, connector, false)
+		require.NoError(t, err)
+
+		var declared int
+		for _, p := range ports {
+			if p.ContainerPort == 5557 {
+				declared++
+			}
+		}
+		assert.Equal(t, 1, declared, "one endpoint declared twice renders once")
+		assert.Contains(t, ports,
+			core.ContainerPort{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5558})
+	})
+
+	t.Run("the same number under a different name is refused", func(t *testing.T) {
+		// A template's port name is synthesized from its number, so a user-declared port on the
+		// publisher's number always lands here rather than in the dedupe arm above.
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{
+				{Name: "http", Protocol: core.ProtocolTCP, Port: 8000},
+				{Name: "events", Protocol: core.ProtocolTCP, Port: 5557},
+			}
+		})
+		_, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+			Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+			Connector: connector,
+		})
+		require.Error(t, err, "two endpoints claiming one socket cannot be merged silently")
+		assert.Contains(t, err.Error(), "5557")
+	})
+
+	t.Run("a direct decoder's engine port colliding with a declared port is refused", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+			md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+			md.Spec.Roles[0].ExtraArgs = []string{"--port", "9100"}
+			md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{
+				{Name: "http", Protocol: core.ProtocolTCP, Port: 8000},
+				{Name: "side", Protocol: core.ProtocolTCP, Port: 9100},
+			}
+		})
+		_, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+			Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+			Connector: ModelDeploymentConnectorRender{
+				Args: []string{"--kv-transfer-config", `{}`}, DirectTransfer: true,
+			},
+		})
+		require.Error(t, err, "the engine port must clear every declared port, not only the served one")
+		assert.Contains(t, err.Error(), "9100")
+	})
 }
 
 // TestRenderModelDeploymentPod_Env covers the merge across tiers: what the operator owns is
@@ -453,7 +597,7 @@ func TestRenderModelDeploymentPod_Env(t *testing.T) {
 				md.Spec.Roles[0].Template.Env = tc.tmplEnv
 			})
 
-			pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 				Deployment:   md,
 				Role:         &md.Spec.Roles[0],
 				InstanceType: newRenderInstanceType(),
@@ -664,7 +808,7 @@ func TestRenderModelDeploymentPod_SynthesizesTheImage(t *testing.T) {
 			md.Spec.Roles[0].Template = nil
 		})
 
-		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment:   md,
 			Role:         &md.Spec.Roles[0],
 			InstanceType: newRenderInstanceType(),
@@ -689,7 +833,7 @@ func TestRenderModelDeploymentPod_SynthesizesTheImage(t *testing.T) {
 			it.Status.Detail.RuntimeVersions = nil
 		})
 
-		_, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+		_, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment:   md,
 			Role:         &md.Spec.Roles[0],
 			InstanceType: it,
@@ -708,7 +852,7 @@ func TestRenderModelDeploymentPod_SynthesizesTheImage(t *testing.T) {
 			it.Status.Detail.Manufacturer = nodefeature.ManufacturerCambricon
 		})
 
-		_, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+		_, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment:   md,
 			Role:         &md.Spec.Roles[0],
 			InstanceType: it,
@@ -729,7 +873,7 @@ func TestRenderModelDeploymentPod_SynthesizesTheImage(t *testing.T) {
 			it.Status.Entrance = ""
 		})
 
-		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment:   md,
 			Role:         &md.Spec.Roles[0],
 			InstanceType: it,
@@ -758,7 +902,7 @@ func TestRenderModelDeploymentPod_ClientConfigMount(t *testing.T) {
 		connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA))
 	require.NoError(t, err)
 
-	pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 		Deployment:   md,
 		Role:         &md.Spec.Roles[0],
 		InstanceType: newRenderInstanceType(),
@@ -914,7 +1058,7 @@ func TestModelDeploymentPodSpecHash_MovesWithEveryRenderedInput(t *testing.T) {
 				tc.input(&in)
 			}
 
-			pod, err := renderModelDeploymentPod(in)
+			pod, err := renderModelDeploymentPod(context.Background(), in)
 			require.NoError(t, err)
 			assert.NotEqual(t, baseHash, pod.Annotations[modelDeploymentPodSpecHashAnnotation])
 		})
@@ -939,7 +1083,7 @@ func TestRenderModelDeploymentPod_ConfigChangeMovesTheSpecHash(t *testing.T) {
 		conn, err := SynthesizeModelDeploymentConnector(cin)
 		require.NoError(t, err)
 
-		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment:   md,
 			Role:         &md.Spec.Roles[0],
 			InstanceType: newRenderInstanceType(),
@@ -983,7 +1127,7 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 			}
 		})
 
-		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment:   md,
 			Role:         &md.Spec.Roles[0],
 			InstanceType: newRenderInstanceType(),
@@ -1014,7 +1158,7 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 				}
 			})
 
-			pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 				Deployment:   md,
 				Role:         &md.Spec.Roles[0],
 				InstanceType: newRenderInstanceType(),
@@ -1065,7 +1209,7 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 				md.Spec.Roles[0].ExtraArgs = extraArgs
 			})
 
-			pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 				Deployment:   md,
 				Role:         &md.Spec.Roles[0],
 				InstanceType: newRenderInstanceType(),
@@ -1106,7 +1250,7 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 				md.Spec.Roles[0].ExtraArgs = extraArgs
 			})
 
-			pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 				Deployment:   md,
 				Role:         &md.Spec.Roles[0],
 				InstanceType: newRenderInstanceType(),
@@ -1144,7 +1288,7 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 				md.Spec.Roles[0].ExtraArgs = extraArgs
 			})
 
-			pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 				Deployment:   md,
 				Role:         &md.Spec.Roles[0],
 				InstanceType: newRenderInstanceType(),
@@ -1174,7 +1318,7 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 		// Equal thresholds would restart on the same failure that withdrew the replica.
 		md := newRenderDeployment()
 
-		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment:   md,
 			Role:         &md.Spec.Roles[0],
 			InstanceType: newRenderInstanceType(),
@@ -1204,7 +1348,7 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 		// connector renders one of these today, which is exactly why nothing else would catch it.
 		md := newRenderDeployment()
 
-		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment:   md,
 			Role:         &md.Spec.Roles[0],
 			InstanceType: newRenderInstanceType(),
@@ -1229,7 +1373,7 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 			md.Spec.Roles[0].ExtraArgs = []string{"--max-model-len", "4096", "--served-model-name", "ssl-demo"}
 		})
 
-		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment:   md,
 			Role:         &md.Spec.Roles[0],
 			InstanceType: newRenderInstanceType(),
@@ -1258,7 +1402,7 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			md := newRenderDeployment()
 
-			pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 				Deployment:   md,
 				Role:         &md.Spec.Roles[0],
 				InstanceType: newRenderInstanceType(),

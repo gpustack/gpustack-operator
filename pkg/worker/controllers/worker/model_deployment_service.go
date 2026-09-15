@@ -12,6 +12,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
 // renderModelDeploymentServices renders every Service a deployment owns: the one it is reached
@@ -19,11 +20,17 @@ import (
 //
 // The deployment-wide one is FIRST, and the order is part of the contract: the caller garbage
 // collects by name, and status reads its endpoint.
-func renderModelDeploymentServices(md *workercore.ModelDeployment) []*core.Service {
+//
+// manufacturers carries each role's accelerator manufacturer, keyed by role name, with a missing
+// entry read as "not known to be Ascend": the KV event ports are part of the render only where the
+// replicas behind the Service publish, and that decision is the connector's.
+func renderModelDeploymentServices(
+	md *workercore.ModelDeployment, manufacturers map[string]string,
+) []*core.Service {
 	svcs := make([]*core.Service, 0, len(md.Spec.Roles)+1)
 	svcs = append(svcs, renderModelDeploymentService(md))
 	for i := range md.Spec.Roles {
-		svcs = append(svcs, renderModelDeploymentRoleService(md, &md.Spec.Roles[i]))
+		svcs = append(svcs, renderModelDeploymentRoleService(md, &md.Spec.Roles[i], manufacturers))
 	}
 
 	return svcs
@@ -71,8 +78,19 @@ func renderModelDeploymentService(md *workercore.ModelDeployment) *core.Service 
 // two objects away from the field that caused it.
 func renderModelDeploymentRoleService(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	manufacturers map[string]string,
 ) *core.Service {
-	return renderModelDeploymentServiceFor(md, role, md.Name+"-"+role.Name)
+	svc := renderModelDeploymentServiceFor(md, role, md.Name+"-"+role.Name)
+	if modelDeploymentPublishesKVEvents(md, role, manufacturers[role.Name]) {
+		for _, port := range inject.KVEventsPorts() {
+			svc.Spec.Ports = append(svc.Spec.Ports, core.ServicePort{
+				Name: port.Name, Protocol: port.Protocol, Port: port.ContainerPort,
+				TargetPort: intstr.FromInt32(port.ContainerPort),
+			})
+		}
+	}
+
+	return svc
 }
 
 // renderModelDeploymentServiceFor is the shape both Services share: a ClusterIP fronting one role's
@@ -131,6 +149,23 @@ func modelDeploymentServicePort(role *workercore.ModelDeploymentRole) core.Conta
 	return modelDeploymentContainerPorts(role.Template)[0]
 }
 
+// ModelDeploymentRoleServingPort returns the port a role's Service targets.
+func ModelDeploymentRoleServingPort(role *workercore.ModelDeploymentRole) int32 {
+	return modelDeploymentServicePort(role).ContainerPort
+}
+
+// ModelDeploymentRoleServingProtocol returns the protocol a role's Service publishes.
+func ModelDeploymentRoleServingProtocol(role *workercore.ModelDeploymentRole) core.Protocol {
+	return modelDeploymentServicePort(role).Protocol
+}
+
+// ModelDeploymentRoleServingScheme returns the scheme a role's engine endpoint publishes.
+func ModelDeploymentRoleServingScheme(role *workercore.ModelDeploymentRole) core.URIScheme {
+	scheme, _ := modelDeploymentEngineTransport(modelDeploymentRoleArgs(role))
+
+	return scheme
+}
+
 // modelDeploymentEndpoint is the one address every replica serves behind.
 //
 // It is derived rather than read back off the Service, because the in-cluster DNS name is decided by
@@ -159,6 +194,16 @@ func modelDeploymentEndpoint(md *workercore.ModelDeployment) string {
 
 	return strings.ToLower(string(scheme)) + "://" +
 		md.Name + "." + md.Namespace + ".svc:" + strconvx.Itoa(int(port.ContainerPort))
+}
+
+func modelDeploymentRoleEndpoint(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) string {
+	port := modelDeploymentServicePort(role)
+	scheme, _ := modelDeploymentEngineTransport(modelDeploymentRoleArgs(role))
+
+	return strings.ToLower(string(scheme)) + "://" + md.Name + "-" + role.Name + "." +
+		md.Namespace + ".svc:" + strconvx.Itoa(int(port.ContainerPort))
 }
 
 // alignModelDeploymentService folds the rendered Service onto the observed one and reports whether

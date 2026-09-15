@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -279,6 +280,124 @@ func TestSynthesizeModelDeploymentConnector_RoleDiscriminator(t *testing.T) {
 	}
 }
 
+func TestSynthesizeModelDeploymentConnector_KVEventsPerRole(t *testing.T) {
+	prefillInput := connectorInputForKind(
+		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
+		workercore.ModelDeploymentRoleKindPrefill)
+	prefillInput.PublishKVEvents = true
+	prefillInput.KVEventsHost = "qwen-prefill.team-a.svc"
+	prefill, err := SynthesizeModelDeploymentConnector(prefillInput)
+	require.NoError(t, err)
+
+	require.NotNil(t, prefill.KVEvents)
+	assert.Equal(t, "tcp://qwen-prefill.team-a.svc:5557", prefill.KVEvents.Endpoint)
+	assert.Equal(t, "tcp://qwen-prefill.team-a.svc:5558", prefill.KVEvents.ReplayEndpoint)
+	assert.Equal(t, "kv@", prefill.KVEvents.Topic)
+	assert.Equal(t, []core.ContainerPort{
+		{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557},
+		{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5558},
+	}, prefill.Ports)
+	assert.Contains(t, prefill.Args, "--kv-events-config")
+
+	decode, err := SynthesizeModelDeploymentConnector(connectorInputForKind(
+		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
+		workercore.ModelDeploymentRoleKindDecode))
+	require.NoError(t, err)
+	assert.Nil(t, decode.KVEvents)
+	assert.Empty(t, decode.Ports)
+	assert.NotContains(t, decode.Args, "--kv-events-config")
+}
+
+func TestSynthesizeModelDeploymentConnector_DirectTransfer(t *testing.T) {
+	in := connectorInputForKind(
+		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
+		workercore.ModelDeploymentRoleKindPrefill)
+	in.DirectTransfer = true
+	in.PublishKVEvents = true
+	in.KVEventsHost = "qwen-prefill.team-a.svc"
+
+	got, err := SynthesizeModelDeploymentConnector(in)
+	require.NoError(t, err)
+	assert.True(t, got.DirectTransfer)
+	require.Len(t, got.Args, 4)
+	assert.JSONEq(t, `{
+		"kv_connector":"MultiConnector","kv_role":"kv_producer",
+		"kv_connector_extra_config":{"connectors":[
+			{"kv_connector":"MooncakeConnector","kv_role":"kv_producer",
+			 "kv_connector_extra_config":{"mooncake_protocol":"tcp"}},
+			{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_both"}
+		]}
+	}`, got.Args[1])
+	assert.Contains(t, got.Env, core.EnvVar{
+		Name: "VLLM_MOONCAKE_BOOTSTRAP_PORT", Value: "8998",
+	})
+	assert.Equal(t, []core.ContainerPort{
+		{Name: "mc-bootstrap", Protocol: core.ProtocolTCP, ContainerPort: 8998},
+		{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557},
+		{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5558},
+	}, got.Ports)
+}
+
+func TestModelDeploymentUsesDirectTransfer(t *testing.T) {
+	base := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+	})
+
+	assert.True(t, modelDeploymentUsesDirectTransfer(
+		base, &base.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+	assert.False(t, modelDeploymentUsesDirectTransfer(
+		base, &base.Spec.Roles[0], nodefeature.ManufacturerAscend))
+
+	server := base.DeepCopy()
+	server.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+	assert.False(t, modelDeploymentUsesDirectTransfer(
+		server, &server.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+
+	unrouted := base.DeepCopy()
+	unrouted.Spec.Router = nil
+	assert.False(t, modelDeploymentUsesDirectTransfer(
+		unrouted, &unrouted.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+
+	sglang := base.DeepCopy()
+	sglang.Spec.Engine = workercore.ModelDeploymentEngineSGLang
+	assert.False(t, modelDeploymentUsesDirectTransfer(
+		sglang, &sglang.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+}
+
+func TestModelDeploymentPublishesKVEvents(t *testing.T) {
+	base := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+	})
+
+	assert.True(t, modelDeploymentPublishesKVEvents(
+		base, &base.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+
+	// The consequence the shared gate exists for: on Ascend the render refuses the event
+	// publisher, so publishing must read false rather than error-loop the reconcile.
+	assert.False(t, modelDeploymentPublishesKVEvents(
+		base, &base.Spec.Roles[0], nodefeature.ManufacturerAscend))
+
+	// The two predicates share the router-name/engine/manufacturer gate, so a router that is not
+	// the managed one gets no publisher -- unreachable through the API today, and exactly the
+	// divergence a second router name would otherwise inherit.
+	otherRouter := base.DeepCopy()
+	otherRouter.Spec.Router.Name = "another-router"
+	assert.False(t, modelDeploymentPublishesKVEvents(
+		otherRouter, &otherRouter.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+
+	decode := base.DeepCopy()
+	decode.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+	assert.False(t, modelDeploymentPublishesKVEvents(
+		decode, &decode.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+
+	unmanaged := base.DeepCopy()
+	unmanaged.Spec.Roles[0].Template.Command = []string{"/bin/my-server"}
+	assert.False(t, modelDeploymentPublishesKVEvents(
+		unmanaged, &unmanaged.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+}
+
 // TestSynthesizeModelDeploymentConnector_ServerIsTheSingleRoleRender is the regression guard that
 // this spec does not change what a deployment written before it renders.
 //
@@ -426,6 +545,38 @@ func TestModelDeploymentConnector_ReachesThePodPerRole(t *testing.T) {
 		`{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}`, byRole["prefill"])
 	assert.JSONEq(t,
 		`{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}`, byRole["decode"])
+}
+
+func TestModelDeploymentConnector_RoutedPairWithoutKVCacheUsesDirectTransferOnly(t *testing.T) {
+	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.KVCache = nil
+	})
+	cli := newModelDeploymentClient(md, newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	byRole := map[string]string{}
+	for _, pod := range replicaPods(t, cli) {
+		container := pod.Spec.Containers[0]
+		at := slices.Index(container.Command, "--kv-transfer-config")
+		require.GreaterOrEqual(t, at, 0, "%s carries no direct transfer configuration", pod.Name)
+		byRole[modelDeploymentPodRole(&pod)] = container.Command[at+1]
+		for _, env := range container.Env {
+			assert.NotEqual(t, "MOONCAKE_CONFIG_PATH", env.Name,
+				"a deployment without kvCache must not receive shared-store configuration")
+		}
+	}
+
+	require.Len(t, byRole, 2)
+	assert.JSONEq(t, `{
+		"kv_connector":"MooncakeConnector","kv_role":"kv_producer",
+		"kv_connector_extra_config":{"mooncake_protocol":"tcp"}
+	}`, byRole["prefill"])
+	assert.JSONEq(t, `{
+		"kv_connector":"MooncakeConnector","kv_role":"kv_consumer",
+		"kv_connector_extra_config":{"mooncake_protocol":"tcp"}
+	}`, byRole["decode"])
 }
 
 // TestSynthesizeModelDeploymentConnector_SGLangEnvironmentCarrier states the four properties that
@@ -650,6 +801,12 @@ func TestModelDeploymentOwnership(t *testing.T) {
 			name:     "vllm_owns_its_transfer_config",
 			engine:   workercore.ModelDeploymentEngineVLLM,
 			arg:      "--kv-transfer-config",
+			wantsArg: true,
+		},
+		{
+			name:     "vllm_owns_its_kv_events_config",
+			engine:   workercore.ModelDeploymentEngineVLLM,
+			arg:      "--kv-events-config",
 			wantsArg: true,
 		},
 		{
@@ -1004,7 +1161,7 @@ func TestModelDeploymentConnectorFieldIsInert(t *testing.T) {
 		synthesized, err := SynthesizeModelDeploymentConnector(in)
 		require.NoError(t, err)
 
-		pod, err := renderModelDeploymentPod(ModelDeploymentRenderInput{
+		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment:   md,
 			Role:         &md.Spec.Roles[0],
 			Ordinal:      0,

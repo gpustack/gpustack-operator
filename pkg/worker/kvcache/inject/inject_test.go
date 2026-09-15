@@ -1,12 +1,14 @@
 package inject
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
 )
 
 // envNames returns the names of a rendered environment, in order.
@@ -87,6 +89,49 @@ func TestRender_VLLMFamilyVehicleIsAFile(t *testing.T) {
 				"the projection and the annotation it reads are two halves of one thing")
 		})
 	}
+}
+
+func TestRender_VLLMPublishesKVEvents(t *testing.T) {
+	result, err := Render(Input{
+		Engine:          EngineVLLM,
+		Role:            RolePrefill,
+		Connection:      testConnection(),
+		PublishKVEvents: true,
+		KVEventsHost:    "qwen-prefill.team-a.svc",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, result.Args, 4)
+	assert.Equal(t, "--kv-events-config", result.Args[2])
+	assert.JSONEq(t, `{
+		"enable_kv_cache_events": true,
+		"publisher": "zmq",
+		"endpoint": "tcp://*:5557",
+		"replay_endpoint": "tcp://*:5558",
+		"buffer_steps": 10000,
+		"hwm": 100000,
+		"max_queue_size": 100000,
+		"topic": "kv@"
+	}`, result.Args[3])
+	assert.Equal(t, []core.ContainerPort{
+		{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557},
+		{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5558},
+	}, result.Ports)
+	require.NotNil(t, result.KVEvents)
+	assert.Equal(t, "tcp://qwen-prefill.team-a.svc:5557", result.KVEvents.Endpoint)
+	assert.Equal(t, "tcp://qwen-prefill.team-a.svc:5558", result.KVEvents.ReplayEndpoint)
+	assert.Equal(t, "kv@", result.KVEvents.Topic)
+}
+
+func TestRender_VLLMDoesNotPublishKVEventsUnlessRequested(t *testing.T) {
+	result, err := Render(Input{
+		Engine: EngineVLLM, Role: RoleDecode, Connection: testConnection(),
+	})
+	require.NoError(t, err)
+
+	assert.NotContains(t, result.Args, "--kv-events-config")
+	assert.Empty(t, result.Ports)
+	assert.Nil(t, result.KVEvents)
 }
 
 // TestRender_SGLangVehicleIsTheEnvironment is the counterpart, and its negative half carries as much
@@ -255,6 +300,63 @@ func TestRender_TenantOmittedForAnEmptyDomain(t *testing.T) {
 	}
 }
 
+func TestRender_VLLMDirectTransferComposesPointToPointAndStore(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		role      Role
+		pointRole string
+		storeRole string
+	}{
+		{name: "prefill", role: RolePrefill, pointRole: "kv_producer", storeRole: "kv_both"},
+		{name: "decode", role: RoleDecode, pointRole: "kv_consumer", storeRole: "kv_consumer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Render(Input{
+				Engine: EngineVLLM, Role: tc.role, Domain: "team-a-chat",
+				Connection: testConnection(), DirectTransfer: true,
+			})
+			require.NoError(t, err)
+			require.Len(t, result.Args, 2)
+			assert.Equal(t, vllmTransferConfigArg, result.Args[0])
+			assert.JSONEq(t, fmt.Sprintf(`{
+				"kv_connector":"MultiConnector",
+				"kv_role":%q,
+				"kv_connector_extra_config":{"connectors":[
+					{"kv_connector":"MooncakeConnector","kv_role":%q,
+					 "kv_connector_extra_config":{"mooncake_protocol":"tcp"}},
+					{"kv_connector":"MooncakeStoreConnector","kv_role":%q}
+				]}
+			}`, tc.pointRole, tc.pointRole, tc.storeRole), result.Args[1])
+			assert.True(t, result.DirectTransfer)
+			for _, port := range result.Ports {
+				assert.Empty(t, utilvalidation.IsValidPortName(port.Name),
+					"rendered port %q must be accepted by the Kubernetes API", port.Name)
+			}
+		})
+	}
+}
+
+func TestRender_VLLMDirectTransferWithoutStore(t *testing.T) {
+	result, err := Render(Input{
+		Engine: EngineVLLM, Role: RolePrefill, DirectTransfer: true,
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Args, 2)
+	assert.Equal(t, vllmTransferConfigArg, result.Args[0])
+	assert.JSONEq(t, `{
+		"kv_connector":"MooncakeConnector",
+		"kv_role":"kv_producer",
+		"kv_connector_extra_config":{"mooncake_protocol":"tcp"}
+	}`, result.Args[1])
+	assert.True(t, result.DirectTransfer)
+	assert.False(t, result.TenantInjected)
+	assert.NotContains(t, envNames(result.Env), vllmConfigPathEnv)
+	assert.Empty(t, result.Volumes)
+	assert.Empty(t, result.VolumeMounts)
+	assert.Empty(t, result.PodAnnotations)
+	assert.Contains(t, envNames(result.Env), "VLLM_MOONCAKE_BOOTSTRAP_PORT")
+}
+
 // TestRender_Refusals covers every case where rendering anything would produce a container that starts
 // normally and does not use the cache.
 func TestRender_Refusals(t *testing.T) {
@@ -384,5 +486,91 @@ func TestSupportsRole_AgreesWithRender(t *testing.T) {
 					"the table and the renderer must answer alike for %q/%q", engine, role)
 			})
 		}
+	}
+}
+
+// TestRender_RefusesAHalfConnection pins the gate that renderVLLM's own "has store" test depends on.
+//
+// That renderer asks only whether an address is present, while this gate asks whether either field
+// is. The two agree only because a connection carrying one without the other never gets past here,
+// and nothing in the renderer would notice if that stopped being true: it would silently reclassify
+// such an input as store-less and return a Result carrying no arguments at all.
+func TestRender_RefusesAHalfConnection(t *testing.T) {
+	cases := []struct {
+		name string
+		conn Connection
+		want string
+	}{
+		{
+			name: "a transport with no address",
+			conn: Connection{Protocol: "tcp"},
+			want: "published no client endpoint",
+		},
+		{
+			name: "an address with no transport",
+			conn: Connection{MasterAddress: "master:50051"},
+			want: "published no transport",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := Render(Input{Engine: EngineVLLM, Connection: c.conn})
+			require.Error(t, err, "half a connection must not reach a renderer")
+			assert.Contains(t, err.Error(), c.want)
+		})
+	}
+}
+
+// TestRender_RefusesDirectTransferOnEnginesThatDropIt covers the capabilities only vLLM renders.
+//
+// The positive baseline matters more than the refusals: without it a renderer that refused every
+// engine would pass this test, and the whole point is that vLLM must still be accepted.
+func TestRender_RefusesDirectTransferOnEnginesThatDropIt(t *testing.T) {
+	store := Connection{MasterAddress: "master:50051", Protocol: "tcp"}
+	cases := []struct {
+		name     string
+		engine   Engine
+		role     Role
+		direct   bool
+		publish  bool
+		accepted bool
+	}{
+		{name: "sglang cannot render direct transfer", engine: EngineSGLang, direct: true},
+		{name: "sglang cannot publish KV events", engine: EngineSGLang, publish: true},
+		{
+			name:   "vllm-ascend cannot render direct transfer",
+			engine: EngineVLLMAscend, role: RolePrefill, direct: true,
+		},
+		{
+			name: "vllm renders both", engine: EngineVLLM, role: RolePrefill,
+			direct: true, publish: true, accepted: true,
+		},
+		{
+			// The baseline that makes the refusals mean something: SGLang is still a supported
+			// engine, and asking for neither capability must still render.
+			name: "sglang with neither is still accepted", engine: EngineSGLang, accepted: true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			conn := store
+			if c.engine == EngineVLLMAscend {
+				conn.Protocol = "ascend"
+			}
+			in := Input{
+				Engine: c.engine, Role: c.role, Connection: conn,
+				DirectTransfer: c.direct, PublishKVEvents: c.publish,
+			}
+			if c.publish {
+				in.KVEventsHost = "role.ns.svc"
+			}
+			_, err := Render(in)
+			if c.accepted {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err, "a capability the renderer drops must be refused, not ignored")
+			assert.Contains(t, err.Error(), "moves nothing")
+		})
 	}
 }

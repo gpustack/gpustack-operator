@@ -71,10 +71,12 @@ type ModelDeploymentSpec struct {
 	// +k8s:validation:maxLength=64
 	EngineVersion string `json:"engineVersion" protobuf:"bytes,5,name=engineVersion"`
 
-	// KVCache attaches the deployment to a KV cache pool.
+	// KVCache optionally attaches the deployment to a shared KV cache pool. A managed vLLM
+	// prefill/decode deployment without it still uses its router's point-to-point connector; it does
+	// not render the shared-store connector or its client configuration.
 	//
-	// +required
-	KVCache ModelDeploymentKVCache `json:"kvCache" protobuf:"bytes,3,name=kvCache"`
+	// +optional
+	KVCache *ModelDeploymentKVCache `json:"kvCache,omitempty" protobuf:"bytes,3,opt,name=kvCache"`
 
 	// Roles are the engine roles this deployment runs. A single-role deployment names one; a
 	// prefill/decode deployment names several, which is why this is a LIST FROM THE FIRST VERSION.
@@ -499,10 +501,9 @@ type ModelDeploymentRouter struct {
 
 	// ExtraArgs are additional flags for the router process.
 	//
-	// The intent is that a flag the operator derives itself is refused rather than merged, so that one
-	// setting has one source. NOTHING ENFORCES THAT YET: the catalog it would consult is keyed by
-	// router rather than by engine, and the engine-keyed catalog guarding a role's extraArgs answers a
-	// different question and cannot stand in for it.
+	// A flag the operator derives itself is refused rather than merged, so that one setting has one
+	// source. The owned catalog is keyed by router because the engine-keyed catalog guarding a role's
+	// extraArgs answers a different question and cannot stand in for it.
 	//
 	// +optional
 	// +listType=atomic
@@ -522,17 +523,21 @@ const (
 // disagreement with the Pods.
 type ModelDeploymentStatus struct {
 	// Phase summarizes the conditions: Starting, Ready, Degraded, Deleting. Ready means every role's
-	// ready count equals its desired count; Degraded means at least one replica is ready and at
-	// least one is not.
+	// ready count equals its desired count and, when declared, the router has a ready replica.
+	// Degraded means a serving component is ready while another required one is not.
 	Phase string `json:"phase,omitempty" protobuf:"bytes,1,opt,name=phase"`
 
 	// PhaseMessage carries the reason for the phase.
 	PhaseMessage string `json:"phaseMessage,omitempty" protobuf:"bytes,2,opt,name=phaseMessage"`
 
 	// Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,
-	// CacheAttached, ReplicasUpToDate, RoleKindsReady. They are independent — "quota reserved but
-	// cache not attached" is a real and actionable state — which is what a single phase string
-	// cannot carry.
+	// CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady. They are
+	// independent —
+	// "quota reserved but cache not attached" is a real and actionable state — which is what a single
+	// phase string cannot carry.
+	//
+	// KVEventsPublishing reports rendered configuration rather than observing the stream. A publisher
+	// that was configured and then crashed therefore remains True until a live consumer observes it.
 	//
 	// +patchMergeKey=type
 	// +patchStrategy=merge
@@ -540,11 +545,13 @@ type ModelDeploymentStatus struct {
 	// +listMapKey=type
 	Conditions []gpustack.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,3,rep,name=conditions"` // nolint: lll
 
-	// Endpoint is the one address every replica serves behind, in the form
-	// <scheme>://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.
+	// Endpoint is the address clients use. Without a router it is the deployment-wide Service, in the
+	// form <scheme>://<name>.<namespace>.svc:<port>. With a router it is the router's Service and is
+	// absent until the router has a ready replica.
 	//
-	// The scheme is https where the first role's own arguments put its listener on TLS, and http
-	// otherwise. A client reads it from here rather than assuming either one.
+	// A role endpoint uses https where that role's own arguments put its listener on TLS. The managed
+	// router endpoint uses the router's own transport instead, which is http. A client reads the
+	// selected value from here rather than assuming either one.
 	//
 	// +k8s:validation:maxLength=512
 	Endpoint string `json:"endpoint,omitempty" protobuf:"bytes,4,opt,name=endpoint"`
@@ -563,8 +570,7 @@ type ModelDeploymentStatus struct {
 	// object here would be indistinguishable from a domain whose every field happens to be empty.
 	KVCache *ModelDeploymentKVCacheStatus `json:"kvCache,omitempty" protobuf:"bytes,6,opt,name=kvCache"`
 
-	// Router is everything a router needs in order to front this deployment, published under BOTH
-	// modes. Under the external mode it is the entire output of this feature.
+	// Router is the observed contract of the managed router requested by spec.router.
 	//
 	// It is ABSENT when spec.router is, rather than present and empty, for the same reason KVCache is:
 	// an empty object here cannot be told apart from a contract whose every string happens to be

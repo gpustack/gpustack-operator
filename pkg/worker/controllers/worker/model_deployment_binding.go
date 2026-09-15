@@ -26,10 +26,12 @@ const ModelDeploymentKind = "ModelDeployment"
 // resolved and its reuse domain was read.
 const ModelDeploymentConditionDomainRegistered kubeapistatus.ConditionType = "DomainRegistered"
 
-// The reasons DomainRegistered carries. Three rather than two, because the three send a reader to
-// three different places: create the Binding, wait for it (or look at the pool), find who deleted it.
+// The reasons DomainRegistered carries. Four rather than two, because the four send a reader to
+// four different places: nowhere, create the Binding, wait for it (or look at the pool), find who
+// deleted it.
 const (
 	modelDeploymentReasonRegistered      = "Registered"
+	modelDeploymentReasonNotApplicable   = "NotApplicable"
 	modelDeploymentReasonBindingNotFound = "BindingNotFound"
 	modelDeploymentReasonBindingNotReady = "BindingNotReady"
 	modelDeploymentReasonBindingDeleting = "BindingDeleting"
@@ -61,9 +63,22 @@ type modelDeploymentDomain struct {
 // The read is scoped to the deployment's OWN namespace and there is no other lookup: poolRef is a
 // LocalObjectReference, so the name it carries can only ever mean an object here. The pool is named
 // from the Binding rather than read, because the projection wants its name and nothing else.
+//
+// A deployment declaring no cache gets an explicit not-applicable reading rather than nil, because
+// nil is reserved for a pass that did not look and a cache-less deployment is an ANSWER, not a gap:
+// without it the object would carry no DomainRegistered condition at all, and an absent condition
+// and an inapplicable one are different states.
 func (r *ModelDeploymentReconciler) resolveModelDeploymentDomain(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) (*modelDeploymentDomain, error) {
+	if md.Spec.KVCache == nil {
+		return &modelDeploymentDomain{
+			Ready:   true,
+			Reason:  modelDeploymentReasonNotApplicable,
+			Message: "the deployment declares no KV cache pool, so there is no Binding to resolve",
+		}, nil
+	}
+
 	kvcpb, err := r.getModelDeploymentBinding(ctx, md)
 	if err != nil {
 		return nil, err
@@ -202,6 +217,10 @@ func (r *ModelDeploymentReconciler) releaseModelDeploymentBinding(
 func (r *ModelDeploymentReconciler) syncModelDeploymentBindingClaim(
 	ctx context.Context, md *workercore.ModelDeployment, claim bool,
 ) error {
+	if md.Spec.KVCache == nil {
+		return nil
+	}
+
 	kvcpb, err := r.getModelDeploymentBinding(ctx, md)
 	if err != nil {
 		return err
@@ -253,6 +272,10 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentBindingClaim(
 func (r *ModelDeploymentReconciler) getModelDeploymentBinding(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) (*workercore.KVCachePoolBinding, error) {
+	if md.Spec.KVCache == nil {
+		return nil, nil
+	}
+
 	kvcpb := new(workercore.KVCachePoolBinding)
 	err := r.Client.Get(ctx,
 		ctrlcli.ObjectKey{Namespace: md.Namespace, Name: md.Spec.KVCache.PoolRef.Name},
@@ -324,8 +347,17 @@ func (r *ModelDeploymentReconciler) resolveModelDeploymentConnection(
 		return nil, fmt.Errorf("getting kv cache backend %q: %w", pool.Spec.Backends[0], err)
 	}
 
+	tenant := domain.KVCache.Domain.Name
+	if !KVCacheMasterSeparatesTenants(kvcb, pool) {
+		// A ledger-less master collapses every tenant name into its default one, so the deployment
+		// is rendered WITHOUT the domain rather than with an identity the store cannot honor. The
+		// status projection keeps the declared name either way — it is the record of what was asked
+		// for, and the conditions on the pool say why it is not forwarded.
+		tenant = ""
+	}
+
 	return &ModelDeploymentConnectorInput{
-		Domain:              domain.KVCache.Domain.Name,
+		Domain:              tenant,
 		MasterServerAddress: pool.Status.ClientEndpoint,
 		// Through the one function that owns this mapping, never by reading Spec.Transport.Protocol
 		// here. It resolves Auto and falls back to Auto for an empty value, and a second reader

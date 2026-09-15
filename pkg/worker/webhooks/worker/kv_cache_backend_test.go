@@ -221,8 +221,9 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](MaxLeaderReplicas + 1)
 			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 		}, "at most"},
-		// One replica with the field is accepted rather than refused as pointless. A Lease held by a
-		// single leader is what lets its replacement pick the same record up after a restart.
+		// One replica with the field is accepted rather than refused as pointless: the field is inert
+		// below two replicas and turns live the moment replicas rises, so setting it up front is how
+		// a later scale-up stays a one-field change.
 		{"replicas 1 with the field", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
 			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
@@ -1820,20 +1821,22 @@ func TestKVCacheBackendWebhook_ValidateImageFallback(t *testing.T) {
 	kvcb.Spec.Image = ""
 
 	t.Run("neither the object nor the setting names an image", func(t *testing.T) {
+		clearKVCacheBackendImageSetting(ctx, t)
+
 		_, err := wh.ValidateCreate(ctx, kvcb)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), `"kv-cache-backend-image"`)
 		require.Contains(t, err.Error(), "neither carries one")
 	})
 
-	// Also before the setting is written, and for the same reason — this subtest needs it unset.
-	//
 	// The state it reproduces is the one that strands an object forever: it was admitted while the
 	// setting carried a value, an admin cleared the setting afterwards, and now every update to it
 	// is refused. The reconciler's own removal of the finalizer is an update, and it happens AFTER
 	// teardown has already deleted every workload — so refusing it leaves an object that owns
 	// nothing and cannot be deleted, by any means short of editing etcd.
 	t.Run("an update that leaves the image alone survives a cleared setting", func(t *testing.T) {
+		clearKVCacheBackendImageSetting(ctx, t)
+
 		admitted := newKVCacheBackend()
 		admitted.Spec.Image = ""
 		admitted.Finalizers = []string{systemmeta.LockedResourceFinalizer}
@@ -1856,11 +1859,10 @@ func TestKVCacheBackendWebhook_ValidateImageFallback(t *testing.T) {
 		require.Contains(t, err.Error(), "neither carries one")
 	})
 
-	// Runs BEFORE the subtest below writes the setting, which is the state that matters: the
-	// setting ships blank on purpose, so this is what a default installation looks like. The
-	// external branch renders nothing and the reconciler resolves no image for it, so asking the
-	// question at all refused every external backend — the shape the documentation shows — on
-	// every cluster where nobody had pinned an image yet.
+	// Asked with the setting in whatever state it is, which is the point: the external branch
+	// renders nothing and the reconciler resolves no image for it, so asking the question at all
+	// would refuse every external backend — the shape the documentation shows — on every cluster
+	// where nobody had pinned an image. That refusal must not come back through the default either.
 	t.Run("an external backend needs no image from either place", func(t *testing.T) {
 		external := newKVCacheBackend()
 		external.Spec = newExternalKVCacheBackendSpec()
@@ -1894,5 +1896,34 @@ func TestKVCacheBackendWebhook_ValidateImageFallback(t *testing.T) {
 		own := newKVCacheBackend()
 		_, err := wh.ValidateCreate(ctx, own)
 		require.NoError(t, err)
+	})
+}
+
+// clearKVCacheBackendImageSetting writes the setting as blank for one case and drops the cached
+// value on the way in and the way out, so the case reads "cleared" whatever order the binary runs
+// it in.
+//
+// It exists because the setting now ships a DEFAULT. Before that, "cleared" was simply what every
+// case saw, and the cases below relied on running before the one that seeds a value. That reliance
+// was never declared anywhere a reader could check, and a default turns it from fragile into wrong.
+func clearKVCacheBackendImageSetting(ctx context.Context, t *testing.T) {
+	t.Helper()
+
+	cli := system.LoopbackCtrlClient.Get()
+	sec := &core.Secret{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: setting.DelegatedSecretNamespace,
+			Name:      setting.DelegatedSecretName,
+		},
+		Data: map[string][]byte{"kv-cache-backend-image": []byte("")},
+	}
+
+	setting.InvalidateCache()
+	_ = cli.Delete(ctx, sec.DeepCopy())
+	require.NoError(t, cli.Create(ctx, sec))
+
+	t.Cleanup(func() {
+		setting.InvalidateCache()
+		_ = cli.Delete(ctx, sec)
 	})
 }

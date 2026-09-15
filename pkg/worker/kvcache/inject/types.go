@@ -151,12 +151,27 @@ type Input struct {
 	// Role is the prefill/decode role, RoleNone when the caller declared none.
 	Role Role
 
-	// Domain is the reuse domain the Binding declared. Every renderer emits a non-empty value; there
-	// is no engine-version check because this path does not inspect the container image.
+	// Domain is the reuse domain the Binding declared. A non-empty value is emitted by every engine
+	// that carries a tenant identity; an empty one — a master that holds no tenant ledger — renders
+	// no tenant at all. There is no engine-version check because this path does not inspect the
+	// container image.
 	Domain string
 
 	// Connection is what the pool and its backend published.
 	Connection Connection
+
+	// DirectTransfer enables the point-to-point connector used by a managed prefill/decode router.
+	// With a complete Connection it is composed with the shared store; without one it is rendered on
+	// its own.
+	DirectTransfer bool
+
+	// PublishKVEvents asks the engine to publish cache-placement events for a router. It is resolved
+	// per role by the caller; a false value preserves the ordinary connector render byte for byte.
+	PublishKVEvents bool
+
+	// KVEventsHost is the dialable host paired with the publisher's fixed ports. The engine binds a
+	// wildcard address, which cannot be published to a consumer as an endpoint.
+	KVEventsHost string
 }
 
 // Reason classifies a refusal. Callers branch on it; the message that accompanies it is for a human
@@ -172,12 +187,16 @@ const (
 	// ReasonRoleUnknown is a role value outside the accepted set.
 	ReasonRoleUnknown Reason = "RoleUnknown"
 
-	// ReasonRoleUnsupported is a role declared for an engine whose equivalent knob is not yet
-	// known. Accepting and ignoring it would be the silent wrong result this package exists to
-	// avoid.
+	// ReasonRoleUnsupported is a role - or a capability requested alongside one - that the engine
+	// has no known knob for: a role the engine cannot express, or point-to-point transfer or KV
+	// event publishing asked of an engine that renders neither. Accepting and ignoring it would
+	// be the silent wrong result this package exists to avoid.
 	ReasonRoleUnsupported Reason = "RoleUnsupported"
 
-	// ReasonConnectionIncomplete is a Connection missing a value the engine cannot start without.
+	// ReasonConnectionIncomplete is an input missing something rendering cannot proceed without:
+	// a Connection missing a value the engine cannot start without, an input that requests none
+	// of the store, direct transfer, or event publishing, an engine that cannot run without a
+	// shared store, or an event publisher with no dialable host.
 	ReasonConnectionIncomplete Reason = "ConnectionIncomplete"
 
 	// ReasonTransportUnsupported is a pool transport the engine's store backend refuses. It is

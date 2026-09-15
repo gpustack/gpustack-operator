@@ -285,8 +285,12 @@ func validateKVCacheBackendTransport(
 //
 // Only a MANAGED backend is asked, for the same reason the name rule is: an external one runs
 // somebody else's deployment, so the reconciler resolves no image for it and there is nothing this
-// could be refusing on behalf of. The setting ships blank on purpose, so without this guard every
-// external backend — the shape the documentation shows — would be refused on a default install.
+// could be refusing on behalf of.
+//
+// The setting now ships a default, so the refusal below does not fire on a stock install. It is not
+// dead: the setting allows blank, and a cluster that clears it is asking for exactly this refusal --
+// every backend must then name its own image. Do not remove this on the grounds that the default
+// makes it unreachable; the default is what an administrator is allowed to take away.
 func validateKVCacheBackendImage(
 	ctx context.Context, kvcb *workercore.KVCacheBackend, checkFallback bool, fldPath *field.Path,
 ) field.ErrorList {

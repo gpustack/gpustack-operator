@@ -31,7 +31,9 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	// - The lower bound is not decoration: `required` makes the key present, not the value
 	// non-empty, and an empty version assembles a malformed tag naming something never typed.
 	EngineVersion *string `json:"engineVersion,omitempty"`
-	// KVCache attaches the deployment to a KV cache pool.
+	// KVCache optionally attaches the deployment to a shared KV cache pool. A managed vLLM
+	// prefill/decode deployment without it still uses its router's point-to-point connector; it does
+	// not render the shared-store connector or its client configuration.
 	KVCache *ModelDeploymentKVCacheApplyConfiguration `json:"kvCache,omitempty"`
 	// Roles are the engine roles this deployment runs. A single-role deployment names one; a
 	// prefill/decode deployment names several, which is why this is a LIST FROM THE FIRST VERSION.

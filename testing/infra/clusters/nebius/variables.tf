@@ -131,7 +131,7 @@ variable "cpu_node_count" {
 # it to false on a GPU group nobody logs in to; the CPU group has its own flag, off by default
 # (see README).
 variable "gpu_instance_types" {
-  description = "GPU node groups keyed by group name (each becomes gpu-<name>). platform+preset are required; os and drivers_preset default to the newest match from `nebius mk8s node-group get-compatibility-matrix` for var.release; preemptible defaults to false; mig defaults to whether the platform supports NVIDIA MIG; public_ip defaults to true, giving the nodes an SSH-reachable public IPv4 at the cost of one public-address quota unit each."
+  description = "GPU node groups keyed by group name (each becomes gpu-<name>). platform+preset are required; os and drivers_preset default to the newest match from `nebius mk8s node-group get-compatibility-matrix` for var.release; preemptible defaults to false; mig defaults to whether the platform supports NVIDIA MIG; public_ip defaults to true, giving the nodes an SSH-reachable public IPv4 at the cost of one public-address quota unit each; boot_disk_size_gb overrides var.node_boot_disk_size_gb for the group -- set it (e.g. 400) on groups that pull inference-engine images, which overflow the 100 GiB module default into kubelet disk pressure."
   type = map(object({
     platform       = string
     preset         = string
@@ -140,9 +140,22 @@ variable "gpu_instance_types" {
     preemptible    = optional(bool, false)
     mig            = optional(bool)
     public_ip      = optional(bool, true)
+    # Per-group override of var.node_boot_disk_size_gb. GPU nodes that pull inference-engine
+    # images need far more than the 100 GiB module default -- one such image is tens of GiB,
+    # and it shares the boot disk with the container runtime's layers, so a disk that is big
+    # enough for the OS alone pushes the kubelet into disk pressure once the pulls start.
+    boot_disk_size_gb = optional(number)
   }))
   default = {
     h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" }
+  }
+
+  validation {
+    condition = alltrue([
+      for cfg in values(var.gpu_instance_types) :
+      cfg.boot_disk_size_gb == null || (cfg.boot_disk_size_gb > 0 && cfg.boot_disk_size_gb == floor(cfg.boot_disk_size_gb))
+    ])
+    error_message = "boot_disk_size_gb must be a positive whole number when set."
   }
 }
 

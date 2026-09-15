@@ -82,6 +82,12 @@ type fakeMaster struct {
 	// ledger and still not answer /metrics.
 	refuseScrape int
 
+	// noTenantLedger reshapes the exposition into what a master running without multi-tenancy
+	// actually serves: the master-wide capacity gauge alone, with not one tenant-quota series. A
+	// master WITH the subsystem emits mooncake_tenant_quota_allocatable_capacity_bytes; one without
+	// does not, and the pool's capacity axis has to read the gauge that is there.
+	noTenantLedger bool
+
 	puts, deletes, lists, scrapes int
 
 	// onWrite, when set, runs on the FIRST write this master is asked to make, before the ledger is
@@ -127,6 +133,11 @@ func (m *fakeMaster) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		if m.noTenantLedger {
+			fmt.Fprintf(w, "master_total_capacity_bytes %d\n", m.allocatable)
+			fmt.Fprintf(w, "master_allocated_bytes 0\n")
+			return
+		}
 		fmt.Fprintf(w, "mooncake_tenant_quota_allocatable_capacity_bytes %d\n", m.allocatable)
 		for tenant, quota := range m.ledger {
 			if m.omitTenants[tenant] {
@@ -335,6 +346,14 @@ func newReconcileBackend(name, admin string) *workercore.KVCacheBackend {
 			},
 		},
 	}
+}
+
+// newManagedSingleTenantReconcileBackend is the topology declared rather than observed: a managed
+// backend whose leader this operator starts without the multi-tenancy flag.
+func newManagedSingleTenantReconcileBackend(name, admin string) *workercore.KVCacheBackend {
+	kvcb := newManagedReconcileBackend(name, admin)
+	kvcb.Spec.Connection.Managed.Leader.MultiTenancy = false
+	return kvcb
 }
 
 func newBoundBinding(namespace, name, pool, domain string, ceiling resource.Quantity) *workercore.KVCachePoolBinding {
@@ -625,6 +644,10 @@ func TestKVCachePoolReconcile_UsageSumsThisPoolsOwnTenants(t *testing.T) {
 }
 
 // TestKVCachePoolReconcile_TheTwoPreconditionsFailLoudly is criterion 11.
+//
+// The two observations report differently now: a master with no tenant ledger is a topology the
+// pool converges INTO, so the fact is on the conditions while the phase is Ready; a policy source
+// that will not persist is still the fault it always was.
 func TestKVCachePoolReconcile_TheTwoPreconditionsFailLoudly(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -632,6 +655,7 @@ func TestKVCachePoolReconcile_TheTwoPreconditionsFailLoudly(t *testing.T) {
 		body       string
 		wantReason string
 		wantSays   string
+		wantReady  bool
 	}{
 		{
 			name:       "a master running without multi-tenancy",
@@ -639,6 +663,7 @@ func TestKVCachePoolReconcile_TheTwoPreconditionsFailLoudly(t *testing.T) {
 			body:       `{"success":false,"error_code":-1011,"error_message":"UNAVAILABLE_IN_CURRENT_MODE"}`,
 			wantReason: KVCachePoolReasonMultiTenancyDisabled,
 			wantSays:   "runs without multi-tenancy",
+			wantReady:  true,
 		},
 		{
 			name:       "a policy source the master cannot rewrite",
@@ -646,6 +671,7 @@ func TestKVCachePoolReconcile_TheTwoPreconditionsFailLoudly(t *testing.T) {
 			body:       `{"success":false,"error_code":-1503,"error_message":"PERSISTENT_FAIL"}`,
 			wantReason: KVCachePoolReasonQuotaPolicyNotWritable,
 			wantSays:   "is not writable",
+			wantReady:  false,
 		},
 	}
 
@@ -665,8 +691,15 @@ func TestKVCachePoolReconcile_TheTwoPreconditionsFailLoudly(t *testing.T) {
 			reconcilePool(t, r, "shared")
 
 			kvcp := readPool(t, cli, "shared")
-			assert.NotEqual(t, KVCachePoolPhaseReady, kvcp.Status.Phase,
-				"neither precondition may be assumed: a pool without it does not report Ready")
+			if c.wantReady {
+				assert.Equal(t, KVCachePoolPhaseReady, kvcp.Status.Phase,
+					"a ledger-less master is a declared single-tenant topology, not a fault: the "+
+						"pool converges to Ready and the conditions carry the fact")
+			} else {
+				assert.NotEqual(t, KVCachePoolPhaseReady, kvcp.Status.Phase,
+					"a precondition that cannot be observed may not be assumed: the pool does not "+
+						"report Ready")
+			}
 			assert.Contains(t, kvcp.Status.PhaseMessage, c.wantSays)
 
 			reasons := make([]string, 0, len(kvcp.Status.Conditions))
@@ -790,11 +823,15 @@ func TestKVCachePoolReconcile_ALedgerFaultDoesNotOutliveItself(t *testing.T) {
 	const (
 		multiTenancyOff  = `{"success":false,"error_code":-1011,"error_message":"UNAVAILABLE_IN_CURRENT_MODE"}`
 		policyUnwritable = `{"success":false,"error_code":-1503,"error_message":"PERSISTENT_FAIL"}`
+		ledgerOutage     = `{"success":false,"error_code":-1,"error_message":"internal"}`
 	)
 
 	// Both directions, because the defect is symmetric and only one half of it shows up in the phase
 	// message: summarizeKVCachePool scans QuotaLedgerAvailable first, so a stale POLICY fault under a
 	// live ledger fault is invisible there and has to be asserted on the condition itself.
+	//
+	// Multi-tenancy off can no longer be the FIRST pass's fault — it is a topology now, and the pool
+	// reports Ready on it — so the first pass owes its fault to an unreachable ledger instead.
 	cases := []struct {
 		name         string
 		firstStatus  int
@@ -806,9 +843,9 @@ func TestKVCachePoolReconcile_ALedgerFaultDoesNotOutliveItself(t *testing.T) {
 		assertSecondPass func(t *testing.T, kvcp *workercore.KVCachePool)
 	}{
 		{
-			name:         "multi-tenancy is turned on and the policy source is what fails now",
-			firstStatus:  http.StatusConflict,
-			firstBody:    multiTenancyOff,
+			name:         "the ledger answers again and the policy source is what fails now",
+			firstStatus:  http.StatusInternalServerError,
+			firstBody:    ledgerOutage,
 			secondStatus: http.StatusInternalServerError,
 			secondBody:   policyUnwritable,
 			assertSecondPass: func(t *testing.T, kvcp *workercore.KVCachePool) {
@@ -935,4 +972,51 @@ func TestKVCachePoolReconcile_ARefusedPolicyReachesTheMasterNotAtAll(t *testing.
 	assert.Zero(t, puts, "the master must not be written for a set the validator refused")
 	assert.Zero(t, deletes, "and nothing may be removed from it on that pass either")
 	assert.Empty(t, master.held(), "so its ledger is exactly as it was")
+}
+
+// TestKVCachePoolReconcile_ADeclaredSingleTenantBackendIsNeverAskedForItsLedger pins the no-ledger
+// fast path: a managed backend declared without multi-tenancy is converged without one ledger
+// call, and the pool and its Binding both report the topology honestly — Ready, with the quota
+// axes saying Unenforced rather than Granted.
+func TestKVCachePoolReconcile_ADeclaredSingleTenantBackendIsNeverAskedForItsLedger(t *testing.T) {
+	master := newFakeMaster()
+	// Such a master serves no tenant-quota series at all; the pool's capacity axis has to read the
+	// master-wide gauge, which is the only capacity figure the exposition carries.
+	master.noTenantLedger = true
+	address := master.start(t)
+
+	r, cli := newReconciler(
+		newManagedSingleTenantReconcileBackend("mooncake-dram", address),
+		newTestKVCachePool("shared", "mooncake-dram"),
+		newBoundBinding("team-a", "chat", "shared", "team-a-chat", resource.MustParse("20Ti")),
+	)
+
+	reconcilePool(t, r, "shared")
+
+	puts, deletes, lists, _ := master.counts()
+	assert.Zero(t, lists, "the declaration answers before the master is asked")
+	assert.Zero(t, puts, "and a quota that cannot be written is never attempted")
+	assert.Zero(t, deletes)
+
+	kvcp := readPool(t, cli, "shared")
+	assert.Equal(t, KVCachePoolPhaseReady, kvcp.Status.Phase,
+		"a ledger-less master is a declared single-tenant topology, not a fault")
+	assert.Contains(t, kvcp.Status.PhaseMessage, "without multi-tenancy")
+	assert.Equal(t, KVCachePoolReasonMultiTenancyDisabled,
+		conditionReason(t, kvcp, KVCachePoolConditionQuotaLedgerAvailable),
+		"the fact stays on the condition that drives the renderers and the Pod gate")
+	assert.True(t, KVCachePoolConditionCapacityAllocatable.IsTrue(kvcp),
+		"capacity comes off the master-wide gauge when no tenant-quota gauge exists")
+
+	kvcpb := readBinding(t, cli, "team-a", "chat")
+	assert.Equal(t, KVCachePoolPhaseReady, kvcpb.Status.Phase,
+		"the Binding is as usable as this topology lets one be")
+	assert.True(t, KVCachePoolBindingConditionQuotaGranted.IsTrue(kvcpb))
+	assert.Equal(t, "Unenforced",
+		conditionReason(t, kvcpb, KVCachePoolBindingConditionQuotaGranted),
+		"granted but not enforced: the write succeeds into the default tenant, and the reason is "+
+			"what keeps that from reading as a per-tenant quota")
+	assert.Equal(t, "NoTenantLedger",
+		conditionReason(t, kvcpb, KVCachePoolBindingConditionQuotaObserved))
+	assert.Nil(t, kvcpb.Status.Usage, "usage is not accounted per domain on such a master")
 }

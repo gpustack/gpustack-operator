@@ -77,23 +77,74 @@ var (
 	// KVCacheBackendImage is the image every role of a KVCacheBackend runs when the object does
 	// not name one itself.
 	//
-	// It ships blank on purpose, and not for want of a verified image. One value has to be right for
-	// every backend in the cluster at once, and the leader and the members do not want the same
-	// thing: the leader needs no accelerator runtime at all, while a member's transports and the
-	// runtime it links are compiled into its wheel. A backend on the Ascend transport, or a member
-	// group placed on other accelerator hardware, needs a build nothing here can guess at. Blank
-	// makes that an admission refusal naming both places to fix, where a default would make it a
-	// loader error at runtime.
+	// The default is this project's own build, pack/mirrored-mooncake. It is the only image that can
+	// run leader.highAvailability, because no published upstream image carries a leadership backend
+	// at all, and it is the build every cluster case in this repository exercises.
 	//
-	// This project does publish one build, pack/mirrored-mooncake, and it is still not a default. It
-	// is the only image that can run leader.highAvailability -- no published upstream image carries
-	// a leadership backend at all -- but it is TCP over DRAM, so defaulting to it would hand a
-	// backend on a vendor fabric an image whose transport it cannot use.
+	// WHAT THE DEFAULT DOES NOT FIT, because one value cannot be right for every backend at once:
+	// it is a CPU build carrying TCP and EFA over DRAM, so a backend whose members sit on a vendor
+	// fabric -- the Ascend transport, or a member group placed on other accelerator hardware -- needs
+	// a build assembled against that runtime, and gets a transport it cannot use from this one. The
+	// leader and the members do not want the same thing either: the leader needs no accelerator
+	// runtime at all, while a member's transports and the runtime it links are compiled into its
+	// wheel. Those backends name their image on the object, which always wins over this setting.
+	//
+	// The failure mode moved with the default, and that is the cost of having one. Blank made a
+	// missing image an ADMISSION REFUSAL naming both places to fix; a default makes a WRONG image a
+	// loader error at runtime, which is quieter and further from the person who can fix it.
+	// Clearing this setting restores the refusal -- it still allows blank for exactly that reason --
+	// so a cluster that would rather have every backend name its own image can have that.
 	KVCacheBackendImage = settings.NewEditable(
 		"kv-cache-backend-image",
 		"Indicates the image to run a KV cache backend, when the backend does not name one.",
-		setting.InitializeFromEnv(),
+		setting.InitializeFromEnv("gpustack/mirrored-mooncake:0.3.13.post1-cpu"),
 		setting.AllowBlank(),
+		setting.AllowContainerImageReference(),
+	)
+
+	// Model deployment.
+
+	// The three images below front a ModelDeployment's roles. Unlike KVCacheBackendImage they DO
+	// ship defaults, because one value is right for every cluster at once: none of them runs a
+	// model, so none of them links an accelerator runtime, and the operator renders configuration
+	// they must be able to read. They are settings rather than constants so that an air-gapped
+	// cluster can point them at its own registry, and so that a broken upstream release can be
+	// pinned back without rebuilding the operator.
+
+	// ModelDeploymentRouterImage is the endpoint picker a managed router runs when the object does
+	// not name one itself.
+	//
+	// The default is pinned to a release. Upstream publishes this under the tag `main`, which moves,
+	// and a moving tag would let two clusters installed months apart run different pickers against
+	// the one configuration this operator renders.
+	ModelDeploymentRouterImage = settings.NewEditable(
+		"model-deployment-router-image",
+		"Indicates the endpoint picker image a managed router runs, "+
+			"when the ModelDeployment does not name one.",
+		setting.InitializeFromEnv("gpustack/mirrored-llm-d-router-endpoint-picker:v0.10.0"),
+		setting.AllowContainerImageReference(),
+	)
+
+	// ModelDeploymentRouterProxyImage is the proxy that fronts a managed router's endpoint picker.
+	//
+	// It has no field on the API to override it: the proxy's configuration is rendered by this
+	// operator against one proxy's configuration schema, so a cluster swapping the binary would
+	// have to swap that configuration too. This setting exists for registry redirection and for
+	// pinning, not for running a different proxy.
+	ModelDeploymentRouterProxyImage = settings.NewEditable(
+		"model-deployment-router-proxy-image",
+		"Indicates the proxy image fronting a managed router's endpoint picker.",
+		setting.InitializeFromEnv("gpustack/mirrored-envoy:distroless-v1.33.2"),
+		setting.AllowContainerImageReference(),
+	)
+
+	// ModelDeploymentRoutingSidecarImage is the sidecar a decoder runs to accept a remote prefill
+	// handoff. It carries the same caveat as the proxy above: this operator renders its arguments,
+	// so the setting is for redirection and pinning rather than for a different implementation.
+	ModelDeploymentRoutingSidecarImage = settings.NewEditable(
+		"model-deployment-routing-sidecar-image",
+		"Indicates the routing sidecar image a decoder runs to accept a remote prefill handoff.",
+		setting.InitializeFromEnv("gpustack/mirrored-llm-d-router-disagg-sidecar:v0.10.0"),
 		setting.AllowContainerImageReference(),
 	)
 

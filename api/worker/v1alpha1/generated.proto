@@ -1462,6 +1462,10 @@ message KVCacheBackendLeader {
   //   - More than one REQUIRES HighAvailability. Electing a leader among several needs a leadership
   //     record, and the webhook refuses the pair without one rather than silently running two
   //     leaders against the same members.
+  //   - Raising this past one TURNS THE ELECTION ON, and the flip is re-evaluated on every
+  //     reconcile rather than decided at create. It restarts the leader and rolls every member —
+  //     the member's master entry changes shape with it — so the store's cached contents do not
+  //     survive the crossing. The same holds on the way back down to one.
   //   - Raising this adds no capacity, which members do. The ceiling is here to catch the reading
   //     that it does, and it is duplicated in the webhook on purpose: this one still holds when
   //     the webhook is not installed, which is when a second leader would be rendered rather than
@@ -1479,6 +1483,11 @@ message KVCacheBackendLeader {
   //
   //   - Unset, the leader runs as a single process exactly as before — no election flag, no extra
   //     object, the command line it ran before this field existed.
+  //   - Set with Replicas at 1, it is INERT: one process has nothing to elect between, so no
+  //     election flag, Lease or API token is rendered until Replicas rises above 1. That makes
+  //     this safe to set up front on a store image built without the k8s-lease backend, whose
+  //     master fails at startup the moment the election flags appear — the flags arrive only
+  //     when there is something for them to elect.
   //   - With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile
   //     interval. Each replica seeds its tenant quota policy at its own start, so a standby that
   //     took over after a quota was raised applies the older, lower ceiling, and an over-quota
@@ -3003,10 +3012,9 @@ message ModelDeploymentRouter {
 
   // ExtraArgs are additional flags for the router process.
   //
-  // The intent is that a flag the operator derives itself is refused rather than merged, so that one
-  // setting has one source. NOTHING ENFORCES THAT YET: the catalog it would consult is keyed by
-  // router rather than by engine, and the engine-keyed catalog guarding a role's extraArgs answers a
-  // different question and cannot stand in for it.
+  // A flag the operator derives itself is refused rather than merged, so that one setting has one
+  // source. The owned catalog is keyed by router because the engine-keyed catalog guarding a role's
+  // extraArgs answers a different question and cannot stand in for it.
   //
   // +optional
   // +listType=atomic
@@ -3164,9 +3172,11 @@ message ModelDeploymentSpec {
   // +k8s:validation:maxLength=64
   optional string engineVersion = 5;
 
-  // KVCache attaches the deployment to a KV cache pool.
+  // KVCache optionally attaches the deployment to a shared KV cache pool. A managed vLLM
+  // prefill/decode deployment without it still uses its router's point-to-point connector; it does
+  // not render the shared-store connector or its client configuration.
   //
-  // +required
+  // +optional
   optional ModelDeploymentKVCache kvCache = 3;
 
   // Roles are the engine roles this deployment runs. A single-role deployment names one; a
@@ -3215,17 +3225,21 @@ message ModelDeploymentSpec {
 // disagreement with the Pods.
 message ModelDeploymentStatus {
   // Phase summarizes the conditions: Starting, Ready, Degraded, Deleting. Ready means every role's
-  // ready count equals its desired count; Degraded means at least one replica is ready and at
-  // least one is not.
+  // ready count equals its desired count and, when declared, the router has a ready replica.
+  // Degraded means a serving component is ready while another required one is not.
   optional string phase = 1;
 
   // PhaseMessage carries the reason for the phase.
   optional string phaseMessage = 2;
 
   // Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,
-  // CacheAttached, ReplicasUpToDate, RoleKindsReady. They are independent — "quota reserved but
-  // cache not attached" is a real and actionable state — which is what a single phase string
-  // cannot carry.
+  // CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady. They are
+  // independent —
+  // "quota reserved but cache not attached" is a real and actionable state — which is what a single
+  // phase string cannot carry.
+  //
+  // KVEventsPublishing reports rendered configuration rather than observing the stream. A publisher
+  // that was configured and then crashed therefore remains True until a live consumer observes it.
   //
   // +patchMergeKey=type
   // +patchStrategy=merge
@@ -3233,11 +3247,13 @@ message ModelDeploymentStatus {
   // +listMapKey=type
   repeated .gpustack.ai.gpustack.api.v1.Condition conditions = 3;
 
-  // Endpoint is the one address every replica serves behind, in the form
-  // <scheme>://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.
+  // Endpoint is the address clients use. Without a router it is the deployment-wide Service, in the
+  // form <scheme>://<name>.<namespace>.svc:<port>. With a router it is the router's Service and is
+  // absent until the router has a ready replica.
   //
-  // The scheme is https where the first role's own arguments put its listener on TLS, and http
-  // otherwise. A client reads it from here rather than assuming either one.
+  // A role endpoint uses https where that role's own arguments put its listener on TLS. The managed
+  // router endpoint uses the router's own transport instead, which is http. A client reads the
+  // selected value from here rather than assuming either one.
   //
   // +k8s:validation:maxLength=512
   optional string endpoint = 4;
@@ -3256,8 +3272,7 @@ message ModelDeploymentStatus {
   // object here would be indistinguishable from a domain whose every field happens to be empty.
   optional ModelDeploymentKVCacheStatus kvCache = 6;
 
-  // Router is everything a router needs in order to front this deployment, published under BOTH
-  // modes. Under the external mode it is the entire output of this feature.
+  // Router is the observed contract of the managed router requested by spec.router.
   //
   // It is ABSENT when spec.router is, rather than present and empty, for the same reason KVCache is:
   // an empty object here cannot be told apart from a contract whose every string happens to be

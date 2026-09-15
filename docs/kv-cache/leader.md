@@ -51,6 +51,14 @@ the field that is missing. An enum would answer `Unsupported value: 2` and teach
 webhook refuses that combination, but a schema cannot express a cross-field rule — so where the
 webhook is not installed this clamp is what keeps unelected masters off one pool.
 
+**`highAvailability` with one replica is inert: the election exists only above one replica.** A
+single process has nothing to elect between, so no election flag, Lease or API token is rendered
+until `replicas` rises past 1 — set the field up front and a later scale-up is a one-field change.
+
+The gate is re-evaluated on every reconcile, not decided at create: crossing `replicas: 1` in
+either direction flips the election on or off, and the flip restarts the leader and rolls every
+member, so the store's cached contents do not survive the crossing.
+
 **The update strategy follows the replica count, and the two cases are opposites.** At one replica
 the Deployment uses `Recreate`: an update stops the old master before starting the new one, so expect
 a gap with no master on every image or flag change. Members keep their segments across it and
@@ -99,7 +107,8 @@ marker, and the readiness gate above is what turns it into an endpoint decision.
 
 ## High availability
 
-Set `leader.highAvailability` and the leader elects through a **Kubernetes Lease**. The field has no
+Set `leader.highAvailability` and the leader elects through a **Kubernetes Lease** — once `replicas`
+exceeds one; below that the field is inert (see above). The field has no
 settings — the Lease carries the leader's own object name, `<backend>-leader`, in this operator's
 namespace — and its presence is the switch:
 
@@ -122,6 +131,10 @@ availability is a compile-time switch and every option ships **off**:
 
 Use an image built from [`pack/mirrored-mooncake`](../../pack/mirrored-mooncake/Dockerfile) for
 `spec.image` **and for every `members[].image`**.
+
+A lease-less image is not refused outright: at one replica the election flags are never rendered, so
+such an image runs a single-leader backend even with `highAvailability` set — the flags arrive only
+when `replicas` rises past 1, which is where the missing backend would fail the leader at startup.
 
 ⛔ **A member group on `RDMA`, `HIP` or `Ascend` cannot run under high availability today.** Those
 transports need a vendor runtime `mirrored-mooncake` does not carry, and the vendor build does not
@@ -174,8 +187,8 @@ The member's is narrower on purpose: a shared account would let any member take 
 leader it is following.
 
 **A member's `MOONCAKE_MASTER` becomes `k8s://<namespace>/<lease>`** instead of the leader Service
-address, so the client reads the holder and follows it across an election without restarting. Without
-`highAvailability` the value is unchanged.
+address, so the client reads the holder and follows it across an election without restarting. Where
+no election runs — the field unset, or one replica — the value is unchanged.
 
 **The Service address is not known to be wrong under HA** — a standby is not ready, so the Service
 already resolves to the serving leader. What is unmeasured is whether a member's reconnect follows

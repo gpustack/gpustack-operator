@@ -2410,7 +2410,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																	Nullable: true,
 																},
 																"highAvailability": {
-																	Description: "HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas\nabove 1. It carries no settings: the Lease is named after this backend, so there is no\nconnection target to supply, and the API access the election needs is rendered beside the\nworkload.\n- Unset, the leader runs as a single process exactly as before — no election flag, no extra\nobject, the command line it ran before this field existed.\n- With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile\ninterval. Each replica seeds its tenant quota policy at its own start, so a standby that\ntook over after a quota was raised applies the older, lower ceiling, and an over-quota\nwrite in this store is not refused — it evicts that tenant's own older objects,\nirreversibly and without moving any counter. The quota itself is not lost: the pool\nreconciler is the authority and writes the difference back on its next pass.",
+																	Description: "HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas\nabove 1. It carries no settings: the Lease is named after this backend, so there is no\nconnection target to supply, and the API access the election needs is rendered beside the\nworkload.\n- Unset, the leader runs as a single process exactly as before — no election flag, no extra\nobject, the command line it ran before this field existed.\n- Set with Replicas at 1, it is INERT: one process has nothing to elect between, so no\nelection flag, Lease or API token is rendered until Replicas rises above 1. That makes\nthis safe to set up front on a store image built without the k8s-lease backend, whose\nmaster fails at startup the moment the election flags appear — the flags arrive only\nwhen there is something for them to elect.\n- With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile\ninterval. Each replica seeds its tenant quota policy at its own start, so a standby that\ntook over after a quota was raised applies the older, lower ceiling, and an over-quota\nwrite in this store is not refused — it evicts that tenant's own older objects,\nirreversibly and without moving any counter. The quota itself is not lost: the pool\nreconciler is the authority and writes the difference back on its next pass.",
 																	Type:        "object",
 																	Nullable:    true,
 																},
@@ -2434,7 +2434,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																	Nullable: true,
 																},
 																"replicas": {
-																	Description: "Replicas is how many leader processes run, of which exactly one serves at a time. The rest are\nstandbys: they hold no data, answer no request, and exist to take over.\n- More than one REQUIRES HighAvailability. Electing a leader among several needs a leadership\nrecord, and the webhook refuses the pair without one rather than silently running two\nleaders against the same members.\n- Raising this adds no capacity, which members do. The ceiling is here to catch the reading\nthat it does, and it is duplicated in the webhook on purpose: this one still holds when\nthe webhook is not installed, which is when a second leader would be rendered rather than\nrefused. Raise both together; widening a maximum is not a breaking change.",
+																	Description: "Replicas is how many leader processes run, of which exactly one serves at a time. The rest are\nstandbys: they hold no data, answer no request, and exist to take over.\n- More than one REQUIRES HighAvailability. Electing a leader among several needs a leadership\nrecord, and the webhook refuses the pair without one rather than silently running two\nleaders against the same members.\n- Raising this past one TURNS THE ELECTION ON, and the flip is re-evaluated on every\nreconcile rather than decided at create. It restarts the leader and rolls every member —\nthe member's master entry changes shape with it — so the store's cached contents do not\nsurvive the crossing. The same holds on the way back down to one.\n- Raising this adds no capacity, which members do. The ceiling is here to catch the reading\nthat it does, and it is duplicated in the webhook on purpose: this one still holds when\nthe webhook is not installed, which is when a second leader would be rendered rather than\nrefused. Raise both together; widening a maximum is not a breaking change.",
 																	Type:        "integer",
 																	Format:      "int32",
 																	Default: &v1.JSON{
@@ -3754,7 +3754,6 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 										"model",
 										"engine",
 										"engineVersion",
-										"kvCache",
 										"roles",
 									},
 									Properties: map[string]v1.JSONSchemaProps{
@@ -3777,7 +3776,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											MinLength:   ptr.To[int64](1),
 										},
 										"kvCache": {
-											Description: "KVCache attaches the deployment to a KV cache pool.",
+											Description: "KVCache optionally attaches the deployment to a shared KV cache pool. A managed vLLM\nprefill/decode deployment without it still uses its router's point-to-point connector; it does\nnot render the shared-store connector or its client configuration.",
 											Type:        "object",
 											Required: []string{
 												"poolRef",
@@ -3809,6 +3808,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													},
 												},
 											},
+											Nullable: true,
 										},
 										"model": {
 											Description: "Model names what the engine serves.",
@@ -4264,7 +4264,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											},
 											Properties: map[string]v1.JSONSchemaProps{
 												"extraArgs": {
-													Description: "ExtraArgs are additional flags for the router process.\nThe intent is that a flag the operator derives itself is refused rather than merged, so that one\nsetting has one source. NOTHING ENFORCES THAT YET: the catalog it would consult is keyed by\nrouter rather than by engine, and the engine-keyed catalog guarding a role's extraArgs answers a\ndifferent question and cannot stand in for it.",
+													Description: "ExtraArgs are additional flags for the router process.\nA flag the operator derives itself is refused rather than merged, so that one setting has one\nsource. The owned catalog is keyed by router because the engine-keyed catalog guarding a role's\nextraArgs answers a different question and cannot stand in for it.",
 													Type:        "array",
 													Items: &v1.JSONSchemaPropsOrArray{
 														Schema: &v1.JSONSchemaProps{
@@ -4304,7 +4304,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 									Type: "object",
 									Properties: map[string]v1.JSONSchemaProps{
 										"conditions": {
-											Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,\nCacheAttached, ReplicasUpToDate, RoleKindsReady. They are independent — \"quota reserved but\ncache not attached\" is a real and actionable state — which is what a single phase string\ncannot carry.",
+											Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,\nCacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady. They are\nindependent —\n\"quota reserved but cache not attached\" is a real and actionable state — which is what a single\nphase string cannot carry.\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher\nthat was configured and then crashed therefore remains True until a live consumer observes it.",
 											Type:        "array",
 											Items: &v1.JSONSchemaPropsOrArray{
 												Schema: &v1.JSONSchemaProps{
@@ -4368,7 +4368,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											XListType: ptr.To[string]("map"),
 										},
 										"endpoint": {
-											Description: "Endpoint is the one address every replica serves behind, in the form\n<scheme>://<name>.<namespace>.svc:<port>. It is absent until the Service has an address.\nThe scheme is https where the first role's own arguments put its listener on TLS, and http\notherwise. A client reads it from here rather than assuming either one.",
+											Description: "Endpoint is the address clients use. Without a router it is the deployment-wide Service, in the\nform <scheme>://<name>.<namespace>.svc:<port>. With a router it is the router's Service and is\nabsent until the router has a ready replica.\nA role endpoint uses https where that role's own arguments put its listener on TLS. The managed\nrouter endpoint uses the router's own transport instead, which is http. A client reads the\nselected value from here rather than assuming either one.",
 											Type:        "string",
 											MaxLength:   ptr.To[int64](512),
 										},
@@ -4417,7 +4417,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											Nullable: true,
 										},
 										"phase": {
-											Description: "Phase summarizes the conditions: Starting, Ready, Degraded, Deleting. Ready means every role's\nready count equals its desired count; Degraded means at least one replica is ready and at\nleast one is not.",
+											Description: "Phase summarizes the conditions: Starting, Ready, Degraded, Deleting. Ready means every role's\nready count equals its desired count and, when declared, the router has a ready replica.\nDegraded means a serving component is ready while another required one is not.",
 											Type:        "string",
 										},
 										"phaseMessage": {
@@ -4485,7 +4485,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											XListType: ptr.To[string]("map"),
 										},
 										"router": {
-											Description: "Router is everything a router needs in order to front this deployment, published under BOTH\nmodes. Under the external mode it is the entire output of this feature.\nIt is ABSENT when spec.router is, rather than present and empty, for the same reason KVCache is:\nan empty object here cannot be told apart from a contract whose every string happens to be\nempty.",
+											Description: "Router is the observed contract of the managed router requested by spec.router.\nIt is ABSENT when spec.router is, rather than present and empty, for the same reason KVCache is:\nan empty object here cannot be told apart from a contract whose every string happens to be\nempty.",
 											Type:        "object",
 											Required: []string{
 												"name",

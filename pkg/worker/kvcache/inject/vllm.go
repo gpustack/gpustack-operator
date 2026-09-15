@@ -19,6 +19,15 @@ const (
 	// it is an EngineArgs field parsed off the command line - so this engine cannot be configured
 	// without appending an argument.
 	vllmTransferConfigArg = "--kv-transfer-config"
+	vllmKVEventsConfigArg = "--kv-events-config"
+	// VLLMKVEventsPort is the ZMQ publisher port consumed by managed routers.
+	VLLMKVEventsPort int32 = 5557
+	// VLLMKVEventsReplayPort is the publisher's replay port.
+	VLLMKVEventsReplayPort int32 = 5558
+	// VLLMKVEventsTopic is the topic both publisher and subscriber use.
+	VLLMKVEventsTopic = "kv@"
+	// VLLMMooncakeBootstrapPort is where a prefiller exposes Mooncake's transfer handshake.
+	VLLMMooncakeBootstrapPort int32 = 8998
 
 	// vllmStoreConnector is the name vLLM PROPER registers for the Mooncake store
 	// (`kv_connector/factory.py:223-226`, read at v0.25.1).
@@ -91,8 +100,25 @@ func vllmKVRole(role Role) (string, error) {
 // vllmTransferConfig is the --kv-transfer-config document. A struct rather than a map so an
 // unreadable key is a compile error, matching the client-config type in this package.
 type vllmTransferConfig struct {
-	KVConnector string `json:"kv_connector"`
-	KVRole      string `json:"kv_role"`
+	KVConnector            string                    `json:"kv_connector"`
+	KVRole                 string                    `json:"kv_role"`
+	KVConnectorExtraConfig *vllmConnectorExtraConfig `json:"kv_connector_extra_config,omitempty"`
+}
+
+type vllmConnectorExtraConfig struct {
+	Connectors       []vllmTransferConfig `json:"connectors,omitempty"`
+	MooncakeProtocol string               `json:"mooncake_protocol,omitempty"`
+}
+
+type vllmKVEventsConfig struct {
+	EnableKVCacheEvents bool   `json:"enable_kv_cache_events"`
+	Publisher           string `json:"publisher"`
+	Endpoint            string `json:"endpoint"`
+	ReplayEndpoint      string `json:"replay_endpoint"`
+	BufferSteps         int    `json:"buffer_steps"`
+	HWM                 int    `json:"hwm"`
+	MaxQueueSize        int    `json:"max_queue_size"`
+	Topic               string `json:"topic"`
 }
 
 func renderVLLM(in Input) (*Result, error) {
@@ -101,38 +127,81 @@ func renderVLLM(in Input) (*Result, error) {
 		return nil, err
 	}
 
-	connector, err := vllmConnectorFor(in.Engine)
-	if err != nil {
-		return nil, err
-	}
-
-	tenantInjected := in.Domain != ""
-	config, err := renderVLLMClientConfig(in.Connection, in.Domain)
-	if err != nil {
-		return nil, err
-	}
+	// Reads the address alone, while Render's gate spells the same question as "an address OR a
+	// transport". The two are EQUIVALENT ON EVERY INPUT THAT REACHES HERE, and only because that gate
+	// refuses a connection carrying one without the other - so a Connection arriving here has both
+	// fields or neither. TestRender_RefusesAHalfConnection pins that, because the equivalence is a
+	// property of the caller rather than of this line, and nothing here would notice it changing.
+	hasStore := in.Connection.MasterAddress != ""
 
 	// The connector configuration is a JSON document on the command line, marshaled from a type so an
 	// unreadable key is a compile error. Key order is not part of the contract - JSON defines none -
 	// so anything comparing this must decode it rather than match the string.
-	transferDoc, err := json.Marshal(vllmTransferConfig{
-		KVConnector: connector,
-		KVRole:      kvRole,
-	})
-	if err != nil {
-		// UNREACHABLE: two strings. Returned rather than ignored because dropping it would mean
-		// discarding an error, and never panicked because this runs on an admission path.
-		return nil, fmt.Errorf("marshal the vLLM connector configuration: %w", err)
+	var transferConfigValue *vllmTransferConfig
+	if hasStore {
+		connector, err := vllmConnectorFor(in.Engine)
+		if err != nil {
+			return nil, err
+		}
+		transferConfigValue = &vllmTransferConfig{KVConnector: connector, KVRole: kvRole}
 	}
-	transferConfig := string(transferDoc)
+	if in.DirectTransfer {
+		if in.Engine != EngineVLLM || (in.Role != RolePrefill && in.Role != RoleDecode) {
+			return nil, newRefusal(ReasonRoleUnsupported,
+				"direct transfer requires a native vLLM prefill or decode role")
+		}
+		protocol := in.Connection.Protocol
+		if protocol == "" {
+			protocol = "tcp"
+		}
+		// This value is NOT gated, on purpose. The accepted set is a property of the mooncake
+		// build inside the engine's own image, which this operator neither ships nor can
+		// inspect: a HIP-compiled build makes "hip" a working point-to-point transport, and
+		// refusing it here would hard-code one image's compile set onto another image's
+		// connector. checkTransport documents the same rule from the other side -- an
+		// unmeasured pair is let through, because a refusal on a fact nobody read turns a
+		// working engine into a broken one. A mismatch therefore still raises at startup, in
+		// the container that owns the fact.
+		direct := vllmTransferConfig{
+			KVConnector: "MooncakeConnector", KVRole: kvRole,
+			KVConnectorExtraConfig: &vllmConnectorExtraConfig{MooncakeProtocol: protocol},
+		}
+		if !hasStore {
+			// The decode arm renders only the role and the protocol: the bootstrap address is
+			// expected to arrive per-request via kv_transfer_params. That is verified behavior
+			// from a real-cluster run; the upstream per-request path has not been read.
+			transferConfigValue = &direct
+		} else {
+			// The inner store connector's kv_consumer/kv_both roles are hardcoded: upstream
+			// per-inner-connector kv_role semantics are unverified. A real-cluster run observed
+			// a Prometheus-metrics registration assert naming MooncakeConnector on the kv_both
+			// role, which recovered after one APIServer restart.
+			storeRole := "kv_consumer"
+			if in.Role == RolePrefill {
+				storeRole = "kv_both"
+			}
+			transferConfigValue = &vllmTransferConfig{
+				KVConnector: "MultiConnector",
+				KVRole:      kvRole,
+				KVConnectorExtraConfig: &vllmConnectorExtraConfig{Connectors: []vllmTransferConfig{
+					direct, *transferConfigValue,
+				}},
+			}
+			transferConfigValue.KVConnectorExtraConfig.Connectors[1].KVRole = storeRole
+		}
+	}
 
-	return &Result{
-		TenantInjected: tenantInjected,
-		Env: []core.EnvVar{
-			{Name: vllmConfigPathEnv, Value: ConfigFilePath},
-		},
-		Args: []string{vllmTransferConfigArg, transferConfig},
-		Volumes: []core.Volume{
+	result := &Result{
+		DirectTransfer: in.DirectTransfer,
+	}
+	if hasStore {
+		config, err := renderVLLMClientConfig(in.Connection, in.Domain)
+		if err != nil {
+			return nil, err
+		}
+		result.TenantInjected = in.Domain != ""
+		result.Env = []core.EnvVar{{Name: vllmConfigPathEnv, Value: ConfigFilePath}}
+		result.Volumes = []core.Volume{
 			{
 				Name: ConfigVolumeName,
 				VolumeSource: core.VolumeSource{
@@ -149,12 +218,54 @@ func renderVLLM(in Input) (*Result, error) {
 					},
 				},
 			},
-		},
-		VolumeMounts: []core.VolumeMount{
+		}
+		result.VolumeMounts = []core.VolumeMount{
 			{Name: ConfigVolumeName, MountPath: ConfigMountPath, ReadOnly: true},
-		},
-		PodAnnotations: map[string]string{
+		}
+		result.PodAnnotations = map[string]string{
 			ClientConfigAnnotationKey: string(config),
-		},
-	}, nil
+		}
+	}
+	if transferConfigValue != nil {
+		transferDoc, err := json.Marshal(transferConfigValue)
+		if err != nil {
+			return nil, fmt.Errorf("marshal the vLLM connector configuration: %w", err)
+		}
+		result.Args = append(result.Args, vllmTransferConfigArg, string(transferDoc))
+	}
+	if in.DirectTransfer && in.Role == RolePrefill {
+		result.Env = append(result.Env, core.EnvVar{
+			Name: "VLLM_MOONCAKE_BOOTSTRAP_PORT", Value: fmt.Sprint(VLLMMooncakeBootstrapPort),
+		})
+		result.Ports = append(result.Ports, core.ContainerPort{
+			Name: "mc-bootstrap", Protocol: core.ProtocolTCP,
+			ContainerPort: VLLMMooncakeBootstrapPort,
+		})
+	}
+	if !in.PublishKVEvents {
+		return result, nil
+	}
+	if in.KVEventsHost == "" {
+		return nil, newRefusal(ReasonConnectionIncomplete,
+			"the KV event publisher has no dialable host")
+	}
+
+	eventsDoc, err := json.Marshal(vllmKVEventsConfig{
+		EnableKVCacheEvents: true,
+		Publisher:           "zmq",
+		Endpoint:            fmt.Sprintf("tcp://*:%d", VLLMKVEventsPort),
+		ReplayEndpoint:      fmt.Sprintf("tcp://*:%d", VLLMKVEventsReplayPort),
+		BufferSteps:         10_000,
+		HWM:                 100_000,
+		MaxQueueSize:        100_000,
+		Topic:               VLLMKVEventsTopic,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal the vLLM KV event configuration: %w", err)
+	}
+	result.Args = append(result.Args, vllmKVEventsConfigArg, string(eventsDoc))
+	result.Ports = append(result.Ports, KVEventsPorts()...)
+	result.KVEvents = VLLMKVEvents(in.KVEventsHost)
+
+	return result, nil
 }

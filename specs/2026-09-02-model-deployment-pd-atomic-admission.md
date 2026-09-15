@@ -3,6 +3,14 @@
 Status: Shipped
 Type: Feature
 
+Superseded in part by
+[2026-09-12-model-deployment-pd-pairing-and-router.md](2026-09-12-model-deployment-pd-pairing-and-router.md):
+`roles[].acceleratorKey` was withdrawn after this spec shipped, so F4, that field's row in the field
+table, the two YAML examples that set it, and the phrase "same (or no) `acceleratorKey`" in the
+rollout-hash section all describe a field the API no longer has. The sections stay as written, being
+the historical record of what this spec delivered; the later spec states what replaced them and what
+did not.
+
 ## Summary
 
 A `ModelDeployment` today runs one role. This spec lets it run several — `prefill` and `decode`

@@ -6,9 +6,13 @@ import (
 	"slices"
 	"time"
 
+	app "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	node "k8s.io/api/node/v1"
+	rbac "k8s.io/api/rbac/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	kmeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	ctrlrecord "k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -504,6 +508,14 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		logger.Error(err, "sync service")
 		return ctrl.Result{}, err
 	}
+	// A ROUTER SYNC FAILURE DOES NOT ABORT THE PASS, for the same reason a failed create does not:
+	// the cause is projected onto the status written below, and returning here would skip the one
+	// write that says what is wrong. The error is still returned after that write, so the pass is
+	// retried exactly as if it had failed here.
+	routerErr := r.syncModelDeploymentRouter(ctx, md)
+	if routerErr != nil {
+		logger.Error(routerErr, "sync router")
+	}
 
 	// Read the replicas back rather than reusing the list this pass started from: status must
 	// describe what exists now, not the snapshot the convergence decided against.
@@ -524,6 +536,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// retried — but after the status has told a reader why the group is short.
 	if createErr != nil {
 		return ctrl.Result{}, createErr
+	}
+
+	if routerErr != nil {
+		return ctrl.Result{}, routerErr
 	}
 
 	if requeue {
@@ -588,61 +604,72 @@ func (r *ModelDeploymentReconciler) recordModelDeploymentRuntimeVersionSkew(
 func (r *ModelDeploymentReconciler) syncModelDeploymentService(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) error {
-	expected := renderModelDeploymentServices(md)
+	rendered := renderModelDeploymentServices(md, r.modelDeploymentRoleManufacturers(ctx, md))
+	expected := make([]ctrlcli.Object, len(rendered))
+	for i := range rendered {
+		expected[i] = rendered[i]
+	}
 
+	return r.syncModelDeploymentOwnedChildren(
+		ctx,
+		md,
+		expected,
+		func() ctrlcli.Object { return new(core.Service) },
+		new(core.ServiceList),
+		func(actual, expected ctrlcli.Object) bool {
+			// The metadata align is what keeps a role-owned Service inside the prune gate: the
+			// resource note is written at Create only, and the gate exempts a child whose note is
+			// gone.
+			changed := alignModelDeploymentService(actual.(*core.Service), expected.(*core.Service))
+			return alignModelDeploymentChildMetadata(actual, expected) || changed
+		},
+		ModelDeploymentResourceNoteRole,
+		"service",
+	)
+}
+
+// syncModelDeploymentOwnedChildren creates, aligns and prunes one kind of rendered child.
+func (r *ModelDeploymentReconciler) syncModelDeploymentOwnedChildren(
+	ctx context.Context,
+	md *workercore.ModelDeployment,
+	expected []ctrlcli.Object,
+	newObject func() ctrlcli.Object,
+	actualList ctrlcli.ObjectList,
+	align func(actual, expected ctrlcli.Object) bool,
+	resourceNote,
+	kind string,
+) error {
 	wanted := sets.New[string]()
-	for _, svc := range expected {
-		wanted.Insert(svc.Name)
-		if err := r.syncOneModelDeploymentService(ctx, md, svc); err != nil {
-			return err
+	for _, want := range expected {
+		wanted.Insert(want.GetName())
+
+		actual := newObject()
+		err := r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(want), actual, ctrlclix.WithoutQuorum)
+		if err != nil {
+			if !kerrors.IsNotFound(err) {
+				return err
+			}
+
+			if err = r.Client.Create(ctx, want); err != nil && !kerrors.IsAlreadyExists(err) {
+				return err
+			}
+			continue
+		}
+
+		if !modelDeploymentOwns(actual, md) {
+			return fmt.Errorf("%s %s/%s is not owned by this deployment",
+				kind, actual.GetNamespace(), actual.GetName())
+		}
+
+		if align(actual, want) {
+			if err = r.Client.Update(ctx, actual); err != nil {
+				return err
+			}
 		}
 	}
 
-	return r.pruneModelDeploymentServices(ctx, md, wanted)
-}
-
-// syncOneModelDeploymentService creates or aligns one rendered Service.
-func (r *ModelDeploymentReconciler) syncOneModelDeploymentService(
-	ctx context.Context, md *workercore.ModelDeployment, expected *core.Service,
-) error {
-	actual := new(core.Service)
-	err := r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(expected), actual, ctrlclix.WithoutQuorum)
-	if err != nil {
-		if !kerrors.IsNotFound(err) {
-			return err
-		}
-
-		return ctrlcli.IgnoreAlreadyExists(r.Client.Create(ctx, expected))
-	}
-
-	if !modelDeploymentOwns(actual, md) {
-		// A Service of this name that belongs to something else is left alone: taking it over would
-		// redirect whatever already points at it.
-		return fmt.Errorf("service %s/%s is not owned by this deployment", actual.Namespace, actual.Name)
-	}
-
-	if !alignModelDeploymentService(actual, expected) {
-		return nil
-	}
-
-	return r.Client.Update(ctx, actual)
-}
-
-// pruneModelDeploymentServices deletes the Services this deployment owns that the spec no longer
-// names.
-//
-// A role removed or renamed leaves its Service behind, and an owner reference does NOT collect it:
-// the deployment still exists, so nothing about the reference is stale. What the leftover does is
-// worse than occupy a name — it keeps resolving, to a selector no Pod matches now, so a caller
-// wired to a decoder that was removed gets connection refused rather than NXDOMAIN, and reads it as
-// the decoder being down.
-func (r *ModelDeploymentReconciler) pruneModelDeploymentServices(
-	ctx context.Context, md *workercore.ModelDeployment, wanted sets.Set[string],
-) error {
 	logger := ctrllog.FromContext(ctx)
-
-	svcList := new(core.ServiceList)
-	err := r.Client.List(ctx, svcList,
+	err := r.Client.List(ctx, actualList,
 		ctrlcli.InNamespace(md.Namespace),
 		ctrlcli.MatchingLabels{
 			modelDeploymentLabelKeyName:     modelDeploymentLabelValueName,
@@ -653,19 +680,21 @@ func (r *ModelDeploymentReconciler) pruneModelDeploymentServices(
 		return err
 	}
 
-	for i := range svcList.Items {
-		svc := &svcList.Items[i]
-		if wanted.Has(svc.Name) || !modelDeploymentOwns(svc, md) {
-			continue
+	return kmeta.EachListItem(actualList, func(obj runtime.Object) error {
+		actual := obj.(ctrlcli.Object)
+		if wanted.Has(actual.GetName()) ||
+			!modelDeploymentOwns(actual, md) ||
+			systemmeta.DescribeResourceNote(actual, resourceNote) == "" {
+			return nil
 		}
 
-		logger.Info("removing the service of a role no longer in the spec", "service", svc.Name)
-		if err = r.Client.Delete(ctx, svc); err != nil && !kerrors.IsNotFound(err) {
+		logger.Info("removing a child no longer in the spec", kind, actual.GetName())
+		if err = r.Client.Delete(ctx, actual); err != nil && !kerrors.IsNotFound(err) {
 			return err
 		}
-	}
 
-	return nil
+		return nil
+	})
 }
 
 // renderModelDeploymentPods renders every replica of every role, keyed by Pod name.
@@ -704,18 +733,24 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 		// because the accelerator is the role's: it selects the store connector the engine
 		// registers, and only the role's InstanceType knows it.
 		//
-		// A nil connection renders replicas with NO connector, which is what a deployment whose
-		// Binding has not resolved gets. A take-over role also gets none, but that decision is the
-		// renderer's rather than this loop's -- it holds the template. Synthesizing here for a role
-		// that will discard it costs a pure function call and keeps one rule in one place.
-		if connection != nil {
-			roleConnection := *connection
+		directTransfer := modelDeploymentUsesDirectTransfer(md, role, instType.Status.Detail.Manufacturer)
+		publishKVEvents := modelDeploymentPublishesKVEvents(md, role, instType.Status.Detail.Manufacturer)
+		if connection != nil || directTransfer || publishKVEvents {
+			roleConnection := ModelDeploymentConnectorInput{}
+			if connection != nil {
+				roleConnection = *connection
+			}
 			roleConnection.Engine = md.Spec.Engine
 			roleConnection.Manufacturer = instType.Status.Detail.Manufacturer
 			// The kind is the role's, and it is the only per-role term in the synthesized
 			// configuration: it is what makes a prefiller and a decoder two configurations rather
 			// than two copies of one, which is what the atomic admission of the pair is FOR.
 			roleConnection.Kind = role.Kind
+			roleConnection.DirectTransfer = directTransfer
+			roleConnection.PublishKVEvents = publishKVEvents
+			if roleConnection.PublishKVEvents {
+				roleConnection.KVEventsHost = md.Name + "-" + role.Name + "." + md.Namespace + ".svc"
+			}
 
 			connector, err := SynthesizeModelDeploymentConnector(roleConnection)
 			if err != nil {
@@ -726,7 +761,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 
 		for ordinal := range role.Replicas {
 			in.Ordinal = ordinal
-			pod, err := renderModelDeploymentPod(in)
+			pod, err := renderModelDeploymentPod(ctx, in)
 			if err != nil {
 				return nil, err
 			}
@@ -764,6 +799,35 @@ func (r *ModelDeploymentReconciler) getModelDeploymentInstanceType(
 	}
 
 	return instType, nil
+}
+
+// modelDeploymentRoleManufacturers resolves each role's accelerator manufacturer, keyed by role
+// name, for the routed-path decisions that depend on it. An unrouted deployment gets nil, because
+// nothing it renders reads a manufacturer.
+//
+// The read is BEST-EFFORT, and deliberately narrower than getModelDeploymentInstanceType's: a role
+// whose type cannot be read simply has no entry, and every consumer treats a missing entry as "not
+// known to be Ascend" -- the answer these paths gave before they looked. The pod render already
+// fails the pass on an unreadable type, so a gap here means the type went away mid-pass, and one
+// pass with the old answer beats failing a sync over it.
+func (r *ModelDeploymentReconciler) modelDeploymentRoleManufacturers(
+	ctx context.Context, md *workercore.ModelDeployment,
+) map[string]string {
+	if md.Spec.Router == nil {
+		return nil
+	}
+
+	manufacturers := make(map[string]string, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		instType := new(worker.InstanceType)
+		if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: md.Spec.Roles[i].InstanceType}, instType,
+			ctrlclix.WithoutQuorum); err != nil {
+			continue
+		}
+		manufacturers[md.Spec.Roles[i].Name] = instType.Status.Detail.Manufacturer
+	}
+
+	return manufacturers
 }
 
 // getModelDeploymentRuntimeClassName reports the runtime class an accelerated replica needs, and ""
@@ -834,6 +898,15 @@ func modelDeploymentOwns(obj ctrlcli.Object, md *workercore.ModelDeployment) boo
 	return false
 }
 
+func modelDeploymentOwnedResource(obj ctrlcli.Object) bool {
+	if !systemmeta.MatchResource(obj, ModelDeploymentResourceType) {
+		return false
+	}
+
+	return systemmeta.DescribeResourceNote(obj, ModelDeploymentResourceNoteRole) != "" ||
+		systemmeta.DescribeResourceNote(obj, modelDeploymentResourceNoteRouter) != ""
+}
+
 func (r *ModelDeploymentReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
 	r.APIReader = opts.Manager.GetAPIReader()
@@ -853,9 +926,7 @@ func (r *ModelDeploymentReconciler) SetupController(_ context.Context, opts cont
 			// that no longer claims it.
 			&core.Pod{},
 			ctrlbuilder.WithPredicates(
-				ctrlpredicate.NewPredicateFuncs(func(obj ctrlcli.Object) bool {
-					return systemmeta.MatchResource(obj, ModelDeploymentResourceType)
-				}),
+				ctrlpredicate.NewPredicateFuncs(modelDeploymentOwnedResource),
 			),
 		).
 		Owns(
@@ -869,10 +940,28 @@ func (r *ModelDeploymentReconciler) SetupController(_ context.Context, opts cont
 			// hand -- it shows up when something else in the cluster does.
 			&core.Service{},
 			ctrlbuilder.WithPredicates(
-				ctrlpredicate.NewPredicateFuncs(func(obj ctrlcli.Object) bool {
-					return systemmeta.MatchResource(obj, ModelDeploymentResourceType)
-				}),
+				ctrlpredicate.NewPredicateFuncs(modelDeploymentOwnedResource),
 			),
+		).
+		Owns(
+			&app.Deployment{},
+			ctrlbuilder.WithPredicates(ctrlpredicate.NewPredicateFuncs(modelDeploymentOwnedResource)),
+		).
+		Owns(
+			&core.ConfigMap{},
+			ctrlbuilder.WithPredicates(ctrlpredicate.NewPredicateFuncs(modelDeploymentOwnedResource)),
+		).
+		Owns(
+			&core.ServiceAccount{},
+			ctrlbuilder.WithPredicates(ctrlpredicate.NewPredicateFuncs(modelDeploymentOwnedResource)),
+		).
+		Owns(
+			&rbac.Role{},
+			ctrlbuilder.WithPredicates(ctrlpredicate.NewPredicateFuncs(modelDeploymentOwnedResource)),
+		).
+		Owns(
+			&rbac.RoleBinding{},
+			ctrlbuilder.WithPredicates(ctrlpredicate.NewPredicateFuncs(modelDeploymentOwnedResource)),
 		).
 		Watches(
 			// A Binding's readiness is observed rather than declared, so the deployment has to be
@@ -1030,7 +1119,7 @@ func (r *ModelDeploymentReconciler) mapModelDeploymentBinding(
 	var reqs []ctrlreconcile.Request
 	for i := range mdList.Items {
 		md := &mdList.Items[i]
-		if md.Spec.KVCache.PoolRef.Name != obj.GetName() {
+		if md.Spec.KVCache == nil || md.Spec.KVCache.PoolRef.Name != obj.GetName() {
 			continue
 		}
 		reqs = append(reqs, ctrlreconcile.Request{
