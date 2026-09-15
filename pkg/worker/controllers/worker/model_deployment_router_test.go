@@ -384,7 +384,7 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 			name:      "proxy runs the mirrored image, pinned to a release",
 			md:        routedModelDeployment(),
 			container: "envoy",
-			want:      "gpustack/mirrored-envoy:v1.33.2",
+			want:      "gpustack/mirrored-envoy:distroless-v1.33.2",
 			why:       "the proxy has no field to override it; only the setting redirects it",
 		},
 		{
