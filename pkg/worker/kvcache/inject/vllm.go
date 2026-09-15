@@ -6,7 +6,6 @@ package inject
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 
 	core "k8s.io/api/core/v1"
 )
@@ -155,15 +154,14 @@ func renderVLLM(in Input) (*Result, error) {
 		if protocol == "" {
 			protocol = "tcp"
 		}
-		// checkTransport never gates this value: it runs only when hasStore, and its vLLM row
-		// admits every transport because that row measures the STORE's backend. The point-to-point
-		// connector has its own accepted set, so this arm checks it here.
-		if !slices.Contains([]string{"tcp", "rdma", "efa"}, protocol) {
-			return nil, newRefusal(ReasonTransportUnsupported,
-				"the point-to-point connector accepts one of {tcp, rdma, efa} and this pool "+
-					"offers %q, so it would raise at startup instead of transferring blocks",
-				protocol)
-		}
+		// This value is NOT gated, on purpose. The accepted set is a property of the mooncake
+		// build inside the engine's own image, which this operator neither ships nor can
+		// inspect: a HIP-compiled build makes "hip" a working point-to-point transport, and
+		// refusing it here would hard-code one image's compile set onto another image's
+		// connector. checkTransport documents the same rule from the other side -- an
+		// unmeasured pair is let through, because a refusal on a fact nobody read turns a
+		// working engine into a broken one. A mismatch therefore still raises at startup, in
+		// the container that owns the fact.
 		direct := vllmTransferConfig{
 			KVConnector: "MooncakeConnector", KVRole: kvRole,
 			KVConnectorExtraConfig: &vllmConnectorExtraConfig{MooncakeProtocol: protocol},

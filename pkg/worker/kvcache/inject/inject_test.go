@@ -402,16 +402,6 @@ func TestRender_Refusals(t *testing.T) {
 			input: Input{Engine: EngineVLLMAscend, Connection: testConnection()},
 			want:  ReasonTransportUnsupported,
 		},
-		{
-			// The pair is legal for the STORE - vLLM's row admits every transport - but the
-			// point-to-point arm has its own accepted set, and checkTransport never reaches it.
-			name: "a transport the point-to-point connector refuses",
-			input: Input{
-				Engine: EngineVLLM, Role: RolePrefill, DirectTransfer: true,
-				Connection: Connection{MasterAddress: "master:50051", Protocol: "grpc"},
-			},
-			want: ReasonTransportUnsupported,
-		},
 	}
 
 	for _, tc := range testCases {
