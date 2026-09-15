@@ -2,6 +2,7 @@
 package inject
 
 import (
+	"fmt"
 	"slices"
 
 	core "k8s.io/api/core/v1"
@@ -51,6 +52,39 @@ type Result struct {
 	// (or when none was produced). Callers use it to apply the Binding's tenant value over any
 	// workload declaration of the same environment variable.
 	TenantEnvName string
+
+	// Ports are the additional container ports opened by synthesized configuration.
+	Ports []core.ContainerPort
+
+	// KVEvents is the event stream as a consumer reaches it, absent when publishing is disabled.
+	KVEvents *KVEvents
+
+	// DirectTransfer reports that the rendered transfer document includes the point-to-point arm.
+	DirectTransfer bool
+}
+
+// KVEvents is the dialable cache-event contract produced alongside the engine's bind configuration.
+type KVEvents struct {
+	Endpoint       string
+	ReplayEndpoint string
+	Topic          string
+}
+
+// VLLMKVEvents returns the dialable event contract paired with vLLM's fixed bind configuration.
+func VLLMKVEvents(host string) *KVEvents {
+	return &KVEvents{
+		Endpoint:       fmt.Sprintf("tcp://%s:%d", host, VLLMKVEventsPort),
+		ReplayEndpoint: fmt.Sprintf("tcp://%s:%d", host, VLLMKVEventsReplayPort),
+		Topic:          VLLMKVEventsTopic,
+	}
+}
+
+// KVEventsPorts returns the ports used by the vLLM ZMQ publisher and its replay endpoint.
+func KVEventsPorts() []core.ContainerPort {
+	return []core.ContainerPort{
+		{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: VLLMKVEventsPort},
+		{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: VLLMKVEventsReplayPort},
+	}
 }
 
 // Render turns a resolved input into the artifacts one container needs to use a KV cache pool.
@@ -70,12 +104,13 @@ func Render(in Input) (*Result, error) {
 			"engine %q is not one this operator can configure; set one of %v", in.Engine, Engines())
 	}
 
-	if in.Connection.MasterAddress == "" {
+	hasStore := in.Connection.MasterAddress != "" || in.Connection.Protocol != ""
+	if hasStore && in.Connection.MasterAddress == "" {
 		return nil, newRefusal(ReasonConnectionIncomplete,
 			"the pool published no client endpoint; there is no address for engine %q to connect to",
 			in.Engine)
 	}
-	if in.Connection.Protocol == "" {
+	if hasStore && in.Connection.Protocol == "" {
 		return nil, newRefusal(ReasonConnectionIncomplete,
 			"the backend published no transport; it is written explicitly because the engines "+
 				"disagree on the default, so omitting it would pick one of them at random")
@@ -85,8 +120,36 @@ func Render(in Input) (*Result, error) {
 	// from an accelerator it derived, and only one of the two can name vLLM-Ascend today. A check on
 	// the caller that can would leave the other admitting the pair, and a check on both would be two
 	// implementations of one table.
-	if err := checkTransport(in.Engine, in.Connection.Protocol); err != nil {
-		return nil, err
+	if hasStore {
+		if err := checkTransport(in.Engine, in.Connection.Protocol); err != nil {
+			return nil, err
+		}
+	}
+	if !hasStore && !in.DirectTransfer && !in.PublishKVEvents {
+		return nil, newRefusal(ReasonConnectionIncomplete,
+			"no shared store, direct transfer, or KV event publisher was requested")
+	}
+	if !hasStore && in.Engine != EngineVLLM {
+		return nil, newRefusal(ReasonConnectionIncomplete,
+			"engine %q requires a shared store connection", in.Engine)
+	}
+	// Point-to-point transfer and event publishing are vLLM-only capabilities, and asking for either
+	// on another engine is refused HERE rather than ignored by that engine's renderer.
+	//
+	// It is refused rather than dropped because dropping it is the failure this package exists to
+	// prevent: renderSGLang reads neither field, so an SGLang role asked for direct transfer would
+	// start normally, serve normally, and move no blocks - with nothing in the Pod to read that says
+	// so. The combination is reachable, not theoretical: the router's metrics contract covers SGLang,
+	// so a managed router over an SGLang pool is a configuration a user can write today.
+	//
+	// The vLLM renderer refuses direct transfer again, on a condition that also covers the role. That
+	// is not a duplicate of this one: this check is about the ENGINE and runs for every caller, while
+	// that one is about a role that is neither prefill nor decode and can only be reached once the
+	// engine is already vLLM.
+	if (in.DirectTransfer || in.PublishKVEvents) && in.Engine != EngineVLLM {
+		return nil, newRefusal(ReasonRoleUnsupported,
+			"engine %q renders neither point-to-point transfer nor KV event publishing; "+
+				"asking for either would leave a container that starts and moves nothing", in.Engine)
 	}
 
 	switch in.Engine {

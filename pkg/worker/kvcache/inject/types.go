@@ -157,6 +157,19 @@ type Input struct {
 
 	// Connection is what the pool and its backend published.
 	Connection Connection
+
+	// DirectTransfer enables the point-to-point connector used by a managed prefill/decode router.
+	// With a complete Connection it is composed with the shared store; without one it is rendered on
+	// its own.
+	DirectTransfer bool
+
+	// PublishKVEvents asks the engine to publish cache-placement events for a router. It is resolved
+	// per role by the caller; a false value preserves the ordinary connector render byte for byte.
+	PublishKVEvents bool
+
+	// KVEventsHost is the dialable host paired with the publisher's fixed ports. The engine binds a
+	// wildcard address, which cannot be published to a consumer as an endpoint.
+	KVEventsHost string
 }
 
 // Reason classifies a refusal. Callers branch on it; the message that accompanies it is for a human
