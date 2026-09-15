@@ -71,11 +71,23 @@ with them. Earlier versions installed Kueue as a release of its own, which outli
 uninstall; this one does not. To keep a Kueue this release does not own, install with
 `--set kueue.enabled=false` and bring your own.
 {{- end }}
-{{- if not .Values.cleanupOnUninstall }}
+{{- if .Values.cleanupOnUninstall }}
 
-NOTE: `helm uninstall` removes only what this release owns. The finalizers the controllers leave
-on their objects, the CRDs and aggregated APIServices the worker registers itself, and its
-webhook configurations stay behind. Run the chart's files/cleanup.sh afterwards to clear them, or
-install with `--set cleanupOnUninstall=true` to have a post-delete Job do it — which is safe only
-where this release exclusively owns those CRDs.
+NOTE: `helm uninstall` runs a pre-delete Job that deletes this operator's custom resources while
+its controllers are still up, so the teardown each finalizer holds for gets to run — a
+KVCacheBackend empties every node's cache tier, a KVCachePoolBinding drops its tenant from the
+master's quota ledger. It stops after {{ .Values.cleanupDrainBudgetSeconds }}s, and helm gives up
+on a delete hook after `--timeout` (5m by default) and fails the uninstall. Both apply, so a large
+cache tier needs `--set cleanupDrainBudgetSeconds=<n>` AND a larger `--timeout`; raising either on
+its own changes nothing. Whatever has not drained is reported, and the post-delete Job removes it
+by force.
+{{- else }}
+
+NOTE: `helm uninstall` removes only what this release owns. The controllers go first, so the
+teardown each finalizer holds for never runs: a node keeps the cache blocks its tier held, and a
+cache master keeps the quota ledger entries of tenants that are gone. The finalizers themselves,
+the CRDs and aggregated APIServices the worker registers itself, and its webhook configurations
+also stay behind. Run the chart's files/drain.sh BEFORE the uninstall and its files/cleanup.sh
+after, or install with `--set cleanupOnUninstall=true` to have two hook Jobs do both — which is
+safe only where this release exclusively owns those CRDs.
 {{- end }}

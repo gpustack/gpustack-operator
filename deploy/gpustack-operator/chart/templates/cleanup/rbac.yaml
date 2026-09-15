@@ -1,10 +1,11 @@
 {{- if .Values.cleanupOnUninstall }}
 {{- /*
-  Dedicated ServiceAccount for the post-delete cleanup Job. It uninstalls the
-  worker's runtime sub-releases and deletes cluster-scoped CRDs/APIServices/
-  webhooks across the cluster, so it is bound to cluster-admin (the worker uses
-  the same binding). Hook-managed and removed on success, so the broad grant
-  exists only for the duration of the uninstall.
+  Dedicated ServiceAccount shared by the two uninstall hook Jobs. The pre-delete
+  one deletes custom resources in every namespace; the post-delete one uninstalls
+  the worker's runtime sub-releases and deletes cluster-scoped CRDs/APIServices/
+  webhooks across the cluster. Both are cluster-wide, so it is bound to
+  cluster-admin (the worker uses the same binding). Hook-managed and removed on
+  success, so the broad grant exists only for the duration of the uninstall.
 */}}
 apiVersion: v1
 kind: ServiceAccount
@@ -14,7 +15,7 @@ metadata:
   labels:
     {{- include "gpustack-operator.commonLabels" . | nindent 4 }}
   annotations:
-    "helm.sh/hook": post-delete
+    "helm.sh/hook": pre-delete,post-delete
     "helm.sh/hook-weight": "-5"
     "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
 ---
@@ -25,7 +26,7 @@ metadata:
   labels:
     {{- include "gpustack-operator.commonLabels" . | nindent 4 }}
   annotations:
-    "helm.sh/hook": post-delete
+    "helm.sh/hook": pre-delete,post-delete
     "helm.sh/hook-weight": "-5"
     "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
 subjects:

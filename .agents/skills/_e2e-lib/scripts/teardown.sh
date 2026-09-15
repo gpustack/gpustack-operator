@@ -53,6 +53,7 @@ RELEASE=gpustack-operator
 LIB="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${LIB}/../../../.." 2>/dev/null && pwd)"
 CLEANUP="${REPO_ROOT}/deploy/gpustack-operator/chart/files/cleanup.sh"
+DRAIN="${REPO_ROOT}/deploy/gpustack-operator/chart/files/drain.sh"
 
 # cleanup.sh calls a bare `helm`, so put the resolved binary ahead of PATH for that delegate too.
 HELM="$(bash "${LIB}/helm.sh")" || exit 1
@@ -60,10 +61,28 @@ PATH="$(dirname "${HELM}"):$PATH"
 
 echo "[teardown] namespace=${NS}"
 
-# 0. E2E test artifacts this skill creates. Delete the test Instance before the
-# NodeFeatures so its Pod/Workload drain cleanly. Deleting the Worker-authored
-#    <node>-gpustack-worker NodeFeature also discards any injected label edit.
-kubectl -n default delete instance gpustack-e2e-instance --ignore-not-found 2>/dev/null || true
+# 0. Drain this operator's custom resources FIRST, while its controllers are still running.
+#    This is the only window in which a finalizer's teardown can run at all: step 2's cleanup.sh
+#    executes after the workloads are gone and strips finalizers instead of waiting for them, so
+#    everything they were holding for - a KVCacheBackend emptying each node's cache tier, a
+#    KVCachePoolBinding dropping its tenant from the master's ledger - is skipped from there on.
+#
+#    Delegated to the chart's own script for the same reason cleanup.sh is: two copies of one
+#    teardown order drift, and the copy is always the one that is wrong. It always exits 0 and
+#    reports what it could not drain; cleanup.sh is the backstop either way.
+#
+#    The test Instance is no longer deleted by name here - drain.sh deletes every Instance in the
+#    cluster, and it does so before the InstanceType the Instance consumes, which by name it did
+#    not. The NodeFeatures stay here: they belong to NFD rather than to this operator, so drain.sh
+#    does not touch them, and deleting the Worker-authored <node>-gpustack-worker one also discards
+#    any injected label edit.
+if [ ! -r "$DRAIN" ]; then
+  echo "[teardown] FATAL: cannot read ${DRAIN}" >&2
+  echo "[teardown] the drain is delegated to the chart's own script; there is no local copy" >&2
+  exit 1
+fi
+echo "[teardown] delegating to chart drain: ${DRAIN}"
+bash "$DRAIN" "$NS"
 kubectl -n "$NS" delete nodefeature --all 2>/dev/null || true
 
 # 1. The operator's own release (worker, device-managers, RBAC, webhooks). cleanup.sh does not do

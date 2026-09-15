@@ -25,7 +25,7 @@ Run as a **test-orchestration lead** (main agent) coordinating read-only **domai
 - **Specialists are read-only** — the lead is the sole writer.
 
 **Layout:**
-- `../_e2e-lib/scripts/` — `preflight.sh`, `build-load.sh <TAG>`, `deploy.sh <NS> <TAG> [--set …]`, `assert-core.sh <NS>`, `teardown.sh <NS>` (test artifacts, release uninstall and a CRD-drain verdict; the cleanup itself is delegated to the chart's `files/cleanup.sh`), `kube-context.sh <ctx>` (read-only; targets a context that is not the current one).
+- `../_e2e-lib/scripts/` — `preflight.sh`, `build-load.sh <TAG>`, `deploy.sh <NS> <TAG> [--set …]`, `assert-core.sh <NS>`, `teardown.sh <NS>` (custom-resource drain, test artifacts, release uninstall and a CRD-drain verdict; the drain and the cleanup are both delegated to the chart's `files/drain.sh` and `files/cleanup.sh`), `kube-context.sh <ctx>` (read-only; targets a context that is not the current one).
 - `cases/case-N.sh` — one scenario each; ends in a `STATUS | CHECK | OBJECT` table, exits non-zero on any FAIL.
 - `references/version-contract.md`; shared `../_e2e-lib/references/{orchestration,troubleshooting}.md`.
 
@@ -104,7 +104,7 @@ bash .claude/skills/_e2e-lib/scripts/deploy.sh "$NS" "$TAG" 2>&1 | tee "$RPT"/ra
 ```
 
 - The chart deploys everything in **one release** — the worker, the device-managers, and Kueue / NFD / the two CSI drivers as subcharts. `--set deviceManager.enabled=false` now only means "render no device-manager DaemonSets"; the worker installs nothing at runtime. The **version-critical path** (see `references/version-contract.md`) is CASE 6's image mode, not a flag on this install.
-- To exercise the gated post-delete hook in-cluster, add `--set cleanupOnUninstall=true`.
+- To exercise the gated pre-delete and post-delete hooks in-cluster, add `--set cleanupOnUninstall=true`.
 
 **Phase 4 — Execute + analyze.** CASE 1 read-only (no prompt); pass the built `$TAG` so it also checks the deployed image tag. Optional CASE 3 (confirm) reproduces the version/warm-cache path — run it after the Phase 3 build so the cache is warm. Per the rendezvous rule, fan out specialists on each case's snapshot before the next mutating step.
 
