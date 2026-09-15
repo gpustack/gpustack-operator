@@ -52,9 +52,11 @@
 #     election off (the shape leaderNeedsAPIAccess in pkg/worker/kvcache/mooncake/ha_rbac.go
 #     renders for it). It is built because some vLLM releases bundle a 0.3.10 Mooncake client,
 #     and a store that version-mismatched with its engines fails their registration handshake.
-#   - 0.3.11: the backend exists and compiles in, but build_wheel.sh neither packages the
-#     wrapper .so nor excludes libfabric from the repaired wheel, and mc_store_rest_server is
-#     still the broken async entry point. The build patches all three below.
+#   - 0.3.11: the backend exists but does not compile as shipped -- the top-level
+#     CMakeLists.txt never puts mooncake-common/k8s-lease on the include path, so the build
+#     patches that in first. build_wheel.sh then neither packages the wrapper .so nor
+#     excludes libfabric from the repaired wheel, and mc_store_rest_server is still the broken
+#     async entry point. The build patches all four below.
 #   - 0.3.12: packaging is whole -- wrapper copied, libfabric excluded, sync_main entry point.
 #   - 0.3.13 (the default): as 0.3.12.
 #
@@ -216,6 +218,22 @@ ENV PATH=/usr/local/go/bin:$PATH
 # wheel, so the runtime stage installs libfabric1 to close that.
 RUN <<EOF
     set -exo pipefail
+
+    # 0.3.11 ships the k8s-lease backend but does not compile it: its top-level CMakeLists.txt
+    # puts mooncake-common/etcd on the include path and never mooncake-common/k8s-lease, so
+    # k8s_lease_helper.cpp cannot resolve libk8s_lease_wrapper.h, which the Go build copies into
+    # that source directory. Upstream never noticed because nothing in 0.3.11's own packaging
+    # turns STORE_USE_K8S_LEASE on. 0.3.12 fixes it with exactly the line inserted here; 0.3.10
+    # predates the backend and has no such line to add. The grep afterwards fails the build on a
+    # silent no-op, because a sed that matched nothing would surface as the same missing-header
+    # error twenty minutes later.
+    case "${MOONCAKE_VERSION}" in
+        0.3.11*)
+            sed -i 's|^include_directories(mooncake-common/etcd)$|include_directories(mooncake-common/etcd)\ninclude_directories(mooncake-common/k8s-lease)|' \
+                /work/CMakeLists.txt
+            grep -q '^include_directories(mooncake-common/k8s-lease)$' /work/CMakeLists.txt
+            ;;
+    esac
 
     cmake -S /work -B /work/build -G Ninja \
         -DSTORE_USE_K8S_LEASE=ON \
