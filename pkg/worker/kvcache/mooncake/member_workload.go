@@ -342,6 +342,23 @@ func MemberProtocolForGroup(kvcb *workercore.KVCacheBackend, group workercore.KV
 	return MemberProtocol(kvcb)
 }
 
+// MemberProtocols is what a pool's backend offers an engine, in group declaration order: each
+// member group's effective protocol, or the backend-wide value alone for a backend that declares
+// no groups — an external one, whose store is somebody else's to describe. The slice is never
+// empty, so a caller matching against it never has to ask whether the pool offers anything.
+func MemberProtocols(kvcb *workercore.KVCacheBackend) []string {
+	managed := kvcb.Spec.Connection.Managed
+	if managed == nil || len(managed.Members) == 0 {
+		return []string{MemberProtocol(kvcb)}
+	}
+
+	offers := make([]string, 0, len(managed.Members))
+	for i := range managed.Members {
+		offers = append(offers, MemberProtocolForGroup(kvcb, managed.Members[i]))
+	}
+	return offers
+}
+
 // RenderMemberDaemonSet renders one member group into a DaemonSet.
 //
 // A DaemonSet rather than a Deployment because a member contributes A NODE's media: it claims that

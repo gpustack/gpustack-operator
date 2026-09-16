@@ -161,3 +161,45 @@ func checkTransport(engine Engine, protocol string) error {
 			"rather than to whatever an engine wants",
 		engine, facts.Required, protocol, facts.Version, facts.Source, facts.RequiredAPIValue)
 }
+
+// MatchTransport is checkTransport's pool-aware half: where the singular check answers whether one
+// engine-transport pair runs, this answers WHICH of a pool's effective transports the engine is
+// handed. The offers are each member group's effective protocol in declaration order, computed by
+// the caller through mooncake.MemberProtocols.
+//
+// THE MATCH IS THE FIRST OFFER IN DECLARATION ORDER THAT THE ENGINE'S CONSTRAINT ACCEPTS — and the
+// first offer outright for an unconstrained engine, which accepts them all. Nothing matches an
+// engine to a specific group: a pool names exactly one backend, and the engine only learns the
+// master address, so the rule has to pick without a binding. Declaration order is deterministic
+// and costs nothing to explain, and every accepted offer is one the engine can run on.
+//
+// A refusal means NO group satisfies the constraint, which is the case worth failing loudly for:
+// admitted, the engine's store backend raises at startup on every group the pool has, and the
+// container never serves a request. An engine with no measured entry claims less and is let
+// through, on the same rule as the singular check.
+//
+// An empty offer list is NOT a transport answer: it is the no-store shape, which Render refuses
+// for its own reason, so this returns no protocol and no error rather than borrowing that case.
+func MatchTransport(engine Engine, offers []string) (string, error) {
+	if len(offers) == 0 {
+		return "", nil
+	}
+
+	facts := engineTransportConstraint[engine]
+	for _, offer := range offers {
+		if facts.Required == "" || facts.Required == offer {
+			return offer, nil
+		}
+	}
+
+	return "", newRefusal(ReasonTransportUnsupported,
+		"engine %q accepts only the %q transport and no group in this pool offers it — the groups "+
+			"offer %q — so its store backend would raise at startup instead of using the cache "+
+			"(measured at %s, %s). The transport belongs to the KVCacheBackend the pool names, not "+
+			"to the Binding: set that backend's spec.transport.protocol to %q or one member group's "+
+			"transport.protocol, which is that same transport in the API's spelling, or point this "+
+			"workload at a pool that already offers it. An unset protocol is not neutral here: the "+
+			"field defaults to Auto, which the backend resolves to one concrete transport rather "+
+			"than to whatever an engine wants",
+		engine, facts.Required, offers, facts.Version, facts.Source, facts.RequiredAPIValue)
+}

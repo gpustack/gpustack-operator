@@ -33,7 +33,7 @@ func connectorInput(engine, manufacturer string) ModelDeploymentConnectorInput {
 		Manufacturer:        manufacturer,
 		Domain:              "team-a-shared",
 		MasterServerAddress: "shared-kv-master.gpustack-system.svc:50051",
-		Protocol:            connectorTransportFor(manufacturer),
+		Protocols:           []string{connectorTransportFor(manufacturer)},
 	}
 }
 
@@ -496,7 +496,7 @@ func TestSynthesizeModelDeploymentConnector_DiscriminatorTravelsInAnOwnedKey(t *
 func TestSynthesizeModelDeploymentConnector_TransportTheEngineCannotUse(t *testing.T) {
 	onAscendWith := func(protocol string) ModelDeploymentConnectorInput {
 		in := connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend)
-		in.Protocol = protocol
+		in.Protocols = []string{protocol}
 		return in
 	}
 

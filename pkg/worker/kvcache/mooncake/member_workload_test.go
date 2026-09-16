@@ -982,6 +982,34 @@ func TestMemberWorkload_Protocol(t *testing.T) {
 		"an unset transport renders exactly what Auto does, never an empty protocol")
 }
 
+// TestMemberProtocols pins the offers an engine is matched against: every group's effective
+// transport in declaration order, with the backend-wide value as the whole list for a backend
+// that declares no groups — the shape an external backend takes, and every backend written before
+// groups could disagree.
+func TestMemberProtocols(t *testing.T) {
+	t.Run("each group's own transport, in declaration order", func(t *testing.T) {
+		kvcb := testMemberBackend(withSecondMemberGroupVRAM(func(group *workercore.KVCacheBackendMember) {
+			group.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "RDMA"}
+		}))
+		assert.Equal(t, []string{"tcp", "rdma"}, MemberProtocols(kvcb))
+	})
+
+	t.Run("a group declaring none inherits the backend's", func(t *testing.T) {
+		kvcb := testMemberBackend(withSecondMemberGroup)
+		assert.Equal(t, []string{"tcp", "tcp"}, MemberProtocols(kvcb))
+	})
+
+	t.Run("a backend with no groups offers the backend-wide value alone", func(t *testing.T) {
+		kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed = nil
+			k.Spec.Transport.Protocol = "RDMA"
+		})
+		assert.Equal(t, []string{"rdma"}, MemberProtocols(kvcb),
+			"the slice is never empty, so a caller matching against it never asks whether the "+
+				"pool offers anything")
+	})
+}
+
 // TestMemberWorkload_RDMAContext pins the security context of the one path that needs one.
 // It is modest on purpose: hostNetwork, the device mount and two capabilities — and never
 // privileged, which would hand the member the whole node.

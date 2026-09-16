@@ -139,6 +139,84 @@ func TestCheckTransport_MessageNamesThePair(t *testing.T) {
 		"the version behind the answer, so the refusal says why rather than only what")
 }
 
+// TestMatchTransport pins the pool-aware half: which of a pool's offers an engine is handed, and
+// when a pool is refused outright.
+//
+// The accepted rows are the control that gives the refusal its teeth. A MatchTransport that
+// refused every pool would satisfy the refusal row alone, and one that always returned the first
+// offer would pass every row but the second — the constraint is what skips an offer, and only
+// that row can see it.
+func TestMatchTransport(t *testing.T) {
+	testCases := []struct {
+		name    string
+		engine  Engine
+		offers  []string
+		want    string
+		wantErr bool
+	}{
+		// Declaration order decides among the offers an engine accepts, so the answer is stable
+		// across reconciles rather than whichever group happened to be read first.
+		{
+			name:   "an unconstrained engine takes the first offer",
+			engine: EngineVLLM, offers: []string{"rdma", "tcp"}, want: "rdma",
+		},
+		{
+			name:   "a constrained engine takes the first offer it accepts",
+			engine: EngineVLLMAscend, offers: []string{"tcp", "ascend"}, want: "ascend",
+		},
+		{
+			name:   "a constrained engine refuses a pool no group serves",
+			engine: EngineVLLMAscend, offers: []string{"tcp", "rdma"}, wantErr: true,
+		},
+		// The same permissive direction as the singular check: refusing on a fact nobody read
+		// would turn an unmeasured engine into a broken one.
+		{
+			name:   "an unmeasured engine is not refused",
+			engine: Engine("mystery-engine"), offers: []string{"tcp"}, want: "tcp",
+		},
+		// The no-store shape is Render's ReasonConnectionIncomplete case, not a transport answer:
+		// refusing it here would borrow a refusal that belongs to another reason.
+		{
+			name:   "no offers is not a transport refusal",
+			engine: EngineVLLMAscend, offers: nil, want: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := MatchTransport(tc.engine, tc.offers)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Equal(t, ReasonTransportUnsupported, reasonOf(t, err))
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestMatchTransport_MessageNamesEveryOffer is the plural counterpart of the singular message pin:
+// the refusal has to list what the pool's groups DO offer, because "unsupported" alone leaves a
+// user guessing between a backend field and a group field.
+func TestMatchTransport_MessageNamesEveryOffer(t *testing.T) {
+	_, err := MatchTransport(EngineVLLMAscend, []string{"tcp", "rdma"})
+	require.Error(t, err)
+	message := err.Error()
+
+	assert.Contains(t, message, string(EngineVLLMAscend), "the engine half of the pair")
+	assert.Contains(t, message, `accepts only the "ascend" transport and no group in this pool offers it`,
+		"the constraint, in the artifact's spelling")
+	assert.Contains(t, message, `["tcp" "rdma"]`,
+		"every group's offer, so neither serving it is visible without opening the object")
+	assert.Contains(t, message, `spec.transport.protocol to "Ascend"`,
+		"the backend remediation, in the spelling the schema accepts")
+	assert.Contains(t, message, `transport.protocol`,
+		"the group field is named too: one group on the right transport is enough")
+	assert.NotContains(t, message, `to "ascend"`,
+		"the artifact spelling in a remediation sentence is a schema rejection waiting to happen")
+}
+
 // TestParseEngine covers the only place an engine string enters the package.
 func TestParseEngine(t *testing.T) {
 	testCases := []struct {
