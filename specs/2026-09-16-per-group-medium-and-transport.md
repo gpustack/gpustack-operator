@@ -1,6 +1,9 @@
 # Spec: Per-Group Medium and Transport on `KVCacheBackend` — a DRAM Group and a VRAM Group on the Same Nodes
 
 Status: Planned
+Blocked on: M1 — a VRAM segment with the local disk tier on, written and read back on each vendor
+validation host against its variant image. It is the one gate below that needs hardware, and this
+spec does not flip to Shipped until it is measured.
 Type: Feature
 Issue: #446
 

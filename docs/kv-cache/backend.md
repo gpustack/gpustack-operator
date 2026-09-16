@@ -42,7 +42,7 @@ spec:
       leader: {}                     # replicas and allocationStrategy default
       members:
         - nodeSelector: {kubernetes.io/os: linux}
-          medium: DRAM               # the one value: what this group's SEGMENT is made of
+          medium: DRAM               # what this group's SEGMENT is made of: DRAM or VRAM
           capacityPerMember: 4Gi
 ```
 
@@ -54,9 +54,13 @@ client](#the-store-version-must-match-the-engines-client) before copying it.
 set; neither and both are refused at admission with a message naming the two. Several member groups
 are allowed; at most one of them may carry a [local disk tier](local-disk-tier.md).
 
-**`members[].medium` has one value, `DRAM`**, and it is an identity rather than a choice: the group
-says what it contributes, so a second medium widens the enum instead of being inferred from a field
-that is not there. It is the same reason `spec.type` names `Mooncake` and nothing else.
+**`members[].medium` takes two values, `DRAM` and `VRAM`** — host memory or device memory. It is a
+choice rather than an identity: the renderer splits on it, charging the segment to the Pod's host
+memory on one and to a device on the other (see [The members](#the-members)). One binary is one
+medium, so a node contributing both does so as two groups selecting it.
+
+The field is **immutable**: a segment already mounted cannot change the kind of memory underneath
+the data it holds, so an edit is refused and the choice is made when the group is declared.
 
 An earlier shape offered five values. Four of them named things that are **not member groups**, and
 each is reached another way:
@@ -96,7 +100,8 @@ By effective version, then, and against this chart's `kubeVersion: ">=1.23.0-0"`
 by a server's binary does not tell you which of the three it is in.
 
 Reaching that state at all takes a cluster that installed the CRD, ran with **no webhook**, and
-created a non-DRAM member in that window — so it is a development cluster or nothing.
+created a member in one of the removed values in that window — so it is a development cluster or
+nothing.
 `KVCacheBackend` is absent from every tag from `v0.8.0` through `v0.8.6`, checked per tag, and the
 commit adding it landed after `v0.8.6`.
 
@@ -175,6 +180,25 @@ Setting.
 The failure mode moved with the default, and that is what having one costs. Blank made a mismatch an
 admission refusal naming both places to fix; a default makes a wrong image a loader error at runtime,
 which is quieter and further from whoever can fix it. Clearing the Setting restores the refusal.
+
+### The project's own build variants
+
+Beside the `-cpu` default, this project publishes `mirrored-mooncake` in one build target per vendor
+— `cuda`, `cann`, `rocm` — whose base images are dispatch-time build arguments. Tags carry the
+toolchain version: `<mooncake-version>-<variant><toolchain>`, such as `0.3.13.post1-cuda13.0`.
+
+Each variant is built on both Mooncake lines this project carries: `0.3.13.post1`, matching engine
+clients from vLLM 0.28.0 on, and `0.3.10.post2` for the ones before. Which line a backend needs is
+[the version table](#the-store-version-must-match-the-engines-client)'s question, not this one's.
+
+**A VRAM group needs a build with VRAM segments compiled in (`USE_VRAM_SEGMENT=ON`), and the stock
+`-cpu` default is not one.** VRAM segments exist only on the `0.3.13` line — the `0.3.10.post2`
+variants carry the vendor transfer engine without them — so a VRAM group always names a
+`0.3.13.post1` variant tag.
+
+Nothing refuses a VRAM group that names no image: the default is an administrator-editable Setting,
+so this paragraph is the guidance rather than a gate. A group names its image through
+`members[].image`, which wins over the backend's `spec.image`, which wins over the Setting.
 
 **A private registry needs `spec.imagePullSecrets`**, and an explicit policy needs
 `spec.imagePullPolicy`. Both are backend-wide: they apply to the leader and to every member group,
@@ -262,8 +286,10 @@ against it: the metadata plane takes no configuration at all.
 ## The members
 
 One member group renders **one DaemonSet** over `members[].nodeSelector`. A member contributes *a
-node's* medium — that node's host memory, host paths, and on the RDMA path its `/dev/infiniband` — so
-its identity is the node, which is what a DaemonSet expresses.
+node's* medium — that node's host memory or, on a VRAM group, its device memory, plus its host paths
+and on the RDMA path its `/dev/infiniband` — so its identity is the node, which is what a DaemonSet
+expresses. Two groups may select the same node — a DRAM group and a VRAM group is the shape the
+second medium exists for — and each still renders its own DaemonSet.
 
 The member's whole configuration renders as **environment variables**: no ConfigMap, no volume, no init
 container.
@@ -299,11 +325,21 @@ carrying it. **Do not put a credential in `extraArgs`.** Nothing refuses one at 
 `Auto` whether or not the `transport` block is written at all. **`Auto` resolves to `TCP`** — it is
 not a per-node probe that promotes itself.
 
+**`members[].transport.protocol` overrides that value for one group; left unset, the group inherits
+the backend's.** The override exists for the one thing two media do not agree on: a VRAM group
+reaching its peers over a fabric while the DRAM group beside it stays on TCP.
+
+The fabric privileges below render per group from the group's effective protocol, and an engine is
+handed the protocol of the group it matched — an engine whose constraint no group in the pool
+satisfies is refused at admission rather than started.
+
 `Ascend` is the one value an engine can **require**: vllm-ascend's store client currently raises on
 any other protocol (`MooncakeBackend.__init__`, verified at v0.23.0 and v0.26.0rc1 — upstream state,
-not a contract, and it may change), so a pool serving Ascend engines declares `Ascend` here rather
-than settling for the `TCP` default. The member then needs a CANN-carrying image, per the variant
-table above — the project's own CPU build compiles no Ascend transport.
+not a contract, and it may change), so a pool serving Ascend engines declares `Ascend` here — or on
+one member group — rather than settling for the `TCP` default.
+
+The member then needs a CANN-carrying image, per the variant table above — the project's own CPU
+build compiles no Ascend transport.
 
 > **Why** — one group is one Pod template, which cannot express a per-node transport; and promoting to
 > a host fabric would mean granting `hostNetwork` plus `IPC_LOCK` and `SYS_RESOURCE`. A privilege is
@@ -337,6 +373,30 @@ resource there would only leave the member unschedulable.
 > the object reads as `RDMA`. That is the behavior every backend had before this field, and it stays
 > reachable because naming a resource no plugin advertises leaves the member unschedulable instead —
 > this operator cannot tell which of the two an administrator without a plugin would rather have.
+
+**What a member's Pod requests follows the group's medium.** A DRAM member requests host memory for
+`capacityPerMember + localBufferSize`. A VRAM member's segment is device memory: host memory carries
+`localBufferSize` only, and the segment is charged against a device — one per member, matching the
+single allocation the client makes.
+
+**`members[].deviceResourceName` names the extended resource that device is charged against.** Set
+on a VRAM group, the member requests one of that resource and the scheduler places it on a node that
+has the device.
+
+Unset, the member renders `privileged: true` with host networking instead of any device request — it
+sees the node's devices and fabric directly, which keeps RDMA and similar transports working on a
+cluster whose plugin advertises no name to point at. The fallback supersedes the fabric rendering
+above rather than adding to it.
+
+The field is refused on a DRAM group: a host-memory segment has no device to charge, so the request
+would be accounted against a segment that is not there. As on the backend's own
+`spec.transport.deviceResourceName`, the name is declared, never derived — it belongs to whichever
+plugin the administrator installed.
+
+⚠️ **A VRAM group may also carry a [local disk tier](local-disk-tier.md), and that combination is
+supported by design but not yet measured.** No upstream test covers it; measuring it on the vendor
+validation hosts is on this project's acceptance list. Until then, treat the pairing as unverified
+rather than as guaranteed.
 
 **Reachability is a port range, never a list.** The transfer engine picks its data ports at random —
 one observed run bound `15002` and `15995`, a second client `16566` and `16655`, none of them

@@ -63,6 +63,30 @@ spec:
           args: ["serve", "--model", "Qwen/Qwen3-8B"]
 ```
 
+A bare Pod follows the same contract — the label opts it in, and the optional annotations select the
+role and the container:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bench
+  namespace: team-a
+  labels:
+    kvcache.gpustack.ai/inject: "true"          # the opt-in; a LABEL, not an annotation
+  annotations:
+    kvcache.gpustack.ai/binding: team-a         # a KVCachePoolBinding in this namespace
+    kvcache.gpustack.ai/engine: vllm
+    kvcache.gpustack.ai/role: decode            # optional: prefill or decode
+    kvcache.gpustack.ai/container: server       # required with more than one container
+spec:
+  containers:
+    - name: server
+      image: vllm/vllm-openai:v0.28.0
+      command: ["vllm"]
+      args: ["serve", "--model", "Qwen/Qwen2.5-72B-Instruct"]
+```
+
 The engine is **declared, never guessed from the image**. Engines take entirely different flags, and a
 renamed or vendored image sniffed wrongly produces a container that starts normally and caches
 nothing.
@@ -104,7 +128,7 @@ and which keys their readers know.
 |---|---|---|
 | the pool's `status.clientEndpoint` | `master_server_address` | `MOONCAKE_MASTER` |
 | the metadata plane, always the literal `P2PHANDSHAKE` | `metadata_server` | `MOONCAKE_TE_META_DATA_SERVER` |
-| the backend's transport, always written | `protocol` | `MOONCAKE_PROTOCOL` |
+| the transport of the pool group the engine matched, always written | `protocol` | `MOONCAKE_PROTOCOL` |
 | the RDMA device filter, always empty | `device_name` | `MOONCAKE_DEVICE` |
 | the contributed storage segment, always `0` | `global_segment_size` | `MOONCAKE_GLOBAL_SEGMENT_SIZE` |
 | the pure-client topology | `mode: standalone-store` | no key — SGLang has none |
@@ -281,7 +305,7 @@ defaulted one — so the webhook does not refuse it, and this annotation is wher
 
 ## vLLM-Ascend requires the `ascend` transport
 
-**A `KVCacheBackend` whose transport is not `ascend` makes a vLLM-Ascend container fail to start**, and
+**A pool whose groups offer no `ascend` transport makes a vLLM-Ascend container fail to start**, and
 the injection is what triggers it. That engine accepts one transport and raises on the rest:
 
 ```text
@@ -303,7 +327,9 @@ handed: `tcp` against `ascend`. The value to set is the API's, **`Ascend`** with
 
 **The failing backend is not one somebody misconfigured.** `spec.transport.protocol` defaults to
 `Auto`, which resolves to `tcp` — so a backend left entirely at its defaults is precisely the one this
-engine cannot use. Pair vLLM-Ascend with a backend whose transport is `Ascend`.
+engine cannot use. Pair vLLM-Ascend with a pool that offers `Ascend`: declared on the backend's
+`spec.transport.protocol`, or on one member group's `transport.protocol` when only one group serves
+the fabric.
 
 ## What a cache changes about a workload
 

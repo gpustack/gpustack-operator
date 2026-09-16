@@ -308,7 +308,9 @@ is the section above.
 
 **See also** — [KV Cache Backend](backend.md) (the store this pool publishes, and where eviction is
 configured) · [KV Cache Injection](../reference/kv-cache-injection.md) (how a Pod consumes the grant
-this page describes) · [Admission](../architecture/admission.md) (the gates and the four-view status
+this page describes) · [Model Deployment](../reference/model-deployment.md) (the other half of the
+worked pair: a rendered engine names this Binding through `spec.kvCache.poolRef`) ·
+[Admission](../architecture/admission.md) (the gates and the four-view status
 pattern) · [Settings & Environment Variables](../settings.md)
 
 **Next** → [Accelerator Requests](../accelerator-requests.md) — how a workload asks for the devices it
