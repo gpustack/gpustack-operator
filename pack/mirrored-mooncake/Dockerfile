@@ -838,16 +838,26 @@ CMD ["bash"]
 
 # =============================================================================
 # Target: cann
-# The Ascend variant: the store compiled with USE_ASCEND_DIRECT on the CANN 9.1 toolkit, for
-# member groups on Ascend NPU nodes. USE_ASCEND_DIRECT is upstream's recommended Ascend path --
-# it is what upstream's own Ascend CI and NPU release jobs configure -- and with it a segment
-# on the ascend protocol allocates in device memory, the Ascend counterpart of the CUDA
-# variant's VRAM segment. Dispatch with --target cann.
+# The Ascend variant: the store compiled with one Ascend flavor on the CANN 9.1 toolkit, for
+# member groups on Ascend NPU nodes. The flavor defaults to USE_ASCEND_DIRECT, upstream's
+# recommended Ascend path -- it is what upstream's own Ascend CI and NPU release jobs
+# configure -- and with it a segment on the ascend protocol allocates in device memory, the
+# Ascend counterpart of the CUDA variant's VRAM segment; ASCEND_TRANSPORT=ubshmem builds the
+# CANN VMM shared-memory flavor for the supernode domain instead. Dispatch with
+# --target cann.
 # =============================================================================
 FROM ${CANN_BUILDER_IMAGE} AS builder-cann
 SHELL ["/bin/bash", "-c"]
 
 ARG MOONCAKE_VERSION
+
+# One build carries one Ascend flavor: upstream's CMake picks the ascend_transport sources on
+# a mutually exclusive if/elseif chain, so the flavors cannot coexist in one image. The
+# default is upstream's recommended path; ubshmem selects the CANN VMM shared-memory
+# transport instead, which serves the supernode (UnifiedBus) shared-memory domain and needs
+# CANN >= 9.0, driver >= 26.0 and Lingqu >= 1.5 at runtime. Dispatch it with
+# args "ASCEND_TRANSPORT=ubshmem" under its own tag.
+ARG ASCEND_TRANSPORT="ascend_direct"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -929,11 +939,14 @@ ENV PATH=/usr/local/go/bin:$PATH
 
 # The flag set is the default builder's with the vendor axis swapped in:
 #
-#   - USE_ASCEND_DIRECT goes ON. The transport links only CANN toolkit libraries (ascendcl,
-#     llm_datadist, metadef), and the toolkit location comes from ASCEND_HOME_PATH, which the
-#     base image exports and common.cmake reads -- no CANN install or set_env step runs in this
-#     stage. The option also switches the project to BUILD_SHARED_LIBS, which is what produces
-#     the ascend_transport.so the wheel ships.
+#   - ASCEND_TRANSPORT picks the one Ascend flavor compiled in. ascend_direct goes ON by
+#     default: the transport links only CANN toolkit libraries (ascendcl, llm_datadist,
+#     metadef), and the toolkit location comes from ASCEND_HOME_PATH, which the base image
+#     exports and common.cmake reads -- no CANN install or set_env step runs in this stage.
+#     Either flavor switches the project to BUILD_SHARED_LIBS, which is what produces the
+#     ascend_transport.so the wheel ships. The case validates the value because cmake would
+#     swallow an unknown flavor's -D with a warning and ship a direct build under a ubshmem
+#     name.
 #   - USE_CUDA stays OFF and USE_EFA goes OFF, for the same reasons as the cuda variant.
 #   - CMAKE_EXE_LINKER_FLAGS carries --allow-shlib-undefined. The CANN toolkit libraries in
 #     the devel base (libascend_dump, libtsdclient, libhccl_v2, libruntime) reference
@@ -958,10 +971,47 @@ RUN <<EOF
             ;;
     esac
 
+    case "${ASCEND_TRANSPORT}" in
+        ascend_direct) transport_flag="-DUSE_ASCEND_DIRECT=ON" ;;
+        ubshmem)       transport_flag="-DUSE_UBSHMEM=ON" ;;
+        *)
+            echo "[ERROR] unknown ASCEND_TRANSPORT '${ASCEND_TRANSPORT}': know ascend_direct and ubshmem." >&2
+            exit 1
+            ;;
+    esac
+
+    if [[ "${ASCEND_TRANSPORT}" == "ubshmem" ]]; then
+        # The bench's ubshmem path calls ascendcl directly, but upstream links the bench
+        # against transfer_engine alone, whose ascendcl use stays PRIVATE through
+        # ascend_transport -- the ascend_direct perf example links ascendcl explicitly, the
+        # bench does not, and the link fails on aclGetRecentErrMsg and the aclrt* set. Patch
+        # the ubshmem block the way the perf example spells it. The if's spacing varies
+        # across the supported releases; the range pattern admits both spellings, and the
+        # grep proves the patch landed rather than rotting silently.
+        sed -i '/^if *(USE_UBSHMEM)$/,/^endif()$/ s|target_link_libraries(transfer_engine_bench PUBLIC transfer_engine)|target_link_libraries(transfer_engine_bench PUBLIC ascendcl transfer_engine)|' \
+            /work/mooncake-transfer-engine/example/CMakeLists.txt
+        grep -q 'target_link_libraries(transfer_engine_bench PUBLIC ascendcl transfer_engine)' \
+            /work/mooncake-transfer-engine/example/CMakeLists.txt
+
+        # v0.3.13's ascend_allocator.cpp calls ContextManager, but the ubshmem source glob leaves
+        # ascend_direct_transport/context_manager.cpp out of the shared library, so importing the
+        # wheel dies on undefined ContextManager symbols. Add the file to the glob; older releases
+        # never reference ContextManager from the ubshmem sources and build untouched. The grep
+        # proves the patch landed rather than rotting silently.
+        case "${MOONCAKE_VERSION}" in
+            0.3.13*)
+                sed -i 's|file(GLOB ASCEND_SOURCES "ubshmem_transport/\*\.cpp" "\*\.cpp")|file(GLOB ASCEND_SOURCES "ubshmem_transport/*.cpp" "ascend_direct_transport/context_manager.cpp" "*.cpp")|' \
+                    /work/mooncake-transfer-engine/src/transport/ascend_transport/CMakeLists.txt
+                grep -q 'ascend_direct_transport/context_manager\.cpp' \
+                    /work/mooncake-transfer-engine/src/transport/ascend_transport/CMakeLists.txt
+                ;;
+        esac
+    fi
+
     cmake -S /work -B /work/build -G Ninja \
         -DSTORE_USE_K8S_LEASE=ON \
         -DSTORE_USE_REDIS=ON \
-        -DUSE_ASCEND_DIRECT=ON \
+        ${transport_flag} \
         -DUSE_CUDA=OFF \
         -DUSE_EFA=OFF \
         -DWITH_EP=OFF \
@@ -1030,6 +1080,10 @@ FROM ${CANN_RUNTIME_IMAGE} AS cann
 SHELL ["/bin/bash", "-c"]
 
 ARG MOONCAKE_VERSION
+
+# The smoke below gates a second artifact on this value; the builder stage's comment carries
+# what the flavors mean.
+ARG ASCEND_TRANSPORT="ascend_direct"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -1142,6 +1196,20 @@ RUN <<EOF
         echo "[ERROR] ascend_transport.so has unresolved libraries:" >&2
         echo "${missing}" >&2
         exit 1
+    fi
+
+    # The ubshmem wheel additionally ships ubshmem_fabric_allocator.so -- built by the
+    # allocator's own build script and installed only under USE_UBSHMEM -- so a ubshmem
+    # build asserts it the same way, or a partially packaged wheel ships under the flavor's
+    # name.
+    if [[ "${ASCEND_TRANSPORT}" == "ubshmem" ]]; then
+        test -f "${pkg}/ubshmem_fabric_allocator.so"
+        missing="$(ldd "${pkg}/ubshmem_fabric_allocator.so" | grep "not found" || true)"
+        if [[ -n "${missing}" ]]; then
+            echo "[ERROR] ubshmem_fabric_allocator.so has unresolved libraries:" >&2
+            echo "${missing}" >&2
+            exit 1
+        fi
     fi
 EOF
 
