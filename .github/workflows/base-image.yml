@@ -26,6 +26,14 @@ on:
         description: 'Tag of packed image.'
         required: true
         type: string
+      # Empty means build to the Dockerfile's final stage, which is today's default image. A
+      # non-empty value names an earlier stage of the Dockerfile, e.g. one of mirrored-mooncake's
+      # vendor variants.
+      target:
+        description: 'Docker build target within the image Dockerfile. Empty builds to the final stage (the default image).'
+        required: false
+        type: string
+        default: ""
       # Allow passing build arguments at pack time, for an image input that must not be
       # committed. Required by thead-ppu-devel: "PPU_SDK_URL=<presigned url>".
       args:
@@ -45,6 +53,7 @@ on:
 
 env:
   INPUT_REPOSITORY: ${{ inputs.repository }}
+  INPUT_TARGET: ${{ inputs.target }}
 
 jobs:
   expand-matrix:
@@ -59,6 +68,30 @@ jobs:
           # tip changed.
           fetch-depth: 2
           persist-credentials: false
+      - name: Validate Inputs
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          #
+          # The manifest job publishes by tag: "docker manifest create --amend" plus a push
+          # assembles the tag from whatever platforms this dispatch built. A variant
+          # dispatched under the default image's tag would therefore rewrite that tag's
+          # multi-arch manifest with the variant's platforms alone. Require a non-empty
+          # target's slug in the tag: "0.3.13.post1-cuda13.0" passes for the generic cuda
+          # target, the bare default tag fails, and a versioned target wants its slugged
+          # form ("0.3.13.post1-cuda13.0" for target cuda13.0). The slug pipeline is
+          # duplicated from the cache-ref step in _image.yml, fallback included; keep
+          # the two in sync.
+          #
+          if [[ -n "${INPUT_TARGET}" ]]; then
+            TARGET_SLUG="$(tr '[:upper:]' '[:lower:]' <<<"${INPUT_TARGET}" | tr -c 'a-z0-9.-' '-' | tr -s '-' | sed 's/^[.-]*//; s/[.-]*$//')"
+            [[ -n "${TARGET_SLUG}" ]] || TARGET_SLUG="variant"
+            if [[ "${INPUT_TAG}" != *"${TARGET_SLUG}"* ]]; then
+              echo "[ERROR] target '${INPUT_TARGET}' requires the tag to contain '${TARGET_SLUG}' (got '${INPUT_TAG}')." >&2
+              echo "        A variant pushed under the default image's tag would overwrite that tag's multi-arch manifest." >&2
+              exit 1
+            fi
+          fi
       - name: Detect Heavy Changes
         id: detect-heavy
         env:
@@ -105,11 +138,16 @@ jobs:
           HEAVY: ${{ steps.detect-heavy.outputs.heavy }}
         run: |
           #
-          # Platform coverage is per image: an image whose upstream ships only one
-          # architecture must not be built for the others, otherwise that leg fails and
-          # the manifest job cannot assemble a complete list.
+          # Platform coverage is per image, and also per build target: an image whose
+          # upstream ships only one architecture must not be built for the others,
+          # otherwise that leg fails and the manifest job cannot assemble a complete
+          # list.
           #
           #   - thead-ppu-devel: the T-Head PPU SDK ships targets/x86_64-linux only.
+          #   - mirrored-mooncake target rocm: the rocm/dev base images publish
+          #     linux/amd64 only (there is no arm64 ROCm build; upstream Mooncake's own
+          #     ROCm release job builds amd64-only too, and gpustack/runner's ROCm
+          #     Dockerfile builds with --platform=linux/amd64).
           #
           # The manifest job derives its platform list from this output, so it follows
           # automatically.
@@ -122,8 +160,9 @@ jobs:
           fi
           AMD64='{"runner":"ubuntu-24.04'"${SUFFIX}"'","platform":"linux/amd64"}'
           ARM64='{"runner":"ubuntu-24.04-arm'"${SUFFIX}"'","platform":"linux/arm64"}'
-          case "${INPUT_REPOSITORY}" in
-            thead-ppu-devel) ENTRIES="${AMD64}" ;;
+          case "${INPUT_REPOSITORY}:${INPUT_TARGET}" in
+            thead-ppu-devel:*) ENTRIES="${AMD64}" ;;
+            mirrored-mooncake:rocm*) ENTRIES="${AMD64}" ;;
             *) ENTRIES="${AMD64},${ARM64}" ;;
           esac
           MATRIX="$(jq -cr . <<<"[${ENTRIES}]")"
@@ -136,6 +175,7 @@ jobs:
     uses: ./.github/workflows/_image.yml
     with:
       repository: ${{ inputs.repository }}
+      target: ${{ inputs.target }}
       matrix: ${{ needs.expand-matrix.outputs.matrix }}
       # A dispatch exists in order to publish the image, so it always pushes.
       push: true
