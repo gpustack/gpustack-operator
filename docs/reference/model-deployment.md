@@ -375,6 +375,14 @@ Arguments fold into `command`; there is deliberately no `args`. A second append 
 `extraArgs` would have no defined precedence, and would make the take-over tier ambiguous, since
 `args` alone would be neither take-over nor append.
 
+**Engine authentication is the append tier's known bad input.** `--api-key` and `VLLM_API_KEY`
+are not operator-owned, so admission accepts them — and vLLM then guards its `/v1` routes,
+including the `/v1/models` a direct decode role's gates read. The probes get 401, and a
+disaggregated pair's decode replica never becomes Ready.
+
+North-south authentication belongs at the gateway in front of the deployment. The routing
+sidecar authenticates no inference traffic, so there is nothing to configure on it.
+
 Taking over the command line has a visible cost: the role reports
 `status.roles[].unmanaged: true` and `CacheAttached` moves to `Unknown`. The operator configured no
 cache client for that role, so it does not report on one it did not render.

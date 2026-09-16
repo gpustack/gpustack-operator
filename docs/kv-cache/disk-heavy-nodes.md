@@ -64,6 +64,9 @@ spec:
               policy: LRU
 ```
 
+⚠️ Pin the example's `spec.image` per [The store version must match the engine's
+client](backend.md#the-store-version-must-match-the-engines-client) before copying it.
+
 ⛔ **That is the supported shape, not a promise the tier fills.** Rendering it correctly is not
 sufficient to make the tier hold data, and `status.capacity` will not tell you either way — what
 decides it, and the figure to read instead, are in
