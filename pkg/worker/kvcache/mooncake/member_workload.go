@@ -330,15 +330,30 @@ func MemberProtocol(kvcb *workercore.KVCacheBackend) string {
 	return memberProtocols[protocol]
 }
 
+// MemberProtocolForGroup is the transport ONE member group resolves to, in the artifact's own
+// spelling: the group's own transport.protocol when it declares one, and the backend's value —
+// with its Auto and empty handling — when it does not. A group carrying a transport block with no
+// protocol inherits too, which is the shape an object that never reached the API server's
+// defaulting takes.
+func MemberProtocolForGroup(kvcb *workercore.KVCacheBackend, group workercore.KVCacheBackendMember) string {
+	if group.Transport != nil && group.Transport.Protocol != "" {
+		return memberProtocols[group.Transport.Protocol]
+	}
+	return MemberProtocol(kvcb)
+}
+
 // RenderMemberDaemonSet renders one member group into a DaemonSet.
 //
-// A DaemonSet rather than a Deployment because a member contributes A NODE's medium: it claims that
-// node's memory or disk, and on the host-fabric paths that node's devices, so its identity IS the
-// node. A Deployment with anti-affinity only approximates that.
+// A DaemonSet rather than a Deployment because a member contributes A NODE's media: it claims that
+// node's memory or disk, and on a VRAM group or a host-fabric path that node's devices, so its
+// identity IS the node. Two groups can now select the SAME node — a DRAM group and a VRAM group is
+// the shape this API exists to express — and each is still its own DaemonSet, one member per group
+// per node. A Deployment with anti-affinity only approximates that.
 //
 // The image is a parameter for the same reason the leader's is, and the group's own image wins over
 // it — a group selects its own nodes, so two groups can sit on different accelerator hardware and
-// need the client wheel built for it. The transport is backend-wide and not part of that split.
+// need the client wheel built for it. The medium and the transport are the group's for the same
+// reason, and both are read off the group below rather than off the backend.
 func RenderMemberDaemonSet(
 	kvcb *workercore.KVCacheBackend, group int, image string,
 ) *apps.DaemonSet {
@@ -406,7 +421,14 @@ func RenderMemberDaemonSet(
 		},
 	}
 
-	applyMemberFabric(ds, MemberProtocol(kvcb), kvcb.Spec.Transport.DeviceResourceName)
+	// A VRAM group naming no device resource takes the direct-access path INSTEAD of the fabric
+	// one: with no extended resource to charge, the member's only way to open a device is the
+	// node's own tree, and the fabric path's mount-plus-capabilities grants nothing toward that.
+	if member.Medium == "VRAM" && member.DeviceResourceName == "" {
+		applyMemberDirectDevice(ds)
+	} else {
+		applyMemberFabric(ds, MemberProtocolForGroup(kvcb, member), kvcb.Spec.Transport.DeviceResourceName)
+	}
 	applyMemberLocalDisk(ds, kvcb, member, group)
 
 	// Stamped last, over a template that is otherwise complete. The fingerprint therefore covers
@@ -461,9 +483,7 @@ func memberContainerSpec(
 			PeriodSeconds:    5,
 			FailureThreshold: 3,
 		},
-		Resources: core.ResourceRequirements{
-			Requests: memberRequests(member),
-		},
+		Resources: memberResources(member),
 	}
 }
 
@@ -506,7 +526,7 @@ func renderMemberEnv(
 			Name:  memberEnvMaster,
 			Value: MemberMasterEntry(kvcb),
 		},
-		{Name: memberEnvProtocol, Value: MemberProtocol(kvcb)},
+		{Name: memberEnvProtocol, Value: MemberProtocolForGroup(kvcb, member)},
 		{
 			// This is the ADDRESS the leader hands to clients, not just a label: it becomes the host
 			// half of the segment's te_endpoint. The transfer engine binds its data port inside the
@@ -538,6 +558,9 @@ func renderMemberEnv(
 	}
 
 	if size := member.CapacityPerMember.Value(); size > 0 {
+		// One spelling for BOTH media: in a VRAM build the same size feeds the device allocation,
+		// because the build-time switch changes WHERE the segment is allocated, not how its total
+		// size reaches the allocator.
 		env = append(env, core.EnvVar{
 			Name:  memberEnvGlobalSegmentSize,
 			Value: strconv.FormatInt(size, 10),
@@ -725,20 +748,46 @@ func memberRESTPort(group int) int32 {
 	return memberRESTPortBase + int32(group)
 }
 
-// memberRequests declares the member's claim so capacity planning can see it. A member that does not
-// fit stays Pending and the backend reads Degraded, which is the honest outcome — the alternative is
-// a member that overcommits the node it landed on.
+// memberResources declares the member's claim so capacity planning can see it. A member that does
+// not fit stays Pending and the backend reads Degraded, which is the honest outcome — the
+// alternative is a member that overcommits the node it landed on.
 //
-// The claim is MEMORY and only memory, whatever else the group carries. A disk tier adds a host
-// directory, which is outside the kubelet's ephemeral-storage accounting entirely — that covers the
-// container filesystem, emptyDir volumes and logs, never a hostPath. Requesting against it would
-// reserve a figure nothing polices and would then keep the member off the very node that has the
-// disk. Watching that filesystem is the operator's, and the documentation says so.
-func memberRequests(member workercore.KVCacheBackendMember) core.ResourceList {
-	claim := member.CapacityPerMember.DeepCopy()
-	claim.Add(member.LocalBufferSize)
+// What the claim is made OF follows the medium. A DRAM member's segment is host memory, so
+// capacityPerMember and localBufferSize are both charged to memory. A VRAM member's segment is
+// device memory: capacityPerMember is charged against the device deviceResourceName names — one
+// device per member, matching the single allocation the client makes — and host memory carries
+// localBufferSize only. A VRAM group naming no resource requests none: it takes the direct-access
+// fallback instead, and there is no name to charge.
+//
+// A disk tier adds a host directory either way, which is outside the kubelet's ephemeral-storage
+// accounting entirely — that covers the container filesystem, emptyDir volumes and logs, never a
+// hostPath. Requesting against it would reserve a figure nothing polices and would then keep the
+// member off the very node that has the disk. Watching that filesystem is the operator's, and the
+// documentation says so.
+//
+// The device goes on Limits alone, on the same rule applyMemberFabric documents: an extended
+// resource is asked for with request equal to limit, the defaulter that fills the request in does
+// not run on a pod template, and storing exactly what is rendered keeps the controller's
+// whole-Resources comparison from rewriting the template on every pass.
+func memberResources(member workercore.KVCacheBackendMember) core.ResourceRequirements {
+	buffer := member.LocalBufferSize.DeepCopy()
 
-	return core.ResourceList{core.ResourceMemory: claim}
+	if member.Medium == "VRAM" {
+		requirements := core.ResourceRequirements{
+			Requests: core.ResourceList{core.ResourceMemory: buffer},
+		}
+		if member.DeviceResourceName != "" {
+			requirements.Limits = core.ResourceList{
+				core.ResourceName(member.DeviceResourceName): *resource.NewQuantity(1, resource.DecimalSI),
+			}
+		}
+		return requirements
+	}
+
+	buffer.Add(member.CapacityPerMember)
+	return core.ResourceRequirements{
+		Requests: core.ResourceList{core.ResourceMemory: buffer},
+	}
 }
 
 // applyMemberFabric grants what a fabric needs, and only to the path that needs it.
@@ -824,6 +873,32 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol, deviceResource string) {
 	}
 
 	container.Resources.Limits[core.ResourceName(deviceResource)] = *resource.NewQuantity(1, resource.DecimalSI)
+}
+
+// applyMemberDirectDevice grants a VRAM group that names no device resource access to the node's
+// devices directly: the member runs privileged on the host's network, so it sees the node's
+// accelerators and its fabric exactly as a process on the node would, and no device plugin has to
+// advertise a name for it.
+//
+// It SUPERSEDES the fabric rendering for the group rather than adding to it. applyMemberFabric
+// grants a mount and two capabilities because that is the least a named fabric needs; with no
+// resource named there is no allocation to open one device through, so the member needs the node's
+// whole device tree, and privileged is the spelling of that. hostNetwork comes with it because the
+// fabric transports bind the host's interfaces, which a pod network namespace would hide — the
+// group keeps working on RDMA without the administrator naming a thing.
+func applyMemberDirectDevice(ds *apps.DaemonSet) {
+	podSpec := &ds.Spec.Template.Spec
+
+	podSpec.HostNetwork = true
+	// The same rule as the fabric path's: a hostNetwork Pod that keeps ClusterFirst resolves
+	// against the host's resolver and cannot find the leader's Service name.
+	podSpec.DNSPolicy = core.DNSClusterFirstWithHostNet
+
+	container := &podSpec.Containers[0]
+	if container.SecurityContext == nil {
+		container.SecurityContext = &core.SecurityContext{}
+	}
+	container.SecurityContext.Privileged = ptr.To(true)
 }
 
 // memberTerminationGracePeriodSeconds is how long the kubelet waits after SIGTERM before it kills

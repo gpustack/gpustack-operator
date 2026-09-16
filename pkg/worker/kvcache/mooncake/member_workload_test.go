@@ -73,6 +73,24 @@ func withSecondMemberGroup(kvcb *workercore.KVCacheBackend) {
 		})
 }
 
+// withSecondMemberGroupVRAM adds a VRAM group on the SAME selector as the first group: one node
+// contributing both media is the shape the medium choice exists for. The mutators carry what a
+// case adds — a device resource, a transport — so the fixture itself stays the plain form.
+func withSecondMemberGroupVRAM(mutate ...func(*workercore.KVCacheBackendMember)) func(*workercore.KVCacheBackend) {
+	return func(kvcb *workercore.KVCacheBackend) {
+		group := workercore.KVCacheBackendMember{
+			NodeSelector:      map[string]string{"kvcache-dram": "true"},
+			Medium:            "VRAM",
+			CapacityPerMember: resource.MustParse("80Gi"),
+			LocalBufferSize:   resource.MustParse("4Gi"),
+		}
+		for _, m := range mutate {
+			m(&group)
+		}
+		kvcb.Spec.Connection.Managed.Members = append(kvcb.Spec.Connection.Managed.Members, group)
+	}
+}
+
 // withSecondGroupDiskTier puts the tier on the SECOND group, so the preStop hook is rendered for a
 // group whose port moved. Only one group may carry a tier, so this is the tier rather than a second.
 func withSecondGroupDiskTier(kvcb *workercore.KVCacheBackend) {
@@ -322,6 +340,123 @@ func TestMemberWorkload_Requests(t *testing.T) {
 			assert.Len(t, requests, 1, "a member claims exactly one resource: its memory segment")
 		})
 	}
+}
+
+// TestMemberWorkload_TwoMediaOnTheSameNodes renders the shape the medium choice exists for: one
+// backend whose DRAM group and VRAM group select the SAME nodes. Each group is its own DaemonSet,
+// each accounts its segment against the memory its medium is made of, and the fabric privileges
+// follow each group's OWN protocol rather than the backend's.
+func TestMemberWorkload_TwoMediaOnTheSameNodes(t *testing.T) {
+	kvcb := testMemberBackend(withSecondMemberGroupVRAM(func(group *workercore.KVCacheBackendMember) {
+		group.DeviceResourceName = "nvidia.com/gpu"
+		group.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "RDMA"}
+	}))
+
+	dram := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13")
+	vram := RenderMemberDaemonSet(kvcb, 1, "mooncake:v0.3.13")
+
+	assert.NotEqual(t, dram.Name, vram.Name, "two groups are two DaemonSets, never one")
+	assert.Equal(t, dram.Spec.Template.Spec.NodeSelector, vram.Spec.Template.Spec.NodeSelector,
+		"both select the same nodes: one node contributes both media")
+
+	dramContainer := dram.Spec.Template.Spec.Containers[0]
+	dramMemory := dramContainer.Resources.Requests[core.ResourceMemory]
+	assert.True(t, resource.MustParse("504Gi").Equal(dramMemory),
+		"a DRAM segment is host memory: capacityPerMember + localBufferSize, got %s", &dramMemory)
+	assert.Empty(t, dramContainer.Resources.Limits, "a DRAM group charges no device")
+	assert.False(t, dram.Spec.Template.Spec.HostNetwork)
+	assert.Nil(t, dramContainer.SecurityContext,
+		"the DRAM group declares no transport, so it inherits the backend's TCP and claims no fabric")
+
+	vramPodSpec := vram.Spec.Template.Spec
+	vramContainer := vramPodSpec.Containers[0]
+	vramMemory := vramContainer.Resources.Requests[core.ResourceMemory]
+	assert.True(t, resource.MustParse("4Gi").Equal(vramMemory),
+		"a VRAM segment is device memory: host memory carries localBufferSize only, got %s", &vramMemory)
+	device := vramContainer.Resources.Limits["nvidia.com/gpu"]
+	assert.Equal(t, int64(1), device.Value(),
+		"one device per member, matching the single allocation the client makes")
+	assert.True(t, vramPodSpec.HostNetwork)
+	require.NotNil(t, vramContainer.SecurityContext)
+	require.NotNil(t, vramContainer.SecurityContext.Capabilities)
+	assert.ElementsMatch(t, []core.Capability{"IPC_LOCK", "SYS_RESOURCE"},
+		vramContainer.SecurityContext.Capabilities.Add,
+		"the group's own RDMA gets the fabric's two capabilities while the backend stays on TCP")
+	assert.Nil(t, vramContainer.SecurityContext.Privileged,
+		"a named device resource is what keeps the member off the privileged fallback")
+
+	env := map[string]string{}
+	for _, e := range vramContainer.Env {
+		env[e.Name] = e.Value
+	}
+	assert.Equal(t, "rdma", env["MOONCAKE_PROTOCOL"],
+		"the member is told its own group's protocol, not the backend's")
+}
+
+// TestMemberWorkload_GroupTransportOverridesTheBackend pins the inheritance in both directions:
+// a group that declares a transport renders its own, and a group that declares none renders the
+// backend's — the second being what keeps a one-group backend byte-identical to what it rendered
+// before the field existed.
+func TestMemberWorkload_GroupTransportOverridesTheBackend(t *testing.T) {
+	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Transport.Protocol = "RDMA"
+	}, withSecondMemberGroupVRAM(func(group *workercore.KVCacheBackendMember) {
+		group.DeviceResourceName = "nvidia.com/gpu"
+		group.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "TCP"}
+	}))
+
+	inherited := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13").Spec.Template.Spec
+	assert.True(t, inherited.HostNetwork,
+		"the group that declares nothing renders the backend's fabric")
+
+	overridden := RenderMemberDaemonSet(kvcb, 1, "mooncake:v0.3.13").Spec.Template.Spec
+	assert.False(t, overridden.HostNetwork, "the group's own protocol replaces the backend's")
+	assert.Equal(t, core.DNSClusterFirst, overridden.DNSPolicy)
+	assert.Empty(t, overridden.Volumes, "TCP mounts no device tree")
+	assert.Nil(t, overridden.Containers[0].SecurityContext,
+		"no security context at all on the path that needs none")
+	device := overridden.Containers[0].Resources.Limits["nvidia.com/gpu"]
+	assert.Equal(t, int64(1), device.Value(),
+		"the medium's device is still charged: it is the segment's home, not the fabric's")
+
+	env := map[string]string{}
+	for _, e := range overridden.Containers[0].Env {
+		env[e.Name] = e.Value
+	}
+	assert.Equal(t, "tcp", env["MOONCAKE_PROTOCOL"], "the member is told its own group's protocol")
+}
+
+// TestMemberWorkload_VRAMWithoutADeviceTakesTheNodeDirectly pins the fallback a VRAM group gets
+// when it names no deviceResourceName: the member runs privileged on the host's network, which
+// SUPERSEDES the fabric rendering — even on an RDMA backend it mounts no device tree and requests
+// no allocation, because an unnamed device resource leaves nothing to charge one against, and the
+// member must see the node's devices and fabric directly.
+func TestMemberWorkload_VRAMWithoutADeviceTakesTheNodeDirectly(t *testing.T) {
+	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Transport.Protocol = "RDMA"
+	}, withSecondMemberGroupVRAM())
+
+	podSpec := RenderMemberDaemonSet(kvcb, 1, "mooncake:v0.3.13").Spec.Template.Spec
+	container := podSpec.Containers[0]
+
+	assert.True(t, podSpec.HostNetwork)
+	assert.Equal(t, core.DNSClusterFirstWithHostNet, podSpec.DNSPolicy,
+		"a hostNetwork Pod that keeps ClusterFirst cannot resolve the leader's Service name")
+
+	require.NotNil(t, container.SecurityContext)
+	require.NotNil(t, container.SecurityContext.Privileged)
+	assert.True(t, *container.SecurityContext.Privileged,
+		"with no resource to charge, the member's only way to open a device is the node's whole tree")
+	assert.Nil(t, container.SecurityContext.Capabilities,
+		"privileged already implies them; listing the fabric's two beside it would say the paths stack")
+
+	assert.Empty(t, podSpec.Volumes, "no device tree mount: the fallback supersedes the fabric path")
+	assert.Empty(t, container.VolumeMounts)
+
+	memory := container.Resources.Requests[core.ResourceMemory]
+	assert.True(t, resource.MustParse("4Gi").Equal(memory),
+		"host memory still carries localBufferSize only, got %s", &memory)
+	assert.Empty(t, container.Resources.Limits, "no name, no request: nothing is charged")
 }
 
 // TestMemberWorkload_NoDiskTierRendersWhatItAlwaysDid is the guard that this feature does not roll
