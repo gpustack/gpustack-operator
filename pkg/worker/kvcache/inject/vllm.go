@@ -29,8 +29,8 @@ const (
 	// VLLMMooncakeBootstrapPort is where a prefiller exposes Mooncake's transfer handshake.
 	VLLMMooncakeBootstrapPort int32 = 8998
 
-	// vllmDirectTransferProtocol is the transport the prefill-to-decode leg is told to use, and
-	// it is deliberately NOT resolved from the backend.
+	// vllmDirectTransferProtocol is the transport the prefill-to-decode leg is told to use when
+	// the caller declares none, and it is deliberately NOT resolved from the backend.
 	//
 	// KVCacheBackend.spec.transport defines the data plane the store MEMBERS run. This leg is
 	// engine to engine and never traverses the store, so the two planes have no business sharing
@@ -42,11 +42,12 @@ const (
 	//
 	// No source can DISCOVER the right value: the accepted set is a property of the mooncake
 	// build inside the engine's own image, which this operator neither ships nor can inspect.
-	// The value is therefore DECLARED, and today's declarer is this renderer. "tcp" is the one
-	// answer honest from here -- the transport every mooncake build carries, and what a
-	// store-less pair has always rendered. The cost is that a pair whose engines COULD speak a
-	// fabric protocol has no way to say so. Moving the declaration onto the ModelDeployment API
-	// is the planned follow-up, and it changes who declares, never the gating rule below.
+	// The value is therefore DECLARED, and the declarer is the ModelDeployment's
+	// spec.directTransfer.protocol. This constant is the default when that field is unset:
+	// "tcp" is the one answer honest from here -- the transport every mooncake build carries,
+	// and what a store-less pair has always rendered. A pair whose engines can speak a fabric
+	// protocol says so through the API; the gating rule below binds the declared value exactly
+	// as it binds this default.
 	vllmDirectTransferProtocol = "tcp"
 
 	// vllmStoreConnector is the name vLLM PROPER registers for the Mooncake store
@@ -177,11 +178,15 @@ func renderVLLM(in Input) (*Result, error) {
 		// connector. checkTransport documents the same rule from the other side -- an
 		// unmeasured pair is let through, because a refusal on a fact nobody read turns a
 		// working engine into a broken one. A mismatch therefore still raises at startup, in
-		// the container that owns the fact. The rule binds the constant the value comes from
-		// today and whatever declared source replaces it.
+		// the container that owns the fact. The rule binds the declared value and the default
+		// alike.
+		protocol := vllmDirectTransferProtocol
+		if in.DirectTransferProtocol != "" {
+			protocol = in.DirectTransferProtocol
+		}
 		direct := vllmTransferConfig{
 			KVConnector: "MooncakeConnector", KVRole: kvRole,
-			KVConnectorExtraConfig: &vllmConnectorExtraConfig{MooncakeProtocol: vllmDirectTransferProtocol},
+			KVConnectorExtraConfig: &vllmConnectorExtraConfig{MooncakeProtocol: protocol},
 		}
 		if !hasStore {
 			// The decode arm renders only the role and the protocol: the bootstrap address is

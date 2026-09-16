@@ -283,6 +283,12 @@ carrying it. **Do not put a credential in `extraArgs`.** Nothing refuses one at 
 `Auto` whether or not the `transport` block is written at all. **`Auto` resolves to `TCP`** — it is
 not a per-node probe that promotes itself.
 
+`Ascend` is the one value an engine can **require**: vllm-ascend's store client currently raises on
+any other protocol (`MooncakeBackend.__init__`, verified at v0.23.0 and v0.26.0rc1 — upstream state,
+not a contract, and it may change), so a pool serving Ascend engines declares `Ascend` here rather
+than settling for the `TCP` default. The member then needs a CANN-carrying image, per the variant
+table above — the project's own CPU build compiles no Ascend transport.
+
 > **Why** — one group is one Pod template, which cannot express a per-node transport; and promoting to
 > a host fabric would mean granting `hostNetwork` plus `IPC_LOCK` and `SYS_RESOURCE`. A privilege is
 > requested, never inferred. Naming `RDMA` or `EFA` is also what accepts the security context that

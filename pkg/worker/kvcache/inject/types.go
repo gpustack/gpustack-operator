@@ -168,6 +168,13 @@ type Input struct {
 	// its own.
 	DirectTransfer bool
 
+	// DirectTransferProtocol is the transport the point-to-point leg is told to use, declared by
+	// the caller. Empty selects the renderer's default. It is passed through verbatim: the
+	// accepted set is a property of the mooncake build inside the engine's own image, which this
+	// operator neither ships nor can inspect, so gating it here would hard-code one image's
+	// compile set onto another image's connector. It is read only when DirectTransfer is set.
+	DirectTransferProtocol string
+
 	// PublishKVEvents asks the engine to publish cache-placement events for a router. It is resolved
 	// per role by the caller; a false value preserves the ordinary connector render byte for byte.
 	PublishKVEvents bool

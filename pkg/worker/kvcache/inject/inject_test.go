@@ -423,6 +423,41 @@ func TestRender_DirectTransferProtocolIsNotTheMembers(t *testing.T) {
 	})["protocol"])
 }
 
+// TestRender_DirectTransferProtocolDeclared pins the declared source of the direct leg's
+// transport: a caller naming a protocol gets it VERBATIM -- including one no enum would admit,
+// because the accepted set belongs to the engine image's mooncake build -- and the store plane of
+// the same render is untouched. The unset case is pinned by the two tests above: everything they
+// assert rides on the renderer's default.
+func TestRender_DirectTransferProtocolDeclared(t *testing.T) {
+	for _, protocol := range []string{"rdma", "hip"} {
+		t.Run(protocol, func(t *testing.T) {
+			conn := testConnection()
+			conn.Protocol = "tcp"
+
+			result, err := Render(Input{
+				Engine: EngineVLLM, Role: RoleDecode, Connection: conn,
+				DirectTransfer: true, DirectTransferProtocol: protocol,
+			})
+			require.NoError(t, err)
+			require.Len(t, result.Args, 2)
+			assert.JSONEq(t, fmt.Sprintf(`{
+				"kv_connector":"MultiConnector",
+				"kv_role":"kv_consumer",
+				"kv_connector_extra_config":{"connectors":[
+					{"kv_connector":"MooncakeConnector","kv_role":"kv_consumer",
+					 "kv_connector_extra_config":{"mooncake_protocol":%q}},
+					{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}
+				]}
+			}`, protocol), result.Args[1])
+
+			assert.Equal(t, "tcp", renderedConfig(t, Input{
+				Engine: EngineVLLM, Role: RoleDecode, Connection: conn,
+				DirectTransfer: true, DirectTransferProtocol: protocol,
+			})["protocol"], "the declared value moves the direct leg alone")
+		})
+	}
+}
+
 // TestRender_Refusals covers every case where rendering anything would produce a container that starts
 // normally and does not use the cache.
 func TestRender_Refusals(t *testing.T) {

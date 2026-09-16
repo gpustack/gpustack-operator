@@ -421,6 +421,11 @@ func (in ModelDeployment) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentDirectTransfer) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentDirectTransfer"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentKVCache) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentKVCache"
 }

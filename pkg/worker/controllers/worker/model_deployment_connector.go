@@ -72,6 +72,11 @@ type ModelDeploymentConnectorInput struct {
 
 	// DirectTransfer composes point-to-point P/D transfer with the shared store.
 	DirectTransfer bool
+
+	// DirectTransferProtocol is the transport the point-to-point leg is told to use, declared on
+	// the ModelDeployment. Empty renders the renderer's default. It is passed through verbatim:
+	// the accepted set belongs to the engine image's mooncake build, not to this operator.
+	DirectTransferProtocol string
 }
 
 // TWO FIELDS THIS STRUCT USED TO CARRY ARE GONE, and neither is a capability that was lost.
@@ -298,6 +303,9 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		PublishKVEvents: in.PublishKVEvents,
 		KVEventsHost:    in.KVEventsHost,
 		DirectTransfer:  in.DirectTransfer,
+		// The protocol is threaded rather than resolved here: the renderer owns the default, and
+		// a second default in this file would be two definitions of one fact.
+		DirectTransferProtocol: in.DirectTransferProtocol,
 	})
 	if err != nil {
 		return ModelDeploymentConnectorRender{}, err

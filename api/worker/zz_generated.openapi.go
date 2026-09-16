@@ -137,6 +137,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.KVCachePoolStatus{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_KVCachePoolStatus(ref),
 		v1alpha1.KVCachePoolUsage{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1alpha1_KVCachePoolUsage(ref),
 		v1alpha1.ModelDeployment{}.OpenAPIModelName():                                schema_gpustack_api_worker_v1alpha1_ModelDeployment(ref),
+		v1alpha1.ModelDeploymentDirectTransfer{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentDirectTransfer(ref),
 		v1alpha1.ModelDeploymentKVCache{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCache(ref),
 		v1alpha1.ModelDeploymentKVCacheDomain{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCacheDomain(ref),
 		v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCacheStatus(ref),
@@ -6887,6 +6888,27 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeployment(ref common.ReferenceCal
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentDirectTransfer(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentDirectTransfer carries the settings of the point-to-point KV transfer leg between a prefill role and a decode role.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"protocol": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Protocol is the transport both ends of the leg are told to use, in the mooncake configuration's own spelling, e.g. \"tcp\" or \"rdma\".\n\n  - IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either\n    end, so a per-role field could only express a contradiction -- two ends naming different\n    values for one connection, which fails at transfer time rather than at admission.\n  - THE VALUE IS DECLARED, NOT DISCOVERED, AND IT IS NOT GATED. The accepted set is a\n    property of the mooncake build inside the engine's own image, which this operator\n    neither ships nor can inspect: a HIP-compiled build makes \"hip\" a working point-to-point\n    transport, and an enum here would hard-code one image's compile set onto another image's\n    connector. The value is passed through verbatim, and a value the engine build rejects\n    raises at engine startup, in the container that owns the fact.\n  - UNSET RENDERS \"tcp\", the transport every mooncake build carries. The default lives in\n    the renderer rather than in this schema, so the stored object holds exactly what was\n    asked.\n  - IT IS READ ONLY ON THE DIRECT-TRANSFER LEG: a managed llm-d router in front of vLLM\n    prefill/decode roles. On every other shape -- sglang, Ascend, or no router -- the value\n    is accepted and renders nothing, which is stated here because an accepted field that\n    silently does nothing is a promise broken quietly.\n  - IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'\n    argv, so a change rebuilds every Kueue pod group of the deployment. With roles split\n    across InstanceTypes the groups rebuild independently, and a mixed-protocol window\n    between a prefiller and a decoder exists until both converge -- the same window an\n    engineVersion edit already opens.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCache(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -7625,12 +7647,18 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref common.Referenc
 							Ref:         ref(v1alpha1.ModelDeploymentRouter{}.OpenAPIModelName()),
 						},
 					},
+					"directTransfer": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DirectTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode pair.\n\nTHE LEG THIS COVERS NEVER TRAVERSES THE STORE, and that is why the value does not come from the KVCacheBackend: spec.transport there defines the data plane the store MEMBERS run, this one is engine to engine, and the two planes declare separately. A deployment can render this leg with no pool attached at all, which is why the field cannot live under KVCache.",
+							Ref:         ref(v1alpha1.ModelDeploymentDirectTransfer{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"model", "engine", "engineVersion", "roles"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.ModelDeploymentKVCache{}.OpenAPIModelName(), v1alpha1.ModelDeploymentModel{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRole{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRouter{}.OpenAPIModelName()},
+			v1alpha1.ModelDeploymentDirectTransfer{}.OpenAPIModelName(), v1alpha1.ModelDeploymentKVCache{}.OpenAPIModelName(), v1alpha1.ModelDeploymentModel{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRole{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRouter{}.OpenAPIModelName()},
 	}
 }
 

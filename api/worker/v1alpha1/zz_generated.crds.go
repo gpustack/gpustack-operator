@@ -3757,6 +3757,18 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 										"roles",
 									},
 									Properties: map[string]v1.JSONSchemaProps{
+										"directTransfer": {
+											Description: "DirectTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode\npair.\nTHE LEG THIS COVERS NEVER TRAVERSES THE STORE, and that is why the value does not come from\nthe KVCacheBackend: spec.transport there defines the data plane the store MEMBERS run, this\none is engine to engine, and the two planes declare separately. A deployment can render\nthis leg with no pool attached at all, which is why the field cannot live under KVCache.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"protocol": {
+													Description: "Protocol is the transport both ends of the leg are told to use, in the mooncake\nconfiguration's own spelling, e.g. \"tcp\" or \"rdma\".\n- IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either\nend, so a per-role field could only express a contradiction -- two ends naming different\nvalues for one connection, which fails at transfer time rather than at admission.\n- THE VALUE IS DECLARED, NOT DISCOVERED, AND IT IS NOT GATED. The accepted set is a\nproperty of the mooncake build inside the engine's own image, which this operator\nneither ships nor can inspect: a HIP-compiled build makes \"hip\" a working point-to-point\ntransport, and an enum here would hard-code one image's compile set onto another image's\nconnector. The value is passed through verbatim, and a value the engine build rejects\nraises at engine startup, in the container that owns the fact.\n- UNSET RENDERS \"tcp\", the transport every mooncake build carries. The default lives in\nthe renderer rather than in this schema, so the stored object holds exactly what was\nasked.\n- IT IS READ ONLY ON THE DIRECT-TRANSFER LEG: a managed llm-d router in front of vLLM\nprefill/decode roles. On every other shape -- sglang, Ascend, or no router -- the value\nis accepted and renders nothing, which is stated here because an accepted field that\nsilently does nothing is a promise broken quietly.\n- IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'\nargv, so a change rebuilds every Kueue pod group of the deployment. With roles split\nacross InstanceTypes the groups rebuild independently, and a mixed-protocol window\nbetween a prefiller and a decoder exists until both converge -- the same window an\nengineVersion edit already opens.",
+													Type:        "string",
+													MaxLength:   ptr.To[int64](64),
+												},
+											},
+											Nullable: true,
+										},
 										"engine": {
 											Description: "Engine selects the inference engine, which decides which argument keys the operator owns and\nwhich carrier the transfer configuration arrives on. Ownership is per (engine, key): a key one\nengine owns is an ordinary user argument on another.\nIt does NOT decide the connector, which follows the role's hardware instead: the connector is a\nproperty of the accelerator backend, so an Ascend pool and an NVIDIA pool running this engine\nget different ones.",
 											Type:        "string",

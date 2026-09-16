@@ -1434,6 +1434,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.KVCachePoolUsageApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeployment"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentDirectTransfer"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentDirectTransferApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentKVCache"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentKVCacheApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentKVCacheDomain"):
