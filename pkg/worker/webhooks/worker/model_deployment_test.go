@@ -24,8 +24,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
-	"gpustack.ai/gpustack/pkg/setting"
-	"gpustack.ai/gpustack/pkg/system"
+	"gpustack.ai/gpustack/pkg/setting/settingtest"
 )
 
 // modelDeployment builds a valid single-role deployment for the given engine, which every case then
@@ -2076,34 +2075,10 @@ func TestModelDeploymentWebhook_AnUnsetAcceleratorGroupIsUnknown(t *testing.T) {
 // varx.Once: TestMain configures it and every later Configure is silently a no-op, so a helper that
 // tried to swap in a seeded fake would leave the setting reading exactly what it read before -- and
 // the case asserting the "on" behavior would fail for a reason that has nothing to do with the rule.
-//
-// THE CACHE IS DROPPED ON BOTH SIDES. A successful read caches for thirty seconds and a failed one
-// does not cache at all, so without the drop on entry a case inherits whatever the previous one
-// seeded, and without the drop on exit it dictates what the next one reads. Either way the assertion
-// becomes a statement about the order the cases happen to run in.
+// The key-scoped merge/remove mechanics live in settingtest.MergeDelegatedSettings.
 func withDerivedFromNode(t *testing.T, on bool) {
 	t.Helper()
-
-	ctx := context.Background()
-	cli := system.LoopbackCtrlClient.Get()
-	sec := &core.Secret{
-		ObjectMeta: meta.ObjectMeta{
-			Namespace: setting.DelegatedSecretNamespace,
-			Name:      setting.DelegatedSecretName,
-		},
-		Data: map[string][]byte{
-			"instance-type-derived-from-node": []byte(strconv.FormatBool(on)),
-		},
-	}
-
-	setting.InvalidateCache()
-	_ = cli.Delete(ctx, sec.DeepCopy())
-	require.NoError(t, cli.Create(ctx, sec))
-
-	t.Cleanup(func() {
-		setting.InvalidateCache()
-		_ = cli.Delete(ctx, sec)
-	})
+	settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-derived-from-node": strconv.FormatBool(on)})
 }
 
 // TestModelDeploymentWebhook_SeveralInstanceTypesNeedTheBarrier covers the refusal T6 adds, in both

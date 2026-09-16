@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -28,8 +29,10 @@ func TestInvalidateCacheIsCalledOnlyFromTests(t *testing.T) {
 			return err
 		}
 		if d.IsDir() {
+			// ".claude" holds agent worktrees that embed full copies of this repository
+			// (gitignored, so never part of the build); scanning them flags the copies.
 			switch d.Name() {
-			case ".git", "staging", "vendor", ".sbin":
+			case ".git", ".claude", "staging", "vendor", ".sbin":
 				return fs.SkipDir
 			}
 
@@ -53,6 +56,13 @@ func TestInvalidateCacheIsCalledOnlyFromTests(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+
+	// The one sanctioned non-test caller: pkg/setting/settingtest is a test-support package,
+	// imported only from _test.go files, so its calls run in test binaries only. Naming the file
+	// here keeps the exemption reviewable; anything else stays an offender.
+	offenders = slices.DeleteFunc(offenders, func(path string) bool {
+		return path == filepath.Join("pkg", "setting", "settingtest", "settingtest.go")
+	})
 
 	assert.Empty(t, offenders,
 		"InvalidateCache exists for tests that cover both sides of a setting; a production caller "+
