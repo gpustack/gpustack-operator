@@ -36,7 +36,7 @@ func newRenderBackend() *workercore.KVCacheBackend {
 	return &workercore.KVCacheBackend{
 		ObjectMeta: meta.ObjectMeta{Name: "kvcb"},
 		Spec: workercore.KVCacheBackendSpec{
-			Transport: workercore.KVCacheBackendTransport{Protocol: "TCP"},
+			Transport: workercore.KVCacheBackendTransport{Protocol: "tcp"},
 		},
 	}
 }
@@ -490,7 +490,7 @@ func TestResolveModelDeploymentConnection(t *testing.T) {
 	backend := &workercore.KVCacheBackend{
 		ObjectMeta: meta.ObjectMeta{Name: "kvcb"},
 		Spec: workercore.KVCacheBackendSpec{
-			Transport: workercore.KVCacheBackendTransport{Protocol: "RDMA"},
+			Transport: workercore.KVCacheBackendTransport{Protocol: "rdma"},
 		},
 	}
 
@@ -585,7 +585,7 @@ func TestResolveModelDeploymentConnection(t *testing.T) {
 			require.NotNil(t, got)
 			assert.Equal(t, "master:50051", got.MasterServerAddress)
 			assert.Equal(t, tc.wantDomain, got.Domain)
-			// Already in the artifact's own spelling, lowercased and Auto-resolved by the package
+			// Already in the artifact's own spelling, lowercased and auto-resolved by the package
 			// that owns the backend. The fixture's backend declares no member groups, so the one
 			// offer is the backend-wide value; which one an engine is handed is synthesis's call.
 			assert.Equal(t, []string{tc.wantProt}, got.Protocols)

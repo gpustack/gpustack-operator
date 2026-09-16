@@ -269,7 +269,7 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 					Medium:             "VRAM",
 					CapacityPerMember:  resource.MustParse("80Gi"),
 					DeviceResourceName: "nvidia.com/gpu",
-					Transport:          &workercore.KVCacheBackendMemberTransport{Protocol: "RDMA"},
+					Transport:          &workercore.KVCacheBackendMemberTransport{Protocol: "rdma"},
 				})
 		}, ""},
 		{"a VRAM group naming neither", func(k *workercore.KVCacheBackend) {
@@ -914,8 +914,8 @@ func TestKVCacheBackendWebhook_ADeviceResourceNameDomainIsBounded(t *testing.T) 
 
 	t.Run("an update that leaves the name where it was is admitted", func(t *testing.T) {
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-		withName(oldKvcb, "RDMA", overLimit)
-		withName(newKvcb, "RDMA", overLimit)
+		withName(oldKvcb, "rdma", overLimit)
+		withName(newKvcb, "rdma", overLimit)
 
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
 		require.NoError(t, err,
@@ -924,8 +924,8 @@ func TestKVCacheBackendWebhook_ADeviceResourceNameDomainIsBounded(t *testing.T) 
 
 	t.Run("an update that moves the name is refused", func(t *testing.T) {
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-		withName(oldKvcb, "RDMA", "vpc.amazonaws.com/efa")
-		withName(newKvcb, "RDMA", overLimit)
+		withName(oldKvcb, "rdma", "vpc.amazonaws.com/efa")
+		withName(newKvcb, "rdma", overLimit)
 
 		// The positive baseline for the case above: an exemption that swallowed the rule would
 		// pass that one just as well.
@@ -935,12 +935,12 @@ func TestKVCacheBackendWebhook_ADeviceResourceNameDomainIsBounded(t *testing.T) 
 	})
 
 	// The blind spot the exemption has if it asks only whether the VALUE moved. A name sitting
-	// under TCP renders nothing, so it can be carried along harmlessly; switching to a host fabric
+	// under tcp renders nothing, so it can be carried along harmlessly; switching to a host fabric
 	// is what starts rendering it, and that update touches the protocol rather than the name.
 	t.Run("an update that starts rendering an unchanged name is refused", func(t *testing.T) {
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-		withName(oldKvcb, "TCP", overLimit)
-		withName(newKvcb, "RDMA", overLimit)
+		withName(oldKvcb, "tcp", overLimit)
+		withName(newKvcb, "rdma", overLimit)
 
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
 		require.Error(t, err,
@@ -953,8 +953,8 @@ func TestKVCacheBackendWebhook_ADeviceResourceNameDomainIsBounded(t *testing.T) 
 	// would refuse the one edit that makes the bad name stop mattering.
 	t.Run("an update that stops rendering an unchanged name is admitted", func(t *testing.T) {
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-		withName(oldKvcb, "RDMA", overLimit)
-		withName(newKvcb, "TCP", overLimit)
+		withName(oldKvcb, "rdma", overLimit)
+		withName(newKvcb, "tcp", overLimit)
 
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
 		require.NoError(t, err,
@@ -963,8 +963,8 @@ func TestKVCacheBackendWebhook_ADeviceResourceNameDomainIsBounded(t *testing.T) 
 
 	t.Run("an update that leaves an unrendered name unrendered is admitted", func(t *testing.T) {
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-		withName(oldKvcb, "TCP", overLimit)
-		withName(newKvcb, "TCP", overLimit)
+		withName(oldKvcb, "tcp", overLimit)
+		withName(newKvcb, "tcp", overLimit)
 		newKvcb.Spec.Image = "example.com/mooncake:v1"
 
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
@@ -1156,10 +1156,10 @@ func TestKVCacheBackendWebhook_ValidateUpdate(t *testing.T) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"offload_cap_ratio": "0.7"}
 		}, ""},
 		{"transport protocol changed", func(k *workercore.KVCacheBackend) {
-			k.Spec.Transport.Protocol = "RDMA"
+			k.Spec.Transport.Protocol = "rdma"
 		}, ""},
 		{"member transport set", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Members[0].Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "TCP"}
+			k.Spec.Connection.Managed.Members[0].Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "tcp"}
 		}, ""},
 	}, func(wh *KVCacheBackendWebhook, oldKvcb, newKvcb *workercore.KVCacheBackend) error {
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)

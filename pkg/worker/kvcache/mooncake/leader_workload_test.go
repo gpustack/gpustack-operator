@@ -563,7 +563,7 @@ func TestLeaderWorkload_SelectorSurvivesASpecChange(t *testing.T) {
 
 	after := RenderLeaderDeployment(testBackend(func(k *workercore.KVCacheBackend) {
 		k.Spec.Image = "mooncake:v0.4.0"
-		k.Spec.Transport.Protocol = "RDMA"
+		k.Spec.Transport.Protocol = "rdma"
 		leader := &k.Spec.Connection.Managed.Leader
 		leader.AllocationStrategy = "Random"
 		leader.ExtraArgs = map[string]string{"client_ttl": "30"}

@@ -34,7 +34,7 @@ type transportFacts struct {
 	// that will reject it.
 	//
 	// IT IS RECORDED AND NOT DERIVED, and that is forced rather than preferred: mooncake's mapping is
-	// not injective, so it has no inverse. Both Auto and TCP render "tcp", so "which API value
+	// not injective, so it has no inverse. Both auto and tcp render "tcp", so "which API value
 	// produces this artifact value" has two answers there and one here. A helper computing it would
 	// be correct for ascend and quietly wrong for the transport that has two -- the same shape of
 	// defect this table exists to remove.
@@ -55,7 +55,7 @@ type transportFacts struct {
 // WHAT IT PREVENTS. An engine that requires a transport RAISES at startup on every other one, so the
 // container never serves a request -- a functional failure rather than a degradation. And the
 // condition is not that somebody chose a wrong transport: KVCacheBackend.spec.transport.protocol
-// defaults to Auto, which mooncake.MemberProtocol renders as "tcp", so a pool nobody configured hands
+// defaults to auto, which mooncake.MemberProtocol renders as "tcp", so a pool nobody configured hands
 // vLLM-Ascend exactly the value it refuses. Everything left at its default is the case this exists for.
 //
 // HOW TO RE-CHECK AN ENTRY, because this table goes stale silently:
@@ -104,10 +104,10 @@ var engineTransportConstraint = map[Engine]transportFacts{
 		// reaches :193.
 		Version: "v0.19.1rc1-2120-gcdad5a32e",
 		Source:  "vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/backend/mooncake_backend.py:193-194,544",
-		// The two spellings of one transport. The API enum is case-sensitive
-		// (KVCacheBackendTransport.Protocol), so the capitalized one is what a remediation may name.
+		// The two spellings of one transport. The API enum is lowercase
+		// (KVCacheBackendTransport.Protocol), so cann is what a remediation may name.
 		Required:         "ascend",
-		RequiredAPIValue: "Ascend",
+		RequiredAPIValue: "cann",
 	},
 	EngineSGLang: {
 		// Unconstrained, and the reason is worth recording because this file DOES compare protocol:
@@ -157,7 +157,7 @@ func checkTransport(engine Engine, protocol string) error {
 			"belongs to the KVCacheBackend the pool names, not to the Binding: set that backend's "+
 			"spec.transport.protocol to %q, which is that same transport in the API's spelling, or "+
 			"point this workload at a pool that already offers it. An unset protocol is not neutral "+
-			"here: the field defaults to Auto, which the backend resolves to one concrete transport "+
+			"here: the field defaults to auto, which the backend resolves to one concrete transport "+
 			"rather than to whatever an engine wants",
 		engine, facts.Required, protocol, facts.Version, facts.Source, facts.RequiredAPIValue)
 }
@@ -199,7 +199,7 @@ func MatchTransport(engine Engine, offers []string) (string, error) {
 			"to the Binding: set that backend's spec.transport.protocol to %q or one member group's "+
 			"transport.protocol, which is that same transport in the API's spelling, or point this "+
 			"workload at a pool that already offers it. An unset protocol is not neutral here: the "+
-			"field defaults to Auto, which the backend resolves to one concrete transport rather "+
+			"field defaults to auto, which the backend resolves to one concrete transport rather "+
 			"than to whatever an engine wants",
 		engine, facts.Required, offers, facts.Version, facts.Source, facts.RequiredAPIValue)
 }

@@ -136,16 +136,16 @@ A lease-less image is not refused outright: at one replica the election flags ar
 such an image runs a single-leader backend even with `highAvailability` set — the flags arrive only
 when `replicas` rises past 1, which is where the missing backend would fail the leader at startup.
 
-⛔ **A member group on `RDMA`, `HIP` or `Ascend` cannot run under high availability today.** Those
+⛔ **A member group on `rdma`, `rocm` or `cann` cannot run under high availability today.** Those
 transports need a vendor runtime `mirrored-mooncake` does not carry, and the vendor build does not
 carry the leadership backend — the two axes are independent, so covering them means rebuilding each
 variant.
 
-`EFA` is the one fabric not on that list: it needs no vendor runtime, only libfabric, so
+`efa` is the one fabric not on that list: it needs no vendor runtime, only libfabric, so
 `mirrored-mooncake` compiles it in — the image build proves the transport installed by running a
 target-mode bench told `--protocol=efa` and refusing the transport map's "Invalid protocol": the
 device-less builder's "No EFA devices found" and an EFA-capable builder's clean run both pass. An
-`EFA` member group runs under high availability, on nodes that have the AWS EFA driver installed.
+`efa` member group runs under high availability, on nodes that have the AWS EFA driver installed.
 
 Tracked at [issue #279](https://github.com/gpustack/gpustack-operator/issues/279), together with the
 alternative of leaving members on the leader Service address and letting readiness move the endpoint.

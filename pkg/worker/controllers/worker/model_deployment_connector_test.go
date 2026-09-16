@@ -487,7 +487,7 @@ func TestSynthesizeModelDeploymentConnector_DiscriminatorTravelsInAnOwnedKey(t *
 // the vLLM-Ascend renderer, and that engine's store backend accepts one transport.
 //
 // The condition is not that an operator chose the wrong transport. KVCacheBackend.spec.transport
-// .protocol defaults to Auto, which resolves to tcp, so the failing pool is the one nobody configured
+// .protocol defaults to auto, which resolves to tcp, so the failing pool is the one nobody configured
 // -- which is why the refusal has to happen here rather than being left to the container.
 //
 // The pair is what fails, and both positive rows say so: the same accelerator renders with the

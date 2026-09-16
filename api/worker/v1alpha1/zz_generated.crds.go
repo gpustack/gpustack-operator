@@ -2637,29 +2637,35 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																			Type:        "object",
 																			Properties: map[string]v1.JSONSchemaProps{
 																				"protocol": {
-																					Description: "Protocol is the transport this group's members are ASKED to use, with the same values and\nthe same Auto-resolves-to-TCP rule as the backend's spec.transport.protocol, which this\nfield replaces for this group when set.",
+																					Description: "Protocol is the transport this group's members are ASKED to use, with the same values and\nthe same auto-resolves-to-tcp rule as the backend's spec.transport.protocol, which this\nfield replaces for this group when set.",
 																					Type:        "string",
 																					Default: &v1.JSON{
-																						Raw: []byte(`"Auto"`),
+																						Raw: []byte(`"auto"`),
 																					},
 																					Enum: []v1.JSON{
 																						{
-																							Raw: []byte(`"Auto"`),
+																							Raw: []byte(`"auto"`),
 																						},
 																						{
-																							Raw: []byte(`"TCP"`),
+																							Raw: []byte(`"tcp"`),
 																						},
 																						{
-																							Raw: []byte(`"RDMA"`),
+																							Raw: []byte(`"rdma"`),
 																						},
 																						{
-																							Raw: []byte(`"EFA"`),
+																							Raw: []byte(`"efa"`),
 																						},
 																						{
-																							Raw: []byte(`"HIP"`),
+																							Raw: []byte(`"cann"`),
 																						},
 																						{
-																							Raw: []byte(`"Ascend"`),
+																							Raw: []byte(`"musa"`),
+																						},
+																						{
+																							Raw: []byte(`"maca"`),
+																						},
+																						{
+																							Raw: []byte(`"rocm"`),
 																						},
 																					},
 																				},
@@ -2740,35 +2746,41 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 											},
 											Properties: map[string]v1.JSONSchemaProps{
 												"deviceResourceName": {
-													Description: "DeviceResourceName is the extended resource a host-fabric member asks one of, so the device\ncgroup lets it open the fabric device. It is CONSULTED ONLY on the RDMA and EFA protocols;\nbeside any other it renders nothing.\n- It is DECLARED rather than derived: the name belongs to whichever plugin the cluster's\nadministrator installed, so no name hard-coded here would be right on two clusters, and no\nadmission rule can check a node for a plugin whose resource it cannot know.\n- EFA is the exception. Its plugin advertises exactly one name, so an EFA member asks for\nvpc.amazonaws.com/efa when this is unset. That is a default rather than a property of the\nprotocol, and setting the field overrides it.\n- UNSET IS NOT A SAFE DEFAULT, IT IS THE OLD BEHAVIOR. A fabric member naming no resource\nmounts the device tree and requests nothing, so the cgroup refuses the open, the store\ninstalls TCP, and the object still reads as the fabric it asked for. Naming one instead\nkeeps the member off a node that advertises none, which is the safer failure but not\nalways the wanted one, so both stay reachable.\nThe bounds below are the API server's own for a resource name: 63 characters after the slash\nand for each domain label, refused here rather than on the DaemonSet rendered from it, where\nthey strand reconciliation with no obvious cause. The domain's 253-character limit is NOT among\nthem — no regular expression can bound a repeated group whose labels vary in length, so\n63.63.63.62 makes a domain of 254 that the 317 below still admits — and admission carries that\none instead, so it is absent when the webhook is not installed.",
+													Description: "DeviceResourceName is the extended resource a host-fabric member asks one of, so the device\ncgroup lets it open the fabric device. It is CONSULTED ONLY on the rdma and efa protocols;\nbeside any other it renders nothing.\n- It is DECLARED rather than derived: the name belongs to whichever plugin the cluster's\nadministrator installed, so no name hard-coded here would be right on two clusters, and no\nadmission rule can check a node for a plugin whose resource it cannot know.\n- efa is the exception. Its plugin advertises exactly one name, so an efa member asks for\nvpc.amazonaws.com/efa when this is unset. That is a default rather than a property of the\nprotocol, and setting the field overrides it.\n- UNSET IS NOT A SAFE DEFAULT, IT IS THE OLD BEHAVIOR. A fabric member naming no resource\nmounts the device tree and requests nothing, so the cgroup refuses the open, the store\ninstalls tcp, and the object still reads as the fabric it asked for. Naming one instead\nkeeps the member off a node that advertises none, which is the safer failure but not\nalways the wanted one, so both stay reachable.\nThe bounds below are the API server's own for a resource name: 63 characters after the slash\nand for each domain label, refused here rather than on the DaemonSet rendered from it, where\nthey strand reconciliation with no obvious cause. The domain's 253-character limit is NOT among\nthem — no regular expression can bound a repeated group whose labels vary in length, so\n63.63.63.62 makes a domain of 254 that the 317 below still admits — and admission carries that\none instead, so it is absent when the webhook is not installed.",
 													Type:        "string",
 													MaxLength:   ptr.To[int64](317),
 													Pattern:     `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$`,
 												},
 												"protocol": {
-													Description: "Protocol is the transport the members are ASKED to use. Auto resolves to TCP.\n- TCP is the universal fallback. RDMA, EFA, HIP and Ascend are peers of one another, each a\nfabric- or vendor-specific fast path rather than a spelling of TCP: EFA in particular is\nreached through libfabric's SRD provider and has no RC queue pairs, so the RDMA transport\ncannot drive it.\n- Whether a member came up on what it asked for is NOT visible through this API.\nstatus.members[].protocol echoes this request back rather than reporting a result, so a\nmember that fell back to TCP still reads as the fabric there, while serving. Only the\nmember's own log says which transport the data plane installed.\n- Auto is deliberately NOT a per-node probe that promotes itself to a faster fabric: a member\ngroup renders one DaemonSet, whose single Pod template cannot carry a different transport\nper node, and promoting to RDMA grants hostNetwork and two capabilities — a privilege is\nrequested, never inferred on an operator's behalf.\n- Membership in this enum means MEASURED AS COMPILED into a published artifact, which is what\nexcludes the other ten strings that artifact's config parser accepts. It does not mean\nmeasured to move bytes: only TCP has been exercised end to end.\n- A host fabric needs two things this API cannot check: the member image must carry the\nruntime its transport links — CANN for Ascend, libfabric for EFA — and the NODE must run a\ndevice plugin, since a hostPath alone leaves the device cgroup refusing to open the device.\nWhich resource the member asks for is deviceResourceName below.",
+													Description: "Protocol is the transport the members are ASKED to use. auto resolves to tcp.\n- tcp is the universal fallback. rdma, efa, cann, rocm, musa and maca are peers of one\nanother, each a fabric- or vendor-specific fast path rather than a spelling of tcp: efa in\nparticular is reached through libfabric's SRD provider and has no RC queue pairs, so the\nrdma transport cannot drive it. musa and maca are intra-node IPC transports, not host\nfabrics: they take no hostNetwork, no capabilities and no device resource.\n- Whether a member came up on what it asked for is NOT visible through this API.\nstatus.members[].protocol echoes this request back rather than reporting a result, so a\nmember that fell back to tcp still reads as the fabric there, while serving. Only the\nmember's own log says which transport the data plane installed.\n- auto is deliberately NOT a per-node probe that promotes itself to a faster fabric: a member\ngroup renders one DaemonSet, whose single Pod template cannot carry a different transport\nper node, and promoting to rdma grants hostNetwork and two capabilities — a privilege is\nrequested, never inferred on an operator's behalf.\n- Membership in this enum means MEASURED AS COMPILED into a published artifact, which is what\nexcludes the other eight strings that artifact's config parser accepts. It does not mean\nmeasured to move bytes: only tcp has been exercised end to end.\n- A host fabric needs two things this API cannot check: the member image must carry the\nruntime its transport links — CANN for cann, libfabric for efa — and the NODE must run a\ndevice plugin, since a hostPath alone leaves the device cgroup refusing to open the device.\nWhich resource the member asks for is deviceResourceName below.",
 													Type:        "string",
 													Default: &v1.JSON{
-														Raw: []byte(`"Auto"`),
+														Raw: []byte(`"auto"`),
 													},
 													Enum: []v1.JSON{
 														{
-															Raw: []byte(`"Auto"`),
+															Raw: []byte(`"auto"`),
 														},
 														{
-															Raw: []byte(`"TCP"`),
+															Raw: []byte(`"tcp"`),
 														},
 														{
-															Raw: []byte(`"RDMA"`),
+															Raw: []byte(`"rdma"`),
 														},
 														{
-															Raw: []byte(`"EFA"`),
+															Raw: []byte(`"efa"`),
 														},
 														{
-															Raw: []byte(`"HIP"`),
+															Raw: []byte(`"cann"`),
 														},
 														{
-															Raw: []byte(`"Ascend"`),
+															Raw: []byte(`"musa"`),
+														},
+														{
+															Raw: []byte(`"maca"`),
+														},
+														{
+															Raw: []byte(`"rocm"`),
 														},
 													},
 												},
@@ -4335,7 +4347,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													MaxLength:   ptr.To[int64](512),
 												},
 												"name": {
-													Description: "Name selects which router implementation fronts this deployment.\nTHE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the difference is\nvisible in the same word twice: the transport protocol on the cache backend types spells it\n\"Auto\" while the connector here spells it \"auto\". The casing convention is per API type, and the\nreason is the one ModelDeploymentRoleKind states about itself -- these values are terms the\noutside tool understands, not terms this operator invents. \"llm-d\" is how that project spells\nitself in its module path, its API group and its label domain, so it is spelled that way here.\nONE VALUE TODAY IS A CHOICE TAKEN FOR NOW, NOT THE ABSENCE OF ONE. This field exists ahead of a\nsecond implementation precisely so that adding one is a widening of this enum rather than a new\nfield appearing on an API that already shipped without it.\nWIDENING IT IS FOUR THINGS, NOT ONE: one entry here, one configuration renderer, the object set\nthat router needs, AND the wiring that threads this value to a dispatch point. The schema\nreservation covers the first of those and nothing else, which is why a second router is a piece\nof work rather than a constant.",
+													Description: "Name selects which router implementation fronts this deployment.\nTHE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the reason is the\none ModelDeploymentRoleKind states about itself -- these values are terms the outside tool\nunderstands, not terms this operator invents. \"llm-d\" is how that project spells itself in its\nmodule path, its API group and its label domain, so it is spelled that way here.\nONE VALUE TODAY IS A CHOICE TAKEN FOR NOW, NOT THE ABSENCE OF ONE. This field exists ahead of a\nsecond implementation precisely so that adding one is a widening of this enum rather than a new\nfield appearing on an API that already shipped without it.\nWIDENING IT IS FOUR THINGS, NOT ONE: one entry here, one configuration renderer, the object set\nthat router needs, AND the wiring that threads this value to a dispatch point. The schema\nreservation covers the first of those and nothing else, which is why a second router is a piece\nof work rather than a constant.",
 													Type:        "string",
 													Enum: []v1.JSON{
 														{

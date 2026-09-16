@@ -321,33 +321,34 @@ leader, as `-key=value`.
 rendered into the container's argv, readable again from the Pod and from the DaemonSet or Deployment
 carrying it. **Do not put a credential in `extraArgs`.** Nothing refuses one at admission.
 
-`spec.transport.protocol` accepts `Auto`, `TCP`, `RDMA`, `EFA`, `HIP` and `Ascend`, and defaults to
-`Auto` whether or not the `transport` block is written at all. **`Auto` resolves to `TCP`** — it is
-not a per-node probe that promotes itself.
+`spec.transport.protocol` accepts `auto`, `tcp`, `rdma`, `efa`, `cann`, `rocm`, `musa` and `maca`,
+and defaults to `auto` whether or not the `transport` block is written at all. **`auto` resolves to
+`tcp`** — it is not a per-node probe that promotes itself. `musa` and `maca` are intra-node IPC
+transports, not host fabrics, so they take none of the fabric privileges below.
 
 **`members[].transport.protocol` overrides that value for one group; left unset, the group inherits
 the backend's.** The override exists for the one thing two media do not agree on: a VRAM group
-reaching its peers over a fabric while the DRAM group beside it stays on TCP.
+reaching its peers over a fabric while the DRAM group beside it stays on `tcp`.
 
 The fabric privileges below render per group from the group's effective protocol, and an engine is
 handed the protocol of the group it matched — an engine whose constraint no group in the pool
 satisfies is refused at admission rather than started.
 
-`Ascend` is the one value an engine can **require**: vllm-ascend's store client currently raises on
+`cann` is the one value an engine can **require**: vllm-ascend's store client currently raises on
 any other protocol (`MooncakeBackend.__init__`, verified at v0.23.0 and v0.26.0rc1 — upstream state,
-not a contract, and it may change), so a pool serving Ascend engines declares `Ascend` here — or on
-one member group — rather than settling for the `TCP` default.
+not a contract, and it may change), so a pool serving Ascend engines declares `cann` here — or on
+one member group — rather than settling for the `tcp` default.
 
 The member then needs a CANN-carrying image, per the variant table above — the project's own CPU
-build compiles no Ascend transport.
+build compiles no `ascend` transport.
 
 > **Why** — one group is one Pod template, which cannot express a per-node transport; and promoting to
 > a host fabric would mean granting `hostNetwork` plus `IPC_LOCK` and `SYS_RESOURCE`. A privilege is
-> requested, never inferred. Naming `RDMA` or `EFA` is also what accepts the security context that
-> comes with it — which is those three things and **not** `privileged`. A `TCP` group sets none of
+> requested, never inferred. Naming `rdma` or `efa` is also what accepts the security context that
+> comes with it — which is those three things and **not** `privileged`. A `tcp` group sets none of
 > them.
 
-An `EFA` group takes everything `RDMA` takes, plus one device from a plugin — by default
+An `efa` group takes everything `rdma` takes, plus one device from a plugin — by default
 `vpc.amazonaws.com/efa`, which `deviceResourceName` below overrides. That request is what lets the
 member open the adapter: the `/dev/infiniband` mount carries the device node in while the device
 cgroup still refuses `open()`, so a member without one starts TCP instead.
@@ -355,24 +356,25 @@ cgroup still refuses `open()`, so a member without one starts TCP instead.
 **The cluster therefore needs the device plugin that advertises whichever resource the group asks
 for** — the AWS EFA plugin when the name is left at its default; without it no node advertises the
 resource and the member stays unscheduled. Nothing is mounted from a host EFA install — the
-libfabric an `EFA` member runs on is in the image. Storage-optimized families such as `i7ie` are not
+libfabric an `efa` member runs on is in the image. Storage-optimized families such as `i7ie` are not
 EFA-capable; check `fi_info -p efa` on the node before selecting one.
 
 `spec.transport.deviceResourceName` names the extended resource a fabric member asks one of, for the
 clusters where that name is not AWS's. The RDMA shared-device plugin and the SR-IOV plugin each let
 an administrator choose it, so no constant would be right on two clusters. Set it and the member
-requests one of that resource; leave it unset and an `EFA` group still asks for the AWS name while an
-`RDMA` group asks for nothing.
+requests one of that resource; leave it unset and an `efa` group still asks for the AWS name while an
+`rdma` group asks for nothing.
 
-**It is read only on `RDMA` and `EFA`**, the two protocols that mount the device tree. Set beside any
+**It is read only on `rdma` and `efa`**, the two protocols that mount the device tree. Set beside any
 other protocol it renders nothing at all — no other path opens a fabric device, and requesting a
 resource there would only leave the member unschedulable.
 
-> **Why an `RDMA` group should set it** — a member that asks for nothing mounts the device tree and
-> is still denied `open()` by the device cgroup, so the store finds no adapter and installs TCP while
-> the object reads as `RDMA`. That is the behavior every backend had before this field, and it stays
-> reachable because naming a resource no plugin advertises leaves the member unschedulable instead —
-> this operator cannot tell which of the two an administrator without a plugin would rather have.
+> **Why an `rdma` group should set it** — a member that asks for nothing mounts the device tree and
+> is still denied `open()` by the device cgroup, so the store finds no adapter and installs `tcp`
+> while the object reads as `rdma`. That is the behavior every backend had before this field, and it
+> stays reachable because naming a resource no plugin advertises leaves the member unschedulable
+> instead — this operator cannot tell which of the two an administrator without a plugin would
+> rather have.
 
 **What a member's Pod requests follows the group's medium.** A DRAM member requests host memory for
 `capacityPerMember + localBufferSize`. A VRAM member's segment is device memory: host memory carries
@@ -405,8 +407,8 @@ between member nodes, and from engine clients, as a **range**. The rendered Pod 
 data-plane `containerPort`, because a fixed list would be a false statement.
 
 **The management port is fixed, and on a host fabric it lands on the node.** A member serves its HTTP
-API on `8080 + <group index>` — the first group on `8080`, a second group on `8081`. A `TCP` group
-holds that port inside its own pod network namespace, but an `RDMA` or `EFA` group holds the host's,
+API on `8080 + <group index>` — the first group on `8080`, a second group on `8081`. A `tcp` group
+holds that port inside its own pod network namespace, but an `rdma` or `efa` group holds the host's,
 so on every node such a group selects that port must be free. Reserve one port from `8080` upward per
 member group.
 
@@ -501,9 +503,9 @@ the ID that maps a row back to it. `MembersMounted` goes `False` with reason
 `AmbiguousMemberIdentity`; each row still carries the node and the medium its candidates **agree**
 on, neither being a fact about one Pod, and leaves empty whichever of the two they dispute.
 
-Two groups on one node do **not** collide by themselves. A `TCP` member advertises its own pod IP, so
+Two groups on one node do **not** collide by themselves. A `tcp` member advertises its own pod IP, so
 each segment carries a distinct name even though both Pods answer to the node's name; the collision is
-on host-network paths (`RDMA` and `EFA`), where both Pods hold the host's network namespace and
+on host-network paths (`rdma` and `efa`), where both Pods hold the host's network namespace and
 advertise the node's address.
 
 The remedy is to give the groups node selectors that keep them on different nodes.

@@ -7,41 +7,42 @@ package v1alpha1
 //
 // KVCacheBackendTransport is the data plane the members use.
 type KVCacheBackendTransportApplyConfiguration struct {
-	// Protocol is the transport the members are ASKED to use. Auto resolves to TCP.
+	// Protocol is the transport the members are ASKED to use. auto resolves to tcp.
 	//
-	// - TCP is the universal fallback. RDMA, EFA, HIP and Ascend are peers of one another, each a
-	// fabric- or vendor-specific fast path rather than a spelling of TCP: EFA in particular is
-	// reached through libfabric's SRD provider and has no RC queue pairs, so the RDMA transport
-	// cannot drive it.
+	// - tcp is the universal fallback. rdma, efa, cann, rocm, musa and maca are peers of one
+	// another, each a fabric- or vendor-specific fast path rather than a spelling of tcp: efa in
+	// particular is reached through libfabric's SRD provider and has no RC queue pairs, so the
+	// rdma transport cannot drive it. musa and maca are intra-node IPC transports, not host
+	// fabrics: they take no hostNetwork, no capabilities and no device resource.
 	// - Whether a member came up on what it asked for is NOT visible through this API.
 	// status.members[].protocol echoes this request back rather than reporting a result, so a
-	// member that fell back to TCP still reads as the fabric there, while serving. Only the
+	// member that fell back to tcp still reads as the fabric there, while serving. Only the
 	// member's own log says which transport the data plane installed.
-	// - Auto is deliberately NOT a per-node probe that promotes itself to a faster fabric: a member
+	// - auto is deliberately NOT a per-node probe that promotes itself to a faster fabric: a member
 	// group renders one DaemonSet, whose single Pod template cannot carry a different transport
-	// per node, and promoting to RDMA grants hostNetwork and two capabilities — a privilege is
+	// per node, and promoting to rdma grants hostNetwork and two capabilities — a privilege is
 	// requested, never inferred on an operator's behalf.
 	// - Membership in this enum means MEASURED AS COMPILED into a published artifact, which is what
-	// excludes the other ten strings that artifact's config parser accepts. It does not mean
-	// measured to move bytes: only TCP has been exercised end to end.
+	// excludes the other eight strings that artifact's config parser accepts. It does not mean
+	// measured to move bytes: only tcp has been exercised end to end.
 	// - A host fabric needs two things this API cannot check: the member image must carry the
-	// runtime its transport links — CANN for Ascend, libfabric for EFA — and the NODE must run a
+	// runtime its transport links — CANN for cann, libfabric for efa — and the NODE must run a
 	// device plugin, since a hostPath alone leaves the device cgroup refusing to open the device.
 	// Which resource the member asks for is deviceResourceName below.
 	Protocol *string `json:"protocol,omitempty"`
 	// DeviceResourceName is the extended resource a host-fabric member asks one of, so the device
-	// cgroup lets it open the fabric device. It is CONSULTED ONLY on the RDMA and EFA protocols;
+	// cgroup lets it open the fabric device. It is CONSULTED ONLY on the rdma and efa protocols;
 	// beside any other it renders nothing.
 	//
 	// - It is DECLARED rather than derived: the name belongs to whichever plugin the cluster's
 	// administrator installed, so no name hard-coded here would be right on two clusters, and no
 	// admission rule can check a node for a plugin whose resource it cannot know.
-	// - EFA is the exception. Its plugin advertises exactly one name, so an EFA member asks for
+	// - efa is the exception. Its plugin advertises exactly one name, so an efa member asks for
 	// vpc.amazonaws.com/efa when this is unset. That is a default rather than a property of the
 	// protocol, and setting the field overrides it.
 	// - UNSET IS NOT A SAFE DEFAULT, IT IS THE OLD BEHAVIOR. A fabric member naming no resource
 	// mounts the device tree and requests nothing, so the cgroup refuses the open, the store
-	// installs TCP, and the object still reads as the fabric it asked for. Naming one instead
+	// installs tcp, and the object still reads as the fabric it asked for. Naming one instead
 	// keeps the member off a node that advertises none, which is the safer failure but not
 	// always the wanted one, so both stay reachable.
 	//

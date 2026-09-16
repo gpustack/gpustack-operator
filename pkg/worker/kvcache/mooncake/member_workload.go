@@ -239,27 +239,38 @@ const memberEvictionPolicyNone = "none"
 
 // memberProtocols maps this API's spelling of a transport onto the artifact's.
 //
-// Auto maps to tcp rather than resolving upward against the node, and the two reasons are in the
+// auto maps to tcp rather than resolving upward against the node, and the two reasons are in the
 // API type's own comment: one DaemonSet covers every node a group selects and so cannot carry a
-// per-node transport, and promoting to RDMA would grant hostNetwork and two capabilities nobody
+// per-node transport, and promoting to rdma would grant hostNetwork and two capabilities nobody
 // asked for. The artifact has no "auto" either — it looks its protocol string up in a transport map,
 // so rendering the literal would reach a lookup that finds nothing.
+//
+// cann and rocm are the ONLY two entries whose artifact spelling differs from the API's: the API
+// names the toolchain the member image is built against, matching the published image tags, while
+// the artifact's transport map knows the vendor's own protocol string. Every other value passes
+// through unchanged.
 // MemberProtocolAuto is the transport the schema defaults to, named because the renderer falls back
 // to it for an object that never reached an API server.
-const MemberProtocolAuto = "Auto"
+const MemberProtocolAuto = "auto"
 
 var memberProtocols = map[string]string{
 	MemberProtocolAuto: "tcp",
-	"TCP":              "tcp",
-	"RDMA":             "rdma",
-	"EFA":              "efa",
-	"HIP":              "hip",
-	"Ascend":           "ascend",
+	"tcp":              "tcp",
+	"rdma":             "rdma",
+	"efa":              "efa",
+	"cann":             "ascend",
+	"rocm":             "hip",
+	"musa":             "musa",
+	"maca":             "maca",
 }
 
 // MemberProtocolIsHostFabric reports whether a RESOLVED protocol is one of the two that reach the
 // host's device tree: the ones that take hostNetwork, get the two capabilities and mount the device
 // node. It takes MemberProtocol's output, not the API's spelling.
+//
+// rdma and efa are the only two. musa and maca are intra-node IPC transports, not host fabrics, and
+// the rest never leave the member's own network namespace, so none of them earns hostNetwork, the
+// capabilities or the mount.
 //
 // It does NOT promise that a device request is rendered. That needs a name as well — declared, or
 // EFA's fallback — and an RDMA group with neither renders the mount and no request, which is the
@@ -332,7 +343,7 @@ func MemberProtocol(kvcb *workercore.KVCacheBackend) string {
 
 // MemberProtocolForGroup is the transport ONE member group resolves to, in the artifact's own
 // spelling: the group's own transport.protocol when it declares one, and the backend's value —
-// with its Auto and empty handling — when it does not. A group carrying a transport block with no
+// with its auto and empty handling — when it does not. A group carrying a transport block with no
 // protocol inherits too, which is the shape an object that never reached the API server's
 // defaulting takes.
 func MemberProtocolForGroup(kvcb *workercore.KVCacheBackend, group workercore.KVCacheBackendMember) string {
@@ -817,7 +828,7 @@ func memberResources(member workercore.KVCacheBackendMember) core.ResourceRequir
 //     is what adds the rule that lets it through.
 //   - The libfabric an EFA member runs on travels in the image, so there is no host tree to mount
 //     and no environment to render.
-//   - Every other path, including the Auto that resolved to TCP, is left exactly as rendered: no
+//   - Every other path, including the auto that resolved to tcp, is left exactly as rendered: no
 //     security context at all rather than an empty one, since an empty struct is an invitation to
 //     add a capability to it.
 func applyMemberFabric(ds *apps.DaemonSet, protocol, deviceResource string) {

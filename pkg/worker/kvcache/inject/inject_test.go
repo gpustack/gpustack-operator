@@ -372,7 +372,7 @@ func TestRender_DirectTransferProtocolIsNotTheMembers(t *testing.T) {
 	backend := &workercore.KVCacheBackend{
 		ObjectMeta: meta.ObjectMeta{Name: "mooncake-dram"},
 		Spec: workercore.KVCacheBackendSpec{
-			Transport: workercore.KVCacheBackendTransport{Protocol: "RDMA"},
+			Transport: workercore.KVCacheBackendTransport{Protocol: "rdma"},
 			Connection: workercore.KVCacheBackendConnection{
 				Managed: &workercore.KVCacheBackendManaged{
 					Members: []workercore.KVCacheBackendMember{{
@@ -534,7 +534,7 @@ func TestRender_TransportIsCheckedAtTheFunnel(t *testing.T) {
 		protocol string
 		rendered bool
 	}{
-		// #172: nobody chose tcp. Auto is the schema's default and the backend resolves it, so a pool
+		// #172: nobody chose tcp. auto is the schema's default and the backend resolves it, so a pool
 		// left alone is what hands this engine the value it refuses.
 		{name: "vllm-ascend on a default pool's transport", engine: EngineVLLMAscend, protocol: "tcp"},
 		{name: "vllm-ascend on ascend", engine: EngineVLLMAscend, protocol: "ascend", rendered: true},

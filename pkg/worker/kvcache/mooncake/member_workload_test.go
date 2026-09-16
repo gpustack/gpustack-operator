@@ -21,7 +21,7 @@ import (
 // testMemberBackend is the canonical one-group backend. Each case mutates the one thing it is about.
 func testMemberBackend(mutate ...func(*workercore.KVCacheBackend)) *workercore.KVCacheBackend {
 	kvcb := testBackend(func(k *workercore.KVCacheBackend) {
-		k.Spec.Transport.Protocol = "Auto"
+		k.Spec.Transport.Protocol = "auto"
 		k.Spec.Connection.Managed.Members = []workercore.KVCacheBackendMember{{
 			NodeSelector:      map[string]string{"kvcache-dram": "true"},
 			Medium:            "DRAM",
@@ -349,7 +349,7 @@ func TestMemberWorkload_Requests(t *testing.T) {
 func TestMemberWorkload_TwoMediaOnTheSameNodes(t *testing.T) {
 	kvcb := testMemberBackend(withSecondMemberGroupVRAM(func(group *workercore.KVCacheBackendMember) {
 		group.DeviceResourceName = "nvidia.com/gpu"
-		group.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "RDMA"}
+		group.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "rdma"}
 	}))
 
 	dram := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13")
@@ -399,10 +399,10 @@ func TestMemberWorkload_TwoMediaOnTheSameNodes(t *testing.T) {
 // before the field existed.
 func TestMemberWorkload_GroupTransportOverridesTheBackend(t *testing.T) {
 	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
-		k.Spec.Transport.Protocol = "RDMA"
+		k.Spec.Transport.Protocol = "rdma"
 	}, withSecondMemberGroupVRAM(func(group *workercore.KVCacheBackendMember) {
 		group.DeviceResourceName = "nvidia.com/gpu"
-		group.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "TCP"}
+		group.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "tcp"}
 	}))
 
 	inherited := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13").Spec.Template.Spec
@@ -433,7 +433,7 @@ func TestMemberWorkload_GroupTransportOverridesTheBackend(t *testing.T) {
 // member must see the node's devices and fabric directly.
 func TestMemberWorkload_VRAMWithoutADeviceTakesTheNodeDirectly(t *testing.T) {
 	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
-		k.Spec.Transport.Protocol = "RDMA"
+		k.Spec.Transport.Protocol = "rdma"
 	}, withSecondMemberGroupVRAM())
 
 	podSpec := RenderMemberDaemonSet(kvcb, 1, "mooncake:v0.3.13").Spec.Template.Spec
@@ -817,7 +817,7 @@ func TestMemberDerivedEnvs_CoversEveryNameTheRendererEmits(t *testing.T) {
 			},
 		}},
 		{"the transport that mounts the host's libfabric", []func(*workercore.KVCacheBackend){
-			func(k *workercore.KVCacheBackend) { k.Spec.Transport.Protocol = "EFA" },
+			func(k *workercore.KVCacheBackend) { k.Spec.Transport.Protocol = "efa" },
 		}},
 	}
 
@@ -924,24 +924,26 @@ func TestMemberWorkload_ShutdownDrainsTheDiskTier(t *testing.T) {
 
 // TestMemberWorkload_Protocol covers every value the API accepts.
 //
-// Auto and TCP are asserted to render an IDENTICAL Pod spec, not merely the same MOONCAKE_PROTOCOL:
-// the resolution is a rename and not a second code path, and a path that resolved Auto while also
-// granting it something TCP does not get would pass a value-only assertion.
+// auto and tcp are asserted to render an IDENTICAL Pod spec, not merely the same MOONCAKE_PROTOCOL:
+// the resolution is a rename and not a second code path, and a path that resolved auto while also
+// granting it something tcp does not get would pass a value-only assertion.
 func TestMemberWorkload_Protocol(t *testing.T) {
 	cases := []struct {
 		requested  string
 		rendered   string
 		privileged bool
 	}{
-		{requested: "Auto", rendered: "tcp", privileged: false},
-		{requested: "TCP", rendered: "tcp", privileged: false},
-		{requested: "RDMA", rendered: "rdma", privileged: true},
-		{requested: "EFA", rendered: "efa", privileged: true},
-		{requested: "HIP", rendered: "hip", privileged: false},
+		{requested: "auto", rendered: "tcp", privileged: false},
+		{requested: "tcp", rendered: "tcp", privileged: false},
+		{requested: "rdma", rendered: "rdma", privileged: true},
+		{requested: "efa", rendered: "efa", privileged: true},
+		{requested: "rocm", rendered: "hip", privileged: false},
+		{requested: "musa", rendered: "musa", privileged: false},
+		{requested: "maca", rendered: "maca", privileged: false},
 		// This spelling has a consumer outside this package: inject's engineTransportConstraint
 		// records that vLLM-Ascend's store backend accepts exactly this string, so renaming it here
-		// would refuse every Ascend pool that engine can use.
-		{requested: "Ascend", rendered: "ascend", privileged: false},
+		// would refuse every cann pool that engine can use.
+		{requested: "cann", rendered: "ascend", privileged: false},
 	}
 
 	for _, c := range cases {
@@ -961,13 +963,13 @@ func TestMemberWorkload_Protocol(t *testing.T) {
 	}
 
 	autoSpec := RenderMemberDaemonSet(testMemberBackend(func(k *workercore.KVCacheBackend) {
-		k.Spec.Transport.Protocol = "Auto"
+		k.Spec.Transport.Protocol = "auto"
 	}), 0, "mooncake:v0.3.13").Spec.Template.Spec
 	tcpSpec := RenderMemberDaemonSet(testMemberBackend(func(k *workercore.KVCacheBackend) {
-		k.Spec.Transport.Protocol = "TCP"
+		k.Spec.Transport.Protocol = "tcp"
 	}), 0, "mooncake:v0.3.13").Spec.Template.Spec
 	assert.Equal(t, tcpSpec, autoSpec,
-		"Auto resolves to TCP and gets nothing else; the resolution is a rename, not a branch")
+		"auto resolves to tcp and gets nothing else; the resolution is a rename, not a branch")
 
 	// An object whose transport was never set renders the SAME thing, and this is not belt and
 	// braces. Structural-schema defaulting does not descend into an absent object, so before the
@@ -979,7 +981,7 @@ func TestMemberWorkload_Protocol(t *testing.T) {
 		k.Spec.Transport = workercore.KVCacheBackendTransport{}
 	}), 0, "mooncake:v0.3.13").Spec.Template.Spec
 	assert.Equal(t, tcpSpec, unsetSpec,
-		"an unset transport renders exactly what Auto does, never an empty protocol")
+		"an unset transport renders exactly what auto does, never an empty protocol")
 }
 
 // TestMemberProtocols pins the offers an engine is matched against: every group's effective
@@ -989,7 +991,7 @@ func TestMemberWorkload_Protocol(t *testing.T) {
 func TestMemberProtocols(t *testing.T) {
 	t.Run("each group's own transport, in declaration order", func(t *testing.T) {
 		kvcb := testMemberBackend(withSecondMemberGroupVRAM(func(group *workercore.KVCacheBackendMember) {
-			group.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "RDMA"}
+			group.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "rdma"}
 		}))
 		assert.Equal(t, []string{"tcp", "rdma"}, MemberProtocols(kvcb))
 	})
@@ -1002,7 +1004,7 @@ func TestMemberProtocols(t *testing.T) {
 	t.Run("a backend with no groups offers the backend-wide value alone", func(t *testing.T) {
 		kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed = nil
-			k.Spec.Transport.Protocol = "RDMA"
+			k.Spec.Transport.Protocol = "rdma"
 		})
 		assert.Equal(t, []string{"rdma"}, MemberProtocols(kvcb),
 			"the slice is never empty, so a caller matching against it never asks whether the "+
@@ -1015,7 +1017,7 @@ func TestMemberProtocols(t *testing.T) {
 // privileged, which would hand the member the whole node.
 func TestMemberWorkload_RDMAContext(t *testing.T) {
 	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
-		k.Spec.Transport.Protocol = "RDMA"
+		k.Spec.Transport.Protocol = "rdma"
 	})
 	ds := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13")
 	podSpec := ds.Spec.Template.Spec
@@ -1055,7 +1057,7 @@ func TestMemberWorkload_RDMAContext(t *testing.T) {
 // in the image.
 func TestMemberWorkload_EFAContext(t *testing.T) {
 	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
-		k.Spec.Transport.Protocol = "EFA"
+		k.Spec.Transport.Protocol = "efa"
 	})
 	ds := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13")
 	podSpec := ds.Spec.Template.Spec
@@ -1102,7 +1104,7 @@ func TestMemberWorkload_EFAContext(t *testing.T) {
 // whole rather than one at a time — a path that granted one of the three silently is exactly what
 // this is here to catch.
 func TestMemberWorkload_TCPClaimsNoHost(t *testing.T) {
-	for _, protocol := range []string{"Auto", "TCP"} {
+	for _, protocol := range []string{"auto", "tcp"} {
 		t.Run(protocol, func(t *testing.T) {
 			kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 				k.Spec.Transport.Protocol = protocol
@@ -1126,7 +1128,7 @@ func TestMemberWorkload_TCPClaimsNoHost(t *testing.T) {
 // took 15002 and 15995, a second client 16566 and 16655, none of them configured — so a fixed
 // containerPort would be a false statement about which ports the process uses.
 func TestMemberWorkload_DeclaresNoDataPlanePort(t *testing.T) {
-	for _, protocol := range []string{"Auto", "TCP", "RDMA", "EFA"} {
+	for _, protocol := range []string{"auto", "tcp", "rdma", "efa"} {
 		t.Run(protocol, func(t *testing.T) {
 			kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 				k.Spec.Transport.Protocol = protocol
@@ -1416,7 +1418,7 @@ func TestMemberWorkload_SelectorSurvivesASpecChange(t *testing.T) {
 
 	after := RenderMemberDaemonSet(testMemberBackend(func(k *workercore.KVCacheBackend) {
 		k.Spec.Image = "mooncake:v0.4.0"
-		k.Spec.Transport.Protocol = "RDMA"
+		k.Spec.Transport.Protocol = "rdma"
 		group := &k.Spec.Connection.Managed.Members[0]
 		group.NodeSelector = map[string]string{"kvcache-dram": "true", "zone": "b"}
 		group.CapacityPerMember = resource.MustParse("1Ti")
@@ -1523,7 +1525,7 @@ func TestMemberWorkload_FingerprintCoversEveryOtherField(t *testing.T) {
 		{
 			field: "the transport, which brings the whole fabric context with it",
 			mutate: func(k *workercore.KVCacheBackend) {
-				k.Spec.Transport.Protocol = "RDMA"
+				k.Spec.Transport.Protocol = "rdma"
 			},
 		},
 	}
@@ -1731,30 +1733,30 @@ func TestMemberWorkload_FabricDeviceResource(t *testing.T) {
 	}{
 		{
 			name:     "EFA with nothing declared falls back to the one name its plugin advertises",
-			protocol: "EFA",
+			protocol: "efa",
 			want:     efaDeviceResource,
 		},
 		{
 			name:     "a declaration overrides the EFA fallback rather than joining it",
-			protocol: "EFA",
+			protocol: "efa",
 			declare:  declared,
 			want:     declared,
 			absent:   efaDeviceResource,
 		},
 		{
 			name:     "RDMA with nothing declared asks for nothing, which is the old behavior",
-			protocol: "RDMA",
+			protocol: "rdma",
 			absent:   declared,
 		},
 		{
 			name:     "RDMA asks for exactly the resource the administrator named",
-			protocol: "RDMA",
+			protocol: "rdma",
 			declare:  declared,
 			want:     declared,
 		},
 		{
 			name:     "a declaration on a path with no fabric renders nothing at all",
-			protocol: "TCP",
+			protocol: "tcp",
 			declare:  declared,
 			absent:   declared,
 		},

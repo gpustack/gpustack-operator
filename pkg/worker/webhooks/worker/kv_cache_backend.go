@@ -838,7 +838,7 @@ func validateExtraEnvs(extraEnvs map[string]string, fldPath *field.Path) field.E
 // It refuses "/" and NOT other sensitive host paths, and that asymmetry is deliberate rather than an
 // unfinished blocklist. An administrator who writes /etc or /var is REQUESTING that directory, and
 // this project does not infer privilege on an operator's behalf or refuse it on their behalf either
-// — the same rule that keeps transport.protocol: Auto from promoting itself to RDMA. "/" is refused
+// — the same rule that keeps transport.protocol: auto from promoting itself to rdma. "/" is refused
 // because it is the one value that cannot be a request: it mounts the node's entire filesystem into
 // a third-party container, and no tier is served by it. A blocklist of "dangerous" paths would also
 // be unclosable — every entry invites a reader to trust that what is missing from it is safe.

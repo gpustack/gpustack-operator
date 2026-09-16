@@ -64,7 +64,7 @@ func TestCheckTransport(t *testing.T) {
 		protocol string
 		accepted bool
 	}{
-		// THE CASE #172 IS ABOUT, and the condition is not that anybody chose tcp: Auto is the
+		// THE CASE #172 IS ABOUT, and the condition is not that anybody chose tcp: auto is the
 		// schema's default and the backend resolves it to this value, so a pool left alone lands here.
 		{name: "vllm-ascend refuses the transport a default pool offers", engine: EngineVLLMAscend, protocol: "tcp"},
 		{name: "vllm-ascend refuses rdma", engine: EngineVLLMAscend, protocol: "rdma"},
@@ -128,7 +128,7 @@ func TestCheckTransport_MessageNamesThePair(t *testing.T) {
 	// The remediation is in the API's spelling, because it names a field the schema validates. The
 	// field name is part of the assertion: that is what makes this positional rather than a presence
 	// check that any mention of the value would satisfy.
-	assert.Contains(t, message, `spec.transport.protocol to "Ascend"`,
+	assert.Contains(t, message, `spec.transport.protocol to "cann"`,
 		"the remediation must name a value the enum accepts, next to the field it goes in")
 	assert.NotContains(t, message, `spec.transport.protocol to "ascend"`,
 		"the artifact spelling in that sentence is a schema rejection waiting to happen")
@@ -209,7 +209,7 @@ func TestMatchTransport_MessageNamesEveryOffer(t *testing.T) {
 		"the constraint, in the artifact's spelling")
 	assert.Contains(t, message, `["tcp" "rdma"]`,
 		"every group's offer, so neither serving it is visible without opening the object")
-	assert.Contains(t, message, `spec.transport.protocol to "Ascend"`,
+	assert.Contains(t, message, `spec.transport.protocol to "cann"`,
 		"the backend remediation, in the spelling the schema accepts")
 	assert.Contains(t, message, `transport.protocol`,
 		"the group field is named too: one group on the right transport is enough")

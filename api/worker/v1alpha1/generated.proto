@@ -1980,11 +1980,11 @@ message KVCacheBackendMemberStatus {
 // rather than one group, so it stays on the backend.
 message KVCacheBackendMemberTransport {
   // Protocol is the transport this group's members are ASKED to use, with the same values and
-  // the same Auto-resolves-to-TCP rule as the backend's spec.transport.protocol, which this
+  // the same auto-resolves-to-tcp rule as the backend's spec.transport.protocol, which this
   // field replaces for this group when set.
   //
-  // +k8s:validation:default="Auto"
-  // +k8s:validation:enum=["Auto","TCP","RDMA","EFA","HIP","Ascend"]
+  // +k8s:validation:default="auto"
+  // +k8s:validation:enum=["auto","tcp","rdma","efa","cann","musa","maca","rocm"]
   optional string protocol = 1;
 }
 
@@ -2155,45 +2155,46 @@ message KVCacheBackendStatus {
 
 // KVCacheBackendTransport is the data plane the members use.
 message KVCacheBackendTransport {
-  // Protocol is the transport the members are ASKED to use. Auto resolves to TCP.
+  // Protocol is the transport the members are ASKED to use. auto resolves to tcp.
   //
-  //   - TCP is the universal fallback. RDMA, EFA, HIP and Ascend are peers of one another, each a
-  //     fabric- or vendor-specific fast path rather than a spelling of TCP: EFA in particular is
-  //     reached through libfabric's SRD provider and has no RC queue pairs, so the RDMA transport
-  //     cannot drive it.
+  //   - tcp is the universal fallback. rdma, efa, cann, rocm, musa and maca are peers of one
+  //     another, each a fabric- or vendor-specific fast path rather than a spelling of tcp: efa in
+  //     particular is reached through libfabric's SRD provider and has no RC queue pairs, so the
+  //     rdma transport cannot drive it. musa and maca are intra-node IPC transports, not host
+  //     fabrics: they take no hostNetwork, no capabilities and no device resource.
   //   - Whether a member came up on what it asked for is NOT visible through this API.
   //     status.members[].protocol echoes this request back rather than reporting a result, so a
-  //     member that fell back to TCP still reads as the fabric there, while serving. Only the
+  //     member that fell back to tcp still reads as the fabric there, while serving. Only the
   //     member's own log says which transport the data plane installed.
-  //   - Auto is deliberately NOT a per-node probe that promotes itself to a faster fabric: a member
+  //   - auto is deliberately NOT a per-node probe that promotes itself to a faster fabric: a member
   //     group renders one DaemonSet, whose single Pod template cannot carry a different transport
-  //     per node, and promoting to RDMA grants hostNetwork and two capabilities — a privilege is
+  //     per node, and promoting to rdma grants hostNetwork and two capabilities — a privilege is
   //     requested, never inferred on an operator's behalf.
   //   - Membership in this enum means MEASURED AS COMPILED into a published artifact, which is what
-  //     excludes the other ten strings that artifact's config parser accepts. It does not mean
-  //     measured to move bytes: only TCP has been exercised end to end.
+  //     excludes the other eight strings that artifact's config parser accepts. It does not mean
+  //     measured to move bytes: only tcp has been exercised end to end.
   //   - A host fabric needs two things this API cannot check: the member image must carry the
-  //     runtime its transport links — CANN for Ascend, libfabric for EFA — and the NODE must run a
+  //     runtime its transport links — CANN for cann, libfabric for efa — and the NODE must run a
   //     device plugin, since a hostPath alone leaves the device cgroup refusing to open the device.
   //     Which resource the member asks for is deviceResourceName below.
   //
-  // +k8s:validation:default="Auto"
-  // +k8s:validation:enum=["Auto","TCP","RDMA","EFA","HIP","Ascend"]
+  // +k8s:validation:default="auto"
+  // +k8s:validation:enum=["auto","tcp","rdma","efa","cann","musa","maca","rocm"]
   optional string protocol = 1;
 
   // DeviceResourceName is the extended resource a host-fabric member asks one of, so the device
-  // cgroup lets it open the fabric device. It is CONSULTED ONLY on the RDMA and EFA protocols;
+  // cgroup lets it open the fabric device. It is CONSULTED ONLY on the rdma and efa protocols;
   // beside any other it renders nothing.
   //
   //   - It is DECLARED rather than derived: the name belongs to whichever plugin the cluster's
   //     administrator installed, so no name hard-coded here would be right on two clusters, and no
   //     admission rule can check a node for a plugin whose resource it cannot know.
-  //   - EFA is the exception. Its plugin advertises exactly one name, so an EFA member asks for
+  //   - efa is the exception. Its plugin advertises exactly one name, so an efa member asks for
   //     vpc.amazonaws.com/efa when this is unset. That is a default rather than a property of the
   //     protocol, and setting the field overrides it.
   //   - UNSET IS NOT A SAFE DEFAULT, IT IS THE OLD BEHAVIOR. A fabric member naming no resource
   //     mounts the device tree and requests nothing, so the cgroup refuses the open, the store
-  //     installs TCP, and the object still reads as the fabric it asked for. Naming one instead
+  //     installs tcp, and the object still reads as the fabric it asked for. Naming one instead
   //     keeps the member off a node that advertises none, which is the safer failure but not
   //     always the wanted one, so both stay reachable.
   //
@@ -3045,12 +3046,10 @@ message ModelDeploymentRoleStatus {
 message ModelDeploymentRouter {
   // Name selects which router implementation fronts this deployment.
   //
-  // THE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the difference is
-  // visible in the same word twice: the transport protocol on the cache backend types spells it
-  // "Auto" while the connector here spells it "auto". The casing convention is per API type, and the
-  // reason is the one ModelDeploymentRoleKind states about itself -- these values are terms the
-  // outside tool understands, not terms this operator invents. "llm-d" is how that project spells
-  // itself in its module path, its API group and its label domain, so it is spelled that way here.
+  // THE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the reason is the
+  // one ModelDeploymentRoleKind states about itself -- these values are terms the outside tool
+  // understands, not terms this operator invents. "llm-d" is how that project spells itself in its
+  // module path, its API group and its label domain, so it is spelled that way here.
   //
   // ONE VALUE TODAY IS A CHOICE TAKEN FOR NOW, NOT THE ABSENCE OF ONE. This field exists ahead of a
   // second implementation precisely so that adding one is a widening of this enum rather than a new

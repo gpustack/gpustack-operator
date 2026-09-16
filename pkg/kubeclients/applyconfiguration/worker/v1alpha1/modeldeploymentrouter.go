@@ -17,12 +17,10 @@ package v1alpha1
 type ModelDeploymentRouterApplyConfiguration struct {
 	// Name selects which router implementation fronts this deployment.
 	//
-	// THE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the difference is
-	// visible in the same word twice: the transport protocol on the cache backend types spells it
-	// "Auto" while the connector here spells it "auto". The casing convention is per API type, and the
-	// reason is the one ModelDeploymentRoleKind states about itself -- these values are terms the
-	// outside tool understands, not terms this operator invents. "llm-d" is how that project spells
-	// itself in its module path, its API group and its label domain, so it is spelled that way here.
+	// THE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the reason is the
+	// one ModelDeploymentRoleKind states about itself -- these values are terms the outside tool
+	// understands, not terms this operator invents. "llm-d" is how that project spells itself in its
+	// module path, its API group and its label domain, so it is spelled that way here.
 	//
 	// ONE VALUE TODAY IS A CHOICE TAKEN FOR NOW, NOT THE ABSENCE OF ONE. This field exists ahead of a
 	// second implementation precisely so that adding one is a widening of this enum rather than a new

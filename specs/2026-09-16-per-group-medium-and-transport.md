@@ -104,7 +104,7 @@ mixing media needs two processes — which is what two member groups already are
 ```yaml
 spec:
   transport:
-    protocol: TCP            # unchanged; the value a group inherits when it declares none
+    protocol: tcp            # unchanged; the value a group inherits when it declares none
   connection:
     managed:
       members:
@@ -118,7 +118,7 @@ spec:
           deviceResourceName: nvidia.com/gpu     # optional; see below
           capacityPerMember: 16Gi
           transport:
-            protocol: RDMA                       # optional; overrides the backend default for this group
+            protocol: rdma                       # optional; overrides the backend default for this group
 ```
 
 - `KVCacheBackendMember.Medium`: enum widened to `["DRAM", "VRAM"]` at
