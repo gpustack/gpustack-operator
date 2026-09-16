@@ -917,6 +917,14 @@ ENV PATH=/usr/local/go/bin:$PATH
 #     stage. The option also switches the project to BUILD_SHARED_LIBS, which is what produces
 #     the ascend_transport.so the wheel ships.
 #   - USE_CUDA stays OFF and USE_EFA goes OFF, for the same reasons as the cuda variant.
+#   - CMAKE_EXE_LINKER_FLAGS carries --allow-shlib-undefined. The CANN toolkit libraries in
+#     the devel base (libascend_dump, libtsdclient, libhccl_v2, libruntime) reference
+#     driver-only symbols -- libascend_hal.so and the drv*/hal* set -- that exist only where
+#     the Ascend driver is installed, and linking the transfer_engine_bench executable
+#     verifies that whole transitive chain. BUILD_EXAMPLES stays ON because packaging copies
+#     the bench unguarded, so the link has to pass without a driver. The flag scopes the
+#     relaxation to executables: the shared libraries the wheel ships still link under the
+#     default checks, and a real node resolves those symbols from its installed driver.
 #
 # STORE_USE_K8S_LEASE stays ON exactly as in the cuda variant; the 0.3.10 caveat spelled
 # out there applies here unchanged.
@@ -943,6 +951,7 @@ RUN <<EOF
         -DUSE_HTTP=ON \
         -DBUILD_UNIT_TESTS=OFF \
         -DBUILD_EXAMPLES=ON \
+        -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined \
         -DCMAKE_BUILD_TYPE=Release
 
     # The memory-bounded parallelism is the default builder's mechanism, kept for the same
