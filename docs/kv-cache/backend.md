@@ -210,11 +210,27 @@ Multi-tenancy moves none of these lines. With it off — the master's own defaul
 resolves to the default tenant and no write is refused, and the cross-minor failures above were all
 measured with it off.
 
-**The client's version is a property of the engine image, not of anything on this CR.** Current
-runner builds (vLLM 0.25.1, 0.27.1) embed mooncake-transfer-engine **0.3.10.post2**, so a backend
-serving them names `spec.image` with the 0.3.10-line build — the [default](../settings.md) is on
-the 0.3.13 line and fails them as measured above. Direct P/D transfer (`MooncakeConnector`, no
-`spec.kvCache`) is engine to engine and exempt from this matching.
+**The client's version is a property of the engine image, not of anything on this CR**, and it is
+not one number across images — not even across images of one vLLM version. A CUDA build inherits
+whatever its upstream base carries, and upstream changed how that is pinned: releases through 0.27.1
+install a wheel pinned by URL, while 0.28.0 and later resolve `mooncake-transfer-engine >= 0.3.12`
+from PyPI at build time. A ROCm build compiles its own from a pinned Mooncake tag.
+
+A lower bound is not a pin, so two images of one vLLM version built on different days can carry
+different clients. Read the client off the image in hand rather than off a vLLM version. Measured
+from the published images, by unpacking each one's `dist-info`:
+
+| runner image | embedded client |
+|---|---|
+| `cuda13.0-vllm0.25.1`, `cuda13.0-vllm0.27.1` | 0.3.10.post2 |
+| `rocm7.2-vllm0.27.1` | 0.3.11.post1 |
+| `cuda13.0-vllm0.29.0` | 0.3.13.post1 |
+
+Backends serving the first two rows name `spec.image` on the 0.3.10 and the 0.3.11 line
+respectively, and the [default](../settings.md) fails both as measured above; it matches the third
+row exactly. **An image absent from the table was not measured, and a neighbouring row is not
+evidence for it** — the first two rows are one vLLM version and different lines. Direct P/D transfer
+(`MooncakeConnector`, no `spec.kvCache`) is engine to engine and exempt from this matching.
 
 Two boundaries, recorded so nobody rediscovers them: upstream has **no 0.3.12.post2** — the 0.3.12
 line ends at 0.3.12.post1 — and nothing older than 0.3.10 is built or exercised by this project.
