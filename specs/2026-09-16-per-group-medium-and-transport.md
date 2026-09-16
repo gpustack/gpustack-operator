@@ -1,8 +1,8 @@
 # Spec: Per-Group Medium and Transport on `KVCacheBackend` — a DRAM Group and a VRAM Group on the Same Nodes
 
 Status: Planned
-Blocked on: M1 — a VRAM segment with the local disk tier on, written and read back on each vendor
-validation host against its variant image. It is the one gate below that needs hardware, and this
+Blocked on: M1 — a VRAM segment with the local disk tier on, written and read back on the NVIDIA
+validation host against the CUDA variant image. It is the one gate below that needs hardware, and this
 spec does not flip to Shipped until it is measured.
 Type: Feature
 Issue: #446
@@ -31,12 +31,16 @@ and final stage, not in file count. The targets are vendor-generic — `cuda`, `
 each variant's builder and runtime base images are ARGs that a dispatch can repoint from outside (CUDA
 13.0 today, 12.9 tomorrow) without editing the Dockerfile; the toolchain version lives only in the
 dispatch-time tag, e.g. `0.3.13.post1-cuda13.0`. The default bases follow the approach of the
-`gpustack/runner` project. Each variant is built on two Mooncake version lines: `0.3.13.post1` (for
-vLLM 0.28.0 and later) and `0.3.10.post2` (for vLLM before 0.28.0). **PR-B (this API change):** the
+`gpustack/runner` project. The `cuda` and `rocm` variants are built on two Mooncake version lines:
+`0.3.13.post1` (for vLLM 0.28.0 and later) and `0.3.10.post2` (for vLLM before 0.28.0); the `cann`
+variant builds `0.3.13.post1` and `0.3.11.post1` instead — 0.3.10's upstream CI pairs with CANN 9.0,
+and the Ascend engine line already ships 0.3.11.post1 (the `gpustack/runner` cann image for vLLM
+0.23.0 carries it), so a 0.3.10 cann build would serve no engine. **PR-B (this API change):** the
 enum, the fields, the renderer, the admission, the docs.
 
-Validation hardware for all three vendors exists (one host per vendor, addresses held out of band), so
-the variant images and the one measured acceptance item below have somewhere real to run.
+NVIDIA validation hardware exists (address held out of band), so the CUDA variant image and the one
+measured acceptance item below have somewhere real to run; equivalent Ascend and AMD hardware is not
+guaranteed, and their measured coverage is an open question.
 
 ## Motivation
 
@@ -64,8 +68,9 @@ mixing media needs two processes — which is what two member groups already are
   member status echoes the registration request rather than the installed transport
   (`pkg/worker/kvcache/mooncake/admin.go:251-255`).
 - **The project ships VRAM-capable images.** The `cuda` / `cann` / `rocm` variant targets in the one
-  Dockerfile produce versioned tags (`0.3.13.post1-cuda13.0` and friends) on both Mooncake version
-  lines, so a VRAM group has a defaultable image to point at — through `members[].image`, `spec.image`,
+  Dockerfile produce versioned tags (`0.3.13.post1-cuda13.0` and friends) on their Mooncake version
+  lines (two per variant; the cann line is `0.3.13.post1` + `0.3.11.post1`), so a VRAM group has a
+  defaultable image to point at — through `members[].image`, `spec.image`,
   or the `kv-cache-backend-image` setting, all of which already resolve today
   (`pkg/worker/controllers/worker/kv_cache_backend.go:1697-1713`).
 - **Success criteria (testable):**
@@ -166,13 +171,18 @@ spec:
   argument, not a Dockerfile edit. The default bases follow the `gpustack/runner` project's approach.
   Each variant differs in the cmake flag set of its build stage (`cuda` enables `USE_CUDA` +
   `USE_VRAM_SEGMENT`, following the Mooncake repository's own CUDA build; `cann` and `rocm` the vendor
-  equivalents). The comment at `Dockerfile:207-209` is rewritten: its stated reason ("the API's medium
+  equivalents). The `cann` build additionally reserves an `ASCEND_TRANSPORT` build ARG selecting the
+  ubshmem flavor: upstream's `USE_UBSHMEM` composes with `USE_ASCEND` rather than replacing it, so the
+  flavor is a build-time choice on the same target, not a new target. The comment at
+  `Dockerfile:207-209` is rewritten: its stated reason ("the API's medium
   is a single-value enum") is overturned by this spec.
 - Tags are pure dispatch-time input and carry the toolchain version: `<mooncake-version>-<variant>`,
   e.g. `0.3.13.post1-cuda13.0`, `0.3.10.post2-rocm7.2`. The `MOONCAKE_VERSION` ARG (`Dockerfile:84`)
   already makes the version a dispatch axis, and the Dockerfile already carries version-conditional
   patching (the `0.3.11*` case at `Dockerfile:230-236`); `0.3.10.post2` joins as the line for vLLM
-  before 0.28.0. Note `USE_VRAM_SEGMENT` exists only on the 0.3.13 line (introduced upstream in 0.3.13),
+  before 0.28.0 — for `cuda` and `rocm` only, since the `cann` variant builds `0.3.13.post1` and
+  `0.3.11.post1` (0.3.10 predates the CANN 9.1 pairing the Ascend engine line ships with).
+  Note `USE_VRAM_SEGMENT` exists only on the 0.3.13 line (introduced upstream in 0.3.13),
   so the `cuda` target builds 0.3.10.post2 as the CUDA transfer engine without VRAM segments — the
   Dockerfile guards this fail-loud rather than silently dropping the flag.
 
@@ -218,7 +228,7 @@ an optimization I adopt when my cluster supports it.
 no Go. PR-B (T2-T5) is the API change; T2 is its foundation (schema + `make generate`), T3 and T4 depend
 only on T2, T5 depends on the behavior settling. Each task leaves the tree building; a
 `make generate`-clean + `make lint` checkpoint sits after T2, T3, and T4. The measured item M1 is an
-acceptance gate on shipping and runs on the vendor validation hosts against the PR-A images; M2 is
+acceptance gate on shipping and runs on the NVIDIA validation host against the PR-A CUDA image; M2 is
 covered by T4's envtest.
 
 - [ ] **T1 (PR-A: image) — build-target input + variant targets in the one Dockerfile.**
@@ -227,8 +237,9 @@ covered by T4's envtest.
   builder/runtime stage pairs to `pack/mirrored-mooncake/Dockerfile` with dispatch-overridable base ARGs
   (defaults per `gpustack/runner`; CUDA flags per the Mooncake repository's own build); rewrite the
   `Dockerfile:207-209` comment. **Accept:** a dispatch with `target` + `tag` produces
-  `0.3.13.post1-cuda13.0`; a dispatch with no `target` reproduces today's `-cpu` image unchanged; each
-  variant image builds on both `0.3.13.post1` and `0.3.10.post2`. **Verify:** workflow dispatch on the
+  `0.3.13.post1-cuda13.0`; a dispatch with no `target` reproduces today's `-cpu` image unchanged; the
+  `cuda` and `rocm` variant images build on both `0.3.13.post1` and `0.3.10.post2`, the `cann` variant
+  on `0.3.13.post1` and `0.3.11.post1`. **Verify:** workflow dispatch on the
   PR-A branch for each variant × version line; smoke-load the store wheel from each produced image on the
   matching vendor validation host.
 - [ ] **T2 (PR-B: API + webhook) — widen the enum, add the fields.**
@@ -257,9 +268,10 @@ covered by T4's envtest.
   `go test ./pkg/worker/kvcache/inject/... ./pkg/worker/webhooks/worker/... ./pkg/worker/controllers/worker/... && make lint`.
 - [ ] **T5 (PR-B: docs) — the reference page and the worked pair.**
   Update `docs/kv-cache/backend.md`: the widened enum, per-group transport and its inheritance, the
-  variant tags and the vLLM version mapping (`0.3.13.post1` for vLLM 0.28.0+, `0.3.10.post2` before), the
+  variant tags and the vLLM version mapping (`0.3.13.post1` for vLLM 0.28.0+, `0.3.10.post2` before;
+  cann ships `0.3.13.post1` and `0.3.11.post1`), the
   `deviceResourceName` semantics and its privileged + hostNetwork fallback, and a clear "measured on the
-  vendor validation hosts" pointer for the VRAM-plus-local-disk combination (banner until M1 lands). Add
+  NVIDIA validation host" pointer for the VRAM-plus-local-disk combination (banner until M1 lands). Add
   the RFC's companion worked pair (`KVCachePoolBinding` + `ModelDeployment`, and the plain-Pod injection
   annotations) where the docs skill routes it; state that tenancy needs an engine build that reads
   `tenant_id`; state that a VRAM group needs a `USE_VRAM_SEGMENT=ON` build and that the stock `-cpu`
@@ -271,10 +283,11 @@ covered by T4's envtest.
 Gates are causally part of #446: if one is red, this spec does not flip to Shipped.
 
 - **M1 — VRAM segment with the local disk tier.** Write keys until offload engages, then read them back
-  and assert byte equality, on each vendor validation host against its PR-A variant image. Upstream
+  and assert byte equality, on the NVIDIA validation host against the PR-A CUDA variant image. Upstream
   covers this combination with no test (verified: no test references VRAM segments at all), and the
   orthogonality evidence is source-level only. Until M1 is measured, the docs carry the banner and this
-  spec does not flip to Shipped on its account.
+  spec does not flip to Shipped on its account. Equivalent coverage on Ascend (`cann`) and AMD (`rocm`)
+  hardware is an open question below, not part of this gate.
 - **M2 — engine refused on a transport no group serves.** Covered by T4's envtest; no hardware needed.
   M2 must be green before PR-B merges.
 
@@ -327,7 +340,7 @@ state, and the window comes first by construction. Sequence: (1) roll out the P/
 the trip's backend and capture R1's two curves during the decode replica's startup window; (2) once
 serving, run R2's steady-state request with before/after counters, block counts, and the
 no-recompute check; (3) bring up (or have already up) a single-role deployment on the same cluster for
-R2's TTFT baseline; (4) M1 runs on the vendor validation hosts against the PR-A variant images, in
+R2's TTFT baseline; (4) M1 runs on the NVIDIA validation host against the PR-A CUDA variant image, in
 parallel with (1)-(3) since it needs its own hardware. One cluster, one trip; only the TTFT baseline
 adds a second deployment.
 
@@ -353,5 +366,8 @@ adds a second deployment.
   follow-up if a deployment needs it.
 - EFA plus VRAM (GPUDirect over libfabric) is untested upstream and out of scope here; the first VRAM
   deployments are expected on RDMA or TCP.
+- Whether the Ascend (`cann`) and AMD (`rocm`) variants get the same measured VRAM-plus-local-disk-tier
+  coverage M1 gives NVIDIA is open: no validation host for either vendor is guaranteed. Their images
+  build and smoke, but the write-offload-read-back measurement stays NVIDIA-only until hardware exists.
 - Whether the operator's `kv-cache-backend-image` default ever flips from `-cpu` to a vendor variant is
   left to a later decision; per-group and per-backend overrides make it unnecessary for this spec.
