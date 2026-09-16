@@ -150,6 +150,18 @@ const (
 	// in its data-parallel supervisor, not in the server a role runs.
 	modelDeploymentProbePath = "/health"
 
+	// modelDeploymentDirectDecodeProbePath is the route the gates read in the direct-decode shape,
+	// where a routing sidecar owns the service port the gates grade. The sidecar answers /health
+	// itself, in every state, so that path grades the sidecar and stops saying anything about the
+	// engine the moment the Pod starts. Every other route the sidecar forwards to the engine, whose
+	// port refuses connections until the engine finishes loading and serves -- a refusal the
+	// sidecar answers with a 503. Reading /v1/models through the sidecar therefore keeps the gates
+	// on the address the Service fronts while the answer once again turns on the engine.
+	//
+	// The vacuity recorded above does not follow this route into the branch: the direct-decode
+	// shape renders only for vLLM, the engine whose /v1/models is a readiness signal.
+	modelDeploymentDirectDecodeProbePath = "/v1/models"
+
 	// modelDeploymentProbePeriodSeconds paces all three gates, which is what makes their failure
 	// thresholds comparable to each other.
 	modelDeploymentProbePeriodSeconds int32 = 10
@@ -359,11 +371,13 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 		mounts = append(mounts, in.Connector.VolumeMounts...)
 	}
 
+	probePath := modelDeploymentProbePath
 	probeScheme := scheme
 	if directDecode {
 		probeScheme = core.URISchemeHTTP
+		probePath = modelDeploymentDirectDecodeProbePath
 	}
-	startupProbe, readinessProbe, livenessProbe := modelDeploymentProbes(role, probeScheme, gradable)
+	startupProbe, readinessProbe, livenessProbe := modelDeploymentProbes(role, probeScheme, probePath, gradable)
 	ports, err := appendModelDeploymentConnectorPorts(declaredPorts, in.Connector, takeOver)
 	if err != nil {
 		return nil, err
@@ -887,8 +901,13 @@ func modelDeploymentRoleArgs(role *workercore.ModelDeploymentRole) []string {
 // picked here, so the address the gate grades and the address the Service sends traffic to cannot
 // become two different ports. That is what makes "ready" and "the endpoint answers" one fact rather
 // than two that a test has to compare.
+//
+// THE ROUTE IS THE CALLER'S, because one shape cannot use the shared one: a direct decoder's
+// service port is owned by its routing sidecar, which answers /health itself, so the gates read
+// the route the sidecar forwards to the engine instead -- a different path on the SAME address,
+// which leaves the one-fact property above intact.
 func modelDeploymentProbes(
-	role *workercore.ModelDeploymentRole, scheme core.URIScheme, gradable bool,
+	role *workercore.ModelDeploymentRole, scheme core.URIScheme, path string, gradable bool,
 ) (startup, readiness, liveness *core.Probe) {
 	if !gradable {
 		return nil, nil, nil
@@ -904,7 +923,7 @@ func modelDeploymentProbes(
 		return &core.Probe{
 			ProbeHandler: core.ProbeHandler{
 				HTTPGet: &core.HTTPGetAction{
-					Path:   modelDeploymentProbePath,
+					Path:   path,
 					Port:   port,
 					Scheme: scheme,
 				},
