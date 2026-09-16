@@ -41,6 +41,13 @@ on:
         required: false
         type: string
         default: ""
+      # Additional tags the manifest job publishes from the same per-platform images,
+      # e.g. tag "0.3.13.post1-cann9.1-910b" with alias "0.3.13.post1-cann9.1-a2".
+      alias:
+        description: 'Alias tags (space-separated) published as extra manifests over the same images.'
+        required: false
+        type: string
+        default: ""
       heavy:
         description: 'Build on the larger "-8x" runners: "auto" decides from the changed files, "true" forces them, "false" keeps the standard runners.'
         required: false
@@ -71,6 +78,7 @@ jobs:
       - name: Validate Inputs
         env:
           INPUT_TAG: ${{ inputs.tag }}
+          INPUT_ALIAS: ${{ inputs.alias }}
         run: |
           #
           # The manifest job publishes by tag: "docker manifest create --amend" plus a push
@@ -91,6 +99,16 @@ jobs:
               echo "        A variant pushed under the default image's tag would overwrite that tag's multi-arch manifest." >&2
               exit 1
             fi
+            # An alias rewrites the alias tag's manifest with this dispatch's platforms,
+            # the same hazard under another name, so every alias answers to the slug too.
+            read -ra ALIASES <<<"${INPUT_ALIAS}" || true
+            for ALIAS in "${ALIASES[@]}"; do
+              [[ -n "${ALIAS}" ]] || continue
+              if [[ "${ALIAS}" != *"${TARGET_SLUG}"* ]]; then
+                echo "[ERROR] target '${INPUT_TARGET}' requires every alias to contain '${TARGET_SLUG}' (got '${ALIAS}')." >&2
+                exit 1
+              fi
+            done
           fi
       - name: Detect Heavy Changes
         id: detect-heavy
@@ -185,5 +203,6 @@ jobs:
         latest=false
       suffix-on-latest: true
       build-args-secret: ${{ inputs.args }}
+      alias: ${{ inputs.alias }}
     secrets:
       dockerhub-password: ${{ secrets.CI_DOCKERHUB_PASSWORD }}
