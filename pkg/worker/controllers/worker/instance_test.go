@@ -835,20 +835,45 @@ func TestConvertPodFromInstance_SlicedSSHColocatesAcceleratorOnMain(t *testing.T
 // holds" and "the rewrite is off" are the same green.
 func TestConvertPodFromInstance_SSHDImageRedirectionKeepsARegistryHost(t *testing.T) {
 	// The package's TestMain owns the loopback client (first-write-wins), so the settings Secret
-	// goes through it rather than through a private fake. The cleanup removes it again: left
-	// behind, every later image assertion in the package would read the mirror namespace.
-	settingsSecret := &core.Secret{
-		ObjectMeta: meta.ObjectMeta{
+	// goes through it rather than through a private fake. That Secret is shared with every other
+	// test in the package, so this test merges its own keys in and removes only them again:
+	// creating the Secret outright collides with any test that seeded it first, and deleting it
+	// would drop keys that are not this test's. Left behind, the mirror namespace leaks into
+	// every later image assertion in the package.
+	ctx := context.Background()
+	loopback := system.LoopbackCtrlClient.Get()
+	mergeSettingsKeys := func(data map[string][]byte) {
+		t.Helper()
+		sec := &core.Secret{
+			ObjectMeta: meta.ObjectMeta{
+				Name:      setting.DelegatedSecretName,
+				Namespace: setting.DelegatedSecretNamespace,
+			},
+		}
+		if err := loopback.Create(ctx, sec); err != nil {
+			require.NoError(t, loopback.Get(ctx, ctrlcli.ObjectKeyFromObject(sec), sec))
+		}
+		if sec.Data == nil {
+			sec.Data = map[string][]byte{}
+		}
+		for k, v := range data {
+			sec.Data[k] = v
+		}
+		require.NoError(t, loopback.Update(ctx, sec))
+		setting.InvalidateCache()
+	}
+	mergeSettingsKeys(map[string][]byte{"container-namespace": []byte("mirror")})
+	t.Cleanup(func() {
+		sec := new(core.Secret)
+		err := loopback.Get(ctx, ctrlcli.ObjectKey{
 			Name:      setting.DelegatedSecretName,
 			Namespace: setting.DelegatedSecretNamespace,
-		},
-		Data: map[string][]byte{"container-namespace": []byte("mirror")},
-	}
-	loopback := system.LoopbackCtrlClient.Get()
-	require.NoError(t, loopback.Create(context.Background(), settingsSecret))
-	setting.InvalidateCache()
-	t.Cleanup(func() {
-		_ = loopback.Delete(context.Background(), settingsSecret)
+		}, sec)
+		if err == nil {
+			delete(sec.Data, "container-namespace")
+			delete(sec.Data, "instance-ssh-server-image")
+			_ = loopback.Update(ctx, sec)
+		}
 		setting.InvalidateCache()
 	})
 
@@ -894,9 +919,7 @@ func TestConvertPodFromInstance_SSHDImageRedirectionKeepsARegistryHost(t *testin
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			settingsSecret.Data["instance-ssh-server-image"] = []byte(tc.image)
-			require.NoError(t, loopback.Update(context.Background(), settingsSecret))
-			setting.InvalidateCache()
+			mergeSettingsKeys(map[string][]byte{"instance-ssh-server-image": []byte(tc.image)})
 
 			pod := r.convertPodFromInstance(context.Background(), inst, instType)
 			require.Len(t, pod.Spec.Containers, 2, "SSH-enabled Instance renders main + sshd")
