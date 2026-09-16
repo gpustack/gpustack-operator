@@ -27,6 +27,11 @@ on:
         description: 'Image name under pack/, which is also the Docker Hub repository.'
         required: true
         type: string
+      target:
+        description: 'Docker build target within the image Dockerfile. Empty builds to the final stage (the default image).'
+        required: false
+        type: string
+        default: ""
       matrix:
         description: 'JSON array of {"runner","platform"} objects, one per platform to build.'
         required: true
@@ -72,6 +77,7 @@ on:
 env:
   INPUT_PASSWORD: ${{ secrets.dockerhub-password }}
   INPUT_REPOSITORY: ${{ inputs.repository }}
+  INPUT_TARGET: ${{ inputs.target }}
 
 jobs:
   build:
@@ -226,7 +232,35 @@ jobs:
             CACHE_FROM_REF="${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${BRANCH}-${INPUT_PLATFORM}"
             CACHE_TO_REF="${CACHE_FROM_REF}"
           fi
+          #
+          # The refs above key on repository, branch and platform only, which is one
+          # cache ref too few once the Dockerfile has more than one build target: a
+          # variant build runs different content under the same RUN instructions as the
+          # default build (a different base image, different flags), so its layers
+          # written under the default build's ref would poison every later default
+          # build on this branch, and the reverse read would give the variant hits that
+          # silently skip its own compile. A non-empty target therefore gets its own
+          # ref, derived by slugging the target name into tag-safe characters
+          # ("cuda13.0" -> "-cuda13.0": dots stay, they are legal inside a tag).
+          # Cache-FROM the default-branch ref takes the
+          # same suffix: a variant build on a branch then reads the default branch's
+          # VARIANT cache, which is the useful hit -- the unsuffixed ref holds the
+          # default build's layers, a guaranteed miss for the variant. The slug keys
+          # on the target NAME alone, so repointing a variant's base-image build args
+          # at another toolchain release shares the ref -- acceptable, because a
+          # registry cache is a hint and mode=max overwrites it on push.
+          #
           CACHE_FROM_DEFAULT_REF="${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${DEFAULT_BRANCH}-${INPUT_PLATFORM}"
+          if [[ -n "${INPUT_TARGET}" ]]; then
+            # The slug pipeline is duplicated in base-image.yml's Validate Inputs
+            # step; keep the two in sync.
+            TARGET_SLUG="$(tr '[:upper:]' '[:lower:]' <<<"${INPUT_TARGET}" | tr -c 'a-z0-9.-' '-' | tr -s '-' | sed 's/^[.-]*//; s/[.-]*$//')"
+            # An all-punctuation target slugs to empty, which would trail a hyphen on the ref.
+            [[ -n "${TARGET_SLUG}" ]] || TARGET_SLUG="variant"
+            CACHE_FROM_REF="${CACHE_FROM_REF}-${TARGET_SLUG}"
+            CACHE_TO_REF="${CACHE_FROM_REF}"
+            CACHE_FROM_DEFAULT_REF="${CACHE_FROM_DEFAULT_REF}-${TARGET_SLUG}"
+          fi
           CACHE_FROM_REFS="type=registry,ref=${CACHE_FROM_REF}"
           if [[ "${CACHE_FROM_REF}" != "${CACHE_FROM_DEFAULT_REF}" ]]; then
             CACHE_FROM_REFS="${CACHE_FROM_REFS}
@@ -282,6 +316,10 @@ jobs:
           push: ${{ inputs.push }}
           file: ${{ github.workspace }}/pack/${{ env.INPUT_REPOSITORY }}/Dockerfile
           context: ${{ github.workspace }}
+          # An empty target builds to the Dockerfile's final stage: build-push-action
+          # passes --target only when the value is non-empty, so callers that set no
+          # target get exactly the build they got before this input existed.
+          target: ${{ inputs.target }}
           platforms: ${{ matrix.platform }}
           build-args: |
             ${{ inputs.build-args }}
