@@ -207,6 +207,12 @@ type ModelDeploymentRenderInput struct {
 	// GeneralResourcesOvercommit mirrors the Instance path's overcommit setting, which decides
 	// whether the derived CPU and memory are requested at full size or scaled down.
 	GeneralResourcesOvercommit bool
+	// NativeSidecar decides which shape a direct decoder's routing proxy is rendered in: a native
+	// sidecar -- an init container carrying restartPolicy: Always -- when the cluster keeps that
+	// field, or a classic regular container when it does not. The reconciler resolves it from the
+	// cluster's version rather than the render guessing, because the field is DROPPED without an
+	// error below 1.29, and a Pod rendered with it there never leaves Init.
+	NativeSidecar bool
 }
 
 // modelDeploymentPodName is the name of one replica's Pod: <deployment>-<role>-<ordinal>.
@@ -410,8 +416,24 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 		},
 	}
 	if directDecode {
-		pod.Spec.InitContainers = []core.Container{
-			renderModelDeploymentRoutingSidecar(ctx, role, enginePort, scheme),
+		sidecar := renderModelDeploymentRoutingSidecar(ctx, role, enginePort, scheme, in.NativeSidecar)
+		if in.NativeSidecar {
+			pod.Spec.InitContainers = []core.Container{sidecar}
+		} else {
+			// The classic shape runs the proxy as the FIRST regular container: kubelet starts
+			// regular containers in list order, which is a de-facto ordering rather than the API
+			// guarantee a native sidecar carries. What actually gates traffic on either shape is
+			// that the engine container's probes target the proxy's port, so the Pod stays
+			// unready until the proxy listens.
+			//
+			// What this shape LOSES is the shutdown ordering: a native sidecar is stopped only
+			// after every regular container exits, while a classic one is terminated alongside
+			// them, so a Pod deletion can cut the proxy before the engine finishes draining --
+			// in-flight handoffs reset instead of answering, and the caller's retry lands on
+			// another replica. The startup guarantee it loses buys nothing here: the engine
+			// never dials the proxy, and a request that arrives before the engine listens gets a
+			// 503 the proxy survives, recovering the moment the engine is up.
+			pod.Spec.Containers = append([]core.Container{sidecar}, pod.Spec.Containers...)
 		}
 	}
 	if in.RuntimeClassName != "" {
@@ -524,6 +546,7 @@ func modelDeploymentRedirectedImage(ctx context.Context, image string) string {
 func renderModelDeploymentRoutingSidecar(
 	ctx context.Context,
 	role *workercore.ModelDeploymentRole, enginePort int32, engineScheme core.URIScheme,
+	native bool,
 ) core.Container {
 	externalPort := modelDeploymentServicePort(role)
 	args := []string{
@@ -542,7 +565,16 @@ func renderModelDeploymentRoutingSidecar(
 		Image:           modelDeploymentRedirectedImage(ctx, settings.ModelDeploymentRoutingSidecarImage.ShouldValue(ctx)),
 		ImagePullPolicy: core.PullIfNotPresent,
 		Args:            args,
-		RestartPolicy:   ptr.To(core.ContainerRestartPolicyAlways),
+		// The per-container restart policy is what makes the native shape a sidecar rather than a
+		// plain init container, and it is ONLY rendered there: a regular container has no business
+		// carrying it, so the classic shape leaves the field nil and lets the Pod's own
+		// restartPolicy restart the proxy, which is the same kubelet mechanism one level up.
+		RestartPolicy: func() *core.ContainerRestartPolicy {
+			if !native {
+				return nil
+			}
+			return ptr.To(core.ContainerRestartPolicyAlways)
+		}(),
 		Ports: []core.ContainerPort{{
 			Name: externalPort.Name, Protocol: core.ProtocolTCP,
 			ContainerPort: externalPort.ContainerPort,

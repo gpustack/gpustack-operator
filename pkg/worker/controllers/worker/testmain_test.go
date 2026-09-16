@@ -7,6 +7,7 @@ import (
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/kubediscovery"
 	"gpustack.ai/gpustack/pkg/system"
 )
 
@@ -17,5 +18,10 @@ import (
 func TestMain(m *testing.M) {
 	system.LoopbackCtrlClient.Configure(
 		ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build())
+	// Reconciler-level render assertions are written against the native sidecar shape, which a
+	// version at the floor unlocks; the classic shape is asserted at render level instead.
+	system.LoopbackKubeVersion.Configure(kubediscovery.Version{
+		Major: "1", Minor: "31", GitVersion: "v1.31.0",
+	})
 	os.Exit(m.Run())
 }

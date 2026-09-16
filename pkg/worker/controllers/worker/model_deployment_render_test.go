@@ -157,6 +157,7 @@ func TestRenderModelDeploymentPod_DecodeUsesRoutingSidecar(t *testing.T) {
 				Connector: ModelDeploymentConnectorRender{
 					Args: []string{"--kv-transfer-config", `{}`}, DirectTransfer: true,
 				},
+				NativeSidecar: true,
 			})
 			require.NoError(t, err)
 
@@ -183,6 +184,49 @@ func TestRenderModelDeploymentPod_DecodeUsesRoutingSidecar(t *testing.T) {
 			assert.Equal(t, tc.externalPort, main.LivenessProbe.HTTPGet.Port.IntVal)
 		})
 	}
+}
+
+// TestRenderModelDeploymentPod_DecodeUsesClassicSidecarBelowTheFloor asserts the shape a cluster
+// without initContainers[].restartPolicy gets: the SAME proxy, carried as a regular container
+// rather than an init one. What changes is where it lands and that it carries no per-container
+// restart policy; what must NOT change is the traffic gate -- the engine container's probes still
+// target the proxy's port, so the Pod stays unready until the proxy listens, on either shape.
+func TestRenderModelDeploymentPod_DecodeUsesClassicSidecarBelowTheFloor(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+		md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{{
+			Name: "http", Protocol: core.ProtocolTCP, Port: 8000,
+		}}
+	})
+	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+		Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+		Connector: ModelDeploymentConnectorRender{
+			Args: []string{"--kv-transfer-config", `{}`}, DirectTransfer: true,
+		},
+		NativeSidecar: false,
+	})
+	require.NoError(t, err)
+
+	assert.Empty(t, pod.Spec.InitContainers, "a plain init container that never exits would wedge the Pod in Init")
+	require.Len(t, pod.Spec.Containers, 2)
+
+	sidecar := pod.Spec.Containers[0]
+	assert.Equal(t, "routing-proxy", sidecar.Name, "the proxy is the FIRST regular container, the closest list order gets to starting first")
+	assert.Equal(t, "gpustack/mirrored-llm-d-router-disagg-sidecar:v0.10.0", sidecar.Image)
+	assert.Nil(t, sidecar.RestartPolicy,
+		"a regular container leaves the field nil and lets the Pod's restartPolicy restart it")
+	assert.Contains(t, sidecar.Args, "--port=8000")
+	assert.Contains(t, sidecar.Args, "--model-server-port=8200")
+	require.Len(t, sidecar.Ports, 1)
+	assert.Equal(t, int32(8000), sidecar.Ports[0].ContainerPort)
+
+	main := pod.Spec.Containers[1]
+	assert.Contains(t, main.Command, "8200")
+	assert.Equal(t, int32(8200), main.Ports[0].ContainerPort)
+	assert.Equal(t, int32(8000), main.StartupProbe.HTTPGet.Port.IntVal)
+	assert.Equal(t, int32(8000), main.ReadinessProbe.HTTPGet.Port.IntVal)
+	assert.Equal(t, int32(8000), main.LivenessProbe.HTTPGet.Port.IntVal)
 }
 
 // TestRenderModelDeploymentPod_EntranceLabelIsNotInTheSelector states why the two label sets are
