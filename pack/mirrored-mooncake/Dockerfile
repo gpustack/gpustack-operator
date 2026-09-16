@@ -962,6 +962,20 @@ RUN <<EOF
             ;;
     esac
 
+    if [[ "${ASCEND_TRANSPORT}" == "ubshmem" ]]; then
+        # The bench's ubshmem path calls ascendcl directly, but upstream links the bench
+        # against transfer_engine alone, whose ascendcl use stays PRIVATE through
+        # ascend_transport -- the ascend_direct perf example links ascendcl explicitly, the
+        # bench does not, and the link fails on aclGetRecentErrMsg and the aclrt* set. Patch
+        # the ubshmem block the way the perf example spells it. The if's spacing varies
+        # across the supported releases; the range pattern admits both spellings, and the
+        # grep proves the patch landed rather than rotting silently.
+        sed -i '/^if *(USE_UBSHMEM)$/,/^endif()$/ s|target_link_libraries(transfer_engine_bench PUBLIC transfer_engine)|target_link_libraries(transfer_engine_bench PUBLIC ascendcl transfer_engine)|' \
+            /work/mooncake-transfer-engine/example/CMakeLists.txt
+        grep -q 'target_link_libraries(transfer_engine_bench PUBLIC ascendcl transfer_engine)' \
+            /work/mooncake-transfer-engine/example/CMakeLists.txt
+    fi
+
     cmake -S /work -B /work/build -G Ninja \
         -DSTORE_USE_K8S_LEASE=ON \
         -DSTORE_USE_REDIS=ON \
