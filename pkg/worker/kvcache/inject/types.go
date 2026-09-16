@@ -140,6 +140,9 @@ type Connection struct {
 	// Protocol is the transport in the artifact's own spelling, already mapped from the backend's
 	// API spelling by the caller. It is backend-wide rather than per-node: one member group renders
 	// one DaemonSet, so a single Pod template cannot carry a different transport per node.
+	//
+	// It feeds the store client alone. The direct-transfer leg does not read it -- the two data
+	// planes declare separately, and vllmDirectTransferProtocol says why.
 	Protocol string
 }
 
