@@ -620,9 +620,13 @@ RUN <<EOF
     # Subjects: both must clear the availability check. "Master runtime state" is printed by the
     # supervisor loop, which is only reached after BuildHABackendSpec returns.
     #
-    # The refusal is asserted absent with `! grep -q`, NOT with `grep -qv`. The -v form asks whether
-    # some line does not match, which every multi-line log satisfies whether or not the refusal is
-    # also in there -- an assertion that cannot fail.
+    # The refusal is asserted absent with an if-guarded grep, NOT with `grep -qv` and NOT with
+    # `! grep -q`. The -v form asks whether some line does not match, which every multi-line log
+    # satisfies whether or not the refusal is also in there -- an assertion that cannot fail. The
+    # inverted form fails identically: a pipeline inverted with ! is exempt from set -e, so the
+    # negated command returns 1 and the build walks on. Naming only the -v trap here once read as
+    # though the ! form had been reviewed; a comment arguing against one spelling says nothing
+    # for the spelling it leaves standing.
     #
     # LIMITED: the strings below are upstream log text at MOONCAKE_VERSION, not an API. Bumping
     # the version means re-reading them out of that release before trusting a failure here: a
@@ -630,7 +634,10 @@ RUN <<EOF
     # nothing about which token went stale.
     grep -q "Master runtime state" /tmp/k8s.log
     grep -q "Master runtime state" /tmp/redis.log
-    ! grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/redis.log
+    if grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/redis.log; then
+        echo "[ERROR] redis metadata backend is unavailable in this build." >&2
+        exit 1
+    fi
 
     case "${MOONCAKE_VERSION}" in
         0.3.10*)
@@ -642,17 +649,26 @@ RUN <<EOF
             # exclusion does not exist yet either, so etcd is compiled in and clears the check
             # exactly as redis does.
             grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/k8s.log
-            ! grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/etcd.log
+            if grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/etcd.log; then
+                echo "[ERROR] etcd metadata backend is unavailable in this build." >&2
+                exit 1
+            fi
             ;;
         0.3.11*)
-            ! grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/k8s.log
+            if grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/k8s.log; then
+                echo "[ERROR] k8s-lease metadata backend is unavailable in this build." >&2
+                exit 1
+            fi
             # The K8S_LEASE/ETCD exclusion does not exist yet either, so the etcd control is
             # not refused -- it CHECK-fails instead: this build compiles etcd out for the
             # lease backend, and the stub helper aborts on first use.
             grep -q "Etcd is not enabled in compilation" /tmp/etcd.log
             ;;
         *)
-            ! grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/k8s.log
+            if grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/k8s.log; then
+                echo "[ERROR] k8s-lease metadata backend is unavailable in this build." >&2
+                exit 1
+            fi
             # Control: etcd must still be refused (proves the exclusion held and the check was
             # not disabled wholesale).
             grep -q "UNAVAILABLE_IN_CURRENT_MODE" /tmp/etcd.log
