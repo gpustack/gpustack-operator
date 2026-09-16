@@ -321,6 +321,11 @@ func (in KVCacheBackendMemberStatus) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCacheBackendMemberTransport) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCacheBackendMemberTransport"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in KVCacheBackendScaleIn) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.KVCacheBackendScaleIn"
 }

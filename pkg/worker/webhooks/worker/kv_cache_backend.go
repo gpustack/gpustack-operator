@@ -683,8 +683,9 @@ const quantityTooLarge = "must not exceed 9223372036854775807 (2^63-1) bytes: th
 // the field they guard is written.
 var memberBucketSize = *resource.NewQuantity(mooncake.MemberBucketSizeLimit, resource.BinarySI)
 
-// validateKVCacheBackendMember holds the per-group rules a schema cannot carry: a medium the schema
-// accepts but nothing renders, and two quantities whose schema type is a string.
+// validateKVCacheBackendMember holds the per-group rules a schema cannot carry: a device
+// resource named on a group with no device to charge, and two quantities whose schema type is a
+// string.
 func validateKVCacheBackendMember(
 	member, oldMember *workercore.KVCacheBackendMember, fldPath *field.Path,
 ) field.ErrorList {
@@ -699,6 +700,15 @@ func validateKVCacheBackendMember(
 		oldDisk = oldMember.LocalDisk
 	}
 	errs = append(errs, validateKVCacheBackendLocalDisk(member.LocalDisk, oldDisk, fldPath.Child("localDisk"))...)
+
+	// A DRAM member has no device to charge, so naming one would reserve an accelerator against a
+	// segment that lives in host memory — and keep a real workload off the node the scheduler
+	// counted it against.
+	if member.Medium == "DRAM" && member.DeviceResourceName != "" {
+		errs = append(errs, field.Invalid(fldPath.Child("deviceResourceName"), member.DeviceResourceName,
+			"must not be set on a DRAM group: a host-memory segment is charged against the Pod's "+
+				"memory, and there is no device for this name to point at"))
+	}
 
 	// A resource.Quantity is a STRING in the schema, so no numeric bound in a marker can reach it —
 	// these two are the only place either can be refused. Zero is refused rather than defaulted,
@@ -1116,10 +1126,9 @@ func validateKVCacheBackendImmutable(oldKvcb, newKvcb *workercore.KVCacheBackend
 		if i >= len(oldMembers) {
 			break
 		}
-		// Unreachable while the enum carries one value, and kept for the day it carries two: on
-		// that day a medium becomes mutable by default, under segments already mounted from it,
-		// and nothing would fail until someone did it. A rule that is only correct after a later
-		// change is cheaper to keep than to remember to add.
+		// Live now that the enum carries two values: a medium changed under a running group would
+		// remount its segments from a different kind of memory underneath the data they hold, and
+		// nothing would fail until someone did it.
 		if oldMembers[i].Medium != newMembers[i].Medium {
 			errs = append(errs, field.Forbidden(membersPath.Index(i).Child("medium"),
 				"medium is immutable"))

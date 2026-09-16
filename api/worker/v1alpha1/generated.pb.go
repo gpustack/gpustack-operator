@@ -158,6 +158,8 @@ func (m *KVCacheBackendMemberLocalDiskEvictionWatermark) Reset() {
 
 func (m *KVCacheBackendMemberStatus) Reset() { *m = KVCacheBackendMemberStatus{} }
 
+func (m *KVCacheBackendMemberTransport) Reset() { *m = KVCacheBackendMemberTransport{} }
+
 func (m *KVCacheBackendScaleIn) Reset() { *m = KVCacheBackendScaleIn{} }
 
 func (m *KVCacheBackendSpec) Reset() { *m = KVCacheBackendSpec{} }
@@ -3528,6 +3530,23 @@ func (m *KVCacheBackendMember) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.DeviceResourceName)
+	copy(dAtA[i:], m.DeviceResourceName)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.DeviceResourceName)))
+	i--
+	dAtA[i] = 0x52
+	if m.Transport != nil {
+		{
+			size, err := m.Transport.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x4a
+	}
 	if len(m.ExtraEnvs) > 0 {
 		keysForExtraEnvs := make([]string, 0, len(m.ExtraEnvs))
 		for k := range m.ExtraEnvs {
@@ -3838,6 +3857,34 @@ func (m *KVCacheBackendMemberStatus) MarshalToSizedBuffer(dAtA []byte) (int, err
 	i -= len(m.SegmentName)
 	copy(dAtA[i:], m.SegmentName)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.SegmentName)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
+func (m *KVCacheBackendMemberTransport) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *KVCacheBackendMemberTransport) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *KVCacheBackendMemberTransport) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	i -= len(m.Protocol)
+	copy(dAtA[i:], m.Protocol)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Protocol)))
 	i--
 	dAtA[i] = 0xa
 	return len(dAtA) - i, nil
@@ -7083,6 +7130,12 @@ func (m *KVCacheBackendMember) Size() (n int) {
 			n += mapEntrySize + 1 + sovGenerated(uint64(mapEntrySize))
 		}
 	}
+	if m.Transport != nil {
+		l = m.Transport.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
+	l = len(m.DeviceResourceName)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -7153,6 +7206,17 @@ func (m *KVCacheBackendMemberStatus) Size() (n int) {
 	l = len(m.SegmentID)
 	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.ClientID)
+	n += 1 + l + sovGenerated(uint64(l))
+	return n
+}
+
+func (m *KVCacheBackendMemberTransport) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Protocol)
 	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
@@ -8881,6 +8945,8 @@ func (this *KVCacheBackendMember) String() string {
 		`Image:` + fmt.Sprintf("%v", this.Image) + `,`,
 		`LocalDisk:` + strings.Replace(this.LocalDisk.String(), "KVCacheBackendMemberLocalDisk", "KVCacheBackendMemberLocalDisk", 1) + `,`,
 		`ExtraEnvs:` + mapStringForExtraEnvs + `,`,
+		`Transport:` + strings.Replace(this.Transport.String(), "KVCacheBackendMemberTransport", "KVCacheBackendMemberTransport", 1) + `,`,
+		`DeviceResourceName:` + fmt.Sprintf("%v", this.DeviceResourceName) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -8934,6 +9000,16 @@ func (this *KVCacheBackendMemberStatus) String() string {
 		`State:` + fmt.Sprintf("%v", this.State) + `,`,
 		`SegmentID:` + fmt.Sprintf("%v", this.SegmentID) + `,`,
 		`ClientID:` + fmt.Sprintf("%v", this.ClientID) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *KVCacheBackendMemberTransport) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&KVCacheBackendMemberTransport{`,
+		`Protocol:` + fmt.Sprintf("%v", this.Protocol) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -20776,6 +20852,74 @@ func (m *KVCacheBackendMember) Unmarshal(dAtA []byte) error {
 			}
 			m.ExtraEnvs[mapkey] = mapvalue
 			iNdEx = postIndex
+		case 9:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Transport", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Transport == nil {
+				m.Transport = &KVCacheBackendMemberTransport{}
+			}
+			if err := m.Transport.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field DeviceResourceName", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.DeviceResourceName = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -21466,6 +21610,88 @@ func (m *KVCacheBackendMemberStatus) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.ClientID = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *KVCacheBackendMemberTransport) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: KVCacheBackendMemberTransport: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: KVCacheBackendMemberTransport: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Protocol", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Protocol = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

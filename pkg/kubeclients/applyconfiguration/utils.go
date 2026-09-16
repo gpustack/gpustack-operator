@@ -1398,6 +1398,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendMemberLocalDiskEvictionWatermarkApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendMemberStatus"):
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendMemberStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendMemberTransport"):
+		return &applyconfigurationworkerv1alpha1.KVCacheBackendMemberTransportApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendScaleIn"):
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendScaleInApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendSpec"):

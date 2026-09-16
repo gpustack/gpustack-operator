@@ -449,11 +449,14 @@ type KVCacheBackendMember struct {
 	// +required
 	NodeSelector map[string]string `json:"nodeSelector" protobuf:"bytes,1,rep,name=nodeSelector"`
 
-	// Medium is what the SEGMENT this member group mounts is made of. One value: host memory.
+	// Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or
+	// device memory (VRAM).
 	//
-	// It is an identity rather than a choice, which is why the field survives with a single value
-	// exactly as spec.type does: a second medium widens this enum instead of being inferred from a
-	// field that is not there.
+	// It is a choice rather than an identity: the renderer splits on it. A DRAM member charges
+	// CapacityPerMember against the Pod's host memory; a VRAM member charges it against the device
+	// deviceResourceName names instead, or falls back to a privileged host-network Pod when no
+	// resource is named. The field stays immutable — a segment already mounted cannot change kind
+	// underneath the data in it — so the choice is made when the group is declared.
 	//
 	//   - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and
 	//     each is reached elsewhere: the first through localDisk below, NVMe-oF as a target
@@ -466,7 +469,7 @@ type KVCacheBackendMember struct {
 	//     shipping release's job — confirm no leftover object exists, or write a recovery procedure.
 	//
 	// +required
-	// +k8s:validation:enum=["DRAM"]
+	// +k8s:validation:enum=["DRAM","VRAM"]
 	Medium string `json:"medium" protobuf:"bytes,2,name=medium"`
 
 	// CapacityPerMember sizes ONE member, not one node. It becomes the member's global segment size
@@ -527,9 +530,9 @@ type KVCacheBackendMember struct {
 	//
 	// A group's NodeSelector is what makes this necessary: two groups can select nodes of different
 	// accelerator vendors or generations, and the store's client ships as one wheel per vendor, each
-	// carrying the transports it was compiled with and the runtime it links. The transport itself is
-	// backend-wide, so this is NOT a per-group transport — it is the per-group runtime that one
-	// transport needs on differing hardware.
+	// carrying the transports it was compiled with and the runtime it links. The vendor runtime is
+	// also the medium's: a VRAM group needs a build with VRAM segments compiled in, which the stock
+	// CPU default is not.
 	//
 	// +k8s:validation:maxLength=512
 	Image string `json:"image,omitempty" protobuf:"bytes,6,opt,name=image"`
@@ -548,6 +551,51 @@ type KVCacheBackendMember struct {
 	//   - To check what the tier actually holds rather than what it declared, read the leader's own
 	//     master_allocated_file_size_bytes; status.capacity reports the declared CAPACITY only.
 	LocalDisk *KVCacheBackendMemberLocalDisk `json:"localDisk,omitempty" protobuf:"bytes,7,opt,name=localDisk"`
+
+	// Transport declares the data plane this group uses, overriding the backend's
+	// spec.transport.protocol for this group only. Left unset, the group inherits the backend's.
+	//
+	// The override exists for the one thing two media do not agree on: a VRAM group reaching its
+	// peers over a fabric while the DRAM group beside it stays on TCP. Everything else about the
+	// fabric — the device a host-fabric member asks for — stays backend-wide, since it describes
+	// the nodes' fabric rather than one group.
+	Transport *KVCacheBackendMemberTransport `json:"transport,omitempty" protobuf:"bytes,9,opt,name=transport"`
+
+	// DeviceResourceName is the extended resource a VRAM member asks one of, so the scheduler
+	// places it on a node that has the device and the device cgroup lets it open it. It is
+	// CONSULTED ONLY on a VRAM group, and refused on a DRAM one: a DRAM member has no device to
+	// charge, so the request would be accounted against a segment that is not there.
+	//
+	//   - When set, the renderer requests one of the named resource per member and mounts nothing
+	//     else; CapacityPerMember is charged against that resource and host memory carries
+	//     localBufferSize only.
+	//   - When UNSET on a VRAM group, the member renders privileged with host networking instead
+	//     of any device-resource request: the member then sees the node's devices and fabric
+	//     directly, which keeps RDMA and similar transports working on a cluster whose plugin
+	//     advertises no name to point at.
+	//   - It is DECLARED rather than derived, on the same rule as the backend transport's: the
+	//     name belongs to whichever plugin the cluster's administrator installed, so no name
+	//     hard-coded here would be right on two clusters.
+	//
+	// The bounds are the API server's own for a resource name, on the same rule as the backend
+	// transport's field: refused here rather than on the DaemonSet rendered from it.
+	//
+	// +k8s:validation:pattern="^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
+	// +k8s:validation:maxLength=317
+	DeviceResourceName string `json:"deviceResourceName,omitempty" protobuf:"bytes,10,opt,name=deviceResourceName"`
+}
+
+// KVCacheBackendMemberTransport is a member group's override of the backend's data plane. It
+// carries a protocol only: the device a host-fabric member asks for describes the nodes' fabric
+// rather than one group, so it stays on the backend.
+type KVCacheBackendMemberTransport struct {
+	// Protocol is the transport this group's members are ASKED to use, with the same values and
+	// the same Auto-resolves-to-TCP rule as the backend's spec.transport.protocol, which this
+	// field replaces for this group when set.
+	//
+	// +k8s:validation:default="Auto"
+	// +k8s:validation:enum=["Auto","TCP","RDMA","EFA","HIP","Ascend"]
+	Protocol string `json:"protocol,omitempty" protobuf:"bytes,1,opt,name=protocol"`
 }
 
 // KVCacheBackendMemberLocalDisk is the local SSD tier this member group's nodes contribute.

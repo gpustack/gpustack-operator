@@ -16,11 +16,14 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// node; widening the selector adds members and the leader admits their segments into
 	// subsequent allocation immediately, with no leader or member restart.
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
-	// Medium is what the SEGMENT this member group mounts is made of. One value: host memory.
+	// Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or
+	// device memory (VRAM).
 	//
-	// It is an identity rather than a choice, which is why the field survives with a single value
-	// exactly as spec.type does: a second medium widens this enum instead of being inferred from a
-	// field that is not there.
+	// It is a choice rather than an identity: the renderer splits on it. A DRAM member charges
+	// CapacityPerMember against the Pod's host memory; a VRAM member charges it against the device
+	// deviceResourceName names instead, or falls back to a privileged host-network Pod when no
+	// resource is named. The field stays immutable — a segment already mounted cannot change kind
+	// underneath the data in it — so the choice is made when the group is declared.
 	//
 	// - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and
 	// each is reached elsewhere: the first through localDisk below, NVMe-oF as a target
@@ -84,9 +87,9 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	//
 	// A group's NodeSelector is what makes this necessary: two groups can select nodes of different
 	// accelerator vendors or generations, and the store's client ships as one wheel per vendor, each
-	// carrying the transports it was compiled with and the runtime it links. The transport itself is
-	// backend-wide, so this is NOT a per-group transport — it is the per-group runtime that one
-	// transport needs on differing hardware.
+	// carrying the transports it was compiled with and the runtime it links. The vendor runtime is
+	// also the medium's: a VRAM group needs a build with VRAM segments compiled in, which the stock
+	// CPU default is not.
 	Image *string `json:"image,omitempty"`
 	// LocalDisk declares a directory on the nodes this group already selects and points the store
 	// client's offload keys at it. Left unset, the group is memory only.
@@ -102,6 +105,33 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// - To check what the tier actually holds rather than what it declared, read the leader's own
 	// master_allocated_file_size_bytes; status.capacity reports the declared CAPACITY only.
 	LocalDisk *KVCacheBackendMemberLocalDiskApplyConfiguration `json:"localDisk,omitempty"`
+	// Transport declares the data plane this group uses, overriding the backend's
+	// spec.transport.protocol for this group only. Left unset, the group inherits the backend's.
+	//
+	// The override exists for the one thing two media do not agree on: a VRAM group reaching its
+	// peers over a fabric while the DRAM group beside it stays on TCP. Everything else about the
+	// fabric — the device a host-fabric member asks for — stays backend-wide, since it describes
+	// the nodes' fabric rather than one group.
+	Transport *KVCacheBackendMemberTransportApplyConfiguration `json:"transport,omitempty"`
+	// DeviceResourceName is the extended resource a VRAM member asks one of, so the scheduler
+	// places it on a node that has the device and the device cgroup lets it open it. It is
+	// CONSULTED ONLY on a VRAM group, and refused on a DRAM one: a DRAM member has no device to
+	// charge, so the request would be accounted against a segment that is not there.
+	//
+	// - When set, the renderer requests one of the named resource per member and mounts nothing
+	// else; CapacityPerMember is charged against that resource and host memory carries
+	// localBufferSize only.
+	// - When UNSET on a VRAM group, the member renders privileged with host networking instead
+	// of any device-resource request: the member then sees the node's devices and fabric
+	// directly, which keeps RDMA and similar transports working on a cluster whose plugin
+	// advertises no name to point at.
+	// - It is DECLARED rather than derived, on the same rule as the backend transport's: the
+	// name belongs to whichever plugin the cluster's administrator installed, so no name
+	// hard-coded here would be right on two clusters.
+	//
+	// The bounds are the API server's own for a resource name, on the same rule as the backend
+	// transport's field: refused here rather than on the DaemonSet rendered from it.
+	DeviceResourceName *string `json:"deviceResourceName,omitempty"`
 }
 
 // KVCacheBackendMemberApplyConfiguration constructs a declarative configuration of the KVCacheBackendMember type for use with
@@ -189,5 +219,21 @@ func (b *KVCacheBackendMemberApplyConfiguration) WithImage(value string) *KVCach
 // If called multiple times, the LocalDisk field is set to the value of the last call.
 func (b *KVCacheBackendMemberApplyConfiguration) WithLocalDisk(value *KVCacheBackendMemberLocalDiskApplyConfiguration) *KVCacheBackendMemberApplyConfiguration {
 	b.LocalDisk = value
+	return b
+}
+
+// WithTransport sets the Transport field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Transport field is set to the value of the last call.
+func (b *KVCacheBackendMemberApplyConfiguration) WithTransport(value *KVCacheBackendMemberTransportApplyConfiguration) *KVCacheBackendMemberApplyConfiguration {
+	b.Transport = value
+	return b
+}
+
+// WithDeviceResourceName sets the DeviceResourceName field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the DeviceResourceName field is set to the value of the last call.
+func (b *KVCacheBackendMemberApplyConfiguration) WithDeviceResourceName(value string) *KVCacheBackendMemberApplyConfiguration {
+	b.DeviceResourceName = &value
 	return b
 }

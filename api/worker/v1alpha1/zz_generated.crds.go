@@ -2473,6 +2473,12 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																			},
 																			XIntOrString: true,
 																		},
+																		"deviceResourceName": {
+																			Description: "DeviceResourceName is the extended resource a VRAM member asks one of, so the scheduler\nplaces it on a node that has the device and the device cgroup lets it open it. It is\nCONSULTED ONLY on a VRAM group, and refused on a DRAM one: a DRAM member has no device to\ncharge, so the request would be accounted against a segment that is not there.\n- When set, the renderer requests one of the named resource per member and mounts nothing\nelse; CapacityPerMember is charged against that resource and host memory carries\nlocalBufferSize only.\n- When UNSET on a VRAM group, the member renders privileged with host networking instead\nof any device-resource request: the member then sees the node's devices and fabric\ndirectly, which keeps RDMA and similar transports working on a cluster whose plugin\nadvertises no name to point at.\n- It is DECLARED rather than derived, on the same rule as the backend transport's: the\nname belongs to whichever plugin the cluster's administrator installed, so no name\nhard-coded here would be right on two clusters.\nThe bounds are the API server's own for a resource name, on the same rule as the backend\ntransport's field: refused here rather than on the DaemonSet rendered from it.",
+																			Type:        "string",
+																			MaxLength:   ptr.To[int64](317),
+																			Pattern:     `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$`,
+																		},
 																		"extraArgs": {
 																			Description: "ExtraArgs passes config keys this API does not enumerate straight through to the member. It\nis keyed by CONFIG KEY rather than by environment-variable name — one namespace per side,\neach the one its own binary documents. A key that collides with one derived from a field\nabove is refused at admission.\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then\nrendered into the member container's argv as -D key=value, readable by anyone who can reach\nthe Pod or the DaemonSet, for the life of the object. A credential does not belong here, and\nsince this operator renders no flag that carries one, this field is the only way one arrives.",
 																			Type:        "object",
@@ -2496,7 +2502,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																			Nullable: true,
 																		},
 																		"image": {
-																			Description: "Image overrides the backend's Image for this member group only. Left unset, the group runs\nthe backend's Image.\nA group's NodeSelector is what makes this necessary: two groups can select nodes of different\naccelerator vendors or generations, and the store's client ships as one wheel per vendor, each\ncarrying the transports it was compiled with and the runtime it links. The transport itself is\nbackend-wide, so this is NOT a per-group transport — it is the per-group runtime that one\ntransport needs on differing hardware.",
+																			Description: "Image overrides the backend's Image for this member group only. Left unset, the group runs\nthe backend's Image.\nA group's NodeSelector is what makes this necessary: two groups can select nodes of different\naccelerator vendors or generations, and the store's client ships as one wheel per vendor, each\ncarrying the transports it was compiled with and the runtime it links. The vendor runtime is\nalso the medium's: a VRAM group needs a build with VRAM segments compiled in, which the stock\nCPU default is not.",
 																			Type:        "string",
 																			MaxLength:   ptr.To[int64](512),
 																		},
@@ -2604,11 +2610,14 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																			Nullable: true,
 																		},
 																		"medium": {
-																			Description: "Medium is what the SEGMENT this member group mounts is made of. One value: host memory.\nIt is an identity rather than a choice, which is why the field survives with a single value\nexactly as spec.type does: a second medium widens this enum instead of being inferred from a\nfield that is not there.\n- A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and\neach is reached elsewhere: the first through localDisk below, NVMe-oF as a target\ncoordinate with no Pod, and the last two on the leader's own process.\n- Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one\nof those values, while this CRD was installed but the webhook was not, becomes undeletable:\nschema validation runs on the write path only, so it reads back fine while every update is\nrefused, the controller's finalizer removal included. The exposure is development clusters\nonly, this type being absent from every tag through v0.8.6, so clearing it is the first\nshipping release's job — confirm no leftover object exists, or write a recovery procedure.",
+																			Description: "Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or\ndevice memory (VRAM).\nIt is a choice rather than an identity: the renderer splits on it. A DRAM member charges\nCapacityPerMember against the Pod's host memory; a VRAM member charges it against the device\ndeviceResourceName names instead, or falls back to a privileged host-network Pod when no\nresource is named. The field stays immutable — a segment already mounted cannot change kind\nunderneath the data in it — so the choice is made when the group is declared.\n- A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and\neach is reached elsewhere: the first through localDisk below, NVMe-oF as a target\ncoordinate with no Pod, and the last two on the leader's own process.\n- Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one\nof those values, while this CRD was installed but the webhook was not, becomes undeletable:\nschema validation runs on the write path only, so it reads back fine while every update is\nrefused, the controller's finalizer removal included. The exposure is development clusters\nonly, this type being absent from every tag through v0.8.6, so clearing it is the first\nshipping release's job — confirm no leftover object exists, or write a recovery procedure.",
 																			Type:        "string",
 																			Enum: []v1.JSON{
 																				{
 																					Raw: []byte(`"DRAM"`),
+																				},
+																				{
+																					Raw: []byte(`"VRAM"`),
 																				},
 																			},
 																		},
@@ -2619,6 +2628,40 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																				Allows: true,
 																				Schema: &v1.JSONSchemaProps{
 																					Type: "string",
+																				},
+																			},
+																			Nullable: true,
+																		},
+																		"transport": {
+																			Description: "Transport declares the data plane this group uses, overriding the backend's\nspec.transport.protocol for this group only. Left unset, the group inherits the backend's.\nThe override exists for the one thing two media do not agree on: a VRAM group reaching its\npeers over a fabric while the DRAM group beside it stays on TCP. Everything else about the\nfabric — the device a host-fabric member asks for — stays backend-wide, since it describes\nthe nodes' fabric rather than one group.",
+																			Type:        "object",
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"protocol": {
+																					Description: "Protocol is the transport this group's members are ASKED to use, with the same values and\nthe same Auto-resolves-to-TCP rule as the backend's spec.transport.protocol, which this\nfield replaces for this group when set.",
+																					Type:        "string",
+																					Default: &v1.JSON{
+																						Raw: []byte(`"Auto"`),
+																					},
+																					Enum: []v1.JSON{
+																						{
+																							Raw: []byte(`"Auto"`),
+																						},
+																						{
+																							Raw: []byte(`"TCP"`),
+																						},
+																						{
+																							Raw: []byte(`"RDMA"`),
+																						},
+																						{
+																							Raw: []byte(`"EFA"`),
+																						},
+																						{
+																							Raw: []byte(`"HIP"`),
+																						},
+																						{
+																							Raw: []byte(`"Ascend"`),
+																						},
+																					},
 																				},
 																			},
 																			Nullable: true,

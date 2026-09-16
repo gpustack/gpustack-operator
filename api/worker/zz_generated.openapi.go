@@ -117,6 +117,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.KVCacheBackendMemberLocalDiskEviction{}.OpenAPIModelName():          schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberLocalDiskEviction(ref),
 		v1alpha1.KVCacheBackendMemberLocalDiskEvictionWatermark{}.OpenAPIModelName(): schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberLocalDiskEvictionWatermark(ref),
 		v1alpha1.KVCacheBackendMemberStatus{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberStatus(ref),
+		v1alpha1.KVCacheBackendMemberTransport{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberTransport(ref),
 		v1alpha1.KVCacheBackendScaleIn{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_KVCacheBackendScaleIn(ref),
 		v1alpha1.KVCacheBackendSpec{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_KVCacheBackendSpec(ref),
 		v1alpha1.KVCacheBackendStatus{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_KVCacheBackendStatus(ref),
@@ -5597,7 +5598,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 					},
 					"medium": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Medium is what the SEGMENT this member group mounts is made of. One value: host memory.\n\nIt is an identity rather than a choice, which is why the field survives with a single value exactly as spec.type does: a second medium widens this enum instead of being inferred from a field that is not there.\n\n  - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and\n    each is reached elsewhere: the first through localDisk below, NVMe-oF as a target\n    coordinate with no Pod, and the last two on the leader's own process.\n  - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one\n    of those values, while this CRD was installed but the webhook was not, becomes undeletable:\n    schema validation runs on the write path only, so it reads back fine while every update is\n    refused, the controller's finalizer removal included. The exposure is development clusters\n    only, this type being absent from every tag through v0.8.6, so clearing it is the first\n    shipping release's job — confirm no leftover object exists, or write a recovery procedure.",
+							Description: "Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or device memory (VRAM).\n\nIt is a choice rather than an identity: the renderer splits on it. A DRAM member charges CapacityPerMember against the Pod's host memory; a VRAM member charges it against the device deviceResourceName names instead, or falls back to a privileged host-network Pod when no resource is named. The field stays immutable — a segment already mounted cannot change kind underneath the data in it — so the choice is made when the group is declared.\n\n  - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and\n    each is reached elsewhere: the first through localDisk below, NVMe-oF as a target\n    coordinate with no Pod, and the last two on the leader's own process.\n  - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one\n    of those values, while this CRD was installed but the webhook was not, becomes undeletable:\n    schema validation runs on the write path only, so it reads back fine while every update is\n    refused, the controller's finalizer removal included. The exposure is development clusters\n    only, this type being absent from every tag through v0.8.6, so clearing it is the first\n    shipping release's job — confirm no leftover object exists, or write a recovery procedure.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -5649,7 +5650,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 					},
 					"image": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Image overrides the backend's Image for this member group only. Left unset, the group runs the backend's Image.\n\nA group's NodeSelector is what makes this necessary: two groups can select nodes of different accelerator vendors or generations, and the store's client ships as one wheel per vendor, each carrying the transports it was compiled with and the runtime it links. The transport itself is backend-wide, so this is NOT a per-group transport — it is the per-group runtime that one transport needs on differing hardware.",
+							Description: "Image overrides the backend's Image for this member group only. Left unset, the group runs the backend's Image.\n\nA group's NodeSelector is what makes this necessary: two groups can select nodes of different accelerator vendors or generations, and the store's client ships as one wheel per vendor, each carrying the transports it was compiled with and the runtime it links. The vendor runtime is also the medium's: a VRAM group needs a build with VRAM segments compiled in, which the stock CPU default is not.",
 							MaxLength:   ptr.To[int64](512),
 							Type:        []string{"string"},
 							Format:      "",
@@ -5661,12 +5662,27 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 							Ref:         ref(v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName()),
 						},
 					},
+					"transport": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Transport declares the data plane this group uses, overriding the backend's spec.transport.protocol for this group only. Left unset, the group inherits the backend's.\n\nThe override exists for the one thing two media do not agree on: a VRAM group reaching its peers over a fabric while the DRAM group beside it stays on TCP. Everything else about the fabric — the device a host-fabric member asks for — stays backend-wide, since it describes the nodes' fabric rather than one group.",
+							Ref:         ref(v1alpha1.KVCacheBackendMemberTransport{}.OpenAPIModelName()),
+						},
+					},
+					"deviceResourceName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DeviceResourceName is the extended resource a VRAM member asks one of, so the scheduler places it on a node that has the device and the device cgroup lets it open it. It is CONSULTED ONLY on a VRAM group, and refused on a DRAM one: a DRAM member has no device to charge, so the request would be accounted against a segment that is not there.\n\n  - When set, the renderer requests one of the named resource per member and mounts nothing\n    else; CapacityPerMember is charged against that resource and host memory carries\n    localBufferSize only.\n  - When UNSET on a VRAM group, the member renders privileged with host networking instead\n    of any device-resource request: the member then sees the node's devices and fabric\n    directly, which keeps RDMA and similar transports working on a cluster whose plugin\n    advertises no name to point at.\n  - It is DECLARED rather than derived, on the same rule as the backend transport's: the\n    name belongs to whichever plugin the cluster's administrator installed, so no name\n    hard-coded here would be right on two clusters.\n\nThe bounds are the API server's own for a resource name, on the same rule as the backend transport's field: refused here rather than on the DaemonSet rendered from it.",
+							MaxLength:   ptr.To[int64](317),
+							Pattern:     "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 				Required: []string{"nodeSelector", "medium", "capacityPerMember"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+			v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName(), v1alpha1.KVCacheBackendMemberTransport{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
 	}
 }
 
@@ -5852,6 +5868,26 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberStatus(ref common.R
 					},
 				},
 				Required: []string{"segmentID", "clientID", "segmentName"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberTransport(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCacheBackendMemberTransport is a member group's override of the backend's data plane. It carries a protocol only: the device a host-fabric member asks for describes the nodes' fabric rather than one group, so it stays on the backend.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"protocol": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Protocol is the transport this group's members are ASKED to use, with the same values and the same Auto-resolves-to-TCP rule as the backend's spec.transport.protocol, which this field replaces for this group when set.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
 			},
 		},
 	}

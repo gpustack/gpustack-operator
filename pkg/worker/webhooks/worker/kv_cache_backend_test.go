@@ -259,6 +259,31 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 				})
 		}, ""},
 
+		// The medium and the group transport are choices now, and each refusal below keeps its
+		// accepted half beside it: a rule that refused every device resource, or every VRAM group,
+		// would satisfy the refusal on its own.
+		{"a VRAM group naming its device and its transport", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members = append(k.Spec.Connection.Managed.Members,
+				workercore.KVCacheBackendMember{
+					NodeSelector:       map[string]string{"kvcache-vram": "true"},
+					Medium:             "VRAM",
+					CapacityPerMember:  resource.MustParse("80Gi"),
+					DeviceResourceName: "nvidia.com/gpu",
+					Transport:          &workercore.KVCacheBackendMemberTransport{Protocol: "RDMA"},
+				})
+		}, ""},
+		{"a VRAM group naming neither", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members = append(k.Spec.Connection.Managed.Members,
+				workercore.KVCacheBackendMember{
+					NodeSelector:      map[string]string{"kvcache-vram": "true"},
+					Medium:            "VRAM",
+					CapacityPerMember: resource.MustParse("80Gi"),
+				})
+		}, ""},
+		{"a DRAM group naming a device", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].DeviceResourceName = "nvidia.com/gpu"
+		}, "must not be set on a DRAM group"},
+
 		// There is deliberately NO case here for a medium outside the enum. The schema carries one
 		// value, so LocalDisk, NoF, CXL and DFS are refused in rest.BeforeCreate and never reach
 		// this handler — the four cases that used to live here asserted a rule that no request can
@@ -1097,13 +1122,11 @@ func TestKVCacheBackendWebhook_ValidateUpdate(t *testing.T) {
 		{"branch switched to external", func(k *workercore.KVCacheBackend) {
 			k.Spec = newExternalKVCacheBackendSpec()
 		}, "connection branch is immutable"},
-		// The schema enumerates one medium, so this rule cannot fire against any object an API
-		// server would accept today, and the value below is deliberately not a medium name that
-		// ever existed — a real-looking one would read as though the enum still carried it. The
-		// rule and this case are both kept for the day the enum widens, when a medium would
-		// otherwise become quietly mutable under segments already mounted from it.
+		// Live since the enum carries two values: the value below is a real medium the schema
+		// admits, so this is the edit the rule exists to refuse — a segment already mounted
+		// cannot change kind underneath the data in it.
 		{"member medium changed", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Members[0].Medium = "SomeFutureMedium"
+			k.Spec.Connection.Managed.Members[0].Medium = "VRAM"
 		}, "medium is immutable"},
 
 		// The disk tier is frozen in whether it exists and where it lives, because both strand
@@ -1134,6 +1157,9 @@ func TestKVCacheBackendWebhook_ValidateUpdate(t *testing.T) {
 		}, ""},
 		{"transport protocol changed", func(k *workercore.KVCacheBackend) {
 			k.Spec.Transport.Protocol = "RDMA"
+		}, ""},
+		{"member transport set", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "TCP"}
 		}, ""},
 	}, func(wh *KVCacheBackendWebhook, oldKvcb, newKvcb *workercore.KVCacheBackend) error {
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
