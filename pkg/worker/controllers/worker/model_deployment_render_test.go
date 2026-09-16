@@ -229,6 +229,67 @@ func TestRenderModelDeploymentPod_DecodeUsesClassicSidecarBelowTheFloor(t *testi
 	assert.Equal(t, int32(8000), main.LivenessProbe.HTTPGet.Port.IntVal)
 }
 
+// TestRenderModelDeploymentPod_ProbeRouteFollowsTheServingShape asserts what route the three gates
+// read in each shape, with LITERAL paths on both sides: comparing against the constants would hold
+// however either of them drifted, which is exactly the drift the direct-decode shape introduced --
+// the shared route stayed in place while the port underneath it changed owners.
+func TestRenderModelDeploymentPod_ProbeRouteFollowsTheServingShape(t *testing.T) {
+	t.Run("engine-only keeps the shared route", func(t *testing.T) {
+		md := newRenderDeployment()
+
+		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+			Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+		})
+		require.NoError(t, err)
+
+		c := pod.Spec.Containers[0]
+		for name, p := range map[string]*core.Probe{
+			"startup": c.StartupProbe, "readiness": c.ReadinessProbe, "liveness": c.LivenessProbe,
+		} {
+			require.NotNil(t, p, "%s gate", name)
+			require.NotNil(t, p.HTTPGet, "%s gate must read the engine's route, not accept a socket", name)
+			assert.Equal(t, "/health", p.HTTPGet.Path,
+				"%s gate keeps the route whose refusal grades the engine on this shape", name)
+			assert.Equal(t, modelDeploymentDefaultPort, p.HTTPGet.Port.IntVal, "%s gate port", name)
+		}
+	})
+
+	t.Run("direct decode reads the route the sidecar forwards to the engine", func(t *testing.T) {
+		// THE DEFECT THIS CASE GUARDS: the sidecar owns the service port and answers /health itself,
+		// in every state, so a gate on that route grades the sidecar and reports Ready for the whole
+		// model load. /v1/models is the route the sidecar forwards, and the forward fails until the
+		// engine serves -- which is what makes the gate below an engine gate again.
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+			md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+			md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{{
+				Name: "http", Protocol: core.ProtocolTCP, Port: 8000,
+			}}
+		})
+
+		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+			Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+			Connector: ModelDeploymentConnectorRender{
+				Args: []string{"--kv-transfer-config", `{}`}, DirectTransfer: true,
+			},
+			NativeSidecar: true,
+		})
+		require.NoError(t, err)
+
+		c := pod.Spec.Containers[0]
+		for name, p := range map[string]*core.Probe{
+			"startup": c.StartupProbe, "readiness": c.ReadinessProbe, "liveness": c.LivenessProbe,
+		} {
+			require.NotNil(t, p, "%s gate", name)
+			require.NotNil(t, p.HTTPGet, "%s gate must read the engine's route, not accept a socket", name)
+			assert.Equal(t, "/v1/models", p.HTTPGet.Path,
+				"%s gate reads the route whose answer turns on the engine, not the one the sidecar answers itself", name)
+			assert.Equal(t, int32(8000), p.HTTPGet.Port.IntVal,
+				"%s gate still grades the address the Service fronts -- the sidecar's port, not the engine's", name)
+		}
+	})
+}
+
 // TestRenderModelDeploymentPod_EntranceLabelIsNotInTheSelector states why the two label sets are
 // different. The selector is what a Service is created with and cannot change; the entrance label
 // follows the role's InstanceType, which a spec update can move. A selector carrying it would
