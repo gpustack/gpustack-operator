@@ -974,6 +974,20 @@ RUN <<EOF
             /work/mooncake-transfer-engine/example/CMakeLists.txt
         grep -q 'target_link_libraries(transfer_engine_bench PUBLIC ascendcl transfer_engine)' \
             /work/mooncake-transfer-engine/example/CMakeLists.txt
+
+        # v0.3.13's ascend_allocator.cpp calls ContextManager, but the ubshmem source glob leaves
+        # ascend_direct_transport/context_manager.cpp out of the shared library, so importing the
+        # wheel dies on undefined ContextManager symbols. Add the file to the glob; older releases
+        # never reference ContextManager from the ubshmem sources and build untouched. The grep
+        # proves the patch landed rather than rotting silently.
+        case "${MOONCAKE_VERSION}" in
+            0.3.13*)
+                sed -i 's|file(GLOB ASCEND_SOURCES "ubshmem_transport/\*\.cpp" "\*\.cpp")|file(GLOB ASCEND_SOURCES "ubshmem_transport/*.cpp" "ascend_direct_transport/context_manager.cpp" "*.cpp")|' \
+                    /work/mooncake-transfer-engine/src/transport/ascend_transport/CMakeLists.txt
+                grep -q 'ascend_direct_transport/context_manager\.cpp' \
+                    /work/mooncake-transfer-engine/src/transport/ascend_transport/CMakeLists.txt
+                ;;
+        esac
     fi
 
     cmake -S /work -B /work/build -G Ninja \
