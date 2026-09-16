@@ -104,8 +104,8 @@ ARG RUNTIME_IMAGE="python:3.12-slim-bookworm"
 #     target for amd64 alone.
 ARG CUDA_BUILDER_IMAGE="nvidia/cuda:13.0.3-devel-ubuntu22.04"
 ARG CUDA_RUNTIME_IMAGE="nvidia/cuda:13.0.3-runtime-ubuntu22.04"
-ARG CANN_BUILDER_IMAGE="quay.io/ascend/cann:9.1.0-910b-ubuntu22.04-py3.12-devel"
-ARG CANN_RUNTIME_IMAGE="quay.io/ascend/cann:9.1.0-910b-ubuntu22.04-py3.12"
+ARG CANN_BUILDER_IMAGE="quay.io/ascend/cann:9.1.1-910b-ubuntu22.04-py3.12-devel"
+ARG CANN_RUNTIME_IMAGE="quay.io/ascend/cann:9.1.1-910b-ubuntu22.04-py3.12"
 ARG ROCM_BUILDER_IMAGE="rocm/dev-ubuntu-22.04:7.2.3-complete"
 ARG ROCM_RUNTIME_IMAGE="rocm/dev-ubuntu-22.04:7.2.3"
 
@@ -1083,8 +1083,18 @@ EOF
 # never loads it. ldd is the build-time proof that its DT_NEEDEDs -- libascendcl,
 # libllm_datadist, libmetadef and the rest of the CANN toolkit set -- resolve against this
 # stage.
+#
+# The devlib export stands in for the driver. The wheel's engine links libascend_hal.so
+# directly, and the CANN base keeps the toolkit's devlib -- the driver libraries' in-image
+# home -- off LD_LIBRARY_PATH: a real node resolves the name from the driver mount the Ascend
+# container runtime adds under /usr/local/Ascend/driver, already on the path ahead of this
+# append. The smoke runs driverless, so it borrows the toolkit's own copy, the same handling
+# runner's cann pack gives its mooncake build. Appended last, it only ever fills what a
+# mounted driver left unresolved.
 RUN <<EOF
     set -exo pipefail
+
+    export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${ASCEND_HOME_PATH}/$(uname -m)-linux/devlib"
 
     command -v mooncake_master
     command -v mc_store_rest_server
