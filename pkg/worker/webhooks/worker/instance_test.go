@@ -71,6 +71,9 @@ var partitionedDetail = workercore.InstanceTypeDetail{
 // partitionedInstanceType builds an all-partitioned pool: every card is in a partitioning mode,
 // so the exclusive / shared / logical-slice views report a zero capacity (they are computed from
 // unpartitioned cards only) while the partition view reports the instances the pool can host.
+// The Detail is deep-copied: it carries the Profiles slice, and a shallow copy would share its
+// backing array with the package-level fixture, so a test mutating a profile entry (making a
+// profile unsizeable, say) would poison every InstanceType built afterwards in this binary.
 func partitionedInstanceType(name string) *worker.InstanceType {
 	return &worker.InstanceType{
 		ObjectMeta: meta.ObjectMeta{Name: name},
@@ -79,7 +82,7 @@ func partitionedInstanceType(name string) *worker.InstanceType {
 			UnitResources: workercore.InstanceTypeUnitResources{CPU: "16", RAM: "40Gi"},
 		},
 		Status: workercore.InstanceTypeStatus{
-			Detail: partitionedDetail,
+			Detail: *partitionedDetail.DeepCopy(),
 			AcceleratorPartitioned: workercore.InstanceTypePartitionedResource{
 				InstanceTypeResource: workercore.InstanceTypeResource{
 					OnceMaxRequest: resource.MustParse("2"), Capacity: resource.MustParse("4"),
