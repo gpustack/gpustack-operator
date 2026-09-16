@@ -278,6 +278,31 @@ which the shape is refused instead.
 refuses a second resource group repeating a covered resource within one queue. With a queue per role
 there is no second group to repeat anything.
 
+**Two roles on different manufacturers cannot share KV through their pool.** The deployment is
+admitted and both halves serve; what fails is the sharing, and it fails silently — reads from the
+shared store miss, and nothing on the deployment reports it. Three independent reasons stand
+between the halves:
+
+- **This operator's own refusal is the one an administrator meets.** On a pool left at its default
+  transport, the renderer [refuses the vLLM-Ascend
+  half](kv-cache-injection.md#vllm-ascend-requires-the-ascend-transport) — the rule and its
+  remediation are stated there. The check is one-sided — it fires for a single-manufacturer Ascend
+  deployment just the same — and it is the only one of the three that produces a message;
+  following its remediation clears only this refusal; the next two apply regardless.
+- **Two upstream walls then apply, measured at vLLM `v0.25.1` and vLLM-Ascend `v0.23.0` — a
+  description of that pair of releases, not a permanent property of either project.** The operator
+  renders no key that lets the Ascend half load from the shared store, and the two engines address
+  it with incompatible keys, so every lookup misses and no error is raised.
+
+This limit governs the shared pool alone: [a pair needs no shared pool to hand blocks
+over](#prefill-and-decode).
+
+**The direct transfer across manufacturers follows a different rule — not "two manufacturers",
+but "is either half Ascend".** It is rendered per role, and the render excludes Ascend
+(`modelDeploymentUsesDirectTransfer`): an Ascend half renders without it while the other half
+renders with it, and the transfer never forms. Two non-Ascend roles both render it — NVIDIA and
+AMD, say — and what the engines then do is upstream's answer, unmeasured here.
+
 [Kueue assigns a ResourceFlavor per
 PodSet](../architecture/scheduling-chain.md#stage-4-the-kueue-chain), so a role still takes whatever
 its own pool assigns; what selects the hardware is the `instanceType` the role names.
