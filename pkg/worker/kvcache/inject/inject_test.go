@@ -7,8 +7,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
+
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 )
 
 // envNames returns the names of a rendered environment, in order.
@@ -355,6 +360,67 @@ func TestRender_VLLMDirectTransferWithoutStore(t *testing.T) {
 	assert.Empty(t, result.VolumeMounts)
 	assert.Empty(t, result.PodAnnotations)
 	assert.Contains(t, envNames(result.Env), "VLLM_MOONCAKE_BOOTSTRAP_PORT")
+}
+
+// TestRender_DirectTransferProtocolIsNotTheMembers pins the split between the two data planes one
+// backend feeds. The STORE plane keeps following the backend's transport; the direct
+// prefill-to-decode leg does not read it, because it is engine to engine and never traverses the
+// store. All three assertions ride on ONE backend, because the change being pinned is that one
+// value's consumers came apart: an edit that switched BOTH legs to tcp -- or both to the members'
+// transport -- would pass an assertion on either leg alone.
+func TestRender_DirectTransferProtocolIsNotTheMembers(t *testing.T) {
+	backend := &workercore.KVCacheBackend{
+		ObjectMeta: meta.ObjectMeta{Name: "mooncake-dram"},
+		Spec: workercore.KVCacheBackendSpec{
+			Transport: workercore.KVCacheBackendTransport{Protocol: "RDMA"},
+			Connection: workercore.KVCacheBackendConnection{
+				Managed: &workercore.KVCacheBackendManaged{
+					Members: []workercore.KVCacheBackendMember{{
+						NodeSelector:      map[string]string{"kvcache-dram": "true"},
+						Medium:            "DRAM",
+						CapacityPerMember: resource.MustParse("500Gi"),
+						LocalBufferSize:   resource.MustParse("4Gi"),
+					}},
+				},
+			},
+		},
+	}
+	conn := testConnection()
+	conn.Protocol = mooncake.MemberProtocol(backend)
+	require.Equal(t, "rdma", conn.Protocol,
+		"the fixture is the case under test: a backend whose members run a fabric transport")
+
+	// The member side MUST NOT move: the same backend's DaemonSet still runs the transport its
+	// members were given, with the host access that transport takes.
+	member := mooncake.RenderMemberDaemonSet(backend, 0, "mooncake:test")
+	require.Len(t, member.Spec.Template.Spec.Containers, 1)
+	assert.Equal(t, "rdma",
+		envValue(t, member.Spec.Template.Spec.Containers[0].Env, "MOONCAKE_PROTOCOL").Value)
+	assert.True(t, member.Spec.Template.Spec.HostNetwork)
+
+	// The direct leg came apart: handed that same backend's transport, it renders its own
+	// declaration rather than inheriting a fabric this operator gives engine Pods no access to.
+	result, err := Render(Input{
+		Engine: EngineVLLM, Role: RolePrefill, Connection: conn, DirectTransfer: true,
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Args, 2)
+	assert.Equal(t, vllmTransferConfigArg, result.Args[0])
+	assert.JSONEq(t, `{
+		"kv_connector":"MultiConnector",
+		"kv_role":"kv_producer",
+		"kv_connector_extra_config":{"connectors":[
+			{"kv_connector":"MooncakeConnector","kv_role":"kv_producer",
+			 "kv_connector_extra_config":{"mooncake_protocol":"tcp"}},
+			{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_both"}
+		]}
+	}`, result.Args[1])
+
+	// The STORE plane of the very same render still follows the backend: only the direct leg
+	// moved, so the engine reaches its pool over the transport the pool runs.
+	assert.Equal(t, "rdma", renderedConfig(t, Input{
+		Engine: EngineVLLM, Role: RolePrefill, Connection: conn, DirectTransfer: true,
+	})["protocol"])
 }
 
 // TestRender_Refusals covers every case where rendering anything would produce a container that starts
