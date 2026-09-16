@@ -555,20 +555,8 @@ func (r *InstanceReconciler) convertPodFromInstance(
 	if needSSHD {
 		// SSHD container.
 		sshdC := core.Container{
-			Name: "sshd",
-			Image: func() string {
-				img := settings.InstanceSSHServerImage.ShouldValue(ctx)
-				if cn := settings.ContainerNamespace.ShouldValue(ctx); cn != "" {
-					_, suffix, found := strings.Cut(img, "/")
-					if found {
-						img = cn + "/" + suffix
-					}
-				}
-				if rn := settings.ContainerRegistry.ShouldValue(ctx); rn != "" {
-					img = rn + "/" + img
-				}
-				return img
-			}(),
+			Name:            "sshd",
+			Image:           redirectedImage(ctx, settings.InstanceSSHServerImage.ShouldValue(ctx)),
 			ImagePullPolicy: inst.Spec.ImagePullPolicy,
 			Stdin:           true,
 			TTY:             true,

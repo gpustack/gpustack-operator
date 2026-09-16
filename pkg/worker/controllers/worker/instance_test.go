@@ -23,6 +23,8 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/kubemetrics"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/setting"
+	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 )
 
@@ -823,6 +825,84 @@ func TestConvertPodFromInstance_SlicedSSHColocatesAcceleratorOnMain(t *testing.T
 	visQ, sshdHasVis := sshd.Resources.Limits[visRes]
 	assert.True(t, sshdHasVis, "sshd must carry the device-only visibility resource")
 	assert.Equal(t, "1", visQ.String(), "sidecar visibility quantity equals main's card count")
+}
+
+// TestConvertPodFromInstance_SSHDImageRedirectionKeepsARegistryHost asserts the sshd sidecar's
+// image redirection leaves a configured registry host alone: the image settings are
+// user-controlled, and a value already carrying a registry must not have its first segment
+// replaced by the pull namespace -- that silently resolves to a different image. The control
+// case carries no host, so the namespace replacement still happens there; without it "the guard
+// holds" and "the rewrite is off" are the same green.
+func TestConvertPodFromInstance_SSHDImageRedirectionKeepsARegistryHost(t *testing.T) {
+	// The package's TestMain owns the loopback client (first-write-wins), so the settings Secret
+	// goes through it rather than through a private fake. The cleanup removes it again: left
+	// behind, every later image assertion in the package would read the mirror namespace.
+	settingsSecret := &core.Secret{
+		ObjectMeta: meta.ObjectMeta{
+			Name:      setting.DelegatedSecretName,
+			Namespace: setting.DelegatedSecretNamespace,
+		},
+		Data: map[string][]byte{"container-namespace": []byte("mirror")},
+	}
+	loopback := system.LoopbackCtrlClient.Get()
+	require.NoError(t, loopback.Create(context.Background(), settingsSecret))
+	setting.InvalidateCache()
+	t.Cleanup(func() {
+		_ = loopback.Delete(context.Background(), settingsSecret)
+		setting.InvalidateCache()
+	})
+
+	cli := buildInstanceClient()
+	r := &InstanceReconciler{Client: cli, APIReader: cli}
+	acc := qty("1")
+	inst := &workercore.Instance{
+		ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "inst"},
+		Spec: workercore.InstanceSpec{
+			Type: "gpu-type",
+			InstanceTemplate: workercore.InstanceTemplate{
+				Image: "vllm/vllm-openai:latest",
+				Resources: &workercore.InstanceResources{
+					CPU:          qty("4"),
+					RAM:          qty("16Gi"),
+					LocalStorage: qty("32Gi"),
+					Accelerator:  &acc,
+				},
+			},
+			SSHPublicKey: &core.LocalObjectReference{Name: "inst-ssh-key"},
+			Volume: workercore.InstanceVolume{
+				Ephemeral: &workercore.InstanceEphemeralVolume{Capacity: qty("10Gi")},
+			},
+		},
+	}
+	instType := &worker.InstanceType{
+		Spec:   workercore.InstanceTypeSpec{Acceleratable: true},
+		Status: workercore.InstanceTypeStatus{Detail: slicedDetail(nodefeature.ManufacturerNVIDIA, true)},
+	}
+
+	for _, tc := range []struct {
+		name, image, want string
+	}{
+		{
+			name:  "an image carrying a registry host is left alone",
+			image: "registry.example.com/team/ssh-server:v1",
+			want:  "registry.example.com/team/ssh-server:v1",
+		},
+		{
+			name:  "an image without one gets the pull namespace",
+			image: "library/ssh-server:v1",
+			want:  "mirror/ssh-server:v1",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			settingsSecret.Data["instance-ssh-server-image"] = []byte(tc.image)
+			require.NoError(t, loopback.Update(context.Background(), settingsSecret))
+			setting.InvalidateCache()
+
+			pod := r.convertPodFromInstance(context.Background(), inst, instType)
+			require.Len(t, pod.Spec.Containers, 2, "SSH-enabled Instance renders main + sshd")
+			assert.Equal(t, tc.want, pod.Spec.Containers[1].Image, "sshd image")
+		})
+	}
 }
 
 // TestConvertPodFromInstance_ContainerLimitsCarryTheDeclaredResources pins the denominator the

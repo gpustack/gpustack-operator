@@ -152,7 +152,7 @@ func renderModelDeploymentRouterObjects(
 	// default this operator picked is redirected to the cluster's mirror.
 	image := md.Spec.Router.Image
 	if image == "" {
-		image = modelDeploymentRedirectedImage(ctx,
+		image = redirectedImage(ctx,
 			settings.ModelDeploymentRouterImage.ShouldValue(ctx))
 	}
 	replicas := int32(1)
@@ -182,7 +182,7 @@ func renderModelDeploymentRouterObjects(
 					ServiceAccountName: name,
 					Containers: []core.Container{
 						{
-							Name: "envoy", Image: modelDeploymentRedirectedImage(ctx,
+							Name: "envoy", Image: redirectedImage(ctx,
 								settings.ModelDeploymentRouterProxyImage.ShouldValue(ctx)),
 							Args:  []string{"-c", "/config/" + modelDeploymentRouterEnvoyConfigKey},
 							Ports: []core.ContainerPort{{Name: "http", ContainerPort: modelDeploymentRouterHTTPPort}},
