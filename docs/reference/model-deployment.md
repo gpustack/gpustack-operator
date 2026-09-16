@@ -225,7 +225,7 @@ vLLM prefill/decode roles); on every other shape it is accepted and renders noth
 On Ascend the field has no consumer even beyond that gate: vllm-ascend's point-to-point connectors
 (its own family — `MooncakeConnectorV1`, not the native name) initialize their transfer engine with
 the protocol **hardcoded** to `ascend`, read from nothing (upstream `mooncake_transfer_engine.py`,
-read at a post-v0.19.1rc1 checkout — upstream state, not a contract, and it may change). A declared
+verified at v0.23.0 and v0.26.0rc1 — upstream state, not a contract, and it may change). A declared
 value could only become meaningful there if upstream makes the protocol configurable.
 
 It is also **not** the pool's transport. `KVCacheBackend.spec.transport` defines the data plane the

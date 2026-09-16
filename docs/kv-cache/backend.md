@@ -284,7 +284,7 @@ carrying it. **Do not put a credential in `extraArgs`.** Nothing refuses one at 
 not a per-node probe that promotes itself.
 
 `Ascend` is the one value an engine can **require**: vllm-ascend's store client currently raises on
-any other protocol (`MooncakeBackend.__init__`, read at a post-v0.19.1rc1 checkout — upstream state,
+any other protocol (`MooncakeBackend.__init__`, verified at v0.23.0 and v0.26.0rc1 — upstream state,
 not a contract, and it may change), so a pool serving Ascend engines declares `Ascend` here rather
 than settling for the `TCP` default. The member then needs a CANN-carrying image, per the variant
 table above — the project's own CPU build compiles no Ascend transport.
