@@ -12,6 +12,7 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes"
+	"gpustack.ai/gpustack/pkg/kubediscovery"
 	"gpustack.ai/gpustack/pkg/utils/netx"
 	"gpustack.ai/gpustack/pkg/utils/varx"
 )
@@ -35,16 +36,23 @@ var (
 
 	// LoopbackKubeClient is the loopback Kubernetes client.
 	LoopbackKubeClient varx.Once[kubernetes.Interface]
+
+	// LoopbackKubeVersion is the loopback Kubernetes cluster version,
+	// read once at startup after the cluster is connected.
+	LoopbackKubeVersion varx.Once[kubediscovery.Version]
 )
 
 // ConfigureLoopbackKube configures the loopback Kubernetes.
-func ConfigureLoopbackKube(inside bool, configPath string, config rest.Config, httpClient *http.Client, client kubernetes.Interface) {
+func ConfigureLoopbackKube(inside bool, configPath string, config rest.Config,
+	httpClient *http.Client, client kubernetes.Interface, version kubediscovery.Version,
+) {
 	LoopbackKubeInside.Configure(inside)
 	LoopbackKubeNearby.Configure(inside || isLoopbackClusterNearby(&config))
 	LoopbackKubeClientConfigPath.Configure(configPath)
 	LoopbackKubeRestConfig.Configure(config)
 	LoopbackKubeHTTPClient.Configure(httpClient)
 	LoopbackKubeClient.Configure(client)
+	LoopbackKubeVersion.Configure(version)
 }
 
 var (

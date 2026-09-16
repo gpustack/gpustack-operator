@@ -27,7 +27,9 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
+	"gpustack.ai/gpustack/pkg/kubediscovery"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -707,6 +709,11 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 	// does. A second knob for one translation would let the two disagree on one cluster.
 	overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
 
+	// Resolved once per reconcile rather than per role: the answer is the cluster's, not the
+	// role's, and it reads the version snapshot configured at startup, so it costs no API call.
+	clusterVersion := system.LoopbackKubeVersion.Get()
+	nativeSidecar := kubediscovery.SupportsFeature(&clusterVersion, kubediscovery.FeatureNativeSidecar)
+
 	desired := make(map[string]*core.Pod)
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
@@ -727,6 +734,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 			InstanceType:               instType,
 			RuntimeClassName:           r.getModelDeploymentRuntimeClassName(ctx, instType),
 			GeneralResourcesOvercommit: overcommit,
+			NativeSidecar:              nativeSidecar,
 		}
 
 		// The connector is synthesized PER ROLE even though its connection is per deployment,

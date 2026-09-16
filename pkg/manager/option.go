@@ -211,9 +211,16 @@ func (o *Options) Complete(ctx context.Context) (*Config, error) {
 		return nil, fmt.Errorf("wait loopback Kubernetes cluster ready: %w", err)
 	}
 
+	// Read the cluster version once here: feature predicates answer from this snapshot
+	// instead of dialing /version on every ask.
+	lpVersion, err := kubediscovery.GetVersion(ctx, lpCli.Discovery())
+	if err != nil {
+		return nil, fmt.Errorf("get loopback Kubernetes cluster version: %w", err)
+	}
+
 	// Configure loopback Kubernetes,
 	// including the client config and client.
-	system.ConfigureLoopbackKube(lpInside, lpCfgPath, *lpRestCfg, lpHttpCli, lpCli)
+	system.ConfigureLoopbackKube(lpInside, lpCfgPath, *lpRestCfg, lpHttpCli, lpCli, *lpVersion)
 
 	return &Config{
 		InformerCacheResyncPeriod: o.InformerCacheResyncPeriod,
