@@ -1035,6 +1035,10 @@ SHELL ["/bin/bash", "-c"]
 
 ARG MOONCAKE_VERSION
 
+# The smoke below gates a second artifact on this value; the builder stage's comment carries
+# what the flavors mean.
+ARG ASCEND_TRANSPORT="ascend_direct"
+
 ENV DEBIAN_FRONTEND=noninteractive
 
 # The package list is the default runtime stage's minus libfabric1, with no Python packages at
@@ -1146,6 +1150,20 @@ RUN <<EOF
         echo "[ERROR] ascend_transport.so has unresolved libraries:" >&2
         echo "${missing}" >&2
         exit 1
+    fi
+
+    # The ubshmem wheel additionally ships ubshmem_fabric_allocator.so -- built by the
+    # allocator's own build script and installed only under USE_UBSHMEM -- so a ubshmem
+    # build asserts it the same way, or a partially packaged wheel ships under the flavor's
+    # name.
+    if [[ "${ASCEND_TRANSPORT}" == "ubshmem" ]]; then
+        test -f "${pkg}/ubshmem_fabric_allocator.so"
+        missing="$(ldd "${pkg}/ubshmem_fabric_allocator.so" | grep "not found" || true)"
+        if [[ -n "${missing}" ]]; then
+            echo "[ERROR] ubshmem_fabric_allocator.so has unresolved libraries:" >&2
+            echo "${missing}" >&2
+            exit 1
+        fi
     fi
 EOF
 
