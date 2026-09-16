@@ -501,6 +501,13 @@ ENV PATH=/usr/local/go/bin:$PATH
 #     silently unflagged; passing the flag unconditionally would let cmake swallow the unknown
 #     -D with a warning and ship a DRAM-segment build under a VRAM name. When the flag IS
 #     passed, the grep on the configure log proves cmake honored it.
+#   - USE_INTRA_NVLINK goes ON when the store can select it. The transport itself compiles
+#     from 0.3.10, but the store's --protocol=nvlink_intra option exists only from 0.3.13,
+#     so an earlier release would carry a transport nothing can ask for. It is inert until
+#     MC_INTRANODE_NVLINK is set: without that env the engine's selection is unchanged, so
+#     an HCA-less node still falls back to TCP. USE_MNNVL stays OFF deliberately: with it
+#     compiled in, that same HCA-less node tries to install the cross-node NVLink transport
+#     and aborts where it falls back today, and only NVL72-class hardware would benefit.
 #   - USE_EFA goes OFF. EFA is compiled into the default image only: an EFA member runs a DRAM
 #     segment, which the default image already serves, and EFA plus VRAM is a combination
 #     upstream does not test. With it off, nothing in the variant carries a DT_NEEDED on
@@ -532,11 +539,19 @@ RUN <<EOF
         echo "[info] this release predates USE_VRAM_SEGMENT (added in 0.3.13): building the CUDA transfer engine without VRAM segments."
     fi
 
+    intra_nvlink_flag=""
+    if grep -q 'nvlink_intra' /work/mooncake-store/src/client_service.cpp; then
+        intra_nvlink_flag="-DUSE_INTRA_NVLINK=ON"
+    else
+        echo "[info] this release's store cannot select nvlink_intra (store support added in 0.3.13): building without the intra-node NVLink transport."
+    fi
+
     cmake -S /work -B /work/build -G Ninja \
         -DSTORE_USE_K8S_LEASE=ON \
         -DSTORE_USE_REDIS=ON \
         -DUSE_CUDA=ON \
         ${vram_flag} \
+        ${intra_nvlink_flag} \
         -DUSE_EFA=OFF \
         -DWITH_EP=OFF \
         -DWITH_STORE_RUST=OFF \
@@ -546,6 +561,9 @@ RUN <<EOF
         -DCMAKE_BUILD_TYPE=Release 2>&1 | tee /tmp/configure.log
     if [[ -n "${vram_flag}" ]]; then
         grep -q "VRAM SEGMENT is ON" /tmp/configure.log
+    fi
+    if [[ -n "${intra_nvlink_flag}" ]]; then
+        grep -q "Enabled USE_INTRA_NVLINK support" /tmp/configure.log
     fi
     rm -f /tmp/configure.log
 
