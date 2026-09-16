@@ -65,6 +65,11 @@ on:
         required: false
         type: string
         default: ""
+      alias:
+        description: 'Additional tags (space-separated) the manifest job publishes from the same per-platform images, e.g. "0.3.13.post1-cann9.1-a2" for a build tagged "0.3.13.post1-cann9.1-910b". No images are rebuilt; each alias is another manifest over the same entries.'
+        required: false
+        type: string
+        default: ""
       go-cache:
         description: 'Carry the Go build/module cache across runs. Only an image that compiles this repository needs it.'
         required: false
@@ -373,10 +378,24 @@ jobs:
         env:
           INPUT_MATRIX: ${{ inputs.matrix }}
           INPUT_MANIFEST_IMAGES: ${{ toJson(fromJson(steps.metadata.outputs.json).tags) }}
+          INPUT_ALIASES: ${{ inputs.alias }}
         run: |
+          read -ra ALIASES <<<"${INPUT_ALIASES}" || true
           for MANIFEST_IMAGE in $(echo "${INPUT_MANIFEST_IMAGES}" | jq -r '.[]'); do
             docker manifest create --amend "${MANIFEST_IMAGE}" \
               $(echo "${INPUT_MATRIX}" | jq -r --arg tag "${MANIFEST_IMAGE}" '.[].platform | "\($tag)-" + gsub("/"; "-")')
             docker manifest inspect "${MANIFEST_IMAGE}"
             docker manifest push --purge "${MANIFEST_IMAGE}"
+            # An alias is the same per-platform entries published under one more tag: the
+            # images were built and pushed once, this only writes another manifest over
+            # them. Two SoC names for one build (an Ascend "910b" build that also answers
+            # to "a2") is the case this exists for.
+            for ALIAS in "${ALIASES[@]}"; do
+              [[ -n "${ALIAS}" ]] || continue
+              ALIAS_IMAGE="${MANIFEST_IMAGE%%:*}:${ALIAS}"
+              docker manifest create --amend "${ALIAS_IMAGE}" \
+                $(echo "${INPUT_MATRIX}" | jq -r --arg tag "${MANIFEST_IMAGE}" '.[].platform | "\($tag)-" + gsub("/"; "-")')
+              docker manifest inspect "${ALIAS_IMAGE}"
+              docker manifest push --purge "${ALIAS_IMAGE}"
+            done
           done
