@@ -23,7 +23,7 @@
 - `make generate` — the `gen/api` generators: deepcopy, register, apiservice, CRDs, conversion, protobuf, webhooks. `make generate binding` regenerates the CGO bindings in `binding/` via c-for-go.
 - `make lint` — golangci-lint (`.golangci.yaml`); `make lint dirty` also fails on a dirty tree. `make lint docs` checks the documentation contract instead — bash and awk over the corpus, a second or two, and no cluster; see [the docs skill](../.claude/skills/gpustack-operator-docs/SKILL.md).
 - `make build` — cross-build `cmd/gpustack-operator` into `.dist/build/`, version ldflag-injected into `pkg/utils/version`; `VERSION=vX.y.z+l.m make build` sets it, `BUILD_PLATFORMS="linux/amd64 linux/arm64"` cross-compiles.
-- `make test` — `go test -v -failfast -race -cover -timeout=30m ./...`, coverage to `.dist/test/coverage.out`; trailing args are regexes of packages to **exclude**.
+- `make test` — `go test -v -failfast -race -cover -shuffle=on -timeout=30m ./...`, coverage to `.dist/test/coverage.out`. The order is shuffled on every run so an order-dependent test cannot hide behind the fixed one; a failure banner prints the seed, and `go test -shuffle=<seed>` reproduces that exact order. Trailing args are regexes of packages to **exclude**.
 - `make package` — images via `docker buildx` from `pack/*/Dockerfile` (Linux only).
 
 CI (`hack/ci.sh`) runs `make generate && make deps && make lint && make build`.

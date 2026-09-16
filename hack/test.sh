@@ -34,6 +34,9 @@ function test() {
     "-failfast"
     "-race"
     "-cover"
+    # Order-dependent tests hide behind a fixed run order; shuffle so every run probes it.
+    # A failure banner prints the seed, and -shuffle=<seed> reproduces that order.
+    "-shuffle=on"
     "-timeout=30m"
     "-ldflags=${ldflags[*]}${extldflags}"
     "-coverprofile=${TEST_DIR}/coverage.out"
