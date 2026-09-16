@@ -755,6 +755,9 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 			// than two copies of one, which is what the atomic admission of the pair is FOR.
 			roleConnection.Kind = role.Kind
 			roleConnection.DirectTransfer = directTransfer
+			if md.Spec.DirectTransfer != nil {
+				roleConnection.DirectTransferProtocol = md.Spec.DirectTransfer.Protocol
+			}
 			roleConnection.PublishKVEvents = publishKVEvents
 			if roleConnection.PublishKVEvents {
 				roleConnection.KVEventsHost = md.Name + "-" + role.Name + "." + md.Namespace + ".svc"

@@ -176,6 +176,8 @@ func (*KVCachePoolUsage) ProtoMessage() {}
 
 func (*ModelDeployment) ProtoMessage() {}
 
+func (*ModelDeploymentDirectTransfer) ProtoMessage() {}
+
 func (*ModelDeploymentKVCache) ProtoMessage() {}
 
 func (*ModelDeploymentKVCacheDomain) ProtoMessage() {}

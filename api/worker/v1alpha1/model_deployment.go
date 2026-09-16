@@ -116,6 +116,17 @@ type ModelDeploymentSpec struct {
 	//
 	// +optional
 	Router *ModelDeploymentRouter `json:"router,omitempty" protobuf:"bytes,6,opt,name=router"`
+
+	// DirectTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode
+	// pair.
+	//
+	// THE LEG THIS COVERS NEVER TRAVERSES THE STORE, and that is why the value does not come from
+	// the KVCacheBackend: spec.transport there defines the data plane the store MEMBERS run, this
+	// one is engine to engine, and the two planes declare separately. A deployment can render
+	// this leg with no pool attached at all, which is why the field cannot live under KVCache.
+	//
+	// +optional
+	DirectTransfer *ModelDeploymentDirectTransfer `json:"directTransfer,omitempty" protobuf:"bytes,7,opt,name=directTransfer"`
 }
 
 // The engines a ModelDeployment can run, which are the values of ModelDeploymentSpec.Engine's enum.
@@ -189,6 +200,39 @@ type ModelDeploymentKVCache struct {
 	// +k8s:validation:default="auto"
 	// +k8s:validation:enum=["auto"]
 	Connector string `json:"connector,omitempty" protobuf:"bytes,2,opt,name=connector"`
+}
+
+// ModelDeploymentDirectTransfer carries the settings of the point-to-point KV transfer leg
+// between a prefill role and a decode role.
+type ModelDeploymentDirectTransfer struct {
+	// Protocol is the transport both ends of the leg are told to use, in the mooncake
+	// configuration's own spelling, e.g. "tcp" or "rdma".
+	//
+	//   - IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either
+	//     end, so a per-role field could only express a contradiction -- two ends naming different
+	//     values for one connection, which fails at transfer time rather than at admission.
+	//   - THE VALUE IS DECLARED, NOT DISCOVERED, AND IT IS NOT GATED. The accepted set is a
+	//     property of the mooncake build inside the engine's own image, which this operator
+	//     neither ships nor can inspect: a HIP-compiled build makes "hip" a working point-to-point
+	//     transport, and an enum here would hard-code one image's compile set onto another image's
+	//     connector. The value is passed through verbatim, and a value the engine build rejects
+	//     raises at engine startup, in the container that owns the fact.
+	//   - UNSET RENDERS "tcp", the transport every mooncake build carries. The default lives in
+	//     the renderer rather than in this schema, so the stored object holds exactly what was
+	//     asked.
+	//   - IT IS READ ONLY ON THE DIRECT-TRANSFER LEG: a managed llm-d router in front of vLLM
+	//     prefill/decode roles. On every other shape -- sglang, Ascend, or no router -- the value
+	//     is accepted and renders nothing, which is stated here because an accepted field that
+	//     silently does nothing is a promise broken quietly.
+	//   - IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'
+	//     argv, so a change rebuilds every Kueue pod group of the deployment. With roles split
+	//     across InstanceTypes the groups rebuild independently, and a mixed-protocol window
+	//     between a prefiller and a decoder exists until both converge -- the same window an
+	//     engineVersion edit already opens.
+	//
+	// +optional
+	// +k8s:validation:maxLength=64
+	Protocol string `json:"protocol,omitempty" protobuf:"bytes,1,opt,name=protocol"`
 }
 
 // ModelDeploymentRole is one engine role and its replicas.

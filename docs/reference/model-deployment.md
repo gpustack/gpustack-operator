@@ -202,6 +202,36 @@ router; for `llm-d` it is `--endpoint-selector`, `--endpoint-target-ports`, `--c
 `--secure-serving`, `--grpc-health-port` and `--metrics-endpoint-auth`, and the refusal names the flag
 and the router.
 
+### The direct transfer's transport
+
+The point-to-point leg renders `tcp` unless the deployment says otherwise:
+
+```yaml
+spec:
+  directTransfer:
+    protocol: rdma                     # unset renders "tcp"
+```
+
+The value is a property of **one link**, so it is deployment-wide: a per-role field could only
+express two ends naming different protocols for one connection, which fails at transfer time rather
+than at admission.
+
+It is **declared, not discovered, and not gated**. The set an engine accepts belongs to the mooncake
+build inside the engine's own image — a HIP-compiled build makes `hip` a working transport — so the
+operator passes the value through verbatim, and a value the build rejects fails that container at
+startup. It is read only on the direct-transfer leg (the managed `llm-d` router in front of native
+vLLM prefill/decode roles); on every other shape it is accepted and renders nothing.
+
+It is also **not** the pool's transport. `KVCacheBackend.spec.transport` defines the data plane the
+store members run and feeds the engine's store client; this leg is engine to engine and never
+traverses the store, so the two declare separately — a deployment with no `kvCache` block still has
+this leg to configure.
+
+Editing it [restarts every role](#rollout-is-recreate): the value renders into both ends' arguments,
+so every pod group rebuilds. With roles split across `instanceType`s the groups rebuild
+independently, and a prefiller and a decoder can disagree on the protocol until both converge — the
+same window an `engineVersion` edit opens.
+
 ### What every Pod of the group carries
 
 | Key | Value | What it is for |
@@ -767,7 +797,7 @@ this deployment being run right now*.**
 
 | Frozen | Editable |
 |---|---|
-| `model`, `engine`, `kvCache` | `engineVersion` |
+| `model`, `engine`, `kvCache` | `engineVersion`, `directTransfer` |
 | the set of roles, and each role's `name` and `kind` | `roles[].replicas` |
 | `roles[].instanceType` | `roles[].extraArgs`, `roles[].env` |
 | `roles[].resources` | the whole `roles[].template` except `command` |

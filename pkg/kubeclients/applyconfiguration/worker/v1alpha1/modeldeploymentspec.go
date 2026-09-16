@@ -65,6 +65,14 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	// individually addressable through their own Services either way, so a deployment written before
 	// this field existed serves exactly as it did.
 	Router *ModelDeploymentRouterApplyConfiguration `json:"router,omitempty"`
+	// DirectTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode
+	// pair.
+	//
+	// THE LEG THIS COVERS NEVER TRAVERSES THE STORE, and that is why the value does not come from
+	// the KVCacheBackend: spec.transport there defines the data plane the store MEMBERS run, this
+	// one is engine to engine, and the two planes declare separately. A deployment can render
+	// this leg with no pool attached at all, which is why the field cannot live under KVCache.
+	DirectTransfer *ModelDeploymentDirectTransferApplyConfiguration `json:"directTransfer,omitempty"`
 }
 
 // ModelDeploymentSpecApplyConfiguration constructs a declarative configuration of the ModelDeploymentSpec type for use with
@@ -123,5 +131,13 @@ func (b *ModelDeploymentSpecApplyConfiguration) WithRoles(values ...*ModelDeploy
 // If called multiple times, the Router field is set to the value of the last call.
 func (b *ModelDeploymentSpecApplyConfiguration) WithRouter(value *ModelDeploymentRouterApplyConfiguration) *ModelDeploymentSpecApplyConfiguration {
 	b.Router = value
+	return b
+}
+
+// WithDirectTransfer sets the DirectTransfer field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the DirectTransfer field is set to the value of the last call.
+func (b *ModelDeploymentSpecApplyConfiguration) WithDirectTransfer(value *ModelDeploymentDirectTransferApplyConfiguration) *ModelDeploymentSpecApplyConfiguration {
+	b.DirectTransfer = value
 	return b
 }

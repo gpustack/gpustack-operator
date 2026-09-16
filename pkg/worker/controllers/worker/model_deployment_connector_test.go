@@ -338,6 +338,29 @@ func TestSynthesizeModelDeploymentConnector_DirectTransfer(t *testing.T) {
 	}, got.Ports)
 }
 
+// TestSynthesizeModelDeploymentConnector_DirectTransferProtocol pins the thread from the
+// deployment's declaration to the rendered leg: the value passes through unchanged, and the
+// unset case -- the renderer's default -- is pinned by the test above.
+func TestSynthesizeModelDeploymentConnector_DirectTransferProtocol(t *testing.T) {
+	in := connectorInputForKind(
+		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
+		workercore.ModelDeploymentRoleKindDecode)
+	in.DirectTransfer = true
+	in.DirectTransferProtocol = "rdma"
+
+	got, err := SynthesizeModelDeploymentConnector(in)
+	require.NoError(t, err)
+	require.Len(t, got.Args, 2)
+	assert.JSONEq(t, `{
+		"kv_connector":"MultiConnector","kv_role":"kv_consumer",
+		"kv_connector_extra_config":{"connectors":[
+			{"kv_connector":"MooncakeConnector","kv_role":"kv_consumer",
+			 "kv_connector_extra_config":{"mooncake_protocol":"rdma"}},
+			{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}
+		]}
+	}`, got.Args[1])
+}
+
 func TestModelDeploymentUsesDirectTransfer(t *testing.T) {
 	base := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
