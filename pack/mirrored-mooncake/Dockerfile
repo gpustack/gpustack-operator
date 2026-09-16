@@ -820,16 +820,26 @@ CMD ["bash"]
 
 # =============================================================================
 # Target: cann
-# The Ascend variant: the store compiled with USE_ASCEND_DIRECT on the CANN 9.1 toolkit, for
-# member groups on Ascend NPU nodes. USE_ASCEND_DIRECT is upstream's recommended Ascend path --
-# it is what upstream's own Ascend CI and NPU release jobs configure -- and with it a segment
-# on the ascend protocol allocates in device memory, the Ascend counterpart of the CUDA
-# variant's VRAM segment. Dispatch with --target cann.
+# The Ascend variant: the store compiled with one Ascend flavor on the CANN 9.1 toolkit, for
+# member groups on Ascend NPU nodes. The flavor defaults to USE_ASCEND_DIRECT, upstream's
+# recommended Ascend path -- it is what upstream's own Ascend CI and NPU release jobs
+# configure -- and with it a segment on the ascend protocol allocates in device memory, the
+# Ascend counterpart of the CUDA variant's VRAM segment; ASCEND_TRANSPORT=ubshmem builds the
+# CANN VMM shared-memory flavor for the supernode domain instead. Dispatch with
+# --target cann.
 # =============================================================================
 FROM ${CANN_BUILDER_IMAGE} AS builder-cann
 SHELL ["/bin/bash", "-c"]
 
 ARG MOONCAKE_VERSION
+
+# One build carries one Ascend flavor: upstream's CMake picks the ascend_transport sources on
+# a mutually exclusive if/elseif chain, so the flavors cannot coexist in one image. The
+# default is upstream's recommended path; ubshmem selects the CANN VMM shared-memory
+# transport instead, which serves the supernode (UnifiedBus) shared-memory domain and needs
+# CANN >= 9.0, driver >= 26.0 and Lingqu >= 1.5 at runtime. Dispatch it with
+# args "ASCEND_TRANSPORT=ubshmem" under its own tag.
+ARG ASCEND_TRANSPORT="ascend_direct"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -911,11 +921,14 @@ ENV PATH=/usr/local/go/bin:$PATH
 
 # The flag set is the default builder's with the vendor axis swapped in:
 #
-#   - USE_ASCEND_DIRECT goes ON. The transport links only CANN toolkit libraries (ascendcl,
-#     llm_datadist, metadef), and the toolkit location comes from ASCEND_HOME_PATH, which the
-#     base image exports and common.cmake reads -- no CANN install or set_env step runs in this
-#     stage. The option also switches the project to BUILD_SHARED_LIBS, which is what produces
-#     the ascend_transport.so the wheel ships.
+#   - ASCEND_TRANSPORT picks the one Ascend flavor compiled in. ascend_direct goes ON by
+#     default: the transport links only CANN toolkit libraries (ascendcl, llm_datadist,
+#     metadef), and the toolkit location comes from ASCEND_HOME_PATH, which the base image
+#     exports and common.cmake reads -- no CANN install or set_env step runs in this stage.
+#     Either flavor switches the project to BUILD_SHARED_LIBS, which is what produces the
+#     ascend_transport.so the wheel ships. The case validates the value because cmake would
+#     swallow an unknown flavor's -D with a warning and ship a direct build under a ubshmem
+#     name.
 #   - USE_CUDA stays OFF and USE_EFA goes OFF, for the same reasons as the cuda variant.
 #   - CMAKE_EXE_LINKER_FLAGS carries --allow-shlib-undefined. The CANN toolkit libraries in
 #     the devel base (libascend_dump, libtsdclient, libhccl_v2, libruntime) reference
@@ -940,10 +953,19 @@ RUN <<EOF
             ;;
     esac
 
+    case "${ASCEND_TRANSPORT}" in
+        ascend_direct) transport_flag="-DUSE_ASCEND_DIRECT=ON" ;;
+        ubshmem)       transport_flag="-DUSE_UBSHMEM=ON" ;;
+        *)
+            echo "[ERROR] unknown ASCEND_TRANSPORT '${ASCEND_TRANSPORT}': know ascend_direct and ubshmem." >&2
+            exit 1
+            ;;
+    esac
+
     cmake -S /work -B /work/build -G Ninja \
         -DSTORE_USE_K8S_LEASE=ON \
         -DSTORE_USE_REDIS=ON \
-        -DUSE_ASCEND_DIRECT=ON \
+        ${transport_flag} \
         -DUSE_CUDA=OFF \
         -DUSE_EFA=OFF \
         -DWITH_EP=OFF \
