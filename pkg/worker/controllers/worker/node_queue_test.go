@@ -19,8 +19,7 @@ import (
 
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
-	"gpustack.ai/gpustack/pkg/setting"
-	"gpustack.ai/gpustack/pkg/system"
+	"gpustack.ai/gpustack/pkg/setting/settingtest"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -29,30 +28,11 @@ import (
 // InstanceTypeDrainWhenNoFlavors resolves to true. ShouldValueBool returns false for any
 // setting whose key is absent from the Secret (the read errors and the bool default is not
 // applied), so the drain=true branch is only reachable once the key is present. The value
-// caches for ~30s once read, so this is a one-way setup step — never flipped mid-test — and
-// merges the key rather than replacing the Secret data other settings share.
+// caches for ~30s once read, so this is a one-way setup step — never flipped mid-test.
 func enableInstanceTypeDrainWhenNoFlavors(t *testing.T) {
 	t.Helper()
-	ctx := context.Background()
-	cli := system.LoopbackCtrlClient.Get()
-	const key = "instance-type-drain-when-no-flavors"
-	sec := &core.Secret{
-		ObjectMeta: meta.ObjectMeta{
-			Name:      setting.DelegatedSecretName,
-			Namespace: setting.DelegatedSecretNamespace,
-		},
-		Data: map[string][]byte{key: []byte("true")},
-	}
-	if err := cli.Create(ctx, sec); err != nil {
-		got := new(core.Secret)
-		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKeyFromObject(sec), got))
-		if got.Data == nil {
-			got.Data = map[string][]byte{}
-		}
-		got.Data[key] = []byte("true")
-		require.NoError(t, cli.Update(ctx, got))
-	}
-	require.True(t, settings.InstanceTypeDrainWhenNoFlavors.ShouldValueBool(ctx),
+	settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-drain-when-no-flavors": "true"})
+	require.True(t, settings.InstanceTypeDrainWhenNoFlavors.ShouldValueBool(context.Background()),
 		"setting must read true after enabling")
 }
 

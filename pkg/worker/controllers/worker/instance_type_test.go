@@ -21,8 +21,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
-	"gpustack.ai/gpustack/pkg/setting"
-	"gpustack.ai/gpustack/pkg/system"
+	"gpustack.ai/gpustack/pkg/setting/settingtest"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/json"
@@ -1591,22 +1590,8 @@ func setNodeDevicesLedger(t *testing.T, cli ctrlcli.Client, node string, cards [
 // enables it the value stays true.
 func enableInstanceTypeDerivedFromNode(t *testing.T) {
 	t.Helper()
-	ctx := context.Background()
-	cli := system.LoopbackCtrlClient.Get()
-	sec := &core.Secret{
-		ObjectMeta: meta.ObjectMeta{
-			Name:      setting.DelegatedSecretName,
-			Namespace: setting.DelegatedSecretNamespace,
-		},
-		Data: map[string][]byte{"instance-type-derived-from-node": []byte("true")},
-	}
-	if err := cli.Create(ctx, sec); err != nil {
-		got := new(core.Secret)
-		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKeyFromObject(sec), got))
-		got.Data = sec.Data
-		require.NoError(t, cli.Update(ctx, got))
-	}
-	require.True(t, settings.InstanceTypeDerivedFromNode.ShouldValueBool(ctx),
+	settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-derived-from-node": "true"})
+	require.True(t, settings.InstanceTypeDerivedFromNode.ShouldValueBool(context.Background()),
 		"setting must read true after enabling")
 }
 
