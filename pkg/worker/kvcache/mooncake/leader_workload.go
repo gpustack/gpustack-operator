@@ -106,13 +106,19 @@ const (
 		`printf '%s' "$POLICY_EMPTY" > "$POLICY_FILE"; fi`
 )
 
+// LeaderObjectNameSuffix is what LeaderObjectName appends. It is exported because one object with
+// this name is created by the STORE rather than by this operator -- the Lease the election runs
+// through -- so the only way back from it to the backend is to strip this, and a second literal
+// spelling it is how that reverse stops agreeing with the forward direction.
+const LeaderObjectNameSuffix = "-leader"
+
 // LeaderObjectName is the name of every object rendered for a backend's leader.
 //
 // The backend is cluster-scoped and its objects are not, so the name has to survive the move into
 // one shared namespace: it is the backend's own name with a role suffix, which keeps two backends
 // apart and keeps a backend's own objects together.
 func LeaderObjectName(kvcb *workercore.KVCacheBackend) string {
-	return kvcb.Name + "-leader"
+	return kvcb.Name + LeaderObjectNameSuffix
 }
 
 // LeaderServiceHost is the in-cluster DNS name the leader answers on.

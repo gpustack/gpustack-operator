@@ -870,6 +870,23 @@ no field for it by design.
 **Not counted as this feature:** an Event that only ever fires when a human deletes a Pod. C5
 requires it under an ordinary rollout too, since that is the failover users actually meet.
 
+**What "the holder changed" is compared against, since a reconcile has no memory.** The last holder
+is kept in a map on the reconciler and nowhere else. A field would be the thing G5 already refused
+three times over — a copy of a value the Lease publishes, kept to be looked at — and the Lease's own
+`leaseTransitions` is the durable count. **The cost, stated rather than discovered:** a handover
+during an operator restart produces no Event, because nothing observed the before. That is the same
+class of gap as the Event TTL above, and the same answer covers it.
+
+**The watch on the Lease carries a predicate, and the predicate is load-bearing rather than tidy.**
+A Lease is renewed every few seconds for the life of every leader, and one reconcile of this backend
+costs three sequential reads of its admin surface — so an unfiltered watch would put a permanent
+load on every store in the cluster to deliver one Event per failover. The filter compares the holder
+because it is the only field a handover moves.
+
+**The Event names no replica**, which a test asserts directly rather than by reading the format
+string. The identity is read to compare two observations and does not leave the map; an Event
+carrying it would answer the refused question by accident and would read as entirely reasonable.
+
 #### F10 — A second way for a member to reach the master
 
 F4 hands every member a `k8s://` entry, and that choice is what forces the member image to carry the
@@ -1100,8 +1117,10 @@ The second round:
       forensic copy directory whose effect is to stop reporting failed uploads, not the object
       store's path. The condition is `SnapshotStorageShared`, and it reads the bound volume's access
       modes rather than the claim's request.
-- [ ] **T11 — The handover Event** (F9), recorded when the Lease's holder changes. No new access:
-      F1's Role already carries the read. FORBIDDEN: a status field; G5 and F5 say why.
+- [x] **T11 — The handover Event** (F9), recorded when the Lease's holder changes. No new access:
+      F1's Role already carries the read. FORBIDDEN: a status field; G5 and F5 say why. It brought
+      two things the feature did not name: a Lease watch whose predicate is what makes the watch
+      affordable at all, and an in-memory last-holder map, whose cost is recorded in the feature.
 - [ ] **T12 — The second member entry** (F10). Both render, the default does not move, and the
       field's doc comment says which one has been measured — neither, until T17.
 - [ ] **T13 — The capability condition** (F11), keyed on a holderless Lease under a Ready leader,

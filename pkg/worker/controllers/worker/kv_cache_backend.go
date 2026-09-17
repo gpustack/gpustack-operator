@@ -12,6 +12,7 @@ import (
 	"time"
 
 	apps "k8s.io/api/apps/v1"
+	coordination "k8s.io/api/coordination/v1"
 	core "k8s.io/api/core/v1"
 	rbac "k8s.io/api/rbac/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -22,6 +23,7 @@ import (
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlcontroller "sigs.k8s.io/controller-runtime/pkg/controller"
+	ctrlevent "sigs.k8s.io/controller-runtime/pkg/event"
 	ctrlhandler "sigs.k8s.io/controller-runtime/pkg/handler"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -116,6 +118,12 @@ type KVCacheBackendReconciler struct {
 	// the NODE rather than against this backend, because the backend is being deleted at the moment
 	// there is something to say and would take the record with it.
 	Recorder ctrlrecord.EventRecorder
+
+	// leaseHolders is the only state this reconciler keeps between passes, and it keeps it because
+	// the question it answers is about a TRANSITION: a lease that changed hands and one that was
+	// merely renewed are the same object read twice. Its zero value is usable, so no construction
+	// path has to remember it.
+	leaseHolders leaseHolders
 }
 
 // adminReadTimeout bounds one read of the leader's admin surface. It is short: everything read there
@@ -440,6 +448,9 @@ func (r *KVCacheBackendReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Independent of everything above: it reads a claim rather than the store, and it is true or
 	// false whether or not the leader is answering.
 	r.reportSnapshotStorage(ctx, kvcb, holder)
+	// Takes the OBSERVED object rather than the status under construction, because what it produces
+	// is an Event and not a field -- see the feature, and the goal it would otherwise fail.
+	r.reportLeaderHandover(ctx, kvcb)
 	// Derived last, from the conditions the observation just wrote. A phase computed before them
 	// would summarize the previous pass.
 	deriveKVCacheBackendPhase(holder, renderBlocked)
@@ -2415,6 +2426,10 @@ func (r *KVCacheBackendReconciler) teardownKVCacheBackend(
 	if err := r.Client.Update(ctx, kvcb); err != nil {
 		return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
 	}
+	// The one piece of state this reconciler holds across passes, dropped where the object is. Left
+	// behind, it grows for the life of the process, and a backend recreated under the same name
+	// would have its first election read as a handover from a leader that belonged to the old one.
+	r.leaseHolders.forget(kvcb.Name)
 	logger.V(2).Info("released kv cache backend")
 	return ctrl.Result{}, nil
 }
@@ -3201,6 +3216,36 @@ func (r *KVCacheBackendReconciler) SetupController(_ context.Context, opts contr
 				r.enqueueKVCacheBackendWhenLeaderPodChanged,
 			),
 			ctrlbuilder.WithPredicates(kvCacheBackendLeaderPodPredicate()),
+		).
+		Watches(
+			// And the Lease the election runs through, which is the only object that says a handover
+			// happened. It is created by the STORE rather than by this operator, so it carries no
+			// resource note and the map function has to earn the link back from the name.
+			//
+			// The predicate is not tidiness. A lease is renewed every few seconds for the life of
+			// every leader, and an unfiltered watch would turn each renewal into a reconcile costing
+			// three sequential reads of that backend's admin surface -- a permanent load on every
+			// store in the cluster, produced by a feature that records one event per failover.
+			&coordination.Lease{},
+			ctrlhandlerx.DedupEnqueueRequestsFromMapFuncWithWindow(
+				3*time.Second,
+				dedupWindow,
+				r.enqueueKVCacheBackendWhenLeaseChanged,
+			),
+			ctrlbuilder.WithPredicates(ctrlpredicate.Funcs{
+				// A lease appearing for the first time establishes the baseline rather than
+				// reporting anything, and the pass it wakes is what stores it.
+				CreateFunc: func(e ctrlevent.CreateEvent) bool {
+					return e.Object.GetNamespace() == kuberess.SystemNamespaceName
+				},
+				UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+					return kvCacheBackendLeaseHolderChanged(e.ObjectOld, e.ObjectNew)
+				},
+				// A deleted lease says the election stopped, not that it moved. The pass that would
+				// forget the holder is the one the backend's own change wakes.
+				DeleteFunc:  func(ctrlevent.DeleteEvent) bool { return false },
+				GenericFunc: func(ctrlevent.GenericEvent) bool { return false },
+			}),
 		).
 		WithOptions(ctrlcontroller.Options{
 			MaxConcurrentReconciles: kvCacheBackendConcurrency,
