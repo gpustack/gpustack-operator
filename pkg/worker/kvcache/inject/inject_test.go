@@ -372,7 +372,7 @@ func TestRender_DirectTransferProtocolIsNotTheMembers(t *testing.T) {
 	backend := &workercore.KVCacheBackend{
 		ObjectMeta: meta.ObjectMeta{Name: "mooncake-dram"},
 		Spec: workercore.KVCacheBackendSpec{
-			Transport: workercore.KVCacheBackendTransport{Protocol: "rdma"},
+			Transport: workercore.KVCacheBackendTransport{Protocol: "RDMA"},
 			Connection: workercore.KVCacheBackendConnection{
 				Managed: &workercore.KVCacheBackendManaged{
 					Members: []workercore.KVCacheBackendMember{{

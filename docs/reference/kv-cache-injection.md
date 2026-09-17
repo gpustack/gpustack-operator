@@ -149,8 +149,8 @@ the client: it is parsed as a filter naming a device no host has.
 
 Nothing injected here grants the engine Pod the fabric itself. These values **name** a transport; the
 `hostNetwork`, the device tree and — on EFA — the host's libfabric mount that a fabric needs are
-rendered on the backend's member Pods only. On `tcp` that distinction costs nothing; on `rdma` or
-`efa`, an engine that is to move bytes over the fabric needs the same access on its own Pod, which
+rendered on the backend's member Pods only. On `TCP` that distinction costs nothing; on `RDMA` or
+`EFA`, an engine that is to move bytes over the fabric needs the same access on its own Pod, which
 this operator does not render today.
 
 Two observability variables, `MC_TE_METRIC` and `MC_STORE_CLIENT_METRIC_BANDWIDTH`, are set to `1`
@@ -322,12 +322,12 @@ share, so it surfaces as an admission rejection for an injected Pod and as a rec
 
 **The transport has two spellings and the message uses both.** What the pool offers and what the
 engine accepts are reported as the artifact spells them, because that is the value the container was
-handed: `tcp` against `ascend`. The value to set is the API's, **`cann`**, because
+handed: `tcp` against `ascend`. The value to set is the API's, **`CANN`**, because
 `spec.transport.protocol` is a case-sensitive enum.
 
 **The failing backend is not one somebody misconfigured.** `spec.transport.protocol` defaults to
-`auto`, which resolves to `tcp` — so a backend left entirely at its defaults is precisely the one this
-engine cannot use. Pair vLLM-Ascend with a pool that offers `cann`: declared on the backend's
+`Auto`, which resolves to the store's `tcp` — so a backend left entirely at its defaults is precisely the
+one this engine cannot use. Pair vLLM-Ascend with a pool that offers `CANN`: declared on the backend's
 `spec.transport.protocol`, or on one member group's `transport.protocol` when only one group serves
 the fabric.
 

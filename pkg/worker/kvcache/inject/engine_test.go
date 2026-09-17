@@ -128,7 +128,7 @@ func TestCheckTransport_MessageNamesThePair(t *testing.T) {
 	// The remediation is in the API's spelling, because it names a field the schema validates. The
 	// field name is part of the assertion: that is what makes this positional rather than a presence
 	// check that any mention of the value would satisfy.
-	assert.Contains(t, message, `spec.transport.protocol to "cann"`,
+	assert.Contains(t, message, `spec.transport.protocol to "CANN"`,
 		"the remediation must name a value the enum accepts, next to the field it goes in")
 	assert.NotContains(t, message, `spec.transport.protocol to "ascend"`,
 		"the artifact spelling in that sentence is a schema rejection waiting to happen")
@@ -209,7 +209,7 @@ func TestMatchTransport_MessageNamesEveryOffer(t *testing.T) {
 		"the constraint, in the artifact's spelling")
 	assert.Contains(t, message, `["tcp" "rdma"]`,
 		"every group's offer, so neither serving it is visible without opening the object")
-	assert.Contains(t, message, `spec.transport.protocol to "cann"`,
+	assert.Contains(t, message, `spec.transport.protocol to "CANN"`,
 		"the backend remediation, in the spelling the schema accepts")
 	assert.Contains(t, message, `transport.protocol`,
 		"the group field is named too: one group on the right transport is enough")

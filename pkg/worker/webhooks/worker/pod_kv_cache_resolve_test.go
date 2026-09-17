@@ -52,7 +52,7 @@ func kvCacheFixture() []ctrlcli.Object {
 	backend := &workercore.KVCacheBackend{
 		ObjectMeta: meta.ObjectMeta{Name: "mc"},
 		Spec: workercore.KVCacheBackendSpec{
-			Transport: workercore.KVCacheBackendTransport{Protocol: "tcp"},
+			Transport: workercore.KVCacheBackendTransport{Protocol: "TCP"},
 		},
 	}
 	return []ctrlcli.Object{binding, pool, backend}

@@ -59,7 +59,7 @@ func newAscendTransportBackend() *workercore.KVCacheBackend {
 	return &workercore.KVCacheBackend{
 		ObjectMeta: meta.ObjectMeta{Name: "kvcb"},
 		Spec: workercore.KVCacheBackendSpec{
-			Transport: workercore.KVCacheBackendTransport{Protocol: "cann"},
+			Transport: workercore.KVCacheBackendTransport{Protocol: "CANN"},
 		},
 	}
 }

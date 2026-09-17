@@ -1045,7 +1045,7 @@ func TestKVCacheBackendReconciler_EnqueuesFromTheResourceNote(t *testing.T) {
 // forward half of this and fail the return half, which is how the DNS policy was caught.
 func TestKVCacheBackendReconciler_ConvergesAFabricSwitch(t *testing.T) {
 	kvcb := newKVCacheBackendObject()
-	kvcb.Spec.Transport.Protocol = "tcp"
+	kvcb.Spec.Transport.Protocol = "TCP"
 	cli := newKVCacheBackendClient(kvcb)
 	ctx := context.Background()
 
@@ -1065,7 +1065,7 @@ func TestKVCacheBackendReconciler_ConvergesAFabricSwitch(t *testing.T) {
 		return ds.Spec.Template.Spec
 	}
 
-	setProtocol("rdma")
+	setProtocol("RDMA")
 	rdma := memberPod()
 	assert.True(t, rdma.HostNetwork, "switching to RDMA takes the host network")
 	assert.Equal(t, core.DNSClusterFirstWithHostNet, rdma.DNSPolicy)
@@ -1073,7 +1073,7 @@ func TestKVCacheBackendReconciler_ConvergesAFabricSwitch(t *testing.T) {
 	require.NotNil(t, rdma.Containers[0].SecurityContext)
 	assert.Len(t, rdma.Containers[0].SecurityContext.Capabilities.Add, 2)
 
-	setProtocol("tcp")
+	setProtocol("TCP")
 	tcp := memberPod()
 	assert.False(t, tcp.HostNetwork, "switching back gives the host network up")
 	assert.Equal(t, core.DNSClusterFirst, tcp.DNSPolicy,
@@ -1091,7 +1091,7 @@ func TestKVCacheBackendReconciler_ConvergesAFabricSwitch(t *testing.T) {
 // on nodes that advertise the resource, for a transport that does not use it.
 func TestKVCacheBackendReconciler_ConvergesAnEFASwitch(t *testing.T) {
 	kvcb := newKVCacheBackendObject()
-	kvcb.Spec.Transport.Protocol = "tcp"
+	kvcb.Spec.Transport.Protocol = "TCP"
 	cli := newKVCacheBackendClient(kvcb)
 	ctx := context.Background()
 
@@ -1115,19 +1115,19 @@ func TestKVCacheBackendReconciler_ConvergesAnEFASwitch(t *testing.T) {
 		return ok
 	}
 
-	setProtocol("efa")
+	setProtocol("EFA")
 	efa := memberPod()
 	assert.True(t, efa.HostNetwork, "switching to EFA takes the host network")
 	require.Len(t, efa.Volumes, 1, "the device tree, shared with RDMA")
 	assert.True(t, hasEFADevice(efa))
 
-	setProtocol("rdma")
+	setProtocol("RDMA")
 	rdma := memberPod()
 	require.Len(t, rdma.Volumes, 1, "RDMA shares the base")
 	assert.False(t, hasEFADevice(rdma),
 		"but not the EFA device request — it comes back off on the same render")
 
-	setProtocol("tcp")
+	setProtocol("TCP")
 	tcp := memberPod()
 	assert.False(t, tcp.HostNetwork, "switching back gives the host network up")
 	assert.Empty(t, tcp.Volumes)
@@ -2479,7 +2479,7 @@ func TestKVCacheBackendStatus_MembersComeFromTheListing(t *testing.T) {
 // plane is ACTUALLY doing is what status carries.
 func TestKVCacheBackendStatus_ProtocolIsTheLeadersAndNotTheRenderers(t *testing.T) {
 	kvcb := newKVCacheBackendObject()
-	kvcb.Spec.Transport.Protocol = "tcp"
+	kvcb.Spec.Transport.Protocol = "TCP"
 
 	got := reconcileWithAdminAndPods(t, kvcb, map[string]adminResponse{
 		"/health":              {body: healthServing},

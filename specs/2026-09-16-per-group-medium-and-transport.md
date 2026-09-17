@@ -110,7 +110,7 @@ mixing media needs two processes — which is what two member groups already are
 ```yaml
 spec:
   transport:
-    protocol: tcp            # unchanged; the value a group inherits when it declares none
+    protocol: TCP            # unchanged; the value a group inherits when it declares none
   connection:
     managed:
       members:
@@ -123,7 +123,7 @@ spec:
           image: mirrored-mooncake:0.3.13.post1-cuda13.0
           capacityPerMember: 16Gi
           transport:
-            protocol: rdma                       # optional; overrides the backend default for this group
+            protocol: RDMA                       # optional; overrides the backend default for this group
 ```
 
 - `KVCacheBackendMember.Medium`: enum widened to `["DRAM", "VRAM"]` at

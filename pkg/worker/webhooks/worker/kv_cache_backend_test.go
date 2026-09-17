@@ -268,7 +268,7 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 					NodeSelector:      map[string]string{"kvcache-vram": "true"},
 					Medium:            "VRAM",
 					CapacityPerMember: resource.MustParse("80Gi"),
-					Transport:         &workercore.KVCacheBackendMemberTransport{Protocol: "rdma"},
+					Transport:         &workercore.KVCacheBackendMemberTransport{Protocol: "RDMA"},
 				})
 		}, ""},
 		{"a VRAM group declaring nothing beyond its medium", func(k *workercore.KVCacheBackend) {
@@ -944,8 +944,8 @@ func TestKVCacheBackendWebhook_ADeviceResourceNameDomainIsBounded(t *testing.T) 
 
 	t.Run("an update that leaves the name where it was is admitted", func(t *testing.T) {
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-		withName(oldKvcb, "rdma", overLimit)
-		withName(newKvcb, "rdma", overLimit)
+		withName(oldKvcb, "RDMA", overLimit)
+		withName(newKvcb, "RDMA", overLimit)
 
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
 		require.NoError(t, err,
@@ -954,8 +954,8 @@ func TestKVCacheBackendWebhook_ADeviceResourceNameDomainIsBounded(t *testing.T) 
 
 	t.Run("an update that moves the name is refused", func(t *testing.T) {
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-		withName(oldKvcb, "rdma", "vpc.amazonaws.com/efa")
-		withName(newKvcb, "rdma", overLimit)
+		withName(oldKvcb, "RDMA", "vpc.amazonaws.com/efa")
+		withName(newKvcb, "RDMA", overLimit)
 
 		// The positive baseline for the case above: an exemption that swallowed the rule would
 		// pass that one just as well.
@@ -969,8 +969,8 @@ func TestKVCacheBackendWebhook_ADeviceResourceNameDomainIsBounded(t *testing.T) 
 	// is what starts rendering it, and that update touches the protocol rather than the name.
 	t.Run("an update that starts rendering an unchanged name is refused", func(t *testing.T) {
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-		withName(oldKvcb, "tcp", overLimit)
-		withName(newKvcb, "rdma", overLimit)
+		withName(oldKvcb, "TCP", overLimit)
+		withName(newKvcb, "RDMA", overLimit)
 
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
 		require.Error(t, err,
@@ -983,8 +983,8 @@ func TestKVCacheBackendWebhook_ADeviceResourceNameDomainIsBounded(t *testing.T) 
 	// would refuse the one edit that makes the bad name stop mattering.
 	t.Run("an update that stops rendering an unchanged name is admitted", func(t *testing.T) {
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-		withName(oldKvcb, "rdma", overLimit)
-		withName(newKvcb, "tcp", overLimit)
+		withName(oldKvcb, "RDMA", overLimit)
+		withName(newKvcb, "TCP", overLimit)
 
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
 		require.NoError(t, err,
@@ -993,8 +993,8 @@ func TestKVCacheBackendWebhook_ADeviceResourceNameDomainIsBounded(t *testing.T) 
 
 	t.Run("an update that leaves an unrendered name unrendered is admitted", func(t *testing.T) {
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-		withName(oldKvcb, "tcp", overLimit)
-		withName(newKvcb, "tcp", overLimit)
+		withName(oldKvcb, "TCP", overLimit)
+		withName(newKvcb, "TCP", overLimit)
 		newKvcb.Spec.Image = "example.com/mooncake:v1"
 
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
@@ -1186,10 +1186,10 @@ func TestKVCacheBackendWebhook_ValidateUpdate(t *testing.T) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{"offload_cap_ratio": "0.7"}
 		}, ""},
 		{"transport protocol changed", func(k *workercore.KVCacheBackend) {
-			k.Spec.Transport.Protocol = "rdma"
+			k.Spec.Transport.Protocol = "RDMA"
 		}, ""},
 		{"member transport set", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Members[0].Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "tcp"}
+			k.Spec.Connection.Managed.Members[0].Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "TCP"}
 		}, ""},
 	}, func(wh *KVCacheBackendWebhook, oldKvcb, newKvcb *workercore.KVCacheBackend) error {
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)

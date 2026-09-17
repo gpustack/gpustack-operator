@@ -96,46 +96,46 @@ func TestPodKVCacheInject_ManufacturerSelectsTheVLLMRuntime(t *testing.T) {
 			name:            "Ascend vllm uses the Ascend connector",
 			manufacturer:    "ascend",
 			manufacturerSet: true,
-			protocol:        "cann",
+			protocol:        "CANN",
 			wantConnector:   "AscendStoreConnector",
 		},
 		{
 			name:          "ordinary vllm remains accepted",
-			protocol:      "tcp",
+			protocol:      "TCP",
 			wantConnector: "MooncakeStoreConnector",
 		},
 		{
 			name:            "Ascend vllm rejects tcp",
 			manufacturer:    "ascend",
 			manufacturerSet: true,
-			protocol:        "tcp",
+			protocol:        "TCP",
 			wantErr:         `accepts only the "ascend" transport and no group in this pool offers it`,
 		},
 		{
 			name:            "manufacturer spelling is exact",
 			manufacturer:    "Ascend",
 			manufacturerSet: true,
-			protocol:        "cann",
+			protocol:        "CANN",
 			wantErr:         "kvcache.gpustack.ai/manufacturer",
 		},
 		{
 			name:            "manufacturer whitespace is refused",
 			manufacturer:    " ascend",
 			manufacturerSet: true,
-			protocol:        "cann",
+			protocol:        "CANN",
 			wantErr:         "kvcache.gpustack.ai/manufacturer",
 		},
 		{
 			name:            "manufacturer has no unmeasured variant",
 			manufacturer:    "huawei",
 			manufacturerSet: true,
-			protocol:        "cann",
+			protocol:        "CANN",
 			wantErr:         "kvcache.gpustack.ai/manufacturer",
 		},
 		{
 			name:            "empty manufacturer is refused when declared",
 			manufacturerSet: true,
-			protocol:        "cann",
+			protocol:        "CANN",
 			wantErr:         "kvcache.gpustack.ai/manufacturer",
 		},
 		{
@@ -143,7 +143,7 @@ func TestPodKVCacheInject_ManufacturerSelectsTheVLLMRuntime(t *testing.T) {
 			engine:          "sglang",
 			manufacturer:    "ascend",
 			manufacturerSet: true,
-			protocol:        "cann",
+			protocol:        "CANN",
 			wantErr:         "kvcache.gpustack.ai/manufacturer",
 		},
 	}
@@ -202,7 +202,7 @@ func TestPodKVCacheInject_TheMatchedGroupsTransport(t *testing.T) {
 		objs[2] = &workercore.KVCacheBackend{
 			ObjectMeta: meta.ObjectMeta{Name: "mc"},
 			Spec: workercore.KVCacheBackendSpec{
-				Transport: workercore.KVCacheBackendTransport{Protocol: "tcp"},
+				Transport: workercore.KVCacheBackendTransport{Protocol: "TCP"},
 				Connection: workercore.KVCacheBackendConnection{
 					Managed: &workercore.KVCacheBackendManaged{
 						Members: []workercore.KVCacheBackendMember{
@@ -226,7 +226,7 @@ func TestPodKVCacheInject_TheMatchedGroupsTransport(t *testing.T) {
 			NodeSelector:      map[string]string{"kvcache": "true"},
 			Medium:            "VRAM",
 			CapacityPerMember: resource.MustParse("16Gi"),
-			Transport:         &workercore.KVCacheBackendMemberTransport{Protocol: "rdma"},
+			Transport:         &workercore.KVCacheBackendMemberTransport{Protocol: "RDMA"},
 		})...)
 
 		require.Error(t, err)
@@ -243,7 +243,7 @@ func TestPodKVCacheInject_TheMatchedGroupsTransport(t *testing.T) {
 			NodeSelector:      map[string]string{"kvcache": "true"},
 			Medium:            "VRAM",
 			CapacityPerMember: resource.MustParse("16Gi"),
-			Transport:         &workercore.KVCacheBackendMemberTransport{Protocol: "cann"},
+			Transport:         &workercore.KVCacheBackendMemberTransport{Protocol: "CANN"},
 		})...))
 
 		require.Contains(t, pod.Annotations, inject.ClientConfigAnnotationKey)

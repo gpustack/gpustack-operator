@@ -36,7 +36,7 @@ func newRenderBackend() *workercore.KVCacheBackend {
 	return &workercore.KVCacheBackend{
 		ObjectMeta: meta.ObjectMeta{Name: "kvcb"},
 		Spec: workercore.KVCacheBackendSpec{
-			Transport: workercore.KVCacheBackendTransport{Protocol: "tcp"},
+			Transport: workercore.KVCacheBackendTransport{Protocol: "TCP"},
 		},
 	}
 }
@@ -490,7 +490,7 @@ func TestResolveModelDeploymentConnection(t *testing.T) {
 	backend := &workercore.KVCacheBackend{
 		ObjectMeta: meta.ObjectMeta{Name: "kvcb"},
 		Spec: workercore.KVCacheBackendSpec{
-			Transport: workercore.KVCacheBackendTransport{Protocol: "rdma"},
+			Transport: workercore.KVCacheBackendTransport{Protocol: "RDMA"},
 		},
 	}
 
