@@ -1188,7 +1188,21 @@ RUN <<EOF
             ;;
     esac
 
-    mc_store_rest_server --help >/dev/null
+    case "${MOONCAKE_VERSION}" in
+        0.3.10*|0.3.11*)
+            # Pre-0.3.13 cann wheels heap-corrupt at interpreter teardown whenever the
+            # ascend libraries actually load -- "corrupted size vs. prev_size", rc=134 --
+            # observed with the toolkit's devlib standing in for the driver and with a
+            # real 910b driver alike; runner's cann9.1 image ships the same behavior, so
+            # the wheel itself is fine and only the process-exit path is broken upstream.
+            # The exec probe would fail on a working wheel, so these versions assert
+            # importability directly and leave through os._exit before teardown runs.
+            python3 -c 'from mooncake.store import MooncakeDistributedStore; import os; os._exit(0)'
+            ;;
+        *)
+            mc_store_rest_server --help >/dev/null
+            ;;
+    esac
 
     test -f "${pkg}/ascend_transport.so"
     missing="$(ldd "${pkg}/ascend_transport.so" | grep "not found" || true)"
