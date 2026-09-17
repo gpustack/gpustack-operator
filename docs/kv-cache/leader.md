@@ -141,6 +141,10 @@ transports need a vendor runtime `mirrored-mooncake` does not carry, and the ven
 carry the leadership backend — the two axes are independent, so covering them means rebuilding each
 variant.
 
+`musa` and `maca` are not on that list because this project builds no variant for either, by
+intent: a group on one of them runs an image you built, so whether it also carries the leadership
+backend is a property of your build rather than of anything here.
+
 `efa` is the one fabric not on that list: it needs no vendor runtime, only libfabric, so
 `mirrored-mooncake` compiles it in — the image build proves the transport installed by running a
 target-mode bench told `--protocol=efa` and refusing the transport map's "Invalid protocol": the

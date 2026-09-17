@@ -180,6 +180,14 @@ func checkTransport(engine Engine, protocol string) error {
 //
 // An empty offer list is NOT a transport answer: it is the no-store shape, which Render refuses
 // for its own reason, so this returns no protocol and no error rather than borrowing that case.
+//
+// An empty offer INSIDE the list is a different thing and is skipped. A group's effective protocol
+// is the artifact's spelling looked up from the API's, so an API value with no entry in that map
+// resolves to the empty string. Nothing produces one today — a guard test asserts every enum value
+// has an entry — but an unconstrained engine accepts any offer, so without this the ninth enum value
+// added without its map entry would be handed to the engine as an empty transport variable rather
+// than refused. Skipping rather than refusing outright is what lets the groups that DID resolve still
+// answer; a pool where none of them did falls through to the refusal below.
 func MatchTransport(engine Engine, offers []string) (string, error) {
 	if len(offers) == 0 {
 		return "", nil
@@ -187,6 +195,9 @@ func MatchTransport(engine Engine, offers []string) (string, error) {
 
 	facts := engineTransportConstraint[engine]
 	for _, offer := range offers {
+		if offer == "" {
+			continue
+		}
 		if facts.Required == "" || facts.Required == offer {
 			return offer, nil
 		}

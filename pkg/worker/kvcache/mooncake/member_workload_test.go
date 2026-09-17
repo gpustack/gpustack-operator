@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
+	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/ptr"
 
@@ -1893,5 +1894,74 @@ func TestMemberWorkload_FabricDeviceResource(t *testing.T) {
 					"no fabric resource was asked for, and nothing else on this path sets a limit")
 			}
 		})
+	}
+}
+
+// TestMemberProtocols_EveryEnumValueResolves is the guard on the one drift that produces an empty
+// transport rather than an error.
+//
+// memberProtocols translates the API's spelling into the artifact's, and a lookup that misses
+// returns the empty string. Nothing downstream treats that as a failure on its own: an unconstrained
+// engine accepts any offer, so a ninth enum value added without its map entry would reach the engine
+// as an empty MOONCAKE_PROTOCOL rather than as a refusal. The two lists live in different packages
+// and nothing but this test makes one follow the other.
+//
+// The enum is read out of the GENERATED CRD rather than restated here, because a copy of it would
+// drift in exactly the case this exists to catch. Both schema sites are read: the backend's
+// spec.transport.protocol and a member group's own, which carry the same values through separate
+// markers and can therefore diverge.
+func TestMemberProtocols_EveryEnumValueResolves(t *testing.T) {
+	crd, ok := workercore.GetCustomResourceDefinitions()["KVCacheBackend"]
+	require.True(t, ok, "the KVCacheBackend CRD is generated under this key")
+
+	var schema *apiext.JSONSchemaProps
+	for i := range crd.Spec.Versions {
+		if crd.Spec.Versions[i].Schema != nil && crd.Spec.Versions[i].Schema.OpenAPIV3Schema != nil {
+			schema = crd.Spec.Versions[i].Schema.OpenAPIV3Schema
+			break
+		}
+	}
+	require.NotNil(t, schema, "the CRD carries a structural schema")
+
+	enumAt := func(t *testing.T, path ...string) []string {
+		t.Helper()
+
+		node := schema
+		for _, step := range path {
+			if step == "" {
+				// The array step: descend into the item schema rather than the property.
+				require.NotNil(t, node.Items, "the schema still has an item schema here")
+				node = node.Items.Schema
+				continue
+			}
+			next, found := node.Properties[step]
+			require.True(t, found, "the schema still has a %q under %v", step, path)
+			node = &next
+		}
+
+		require.NotEmpty(t, node.Enum, "the field at %v still carries an enum", path)
+
+		values := make([]string, 0, len(node.Enum))
+		for _, raw := range node.Enum {
+			var value string
+			require.NoError(t, json.Unmarshal(raw.Raw, &value))
+			values = append(values, value)
+		}
+		return values
+	}
+
+	backendEnum := enumAt(t, "spec", "transport", "protocol")
+	groupEnum := enumAt(t, "spec", "connection", "managed", "members", "", "transport", "protocol")
+
+	assert.Equal(t, backendEnum, groupEnum,
+		"a group's protocol replaces the backend's, so one value accepted at one site and not the "+
+			"other would be accepted and then unresolvable")
+
+	for _, value := range backendEnum {
+		resolved, found := memberProtocols[value]
+		assert.True(t, found,
+			"enum value %q has no entry in memberProtocols: it would resolve to the empty string, "+
+				"which reaches the member as an empty MOONCAKE_PROTOCOL rather than as an error", value)
+		assert.NotEmpty(t, resolved, "enum value %q maps to the empty string", value)
 	}
 }

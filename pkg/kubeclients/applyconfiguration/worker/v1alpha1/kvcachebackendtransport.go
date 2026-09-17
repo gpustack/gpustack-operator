@@ -22,9 +22,13 @@ type KVCacheBackendTransportApplyConfiguration struct {
 	// group renders one DaemonSet, whose single Pod template cannot carry a different transport
 	// per node, and promoting to rdma grants hostNetwork and two capabilities — a privilege is
 	// requested, never inferred on an operator's behalf.
-	// - Membership in this enum means MEASURED AS COMPILED into a published artifact, which is what
-	// excludes the other eight strings that artifact's config parser accepts. It does not mean
-	// measured to move bytes: only tcp has been exercised end to end.
+	// - Membership in this enum means MEASURED AS COMPILED into an artifact a member can run, which
+	// is what excludes the other eight strings that artifact's config parser accepts. It does not
+	// mean measured to move bytes: only tcp has been exercised end to end. It also does not mean
+	// this project publishes an image carrying it — musa and maca are deliberately in the enum
+	// with no variant in pack/mirrored-mooncake, so a group on either names its own image. A
+	// value here with neither a project variant nor a working self-built image is what the rule
+	// excludes; an absent variant on its own is not.
 	// - A host fabric needs two things this API cannot check: the member image must carry the
 	// runtime its transport links — CANN for cann, libfabric for efa — and the NODE must run a
 	// device plugin, since a hostPath alone leaves the device cgroup refusing to open the device.

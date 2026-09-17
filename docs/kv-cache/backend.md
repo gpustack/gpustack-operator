@@ -347,7 +347,8 @@ build compiles no `ascend` transport.
 > a host fabric would mean granting `hostNetwork` plus `IPC_LOCK` and `SYS_RESOURCE`. A privilege is
 > requested, never inferred. Naming `rdma` or `efa` is also what accepts the security context that
 > comes with it — which is those three things and **not** `privileged`. A `tcp` group sets none of
-> them.
+> them. `privileged` is reachable, but only by writing it into
+> [`members[].securityContext`](#reaching-a-nodes-accelerator), never by naming a protocol.
 
 An `efa` group takes everything `rdma` takes, plus one device from a plugin — by default
 `vpc.amazonaws.com/efa`, which `spec.transport.deviceResourceName` overrides. That request is what lets the
