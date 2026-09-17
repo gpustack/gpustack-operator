@@ -18,7 +18,8 @@ type KVCacheBackendStatusApplyConfiguration struct {
 	// PhaseMessage carries the reason for the phase.
 	PhaseMessage *string `json:"phaseMessage,omitempty"`
 	// Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,
-	// CapacityObserved, Deletable. Every one is derived from an observed document.
+	// CapacityObserved, Deletable, and SnapshotStorageShared when a snapshot is configured. Every
+	// one is derived from an observed document.
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 	// Endpoints are this backend's addresses, one entry per named role — the same shape the
 	// external branch takes as input. A managed backend fills both from its own Service; an

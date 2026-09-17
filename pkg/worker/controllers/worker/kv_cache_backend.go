@@ -83,6 +83,10 @@ const (
 	// own data is indistinguishable from what it found. reportKVCacheBackendTierReuse carries why
 	// the alternatives were worse.
 	KVCacheBackendConditionTierWasEmpty kubeapistatus.ConditionType = "TierWasEmpty"
+	// KVCacheBackendConditionSnapshotStorageShared answers whether more than one leader replica can
+	// read the claim the snapshot is kept on. It is ABSENT on a backend that asks for no snapshot,
+	// rather than True, because there is no storage for it to be a verdict about.
+	KVCacheBackendConditionSnapshotStorageShared kubeapistatus.ConditionType = "SnapshotStorageShared"
 )
 
 // KVCacheBackendReconciler reconciles a KVCacheBackend.
@@ -433,6 +437,9 @@ func (r *KVCacheBackendReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Decided once and carried on the object, because a member restarting under an established
 	// backend surveys this backend's own data and cannot be told apart from a fresh reuse.
 	r.reportKVCacheBackendTierReuse(ctx, kvcb, holder)
+	// Independent of everything above: it reads a claim rather than the store, and it is true or
+	// false whether or not the leader is answering.
+	r.reportSnapshotStorage(ctx, kvcb, holder)
 	// Derived last, from the conditions the observation just wrote. A phase computed before them
 	// would summarize the previous pass.
 	deriveKVCacheBackendPhase(holder, renderBlocked)

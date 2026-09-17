@@ -142,6 +142,8 @@ func (m *KVCacheBackendLeaderHighAvailability) Reset() { *m = KVCacheBackendLead
 
 func (m *KVCacheBackendLeaderOffload) Reset() { *m = KVCacheBackendLeaderOffload{} }
 
+func (m *KVCacheBackendLeaderSnapshot) Reset() { *m = KVCacheBackendLeaderSnapshot{} }
+
 func (m *KVCacheBackendList) Reset() { *m = KVCacheBackendList{} }
 
 func (m *KVCacheBackendManaged) Reset() { *m = KVCacheBackendManaged{} }
@@ -3364,6 +3366,18 @@ func (m *KVCacheBackendLeaderHighAvailability) MarshalToSizedBuffer(dAtA []byte)
 	_ = i
 	var l int
 	_ = l
+	if m.Snapshot != nil {
+		{
+			size, err := m.Snapshot.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0xa
+	}
 	return len(dAtA) - i, nil
 }
 
@@ -3403,6 +3417,44 @@ func (m *KVCacheBackendLeaderOffload) MarshalToSizedBuffer(dAtA []byte) (int, er
 	}
 	i--
 	dAtA[i] = 0x8
+	return len(dAtA) - i, nil
+}
+
+func (m *KVCacheBackendLeaderSnapshot) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *KVCacheBackendLeaderSnapshot) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *KVCacheBackendLeaderSnapshot) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.RetentionCount != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.RetentionCount))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.IntervalSeconds != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.IntervalSeconds))
+		i--
+		dAtA[i] = 0x10
+	}
+	i -= len(m.PersistentVolumeClaimName)
+	copy(dAtA[i:], m.PersistentVolumeClaimName)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.PersistentVolumeClaimName)))
+	i--
+	dAtA[i] = 0xa
 	return len(dAtA) - i, nil
 }
 
@@ -7112,6 +7164,10 @@ func (m *KVCacheBackendLeaderHighAvailability) Size() (n int) {
 	}
 	var l int
 	_ = l
+	if m.Snapshot != nil {
+		l = m.Snapshot.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
 	return n
 }
 
@@ -7123,6 +7179,23 @@ func (m *KVCacheBackendLeaderOffload) Size() (n int) {
 	_ = l
 	n += 2
 	n += 2
+	return n
+}
+
+func (m *KVCacheBackendLeaderSnapshot) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.PersistentVolumeClaimName)
+	n += 1 + l + sovGenerated(uint64(l))
+	if m.IntervalSeconds != nil {
+		n += 1 + sovGenerated(uint64(*m.IntervalSeconds))
+	}
+	if m.RetentionCount != nil {
+		n += 1 + sovGenerated(uint64(*m.RetentionCount))
+	}
 	return n
 }
 
@@ -8958,6 +9031,7 @@ func (this *KVCacheBackendLeaderHighAvailability) String() string {
 		return "nil"
 	}
 	s := strings.Join([]string{`&KVCacheBackendLeaderHighAvailability{`,
+		`Snapshot:` + strings.Replace(this.Snapshot.String(), "KVCacheBackendLeaderSnapshot", "KVCacheBackendLeaderSnapshot", 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -8969,6 +9043,18 @@ func (this *KVCacheBackendLeaderOffload) String() string {
 	s := strings.Join([]string{`&KVCacheBackendLeaderOffload{`,
 		`Enabled:` + fmt.Sprintf("%v", this.Enabled) + `,`,
 		`OnEvict:` + fmt.Sprintf("%v", this.OnEvict) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *KVCacheBackendLeaderSnapshot) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&KVCacheBackendLeaderSnapshot{`,
+		`PersistentVolumeClaimName:` + fmt.Sprintf("%v", this.PersistentVolumeClaimName) + `,`,
+		`IntervalSeconds:` + valueToStringGenerated(this.IntervalSeconds) + `,`,
+		`RetentionCount:` + valueToStringGenerated(this.RetentionCount) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -20019,6 +20105,42 @@ func (m *KVCacheBackendLeaderHighAvailability) Unmarshal(dAtA []byte) error {
 			return fmt.Errorf("proto: KVCacheBackendLeaderHighAvailability: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Snapshot", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Snapshot == nil {
+				m.Snapshot = &KVCacheBackendLeaderSnapshot{}
+			}
+			if err := m.Snapshot.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -20109,6 +20231,128 @@ func (m *KVCacheBackendLeaderOffload) Unmarshal(dAtA []byte) error {
 				}
 			}
 			m.OnEvict = bool(v != 0)
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *KVCacheBackendLeaderSnapshot) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: KVCacheBackendLeaderSnapshot: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: KVCacheBackendLeaderSnapshot: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field PersistentVolumeClaimName", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.PersistentVolumeClaimName = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field IntervalSeconds", wireType)
+			}
+			var v int32
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.IntervalSeconds = &v
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RetentionCount", wireType)
+			}
+			var v int32
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.RetentionCount = &v
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

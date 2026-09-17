@@ -756,11 +756,19 @@ skips generation, `:544`. That branch is unreachable here.)
 
 **The flags are already reachable. The storage is not, and that is the whole reason this field
 exists.** `enable_snapshot`, `enable_snapshot_restore` and the object-store keys are absent from
-`LeaderExtraArgsRules`, so an administrator can set all of them today through `leader.extraArgs` —
-and get a backend that reads as configured and restores nothing. `snapshot_object_store_type=local`
-resolves its root from the `MOONCAKE_SNAPSHOT_LOCAL_PATH` environment variable, with **no default**
-(`local_file_snapshot_object_store.h:19-20`), inside each Pod's own filesystem. The primary writes;
-the standby is a different Pod and reads an empty directory. Nothing logs it.
+`LeaderExtraArgsRules`, so an administrator can set all of them today through `leader.extraArgs`.
+`snapshot_object_store_type=local` resolves its root from the `MOONCAKE_SNAPSHOT_LOCAL_PATH`
+environment variable, with **no default** (`local_file_snapshot_object_store.h:19-20`), and
+`leader.extraArgs` renders flags rather than environment — so there is no way to supply it.
+
+**CORRECTION, measured rather than assumed:** an earlier draft here said the reachable flags buy a
+backend that "reads as configured and restores nothing". They do not. The constructor
+**throws** on the unset variable, `master_service.cpp:256-266` rethrows it as a `runtime_error`, and
+nothing between there and `main` catches it on either the HA or the single-master path. The hatch
+therefore yields a leader that does not start, which is the loud failure this project prefers. What
+is unreachable is the capability, not the reporting — and the silent version of the failure is still
+the one this field has to avoid producing: a variable pointing INSIDE each Pod's own filesystem
+means the primary writes where the standby cannot read, and nothing logs that.
 
 The field:
 
@@ -785,17 +793,43 @@ have. The reconciler checks the claim's access modes when it can see them and re
 as a condition; the walkthrough in F7 states the requirement where a reader meets it first. **Not
 counted as the check:** the backend reaching Ready, which it does either way.
 
+**The condition reads the BOUND volume's modes, never the claim's request.** `spec.accessModes` is
+what somebody asked for, and a cluster is free to bind a volume that does not honour it; reading the
+request would make this check pass on exactly the cluster it exists to catch. So the answer is
+`Unknown` until the claim is `Bound` — as it is when the claim cannot be read at all, because a
+briefly unreachable API server and a single-writer volume call for different remedies and `False`
+would put them in one state.
+
+**The snapshot is not gated on the replica count, and the election beside it is.** A single leader
+restores its own last snapshot when it restarts, which is worth having on its own, so the flags
+arrive as soon as the field is set. The election's do not, because an image without the Lease
+backend refuses to start the moment they appear. The two gates sit in the same block and differ, so
+the API type says which is which and a unit test holds them apart.
+
 **No catalog field, because the catalog rides in the object store.**
 `EmbeddedSnapshotCatalogStore(SnapshotObjectStore*, cluster_id)` takes the object store itself, so
 one shared volume carries both the payload and the index of what exists. The Redis catalog upstream
 offers would add a second external dependency to a spec whose entire premise is not having one.
 
-**Five more keys join the escape hatch's reserved list**, four of them derived from this field —
-`enable_snapshot`, `enable_snapshot_restore`, `snapshot_object_store_type`, `snapshot_backup_dir` —
-and one that is not: **`memory_allocator`**. `master_service.cpp:527` creates the snapshot manager
-only when the allocator is `OFFSET`. That is the artifact's default (`master.cpp:320`), so nothing
-is wrong today, and the `if` has no `else` and logs nothing — an administrator who switches the
-allocator through the hatch turns snapshots off silently and keeps every flag that says they are on.
+**Thirteen keys join the escape hatch's reserved list, not five.** The earlier count in this
+section named four derived keys and one forbidden; tracing each rendered setting to its write points
+in the artifact's own source — which `LeaderExtraArgsRules` states as a claim a reader can check,
+not as a summary — turns up eight more, and one of the original five is on the wrong side.
+
+Derived, because this API renders the flag: `enable_snapshot`, `enable_snapshot_restore`,
+`snapshot_object_store_type`, `snapshot_interval_seconds`, `snapshot_retention_count`. The last two
+render only when their fields are set and are reserved all the same, because a key accepted here
+would win over a field left unset — an object stating a default it is not running with.
+
+Forbidden, because nothing collides by name and the key costs more than the hatch is worth:
+
+| Key | What it does |
+|---|---|
+| `memory_allocator` | `master_service.cpp:527` builds the snapshot manager only under the `OFFSET` allocator. That is the artifact's default (`master.cpp:320`), the `if` has no `else` and logs nothing, so any other value turns generation off while every rendered flag, the mounted claim and the object all go on saying it is on |
+| `snapshot_backup_dir` | **Moved out of Derived, and the reason inverts what its name suggests.** It is not the object store's path — it is a forensic copy written beside a failed upload, and `master_snapshot_manager.cpp:488` returns the upload error to its caller ONLY while it is empty. Set, each failed payload upload is logged, saved locally and stepped over, and the round reports itself finished |
+| `snapshot_payload_store_type`, `snapshot_payload_backend_type` | Deprecated aliases of `snapshot_object_store_type`. `master.cpp:1304-1319` tests the canonical flag first, and this operator renders it unconditionally, so these move nothing while reading as a store that moved — the `port` shape already in the list |
+| `snapshot_catalog_store_type`, `snapshot_catalog_backend_type` | Not rendered here at all, and that omission is what leaves them reachable: the design rests on `""` parsing to the embedded catalog (`master_service.cpp:85-87`), which is what puts the index on the same claim as the payloads. Pointed elsewhere, a store nothing here creates or backs up holds the index while the claim holds every payload |
+| `snapshot_catalog_store_connstring`, `snapshot_catalog_backend_connstring` | Read only under the catalog kind refused above — the `cxl_path` shape, an accepted key that configures nothing |
 
 **What the baseline does not restore.** The objects a client wrote since the last snapshot are not
 in it, so the window is `intervalSeconds` wide and the cache is partially cold after a failover
@@ -1057,10 +1091,15 @@ bound.
 
 The second round:
 
-- [ ] **T10 — `leader.highAvailability.snapshot`** (F8): the field, the volume and its mount, the
-      four derived flags plus `MOONCAKE_SNAPSHOT_LOCAL_PATH`, the five keys joining the reserved
-      list, and the admission rule that refuses a snapshot naming no claim. The reconciler check on
-      the claim's access modes lands here too, reported as a condition rather than a refusal.
+- [x] **T10 — `leader.highAvailability.snapshot`** (F8): the field, the volume and its mount, the
+      derived flags plus `MOONCAKE_SNAPSHOT_LOCAL_PATH`, the keys joining the reserved list, and the
+      admission rule that refuses a snapshot naming no claim. The reconciler check on the claim's
+      access modes lands here too, reported as a condition rather than a refusal. **Two counts in
+      the feature above were wrong and are corrected there:** the reserved list takes thirteen keys
+      rather than five, and `snapshot_backup_dir` is forbidden rather than derived — it is a
+      forensic copy directory whose effect is to stop reporting failed uploads, not the object
+      store's path. The condition is `SnapshotStorageShared`, and it reads the bound volume's access
+      modes rather than the claim's request.
 - [ ] **T11 — The handover Event** (F9), recorded when the Lease's holder changes. No new access:
       F1's Role already carries the read. FORBIDDEN: a status field; G5 and F5 say why.
 - [ ] **T12 — The second member entry** (F10). Both render, the default does not move, and the
