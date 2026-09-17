@@ -417,6 +417,18 @@ type KVCacheBackendTransport struct {
 	//     runtime its transport links — the CANN toolkit for CANN, libfabric for EFA — and the NODE must run a
 	//     device plugin, since a hostPath alone leaves the device cgroup refusing to open the device.
 	//     Which resource the member asks for is deviceResourceName below.
+	//   - RESPELLING THIS ENUM CARRIES A RESIDUAL RISK, knowingly accepted, on the same terms as
+	//     Medium's. The values were once Auto, TCP, RDMA, EFA, HIP and Ascend; HIP and Ascend are
+	//     gone, replaced by the toolchain names ROCM and CANN, and the rest changed case. An object
+	//     storing one of the old values becomes undeletable, because schema validation runs on the
+	//     write path only: it reads back fine while every update is refused, the controller's
+	//     finalizer removal included. NO RELEASE IS EXPOSED — this type is absent from every tag
+	//     through v0.8.6, checked per tag — but a cluster tracking the default branch is, since that
+	//     branch carried the old spellings. Clearing it is the first shipping release's job: confirm
+	//     no leftover object exists, or write a recovery procedure. A conversion webhook is NOT the
+	//     answer here for the reason an alias map is not: the schema enum is the gate a stored object
+	//     meets first, so widening what admission accepts reaches nothing that the API server has
+	//     already refused.
 	//
 	// +k8s:validation:default="Auto"
 	// +k8s:validation:enum=["Auto","TCP","RDMA","EFA","CANN","ROCM","MUSA","MACA"]
@@ -680,7 +692,8 @@ type KVCacheBackendMemberHostPath struct {
 type KVCacheBackendMemberTransport struct {
 	// Protocol is the transport this group's members are ASKED to use, with the same values and
 	// the same Auto-resolves-to-TCP rule as the backend's spec.transport.protocol, which this
-	// field replaces for this group when set.
+	// field replaces for this group when set — including the residual risk that field records for
+	// the respelling, which applies to a stored value here the same way.
 	//
 	// +k8s:validation:default="Auto"
 	// +k8s:validation:enum=["Auto","TCP","RDMA","EFA","CANN","ROCM","MUSA","MACA"]

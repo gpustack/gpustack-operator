@@ -11,7 +11,8 @@ package v1alpha1
 type KVCacheBackendMemberTransportApplyConfiguration struct {
 	// Protocol is the transport this group's members are ASKED to use, with the same values and
 	// the same Auto-resolves-to-TCP rule as the backend's spec.transport.protocol, which this
-	// field replaces for this group when set.
+	// field replaces for this group when set — including the residual risk that field records for
+	// the respelling, which applies to a stored value here the same way.
 	Protocol *string `json:"protocol,omitempty"`
 }
 
