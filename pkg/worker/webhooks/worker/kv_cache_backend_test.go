@@ -295,7 +295,28 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 				{Path: "/usr/local/Ascend/driver", MountPath: "/opt/vendor"},
 				{Path: "/usr/local/dcmi", MountPath: "/opt/vendor"},
 			}
-		}, "duplicates the mount path of hostPaths[0]"},
+		}, "overlaps the mount path of hostPaths[0]"},
+		{"a group mounting one declared path inside another", func(k *workercore.KVCacheBackend) {
+			// Two declared mounts are ordered by their position in the list, so which one the
+			// container sees is the runtime's decision for exactly the reason a renderer-owned
+			// overlap is.
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/srv/data", MountPath: "/data"},
+				{Path: "/srv/cache", MountPath: "/data/cache"},
+			}
+		}, "overlaps the mount path of hostPaths[0]"},
+		{"a group mounting one declared path around another", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/srv/cache", MountPath: "/data/cache"},
+				{Path: "/srv/data", MountPath: "/data"},
+			}
+		}, "overlaps the mount path of hostPaths[0]"},
+		{"a group whose two declared paths only share a string prefix", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/srv/data", MountPath: "/data"},
+				{Path: "/srv/data2", MountPath: "/data2"},
+			}
+		}, ""},
 		{"a group mounting over the device tree on tcp", func(k *workercore.KVCacheBackend) {
 			// Refused even though this backend's protocol renders no such mount: the protocol is a
 			// field an update may change, while a mount path is judged only when it is written.

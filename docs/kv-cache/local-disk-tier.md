@@ -55,7 +55,8 @@ documented, so there is nothing to opt into.
 
 ⚠️ **Every example on this page is a `DRAM` group, and that is not incidental: pairing the tier with
 a `VRAM` group is unverified.** What is and is not measured about that pairing is stated once, with
-the medium it belongs to, at [The members](backend.md#the-members) — read it before writing one.
+the medium it belongs to, at [Reaching a node's accelerator](backend.md#reaching-a-nodes-accelerator) —
+read it before writing one.
 
 ## Contents
 

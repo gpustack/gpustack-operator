@@ -34,7 +34,7 @@ type transportFacts struct {
 	// that will reject it.
 	//
 	// IT IS RECORDED AND NOT DERIVED, and that is forced rather than preferred: mooncake's mapping is
-	// not injective, so it has no inverse. Both auto and tcp render "tcp", so "which API value
+	// not injective, so it has no inverse. Both Auto and TCP render "tcp", so "which API value
 	// produces this artifact value" has two answers there and one here. A helper computing it would
 	// be correct for ascend and quietly wrong for the transport that has two -- the same shape of
 	// defect this table exists to remove.

@@ -360,7 +360,7 @@ func (r *ModelDeploymentReconciler) resolveModelDeploymentConnection(
 		Domain:              tenant,
 		MasterServerAddress: pool.Status.ClientEndpoint,
 		// Every group's effective protocol, never Spec.Transport.Protocol read here: the one
-		// function that owns this mapping resolves auto, falls back to auto for an empty value,
+		// function that owns this mapping resolves Auto, falls back to Auto for an empty value,
 		// and applies each group's own override. Which offer an engine is handed is decided at
 		// synthesis, where the engine is known — this resolution is deliberately per deployment.
 		Protocols: mooncake.MemberProtocols(kvcb),

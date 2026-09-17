@@ -802,10 +802,11 @@ func pathsOverlap(a, b string) bool {
 // validateKVCacheBackendMemberHostPaths keeps a group's declared mounts from landing on each other
 // or on one the renderer owns.
 //
-// Kubernetes accepts a container carrying two mounts at one path and leaves the winner to the
-// runtime, so neither collision is reported anywhere: the member starts, one of the two mounts is
-// simply not there, and what reads it finds the other one's contents. That is the whole reason
-// these are refused here rather than left to the Pod.
+// Kubernetes accepts a container carrying two mounts at one path — or at two paths where one
+// contains the other — and leaves the outcome to the runtime, so no collision here is reported
+// anywhere: the member starts, one of the mounts is simply not what reads it finds. That is the
+// whole reason these are refused here rather than left to the Pod, and it is why EVERY comparison
+// below is by overlap rather than by equality.
 //
 // The device tree's path is refused UNCONDITIONALLY, including on a group whose protocol renders no
 // such mount today: the protocol is a field an update may change while a mount path is judged only
@@ -823,19 +824,24 @@ func validateKVCacheBackendMemberHostPaths(
 		diskPath = member.LocalDisk.Path
 	}
 
-	seen := make(map[string]int, len(member.HostPaths))
-
 	for i := range member.HostPaths {
 		mountPath := member.HostPaths[i].MountPath
 		mountPathPath := fldPath.Index(i).Child("mountPath")
 
-		if first, ok := seen[mountPath]; ok {
+		// Against the entries BEFORE this one, and by overlap rather than by equality: two declared
+		// mounts where one contains the other are ordered by their position in this list, and which
+		// of the two the container ends up seeing is the runtime's to decide — the same reason the
+		// renderer-owned paths below are judged by overlap. Comparing backwards reports the pair
+		// once, on the later entry, instead of once from each side.
+		if prior := slices.IndexFunc(member.HostPaths[:i], func(e workercore.KVCacheBackendMemberHostPath) bool {
+			return pathsOverlap(mountPath, e.MountPath)
+		}); prior >= 0 {
 			errs = append(errs, field.Invalid(mountPathPath, mountPath, fmt.Sprintf(
-				"duplicates the mount path of hostPaths[%d]: a container carrying one path twice "+
-					"leaves which mount wins to the runtime, and reports nothing either way", first)))
+				"overlaps the mount path of hostPaths[%d] (%s): a container carrying overlapping "+
+					"paths leaves which mount wins to the runtime, and reports nothing either way",
+				prior, member.HostPaths[prior].MountPath)))
 			continue
 		}
-		seen[mountPath] = i
 
 		switch {
 		case pathsOverlap(mountPath, mooncake.RDMADevicePath):

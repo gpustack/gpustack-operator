@@ -585,8 +585,9 @@ func TestResolveModelDeploymentConnection(t *testing.T) {
 			require.NotNil(t, got)
 			assert.Equal(t, "master:50051", got.MasterServerAddress)
 			assert.Equal(t, tc.wantDomain, got.Domain)
-			// Already in the artifact's own spelling, lowercased and auto-resolved by the package
-			// that owns the backend. The fixture's backend declares no member groups, so the one
+			// Already in the artifact's own spelling, which is lowercase where the API's is not, with
+			// Auto already resolved by the package that owns the backend. The fixture's backend
+			// declares no member groups, so the one
 			// offer is the backend-wide value; which one an engine is handed is synthesis's call.
 			assert.Equal(t, []string{tc.wantProt}, got.Protocols)
 		})

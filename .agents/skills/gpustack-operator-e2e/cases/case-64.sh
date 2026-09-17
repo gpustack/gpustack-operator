@@ -202,7 +202,7 @@ spec:
   type: Mooncake
   image: ${IMAGE}
   transport:
-    protocol: tcp
+    protocol: TCP
   connection:
     managed:
       leader:
