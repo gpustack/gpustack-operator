@@ -107,6 +107,14 @@ const (
 	// memberLocalDiskVolumeName names the host directory holding a group's disk tier.
 	memberLocalDiskVolumeName = "local-disk"
 
+	// memberHostPathVolumeNamePrefix prefixes the volume backing one declared host path, which is
+	// suffixed with the entry's position.
+	//
+	// The position and not the path, because a name derived from user input can collide with the
+	// two names above and a DNS label cannot hold a path anyway. The position already identifies an
+	// entry everywhere else, so the mapping needs no state to remember it.
+	memberHostPathVolumeNamePrefix = "host-path"
+
 	// MemberLocalDiskSurveyContainerName names the init container that reports what the tier
 	// directory already held. The controller finds its reading by this name, so the two are one
 	// fact and not two spellings of it.
@@ -239,11 +247,17 @@ const memberEvictionPolicyNone = "none"
 
 // memberProtocols maps this API's spelling of a transport onto the artifact's.
 //
-// Auto maps to tcp rather than resolving upward against the node, and the two reasons are in the
-// API type's own comment: one DaemonSet covers every node a group selects and so cannot carry a
-// per-node transport, and promoting to RDMA would grant hostNetwork and two capabilities nobody
-// asked for. The artifact has no "auto" either — it looks its protocol string up in a transport map,
-// so rendering the literal would reach a lookup that finds nothing.
+// Auto maps to the artifact's tcp rather than resolving upward against the node, and the two
+// reasons are in the API type's own comment: one DaemonSet covers every node a group selects and so
+// cannot carry a per-node transport, and promoting to RDMA would grant hostNetwork and two
+// capabilities nobody asked for. The artifact has no "auto" of its own either — it looks its
+// protocol string up in a transport map, so rendering the literal would find nothing there.
+//
+// CANN and ROCM are the ONLY two entries whose artifact spelling differs by more than case: the API
+// names the toolchain the member image is built against, matching the published image tags, while
+// the artifact's transport map knows the vendor's own protocol string (ascend and hip). The rest
+// differ only in case, which is enough that comparing an API value against a rendered one as
+// strings finds a difference that is not one.
 // MemberProtocolAuto is the transport the schema defaults to, named because the renderer falls back
 // to it for an object that never reached an API server.
 const MemberProtocolAuto = "Auto"
@@ -253,13 +267,19 @@ var memberProtocols = map[string]string{
 	"TCP":              "tcp",
 	"RDMA":             "rdma",
 	"EFA":              "efa",
-	"HIP":              "hip",
-	"Ascend":           "ascend",
+	"CANN":             "ascend",
+	"ROCM":             "hip",
+	"MUSA":             "musa",
+	"MACA":             "maca",
 }
 
 // MemberProtocolIsHostFabric reports whether a RESOLVED protocol is one of the two that reach the
 // host's device tree: the ones that take hostNetwork, get the two capabilities and mount the device
 // node. It takes MemberProtocol's output, not the API's spelling.
+//
+// rdma and efa are the only two. musa and maca are intra-node IPC transports, not host fabrics, and
+// the rest never leave the member's own network namespace, so none of them earns hostNetwork, the
+// capabilities or the mount.
 //
 // It does NOT promise that a device request is rendered. That needs a name as well — declared, or
 // EFA's fallback — and an RDMA group with neither renders the mount and no request, which is the
@@ -330,15 +350,47 @@ func MemberProtocol(kvcb *workercore.KVCacheBackend) string {
 	return memberProtocols[protocol]
 }
 
+// MemberProtocolForGroup is the transport ONE member group resolves to, in the artifact's own
+// spelling: the group's own transport.protocol when it declares one, and the backend's value —
+// with its Auto and empty handling — when it does not. A group carrying a transport block with no
+// protocol inherits too, which is the shape an object that never reached the API server's
+// defaulting takes.
+func MemberProtocolForGroup(kvcb *workercore.KVCacheBackend, group workercore.KVCacheBackendMember) string {
+	if group.Transport != nil && group.Transport.Protocol != "" {
+		return memberProtocols[group.Transport.Protocol]
+	}
+	return MemberProtocol(kvcb)
+}
+
+// MemberProtocols is what a pool's backend offers an engine, in group declaration order: each
+// member group's effective protocol, or the backend-wide value alone for a backend that declares
+// no groups — an external one, whose store is somebody else's to describe. The slice is never
+// empty, so a caller matching against it never has to ask whether the pool offers anything.
+func MemberProtocols(kvcb *workercore.KVCacheBackend) []string {
+	managed := kvcb.Spec.Connection.Managed
+	if managed == nil || len(managed.Members) == 0 {
+		return []string{MemberProtocol(kvcb)}
+	}
+
+	offers := make([]string, 0, len(managed.Members))
+	for i := range managed.Members {
+		offers = append(offers, MemberProtocolForGroup(kvcb, managed.Members[i]))
+	}
+	return offers
+}
+
 // RenderMemberDaemonSet renders one member group into a DaemonSet.
 //
-// A DaemonSet rather than a Deployment because a member contributes A NODE's medium: it claims that
-// node's memory or disk, and on the host-fabric paths that node's devices, so its identity IS the
-// node. A Deployment with anti-affinity only approximates that.
+// A DaemonSet rather than a Deployment because a member contributes A NODE's media: it claims that
+// node's memory or disk, and on a VRAM group or a host-fabric path that node's devices, so its
+// identity IS the node. Two groups can now select the SAME node — a DRAM group and a VRAM group is
+// the shape this API exists to express — and each is still its own DaemonSet, one member per group
+// per node. A Deployment with anti-affinity only approximates that.
 //
 // The image is a parameter for the same reason the leader's is, and the group's own image wins over
 // it — a group selects its own nodes, so two groups can sit on different accelerator hardware and
-// need the client wheel built for it. The transport is backend-wide and not part of that split.
+// need the client wheel built for it. The medium and the transport are the group's for the same
+// reason, and both are read off the group below rather than off the backend.
 func RenderMemberDaemonSet(
 	kvcb *workercore.KVCacheBackend, group int, image string,
 ) *apps.DaemonSet {
@@ -406,8 +458,16 @@ func RenderMemberDaemonSet(
 		},
 	}
 
-	applyMemberFabric(ds, MemberProtocol(kvcb), kvcb.Spec.Transport.DeviceResourceName)
+	applyMemberFabric(ds, MemberProtocolForGroup(kvcb, member), kvcb.Spec.Transport.DeviceResourceName)
 	applyMemberLocalDisk(ds, kvcb, member, group)
+	applyMemberHostPaths(ds, member)
+	// Last of the four, because it merges onto whatever the fabric path put there and so has to see
+	// the finished context rather than race it.
+	applyMemberSecurityContext(ds, member)
+
+	if member.RuntimeClassName != "" {
+		ds.Spec.Template.Spec.RuntimeClassName = ptr.To(member.RuntimeClassName)
+	}
 
 	// Stamped last, over a template that is otherwise complete. The fingerprint therefore covers
 	// the fabric fields applied just above, and — because it is computed from a copy with the node
@@ -461,9 +521,7 @@ func memberContainerSpec(
 			PeriodSeconds:    5,
 			FailureThreshold: 3,
 		},
-		Resources: core.ResourceRequirements{
-			Requests: memberRequests(member),
-		},
+		Resources: memberResources(member),
 	}
 }
 
@@ -506,7 +564,7 @@ func renderMemberEnv(
 			Name:  memberEnvMaster,
 			Value: MemberMasterEntry(kvcb),
 		},
-		{Name: memberEnvProtocol, Value: MemberProtocol(kvcb)},
+		{Name: memberEnvProtocol, Value: MemberProtocolForGroup(kvcb, member)},
 		{
 			// This is the ADDRESS the leader hands to clients, not just a label: it becomes the host
 			// half of the segment's te_endpoint. The transfer engine binds its data port inside the
@@ -538,6 +596,9 @@ func renderMemberEnv(
 	}
 
 	if size := member.CapacityPerMember.Value(); size > 0 {
+		// One spelling for BOTH media: in a VRAM build the same size feeds the device allocation,
+		// because the build-time switch changes WHERE the segment is allocated, not how its total
+		// size reaches the allocator.
 		env = append(env, core.EnvVar{
 			Name:  memberEnvGlobalSegmentSize,
 			Value: strconv.FormatInt(size, 10),
@@ -725,20 +786,45 @@ func memberRESTPort(group int) int32 {
 	return memberRESTPortBase + int32(group)
 }
 
-// memberRequests declares the member's claim so capacity planning can see it. A member that does not
-// fit stays Pending and the backend reads Degraded, which is the honest outcome — the alternative is
-// a member that overcommits the node it landed on.
+// memberResources declares the member's claim so capacity planning can see it. A member that does
+// not fit stays Pending and the backend reads Degraded, which is the honest outcome — the
+// alternative is a member that overcommits the node it landed on.
 //
-// The claim is MEMORY and only memory, whatever else the group carries. A disk tier adds a host
-// directory, which is outside the kubelet's ephemeral-storage accounting entirely — that covers the
-// container filesystem, emptyDir volumes and logs, never a hostPath. Requesting against it would
-// reserve a figure nothing polices and would then keep the member off the very node that has the
-// disk. Watching that filesystem is the operator's, and the documentation says so.
-func memberRequests(member workercore.KVCacheBackendMember) core.ResourceList {
-	claim := member.CapacityPerMember.DeepCopy()
-	claim.Add(member.LocalBufferSize)
+// What the claim is made OF follows the medium. A DRAM member's segment is host memory, so
+// capacityPerMember and localBufferSize are both charged to memory. A VRAM member's segment is
+// device memory, which NOTHING HERE CHARGES: host memory carries localBufferSize only, and the
+// device memory is claimed by allocating it and in no other way.
+//
+// Nothing charges it because the claim would not be true. Measured upstream at v0.3.13.post1: the
+// member allocates its whole segment with one cudaMalloc per split
+// (mooncake-store/src/client_buffer_allocation.cpp), the splits exist to stay under the transport's
+// registration limit rather than to span devices (GetTransportRegistrationLimit, real_client.cpp),
+// and nothing on that path calls cudaSetDevice. So a member's segment is on ONE device — whichever
+// the container sees first — and a node's other accelerators are untouched by it. Asking the
+// scheduler for one of an extended resource would take a whole accelerator away from inference to
+// account for a fraction of one device's memory, on a node where the member cannot use the rest of
+// what it took.
+//
+// What it costs to charge nothing is real and belongs to the operator: the inference engine sharing
+// that device sees the whole of its memory as available, so the two are held apart by sizing
+// capacityPerMember against the engine's own memory fraction, and by nothing else. The
+// documentation carries that.
+//
+// A disk tier adds a host directory either way, which is outside the kubelet's ephemeral-storage
+// accounting entirely — that covers the container filesystem, emptyDir volumes and logs, never a
+// hostPath. Requesting against it would reserve a figure nothing polices and would then keep the
+// member off the very node that has the disk. Watching that filesystem is the operator's, and the
+// documentation says so.
+func memberResources(member workercore.KVCacheBackendMember) core.ResourceRequirements {
+	buffer := member.LocalBufferSize.DeepCopy()
 
-	return core.ResourceList{core.ResourceMemory: claim}
+	if member.Medium != "VRAM" {
+		buffer.Add(member.CapacityPerMember)
+	}
+
+	return core.ResourceRequirements{
+		Requests: core.ResourceList{core.ResourceMemory: buffer},
+	}
 }
 
 // applyMemberFabric grants what a fabric needs, and only to the path that needs it.
@@ -751,7 +837,7 @@ func memberRequests(member workercore.KVCacheBackendMember) core.ResourceList {
 //     is what adds the rule that lets it through.
 //   - The libfabric an EFA member runs on travels in the image, so there is no host tree to mount
 //     and no environment to render.
-//   - Every other path, including the Auto that resolved to TCP, is left exactly as rendered: no
+//   - Every other path, including the Auto that resolved to tcp, is left exactly as rendered: no
 //     security context at all rather than an empty one, since an empty struct is an invitation to
 //     add a capability to it.
 func applyMemberFabric(ds *apps.DaemonSet, protocol, deviceResource string) {
@@ -824,6 +910,121 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol, deviceResource string) {
 	}
 
 	container.Resources.Limits[core.ResourceName(deviceResource)] = *resource.NewQuantity(1, resource.DecimalSI)
+}
+
+// applyMemberHostPaths mounts what the group declared it needs from its nodes.
+//
+// The volume name is derived from the entry's POSITION and never from anything the entry carries,
+// which is what keeps it from colliding with the two volumes this renderer owns or with another
+// entry. An entry's mount path is the operator's to keep unique; admission refuses a duplicate.
+//
+// A group that declared none is left exactly as rendered, so this feature does not move the Pod
+// template — and therefore the fingerprint, and therefore the running members — of a backend that
+// does not use it.
+func applyMemberHostPaths(ds *apps.DaemonSet, member workercore.KVCacheBackendMember) {
+	if len(member.HostPaths) == 0 {
+		return
+	}
+
+	podSpec := &ds.Spec.Template.Spec
+	container := &podSpec.Containers[0]
+
+	for i, hp := range member.HostPaths {
+		name := fmt.Sprintf("%s-%d", memberHostPathVolumeNamePrefix, i)
+
+		podSpec.Volumes = append(podSpec.Volumes, core.Volume{
+			Name: name,
+			VolumeSource: core.VolumeSource{
+				HostPath: &core.HostPathVolumeSource{
+					Path: hp.Path,
+					Type: hp.Type,
+				},
+			},
+		})
+		container.VolumeMounts = append(container.VolumeMounts, core.VolumeMount{
+			Name:      name,
+			MountPath: hp.MountPath,
+			ReadOnly:  hp.ReadOnly,
+		})
+	}
+}
+
+// applyMemberSecurityContext merges the group's declared security context ONTO the one the fabric
+// path derived, field by field, with the capability sets unioned.
+//
+// Merged and not substituted, because the two sides know different things. The fabric path knows
+// that a host-fabric member cannot register memory without IPC_LOCK and cannot raise the limit that
+// pinning hits without SYS_RESOURCE; the declaration knows what the node's vendor stack needs. A
+// whole-struct substitution would drop the first pair silently — the container would start, run,
+// and fail only when the transfer engine registers its buffers — so the union is what makes the two
+// declarations independent of each other.
+//
+// Only Add is unioned. Drop is taken as declared: a capability the operator never adds is not one
+// this renderer has an opinion about, and a Drop that overlaps the Add above is the kubelet's
+// contradiction to resolve, not this function's to hide.
+func applyMemberSecurityContext(ds *apps.DaemonSet, member workercore.KVCacheBackendMember) {
+	if member.SecurityContext == nil {
+		return
+	}
+
+	container := &ds.Spec.Template.Spec.Containers[0]
+	derived := container.SecurityContext
+
+	// Deep-copied, so the object handed in by a caller that shares it across renders — a lister's
+	// cached copy, for one — is never written through.
+	merged := member.SecurityContext.DeepCopy()
+
+	if derived != nil {
+		if merged.Privileged == nil {
+			merged.Privileged = derived.Privileged
+		}
+		if merged.RunAsUser == nil {
+			merged.RunAsUser = derived.RunAsUser
+		}
+		if merged.RunAsGroup == nil {
+			merged.RunAsGroup = derived.RunAsGroup
+		}
+		if merged.RunAsNonRoot == nil {
+			merged.RunAsNonRoot = derived.RunAsNonRoot
+		}
+		if merged.ReadOnlyRootFilesystem == nil {
+			merged.ReadOnlyRootFilesystem = derived.ReadOnlyRootFilesystem
+		}
+		if merged.AllowPrivilegeEscalation == nil {
+			merged.AllowPrivilegeEscalation = derived.AllowPrivilegeEscalation
+		}
+		if merged.ProcMount == nil {
+			merged.ProcMount = derived.ProcMount
+		}
+		if merged.SELinuxOptions == nil {
+			merged.SELinuxOptions = derived.SELinuxOptions
+		}
+		if merged.WindowsOptions == nil {
+			merged.WindowsOptions = derived.WindowsOptions
+		}
+		if merged.SeccompProfile == nil {
+			merged.SeccompProfile = derived.SeccompProfile
+		}
+		if merged.AppArmorProfile == nil {
+			merged.AppArmorProfile = derived.AppArmorProfile
+		}
+
+		if derived.Capabilities != nil && len(derived.Capabilities.Add) > 0 {
+			if merged.Capabilities == nil {
+				merged.Capabilities = &core.Capabilities{}
+			}
+			for _, capability := range derived.Capabilities.Add {
+				if !slices.Contains(merged.Capabilities.Add, capability) {
+					merged.Capabilities.Add = append(merged.Capabilities.Add, capability)
+				}
+			}
+			// Sorted, so two renders of one spec are byte-identical whichever order the two sides
+			// contributed in and the DaemonSet does not churn.
+			slices.Sort(merged.Capabilities.Add)
+		}
+	}
+
+	container.SecurityContext = merged
 }
 
 // memberTerminationGracePeriodSeconds is how long the kubelet waits after SIGTERM before it kills

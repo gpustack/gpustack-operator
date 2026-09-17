@@ -683,8 +683,9 @@ const quantityTooLarge = "must not exceed 9223372036854775807 (2^63-1) bytes: th
 // the field they guard is written.
 var memberBucketSize = *resource.NewQuantity(mooncake.MemberBucketSizeLimit, resource.BinarySI)
 
-// validateKVCacheBackendMember holds the per-group rules a schema cannot carry: a medium the schema
-// accepts but nothing renders, and two quantities whose schema type is a string.
+// validateKVCacheBackendMember holds the per-group rules a schema cannot carry: a device
+// resource named on a group with no device to charge, and two quantities whose schema type is a
+// string.
 func validateKVCacheBackendMember(
 	member, oldMember *workercore.KVCacheBackendMember, fldPath *field.Path,
 ) field.ErrorList {
@@ -699,6 +700,8 @@ func validateKVCacheBackendMember(
 		oldDisk = oldMember.LocalDisk
 	}
 	errs = append(errs, validateKVCacheBackendLocalDisk(member.LocalDisk, oldDisk, fldPath.Child("localDisk"))...)
+
+	errs = append(errs, validateKVCacheBackendMemberHostPaths(member, fldPath.Child("hostPaths"))...)
 
 	// A resource.Quantity is a STRING in the schema, so no numeric bound in a marker can reach it —
 	// these two are the only place either can be refused. Zero is refused rather than defaulted,
@@ -771,6 +774,87 @@ func validateKVCacheBackendMember(
 	}
 	if !unchangedExtraArgs(oldMember != nil, oldExtraEnvs, member.ExtraEnvs) {
 		errs = append(errs, validateExtraEnvs(member.ExtraEnvs, fldPath.Child("extraEnvs"))...)
+	}
+
+	return errs
+}
+
+// pathsOverlap reports whether two mount paths are the same path or one contains the other.
+//
+// CONTAINMENT and not just equality, because the renderer appends its own mounts BEFORE a group's
+// declared ones: a declared /dev would be mounted after the device tree at /dev/infiniband, and
+// whether the later mount shadows the earlier one is decided by the container runtime rather than by
+// anything here. A rule that depends on an ordering nobody in this repository verified is not a rule,
+// so the overlap is refused instead and the question never arises.
+//
+// Compared by path ELEMENT, so /dev/infiniband2 does not read as being under /dev/infiniband the way
+// a plain string prefix would have it. Both sides are cleaned first: the schema requires an absolute
+// path with no empty element, which leaves a trailing slash as the one difference Clean still has to
+// remove.
+func pathsOverlap(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if a == b {
+		return true
+	}
+	return strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+}
+
+// validateKVCacheBackendMemberHostPaths keeps a group's declared mounts from landing on each other
+// or on one the renderer owns.
+//
+// Kubernetes accepts a container carrying two mounts at one path — or at two paths where one
+// contains the other — and leaves the outcome to the runtime, so no collision here is reported
+// anywhere: the member starts, one of the mounts is simply not what reads it finds. That is the
+// whole reason these are refused here rather than left to the Pod, and it is why EVERY comparison
+// below is by overlap rather than by equality.
+//
+// The device tree's path is refused UNCONDITIONALLY, including on a group whose protocol renders no
+// such mount today: the protocol is a field an update may change while a mount path is judged only
+// when it is written, so admitting it under tcp would leave a collision that arrives on the day
+// somebody edits an unrelated field. The disk tier's path is judged against the group's CURRENT
+// localDisk instead, because that path is itself declared right there — a group that moves its tier
+// is re-judged against the new one on the same update.
+func validateKVCacheBackendMemberHostPaths(
+	member *workercore.KVCacheBackendMember, fldPath *field.Path,
+) field.ErrorList {
+	var errs field.ErrorList
+
+	var diskPath string
+	if member.LocalDisk != nil {
+		diskPath = member.LocalDisk.Path
+	}
+
+	for i := range member.HostPaths {
+		mountPath := member.HostPaths[i].MountPath
+		mountPathPath := fldPath.Index(i).Child("mountPath")
+
+		// Against the entries BEFORE this one, and by overlap rather than by equality: two declared
+		// mounts where one contains the other are ordered by their position in this list, and which
+		// of the two the container ends up seeing is the runtime's to decide — the same reason the
+		// renderer-owned paths below are judged by overlap. Comparing backwards reports the pair
+		// once, on the later entry, instead of once from each side.
+		if prior := slices.IndexFunc(member.HostPaths[:i], func(e workercore.KVCacheBackendMemberHostPath) bool {
+			return pathsOverlap(mountPath, e.MountPath)
+		}); prior >= 0 {
+			errs = append(errs, field.Invalid(mountPathPath, mountPath, fmt.Sprintf(
+				"overlaps the mount path of hostPaths[%d] (%s): a container carrying overlapping "+
+					"paths leaves which mount wins to the runtime, and reports nothing either way",
+				prior, member.HostPaths[prior].MountPath)))
+			continue
+		}
+
+		switch {
+		case pathsOverlap(mountPath, mooncake.RDMADevicePath):
+			errs = append(errs, field.Invalid(mountPathPath, mountPath,
+				"overlaps where a host-fabric group's device tree is mounted ("+mooncake.RDMADevicePath+
+					"), which this operator renders whenever the group's protocol is RDMA or EFA: "+
+					"declaring it here would collide with that mount the day the protocol changes"))
+		case diskPath != "" && pathsOverlap(mountPath, diskPath):
+			errs = append(errs, field.Invalid(mountPathPath, mountPath,
+				"overlaps where this group's localDisk tier is mounted ("+diskPath+"): the tier is a "+
+					"declared capacity with its own deregistration hook, so it is reached through "+
+					"localDisk and not through a plain mount"))
+		}
 	}
 
 	return errs
@@ -1116,10 +1200,9 @@ func validateKVCacheBackendImmutable(oldKvcb, newKvcb *workercore.KVCacheBackend
 		if i >= len(oldMembers) {
 			break
 		}
-		// Unreachable while the enum carries one value, and kept for the day it carries two: on
-		// that day a medium becomes mutable by default, under segments already mounted from it,
-		// and nothing would fail until someone did it. A rule that is only correct after a later
-		// change is cheaper to keep than to remember to add.
+		// Live now that the enum carries two values: a medium changed under a running group would
+		// remount its segments from a different kind of memory underneath the data they hold, and
+		// nothing would fail until someone did it.
 		if oldMembers[i].Medium != newMembers[i].Medium {
 			errs = append(errs, field.Forbidden(membersPath.Index(i).Child("medium"),
 				"medium is immutable"))

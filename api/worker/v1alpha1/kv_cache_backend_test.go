@@ -65,16 +65,16 @@ func TestKVCacheBackendMembersAreKeyedBySegmentID(t *testing.T) {
 		members.Items.Schema.Required)
 }
 
-// TestKVCacheBackendMediumEnumCarriesOnlyWhatRuns is the only automated guard on the narrowed enum,
-// and it guards a claim nothing else can reach: the four removed values are refused by the SCHEMA,
-// in rest.BeforeCreate, before any webhook runs — so no admission test can cover them, and the
-// webhook rule that used to refuse them is gone precisely because no request reaches it any more.
+// TestKVCacheBackendMediumEnumCarriesOnlyWhatRuns is the only automated guard on the enum, and
+// it guards a claim nothing else can reach: a value outside the enum is refused by the SCHEMA,
+// in rest.BeforeCreate, before any webhook runs — so no admission test can cover it, and a value
+// added here without a renderer behind it would be admitted with nothing to fail.
 //
-// What it is really protecting against is a value being put back. Each of the four named something
-// that is not a member group at all: a local disk belongs to the group holding the memory replica
-// (it is members[].localDisk), an NVMe-oF namespace is a target coordinate with no node affinity,
-// and CXL and DFS are configured on the leader's own process. Widening this enum without moving the
-// renderer would bring back a group that reports capacity it never fills.
+// What it is really protecting against is a value being added without its renderer. DRAM and
+// VRAM each have one. A local disk belongs to the group holding the memory replica (it is
+// members[].localDisk), an NVMe-oF namespace is a target coordinate with no node affinity, and
+// CXL and DFS are configured on the leader's own process: none of them is a member group, so
+// none of them belongs here.
 func TestKVCacheBackendMediumEnumCarriesOnlyWhatRuns(t *testing.T) {
 	medium, ok := memberSchema(t).Properties["medium"]
 	require.True(t, ok, "a member group must still name what its segment is made of")
@@ -84,8 +84,8 @@ func TestKVCacheBackendMediumEnumCarriesOnlyWhatRuns(t *testing.T) {
 		values = append(values, string(entry.Raw))
 	}
 
-	assert.Equal(t, []string{`"DRAM"`}, values,
-		"the enum carries exactly the medium that runs; adding one without a renderer for it is how "+
+	assert.Equal(t, []string{`"DRAM"`, `"VRAM"`}, values,
+		"the enum carries exactly the media that run; adding one without a renderer for it is how "+
 			"a member group comes to report a tier it never fills")
 
 	// The guidance has to live somewhere a reader looks, and with the values gone the field's own

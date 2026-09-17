@@ -3,6 +3,7 @@
 package v1alpha1
 
 import (
+	v1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/core/v1"
 	resource "k8s.io/apimachinery/pkg/api/resource"
 )
 
@@ -16,11 +17,16 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// node; widening the selector adds members and the leader admits their segments into
 	// subsequent allocation immediately, with no leader or member restart.
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
-	// Medium is what the SEGMENT this member group mounts is made of. One value: host memory.
+	// Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or
+	// device memory (VRAM).
 	//
-	// It is an identity rather than a choice, which is why the field survives with a single value
-	// exactly as spec.type does: a second medium widens this enum instead of being inferred from a
-	// field that is not there.
+	// It is a choice rather than an identity: the renderer splits on it. A DRAM member charges
+	// CapacityPerMember against the Pod's host memory; a VRAM member charges it against nothing,
+	// because its segment is device memory and claiming it is allocating it. What lets a VRAM member
+	// reach its device is declared and never inferred — SecurityContext, HostPaths and
+	// RuntimeClassName below, each on its own. The field stays immutable — a segment already mounted
+	// cannot change kind underneath the data in it — so the choice is made when the group is
+	// declared.
 	//
 	// - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and
 	// each is reached elsewhere: the first through localDisk below, NVMe-oF as a target
@@ -84,9 +90,9 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	//
 	// A group's NodeSelector is what makes this necessary: two groups can select nodes of different
 	// accelerator vendors or generations, and the store's client ships as one wheel per vendor, each
-	// carrying the transports it was compiled with and the runtime it links. The transport itself is
-	// backend-wide, so this is NOT a per-group transport — it is the per-group runtime that one
-	// transport needs on differing hardware.
+	// carrying the transports it was compiled with and the runtime it links. The vendor runtime is
+	// also the medium's: a VRAM group needs a build with VRAM segments compiled in, which the stock
+	// CPU default is not.
 	Image *string `json:"image,omitempty"`
 	// LocalDisk declares a directory on the nodes this group already selects and points the store
 	// client's offload keys at it. Left unset, the group is memory only.
@@ -102,6 +108,60 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// - To check what the tier actually holds rather than what it declared, read the leader's own
 	// master_allocated_file_size_bytes; status.capacity reports the declared CAPACITY only.
 	LocalDisk *KVCacheBackendMemberLocalDiskApplyConfiguration `json:"localDisk,omitempty"`
+	// Transport declares the data plane this group uses, overriding the backend's
+	// spec.transport.protocol for this group only. Left unset, the group inherits the backend's.
+	//
+	// The override exists for the one thing two media do not agree on: a VRAM group reaching its
+	// peers over a fabric while the DRAM group beside it stays on TCP. Everything else about the
+	// fabric — the device a host-fabric member asks for — stays backend-wide, since it describes
+	// the nodes' fabric rather than one group.
+	Transport *KVCacheBackendMemberTransportApplyConfiguration `json:"transport,omitempty"`
+	// SecurityContext is the member container's security context, merged ONTO the one the renderer
+	// derives from the group's effective protocol rather than replacing it.
+	//
+	// The merge is per field: a field set here wins, a field left unset keeps whatever the renderer
+	// put there, and capabilities.add is the UNION of both sides. The union is the part worth
+	// stating, because the alternative is silent: a host-fabric group needs IPC_LOCK to pin the
+	// memory it registers and SYS_RESOURCE to raise the limit that pinning hits, and replacing this
+	// value whole would drop both while leaving a container that starts, runs, and fails only at
+	// registration. Dropping one of the two is therefore not something this field can express; a
+	// group that must not hold them declares a protocol that does not ask for them.
+	//
+	// THIS IS ROOT ON THE NODE, and deliberately so: Privileged, or a RunAsUser of zero paired with
+	// a HostPaths entry, gives the member container what a process on the node has. The grant is
+	// not an escalation of who can make it — this object is cluster-scoped precisely because it is
+	// a privileged physical resource, so whoever can write one already holds the cluster. It is
+	// written here rather than inferred so that reading the object tells you what was granted.
+	SecurityContext *v1.SecurityContextApplyConfiguration `json:"securityContext,omitempty"`
+	// HostPaths mounts directories or files from the selected nodes into the member container.
+	//
+	// It exists because a vendor's USER-SPACE DRIVER is not in the image and is not under /dev, so
+	// no device grant reaches it: an Ascend member needs the driver tree and the DCMI library from
+	// the node, and a container runtime that injects them is the other way to get there. Privileged
+	// alone does NOT cover this — it opens the node's device tree, which is where the device nodes
+	// are and is not where the libraries are.
+	//
+	// Entries are mounted in the order written. The volume backing each one is named from its
+	// POSITION rather than from anything declared here, so an entry can collide with neither
+	// another entry nor a volume the renderer owns.
+	//
+	// LocalDisk above is not this field spelled differently: that tier is a declared capacity the
+	// leader routes offload tasks to, with a deregistration hook and a grace period derived from
+	// it. A directory mounted here is a mount and nothing more.
+	HostPaths []KVCacheBackendMemberHostPathApplyConfiguration `json:"hostPaths,omitempty"`
+	// RuntimeClassName selects the container runtime the member's Pods run under, which is how a
+	// vendor runtime injects its driver libraries and device nodes without any of them being named
+	// here.
+	//
+	// It is DECLARED rather than looked up from the group's hardware, unlike the equivalent on a
+	// model deployment, and the reason is that a member group has no InstanceType to ask: it selects
+	// nodes by label, and a label does not carry a manufacturer this operator can map. A cluster
+	// whose vendor runtime is the default runtime needs nothing here.
+	//
+	// A name no RuntimeClass on the cluster carries makes the API server REJECT the Pod outright,
+	// so the member group stops at admission of its own Pods rather than starting without the
+	// runtime. That is the loud failure, and it is the one wanted here.
+	RuntimeClassName *string `json:"runtimeClassName,omitempty"`
 }
 
 // KVCacheBackendMemberApplyConfiguration constructs a declarative configuration of the KVCacheBackendMember type for use with
@@ -189,5 +249,42 @@ func (b *KVCacheBackendMemberApplyConfiguration) WithImage(value string) *KVCach
 // If called multiple times, the LocalDisk field is set to the value of the last call.
 func (b *KVCacheBackendMemberApplyConfiguration) WithLocalDisk(value *KVCacheBackendMemberLocalDiskApplyConfiguration) *KVCacheBackendMemberApplyConfiguration {
 	b.LocalDisk = value
+	return b
+}
+
+// WithTransport sets the Transport field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Transport field is set to the value of the last call.
+func (b *KVCacheBackendMemberApplyConfiguration) WithTransport(value *KVCacheBackendMemberTransportApplyConfiguration) *KVCacheBackendMemberApplyConfiguration {
+	b.Transport = value
+	return b
+}
+
+// WithSecurityContext sets the SecurityContext field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the SecurityContext field is set to the value of the last call.
+func (b *KVCacheBackendMemberApplyConfiguration) WithSecurityContext(value *v1.SecurityContextApplyConfiguration) *KVCacheBackendMemberApplyConfiguration {
+	b.SecurityContext = value
+	return b
+}
+
+// WithHostPaths adds the given value to the HostPaths field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the HostPaths field.
+func (b *KVCacheBackendMemberApplyConfiguration) WithHostPaths(values ...*KVCacheBackendMemberHostPathApplyConfiguration) *KVCacheBackendMemberApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithHostPaths")
+		}
+		b.HostPaths = append(b.HostPaths, *values[i])
+	}
+	return b
+}
+
+// WithRuntimeClassName sets the RuntimeClassName field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the RuntimeClassName field is set to the value of the last call.
+func (b *KVCacheBackendMemberApplyConfiguration) WithRuntimeClassName(value string) *KVCacheBackendMemberApplyConfiguration {
+	b.RuntimeClassName = &value
 	return b
 }

@@ -259,6 +259,111 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 				})
 		}, ""},
 
+		// The medium and the group transport are choices now, and each refusal below keeps its
+		// accepted half beside it: a rule that refused every device resource, or every VRAM group,
+		// would satisfy the refusal on its own.
+		{"a VRAM group naming its own transport", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members = append(k.Spec.Connection.Managed.Members,
+				workercore.KVCacheBackendMember{
+					NodeSelector:      map[string]string{"kvcache-vram": "true"},
+					Medium:            "VRAM",
+					CapacityPerMember: resource.MustParse("80Gi"),
+					Transport:         &workercore.KVCacheBackendMemberTransport{Protocol: "RDMA"},
+				})
+		}, ""},
+		{"a VRAM group declaring nothing beyond its medium", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members = append(k.Spec.Connection.Managed.Members,
+				workercore.KVCacheBackendMember{
+					NodeSelector:      map[string]string{"kvcache-vram": "true"},
+					Medium:            "VRAM",
+					CapacityPerMember: resource.MustParse("80Gi"),
+				})
+		}, ""},
+
+		// The declared grants. Each refusal below keeps its accepted half beside it, because both
+		// collisions are SILENT on the Pod: Kubernetes takes a container carrying one mount path
+		// twice and leaves the winner to the runtime, so a rule that refused every hostPaths entry
+		// would satisfy the refusal on its own.
+		{"a group declaring two distinct mounts", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/usr/local/Ascend/driver", MountPath: "/usr/local/Ascend/driver", ReadOnly: true},
+				{Path: "/usr/local/dcmi", MountPath: "/usr/local/dcmi"},
+			}
+		}, ""},
+		{"a group mounting two host paths at one place", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/usr/local/Ascend/driver", MountPath: "/opt/vendor"},
+				{Path: "/usr/local/dcmi", MountPath: "/opt/vendor"},
+			}
+		}, "overlaps the mount path of hostPaths[0]"},
+		{"a group mounting one declared path inside another", func(k *workercore.KVCacheBackend) {
+			// Two declared mounts are ordered by their position in the list, so which one the
+			// container sees is the runtime's decision for exactly the reason a renderer-owned
+			// overlap is.
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/srv/data", MountPath: "/data"},
+				{Path: "/srv/cache", MountPath: "/data/cache"},
+			}
+		}, "overlaps the mount path of hostPaths[0]"},
+		{"a group mounting one declared path around another", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/srv/cache", MountPath: "/data/cache"},
+				{Path: "/srv/data", MountPath: "/data"},
+			}
+		}, "overlaps the mount path of hostPaths[0]"},
+		{"a group whose two declared paths only share a string prefix", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/srv/data", MountPath: "/data"},
+				{Path: "/srv/data2", MountPath: "/data2"},
+			}
+		}, ""},
+		{"a group mounting over the device tree on tcp", func(k *workercore.KVCacheBackend) {
+			// Refused even though this backend's protocol renders no such mount: the protocol is a
+			// field an update may change, while a mount path is judged only when it is written.
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/dev/infiniband", MountPath: "/dev/infiniband"},
+			}
+		}, "overlaps where a host-fabric group's device tree is mounted"},
+		{"a group mounting the parent of the device tree", func(k *workercore.KVCacheBackend) {
+			// The renderer appends its own mounts first, so this one lands after the device tree and
+			// whether it shadows it is the runtime's decision rather than this operator's.
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/dev", MountPath: "/dev"},
+			}
+		}, "overlaps where a host-fabric group's device tree is mounted"},
+		{"a group mounting inside the device tree", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/dev/infiniband/uverbs0", MountPath: "/dev/infiniband/uverbs0"},
+			}
+		}, "overlaps where a host-fabric group's device tree is mounted"},
+		{"a group mounting a sibling the device tree only prefixes as a string", func(k *workercore.KVCacheBackend) {
+			// /dev/infiniband2 is NOT under /dev/infiniband, and a plain string prefix would have
+			// said it was. This is the case that keeps the rule from refusing legitimate paths.
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/dev/infiniband2", MountPath: "/dev/infiniband2"},
+			}
+		}, ""},
+		{"a group mounting over its own disk tier", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+			k.Spec.Connection.Managed.Members[0].LocalDisk = &workercore.KVCacheBackendMemberLocalDisk{
+				Path:     "/mnt/nvme/mooncake",
+				Capacity: resource.MustParse("2Ti"),
+			}
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/mnt/nvme/other", MountPath: "/mnt/nvme/mooncake"},
+			}
+		}, "overlaps where this group's localDisk tier is mounted"},
+		{"a group mounting the parent of its own disk tier", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+			k.Spec.Connection.Managed.Members[0].LocalDisk = &workercore.KVCacheBackendMemberLocalDisk{
+				Path:     "/mnt/nvme/mooncake",
+				Capacity: resource.MustParse("2Ti"),
+			}
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/mnt/nvme", MountPath: "/mnt/nvme"},
+			}
+		}, "overlaps where this group's localDisk tier is mounted"},
+
 		// There is deliberately NO case here for a medium outside the enum. The schema carries one
 		// value, so LocalDisk, NoF, CXL and DFS are refused in rest.BeforeCreate and never reach
 		// this handler — the four cases that used to live here asserted a rule that no request can
@@ -1097,13 +1202,11 @@ func TestKVCacheBackendWebhook_ValidateUpdate(t *testing.T) {
 		{"branch switched to external", func(k *workercore.KVCacheBackend) {
 			k.Spec = newExternalKVCacheBackendSpec()
 		}, "connection branch is immutable"},
-		// The schema enumerates one medium, so this rule cannot fire against any object an API
-		// server would accept today, and the value below is deliberately not a medium name that
-		// ever existed — a real-looking one would read as though the enum still carried it. The
-		// rule and this case are both kept for the day the enum widens, when a medium would
-		// otherwise become quietly mutable under segments already mounted from it.
+		// Live since the enum carries two values: the value below is a real medium the schema
+		// admits, so this is the edit the rule exists to refuse — a segment already mounted
+		// cannot change kind underneath the data in it.
 		{"member medium changed", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Members[0].Medium = "SomeFutureMedium"
+			k.Spec.Connection.Managed.Members[0].Medium = "VRAM"
 		}, "medium is immutable"},
 
 		// The disk tier is frozen in whether it exists and where it lives, because both strand
@@ -1134,6 +1237,9 @@ func TestKVCacheBackendWebhook_ValidateUpdate(t *testing.T) {
 		}, ""},
 		{"transport protocol changed", func(k *workercore.KVCacheBackend) {
 			k.Spec.Transport.Protocol = "RDMA"
+		}, ""},
+		{"member transport set", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "TCP"}
 		}, ""},
 	}, func(wh *KVCacheBackendWebhook, oldKvcb, newKvcb *workercore.KVCacheBackend) error {
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
