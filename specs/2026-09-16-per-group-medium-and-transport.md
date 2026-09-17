@@ -1,14 +1,17 @@
 # Spec: Per-Group Medium and Transport on `KVCacheBackend` — a DRAM Group and a VRAM Group on the Same Nodes
 
-Status: Planned
-Blocked on: the implementation landing on its branch. M1 — a VRAM segment with the local disk tier
-on, written and read back on an NVIDIA validation host against the CUDA variant image — is the one
-gate below that needs hardware, and it does NOT gate this status: it runs as C8 of the cluster trip in
-[the leader high availability spec](2026-09-06-kv-cache-backend-high-availability.md), on the same
-cluster with the same images, and its reading is recorded against this spec when it arrives. That
-trip also states the container-runtime reading M1 requires before it is worth running.
+Status: Shipped
 Type: Feature
 Issue: #446
+
+> **What this ships, and what arrives after it.** The API, the rendering, the resource accounting,
+> the fabric privileges and the engine wiring are built and covered by unit tests. **M1 is not, and
+> does not gate this status:** a VRAM segment with the local disk tier on, written and read back on
+> an NVIDIA validation host against the CUDA variant image, needs hardware. It runs as C8 of the
+> cluster trip in
+> [the leader high availability spec](2026-09-06-kv-cache-backend-high-availability.md), on the same
+> cluster with the same images, and its reading is recorded against this spec when it arrives. That
+> trip also states the container-runtime reading M1 requires before it is worth running.
 
 ## Summary
 

@@ -1,11 +1,19 @@
 # Spec: KV Cache Backend Leader High Availability — Electing One, and What Survives the Handover
 
-Status: Building
-Blocked on: the second round's implementation — T10 through T16. T17's cluster trip does NOT gate
-this status: it turns C1 through C8 from expectations into readings, and readings that arrive after a
-spec ships are recorded against it the way T9's were. The trip carries the `M1` gate of the per-group
-medium and transport spec in the same visit.
+Status: Shipped
 Type: Feature
+
+> **What this ships, and what arrives after it.** Every task through T16 is built and covered by
+> unit tests. **T17 is not, and does not gate this status:** it turns C1 through C8 from expectations
+> into readings, and readings that arrive after a spec ships are recorded against it the way T9's
+> were. The same trip carries the `M1` gate of
+> [the per-group medium and transport spec](2026-09-16-per-group-medium-and-transport.md).
+>
+> **REQUIRED, and it is the point of running the trip at all:** no end-to-end case is authored ahead
+> of it. Each question is run by hand until it yields a counter-example; only then does a case get
+> written against the corrected behaviour. The exception is what the suite already holds, which is
+> a measurement someone else built rather than a pre-written expectation — those are run, not
+> authored. The Verification table below states, per feature, which half a unit test cannot settle.
 
 ## The image this needs
 
