@@ -2892,7 +2892,7 @@ func TestKVCacheBackendStatus_SharedIdentityIsNotReportedHealthy(t *testing.T) {
 // every one of them resolves. The shared key is real and no segment ever arrives on it.
 //
 // Judging the index instead of the listing marks this healthy backend Degraded and tells the operator
-// to split two groups that never collided. Since `auto` resolves to tcp, this is what most backends
+// to split two groups that never collided. Since `Auto` resolves to TCP, this is what most backends
 // with two groups on a node look like.
 func TestKVCacheBackendStatus_ASharedKeyNoSegmentUsesIsNotAmbiguous(t *testing.T) {
 	kvcb := twoGroupBackend(t)

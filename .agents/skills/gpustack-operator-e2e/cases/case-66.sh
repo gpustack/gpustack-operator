@@ -192,7 +192,7 @@ kubectl -n "$NS" scale deployment/"${RELEASE}-worker" --replicas=0 >/dev/null &&
   exit 1
 }
 kubectl -n "$NS" get kvcachebackend "$BACKEND" -o json | jq \
-  '.status = {"phase":"Ready","members":[{"segmentName":"legacy-address","state":"Ready","protocol":"tcp"}]}' | \
+  '.status = {"phase":"Ready","members":[{"segmentName":"legacy-address","state":"Ready","protocol":"TCP"}]}' | \
   kubectl replace --raw "/apis/worker.gpustack.ai/v1alpha1/kvcachebackends/${BACKEND}/status" -f - >/dev/null || {
   record FAIL "old-schema status writes" "$BACKEND"
   results

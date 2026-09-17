@@ -1015,7 +1015,7 @@ func TestKVCacheBackendWebhook_ADeviceResourceNameDomainIsBounded(t *testing.T) 
 	})
 
 	// The blind spot the exemption has if it asks only whether the VALUE moved. A name sitting
-	// under tcp renders nothing, so it can be carried along harmlessly; switching to a host fabric
+	// under TCP renders nothing, so it can be carried along harmlessly; switching to a host fabric
 	// is what starts rendering it, and that update touches the protocol rather than the name.
 	t.Run("an update that starts rendering an unchanged name is refused", func(t *testing.T) {
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()

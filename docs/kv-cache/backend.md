@@ -372,7 +372,7 @@ other protocol it renders nothing at all — no other path opens a fabric device
 resource there would only leave the member unschedulable.
 
 > **Why an `RDMA` group should set it** — a member that asks for nothing mounts the device tree and
-> is still denied `open()` by the device cgroup, so the store finds no adapter and installs `tcp`
+> is still denied `open()` by the device cgroup, so the store finds no adapter and installs `TCP`
 > while the object reads as `RDMA`. That is the behavior every backend had before this field, and it
 > stays reachable because naming a resource no plugin advertises leaves the member unschedulable
 > instead — this operator cannot tell which of the two an administrator without a plugin would

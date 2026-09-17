@@ -534,7 +534,7 @@ func TestRender_TransportIsCheckedAtTheFunnel(t *testing.T) {
 		protocol string
 		rendered bool
 	}{
-		// #172: nobody chose tcp. auto is the schema's default and the backend resolves it, so a pool
+		// #172: nobody chose tcp. Auto is the schema's default and the backend resolves it, so a pool
 		// left alone is what hands this engine the value it refuses.
 		{name: "vllm-ascend on a default pool's transport", engine: EngineVLLMAscend, protocol: "tcp"},
 		{name: "vllm-ascend on ascend", engine: EngineVLLMAscend, protocol: "ascend", rendered: true},

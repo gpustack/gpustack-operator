@@ -64,7 +64,7 @@ func TestCheckTransport(t *testing.T) {
 		protocol string
 		accepted bool
 	}{
-		// THE CASE #172 IS ABOUT, and the condition is not that anybody chose tcp: auto is the
+		// THE CASE #172 IS ABOUT, and the condition is not that anybody chose tcp: Auto is the
 		// schema's default and the backend resolves it to this value, so a pool left alone lands here.
 		{name: "vllm-ascend refuses the transport a default pool offers", engine: EngineVLLMAscend, protocol: "tcp"},
 		{name: "vllm-ascend refuses rdma", engine: EngineVLLMAscend, protocol: "rdma"},

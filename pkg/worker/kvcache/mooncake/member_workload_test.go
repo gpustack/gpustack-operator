@@ -1028,9 +1028,9 @@ func TestMemberWorkload_ShutdownDrainsTheDiskTier(t *testing.T) {
 
 // TestMemberWorkload_Protocol covers every value the API accepts.
 //
-// auto and tcp are asserted to render an IDENTICAL Pod spec, not merely the same MOONCAKE_PROTOCOL:
-// the resolution is a rename and not a second code path, and a path that resolved auto while also
-// granting it something tcp does not get would pass a value-only assertion.
+// Auto and TCP are asserted to render an IDENTICAL Pod spec, not merely the same MOONCAKE_PROTOCOL:
+// the resolution is a rename and not a second code path, and a path that resolved Auto while also
+// granting it something TCP does not get would pass a value-only assertion.
 func TestMemberWorkload_Protocol(t *testing.T) {
 	cases := []struct {
 		requested  string
@@ -1046,7 +1046,7 @@ func TestMemberWorkload_Protocol(t *testing.T) {
 		{requested: "MACA", rendered: "maca", privileged: false},
 		// This spelling has a consumer outside this package: inject's engineTransportConstraint
 		// records that vLLM-Ascend's store backend accepts exactly this string, so renaming it here
-		// would refuse every cann pool that engine can use.
+		// would refuse every CANN pool that engine can use.
 		{requested: "CANN", rendered: "ascend", privileged: false},
 	}
 
@@ -1073,7 +1073,7 @@ func TestMemberWorkload_Protocol(t *testing.T) {
 		k.Spec.Transport.Protocol = "TCP"
 	}), 0, "mooncake:v0.3.13").Spec.Template.Spec
 	assert.Equal(t, tcpSpec, autoSpec,
-		"auto resolves to tcp and gets nothing else; the resolution is a rename, not a branch")
+		"Auto resolves to TCP and gets nothing else; the resolution is a rename, not a branch")
 
 	// An object whose transport was never set renders the SAME thing, and this is not belt and
 	// braces. Structural-schema defaulting does not descend into an absent object, so before the
@@ -1085,7 +1085,7 @@ func TestMemberWorkload_Protocol(t *testing.T) {
 		k.Spec.Transport = workercore.KVCacheBackendTransport{}
 	}), 0, "mooncake:v0.3.13").Spec.Template.Spec
 	assert.Equal(t, tcpSpec, unsetSpec,
-		"an unset transport renders exactly what auto does, never an empty protocol")
+		"an unset transport renders exactly what Auto does, never an empty protocol")
 }
 
 // TestMemberProtocols pins the offers an engine is matched against: every group's effective
@@ -1208,7 +1208,7 @@ func TestMemberWorkload_EFAContext(t *testing.T) {
 // whole rather than one at a time — a path that granted one of the three silently is exactly what
 // this is here to catch.
 func TestMemberWorkload_TCPClaimsNoHost(t *testing.T) {
-	for _, protocol := range []string{"auto", "tcp"} {
+	for _, protocol := range []string{"Auto", "TCP"} {
 		t.Run(protocol, func(t *testing.T) {
 			kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 				k.Spec.Transport.Protocol = protocol
@@ -1232,7 +1232,7 @@ func TestMemberWorkload_TCPClaimsNoHost(t *testing.T) {
 // took 15002 and 15995, a second client 16566 and 16655, none of them configured — so a fixed
 // containerPort would be a false statement about which ports the process uses.
 func TestMemberWorkload_DeclaresNoDataPlanePort(t *testing.T) {
-	for _, protocol := range []string{"auto", "tcp", "rdma", "efa"} {
+	for _, protocol := range []string{"Auto", "TCP", "RDMA", "EFA"} {
 		t.Run(protocol, func(t *testing.T) {
 			kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 				k.Spec.Transport.Protocol = protocol
