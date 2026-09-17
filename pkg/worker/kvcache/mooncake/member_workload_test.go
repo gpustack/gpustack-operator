@@ -348,7 +348,6 @@ func TestMemberWorkload_Requests(t *testing.T) {
 // follow each group's OWN protocol rather than the backend's.
 func TestMemberWorkload_TwoMediaOnTheSameNodes(t *testing.T) {
 	kvcb := testMemberBackend(withSecondMemberGroupVRAM(func(group *workercore.KVCacheBackendMember) {
-		group.DeviceResourceName = "nvidia.com/gpu"
 		group.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "rdma"}
 	}))
 
@@ -373,9 +372,9 @@ func TestMemberWorkload_TwoMediaOnTheSameNodes(t *testing.T) {
 	vramMemory := vramContainer.Resources.Requests[core.ResourceMemory]
 	assert.True(t, resource.MustParse("4Gi").Equal(vramMemory),
 		"a VRAM segment is device memory: host memory carries localBufferSize only, got %s", &vramMemory)
-	device := vramContainer.Resources.Limits["nvidia.com/gpu"]
-	assert.Equal(t, int64(1), device.Value(),
-		"one device per member, matching the single allocation the client makes")
+	assert.Empty(t, vramContainer.Resources.Limits,
+		"device memory is claimed by allocating it: charging an accelerator here would take a whole "+
+			"one from inference to account for a fraction of one device's memory")
 	assert.True(t, vramPodSpec.HostNetwork)
 	require.NotNil(t, vramContainer.SecurityContext)
 	require.NotNil(t, vramContainer.SecurityContext.Capabilities)
@@ -401,7 +400,6 @@ func TestMemberWorkload_GroupTransportOverridesTheBackend(t *testing.T) {
 	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 		k.Spec.Transport.Protocol = "rdma"
 	}, withSecondMemberGroupVRAM(func(group *workercore.KVCacheBackendMember) {
-		group.DeviceResourceName = "nvidia.com/gpu"
 		group.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "tcp"}
 	}))
 
@@ -415,9 +413,8 @@ func TestMemberWorkload_GroupTransportOverridesTheBackend(t *testing.T) {
 	assert.Empty(t, overridden.Volumes, "TCP mounts no device tree")
 	assert.Nil(t, overridden.Containers[0].SecurityContext,
 		"no security context at all on the path that needs none")
-	device := overridden.Containers[0].Resources.Limits["nvidia.com/gpu"]
-	assert.Equal(t, int64(1), device.Value(),
-		"the medium's device is still charged: it is the segment's home, not the fabric's")
+	assert.Empty(t, overridden.Containers[0].Resources.Limits,
+		"a VRAM group charges no extended resource whatever its transport is")
 
 	env := map[string]string{}
 	for _, e := range overridden.Containers[0].Env {
@@ -426,12 +423,20 @@ func TestMemberWorkload_GroupTransportOverridesTheBackend(t *testing.T) {
 	assert.Equal(t, "tcp", env["MOONCAKE_PROTOCOL"], "the member is told its own group's protocol")
 }
 
-// TestMemberWorkload_VRAMWithoutADeviceTakesTheNodeDirectly pins the fallback a VRAM group gets
-// when it names no deviceResourceName: the member runs privileged on the host's network, which
-// SUPERSEDES the fabric rendering — even on an RDMA backend it mounts no device tree and requests
-// no allocation, because an unnamed device resource leaves nothing to charge one against, and the
-// member must see the node's devices and fabric directly.
-func TestMemberWorkload_VRAMWithoutADeviceTakesTheNodeDirectly(t *testing.T) {
+// TestMemberWorkload_VRAMGrantsNothingItWasNotDeclared pins that the medium on its own grants no
+// privilege, mounts nothing, and charges nothing.
+//
+// Two earlier designs are kept out by this test. One read an absent device-resource name as a
+// request for a privileged host-network Pod: the privilege it granted reached the node's device
+// nodes and not the vendor's user-space driver, which is not under /dev, so it produced a member
+// that started, looked healthy, and could not allocate a segment on two of the three vendors. The
+// other charged one extended resource per VRAM member, which takes a whole accelerator away from
+// inference to account for a fraction of one device's memory — a member's segment is one cudaMalloc
+// on one device, so it cannot use the rest of what it took.
+//
+// The fabric rendering still applies, because it is keyed on the protocol and never on the medium:
+// on an RDMA backend this group gets the device tree and the two capabilities like any other.
+func TestMemberWorkload_VRAMGrantsNothingItWasNotDeclared(t *testing.T) {
 	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 		k.Spec.Transport.Protocol = "rdma"
 	}, withSecondMemberGroupVRAM())
@@ -439,24 +444,122 @@ func TestMemberWorkload_VRAMWithoutADeviceTakesTheNodeDirectly(t *testing.T) {
 	podSpec := RenderMemberDaemonSet(kvcb, 1, "mooncake:v0.3.13").Spec.Template.Spec
 	container := podSpec.Containers[0]
 
-	assert.True(t, podSpec.HostNetwork)
-	assert.Equal(t, core.DNSClusterFirstWithHostNet, podSpec.DNSPolicy,
-		"a hostNetwork Pod that keeps ClusterFirst cannot resolve the leader's Service name")
-
 	require.NotNil(t, container.SecurityContext)
-	require.NotNil(t, container.SecurityContext.Privileged)
-	assert.True(t, *container.SecurityContext.Privileged,
-		"with no resource to charge, the member's only way to open a device is the node's whole tree")
-	assert.Nil(t, container.SecurityContext.Capabilities,
-		"privileged already implies them; listing the fabric's two beside it would say the paths stack")
+	assert.Nil(t, container.SecurityContext.Privileged,
+		"the medium is not a request for privilege")
+	require.NotNil(t, container.SecurityContext.Capabilities)
+	assert.Equal(t, []core.Capability{"IPC_LOCK", "SYS_RESOURCE"}, container.SecurityContext.Capabilities.Add,
+		"the fabric path is keyed on the protocol, so the medium does not exempt this group from it")
 
-	assert.Empty(t, podSpec.Volumes, "no device tree mount: the fallback supersedes the fabric path")
-	assert.Empty(t, container.VolumeMounts)
+	assert.True(t, podSpec.HostNetwork, "rdma takes the host network whatever the medium is")
+	require.Len(t, podSpec.Volumes, 1, "the device tree, from the fabric path")
+	assert.Equal(t, RDMADevicePath, podSpec.Volumes[0].HostPath.Path)
 
 	memory := container.Resources.Requests[core.ResourceMemory]
 	assert.True(t, resource.MustParse("4Gi").Equal(memory),
 		"host memory still carries localBufferSize only, got %s", &memory)
-	assert.Empty(t, container.Resources.Limits, "no name, no request: nothing is charged")
+	assert.Empty(t, container.Resources.Limits,
+		"nothing is charged: device memory is claimed by allocating it")
+}
+
+// TestMemberWorkload_DeclaredSecurityContextMergesOntoTheFabricOne is the test for the one merge
+// rule that is not obvious, and the one whose failure is silent.
+//
+// A group declaring a security context on a host fabric keeps IPC_LOCK and SYS_RESOURCE, because
+// without them the transfer engine cannot pin the memory it registers — and it fails at
+// registration, long after the container started and looked healthy. A whole-struct substitution
+// would have dropped both while turning this test's own privileged assertion green, which is why
+// the capability assertion is here rather than in a test of its own.
+func TestMemberWorkload_DeclaredSecurityContextMergesOntoTheFabricOne(t *testing.T) {
+	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Transport.Protocol = "rdma"
+		members := k.Spec.Connection.Managed.Members
+		members[0].SecurityContext = &core.SecurityContext{
+			Privileged:   ptr.To(true),
+			RunAsUser:    ptr.To(int64(0)),
+			Capabilities: &core.Capabilities{Add: []core.Capability{"SYS_ADMIN"}},
+		}
+	})
+
+	container := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13").Spec.Template.Spec.Containers[0]
+
+	require.NotNil(t, container.SecurityContext)
+	require.NotNil(t, container.SecurityContext.Privileged)
+	assert.True(t, *container.SecurityContext.Privileged, "a field set here wins")
+	require.NotNil(t, container.SecurityContext.RunAsUser)
+	assert.Equal(t, int64(0), *container.SecurityContext.RunAsUser)
+
+	require.NotNil(t, container.SecurityContext.Capabilities)
+	assert.Equal(t,
+		[]core.Capability{"IPC_LOCK", "SYS_ADMIN", "SYS_RESOURCE"},
+		container.SecurityContext.Capabilities.Add,
+		"the union, sorted: dropping the fabric's two would fail only at memory registration")
+}
+
+// TestMemberWorkload_DeclaredSecurityContextOnATCPGroupStandsAlone is the other half: with no
+// fabric context to merge onto, what is declared is what is rendered, and nothing is added.
+func TestMemberWorkload_DeclaredSecurityContextOnATCPGroupStandsAlone(t *testing.T) {
+	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Connection.Managed.Members[0].SecurityContext = &core.SecurityContext{
+			Privileged: ptr.To(true),
+		}
+	})
+
+	container := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13").Spec.Template.Spec.Containers[0]
+
+	require.NotNil(t, container.SecurityContext)
+	require.NotNil(t, container.SecurityContext.Privileged)
+	assert.True(t, *container.SecurityContext.Privileged)
+	assert.Nil(t, container.SecurityContext.Capabilities,
+		"tcp renders no capabilities, so there is nothing to union with")
+}
+
+// TestMemberWorkload_DeclaredHostPathsMountInOrder pins the vendor-driver path: the mounts appear in
+// the order declared, and each volume is named from its POSITION so it can collide with neither
+// another entry nor the two volumes this renderer owns.
+func TestMemberWorkload_DeclaredHostPathsMountInOrder(t *testing.T) {
+	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+			{
+				Path:      "/usr/local/Ascend/driver",
+				MountPath: "/usr/local/Ascend/driver",
+				Type:      ptr.To(core.HostPathDirectory),
+				ReadOnly:  true,
+			},
+			{Path: "/usr/local/dcmi", MountPath: "/usr/local/dcmi"},
+		}
+	})
+
+	podSpec := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13").Spec.Template.Spec
+	container := podSpec.Containers[0]
+
+	require.Len(t, podSpec.Volumes, 2)
+	assert.Equal(t, "host-path-0", podSpec.Volumes[0].Name)
+	assert.Equal(t, "/usr/local/Ascend/driver", podSpec.Volumes[0].HostPath.Path)
+	require.NotNil(t, podSpec.Volumes[0].HostPath.Type)
+	assert.Equal(t, core.HostPathDirectory, *podSpec.Volumes[0].HostPath.Type)
+	assert.Equal(t, "host-path-1", podSpec.Volumes[1].Name)
+	assert.Nil(t, podSpec.Volumes[1].HostPath.Type,
+		"an entry that names no type gets the empty one, which the kubelet does not check")
+
+	require.Len(t, container.VolumeMounts, 2)
+	assert.Equal(t, "/usr/local/Ascend/driver", container.VolumeMounts[0].MountPath)
+	assert.True(t, container.VolumeMounts[0].ReadOnly)
+	assert.Equal(t, "/usr/local/dcmi", container.VolumeMounts[1].MountPath)
+	assert.False(t, container.VolumeMounts[1].ReadOnly)
+}
+
+// TestMemberWorkload_DeclaredRuntimeClassReachesThePodSpec pins the third of the three declared
+// grants. It is on the pod spec rather than the container, unlike the other two.
+func TestMemberWorkload_DeclaredRuntimeClassReachesThePodSpec(t *testing.T) {
+	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Connection.Managed.Members[0].RuntimeClassName = "ascend"
+	})
+
+	podSpec := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13").Spec.Template.Spec
+
+	require.NotNil(t, podSpec.RuntimeClassName)
+	assert.Equal(t, "ascend", *podSpec.RuntimeClassName)
 }
 
 // TestMemberWorkload_NoDiskTierRendersWhatItAlwaysDid is the guard that this feature does not roll

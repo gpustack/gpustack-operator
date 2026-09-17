@@ -262,17 +262,16 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 		// The medium and the group transport are choices now, and each refusal below keeps its
 		// accepted half beside it: a rule that refused every device resource, or every VRAM group,
 		// would satisfy the refusal on its own.
-		{"a VRAM group naming its device and its transport", func(k *workercore.KVCacheBackend) {
+		{"a VRAM group naming its own transport", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Members = append(k.Spec.Connection.Managed.Members,
 				workercore.KVCacheBackendMember{
-					NodeSelector:       map[string]string{"kvcache-vram": "true"},
-					Medium:             "VRAM",
-					CapacityPerMember:  resource.MustParse("80Gi"),
-					DeviceResourceName: "nvidia.com/gpu",
-					Transport:          &workercore.KVCacheBackendMemberTransport{Protocol: "rdma"},
+					NodeSelector:      map[string]string{"kvcache-vram": "true"},
+					Medium:            "VRAM",
+					CapacityPerMember: resource.MustParse("80Gi"),
+					Transport:         &workercore.KVCacheBackendMemberTransport{Protocol: "rdma"},
 				})
 		}, ""},
-		{"a VRAM group naming neither", func(k *workercore.KVCacheBackend) {
+		{"a VRAM group declaring nothing beyond its medium", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Members = append(k.Spec.Connection.Managed.Members,
 				workercore.KVCacheBackendMember{
 					NodeSelector:      map[string]string{"kvcache-vram": "true"},
@@ -280,9 +279,40 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 					CapacityPerMember: resource.MustParse("80Gi"),
 				})
 		}, ""},
-		{"a DRAM group naming a device", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Members[0].DeviceResourceName = "nvidia.com/gpu"
-		}, "must not be set on a DRAM group"},
+
+		// The declared grants. Each refusal below keeps its accepted half beside it, because both
+		// collisions are SILENT on the Pod: Kubernetes takes a container carrying one mount path
+		// twice and leaves the winner to the runtime, so a rule that refused every hostPaths entry
+		// would satisfy the refusal on its own.
+		{"a group declaring two distinct mounts", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/usr/local/Ascend/driver", MountPath: "/usr/local/Ascend/driver", ReadOnly: true},
+				{Path: "/usr/local/dcmi", MountPath: "/usr/local/dcmi"},
+			}
+		}, ""},
+		{"a group mounting two host paths at one place", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/usr/local/Ascend/driver", MountPath: "/opt/vendor"},
+				{Path: "/usr/local/dcmi", MountPath: "/opt/vendor"},
+			}
+		}, "duplicates the mount path of hostPaths[0]"},
+		{"a group mounting over the device tree on tcp", func(k *workercore.KVCacheBackend) {
+			// Refused even though this backend's protocol renders no such mount: the protocol is a
+			// field an update may change, while a mount path is judged only when it is written.
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/dev/infiniband", MountPath: "/dev/infiniband"},
+			}
+		}, "is where a host-fabric group's device tree is mounted"},
+		{"a group mounting over its own disk tier", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+			k.Spec.Connection.Managed.Members[0].LocalDisk = &workercore.KVCacheBackendMemberLocalDisk{
+				Path:     "/mnt/nvme/mooncake",
+				Capacity: resource.MustParse("2Ti"),
+			}
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/mnt/nvme/other", MountPath: "/mnt/nvme/mooncake"},
+			}
+		}, "is where this group's localDisk tier is mounted"},
 
 		// There is deliberately NO case here for a medium outside the enum. The schema carries one
 		// value, so LocalDisk, NoF, CXL and DFS are refused in rest.BeforeCreate and never reach

@@ -128,6 +128,8 @@ func (*KVCacheBackendManaged) ProtoMessage() {}
 
 func (*KVCacheBackendMember) ProtoMessage() {}
 
+func (*KVCacheBackendMemberHostPath) ProtoMessage() {}
+
 func (*KVCacheBackendMemberLocalDisk) ProtoMessage() {}
 
 func (*KVCacheBackendMemberLocalDiskEviction) ProtoMessage() {}

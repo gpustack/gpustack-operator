@@ -79,9 +79,10 @@ mixing media needs two processes — which is what two member groups already are
   2. A group that declares no transport inherits the backend's; the value an engine is handed is the one
      belonging to the group it was matched to.
   3. Resource accounting differs by medium: a DRAM member requests host memory for
-     `capacityPerMember + localBufferSize`; a VRAM member with `deviceResourceName` requests that
-     resource for the segment plus host memory for `localBufferSize` only; a VRAM member without it
-     renders privileged + hostNetwork and requests host memory for `localBufferSize` only.
+     `capacityPerMember + localBufferSize`; a VRAM member requests host memory for `localBufferSize`
+     only and charges its device memory to nothing, since claiming device memory is allocating it.
+  3a. A group reaches its nodes' devices only through what it declares: `securityContext` merged onto
+     the protocol's own (capabilities unioned), `hostPaths`, and `runtimeClassName`.
   4. An engine whose transport constraint no group in the pool serves is refused at admission with the
      typed `TransportUnsupported` reason.
   5. Dispatching the base-image workflow with a `target` and a `tag` produces the named variant tag from
@@ -120,7 +121,6 @@ spec:
         - nodeSelector: {kvcache: "yes"}        # the SAME nodes
           medium: VRAM                           # widened enum
           image: mirrored-mooncake:0.3.13.post1-cuda13.0
-          deviceResourceName: nvidia.com/gpu     # optional; see below
           capacityPerMember: 16Gi
           transport:
             protocol: rdma                       # optional; overrides the backend default for this group
@@ -132,22 +132,37 @@ spec:
 - `KVCacheBackendMember.Transport`: new optional struct carrying only `Protocol` (same enum as the
   backend field). `DeviceResourceName` on the backend transport stays backend-wide; it describes the
   fabric, not the group.
-- `KVCacheBackendMember.DeviceResourceName`: new OPTIONAL field naming the accelerator extended resource
-  a VRAM member is charged against (one per member). When set, the renderer requests
-  `<deviceResourceName>: 1` and renders fabric privileges from the group's effective protocol as usual.
-  When UNSET on a VRAM group, the member renders `privileged: true` + `hostNetwork: true` instead of any
-  device-resource request: the member then sees the node's devices and fabric directly, which keeps RDMA
-  and similar transports working without forcing the administrator to name a resource. The field is
-  refused on DRAM groups (a DRAM member has no device to charge).
+- **No per-group device-resource field.** A VRAM member charges its device memory to nothing. Measured
+  upstream at `v0.3.13.post1`, a member's segment is one `cudaMalloc` per split
+  (`client_buffer_allocation.cpp`), the splits stay under a transport's registration limit rather than
+  spanning devices (`GetTransportRegistrationLimit`, `real_client.cpp`), and nothing on that path calls
+  `cudaSetDevice` — so one member's segment is on ONE device, and requesting one accelerator would take
+  a whole one from inference to account for a fraction of one device's memory. What holds the member and
+  the engine apart on a shared device is sizing `capacityPerMember` against the engine's memory
+  fraction, and the documentation says so. Fabric privileges stay keyed on the protocol, never on the
+  medium, so a VRAM group is not exempt from them.
+- `KVCacheBackendMember.SecurityContext`: new OPTIONAL `core.SecurityContext`, merged ONTO the one the
+  fabric path derived. Per field, with `capabilities.add` UNIONED — a host-fabric group keeps IPC_LOCK
+  and SYS_RESOURCE whatever it declares, because without them the transfer engine fails at memory
+  registration, long after the container started and looked healthy.
+- `KVCacheBackendMember.HostPaths`: new OPTIONAL list of `{path, mountPath, type, readOnly}`. Host paths
+  only: what a member needs from outside its image is the node's driver tree and device nodes. The
+  backing volume is named from the entry's POSITION, so it collides with neither another entry nor the
+  two volumes the renderer owns. Admission refuses a mount path that duplicates another entry's, that
+  equals the device tree's (`/dev/infiniband`, unconditionally — the protocol may change while a mount
+  path is judged only when written), or that equals this group's current `localDisk.path`.
+- `KVCacheBackendMember.RuntimeClassName`: new OPTIONAL field, declared rather than derived. A member
+  group has no `InstanceType` to ask — it selects nodes by label, and a label carries no manufacturer
+  this operator can map — so the equivalent derivation on a model deployment has no counterpart here.
 
 ### Render and accounting changes (the silently-wrong branches)
 
 | Site | Today | After |
 |---|---|---|
-| `memberRequests`, `pkg/worker/kvcache/mooncake/member_workload.go:737-742` | Always charges `capacityPerMember + localBufferSize` to host `ResourceMemory` | DRAM: unchanged. VRAM with `deviceResourceName`: requests `<name>: 1` for the segment and host memory for `localBufferSize` only. VRAM without: host memory for `localBufferSize` only, plus the privileged + hostNetwork fallback above |
+| `memberRequests`, `pkg/worker/kvcache/mooncake/member_workload.go:737-742` | Always charges `capacityPerMember + localBufferSize` to host `ResourceMemory` | DRAM: unchanged. VRAM: host memory for `localBufferSize` only, and no extended resource at all |
 | `renderMemberEnv`, `member_workload.go:540-545` | Renders `capacityPerMember` as `MOONCAKE_GLOBAL_SEGMENT_SIZE` | Unchanged in spelling; the comment is corrected — in a VRAM build the same size feeds `cudaMalloc`, verified upstream: the `#ifdef` switches allocation only, the `total_size` plumbing is shared (`client_buffer_allocation.cpp:57-99`) |
 | `MemberProtocol`, `member_workload.go:319-331` | One protocol per backend | `MemberProtocolForGroup(kvcb, group)`: group's `transport.protocol` if set, else the backend's; `MemberProtocol` stays for backend-wide callers |
-| `applyMemberFabric`, `member_workload.go:757-827` | Fabric privileges keyed on the backend protocol | Keyed on the group's effective protocol, per DaemonSet; superseded by the privileged + hostNetwork fallback when a VRAM group names no device resource |
+| `applyMemberFabric`, `member_workload.go:757-827` | Fabric privileges keyed on the backend protocol | Keyed on the group's effective protocol, per DaemonSet. Never keyed on the medium, so a VRAM group is not exempt from it |
 | Engine wiring, `model_deployment_binding.go:365`, `pod_kv_cache_resolve.go:111` | `Protocol: MemberProtocol(backend)` | `Protocol: MemberProtocolForGroup(backend, matchedGroup)` |
 
 ### Admission changes
@@ -156,8 +171,9 @@ spec:
   the matched pool's backend, compute the effective protocol; refuse with `TransportUnsupported` when the
   engine's constraint (the `engineTransportConstraint` table) is satisfiable by no group. When several
   groups satisfy, the engine is handed the protocol of the group it was matched to.
-- Webhook on `KVCacheBackend`: `deviceResourceName` on a DRAM group is refused with a `field.Error`.
-  No rule on `image` (see Non-Goals).
+- Webhook on `KVCacheBackend`: a `hostPaths[]` mount path is refused when it duplicates another entry's,
+  when it is the device tree's (`/dev/infiniband`, unconditionally), or when it is this group's current
+  `localDisk.path`. No rule on `image` (see Non-Goals).
 
 ### Image build (PR-A)
 
@@ -215,12 +231,19 @@ As a **platform engineer** deploying an engine with a fabric requirement, I want
 deployment when no group in the bound pool serves a compatible transport, so that the failure is a typed
 condition at submit time instead of a container that starts and never caches.
 
-#### Story 5 — Sizing without naming a resource
+#### Story 5 — Reaching the device without a plugin to name
 
-As a **cluster administrator** on a cluster whose GPU nodes are not carved by a device plugin into
-extended resources, I want a VRAM group to come up privileged with host networking when I do not name a
-`deviceResourceName`, so that device access and RDMA work out of the box and the resource-named form is
-an optimization I adopt when my cluster supports it.
+As a **cluster administrator** on a cluster whose accelerator nodes are not carved by a device plugin
+into extended resources, I want to grant a VRAM group what it needs by declaring it — a security
+context, the host paths carrying the vendor's user-space driver, and the runtime class that injects one
+— so that the group runs on nodes no plugin advertises, and so that reading the object tells me exactly
+what was granted.
+
+Every grant is declared and none is inferred, and the reason is measured: privilege opens the node's
+device tree under `/dev`, while a vendor's user-space driver lives outside it
+(`/usr/local/Ascend/driver` and the DCMI library on Ascend; `libcuda.so` injected by the container
+runtime on NVIDIA). An earlier design that inferred privilege produced a member that started, reported
+healthy, and could not allocate a segment on two of the three vendors.
 
 ### Implementation Plan
 
@@ -245,17 +268,16 @@ covered by T4's envtest.
 - [ ] **T2 (PR-B: API + webhook) — widen the enum, add the fields.**
   Widen `members[].medium` to `["DRAM", "VRAM"]` (`api/worker/v1alpha1/kv_cache_backend.go:469`); add
   `members[].transport.protocol` (optional, same enum as the backend field) and
-  `members[].deviceResourceName` (optional string). Update the guard test
+  `members[].securityContext`, `members[].hostPaths[]` and `members[].runtimeClassName`. Update the guard test
   `TestKVCacheBackendMediumEnumCarriesOnlyWhatRuns` (`api/worker/v1alpha1/kv_cache_backend_test.go:78-96`)
   — its failure message says "do not widen without a renderer"; this spec lands the renderer, so the test
-  now asserts exactly `["DRAM", "VRAM"]`. Webhook: `deviceResourceName` on a DRAM group is refused; the
+  now asserts exactly `["DRAM", "VRAM"]`. Webhook: a colliding `hostPaths[]` mount path is refused; the
   medium-immutability rule becomes live. Run `make generate`. **Accept:** the tree builds; the guard test
-  passes with the widened enum; a DRAM group naming `deviceResourceName` is refused with a
+  passes with the widened enum; a group whose mount path collides is refused with a
   `field.Error`. **Verify:** `go test ./api/worker/... ./pkg/worker/webhooks/worker/... && make generate && make lint`.
 - [ ] **T3 (PR-B: render) — per-group protocol and per-medium accounting.**
   Add `MemberProtocolForGroup` with inheritance; rekey `applyMemberFabric` on the group's effective
-  protocol; split `memberRequests` by medium per the table above, including the privileged + hostNetwork
-  fallback for VRAM groups without `deviceResourceName`; correct the `MOONCAKE_GLOBAL_SEGMENT_SIZE`
+  protocol; split `memberRequests` by medium per the table above; correct the `MOONCAKE_GLOBAL_SEGMENT_SIZE`
   comment. **Accept:** table tests render a two-group backend into two DaemonSets covering success
   criterion 3, and fabric privileges follow each group's own protocol. **Verify:**
   `go test ./pkg/worker/kvcache/... ./pkg/worker/controllers/worker/... && make lint`.
@@ -270,7 +292,7 @@ covered by T4's envtest.
   Update `docs/kv-cache/backend.md`: the widened enum, per-group transport and its inheritance, the
   variant tags and the vLLM version mapping (`0.3.13.post1` for vLLM 0.28.0+, `0.3.10.post2` before;
   cann ships `0.3.13.post1` and `0.3.11.post1`), the
-  `deviceResourceName` semantics and its privileged + hostNetwork fallback, and a clear "measured on the
+  declared device grants and why nothing charges device memory, and a clear "measured on the
   NVIDIA validation host" pointer for the VRAM-plus-local-disk combination (banner until M1 lands). Add
   the RFC's companion worked pair (`KVCachePoolBinding` + `ModelDeployment`, and the plain-Pod injection
   annotations) where the docs skill routes it; state that tenancy needs an engine build that reads
@@ -354,16 +376,29 @@ adds a second deployment.
   surface whose motivation does not exist yet.
 - **`mediums: [DRAM, VRAM]` on one group.** Rejected by the RFC and confirmed by upstream: one binary is
   one medium, so the API would express something no build can produce.
-- **Hard-require `image` and/or `deviceResourceName` on VRAM groups.** Rejected: the default image is an
-  administrator-editable setting, so a hard image requirement breaks the cluster that configured its
-  default correctly; and an unnamed device resource has a working privileged + hostNetwork fallback
-  (Story 5), so requiring it would reject configurations that run fine.
+- **Hard-require `image` on VRAM groups.** Rejected: the default image is an administrator-editable
+  setting, so a hard requirement breaks the cluster that configured its default correctly.
+- **A per-group `deviceResourceName`, charging one accelerator per VRAM member.** Implemented, then
+  removed before this spec shipped, on a measurement: a member's segment is one `cudaMalloc` on one
+  device, so the request took a whole accelerator from inference to account for a fraction of one
+  device's memory, on a node where the member could not use the rest. It also did not do the thing it
+  read as doing — a member is a DaemonSet placed by `nodeSelector`, so no scheduler consults the request
+  to choose its node. What it did do is bookkeeping, and the bookkeeping bought a worse trade than the
+  double-use it prevented.
+- **Infer privilege from an empty `deviceResourceName`.** Implemented, then removed in the same pass. It
+  granted the node's device tree, which is where the device nodes are and is not where the vendor's
+  user-space driver is, so it covered AMD and left NVIDIA and Ascend with a member that started and
+  could not allocate. A privilege inferred from an absent field is also one nobody can see in the object
+  that granted it. Superseded by the declared grants in Story 5.
 
 ## Open Questions
 
-- Does a VRAM member need more than one device (multi-GPU segment spanning)? This spec charges exactly
-  one device per member, matching the single-`cudaMalloc` allocation upstream; widening the count is a
-  follow-up if a deployment needs it.
+- A member's segment is on ONE device, measured upstream: one `cudaMalloc` per split, splits sized by
+  the transport's registration limit, no `cudaSetDevice` anywhere on the path. So a node with eight
+  accelerators contributes a slice of one of them, and the seven others are reachable only by running
+  more members on that node — the several-members-per-node shape `capacityPerMember` already names as
+  decided and not done. Whether to build it is open, and what would decide it is a deployment wanting
+  more device memory in the pool than one accelerator per node can give.
 - EFA plus VRAM (GPUDirect over libfabric) is untested upstream and out of scope here; the first VRAM
   deployments are expected on RDMA or TCP.
 - Whether the Ascend (`cann`) and AMD (`rocm`) variants get the same measured VRAM-plus-local-disk-tier

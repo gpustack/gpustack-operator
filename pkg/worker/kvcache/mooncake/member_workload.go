@@ -107,6 +107,14 @@ const (
 	// memberLocalDiskVolumeName names the host directory holding a group's disk tier.
 	memberLocalDiskVolumeName = "local-disk"
 
+	// memberHostPathVolumeNamePrefix prefixes the volume backing one declared host path, which is
+	// suffixed with the entry's position.
+	//
+	// The position and not the path, because a name derived from user input can collide with the
+	// two names above and a DNS label cannot hold a path anyway. The position already identifies an
+	// entry everywhere else, so the mapping needs no state to remember it.
+	memberHostPathVolumeNamePrefix = "host-path"
+
 	// MemberLocalDiskSurveyContainerName names the init container that reports what the tier
 	// directory already held. The controller finds its reading by this name, so the two are one
 	// fact and not two spellings of it.
@@ -449,15 +457,16 @@ func RenderMemberDaemonSet(
 		},
 	}
 
-	// A VRAM group naming no device resource takes the direct-access path INSTEAD of the fabric
-	// one: with no extended resource to charge, the member's only way to open a device is the
-	// node's own tree, and the fabric path's mount-plus-capabilities grants nothing toward that.
-	if member.Medium == "VRAM" && member.DeviceResourceName == "" {
-		applyMemberDirectDevice(ds)
-	} else {
-		applyMemberFabric(ds, MemberProtocolForGroup(kvcb, member), kvcb.Spec.Transport.DeviceResourceName)
-	}
+	applyMemberFabric(ds, MemberProtocolForGroup(kvcb, member), kvcb.Spec.Transport.DeviceResourceName)
 	applyMemberLocalDisk(ds, kvcb, member, group)
+	applyMemberHostPaths(ds, member)
+	// Last of the four, because it merges onto whatever the fabric path put there and so has to see
+	// the finished context rather than race it.
+	applyMemberSecurityContext(ds, member)
+
+	if member.RuntimeClassName != "" {
+		ds.Spec.Template.Spec.RuntimeClassName = ptr.To(member.RuntimeClassName)
+	}
 
 	// Stamped last, over a template that is otherwise complete. The fingerprint therefore covers
 	// the fabric fields applied just above, and — because it is computed from a copy with the node
@@ -782,37 +791,36 @@ func memberRESTPort(group int) int32 {
 //
 // What the claim is made OF follows the medium. A DRAM member's segment is host memory, so
 // capacityPerMember and localBufferSize are both charged to memory. A VRAM member's segment is
-// device memory: capacityPerMember is charged against the device deviceResourceName names — one
-// device per member, matching the single allocation the client makes — and host memory carries
-// localBufferSize only. A VRAM group naming no resource requests none: it takes the direct-access
-// fallback instead, and there is no name to charge.
+// device memory, which NOTHING HERE CHARGES: host memory carries localBufferSize only, and the
+// device memory is claimed by allocating it and in no other way.
+//
+// Nothing charges it because the claim would not be true. Measured upstream at v0.3.13.post1: the
+// member allocates its whole segment with one cudaMalloc per split
+// (mooncake-store/src/client_buffer_allocation.cpp), the splits exist to stay under the transport's
+// registration limit rather than to span devices (GetTransportRegistrationLimit, real_client.cpp),
+// and nothing on that path calls cudaSetDevice. So a member's segment is on ONE device — whichever
+// the container sees first — and a node's other accelerators are untouched by it. Asking the
+// scheduler for one of an extended resource would take a whole accelerator away from inference to
+// account for a fraction of one device's memory, on a node where the member cannot use the rest of
+// what it took.
+//
+// What it costs to charge nothing is real and belongs to the operator: the inference engine sharing
+// that device sees the whole of its memory as available, so the two are held apart by sizing
+// capacityPerMember against the engine's own memory fraction, and by nothing else. The
+// documentation carries that.
 //
 // A disk tier adds a host directory either way, which is outside the kubelet's ephemeral-storage
 // accounting entirely — that covers the container filesystem, emptyDir volumes and logs, never a
 // hostPath. Requesting against it would reserve a figure nothing polices and would then keep the
 // member off the very node that has the disk. Watching that filesystem is the operator's, and the
 // documentation says so.
-//
-// The device goes on Limits alone, on the same rule applyMemberFabric documents: an extended
-// resource is asked for with request equal to limit, the defaulter that fills the request in does
-// not run on a pod template, and storing exactly what is rendered keeps the controller's
-// whole-Resources comparison from rewriting the template on every pass.
 func memberResources(member workercore.KVCacheBackendMember) core.ResourceRequirements {
 	buffer := member.LocalBufferSize.DeepCopy()
 
-	if member.Medium == "VRAM" {
-		requirements := core.ResourceRequirements{
-			Requests: core.ResourceList{core.ResourceMemory: buffer},
-		}
-		if member.DeviceResourceName != "" {
-			requirements.Limits = core.ResourceList{
-				core.ResourceName(member.DeviceResourceName): *resource.NewQuantity(1, resource.DecimalSI),
-			}
-		}
-		return requirements
+	if member.Medium != "VRAM" {
+		buffer.Add(member.CapacityPerMember)
 	}
 
-	buffer.Add(member.CapacityPerMember)
 	return core.ResourceRequirements{
 		Requests: core.ResourceList{core.ResourceMemory: buffer},
 	}
@@ -903,30 +911,119 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol, deviceResource string) {
 	container.Resources.Limits[core.ResourceName(deviceResource)] = *resource.NewQuantity(1, resource.DecimalSI)
 }
 
-// applyMemberDirectDevice grants a VRAM group that names no device resource access to the node's
-// devices directly: the member runs privileged on the host's network, so it sees the node's
-// accelerators and its fabric exactly as a process on the node would, and no device plugin has to
-// advertise a name for it.
+// applyMemberHostPaths mounts what the group declared it needs from its nodes.
 //
-// It SUPERSEDES the fabric rendering for the group rather than adding to it. applyMemberFabric
-// grants a mount and two capabilities because that is the least a named fabric needs; with no
-// resource named there is no allocation to open one device through, so the member needs the node's
-// whole device tree, and privileged is the spelling of that. hostNetwork comes with it because the
-// fabric transports bind the host's interfaces, which a pod network namespace would hide — the
-// group keeps working on RDMA without the administrator naming a thing.
-func applyMemberDirectDevice(ds *apps.DaemonSet) {
-	podSpec := &ds.Spec.Template.Spec
-
-	podSpec.HostNetwork = true
-	// The same rule as the fabric path's: a hostNetwork Pod that keeps ClusterFirst resolves
-	// against the host's resolver and cannot find the leader's Service name.
-	podSpec.DNSPolicy = core.DNSClusterFirstWithHostNet
-
-	container := &podSpec.Containers[0]
-	if container.SecurityContext == nil {
-		container.SecurityContext = &core.SecurityContext{}
+// The volume name is derived from the entry's POSITION and never from anything the entry carries,
+// which is what keeps it from colliding with the two volumes this renderer owns or with another
+// entry. An entry's mount path is the operator's to keep unique; admission refuses a duplicate.
+//
+// A group that declared none is left exactly as rendered, so this feature does not move the Pod
+// template — and therefore the fingerprint, and therefore the running members — of a backend that
+// does not use it.
+func applyMemberHostPaths(ds *apps.DaemonSet, member workercore.KVCacheBackendMember) {
+	if len(member.HostPaths) == 0 {
+		return
 	}
-	container.SecurityContext.Privileged = ptr.To(true)
+
+	podSpec := &ds.Spec.Template.Spec
+	container := &podSpec.Containers[0]
+
+	for i, hp := range member.HostPaths {
+		name := fmt.Sprintf("%s-%d", memberHostPathVolumeNamePrefix, i)
+
+		podSpec.Volumes = append(podSpec.Volumes, core.Volume{
+			Name: name,
+			VolumeSource: core.VolumeSource{
+				HostPath: &core.HostPathVolumeSource{
+					Path: hp.Path,
+					Type: hp.Type,
+				},
+			},
+		})
+		container.VolumeMounts = append(container.VolumeMounts, core.VolumeMount{
+			Name:      name,
+			MountPath: hp.MountPath,
+			ReadOnly:  hp.ReadOnly,
+		})
+	}
+}
+
+// applyMemberSecurityContext merges the group's declared security context ONTO the one the fabric
+// path derived, field by field, with the capability sets unioned.
+//
+// Merged and not substituted, because the two sides know different things. The fabric path knows
+// that a host-fabric member cannot register memory without IPC_LOCK and cannot raise the limit that
+// pinning hits without SYS_RESOURCE; the declaration knows what the node's vendor stack needs. A
+// whole-struct substitution would drop the first pair silently — the container would start, run,
+// and fail only when the transfer engine registers its buffers — so the union is what makes the two
+// declarations independent of each other.
+//
+// Only Add is unioned. Drop is taken as declared: a capability the operator never adds is not one
+// this renderer has an opinion about, and a Drop that overlaps the Add above is the kubelet's
+// contradiction to resolve, not this function's to hide.
+func applyMemberSecurityContext(ds *apps.DaemonSet, member workercore.KVCacheBackendMember) {
+	if member.SecurityContext == nil {
+		return
+	}
+
+	container := &ds.Spec.Template.Spec.Containers[0]
+	derived := container.SecurityContext
+
+	// Deep-copied, so the object handed in by a caller that shares it across renders — a lister's
+	// cached copy, for one — is never written through.
+	merged := member.SecurityContext.DeepCopy()
+
+	if derived != nil {
+		if merged.Privileged == nil {
+			merged.Privileged = derived.Privileged
+		}
+		if merged.RunAsUser == nil {
+			merged.RunAsUser = derived.RunAsUser
+		}
+		if merged.RunAsGroup == nil {
+			merged.RunAsGroup = derived.RunAsGroup
+		}
+		if merged.RunAsNonRoot == nil {
+			merged.RunAsNonRoot = derived.RunAsNonRoot
+		}
+		if merged.ReadOnlyRootFilesystem == nil {
+			merged.ReadOnlyRootFilesystem = derived.ReadOnlyRootFilesystem
+		}
+		if merged.AllowPrivilegeEscalation == nil {
+			merged.AllowPrivilegeEscalation = derived.AllowPrivilegeEscalation
+		}
+		if merged.ProcMount == nil {
+			merged.ProcMount = derived.ProcMount
+		}
+		if merged.SELinuxOptions == nil {
+			merged.SELinuxOptions = derived.SELinuxOptions
+		}
+		if merged.WindowsOptions == nil {
+			merged.WindowsOptions = derived.WindowsOptions
+		}
+		if merged.SeccompProfile == nil {
+			merged.SeccompProfile = derived.SeccompProfile
+		}
+		if merged.AppArmorProfile == nil {
+			merged.AppArmorProfile = derived.AppArmorProfile
+		}
+
+		if derived.Capabilities != nil && len(derived.Capabilities.Add) > 0 {
+			if merged.Capabilities == nil {
+				merged.Capabilities = &core.Capabilities{}
+			}
+			for _, capability := range derived.Capabilities.Add {
+				if !slices.Contains(merged.Capabilities.Add, capability) {
+					merged.Capabilities.Add = append(merged.Capabilities.Add, capability)
+				}
+			}
+			// Sorted, so two renders of one spec are byte-identical whichever order the two sides
+			// contributed in and the DaemonSet does not churn.
+			slices.Sort(merged.Capabilities.Add)
+		}
+	}
+
+	container.SecurityContext = merged
 }
 
 // memberTerminationGracePeriodSeconds is how long the kubelet waits after SIGTERM before it kills

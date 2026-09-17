@@ -454,10 +454,12 @@ type KVCacheBackendMember struct {
 	// device memory (VRAM).
 	//
 	// It is a choice rather than an identity: the renderer splits on it. A DRAM member charges
-	// CapacityPerMember against the Pod's host memory; a VRAM member charges it against the device
-	// deviceResourceName names instead, or falls back to a privileged host-network Pod when no
-	// resource is named. The field stays immutable — a segment already mounted cannot change kind
-	// underneath the data in it — so the choice is made when the group is declared.
+	// CapacityPerMember against the Pod's host memory; a VRAM member charges it against nothing,
+	// because its segment is device memory and claiming it is allocating it. What lets a VRAM member
+	// reach its device is declared and never inferred — SecurityContext, HostPaths and
+	// RuntimeClassName below, each on its own. The field stays immutable — a segment already mounted
+	// cannot change kind underneath the data in it — so the choice is made when the group is
+	// declared.
 	//
 	//   - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and
 	//     each is reached elsewhere: the first through localDisk below, NVMe-oF as a target
@@ -562,28 +564,104 @@ type KVCacheBackendMember struct {
 	// the nodes' fabric rather than one group.
 	Transport *KVCacheBackendMemberTransport `json:"transport,omitempty" protobuf:"bytes,9,opt,name=transport"`
 
-	// DeviceResourceName is the extended resource a VRAM member asks one of, so the scheduler
-	// places it on a node that has the device and the device cgroup lets it open it. It is
-	// CONSULTED ONLY on a VRAM group, and refused on a DRAM one: a DRAM member has no device to
-	// charge, so the request would be accounted against a segment that is not there.
+	// There is NO per-group device-resource field, and protobuf tag 10 is left vacant where one
+	// briefly sat. A member's segment is one cudaMalloc on one device — measured upstream, the
+	// splits exist to stay under a transport's registration limit and nothing on that path selects a
+	// device — so asking the scheduler for one of an extended resource would take a whole
+	// accelerator away from inference to account for a fraction of one device's memory, on a node
+	// where the member cannot use the rest of what it took. A group sits alongside the engine on a
+	// device instead, sized against that engine's own memory fraction.
+
+	// SecurityContext is the member container's security context, merged ONTO the one the renderer
+	// derives from the group's effective protocol rather than replacing it.
 	//
-	//   - When set, the renderer requests one of the named resource per member and mounts nothing
-	//     else; CapacityPerMember is charged against that resource and host memory carries
-	//     localBufferSize only.
-	//   - When UNSET on a VRAM group, the member renders privileged with host networking instead
-	//     of any device-resource request: the member then sees the node's devices and fabric
-	//     directly, which keeps RDMA and similar transports working on a cluster whose plugin
-	//     advertises no name to point at.
-	//   - It is DECLARED rather than derived, on the same rule as the backend transport's: the
-	//     name belongs to whichever plugin the cluster's administrator installed, so no name
-	//     hard-coded here would be right on two clusters.
+	// The merge is per field: a field set here wins, a field left unset keeps whatever the renderer
+	// put there, and capabilities.add is the UNION of both sides. The union is the part worth
+	// stating, because the alternative is silent: a host-fabric group needs IPC_LOCK to pin the
+	// memory it registers and SYS_RESOURCE to raise the limit that pinning hits, and replacing this
+	// value whole would drop both while leaving a container that starts, runs, and fails only at
+	// registration. Dropping one of the two is therefore not something this field can express; a
+	// group that must not hold them declares a protocol that does not ask for them.
 	//
-	// The bounds are the API server's own for a resource name, on the same rule as the backend
-	// transport's field: refused here rather than on the DaemonSet rendered from it.
+	// THIS IS ROOT ON THE NODE, and deliberately so: Privileged, or a RunAsUser of zero paired with
+	// a HostPaths entry, gives the member container what a process on the node has. The grant is
+	// not an escalation of who can make it — this object is cluster-scoped precisely because it is
+	// a privileged physical resource, so whoever can write one already holds the cluster. It is
+	// written here rather than inferred so that reading the object tells you what was granted.
+	SecurityContext *core.SecurityContext `json:"securityContext,omitempty" protobuf:"bytes,11,opt,name=securityContext"`
+
+	// HostPaths mounts directories or files from the selected nodes into the member container.
 	//
-	// +k8s:validation:pattern="^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
-	// +k8s:validation:maxLength=317
-	DeviceResourceName string `json:"deviceResourceName,omitempty" protobuf:"bytes,10,opt,name=deviceResourceName"`
+	// It exists because a vendor's USER-SPACE DRIVER is not in the image and is not under /dev, so
+	// no device grant reaches it: an Ascend member needs the driver tree and the DCMI library from
+	// the node, and a container runtime that injects them is the other way to get there. Privileged
+	// alone does NOT cover this — it opens the node's device tree, which is where the device nodes
+	// are and is not where the libraries are.
+	//
+	// Entries are mounted in the order written. The volume backing each one is named from its
+	// POSITION rather than from anything declared here, so an entry can collide with neither
+	// another entry nor a volume the renderer owns.
+	//
+	// LocalDisk above is not this field spelled differently: that tier is a declared capacity the
+	// leader routes offload tasks to, with a deregistration hook and a grace period derived from
+	// it. A directory mounted here is a mount and nothing more.
+	//
+	// +k8s:validation:maxItems=32
+	HostPaths []KVCacheBackendMemberHostPath `json:"hostPaths,omitempty" protobuf:"bytes,12,rep,name=hostPaths"`
+
+	// RuntimeClassName selects the container runtime the member's Pods run under, which is how a
+	// vendor runtime injects its driver libraries and device nodes without any of them being named
+	// here.
+	//
+	// It is DECLARED rather than looked up from the group's hardware, unlike the equivalent on a
+	// model deployment, and the reason is that a member group has no InstanceType to ask: it selects
+	// nodes by label, and a label does not carry a manufacturer this operator can map. A cluster
+	// whose vendor runtime is the default runtime needs nothing here.
+	//
+	// A name no RuntimeClass on the cluster carries makes the API server REJECT the Pod outright,
+	// so the member group stops at admission of its own Pods rather than starting without the
+	// runtime. That is the loud failure, and it is the one wanted here.
+	//
+	// +k8s:validation:pattern="^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+	// +k8s:validation:maxLength=253
+	RuntimeClassName string `json:"runtimeClassName,omitempty" protobuf:"bytes,13,opt,name=runtimeClassName"`
+}
+
+// KVCacheBackendMemberHostPath is one directory or file taken from a selected node into the member
+// container.
+//
+// Only a host path, and none of the other volume sources: what a member group needs from outside
+// its image is the node's own driver tree and device nodes. A ConfigMap, a Secret or a claim has no
+// use here that is known, and a source added without one is a validation surface nobody exercises.
+type KVCacheBackendMemberHostPath struct {
+	// Path is the absolute path on the node.
+	//
+	// +required
+	// +k8s:validation:pattern="^(/[^/]+)+$"
+	// +k8s:validation:maxLength=1024
+	Path string `json:"path" protobuf:"bytes,1,name=path"`
+
+	// MountPath is the absolute path inside the member container. It must duplicate neither another
+	// entry's mount path nor one the renderer owns.
+	//
+	// +required
+	// +k8s:validation:pattern="^(/[^/]+)+$"
+	// +k8s:validation:maxLength=1024
+	MountPath string `json:"mountPath" protobuf:"bytes,2,name=mountPath"`
+
+	// Type is the kubelet's host-path type check, applied before the mount.
+	//
+	// Left unset it is the EMPTY type, for which the kubelet's mounter returns immediately and looks
+	// at the path not at all — so a missing path becomes an empty directory in the container and the
+	// member starts anyway. Naming a type is what turns that into a FailedMount the Pod stops at.
+	//
+	// +k8s:validation:enum=["","DirectoryOrCreate","Directory","FileOrCreate","File","Socket","CharDevice","BlockDevice"]
+	Type *core.HostPathType `json:"type,omitempty" protobuf:"bytes,3,opt,name=type"`
+
+	// ReadOnly mounts it read-only. A driver tree is read by the member and written by nobody, so
+	// this is the right setting for one, and it is not the default because a device node under /dev
+	// is the other thing mounted here and that one is written.
+	ReadOnly bool `json:"readOnly,omitempty" protobuf:"varint,4,opt,name=readOnly"`
 }
 
 // KVCacheBackendMemberTransport is a member group's override of the backend's data plane. It

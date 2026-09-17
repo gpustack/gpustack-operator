@@ -113,6 +113,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.KVCacheBackendList{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_KVCacheBackendList(ref),
 		v1alpha1.KVCacheBackendManaged{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_KVCacheBackendManaged(ref),
 		v1alpha1.KVCacheBackendMember{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref),
+		v1alpha1.KVCacheBackendMemberHostPath{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberHostPath(ref),
 		v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberLocalDisk(ref),
 		v1alpha1.KVCacheBackendMemberLocalDiskEviction{}.OpenAPIModelName():          schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberLocalDiskEviction(ref),
 		v1alpha1.KVCacheBackendMemberLocalDiskEvictionWatermark{}.OpenAPIModelName(): schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberLocalDiskEvictionWatermark(ref),
@@ -5598,7 +5599,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 					},
 					"medium": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or device memory (VRAM).\n\nIt is a choice rather than an identity: the renderer splits on it. A DRAM member charges CapacityPerMember against the Pod's host memory; a VRAM member charges it against the device deviceResourceName names instead, or falls back to a privileged host-network Pod when no resource is named. The field stays immutable — a segment already mounted cannot change kind underneath the data in it — so the choice is made when the group is declared.\n\n  - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and\n    each is reached elsewhere: the first through localDisk below, NVMe-oF as a target\n    coordinate with no Pod, and the last two on the leader's own process.\n  - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one\n    of those values, while this CRD was installed but the webhook was not, becomes undeletable:\n    schema validation runs on the write path only, so it reads back fine while every update is\n    refused, the controller's finalizer removal included. The exposure is development clusters\n    only, this type being absent from every tag through v0.8.6, so clearing it is the first\n    shipping release's job — confirm no leftover object exists, or write a recovery procedure.",
+							Description: "Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or device memory (VRAM).\n\nIt is a choice rather than an identity: the renderer splits on it. A DRAM member charges CapacityPerMember against the Pod's host memory; a VRAM member charges it against nothing, because its segment is device memory and claiming it is allocating it. What lets a VRAM member reach its device is declared and never inferred — SecurityContext, HostPaths and RuntimeClassName below, each on its own. The field stays immutable — a segment already mounted cannot change kind underneath the data in it — so the choice is made when the group is declared.\n\n  - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and\n    each is reached elsewhere: the first through localDisk below, NVMe-oF as a target\n    coordinate with no Pod, and the last two on the leader's own process.\n  - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one\n    of those values, while this CRD was installed but the webhook was not, becomes undeletable:\n    schema validation runs on the write path only, so it reads back fine while every update is\n    refused, the controller's finalizer removal included. The exposure is development clusters\n    only, this type being absent from every tag through v0.8.6, so clearing it is the first\n    shipping release's job — confirm no leftover object exists, or write a recovery procedure.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -5668,11 +5669,32 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 							Ref:         ref(v1alpha1.KVCacheBackendMemberTransport{}.OpenAPIModelName()),
 						},
 					},
-					"deviceResourceName": {
+					"securityContext": {
 						SchemaProps: spec.SchemaProps{
-							Description: "DeviceResourceName is the extended resource a VRAM member asks one of, so the scheduler places it on a node that has the device and the device cgroup lets it open it. It is CONSULTED ONLY on a VRAM group, and refused on a DRAM one: a DRAM member has no device to charge, so the request would be accounted against a segment that is not there.\n\n  - When set, the renderer requests one of the named resource per member and mounts nothing\n    else; CapacityPerMember is charged against that resource and host memory carries\n    localBufferSize only.\n  - When UNSET on a VRAM group, the member renders privileged with host networking instead\n    of any device-resource request: the member then sees the node's devices and fabric\n    directly, which keeps RDMA and similar transports working on a cluster whose plugin\n    advertises no name to point at.\n  - It is DECLARED rather than derived, on the same rule as the backend transport's: the\n    name belongs to whichever plugin the cluster's administrator installed, so no name\n    hard-coded here would be right on two clusters.\n\nThe bounds are the API server's own for a resource name, on the same rule as the backend transport's field: refused here rather than on the DaemonSet rendered from it.",
-							MaxLength:   ptr.To[int64](317),
-							Pattern:     "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$",
+							Description: "SecurityContext is the member container's security context, merged ONTO the one the renderer derives from the group's effective protocol rather than replacing it.\n\nThe merge is per field: a field set here wins, a field left unset keeps whatever the renderer put there, and capabilities.add is the UNION of both sides. The union is the part worth stating, because the alternative is silent: a host-fabric group needs IPC_LOCK to pin the memory it registers and SYS_RESOURCE to raise the limit that pinning hits, and replacing this value whole would drop both while leaving a container that starts, runs, and fails only at registration. Dropping one of the two is therefore not something this field can express; a group that must not hold them declares a protocol that does not ask for them.\n\nTHIS IS ROOT ON THE NODE, and deliberately so: Privileged, or a RunAsUser of zero paired with a HostPaths entry, gives the member container what a process on the node has. The grant is not an escalation of who can make it — this object is cluster-scoped precisely because it is a privileged physical resource, so whoever can write one already holds the cluster. It is written here rather than inferred so that reading the object tells you what was granted.",
+							Ref:         ref(corev1.SecurityContext{}.OpenAPIModelName()),
+						},
+					},
+					"hostPaths": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HostPaths mounts directories or files from the selected nodes into the member container.\n\nIt exists because a vendor's USER-SPACE DRIVER is not in the image and is not under /dev, so no device grant reaches it: an Ascend member needs the driver tree and the DCMI library from the node, and a container runtime that injects them is the other way to get there. Privileged alone does NOT cover this — it opens the node's device tree, which is where the device nodes are and is not where the libraries are.\n\nEntries are mounted in the order written. The volume backing each one is named from its POSITION rather than from anything declared here, so an entry can collide with neither another entry nor a volume the renderer owns.\n\nLocalDisk above is not this field spelled differently: that tier is a declared capacity the leader routes offload tasks to, with a deregistration hook and a grace period derived from it. A directory mounted here is a mount and nothing more.",
+							MaxItems:    ptr.To[int64](32),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.KVCacheBackendMemberHostPath{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"runtimeClassName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RuntimeClassName selects the container runtime the member's Pods run under, which is how a vendor runtime injects its driver libraries and device nodes without any of them being named here.\n\nIt is DECLARED rather than looked up from the group's hardware, unlike the equivalent on a model deployment, and the reason is that a member group has no InstanceType to ask: it selects nodes by label, and a label does not carry a manufacturer this operator can map. A cluster whose vendor runtime is the default runtime needs nothing here.\n\nA name no RuntimeClass on the cluster carries makes the API server REJECT the Pod outright, so the member group stops at admission of its own Pods rather than starting without the runtime. That is the loud failure, and it is the one wanted here.",
+							MaxLength:   ptr.To[int64](253),
+							Pattern:     "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -5682,7 +5704,56 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName(), v1alpha1.KVCacheBackendMemberTransport{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+			v1alpha1.KVCacheBackendMemberHostPath{}.OpenAPIModelName(), v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName(), v1alpha1.KVCacheBackendMemberTransport{}.OpenAPIModelName(), corev1.SecurityContext{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberHostPath(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCacheBackendMemberHostPath is one directory or file taken from a selected node into the member container.\n\nOnly a host path, and none of the other volume sources: what a member group needs from outside its image is the node's own driver tree and device nodes. A ConfigMap, a Secret or a claim has no use here that is known, and a source added without one is a validation surface nobody exercises.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"path": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Path is the absolute path on the node.",
+							Default:     "",
+							MaxLength:   ptr.To[int64](1024),
+							Pattern:     "^(/[^/]+)+$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"mountPath": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MountPath is the absolute path inside the member container. It must duplicate neither another entry's mount path nor one the renderer owns.",
+							Default:     "",
+							MaxLength:   ptr.To[int64](1024),
+							Pattern:     "^(/[^/]+)+$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"type": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Type is the kubelet's host-path type check, applied before the mount.\n\nLeft unset it is the EMPTY type, for which the kubelet's mounter returns immediately and looks at the path not at all — so a missing path becomes an empty directory in the container and the member starts anyway. Naming a type is what turns that into a FailedMount the Pod stops at.\n\n\nPossible enum values:\n - `\"\"` For backwards compatible, leave it empty if unset\n - `\"BlockDevice\"` A block device must exist at the given path\n - `\"CharDevice\"` A character device must exist at the given path\n - `\"Directory\"` A directory must exist at the given path\n - `\"DirectoryOrCreate\"` If nothing exists at the given path, an empty directory will be created there as needed with file mode 0755, having the same group and ownership with Kubelet.\n - `\"File\"` A file must exist at the given path\n - `\"FileOrCreate\"` If nothing exists at the given path, an empty file will be created there as needed with file mode 0644, having the same group and ownership with Kubelet.\n - `\"Socket\"` A UNIX socket must exist at the given path",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"", "BlockDevice", "CharDevice", "Directory", "DirectoryOrCreate", "File", "FileOrCreate", "Socket"},
+						},
+					},
+					"readOnly": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReadOnly mounts it read-only. A driver tree is read by the member and written by nobody, so this is the right setting for one, and it is not the default because a device node under /dev is the other thing mounted here and that one is written.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"path", "mountPath"},
+			},
+		},
 	}
 }
 

@@ -2473,12 +2473,6 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																			},
 																			XIntOrString: true,
 																		},
-																		"deviceResourceName": {
-																			Description: "DeviceResourceName is the extended resource a VRAM member asks one of, so the scheduler\nplaces it on a node that has the device and the device cgroup lets it open it. It is\nCONSULTED ONLY on a VRAM group, and refused on a DRAM one: a DRAM member has no device to\ncharge, so the request would be accounted against a segment that is not there.\n- When set, the renderer requests one of the named resource per member and mounts nothing\nelse; CapacityPerMember is charged against that resource and host memory carries\nlocalBufferSize only.\n- When UNSET on a VRAM group, the member renders privileged with host networking instead\nof any device-resource request: the member then sees the node's devices and fabric\ndirectly, which keeps RDMA and similar transports working on a cluster whose plugin\nadvertises no name to point at.\n- It is DECLARED rather than derived, on the same rule as the backend transport's: the\nname belongs to whichever plugin the cluster's administrator installed, so no name\nhard-coded here would be right on two clusters.\nThe bounds are the API server's own for a resource name, on the same rule as the backend\ntransport's field: refused here rather than on the DaemonSet rendered from it.",
-																			Type:        "string",
-																			MaxLength:   ptr.To[int64](317),
-																			Pattern:     `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$`,
-																		},
 																		"extraArgs": {
 																			Description: "ExtraArgs passes config keys this API does not enumerate straight through to the member. It\nis keyed by CONFIG KEY rather than by environment-variable name — one namespace per side,\neach the one its own binary documents. A key that collides with one derived from a field\nabove is refused at admission.\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then\nrendered into the member container's argv as -D key=value, readable by anyone who can reach\nthe Pod or the DaemonSet, for the life of the object. A credential does not belong here, and\nsince this operator renders no flag that carries one, this field is the only way one arrives.",
 																			Type:        "object",
@@ -2497,6 +2491,70 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																				Allows: true,
 																				Schema: &v1.JSONSchemaProps{
 																					Type: "string",
+																				},
+																			},
+																			Nullable: true,
+																		},
+																		"hostPaths": {
+																			Description: "HostPaths mounts directories or files from the selected nodes into the member container.\nIt exists because a vendor's USER-SPACE DRIVER is not in the image and is not under /dev, so\nno device grant reaches it: an Ascend member needs the driver tree and the DCMI library from\nthe node, and a container runtime that injects them is the other way to get there. Privileged\nalone does NOT cover this — it opens the node's device tree, which is where the device nodes\nare and is not where the libraries are.\nEntries are mounted in the order written. The volume backing each one is named from its\nPOSITION rather than from anything declared here, so an entry can collide with neither\nanother entry nor a volume the renderer owns.\nLocalDisk above is not this field spelled differently: that tier is a declared capacity the\nleader routes offload tasks to, with a deregistration hook and a grace period derived from\nit. A directory mounted here is a mount and nothing more.",
+																			Type:        "array",
+																			MaxItems:    ptr.To[int64](32),
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"path",
+																						"mountPath",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"mountPath": {
+																							Description: "MountPath is the absolute path inside the member container. It must duplicate neither another\nentry's mount path nor one the renderer owns.",
+																							Type:        "string",
+																							MaxLength:   ptr.To[int64](1024),
+																							Pattern:     `^(/[^/]+)+$`,
+																						},
+																						"path": {
+																							Description: "Path is the absolute path on the node.",
+																							Type:        "string",
+																							MaxLength:   ptr.To[int64](1024),
+																							Pattern:     `^(/[^/]+)+$`,
+																						},
+																						"readOnly": {
+																							Description: "ReadOnly mounts it read-only. A driver tree is read by the member and written by nobody, so\nthis is the right setting for one, and it is not the default because a device node under /dev\nis the other thing mounted here and that one is written.",
+																							Type:        "boolean",
+																						},
+																						"type": {
+																							Description: "Type is the kubelet's host-path type check, applied before the mount.\nLeft unset it is the EMPTY type, for which the kubelet's mounter returns immediately and looks\nat the path not at all — so a missing path becomes an empty directory in the container and the\nmember starts anyway. Naming a type is what turns that into a FailedMount the Pod stops at.",
+																							Type:        "string",
+																							Enum: []v1.JSON{
+																								{
+																									Raw: []byte(`""`),
+																								},
+																								{
+																									Raw: []byte(`"DirectoryOrCreate"`),
+																								},
+																								{
+																									Raw: []byte(`"Directory"`),
+																								},
+																								{
+																									Raw: []byte(`"FileOrCreate"`),
+																								},
+																								{
+																									Raw: []byte(`"File"`),
+																								},
+																								{
+																									Raw: []byte(`"Socket"`),
+																								},
+																								{
+																									Raw: []byte(`"CharDevice"`),
+																								},
+																								{
+																									Raw: []byte(`"BlockDevice"`),
+																								},
+																							},
+																							Nullable: true,
+																						},
+																					},
 																				},
 																			},
 																			Nullable: true,
@@ -2610,7 +2668,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																			Nullable: true,
 																		},
 																		"medium": {
-																			Description: "Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or\ndevice memory (VRAM).\nIt is a choice rather than an identity: the renderer splits on it. A DRAM member charges\nCapacityPerMember against the Pod's host memory; a VRAM member charges it against the device\ndeviceResourceName names instead, or falls back to a privileged host-network Pod when no\nresource is named. The field stays immutable — a segment already mounted cannot change kind\nunderneath the data in it — so the choice is made when the group is declared.\n- A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and\neach is reached elsewhere: the first through localDisk below, NVMe-oF as a target\ncoordinate with no Pod, and the last two on the leader's own process.\n- Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one\nof those values, while this CRD was installed but the webhook was not, becomes undeletable:\nschema validation runs on the write path only, so it reads back fine while every update is\nrefused, the controller's finalizer removal included. The exposure is development clusters\nonly, this type being absent from every tag through v0.8.6, so clearing it is the first\nshipping release's job — confirm no leftover object exists, or write a recovery procedure.",
+																			Description: "Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or\ndevice memory (VRAM).\nIt is a choice rather than an identity: the renderer splits on it. A DRAM member charges\nCapacityPerMember against the Pod's host memory; a VRAM member charges it against nothing,\nbecause its segment is device memory and claiming it is allocating it. What lets a VRAM member\nreach its device is declared and never inferred — SecurityContext, HostPaths and\nRuntimeClassName below, each on its own. The field stays immutable — a segment already mounted\ncannot change kind underneath the data in it — so the choice is made when the group is\ndeclared.\n- A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and\neach is reached elsewhere: the first through localDisk below, NVMe-oF as a target\ncoordinate with no Pod, and the last two on the leader's own process.\n- Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one\nof those values, while this CRD was installed but the webhook was not, becomes undeletable:\nschema validation runs on the write path only, so it reads back fine while every update is\nrefused, the controller's finalizer removal included. The exposure is development clusters\nonly, this type being absent from every tag through v0.8.6, so clearing it is the first\nshipping release's job — confirm no leftover object exists, or write a recovery procedure.",
 																			Type:        "string",
 																			Enum: []v1.JSON{
 																				{
@@ -2628,6 +2686,173 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																				Allows: true,
 																				Schema: &v1.JSONSchemaProps{
 																					Type: "string",
+																				},
+																			},
+																			Nullable: true,
+																		},
+																		"runtimeClassName": {
+																			Description: "RuntimeClassName selects the container runtime the member's Pods run under, which is how a\nvendor runtime injects its driver libraries and device nodes without any of them being named\nhere.\nIt is DECLARED rather than looked up from the group's hardware, unlike the equivalent on a\nmodel deployment, and the reason is that a member group has no InstanceType to ask: it selects\nnodes by label, and a label does not carry a manufacturer this operator can map. A cluster\nwhose vendor runtime is the default runtime needs nothing here.\nA name no RuntimeClass on the cluster carries makes the API server REJECT the Pod outright,\nso the member group stops at admission of its own Pods rather than starting without the\nruntime. That is the loud failure, and it is the one wanted here.",
+																			Type:        "string",
+																			MaxLength:   ptr.To[int64](253),
+																			Pattern:     `^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`,
+																		},
+																		"securityContext": {
+																			Description: "SecurityContext is the member container's security context, merged ONTO the one the renderer\nderives from the group's effective protocol rather than replacing it.\nThe merge is per field: a field set here wins, a field left unset keeps whatever the renderer\nput there, and capabilities.add is the UNION of both sides. The union is the part worth\nstating, because the alternative is silent: a host-fabric group needs IPC_LOCK to pin the\nmemory it registers and SYS_RESOURCE to raise the limit that pinning hits, and replacing this\nvalue whole would drop both while leaving a container that starts, runs, and fails only at\nregistration. Dropping one of the two is therefore not something this field can express; a\ngroup that must not hold them declares a protocol that does not ask for them.\nTHIS IS ROOT ON THE NODE, and deliberately so: Privileged, or a RunAsUser of zero paired with\na HostPaths entry, gives the member container what a process on the node has. The grant is\nnot an escalation of who can make it — this object is cluster-scoped precisely because it is\na privileged physical resource, so whoever can write one already holds the cluster. It is\nwritten here rather than inferred so that reading the object tells you what was granted.",
+																			Type:        "object",
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"allowPrivilegeEscalation": {
+																					Description: "AllowPrivilegeEscalation controls whether a process can gain more\nprivileges than its parent process. This bool directly controls if\nthe no_new_privs flag will be set on the container process.\nAllowPrivilegeEscalation is true always when the container is:\n1) run as Privileged\n2) has CAP_SYS_ADMIN\nNote that this field cannot be set when spec.os.name is windows.",
+																					Type:        "boolean",
+																					Nullable:    true,
+																				},
+																				"appArmorProfile": {
+																					Description: "appArmorProfile is the AppArmor options to use by this container. If set, this profile\noverrides the pod's appArmorProfile.\nNote that this field cannot be set when spec.os.name is windows.",
+																					Type:        "object",
+																					Required: []string{
+																						"type",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"localhostProfile": {
+																							Description: "localhostProfile indicates a profile loaded on the node that should be used.\nThe profile must be preconfigured on the node to work.\nMust match the loaded name of the profile.\nMust be set if and only if type is \"Localhost\".",
+																							Type:        "string",
+																							Nullable:    true,
+																						},
+																						"type": {
+																							Description: "type indicates which kind of AppArmor profile will be applied.\nValid options are:\nLocalhost - a profile pre-loaded on the node.\nRuntimeDefault - the container runtime's default profile.\nUnconfined - no AppArmor enforcement.",
+																							Type:        "string",
+																						},
+																					},
+																					Nullable: true,
+																				},
+																				"capabilities": {
+																					Description: "The capabilities to add/drop when running containers.\nDefaults to the default set of capabilities granted by the container runtime.\nNote that this field cannot be set when spec.os.name is windows.",
+																					Type:        "object",
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"add": {
+																							Description: "Added capabilities",
+																							Type:        "array",
+																							Items: &v1.JSONSchemaPropsOrArray{
+																								Schema: &v1.JSONSchemaProps{
+																									Type: "string",
+																								},
+																							},
+																							Nullable:  true,
+																							XListType: ptr.To[string]("atomic"),
+																						},
+																						"drop": {
+																							Description: "Removed capabilities",
+																							Type:        "array",
+																							Items: &v1.JSONSchemaPropsOrArray{
+																								Schema: &v1.JSONSchemaProps{
+																									Type: "string",
+																								},
+																							},
+																							Nullable:  true,
+																							XListType: ptr.To[string]("atomic"),
+																						},
+																					},
+																					Nullable: true,
+																				},
+																				"privileged": {
+																					Description: "Run container in privileged mode.\nProcesses in privileged containers are essentially equivalent to root on the host.\nDefaults to false.\nNote that this field cannot be set when spec.os.name is windows.",
+																					Type:        "boolean",
+																					Nullable:    true,
+																				},
+																				"procMount": {
+																					Description: "procMount denotes the type of proc mount to use for the containers.\nThe default value is Default which uses the container runtime defaults for\nreadonly paths and masked paths.\nThis requires the ProcMountType feature flag to be enabled.\nNote that this field cannot be set when spec.os.name is windows.",
+																					Type:        "string",
+																					Nullable:    true,
+																				},
+																				"readOnlyRootFilesystem": {
+																					Description: "Whether this container has a read-only root filesystem.\nDefault is false.\nNote that this field cannot be set when spec.os.name is windows.",
+																					Type:        "boolean",
+																					Nullable:    true,
+																				},
+																				"runAsGroup": {
+																					Description: "The GID to run the entrypoint of the container process.\nUses runtime default if unset.\nMay also be set in PodSecurityContext.  If set in both SecurityContext and\nPodSecurityContext, the value specified in SecurityContext takes precedence.\nNote that this field cannot be set when spec.os.name is windows.",
+																					Type:        "integer",
+																					Format:      "int64",
+																					Nullable:    true,
+																				},
+																				"runAsNonRoot": {
+																					Description: "Indicates that the container must run as a non-root user.\nIf true, the Kubelet will validate the image at runtime to ensure that it\ndoes not run as UID 0 (root) and fail to start the container if it does.\nIf unset or false, no such validation will be performed.\nMay also be set in PodSecurityContext.  If set in both SecurityContext and\nPodSecurityContext, the value specified in SecurityContext takes precedence.",
+																					Type:        "boolean",
+																					Nullable:    true,
+																				},
+																				"runAsUser": {
+																					Description: "The UID to run the entrypoint of the container process.\nDefaults to user specified in image metadata if unspecified.\nMay also be set in PodSecurityContext.  If set in both SecurityContext and\nPodSecurityContext, the value specified in SecurityContext takes precedence.\nNote that this field cannot be set when spec.os.name is windows.",
+																					Type:        "integer",
+																					Format:      "int64",
+																					Nullable:    true,
+																				},
+																				"seLinuxOptions": {
+																					Description: "The SELinux context to be applied to the container.\nIf unspecified, the container runtime will allocate a random SELinux context for each\ncontainer.  May also be set in PodSecurityContext.  If set in both SecurityContext and\nPodSecurityContext, the value specified in SecurityContext takes precedence.\nNote that this field cannot be set when spec.os.name is windows.",
+																					Type:        "object",
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"level": {
+																							Description: "Level is SELinux level label that applies to the container.",
+																							Type:        "string",
+																						},
+																						"role": {
+																							Description: "Role is a SELinux role label that applies to the container.",
+																							Type:        "string",
+																						},
+																						"type": {
+																							Description: "Type is a SELinux type label that applies to the container.",
+																							Type:        "string",
+																						},
+																						"user": {
+																							Description: "User is a SELinux user label that applies to the container.",
+																							Type:        "string",
+																						},
+																					},
+																					Nullable: true,
+																				},
+																				"seccompProfile": {
+																					Description: "The seccomp options to use by this container. If seccomp options are\nprovided at both the pod & container level, the container options\noverride the pod options.\nNote that this field cannot be set when spec.os.name is windows.",
+																					Type:        "object",
+																					Required: []string{
+																						"type",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"localhostProfile": {
+																							Description: "localhostProfile indicates a profile defined in a file on the node should be used.\nThe profile must be preconfigured on the node to work.\nMust be a descending path, relative to the kubelet's configured seccomp profile location.\nMust be set if type is \"Localhost\". Must NOT be set for any other type.",
+																							Type:        "string",
+																							Nullable:    true,
+																						},
+																						"type": {
+																							Description: "type indicates which kind of seccomp profile will be applied.\nValid options are:\nLocalhost - a profile defined in a file on the node should be used.\nRuntimeDefault - the container runtime default profile should be used.\nUnconfined - no profile should be applied.",
+																							Type:        "string",
+																						},
+																					},
+																					Nullable: true,
+																				},
+																				"windowsOptions": {
+																					Description: "The Windows specific settings applied to all containers.\nIf unspecified, the options from the PodSecurityContext will be used.\nIf set in both SecurityContext and PodSecurityContext, the value specified in SecurityContext takes precedence.\nNote that this field cannot be set when spec.os.name is linux.",
+																					Type:        "object",
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"gmsaCredentialSpec": {
+																							Description: "GMSACredentialSpec is where the GMSA admission webhook\n(https://github.com/kubernetes-sigs/windows-gmsa) inlines the contents of the\nGMSA credential spec named by the GMSACredentialSpecName field.",
+																							Type:        "string",
+																							Nullable:    true,
+																						},
+																						"gmsaCredentialSpecName": {
+																							Description: "GMSACredentialSpecName is the name of the GMSA credential spec to use.",
+																							Type:        "string",
+																							Nullable:    true,
+																						},
+																						"hostProcess": {
+																							Description: "HostProcess determines if a container should be run as a 'Host Process' container.\nAll of a Pod's containers must have the same effective HostProcess value\n(it is not allowed to have a mix of HostProcess containers and non-HostProcess containers).\nIn addition, if HostProcess is true then HostNetwork must also be set to true.",
+																							Type:        "boolean",
+																							Nullable:    true,
+																						},
+																						"runAsUserName": {
+																							Description: "The UserName in Windows to run the entrypoint of the container process.\nDefaults to the user specified in image metadata if unspecified.\nMay also be set in PodSecurityContext. If set in both SecurityContext and\nPodSecurityContext, the value specified in SecurityContext takes precedence.",
+																							Type:        "string",
+																							Nullable:    true,
+																						},
+																					},
+																					Nullable: true,
 																				},
 																			},
 																			Nullable: true,
