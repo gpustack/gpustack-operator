@@ -3366,6 +3366,11 @@ func (m *KVCacheBackendLeaderHighAvailability) MarshalToSizedBuffer(dAtA []byte)
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.MemberAddressing)
+	copy(dAtA[i:], m.MemberAddressing)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.MemberAddressing)))
+	i--
+	dAtA[i] = 0x12
 	if m.Snapshot != nil {
 		{
 			size, err := m.Snapshot.MarshalToSizedBuffer(dAtA[:i])
@@ -7168,6 +7173,8 @@ func (m *KVCacheBackendLeaderHighAvailability) Size() (n int) {
 		l = m.Snapshot.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
+	l = len(m.MemberAddressing)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -9032,6 +9039,7 @@ func (this *KVCacheBackendLeaderHighAvailability) String() string {
 	}
 	s := strings.Join([]string{`&KVCacheBackendLeaderHighAvailability{`,
 		`Snapshot:` + strings.Replace(this.Snapshot.String(), "KVCacheBackendLeaderSnapshot", "KVCacheBackendLeaderSnapshot", 1) + `,`,
+		`MemberAddressing:` + fmt.Sprintf("%v", this.MemberAddressing) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -20140,6 +20148,38 @@ func (m *KVCacheBackendLeaderHighAvailability) Unmarshal(dAtA []byte) error {
 			if err := m.Snapshot.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MemberAddressing", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.MemberAddressing = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

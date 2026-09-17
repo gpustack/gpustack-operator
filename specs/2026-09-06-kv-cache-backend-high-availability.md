@@ -911,6 +911,17 @@ describes a label selector and a Service, which is the same shape, and it says n
 a member is unable to reach a master after the leader Pod is deleted. That number is what decides
 this, and the guide is evidence about a shape.
 
+**The member's API access does NOT move with the field, and that is the measurement's requirement
+rather than an oversight.** Under the Service form the client never reads the Lease, so the account
+it is given goes unused — withdrawing it as well would make the two arms differ in two things at
+once, and an interval measured across them could not be attributed to either. Dropping the account
+is what a verdict for Service would unlock, and it belongs after the number, not before it.
+
+**The field is read only when an election runs, and an EMPTY value reads as the default rather than
+as the new form.** The schema defaults it, so an empty string means the object never went through
+admission — the same reading every other enum in this design gives — and a renderer that took it for
+`Service` would rewrite the master entry of every backend on a cluster whose webhook is absent.
+
 #### F11 — A condition for an image that cannot elect
 
 The Kubernetes leadership backend does not exist before `0.3.11`: `v0.3.10.post2` carries no
@@ -1121,8 +1132,11 @@ The second round:
       F1's Role already carries the read. FORBIDDEN: a status field; G5 and F5 say why. It brought
       two things the feature did not name: a Lease watch whose predicate is what makes the watch
       affordable at all, and an in-memory last-holder map, whose cost is recorded in the feature.
-- [ ] **T12 — The second member entry** (F10). Both render, the default does not move, and the
-      field's doc comment says which one has been measured — neither, until T17.
+- [x] **T12 — The second member entry** (F10), as
+      `leader.highAvailability.memberAddressing`. Both render, the default does not move, and the
+      field's doc comment says which one has been measured — neither, until T17. The member's
+      account is rendered identically under both, so the two arms of that measurement differ in one
+      thing.
 - [ ] **T13 — The capability condition** (F11), keyed on a holderless Lease under a Ready leader,
       worded as an observation with its candidate causes.
 - [ ] **T14 — The rollout-completion predicate** F3 designed and left unbuilt, surfaced as its own

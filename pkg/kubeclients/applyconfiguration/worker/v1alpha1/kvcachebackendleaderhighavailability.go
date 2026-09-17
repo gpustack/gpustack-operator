@@ -29,6 +29,23 @@ type KVCacheBackendLeaderHighAvailabilityApplyConfiguration struct {
 	// kind. Moving the image BACKWARDS across a snapshot format change is outside what this API
 	// makes any promise about.
 	Snapshot *KVCacheBackendLeaderSnapshotApplyConfiguration `json:"snapshot,omitempty"`
+	// MemberAddressing selects how a member is told to find the master once an election runs. Both
+	// forms reach the leader that is serving, by different routes, and they are rendered into the
+	// same one variable — so changing this rolls every member group.
+	//
+	// - Lease: the member is handed the Lease's coordinates and reads the current holder itself.
+	// This needs the member to talk to the API server, which is why the member image has to
+	// carry the leadership backend at all.
+	// - Service: the member is handed the leader Service's address, exactly as it is without high
+	// availability. The Service publishes only READY endpoints and a standby deliberately is not
+	// ready, so the address resolves to the serving leader — the open part is whether the
+	// client's reconnect follows that endpoint across an election, and how long it takes.
+	//
+	// NEITHER FORM HAS BEEN MEASURED against the other. The default is Lease because that is what
+	// this operator has always rendered, not because it won a comparison, and the number that would
+	// settle it is how long a member cannot reach a master after the leader pod is deleted. Until
+	// that is measured on a cluster, treat Service as the one to try rather than the one to trust.
+	MemberAddressing *string `json:"memberAddressing,omitempty"`
 }
 
 // KVCacheBackendLeaderHighAvailabilityApplyConfiguration constructs a declarative configuration of the KVCacheBackendLeaderHighAvailability type for use with
@@ -42,5 +59,13 @@ func KVCacheBackendLeaderHighAvailability() *KVCacheBackendLeaderHighAvailabilit
 // If called multiple times, the Snapshot field is set to the value of the last call.
 func (b *KVCacheBackendLeaderHighAvailabilityApplyConfiguration) WithSnapshot(value *KVCacheBackendLeaderSnapshotApplyConfiguration) *KVCacheBackendLeaderHighAvailabilityApplyConfiguration {
 	b.Snapshot = value
+	return b
+}
+
+// WithMemberAddressing sets the MemberAddressing field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the MemberAddressing field is set to the value of the last call.
+func (b *KVCacheBackendLeaderHighAvailabilityApplyConfiguration) WithMemberAddressing(value string) *KVCacheBackendLeaderHighAvailabilityApplyConfiguration {
+	b.MemberAddressing = &value
 	return b
 }

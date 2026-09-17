@@ -536,13 +536,20 @@ func memberContainerSpec(
 // operator's part in failover: no Service selector moves, and nothing here watches an election.
 //
 // REQUIRED: a scheme without HA names a Lease no leader ever takes, so the two forms are not
-// interchangeable in that direction. The other direction is an OPEN QUESTION rather than a rule:
-// the Service publishes only ready endpoints and a standby is not ready, so the address does resolve
-// to the serving leader, and whether the client's reconnect follows the endpoint across an election
-// has not been measured. If it does, the scheme is an optimisation and the member's whole API
-// access goes away with it -- tracked at github.com/gpustack/gpustack-operator/issues/279.
+// interchangeable in that direction. The other direction is a CHOICE rather than a rule, and
+// leader.highAvailability.memberAddressing is where it is made: the Service publishes only ready
+// endpoints and a standby is not ready, so the address does resolve to the serving leader. Which of
+// the two recovers faster after the leader pod is deleted has not been measured, which is why the
+// default is the shape this operator has always rendered rather than the one that reads better --
+// tracked at github.com/gpustack/gpustack-operator/issues/279.
+//
+// The member's API access does NOT move with this setting. Under the Service form the client never
+// reads the Lease, so the account it is given goes unused; withdrawing it as well would make the
+// two forms differ in two things at once, and the measurement that has to tell them apart wants one.
 func MemberMasterEntry(kvcb *workercore.KVCacheBackend) string {
-	if leaderNeedsAPIAccess(kvcb.Spec.Connection.Managed.Leader) {
+	leader := kvcb.Spec.Connection.Managed.Leader
+	if leaderNeedsAPIAccess(leader) &&
+		leader.HighAvailability.MemberAddressing != MemberAddressingService {
 		return fmt.Sprintf("k8s://%s/%s", kuberess.SystemNamespaceName, LeaderObjectName(kvcb))
 	}
 

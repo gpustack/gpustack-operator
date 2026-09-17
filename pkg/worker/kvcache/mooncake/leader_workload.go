@@ -106,6 +106,14 @@ const (
 		`printf '%s' "$POLICY_EMPTY" > "$POLICY_FILE"; fi`
 )
 
+// The two values leader.highAvailability.memberAddressing takes. Only the second is tested for,
+// because the field is schema-defaulted and an empty value means the object never went through
+// admission -- which is the same reading every other enum in this package gives an empty string.
+const (
+	MemberAddressingLease   = "Lease"
+	MemberAddressingService = "Service"
+)
+
 // LeaderObjectNameSuffix is what LeaderObjectName appends. It is exported because one object with
 // this name is created by the STORE rather than by this operator -- the Lease the election runs
 // through -- so the only way back from it to the backend is to strip this, and a second literal

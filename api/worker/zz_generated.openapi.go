@@ -5451,6 +5451,13 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderHighAvailability(re
 							Ref:         ref(v1alpha1.KVCacheBackendLeaderSnapshot{}.OpenAPIModelName()),
 						},
 					},
+					"memberAddressing": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MemberAddressing selects how a member is told to find the master once an election runs. Both forms reach the leader that is serving, by different routes, and they are rendered into the same one variable — so changing this rolls every member group.\n\n  - Lease: the member is handed the Lease's coordinates and reads the current holder itself.\n    This needs the member to talk to the API server, which is why the member image has to\n    carry the leadership backend at all.\n  - Service: the member is handed the leader Service's address, exactly as it is without high\n    availability. The Service publishes only READY endpoints and a standby deliberately is not\n    ready, so the address resolves to the serving leader — the open part is whether the\n    client's reconnect follows that endpoint across an election, and how long it takes.\n\nNEITHER FORM HAS BEEN MEASURED against the other. The default is Lease because that is what this operator has always rendered, not because it won a comparison, and the number that would settle it is how long a member cannot reach a master after the leader pod is deleted. Until that is measured on a cluster, treat Service as the one to try rather than the one to trust.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 			},
 		},
