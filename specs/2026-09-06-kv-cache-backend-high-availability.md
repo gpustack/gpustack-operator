@@ -1,6 +1,10 @@
-# Spec: KV Cache Backend Leader High Availability
+# Spec: KV Cache Backend Leader High Availability — Electing One, and What Survives the Handover
 
-Status: Shipped
+Status: Building
+Blocked on: the second round's implementation — T10 through T16. T17's cluster trip does NOT gate
+this status: it turns C1 through C8 from expectations into readings, and readings that arrive after a
+spec ships are recorded against it the way T9's were. The trip carries the `M1` gate of the per-group
+medium and transport spec in the same visit.
 Type: Feature
 
 ## The image this needs
@@ -89,7 +93,33 @@ the explicit `USE_CUDA` / `USE_HIP` flags instead of detecting an SDK, so a buil
 **REQUIRED: re-read the citations at the tag actually built before trusting them again.** They hold
 across this bump because the diff was checked file by file, not because a `.post1` is small.
 
-## Motivation
+### The second round: what the first one elected, and what it did not carry across
+
+The work above elects a leader. It does not say what the new one knows when it starts, and the
+answer measured since is **nothing**: the whole object catalogue lives in the winning process's own
+memory (`master_service.h`, the 1024 metadata shards), the Lease stores only an address, and a
+standby under the Kubernetes backend runs with no replication at all —
+`standby_controller.cpp:43-44` gives it oplog following **only** on the etcd backend, which F2
+refuses. A failover therefore moves service in seconds and leaves the cache cold: the bytes are
+still in every member's memory, and no key indexes them until the clients re-put.
+
+Four more pieces of work, all of them about the handover rather than the election:
+
+4. **A metadata baseline the standby can start from** (F8). The store's snapshot subsystem is not
+   gated on the backend — `standby_controller.cpp:42` reads `enable_snapshot_restore` alone — so the
+   Kubernetes backend can have one. What it needs is not a flag, since the flags are already
+   reachable: it needs **storage two Pods can both see**, because the primary writes the snapshot
+   and the standby reads it.
+5. **A record that a failover happened** (F9) — an Event, not a status field, because G5 already
+   refused three fields of that shape. It reads the Lease this operator watches, never the store's
+   admin API, which stays refused.
+6. **A second way for a member to find the master** (F10), rendered but not defaulted to, so that
+   Q1 becomes a measurement instead of a rewrite.
+7. **A condition for the image that cannot do any of it** (F11). The Kubernetes leadership backend
+   appeared in `0.3.11`; a backend pinned to an earlier image renders HA flags that the process
+   ignores, and nothing says so today.
+
+Rollout completion (Q3) is settled in the same round, by F3 rather than as a new feature.
 
 ### Goals
 
@@ -137,6 +167,12 @@ Each is out of scope by decision, and the subject that owns it is named so that 
   retries every second forever (`ha/leadership/leader_label_reconciler.h:71-83`), never blocking
   election. It buys one warning per second for the life of every leader, which is worse than the
   grant.
+
+  **This Non-Goal is about identity, and F9 does not report identity.** Two different questions hide
+  under "observability of the leader": *which replica holds it now*, refused here and answered by
+  the label above, and *that it moved at all*, which is a property of the handover rather than of any
+  replica. F9 records only the second, as an Event rather than a field, and it reads the Lease object
+  this operator already watches — never `/role`, so the interaction shape refused above stays refused.
 - **Moving the tenant quota policy to a shared store.** F6 measures the window this leaves and
   settles it. The short version: the operator's own reconcile loop is the authority and re-converges
   the ledger within `kvCachePoolObserveInterval`, so the file-backed policy store does not lose a
@@ -147,6 +183,15 @@ Each is out of scope by decision, and the subject that owns it is named so that 
   `:1456` is a `LOG(FATAL)`, and `STORE_USE_K8S_LEASE` cannot be compiled with `STORE_USE_ETCD`
   (`CMakeLists.txt:78`), so wanting the oplog back means **rebuilding the image on a different
   backend** and giving up the Lease. F2 refuses the key at admission for that reason.
+
+  **Re-examined, and kept.** The reason to want the oplog was that the Kubernetes backend left a
+  standby with no replication at all, so the choice read as "seconds of downtime, then a cold
+  cache". F8 removes that: `standby_controller.cpp:42` gates snapshot bootstrap on
+  `enable_snapshot_restore` **alone**, with no backend condition, so the Kubernetes backend can
+  carry a metadata baseline after all. What the oplog would still add over a snapshot is the
+  interval between snapshots — bounded by `snapshot_interval_seconds` and stated in F8 — and that is
+  not worth an image variant compiled on a backend that cannot hold a Lease. The compile-time
+  exclusion is unchanged today (`CMakeLists.txt:75-79`), and so is the `LOG(FATAL)`.
 
 ## Proposal
 
@@ -489,7 +534,7 @@ ledger, not merely remove an observable.
   `scaleDownOldReplicaSetsForRollingUpdate` removes an old Pod only while `availablePodCount >
   replicas - maxUnavailable` (`rolling.go`), and exactly one Pod is ever available here — so
   `replicas - 1` makes that `1 > 1`, the old leader is never removed, and no new replica can become
-  ready until it releases the Lease. `[跑]` Measured on a single-node Kubernetes cluster, three
+  ready until it releases the Lease. MEASURED: Measured on a single-node Kubernetes cluster, three
   replicas of which one can ever be available: at `maxUnavailable: 2` the old ReplicaSet still held
   `1` replica after 90s while the new one sat at `3` with none available; at `maxUnavailable: 3` the
   old ReplicaSet reached zero within 15s.
@@ -503,11 +548,12 @@ ledger, not merely remove an observable.
 and "the image cannot be pulled" both look like exactly that — the counters stop moving either way.
 A check whose two outcomes are indistinguishable on this workload is not a check.
 
-**The need it served is real, and the replacement is designed but NOT built.** It would be
-`DeploymentComplete` **minus the one clause that is structurally false**: `UpdatedReplicas ==
-Spec.Replicas` and `Replicas == Spec.Replicas` both hold normally under HA, and only the
-`AvailableReplicas` clause does not. Nothing reads that pair today, so a rollout that cannot finish
-has no failure signal — the decision sits at Q3.
+**The need it served is real, and the replacement is `DeploymentComplete` minus the one clause that
+is structurally false**: `UpdatedReplicas == Spec.Replicas` and `Replicas == Spec.Replicas` both hold
+normally under HA, and only the `AvailableReplicas` clause does not. It was designed in the first
+round and left unbuilt, which left a rollout that cannot finish with no failure signal at all; the
+second round builds it, as a condition of its own. Q3 records why it took a second round and why it
+is not the health predicate.
 
 **LIMITED:** `leaderPodIsReady` does **not** answer this. It reports whether a leader exists, which
 a freshly elected leader satisfies while two standbys still run the old image.
@@ -565,7 +611,7 @@ exactly when the client half was compiled with `STORE_USE_K8S_LEASE`. It then re
 holder, connects, and starts a monitor thread that follows view changes (`:636-673`). That thread is
 the entirety of failover, and none of it is this operator's.
 
-`[跑]` Confirmed on the built image: a member given `k8s://default/mooncake-master-lease` reaches
+MEASURED: Confirmed on the built image: a member given `k8s://default/mooncake-master-lease` reaches
 `k8s_lease_helper.cpp:24` and reports `Failed to create HA backend coordinator:
 K8S_LEASE_OPERATION_ERROR` from `client_service.cpp:647`. Not `INVALID_PARAMS`, not
 `UNAVAILABLE_IN_CURRENT_MODE` — it parsed the scheme and called the backend, and failed only for the
@@ -679,6 +725,159 @@ workload shape, and the health rule. Routing per `gpustack-operator-docs`.
 like. F5 declines to add a status field for it, so this page is where a reader meets the explanation.
 Omitting it does not leave a gap in the documentation — it leaves users diagnosing a working system.
 
+**A walkthrough is part of this feature, not a follow-up.** One page that stands a `KVCacheBackend`
+up and attaches a `ModelDeployment` to it, end to end, with the manifests a reader can paste. It is
+the delivery surface for both CRs: every other page documents a field, and none of them answers "what
+do I type first". It carries the HA opt-in, the snapshot storage F8 needs, and the two member
+addressing modes of F10, because those are the three places a reader gets a working object wrong.
+
+**Two more items are load-bearing rather than descriptive:**
+
+- **What `TCP` buys and what it costs.** The transport is supported and complete — the store works,
+  cross-instance prefix reuse works, capacity scales with DRAM and the disk tier. What is absent is
+  the zero-copy path: TCP traverses the kernel stack per packet and burns CPU to do it. Undocumented,
+  a pool that behaves exactly as designed gets reported as a performance defect.
+- **That a snapshot needs storage two Pods can read.** F8's failure mode when the storage is
+  per-Pod is silence, so the page states the requirement rather than leaving it to be discovered
+  from a cold cache after a failover.
+
+#### F8 — `leader.highAvailability.snapshot`: the baseline a standby starts from
+
+A standby under the Kubernetes backend replicates nothing. `standby_controller.cpp:43-44` grants
+oplog following only on the etcd backend, and F2 refuses that backend, so the standby this spec
+ships runs as a controller with no source of state. What it can have instead is the snapshot
+subsystem, which `standby_controller.cpp:42` gates on `enable_snapshot_restore` **alone** — no
+backend condition, unlike the line directly below it.
+
+Who writes and who reads: `master_service.cpp:526` starts the snapshot manager when
+`enable_snapshot && !enable_oplog_`, which is this project's combination, so **the primary writes
+the snapshot and the standby reads it**. (Under the oplog the ownership inverts and the primary
+skips generation, `:544`. That branch is unreachable here.)
+
+**The flags are already reachable. The storage is not, and that is the whole reason this field
+exists.** `enable_snapshot`, `enable_snapshot_restore` and the object-store keys are absent from
+`LeaderExtraArgsRules`, so an administrator can set all of them today through `leader.extraArgs` —
+and get a backend that reads as configured and restores nothing. `snapshot_object_store_type=local`
+resolves its root from the `MOONCAKE_SNAPSHOT_LOCAL_PATH` environment variable, with **no default**
+(`local_file_snapshot_object_store.h:19-20`), inside each Pod's own filesystem. The primary writes;
+the standby is a different Pod and reads an empty directory. Nothing logs it.
+
+The field:
+
+```yaml
+leader:
+  highAvailability:
+    snapshot:
+      persistentVolumeClaimName: <name>   # REQUIRED when snapshot is present
+      intervalSeconds: <n>                # optional, the artifact's default otherwise
+      retentionCount: <n>                 # optional
+```
+
+**One storage shape, not two, and the narrower one.** The store also speaks S3
+(`snapshot_object_store_type=s3`), which would need an endpoint, a bucket and a credential
+reference — a group of fields plus Secret handling, for a capability a `ReadWriteMany` PVC already
+covers inside the cluster. S3 is recorded in Alternatives rather than shipped; widening to it later
+adds a field beside this one and breaks nothing.
+
+**REQUIRED: the volume must be `ReadWriteMany`, and admission does not check it.** The PVC may not
+exist when the backend is created, and a webhook that reached for it would need a read it does not
+have. The reconciler checks the claim's access modes when it can see them and reports the mismatch
+as a condition; the walkthrough in F7 states the requirement where a reader meets it first. **Not
+counted as the check:** the backend reaching Ready, which it does either way.
+
+**No catalog field, because the catalog rides in the object store.**
+`EmbeddedSnapshotCatalogStore(SnapshotObjectStore*, cluster_id)` takes the object store itself, so
+one shared volume carries both the payload and the index of what exists. The Redis catalog upstream
+offers would add a second external dependency to a spec whose entire premise is not having one.
+
+**Five more keys join the escape hatch's reserved list**, four of them derived from this field —
+`enable_snapshot`, `enable_snapshot_restore`, `snapshot_object_store_type`, `snapshot_backup_dir` —
+and one that is not: **`memory_allocator`**. `master_service.cpp:527` creates the snapshot manager
+only when the allocator is `OFFSET`. That is the artifact's default (`master.cpp:320`), so nothing
+is wrong today, and the `if` has no `else` and logs nothing — an administrator who switches the
+allocator through the hatch turns snapshots off silently and keeps every flag that says they are on.
+
+**What the baseline does not restore.** The objects a client wrote since the last snapshot are not
+in it, so the window is `intervalSeconds` wide and the cache is partially cold after a failover
+rather than entirely cold. That is the difference between this and the oplog, and it is the whole
+of it **for objects**.
+
+**REQUIRED: C1 reads what came back, not whether something came back.** What a snapshot carries is
+the master's metadata shards and its segment state; whatever the store holds as pure runtime state
+beside them is a separate question this spec has not settled per property — soft pinning is the one
+the earlier survey flagged, and a survey is not a measurement. A restore that recovers the objects
+and silently drops a property attached to them is the failure this feature can have while every
+assertion about flags, mounts and files passes.
+
+#### F9 — A handover is recorded as an Event, not as a field
+
+A failover is invisible from the object. A pool that lost its cache twice overnight and one that has
+been stable for a week present identically, and the first diagnostic question after a latency spike
+has no answer anywhere a user is already looking.
+
+**A status field is the wrong carrier, by this spec's own G5.** F5 applied that goal to a
+near-identical candidate and refused it: a field copying a value another object already publishes,
+whose only purpose is being looked at. `spec.leaseTransitions` on the Lease is exactly that shape, so
+a `status.leader.transitions` mirroring it fails the same test — and a goal that stopped three
+candidate fields does not get an exception for the fourth.
+
+**An Event is not a field.** When the reconciler observes the Lease's holder change, it records one
+Event against the `KVCacheBackend` naming that the leader moved. It reads a Kubernetes object this
+operator already watches with access F1 already grants, it names no replica — so the Non-Goal above
+is untouched — and it appears in `kubectl describe`, which is where someone diagnosing a spike
+already is.
+
+**What it costs, stated here rather than discovered later:** Events are garbage-collected on the
+cluster's event TTL, one hour by default. This answers *did service just move* and does **not**
+answer *how many times last night*. The durable count remains the Lease's own `leaseTransitions`,
+and F7 documents how to read it — that is the answer to the longer-horizon question, and there is
+no field for it by design.
+
+**Not counted as this feature:** an Event that only ever fires when a human deletes a Pod. C5
+requires it under an ordinary rollout too, since that is the failover users actually meet.
+
+#### F10 — A second way for a member to reach the master
+
+F4 hands every member a `k8s://` entry, and that choice is what forces the member image to carry the
+leadership backend — which is why the vendor variants had to be built. Q1 records a second path
+found afterwards and never measured: the leader Service already contains only the leader, because a
+standby is not ready.
+
+This feature **renders both and defaults to neither being a rewrite**: a field selects the entry, and
+its default is the `k8s://` shape shipped today. Q1 stops being a question about a design and becomes
+a measurement of two rendered objects, run on the cluster trip.
+
+**The measurement already exists and is not this feature's to design.** `case-63` in the end-to-end
+suite deletes the serving leader and records, per path, the interval from the delete to the first
+store operation that completes after an observed error window — a completed put, because it needs the
+client to reach the new master AND a member to have re-registered its segment there. Its verdict
+carries `DID_NOT_RECOVER` and `NO_ERROR_WINDOW` beside the number, so a run in which no failover
+happened reports that rather than a small interval. What F10 owes it is the second rendered entry to
+point at.
+
+**FORBIDDEN: switching the default on the strength of the official deployment guide.** That guide
+describes a label selector and a Service, which is the same shape, and it says nothing about how long
+a member is unable to reach a master after the leader Pod is deleted. That number is what decides
+this, and the guide is evidence about a shape.
+
+#### F11 — A condition for an image that cannot elect
+
+The Kubernetes leadership backend does not exist before `0.3.11`: `v0.3.10.post2` carries no
+`k8s_leader_coordinator` source and no `STORE_USE_K8S_LEASE` option in its `CMakeLists.txt`. A
+backend pinned to such an image and configured with `replicas > 1` and `highAvailability` renders
+flags the process does not implement, and reports Ready while electing nothing.
+
+**The condition is observed, not parsed.** Reading the version out of the image tag is not a check —
+a tag is a name, and the one users pin most often is a digest or a local rebuild. What is observable
+without touching the store: **the Lease is the artifact of election**, so a backend whose leader
+replicas are Ready while its Lease is absent or holderless has told us what we need, from the
+Kubernetes side only.
+
+**REQUIRED: the condition states what was observed, not why.** A holderless Lease is also what a
+missing RBAC grant and a still-starting process look like, and the message that names the image as
+the cause would be wrong in both. It carries the observation and the two or three things that
+produce it, in that order.
+
 ### Verification
 
 Two properties are load-bearing and each names what does not count:
@@ -714,8 +913,44 @@ is, in both cases, the half carrying the feature's reason for existing.
 |---|---|---|
 | **F3** workload shape | The rendered strategy and its parameters, asserted directly | **That a rollout completes.** F3 exists because both defaults fail during an update; a third strategy that has never been updated is as unverified as the two it replaces |
 | **F5** health rule | The predicate, including a simulated two-ready window | **That an ordinary failover reports no fault.** The transient the rule is designed around is produced by a real kubelet, not by a fixture |
+| **F8** snapshot baseline | The rendered flags, the volume mount, the reserved keys, the refusal of a snapshot without a claim | **That a key written before a failover is still readable after one.** Every part of F8 can be right while the standby restores nothing, and the only thing that tells them apart is a client reading its own key across a handover |
+| **F9** handover Event | That an Event is recorded for a Lease holder change, against a fixture | **That it fires on an ordinary rollout**, not only when a Pod is deleted by hand. An Event that appears in exactly the situation nobody meets is not observability |
+| **F10** member addressing | That both entries render, and that the default is unchanged | **How long a member cannot reach a master after the leader Pod is deleted, measured once per path.** The instrument is `case-63` and it is already correct; what is missing is a run against both rendered entries |
+| **F11** capability condition | The predicate over a Lease and a replica count | **That it fires on a `0.3.10` image and stays silent on a `0.3.13` one.** A condition verified only where it should fire has not been shown to discriminate |
 
-**FORBIDDEN:** marking either feature done on the first column alone.
+**FORBIDDEN:** marking any feature done on the first column alone.
+
+### The cluster trip
+
+Everything above whose answer is a measurement lands in one trip, together with the `M1` gate of
+[the per-group medium and transport spec](2026-09-16-per-group-medium-and-transport.md), because
+that gate needs the same cluster and the same images.
+
+**The working order is failure first.** No end-to-end case is written ahead of the trip. Each
+question below is run by hand against a live cluster until it produces a **counter-example** — the
+concrete way the thing is wrong, or the reading that settles it — and only then is a case written
+that asserts the corrected behaviour and re-run. A case authored before the trip encodes what the
+author expected to happen, and the failures worth having are the ones nobody predicted.
+
+The questions, each with what would settle it and what does not count:
+
+| # | Question | Settled by | Not counted |
+|---|---|---|---|
+| C1 | Does a key survive a failover with F8 on? | The same client reading a key it wrote before the handover, after it | The standby reaching Ready; a snapshot file existing on the volume |
+| C2 | What is lost in the window? | Keys written inside one `intervalSeconds` before the handover, counted | That "most" keys came back |
+| C3 | Does F8 fail loudly on a `ReadWriteOnce` claim? | The condition, and the second Pod's own error | The backend reaching Ready, which it does either way |
+| C4 | Q1: how long is a member without a master, per path? | `case-63` against both rendered entries: two intervals, each the first put completing AFTER an error window | Either path working at all; any interval recorded when the verdict reads `NO_ERROR_WINDOW` |
+| C5 | Does the handover Event fire on a rollout? | An image bump on a 3-replica leader | A hand-deleted Pod |
+| C6 | Does F11 discriminate? | `0.3.10.post2` fires, `0.3.13.post1` silent, same manifest otherwise | Only the firing case |
+| C7 | Does the rollout complete under HA with the Q3 predicate? | `kubectl rollout status` returning on a multi-replica leader mid-update | A single-replica rollout |
+| C8 | `M1` of the per-group spec: a VRAM segment and a local disk tier, written and read | Per that spec's own gate | — |
+
+**REQUIRED before C8 is run: read the cluster's default container runtime.** `M1` exercises three
+device-injection paths and two of them exist only for a cluster **without** a default vendor runtime
+— with one configured, `extraEnvs` is satisfied automatically and `hostPaths` and `runtimeClassName`
+are never reached. A green `M1` on such a cluster reports nothing about the two, so the reading
+(`containerd config dump`, or the RuntimeClass list) is taken first and decides whether the trip
+uses that cluster.
 
 ### Notes / Constraints / Caveats
 
@@ -751,6 +986,28 @@ tier, or anything under `pkg/worker/controllers/worker/kv_cache_pool.go`.
 - **The workload shape is the part most likely to be got wrong quietly.** A wrong strategy does not
   fail at apply time; it fails during an upgrade, which is when it is most expensive. F3's acceptance
   asserts against the store's view rather than the Deployment's for this reason.
+- **F8 makes one binary read state another binary wrote, and this spec has not measured what happens
+  across a version boundary.** A snapshot is written by the primary and restored by a standby; during
+  a rollout those are different images. The oplog next door is known to be version-fragile — `0.3.13`
+  refuses a namespace holding the earlier layout — and whether the snapshot format carries the same
+  property has not been checked. Mitigated rather than solved: Q3's predicate shortens the window in
+  which the two coexist, and C2 reads what a restore actually recovered instead of assuming it
+  recovered everything. **LIMITED to upgrades.** Deliberately moving an image backwards is out of
+  scope for this spec, and a cache that a downgrade empties is the expected outcome, not a defect.
+- **F8 puts a decodable list of cache keys on a volume, and the volume outlives the Pods.** The
+  snapshot's `metadata` payload is the master's metadata shards serialized
+  (`master_snapshot_codec.h:29-56`), and those shards are keyed by the object key — which under
+  multi-tenancy carries the tenant with it. `MasterSnapshotPayloads` is a byte buffer: serialized and
+  compressed, **not** encrypted, and nothing in this spec encrypts it either. It is the same exposure
+  the Non-Goal above records for the oplog, arriving through the feature that replaced the reason to
+  want one, and it is stated here rather than left for a reader to infer from "metadata baseline".
+  Accepted rather than solved: the claim is one the cluster's own storage controls, the keys are
+  already visible to every member of the pool, and encrypting a store format this project does not
+  own would be a second implementation of it. F7's page carries the sentence.
+- **`ReadWriteMany` is not universally available.** F8 is unreachable on a cluster whose only
+  StorageClass is `ReadWriteOnce`, and the failure is a silent non-restore rather than a refusal
+  unless the reconciler sees the claim. C3 exists because that is the one failure shape of this
+  feature nobody would notice.
 
 ## Design Details
 
@@ -787,12 +1044,39 @@ bound.
       the bound and the consequence in one sentence rather than two, because split apart the bound
       reads as harmless.
 - [x] **T8 — Documentation** (F7), in [`docs/kv-cache/backend.md`](../docs/kv-cache/backend.md).
-- [ ] **T9 — e2e: an induced failover** on a single-node Kubernetes cluster. Service moves, no member
+- [x] **T9 — e2e: an induced failover** on a single-node Kubernetes cluster. Service moves, no member
       restarts, and no fault is reported during the transition. Tracked as
       https://github.com/gpustack/gpustack-operator/issues/278. Two things it must check that no unit
       test can: that the members' `k8s://` entry actually carries them across an election, and that
       the two rendered ServiceAccounts are sufficient — every RBAC assertion here is against a
-      rendered object, never against an API server that enforced it.
+      rendered object, never against an API server that enforced it. **DONE, and the record was
+      elsewhere:** `case-62` (three replicas elect one, the two accounts are sufficient and no more,
+      an induced failover moves the Lease) and `case-64` (a hard-killed leader still yields it, the
+      members come through) carry it, and the issue was closed against them. This task went on
+      reading unticked because nothing connects a suite case back to the spec task it satisfies.
+
+The second round:
+
+- [ ] **T10 — `leader.highAvailability.snapshot`** (F8): the field, the volume and its mount, the
+      four derived flags plus `MOONCAKE_SNAPSHOT_LOCAL_PATH`, the five keys joining the reserved
+      list, and the admission rule that refuses a snapshot naming no claim. The reconciler check on
+      the claim's access modes lands here too, reported as a condition rather than a refusal.
+- [ ] **T11 — The handover Event** (F9), recorded when the Lease's holder changes. No new access:
+      F1's Role already carries the read. FORBIDDEN: a status field; G5 and F5 say why.
+- [ ] **T12 — The second member entry** (F10). Both render, the default does not move, and the
+      field's doc comment says which one has been measured — neither, until T17.
+- [ ] **T13 — The capability condition** (F11), keyed on a holderless Lease under a Ready leader,
+      worded as an observation with its candidate causes.
+- [ ] **T14 — The rollout-completion predicate** F3 designed and left unbuilt, surfaced as its own
+      condition. FORBIDDEN: adding it to `leaderPodIsReady`; Q3 says why.
+- [ ] **T15 — Documentation** (F7): what `TCP` buys and costs, and that a snapshot needs storage two
+      Pods can read.
+- [ ] **T16 — The walkthrough page** (F7): a `KVCacheBackend` and a `ModelDeployment` attached to
+      it, end to end, with pasteable manifests. It is the delivery surface for both CRs.
+- [ ] **T17 — The cluster trip**, answering C1 through C8. **Failure first: no case is authored
+      before the trip.** Each question is run by hand until it yields a counter-example, and only
+      then does a case get written against the corrected behaviour and re-run. The suite additions
+      are an output of this task, not an input to it.
 
 ### Where a green suite is not coverage
 
@@ -828,6 +1112,23 @@ watching the new test go red.
 - **e2e** — an induced failover on a single-node Kubernetes cluster: service moves, a member does not
   restart, no fault is reported during the transition.
 
+The second round adds:
+
+- **Unit** — the snapshot flags, mount and environment variable rendered from the field, and nothing
+  rendered without it; the five keys refused by the escape hatch, each by name; admission refusing a
+  snapshot that names no claim; the Event recorded for a Lease holder change and not for an unchanged
+  one; both member entries rendering with the default unmoved; the capability predicate over a
+  holderless Lease; the rollout-completion predicate, including the case it must NOT fire on.
+- **e2e** — **authored after the cluster trip, not before it.** C1 through C8 are run by hand until
+  each produces a counter-example, and the cases that land in the suite assert the corrected
+  behaviour. A case written ahead of the trip encodes the author's expectation, which is the one
+  thing the trip exists to test.
+
+  **The exception is what the suite already holds**, which is not a pre-written expectation but a
+  measurement someone else already built: `case-62` and `case-64` cover the induced failover of T9,
+  and `case-63` is C4's instrument. These are run, not authored. The rule above governs C1, C2, C3,
+  C5, C6 and C7, which have nothing.
+
 ## Alternatives
 
 - **Orchestrating failover from the controller** — watching the leadership backend and steering a
@@ -847,6 +1148,19 @@ watching the new test go red.
   than the lost signal: readiness is what keeps a standby out of the leader Service's endpoints, and
   this operator's own admin calls resolve through that Service. Ready standbys would put `503`s into
   the tenant ledger's convergence path. See F3.
+- **`/role` as the readiness probe**, on the strength of the deployment guide recommending it.
+  **Refused, and it is the previous entry wearing a different hat.** `HandleRole` answers
+  `status_type::ok` unconditionally (`master_admin_service.cpp:565-571`) — the role is in the body,
+  and an HTTP probe reads the status code. Adopting it makes every standby ready, which is exactly
+  the alternative refused directly above. What the probe uses instead is a gated route:
+  `/get_all_segments` runs through `WithActiveService`, which answers `SetServiceUnavailable` when
+  the service plane is not active (`:542-548`). The guide's recommendation is about a Service whose
+  selector follows a label, which this operator does not use — the shape it describes is real and
+  the probe it names does not transfer to it.
+- **S3 as the snapshot object store.** Supported upstream (`snapshot_object_store_type=s3`) and left
+  out of F8: it needs an endpoint, a bucket and a credential reference where a `ReadWriteMany` PVC
+  needs one name, for no capability an in-cluster volume lacks. Reopened by a user who wants the
+  baseline to outlive the cluster — adding it is a field beside the claim, not a change to one.
 
 ## Open Questions
 
@@ -863,6 +1177,19 @@ endpoint propagation — up to about 15s at the rendered probe settings — agai
 new leader's Pod address directly. The figure that decides it is how long a member cannot reach a
 master after the leader Pod is deleted, measured both ways.
 
+**CORRECTION: "has not been measured" above is no longer true, and the instrument is already in the
+suite.** `case-63` was written to measure exactly these two paths, and its convergence verdict reads
+the first completed put AFTER an observed error window — not the first put after the delete, which
+would be satisfied by the old leader still serving. It reports `NO_ERROR_WINDOW` when no failover
+occurred and `DID_NOT_RECOVER` when none followed, so neither outcome can pass as a small interval.
+
+**What is still missing is a trusted run, not an instrument.** F10 supplies the second rendered entry
+the case needs to point Path B at; C4 runs it. **FORBIDDEN: closing this on a pass recorded before the
+verdict was reading the error window** — a number produced by the earlier predicate answers a
+different question, which is the failure mode this whole spec keeps meeting. And **FORBIDDEN: closing
+it by adopting the shape the deployment guide describes**, which is evidence about a Service and not
+about this figure.
+
 **Q2 — Is the namespace-wide Lease grant narrow enough?**
 
 F1's Roles are namespace-scoped, not backend-scoped: one backend's leader can `update` every Lease in
@@ -871,12 +1198,24 @@ the shared namespace. `resourceNames` cannot restrict `create`, but it can restr
 account here is in one trust domain in one namespace this operator owns; reopened by anything that
 puts a backend outside that assumption.
 
-**Q3 — Should readiness require the rollout to have finished?**
+**Q3 — Should readiness require the rollout to have finished? ANSWERED: it is not readiness, and
+the replacement F3 designed gets built.**
 
-The readiness predicate is `ReadyReplicas > 0`, which does not distinguish a finished rollout from one
-still carrying old-revision standbys, so a failover during an update can elect the previous binary.
-Whether that matters enough to add `UpdatedReplicas == Spec.Replicas` has not been settled. It is the
-same missing predicate the disabled progress deadline left behind, so one answer serves both.
+The question as written conflates two predicates that F3 already separates, and its own **LIMITED**
+note says so: `leaderPodIsReady` reports whether a leader exists, which is the right question for
+health and the wrong one for rollout. Adding `UpdatedReplicas == Spec.Replicas` to it would report a
+correctly progressing backend as unhealthy for the length of every ordinary update — strictly worse
+than the gap it closes.
+
+What was missing is the **other** predicate, the one F3 designed and left unbuilt: `DeploymentComplete`
+minus its structurally false `AvailableReplicas` clause. It is built in this round and surfaces as its
+own condition, touching neither F5's health rule nor the probe.
+
+What settled it was not new evidence about the cost. It is that F8 gives a failover a consequence it
+did not have: a standby restoring a baseline that a **different binary** wrote. The round that
+introduces reading state across replicas is the wrong one to go on having no signal for "this rollout
+never finished". C7 verifies the predicate does not stall a rollout that should finish — the failing
+shape being the one that reports a stall where none exists.
 
 ## Appendix: what the build cost
 
