@@ -1132,21 +1132,31 @@ RUN --mount=from=builder-cann,source=/work/mooncake-wheel/dist,target=/wheel \
                     rm -fv "${vendored}"
                 done
             done
-            # Pre-0.3.13 masters link ascend_transport.so out of the same directory, but
-            # upstream only gave the install an $ORIGIN rpath in 0.3.13
-            # (mooncake-store/CMakeLists.txt's INSTALL_RPATH); without it the binary
-            # cannot start unless the package directory sits on LD_LIBRARY_PATH --
-            # production pods included. Prepend $ORIGIN to any shipped binary that needs
-            # it, keeping whatever rpath the wheel repair already wrote.
-            for bin in "${pkg}"/mooncake_*; do
-                [[ -f "${bin}" ]] || continue
-                if patchelf --print-needed "${bin}" 2>/dev/null | grep -qx "ascend_transport.so"; then
-                    rpath="$(patchelf --print-rpath "${bin}" 2>/dev/null || true)"
+            # Pre-0.3.13 masters reach ascend_transport.so transitively: the auditwheel
+            # repair rewrote the master's NEEDED entries to the mangled vendored names, so
+            # the chain is mooncake_master -> libmooncake_store.so -> ascend_transport.so,
+            # and the NEEDED entry for ascend_transport.so lives on the libraries, not the
+            # binary. Upstream only gave the install an $ORIGIN rpath in 0.3.13
+            # (mooncake-store/CMakeLists.txt's INSTALL_RPATH), and 0.3.13's master no longer
+            # links libmooncake_store at all, so only these releases strand the loader:
+            # without a same-directory rpath entry the master cannot start unless the
+            # package directory sits on LD_LIBRARY_PATH -- production pods included.
+            # Prepend the entry that points back at the package directory: $ORIGIN for a
+            # library inside it, $ORIGIN/../mooncake for a vendored copy under
+            # mooncake_transfer_engine.libs. Keep whatever rpath the wheel repair wrote.
+            for so in "${pkg}"/* "${libs}"/*.so "${libs}"/*.so.*; do
+                [[ -f "${so}" ]] || continue
+                if patchelf --print-needed "${so}" 2>/dev/null | grep -qx "ascend_transport.so"; then
+                    case "$(dirname "${so}")" in
+                        "${pkg}") entry='$ORIGIN' ;;
+                        *)        entry='$ORIGIN/../mooncake' ;;
+                    esac
+                    rpath="$(patchelf --print-rpath "${so}" 2>/dev/null || true)"
                     case ":${rpath}:" in
-                        *':$ORIGIN:'*) ;;
+                        *":${entry}:"*) ;;
                         *)
-                            patchelf --set-rpath "\$ORIGIN${rpath:+:${rpath}}" "${bin}"
-                            echo "[info] ${bin}: prepended \$ORIGIN to RPATH (was: ${rpath:-<empty>})."
+                            patchelf --set-rpath "${entry}${rpath:+:${rpath}}" "${so}"
+                            echo "[info] ${so}: prepended ${entry} to RPATH (was: ${rpath:-<empty>})."
                             ;;
                     esac
                 fi
