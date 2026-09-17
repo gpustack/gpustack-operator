@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -11,6 +13,7 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	gpustack "gpustack.ai/gpustack/api/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
@@ -118,6 +121,68 @@ func (r *KVCacheBackendReconciler) reportLeaderHandover(
 	r.recordNormal(kvcb, kvCacheBackendEventLeaderHandover,
 		"the store's leader moved to another replica; the lease has recorded %d handovers in total, "+
 			"and the cache it serves is whatever the new leader could restore", transitions)
+}
+
+// reportElectionObserved answers whether an election is actually happening, for a backend that asked
+// for one.
+//
+// The question it exists for is an image too old to elect. The Kubernetes leadership backend does
+// not exist below a certain store version, and a backend pinned to such an image renders the
+// election flags, starts, serves from one replica and reports Ready -- while nothing elects. Reading
+// the version out of the image tag is not a check: a tag is a name, and the one users pin most often
+// is a digest or a local rebuild.
+//
+// What IS observable from the Kubernetes side is the artifact of the election. A lease with a holder
+// means one happened. A lease with none, under a leader that is ready, means one did not.
+//
+// REQUIRED: the message states what was OBSERVED and then the things that produce it, in that order,
+// and never names a cause. A holderless lease is equally what a missing role binding and a process
+// still starting look like, and a message naming the image would be wrong in both of those.
+func (r *KVCacheBackendReconciler) reportElectionObserved(
+	ctx context.Context, kvcb, holder *workercore.KVCacheBackend,
+) {
+	managed := kvcb.Spec.Connection.Managed
+	if managed == nil || mooncake.LeaderReplicas(managed.Leader) <= 1 {
+		// Below two replicas there is nothing to elect between, so there is no lease to be the
+		// artifact of anything. Dropped rather than left, because the status this pass builds starts
+		// as a copy of the observed one -- see the snapshot condition for the same reasoning.
+		holder.Status.Conditions = slices.DeleteFunc(holder.Status.Conditions,
+			func(c gpustack.Condition) bool {
+				return c.Type == string(KVCacheBackendConditionElectionObserved)
+			})
+		return
+	}
+
+	leaseName := mooncake.LeaderObjectName(kvcb)
+	lease := new(coordination.Lease)
+	err := r.Client.Get(ctx, ctrlcli.ObjectKey{
+		Name:      leaseName,
+		Namespace: kuberess.SystemNamespaceName,
+	}, lease)
+
+	switch {
+	case err != nil && !kerrors.IsNotFound(err):
+		KVCacheBackendConditionElectionObserved.Unknown(holder, "LeaseUnreadable", fmt.Sprintf(
+			"the lease %q could not be read: %v", leaseName, clipFaultDetail(err.Error())))
+
+	case err == nil && leaseHolderIdentity(lease) != "":
+		KVCacheBackendConditionElectionObserved.True(holder, "Electing", fmt.Sprintf(
+			"the lease %q names a holder, so an election has taken place", leaseName))
+
+	case !r.leaderPodIsReady(ctx, kvcb):
+		// The same observation with no information in it. A leader that has not become ready has
+		// not had the chance to campaign, so the absence says nothing about whether it can.
+		KVCacheBackendConditionElectionObserved.Unknown(holder, "LeaderStarting", fmt.Sprintf(
+			"no replica of the leader is ready yet, so the lease %q says nothing about whether an "+
+				"election can happen", leaseName))
+
+	default:
+		KVCacheBackendConditionElectionObserved.False(holder, "NoHolder", fmt.Sprintf(
+			"a replica of the leader is ready while the lease %q names no holder. A store image "+
+				"built without the Kubernetes leadership backend, a role binding for it that has not "+
+				"been applied, and a process that is serving without having finished its first "+
+				"campaign all produce this", leaseName))
+	}
 }
 
 // enqueueKVCacheBackendWhenLeaseChanged maps a Lease back to the backend that elects through it.

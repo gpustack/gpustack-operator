@@ -940,6 +940,12 @@ missing RBAC grant and a still-starting process look like, and the message that 
 the cause would be wrong in both. It carries the observation and the two or three things that
 produce it, in that order.
 
+**The leader being ready is half the predicate, and it is the half that carries the information.**
+A holderless Lease under a leader that has not become ready says nothing at all — it has not had the
+chance to campaign — so that reading is `Unknown` rather than `False`. The condition is
+`ElectionObserved`, and it is absent below two replicas, where there is nothing to elect between and
+therefore no Lease to be the artifact of anything.
+
 ### Verification
 
 Two properties are load-bearing and each names what does not count:
@@ -1137,10 +1143,14 @@ The second round:
       field's doc comment says which one has been measured — neither, until T17. The member's
       account is rendered identically under both, so the two arms of that measurement differ in one
       thing.
-- [ ] **T13 — The capability condition** (F11), keyed on a holderless Lease under a Ready leader,
-      worded as an observation with its candidate causes.
-- [ ] **T14 — The rollout-completion predicate** F3 designed and left unbuilt, surfaced as its own
-      condition. FORBIDDEN: adding it to `leaderPodIsReady`; Q3 says why.
+- [x] **T13 — The capability condition** (F11) as `ElectionObserved`, keyed on a holderless Lease
+      under a Ready leader, worded as an observation with its candidate causes. A holderless Lease
+      under a leader that is NOT ready reports `Unknown`: that reading has no information in it.
+- [x] **T14 — The rollout-completion predicate** F3 designed and left unbuilt, surfaced as its own
+      condition, `RolloutComplete`. FORBIDDEN: adding it to `leaderPodIsReady`; Q3 says why. The
+      unit test's first case is three updated replicas of which one is ready — the steady state
+      here — so a predicate that carried the `AvailableReplicas` clause back fails the table rather
+      than merely describing it.
 - [ ] **T15 — Documentation** (F7): what `TCP` buys and costs, and that a snapshot needs storage two
       Pods can read.
 - [ ] **T16 — The walkthrough page** (F7): a `KVCacheBackend` and a `ModelDeployment` attached to

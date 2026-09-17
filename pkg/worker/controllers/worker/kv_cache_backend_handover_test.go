@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apps "k8s.io/api/apps/v1"
 	coordination "k8s.io/api/coordination/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
@@ -14,6 +15,7 @@ import (
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	gpustack "gpustack.ai/gpustack/api/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
@@ -252,4 +254,141 @@ func TestLeaseEnqueueEarnsTheLinkBackToItsBackend(t *testing.T) {
 	notOurs.Name = "some-other-election"
 	assert.Empty(t, r.enqueueKVCacheBackendWhenLeaseChanged(ctx, notOurs),
 		"a name without the suffix is not this operator's to interpret")
+}
+
+// readyLeaderDeployment is the leader's Deployment with a serving replica, which is what makes a
+// holderless lease mean anything.
+func readyLeaderDeployment(backend string) *apps.Deployment {
+	return &apps.Deployment{
+		ObjectMeta: meta.ObjectMeta{
+			Name:      backend + mooncake.LeaderObjectNameSuffix,
+			Namespace: kuberess.SystemNamespaceName,
+		},
+		Status: apps.DeploymentStatus{ReadyReplicas: 1},
+	}
+}
+
+// TestElectionObservedDiscriminates covers every answer, and the pair that matters is the last two:
+// the SAME holderless lease is Unknown under a leader that is not ready and False under one that is.
+//
+// A condition verified only where it should fire has not been shown to discriminate, and this one is
+// keyed on an observation that three different faults produce -- so the reading that carries the
+// information is the one where it stays quiet.
+func TestElectionObservedDiscriminates(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		objects    []ctrlcli.Object
+		replicas   int32
+		wantAbsent bool
+		wantStatus meta.ConditionStatus
+		wantReason string
+	}{
+		{
+			name:       "a lease with a holder",
+			objects:    []ctrlcli.Object{electionLease("store", "store-leader-a", 0)},
+			replicas:   3,
+			wantStatus: meta.ConditionTrue,
+			wantReason: "Electing",
+		},
+		{
+			name:       "no lease at all, and a leader that is not ready",
+			replicas:   3,
+			wantStatus: meta.ConditionUnknown,
+			wantReason: "LeaderStarting",
+		},
+		{
+			name:       "no lease at all, under a ready leader",
+			objects:    []ctrlcli.Object{readyLeaderDeployment("store")},
+			replicas:   3,
+			wantStatus: meta.ConditionFalse,
+			wantReason: "NoHolder",
+		},
+		{
+			// The same object as the True case with its holder taken away. Pinned separately from
+			// the missing lease because the store creates the object before it wins anything, so
+			// this is the shape an image that cannot elect actually leaves behind.
+			name: "a holderless lease under a ready leader",
+			objects: []ctrlcli.Object{
+				electionLease("store", "", 0), readyLeaderDeployment("store"),
+			},
+			replicas:   3,
+			wantStatus: meta.ConditionFalse,
+			wantReason: "NoHolder",
+		},
+		{
+			name:       "one replica, which elects nothing by design",
+			objects:    []ctrlcli.Object{readyLeaderDeployment("store")},
+			replicas:   1,
+			wantAbsent: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kvcb := electingBackend("store")
+			kvcb.Spec.Connection.Managed.Leader.Replicas = ptr.To(tc.replicas)
+
+			r := &KVCacheBackendReconciler{
+				Client: ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+					WithObjects(tc.objects...).Build(),
+			}
+			holder := kvcb.DeepCopy()
+			r.reportElectionObserved(context.Background(), kvcb, holder)
+
+			if tc.wantAbsent {
+				assert.False(t, KVCacheBackendConditionElectionObserved.Exists(holder))
+				return
+			}
+			assert.Equal(t, string(tc.wantStatus),
+				KVCacheBackendConditionElectionObserved.GetStatus(holder),
+				KVCacheBackendConditionElectionObserved.GetMessage(holder))
+			assert.Equal(t, tc.wantReason,
+				KVCacheBackendConditionElectionObserved.GetReason(holder))
+		})
+	}
+}
+
+// TestElectionObservedNamesNoCause pins the wording rule the feature states, because it is the one
+// property of this condition a reader acts on and the one an edit would most easily undo.
+//
+// Three different faults produce a holderless lease, and a message naming the image would be wrong
+// in two of them -- sending an operator to rebuild a container when the answer is a role binding.
+func TestElectionObservedNamesNoCause(t *testing.T) {
+	r := &KVCacheBackendReconciler{
+		Client: ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+			WithObjects(electionLease("store", "", 0), readyLeaderDeployment("store")).Build(),
+	}
+	kvcb := electingBackend("store")
+	holder := kvcb.DeepCopy()
+	r.reportElectionObserved(context.Background(), kvcb, holder)
+
+	message := KVCacheBackendConditionElectionObserved.GetMessage(holder)
+	assert.Contains(t, message, "names no holder", "the observation comes first")
+	for _, cause := range []string{
+		"built without the Kubernetes leadership backend",
+		"role binding",
+		"first campaign",
+	} {
+		assert.Contains(t, message, cause, "all three causes are listed, none of them chosen")
+	}
+}
+
+// TestElectionObservedIsDroppedWhenTheElectionGoesAway pins the removal half, which the status
+// carrying forward makes necessary: a backend scaled back to one replica would otherwise go on
+// publishing a verdict about a lease nothing takes.
+func TestElectionObservedIsDroppedWhenTheElectionGoesAway(t *testing.T) {
+	r := &KVCacheBackendReconciler{
+		Client: ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build(),
+	}
+	kvcb := electingBackend("store")
+	kvcb.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
+
+	holder := kvcb.DeepCopy()
+	holder.Status.Conditions = append(holder.Status.Conditions, gpustack.Condition{
+		Type:    string(KVCacheBackendConditionElectionObserved),
+		Status:  meta.ConditionFalse,
+		Reason:  "NoHolder",
+		Message: "stale",
+	})
+
+	r.reportElectionObserved(context.Background(), kvcb, holder)
+	assert.False(t, KVCacheBackendConditionElectionObserved.Exists(holder))
 }

@@ -6150,7 +6150,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendStatus(ref common.Referen
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted, CapacityObserved, Deletable, and SnapshotStorageShared when a snapshot is configured. Every one is derived from an observed document.",
+							Description: "Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted, CapacityObserved, Deletable, RolloutComplete, and — each only where it has something to be a verdict about — SnapshotStorageShared and ElectionObserved. Every one is derived from an observed document.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{

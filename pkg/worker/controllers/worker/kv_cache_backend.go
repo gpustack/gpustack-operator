@@ -89,6 +89,14 @@ const (
 	// read the claim the snapshot is kept on. It is ABSENT on a backend that asks for no snapshot,
 	// rather than True, because there is no storage for it to be a verdict about.
 	KVCacheBackendConditionSnapshotStorageShared kubeapistatus.ConditionType = "SnapshotStorageShared"
+	// KVCacheBackendConditionElectionObserved answers whether an election has actually taken place
+	// on a backend that asked for one. It is ABSENT below two replicas, where there is nothing to
+	// elect between and therefore no lease to be the artifact of anything.
+	KVCacheBackendConditionElectionObserved kubeapistatus.ConditionType = "ElectionObserved"
+	// KVCacheBackendConditionRolloutComplete answers whether the leader's last update finished. It
+	// exists because this workload disables the deadline that would otherwise answer it, and that
+	// deadline is disabled because its two outcomes are indistinguishable here.
+	KVCacheBackendConditionRolloutComplete kubeapistatus.ConditionType = "RolloutComplete"
 )
 
 // KVCacheBackendReconciler reconciles a KVCacheBackend.
@@ -451,6 +459,12 @@ func (r *KVCacheBackendReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Takes the OBSERVED object rather than the status under construction, because what it produces
 	// is an Event and not a field -- see the feature, and the goal it would otherwise fail.
 	r.reportLeaderHandover(ctx, kvcb)
+	// Reads the same lease and asks the other question of it: not whether it moved, but whether
+	// anything ever held it.
+	r.reportElectionObserved(ctx, kvcb, holder)
+	// And the workload's own question, which is separate from every health one above: did the last
+	// update finish.
+	r.reportRolloutComplete(ctx, kvcb, holder)
 	// Derived last, from the conditions the observation just wrote. A phase computed before them
 	// would summarize the previous pass.
 	deriveKVCacheBackendPhase(holder, renderBlocked)
