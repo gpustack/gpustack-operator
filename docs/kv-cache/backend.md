@@ -56,8 +56,9 @@ are allowed; at most one of them may carry a [local disk tier](local-disk-tier.m
 
 **`members[].medium` takes two values, `DRAM` and `VRAM`** — host memory or device memory. It is a
 choice rather than an identity: the renderer splits on it, charging the segment to the Pod's host
-memory on one and to a device on the other (see [The members](#the-members)). One binary is one
-medium, so a node contributing both does so as two groups selecting it.
+memory on one and to nothing at all on the other, where the segment is device memory and claiming it
+is allocating it (see [The members](#the-members)). One binary is one medium, so a node contributing
+both does so as two groups selecting it.
 
 The field is **immutable**: a segment already mounted cannot change the kind of memory underneath
 the data it holds, so an edit is refused and the choice is made when the group is declared.
@@ -349,7 +350,7 @@ build compiles no `ascend` transport.
 > them.
 
 An `efa` group takes everything `rdma` takes, plus one device from a plugin — by default
-`vpc.amazonaws.com/efa`, which `deviceResourceName` below overrides. That request is what lets the
+`vpc.amazonaws.com/efa`, which `spec.transport.deviceResourceName` overrides. That request is what lets the
 member open the adapter: the `/dev/infiniband` mount carries the device node in while the device
 cgroup still refuses `open()`, so a member without one starts TCP instead.
 
@@ -377,23 +378,89 @@ resource there would only leave the member unschedulable.
 > rather have.
 
 **What a member's Pod requests follows the group's medium.** A DRAM member requests host memory for
-`capacityPerMember + localBufferSize`. A VRAM member's segment is device memory: host memory carries
-`localBufferSize` only, and the segment is charged against a device — one per member, matching the
-single allocation the client makes.
+`capacityPerMember + localBufferSize`. A VRAM member's segment is device memory, which **nothing
+requests**: host memory carries `localBufferSize` only, and the device memory is claimed by
+allocating it.
 
-**`members[].deviceResourceName` names the extended resource that device is charged against.** Set
-on a VRAM group, the member requests one of that resource and the scheduler places it on a node that
-has the device.
+⚠️ **The engine sharing that accelerator does not know the member took a slice of it.** Nothing in
+Kubernetes accounts for device memory, so the two are held apart by **sizing `capacityPerMember`
+against the engine's own memory fraction**, and by nothing else. Give the engine a
+`gpu_memory_utilization` that leaves `capacityPerMember` free, and expect whichever starts second to
+fail on allocation if you do not.
 
-Unset, the member renders `privileged: true` with host networking instead of any device request — it
-sees the node's devices and fabric directly, which keeps RDMA and similar transports working on a
-cluster whose plugin advertises no name to point at. The fallback supersedes the fabric rendering
-above rather than adding to it.
+A member group asks for **no** accelerator extended resource, because the claim would not be true.
+Measured upstream at `v0.3.13.post1`: a member allocates its segment with one `cudaMalloc` per split
+(`mooncake-store/src/client_buffer_allocation.cpp`), the splits stay under the transport's
+registration limit rather than spanning devices (`GetTransportRegistrationLimit`, `real_client.cpp`),
+and nothing on that path calls `cudaSetDevice`.
 
-The field is refused on a DRAM group: a host-memory segment has no device to charge, so the request
-would be accounted against a segment that is not there. As on the backend's own
-`spec.transport.deviceResourceName`, the name is declared, never derived — it belongs to whichever
-plugin the administrator installed.
+**One member's segment is therefore on one device** — whichever the container sees first. Requesting
+one accelerator would take a whole one away from inference to account for a fraction of one device's
+memory, on a node where the member cannot use the rest of what it took. An eight-accelerator node
+keeps all eight available to inference, and one member contributes a slice of the first.
+
+### Reaching a node's accelerator
+
+A VRAM group's container needs the vendor's **user-space driver**, which is what the store's client
+loads to allocate a segment at all. That driver is the node's and is never in the image, so it has to
+be brought in. Nothing is inferred; every route is written on the group:
+
+| Field | What it is for |
+|---|---|
+| `members[].extraEnvs` | The vendor runtime's own trigger, where one exists — `NVIDIA_VISIBLE_DEVICES: all` makes the NVIDIA toolkit inject the driver and every device. Ascend has no counterpart. |
+| `members[].runtimeClassName` | The vendor container runtime named explicitly, for a cluster where it is not the default runtime. |
+| `members[].hostPaths[]` | The driver tree taken from the node directly, for a cluster running no vendor runtime at all. |
+| `members[].securityContext` | Privilege, when a mount alone is not enough to open what was mounted. |
+
+⚠️ **Privilege alone does not cover this.** It opens the node's device tree under `/dev`, which is
+where the device nodes are and is **not** where the libraries are: Ascend's driver is under
+`/usr/local/Ascend/driver` with DCMI beside it, and NVIDIA's `libcuda.so` is injected by the
+container runtime. A privileged member with neither a runtime class nor the driver mounted starts,
+reports healthy, and fails to allocate.
+
+`securityContext` is **merged onto** what the group's protocol already earned, field by field, with
+`capabilities.add` **unioned**. A `rdma` or `efa` group therefore keeps `IPC_LOCK` and `SYS_RESOURCE`
+whatever it declares — without them the transfer engine fails when it registers memory, long after
+the container looked healthy. Declaring a capability adds it; a group that must hold neither of those
+two declares a protocol that does not ask for them.
+
+Each `hostPaths[]` entry is `{path, mountPath, type, readOnly}`. Name a `type` — left empty the
+kubelet checks nothing, so a missing path becomes an empty directory in the container and the member
+starts anyway. A mount path is refused if it duplicates another entry's, if it is `/dev/infiniband`
+(the device tree a host-fabric group gets rendered, refused even under `tcp`, since the protocol can
+change later), or if it is this group's own `localDisk.path`.
+
+Two worked groups. The NVIDIA one needs no mounts at all, because the container runtime injects the
+driver once the variable tells it which devices to inject:
+
+```yaml
+members:
+  - nodeSelector: {kvcache-vram: "true"}
+    medium: VRAM
+    image: gpustack/mirrored-mooncake:0.3.13.post1-cuda13.0
+    capacityPerMember: 8Gi              # the engine's gpu_memory_utilization must leave this free
+    extraEnvs: {NVIDIA_VISIBLE_DEVICES: all}
+```
+
+⚠️ That variable is honored only while the toolkit's
+`accept-nvidia-visible-devices-envvar-when-unprivileged` is on, which is its default and which
+NVIDIA's own hardening guidance turns **off**. On a cluster that turned it off, use
+`runtimeClassName` instead.
+
+The Ascend one has no such variable, and this cluster runs no vendor runtime, so the driver is
+mounted from the node:
+
+```yaml
+members:
+  - nodeSelector: {kvcache-vram: "true"}
+    medium: VRAM
+    image: gpustack/mirrored-mooncake:0.3.13.post1-cann9.1
+    capacityPerMember: 32Gi
+    hostPaths:
+      - {path: /usr/local/Ascend/driver, mountPath: /usr/local/Ascend/driver, type: Directory, readOnly: true}
+      - {path: /usr/local/dcmi, mountPath: /usr/local/dcmi, type: Directory, readOnly: true}
+      - {path: /usr/local/bin/npu-smi, mountPath: /usr/local/bin/npu-smi, type: File, readOnly: true}
+```
 
 ⚠️ **A VRAM group may also carry a [local disk tier](local-disk-tier.md), and that combination is
 supported by design but not yet measured.** No upstream test covers it; measuring it on the vendor
