@@ -302,7 +302,26 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
 				{Path: "/dev/infiniband", MountPath: "/dev/infiniband"},
 			}
-		}, "is where a host-fabric group's device tree is mounted"},
+		}, "overlaps where a host-fabric group's device tree is mounted"},
+		{"a group mounting the parent of the device tree", func(k *workercore.KVCacheBackend) {
+			// The renderer appends its own mounts first, so this one lands after the device tree and
+			// whether it shadows it is the runtime's decision rather than this operator's.
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/dev", MountPath: "/dev"},
+			}
+		}, "overlaps where a host-fabric group's device tree is mounted"},
+		{"a group mounting inside the device tree", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/dev/infiniband/uverbs0", MountPath: "/dev/infiniband/uverbs0"},
+			}
+		}, "overlaps where a host-fabric group's device tree is mounted"},
+		{"a group mounting a sibling the device tree only prefixes as a string", func(k *workercore.KVCacheBackend) {
+			// /dev/infiniband2 is NOT under /dev/infiniband, and a plain string prefix would have
+			// said it was. This is the case that keeps the rule from refusing legitimate paths.
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/dev/infiniband2", MountPath: "/dev/infiniband2"},
+			}
+		}, ""},
 		{"a group mounting over its own disk tier", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
 			k.Spec.Connection.Managed.Members[0].LocalDisk = &workercore.KVCacheBackendMemberLocalDisk{
@@ -312,7 +331,17 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
 				{Path: "/mnt/nvme/other", MountPath: "/mnt/nvme/mooncake"},
 			}
-		}, "is where this group's localDisk tier is mounted"},
+		}, "overlaps where this group's localDisk tier is mounted"},
+		{"a group mounting the parent of its own disk tier", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+			k.Spec.Connection.Managed.Members[0].LocalDisk = &workercore.KVCacheBackendMemberLocalDisk{
+				Path:     "/mnt/nvme/mooncake",
+				Capacity: resource.MustParse("2Ti"),
+			}
+			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+				{Path: "/mnt/nvme", MountPath: "/mnt/nvme"},
+			}
+		}, "overlaps where this group's localDisk tier is mounted"},
 
 		// There is deliberately NO case here for a medium outside the enum. The schema carries one
 		// value, so LocalDisk, NoF, CXL and DFS are refused in rest.BeforeCreate and never reach

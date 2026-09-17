@@ -779,6 +779,26 @@ func validateKVCacheBackendMember(
 	return errs
 }
 
+// pathsOverlap reports whether two mount paths are the same path or one contains the other.
+//
+// CONTAINMENT and not just equality, because the renderer appends its own mounts BEFORE a group's
+// declared ones: a declared /dev would be mounted after the device tree at /dev/infiniband, and
+// whether the later mount shadows the earlier one is decided by the container runtime rather than by
+// anything here. A rule that depends on an ordering nobody in this repository verified is not a rule,
+// so the overlap is refused instead and the question never arises.
+//
+// Compared by path ELEMENT, so /dev/infiniband2 does not read as being under /dev/infiniband the way
+// a plain string prefix would have it. Both sides are cleaned first: the schema requires an absolute
+// path with no empty element, which leaves a trailing slash as the one difference Clean still has to
+// remove.
+func pathsOverlap(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if a == b {
+		return true
+	}
+	return strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+}
+
 // validateKVCacheBackendMemberHostPaths keeps a group's declared mounts from landing on each other
 // or on one the renderer owns.
 //
@@ -818,16 +838,16 @@ func validateKVCacheBackendMemberHostPaths(
 		seen[mountPath] = i
 
 		switch {
-		case mountPath == mooncake.RDMADevicePath:
+		case pathsOverlap(mountPath, mooncake.RDMADevicePath):
 			errs = append(errs, field.Invalid(mountPathPath, mountPath,
-				"is where a host-fabric group's device tree is mounted, so this operator renders it "+
-					"whenever the group's protocol is rdma or efa: declaring it here would collide "+
-					"with that mount the day the protocol changes"))
-		case diskPath != "" && mountPath == diskPath:
+				"overlaps where a host-fabric group's device tree is mounted ("+mooncake.RDMADevicePath+
+					"), which this operator renders whenever the group's protocol is RDMA or EFA: "+
+					"declaring it here would collide with that mount the day the protocol changes"))
+		case diskPath != "" && pathsOverlap(mountPath, diskPath):
 			errs = append(errs, field.Invalid(mountPathPath, mountPath,
-				"is where this group's localDisk tier is mounted: the tier is a declared capacity "+
-					"with its own deregistration hook, so it is reached through localDisk and not "+
-					"through a plain mount"))
+				"overlaps where this group's localDisk tier is mounted ("+diskPath+"): the tier is a "+
+					"declared capacity with its own deregistration hook, so it is reached through "+
+					"localDisk and not through a plain mount"))
 		}
 	}
 
