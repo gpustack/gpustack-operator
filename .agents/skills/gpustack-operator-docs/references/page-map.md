@@ -142,6 +142,18 @@ backend and links to it. And never the *enforcement* the Binding does not do: th
 it is a grant and not an isolation boundary belongs here, but the mechanism a real boundary would need
 is not this page's to design.
 
+## `docs/kv-cache/walkthrough.md`
+
+**Owns** — the ORDER, and nothing else: the four objects a working shared cache takes, one pasteable
+manifest each, the check to run after each one, and the three configurations that read as working and
+are not. It is the delivery surface for `KVCacheBackend` and `ModelDeployment` together, and the only
+page that answers "what do I type first".
+
+**Never** — a field's semantics. Every explanation here is one clause plus a link to the page that
+owns it; a second account of `quotaCeiling` or of the snapshot's access modes is how the two drift
+apart. If a paragraph here grows past a clause, it belongs on `backend.md`, `leader.md` or `pool.md`
+and this page should link to it instead.
+
 ## `docs/accelerator-requests.md`
 
 **Owns** — the normative contract: the two families, every resource key, a worked example per family,

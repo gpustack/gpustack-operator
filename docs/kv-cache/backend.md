@@ -331,6 +331,16 @@ transports, not host fabrics, so they take none of the fabric privileges below.
 the backend's.** The override exists for the one thing two media do not agree on: a VRAM group
 reaching its peers over a fabric while the DRAM group beside it stays on `TCP`.
 
+**`TCP` is complete, not a fallback — and it costs CPU.** Everything the store does works over it:
+the cache fills, cross-instance prefix reuse works, and capacity scales with DRAM and the disk tier.
+What it does not have is the zero-copy path the fabrics take. Every transfer traverses the kernel
+network stack packet by packet, and the CPU that does so is CPU the node is not giving to anything
+else.
+
+So a `TCP` pool under load shows higher CPU on the member nodes and higher transfer latency than the
+same pool on `RDMA`, and **that is the transport behaving as designed**. Read it as a reason to ask
+for a fabric, not as a defect to open a report against.
+
 The fabric privileges below render per group from the group's effective protocol, and an engine is
 handed the protocol of the group it matched — an engine whose constraint no group in the pool
 satisfies is refused at admission rather than started.
@@ -504,8 +514,17 @@ mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:5005
 ```
 
 Five phases — `Provisioning`, `Ready`, `Degraded`, `Error`, `Deleting`. `Ready` carries no
-`phaseMessage`; every other phase carries one. Four conditions report the axes: `LeaderAvailable`,
-`MembersMounted`, `CapacityObserved` and `Deletable`.
+`phaseMessage`; every other phase carries one.
+
+Conditions report the axes: `LeaderAvailable`, `MembersMounted`, `CapacityObserved`, `Deletable` and
+`RolloutComplete`. Two more appear only where they have something to judge —
+`SnapshotStorageShared` when [`leader.highAvailability.snapshot`](leader.md#high-availability) is
+set, and `ElectionObserved` above one leader replica.
+
+**Those last three do not move the phase, and that is deliberate.** A rollout in flight, a snapshot
+claim only one Pod can mount, and an election that has not happened are all states in which the
+backend serves normally — reporting them as `Degraded` would put a storage arrangement in the same
+field as a leader nobody can reach. Read the conditions for them; the phase will not tell you.
 
 **A member that is starting is not a shortfall; a member that is stuck is one.** A Pod still pulling
 its image is left alone — holding it against the backend would report `Degraded` for the length of

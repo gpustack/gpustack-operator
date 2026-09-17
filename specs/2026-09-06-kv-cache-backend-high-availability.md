@@ -1151,10 +1151,14 @@ The second round:
       unit test's first case is three updated replicas of which one is ready — the steady state
       here — so a predicate that carried the `AvailableReplicas` clause back fails the table rather
       than merely describing it.
-- [ ] **T15 — Documentation** (F7): what `TCP` buys and costs, and that a snapshot needs storage two
-      Pods can read.
-- [ ] **T16 — The walkthrough page** (F7): a `KVCacheBackend` and a `ModelDeployment` attached to
-      it, end to end, with pasteable manifests. It is the delivery surface for both CRs.
+- [x] **T15 — Documentation** (F7): what `TCP` buys and costs, on the backend page beside the
+      transport it qualifies; the snapshot, its storage requirement and its failure mode, on the
+      leader page beside the election. The new conditions join the status section, with the note
+      that none of the three moves the phase.
+- [x] **T16 — The walkthrough page** (F7): a `KVCacheBackend` and a `ModelDeployment` attached to
+      it, end to end, with pasteable manifests. It is the delivery surface for both CRs. It owns the
+      ORDER and nothing else -- every field explanation is one clause plus a link to the page that
+      owns it, recorded in the docs page map so a second account of a field does not grow here.
 - [ ] **T17 — The cluster trip**, answering C1 through C8. **Failure first: no case is authored
       before the trip.** Each question is run by hand until it yields a counter-example, and only
       then does a case get written against the corrected behaviour and re-run. The suite additions
