@@ -1132,6 +1132,25 @@ RUN --mount=from=builder-cann,source=/work/mooncake-wheel/dist,target=/wheel \
                     rm -fv "${vendored}"
                 done
             done
+            # Pre-0.3.13 masters link ascend_transport.so out of the same directory, but
+            # upstream only gave the install an $ORIGIN rpath in 0.3.13
+            # (mooncake-store/CMakeLists.txt's INSTALL_RPATH); without it the binary
+            # cannot start unless the package directory sits on LD_LIBRARY_PATH --
+            # production pods included. Prepend $ORIGIN to any shipped binary that needs
+            # it, keeping whatever rpath the wheel repair already wrote.
+            for bin in "${pkg}"/mooncake_*; do
+                [[ -f "${bin}" ]] || continue
+                if patchelf --print-needed "${bin}" 2>/dev/null | grep -qx "ascend_transport.so"; then
+                    rpath="$(patchelf --print-rpath "${bin}" 2>/dev/null || true)"
+                    case ":${rpath}:" in
+                        *':$ORIGIN:'*) ;;
+                        *)
+                            patchelf --set-rpath "\$ORIGIN${rpath:+:${rpath}}" "${bin}"
+                            echo "[info] ${bin}: prepended \$ORIGIN to RPATH (was: ${rpath:-<empty>})."
+                            ;;
+                    esac
+                fi
+            done
             pip uninstall -y patchelf
 
             shim="$(command -v mc_store_rest_server)"
@@ -1227,9 +1246,13 @@ RUN <<EOF
     fi
 EOF
 
-# Half two is the default stage's leadership probe set, unchanged.
+# Half two is the default stage's leadership probe set, plus the smoke block's devlib
+# export: pre-0.3.13 masters also link libascend_hal.so directly, and the probe runs
+# driverless, so it borrows the toolkit's own copy the same way.
 RUN <<EOF
     set -exo pipefail
+
+    export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${ASCEND_HOME_PATH}/$(uname -m)-linux/devlib"
 
     function probe() {
         timeout -k 5 25 mooncake_master \
