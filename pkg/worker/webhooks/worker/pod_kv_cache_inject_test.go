@@ -768,19 +768,37 @@ func TestPodKVCacheInject_ObservabilityDefaultsOnAndYieldToTheUser(t *testing.T)
 	})
 }
 
-// TestPodKVCacheInject_ValueVariableYieldsToTheWorkload is the F6 distinction between the keys that
-// select the mechanism and the ones that carry a value inside it. A user overriding one value keeps the
-// rest of the injection, which is what makes the rule useful rather than all-or-nothing.
-func TestPodKVCacheInject_ValueVariableYieldsToTheWorkload(t *testing.T) {
+// TestPodKVCacheInject_ValueVariableIsOverwritten pins that an injection OVERRULES a value variable
+// the workload declared for itself, rather than yielding to it.
+//
+// Yielding was the earlier rule, and what it bought was a Pod that asked to be injected, got a full
+// set of variables, and ran on one of its own -- with nothing on the object saying which value
+// applied. Injection is opt-in and its opt-out is explicit, so a declaration here is a second answer
+// to a question the Binding already answered.
+//
+// The variable is asserted to be present ONCE. Appending a second entry of the same name would also
+// take effect -- the kubelet folds the list into a map in declaration order -- but it would leave a
+// Pod showing two values for one name, and a reader no way to tell which one wins without knowing
+// that rule.
+func TestPodKVCacheInject_ValueVariableIsOverwritten(t *testing.T) {
 	pod := kvCachePodForEngine("sglang")
 	pod.Spec.Containers[0].Env = []core.EnvVar{{Name: "MOONCAKE_PROTOCOL", Value: "rdma"}}
 
 	require.NoError(t, admit(t, pod), "a value variable is not a mechanism key, so it does not refuse")
 
-	env := containerEnv(&pod.Spec.Containers[0])
-	assert.Equal(t, "rdma", env["MOONCAKE_PROTOCOL"], "the workload's own declaration is authoritative")
-	assert.Equal(t, "mc-leader.gpustack-system.svc:50051", env["MOONCAKE_MASTER"],
+	ctr := &pod.Spec.Containers[0]
+	assert.Equal(t, "tcp", containerEnv(ctr)["MOONCAKE_PROTOCOL"],
+		"the Binding's backend decides the transport, not the workload's own declaration")
+	assert.Equal(t, "mc-leader.gpustack-system.svc:50051", containerEnv(ctr)["MOONCAKE_MASTER"],
 		"the rest of the injection still lands")
+
+	var seen int
+	for i := range ctr.Env {
+		if ctr.Env[i].Name == "MOONCAKE_PROTOCOL" {
+			seen++
+		}
+	}
+	assert.Equal(t, 1, seen, "overwritten in place, so the Pod shows one value per name")
 }
 
 // TestPodKVCacheInject_ContainerSelection. Never the first of several: the grounding is this
@@ -919,19 +937,50 @@ func TestPodKVCacheInject_TenantFromBindingOverridesAnotherRegisteredDomain(t *t
 	assert.Equal(t, "team-a-chat", containerEnv(&pod.Spec.Containers[0])["MOONCAKE_TENANT_ID"])
 }
 
-// TestPodKVCacheInject_SGLangConfigPathIsNotAConflict. The webhook stopped writing this key with the
-// per-engine vehicle, and a user who sets it has configured SGLang from a file of their own - correct
-// precedence rather than a collision. The injection yields to it silently, which is recorded as the one
-// accepted silent outcome in the design.
-func TestPodKVCacheInject_SGLangConfigPathIsNotAConflict(t *testing.T) {
-	pod := kvCachePodForEngine("sglang")
-	pod.Spec.Containers[0].Env = []core.EnvVar{
-		{Name: "SGLANG_HICACHE_MOONCAKE_CONFIG_PATH", Value: "/mine.json"},
-	}
+// TestPodKVCacheInject_ConfigSourceKeysAreRefused pins the class of key that collides with nothing
+// this webhook writes and disables all of it anyway.
+//
+// MEASURED, SGLang main at 66c7bc83: _load_config is an if/elif/else over three mutually exclusive
+// sources, and every variable this webhook emits lives in the last branch. Either key here takes an
+// earlier one, so the Pod carries a full set of variables nothing reads while the injection record
+// says it succeeded -- which is the one silent outcome an earlier revision of this design accepted
+// and this rule removes.
+//
+// The vLLM case is the control. The same variable on a vLLM container means nothing to it, so
+// refusing there would be a refusal with nothing behind it -- the same reason the owned-key scan
+// filters on what the render writes. Without this arm the rule would look right while being
+// per-engine in name only.
+func TestPodKVCacheInject_ConfigSourceKeysAreRefused(t *testing.T) {
+	t.Run("sglang config path", func(t *testing.T) {
+		pod := kvCachePodForEngine("sglang")
+		pod.Spec.Containers[0].Env = []core.EnvVar{
+			{Name: "SGLANG_HICACHE_MOONCAKE_CONFIG_PATH", Value: "/mine.json"},
+		}
 
-	require.NoError(t, admit(t, pod))
-	assert.Equal(t, "/mine.json",
-		containerEnv(&pod.Spec.Containers[0])["SGLANG_HICACHE_MOONCAKE_CONFIG_PATH"])
+		err := admit(t, pod)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "configuration file of its own")
+	})
+
+	t.Run("sglang extra config, which outranks even the file", func(t *testing.T) {
+		pod := kvCachePodForEngine("sglang")
+		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args,
+			"--hicache-storage-backend-extra-config", "/mine.toml")
+
+		err := admit(t, pod)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "outranks the environment")
+	})
+
+	t.Run("the same variable on vllm, which does not read it", func(t *testing.T) {
+		pod := kvCachePod()
+		pod.Spec.Containers[0].Env = []core.EnvVar{
+			{Name: "SGLANG_HICACHE_MOONCAKE_CONFIG_PATH", Value: "/mine.json"},
+		}
+
+		require.NoError(t, admit(t, pod),
+			"a key that selects nothing for this engine is not a reason to refuse its Pod")
+	})
 }
 
 // TestPodKVCacheInject_NoCommandNoArgsIsRefused. Appending to an empty args does not append: Kubernetes

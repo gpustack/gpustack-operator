@@ -156,11 +156,22 @@ this operator does not render today.
 Two observability variables, `MC_TE_METRIC` and `MC_STORE_CLIENT_METRIC_BANDWIDTH`, are set to `1`
 when the container has not spoken about them. A value you set yourself is left alone.
 
-**A variable you declare yourself wins, with two exceptions.** `MOONCAKE_CONFIG_PATH` selects the
-mechanism, so declaring it yourself is **refused at admission** rather than honoured. Two containers
-pointing at two different configurations is an ambiguity nothing would report.
-`MOONCAKE_TENANT_ID` is overwritten with the Binding's domain because the workload cannot select
-another reuse domain. Every other `env` entry the workload carries is left alone.
+**An injected variable overrules one you declared yourself.** Injection is opt-in and its opt-out
+is explicit, so a Pod that asked for it and then declares a Mooncake variable has given two answers
+to a question the Binding already answered; the injected value is written **in place**, leaving one
+entry per name rather than two.
+
+The two observability toggles above are the exception: they change no result, so a value you set is
+kept.
+
+Two kinds of key are **refused at admission** instead of overwritten, because overwriting them
+would not help.
+
+`MOONCAKE_CONFIG_PATH` and `--kv-transfer-config` select the **mechanism** — a second one is an
+ambiguity nothing reports. `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` and
+`--hicache-storage-backend-extra-config` select the configuration **source**: the engine reads its
+store settings from one of three mutually exclusive places, so either key takes a branch in which no
+injected variable is read at all.
 
 This applies only to `env`: a value supplied through `envFrom` is invisible to the check and **will
 be overwritten with no symptom**, so declare Mooncake variables in `env`.
@@ -205,10 +216,14 @@ guarantee. The general launch check also refuses a suffix-less wrapper named `en
 unless its author declares that it forwards appended arguments. Admission cannot open the file, so
 the declaration is the only way to admit that uncertainty.
 
-Two keys are not refused as conflicts. `MOONCAKE_TENANT_ID` is overwritten with the Binding's domain
-because the workload cannot select another reuse domain. `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` is
-left alone because it means you configured SGLang from a file of your own; the injected variables
-then silently stop mattering — see [Reading the injection record](#reading-the-injection-record).
+⛔ **A key that selects where the engine reads its store configuration from is refused**, per engine:
+`SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` and `--hicache-storage-backend-extra-config` on SGLang,
+`MOONCAKE_CONFIG_PATH` on vLLM. None of them collides with anything this operator writes, and that
+is what makes them worth refusing: the engine selects one source out of three, so either key leaves
+every injected variable present on the Pod and read by nothing.
+
+The same key on an engine that does not read it is **not** refused — SGLang's variable means nothing
+to vLLM, and a refusal there would have nothing behind it.
 
 To take future Pods back over, set `kvcache.gpustack.ai/inject: "false"` on the workload's **Pod
 template**, or drop the label there. It does not undo an existing Pod: the injected args, env and
@@ -297,11 +312,13 @@ Pods admitted by an older operator may also carry `engineVersion`. New records o
 described the upstream source used when the injector was written, not the image in the Pod. Readers
 must ignore that legacy field and must not infer image compatibility from it.
 
-`vehicle` is on the record because it turns one otherwise-silent outcome into a one-line check: a Pod
-stamped `"vehicle":"environment"` whose cache stays cold is a Pod whose own
-`SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` or `--hicache-storage-backend-extra-config` has taken
-precedence over the injection. That precedence is correct — your explicit configuration outranks a
-defaulted one — so the webhook does not refuse it, and this annotation is where you find out.
+`vehicle` is on the record so a reader can tell which shape was written without decoding the
+container: `"file"` means a projected configuration document plus its volume, `"environment"` means
+variables alone.
+
+It used to carry a second job — telling you that your own `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` had
+taken precedence and left the injection inert. That outcome no longer occurs: those keys are refused
+at admission, so a Pod that was injected is a Pod whose injection is read.
 
 ## vLLM-Ascend requires the `ascend` transport
 

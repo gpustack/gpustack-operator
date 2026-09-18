@@ -214,3 +214,41 @@ func MatchTransport(engine Engine, offers []string) (string, error) {
 			"than to whatever an engine wants",
 		engine, facts.Required, offers, facts.Version, facts.Source, facts.RequiredAPIValue)
 }
+
+// ConfigSourceKeys are the keys that switch an engine to a configuration source THIS OPERATOR DOES
+// NOT WRITE, per engine, as environment variable names and as command-line flags.
+//
+// They are a class of their own, and the distinction they need is the one that makes them dangerous:
+// every other reserved key is a SECOND SOURCE for a setting this package renders, so "last one wins"
+// decides it. These are not. The engines read their store configuration through an if/elif/else over
+// mutually exclusive SOURCES, so a key here does not shade a value -- it takes a branch, and the
+// branch this package's whole injection lives in is then never executed.
+//
+// MEASURED, on SGLang main at 66c7bc83,
+// python/sglang/srt/mem_cache/storage/mooncake_store/mooncake_store.py:294-314:
+//
+//	if extra_config and (...):                     load_from_extra_config(extra_config)
+//	elif SGLANG_HICACHE_MOONCAKE_CONFIG_PATH...:   from_file()
+//	else:                                          load_from_env()      <-- everything injected here
+//
+// So a container that sets either of the first two reads none of the MOONCAKE_* variables this
+// package emits, while the Pod carries a full set of them and the injection record says it
+// succeeded. That is the failure this list exists to refuse rather than document.
+//
+// REQUIRED: keyed per engine, because a key is only a branch selector for the engine that reads it.
+// SGLang's variable means nothing to vLLM, and refusing a vLLM container over it would be a refusal
+// with nothing behind it -- the same reason the owned-key scan filters by what the render writes.
+//
+// vLLM's own MOONCAKE_CONFIG_PATH is deliberately ABSENT here: this package WRITES it, so it is
+// already refused as an owned key, and listing it twice would give one collision two messages.
+func ConfigSourceKeys(engine Engine) (env, args []string) {
+	switch engine {
+	case EngineSGLang:
+		return []string{"SGLANG_HICACHE_MOONCAKE_CONFIG_PATH"},
+			[]string{"--hicache-storage-backend-extra-config"}
+	case EngineVLLM, EngineVLLMAscend:
+		return nil, nil
+	}
+
+	return nil, nil
+}
