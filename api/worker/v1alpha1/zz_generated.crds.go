@@ -4040,6 +4040,22 @@ func crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding() *v1.CustomResourceDef
 							JSONPath:    ".spec.domain.name",
 						},
 						{
+							Name:        "BlockSize",
+							Type:        "integer",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.domain.blockSize",
+						},
+						{
+							Name:        "Dtype",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.domain.dtype",
+						},
+						{
 							Name:        "Effective",
 							Type:        "string",
 							Format:      "",

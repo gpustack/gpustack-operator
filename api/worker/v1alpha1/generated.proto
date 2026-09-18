@@ -2494,6 +2494,8 @@ message KVCachePool {
 // +k8s:crd-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["kvcpb"],subResources=["status"]
 // +k8s:crd-gen:printcolumn:name="Pool",type="string",jsonPath=".spec.poolRef.name"
 // +k8s:crd-gen:printcolumn:name="Domain",type="string",jsonPath=".spec.domain.name"
+// +k8s:crd-gen:printcolumn:name="BlockSize",type="integer",jsonPath=".spec.domain.blockSize"
+// +k8s:crd-gen:printcolumn:name="Dtype",type="string",jsonPath=".spec.domain.dtype"
 // +k8s:crd-gen:printcolumn:name="Effective",type="string",jsonPath=".status.effectiveQuota"
 // +k8s:crd-gen:printcolumn:name="Usage",type="string",jsonPath=".status.usage"
 // +k8s:crd-gen:printcolumn:name="Phase",type="string",jsonPath=".status.phase"
