@@ -38,9 +38,15 @@ characters, so everything of unbounded length is an annotation.
 | annotation | `kvcache.gpustack.ai/binding` | a `KVCachePoolBinding` name, in this Pod's namespace | yes |
 | annotation | `kvcache.gpustack.ai/engine` | `vllm` \| `sglang` | yes |
 | annotation | `kvcache.gpustack.ai/manufacturer` | `ascend` | no — only with `engine: vllm`; selects the vLLM-Ascend runtime |
-| annotation | `kvcache.gpustack.ai/role` | `prefill` \| `decode` | no — **vLLM family only**; SGLang refuses any role |
+| annotation | `kvcache.gpustack.ai/role` | `prefill` \| `decode`; omitted for a plain server | no — **vLLM family only**; SGLang refuses any role |
 | annotation | `kvcache.gpustack.ai/container` | a container name | only when the Pod has more than one container |
 | annotation | `kvcache.gpustack.ai/launch-args-forwarded` | `"true"` | no — only when an unrecognised launcher, script, or image ENTRYPOINT forwards appended arguments to the declared engine |
+
+For a plain server, one that is not half of a prefill/decode split, LEAVE THE ROLE ANNOTATION OFF.
+`server` is not in its value domain and a Pod carrying it is refused, while the same arrangement is
+spelled `server` on `ModelDeployment.spec.roles[].kind`, which even defaults to it. The value that
+is correct there turns a Pod away here. An absent annotation renders the read-and-write
+configuration a shared cache wants.
 
 ```yaml
 apiVersion: apps/v1
@@ -169,9 +175,9 @@ would not help.
 
 `MOONCAKE_CONFIG_PATH` and `--kv-transfer-config` select the **mechanism** — a second one is an
 ambiguity nothing reports. `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` and
-`--hicache-storage-backend-extra-config` select the configuration **source**: the engine reads its
-store settings from one of three mutually exclusive places, so either key takes a branch in which no
-injected variable is read at all.
+`--hicache-storage-backend-extra-config` select the configuration **source**, which leaves the
+injected variables present and unread. Each key, the engine it applies to and why it is refused are
+under [Refusals and their fixes](#refusals-and-their-fixes).
 
 This applies only to `env`: a value supplied through `envFrom` is invisible to the check and **will
 be overwritten with no symptom**, so declare Mooncake variables in `env`.
