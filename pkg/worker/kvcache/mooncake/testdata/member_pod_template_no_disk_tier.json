@@ -7,7 +7,7 @@
       "app.kubernetes.io/part-of": "gpustack-operator-worker"
     },
     "annotations": {
-      "kvcache.gpustack.ai/pod-spec-hash": "e4e1f6a566146eef79f1d75ad3d3b4a61c9fd02536034f722928b51af75c21fd"
+      "kvcache.gpustack.ai/pod-spec-hash": "8bae493a20ab49a85903b2120ce664f648240ac9d7a20f7b500d13480613f06e"
     }
   },
   "spec": {
@@ -38,6 +38,26 @@
                 "fieldPath": "status.podIP"
               }
             }
+          },
+          {
+            "name": "AMD_VISIBLE_DEVICES",
+            "value": "void"
+          },
+          {
+            "name": "CAMBRICON_VISIBLE_DEVICES",
+            "value": "void"
+          },
+          {
+            "name": "IX_VISIBLE_DEVICES",
+            "value": "void"
+          },
+          {
+            "name": "MTHREADS_VISIBLE_DEVICES",
+            "value": "void"
+          },
+          {
+            "name": "NVIDIA_VISIBLE_DEVICES",
+            "value": "void"
           },
           {
             "name": "MOONCAKE_GLOBAL_SEGMENT_SIZE",

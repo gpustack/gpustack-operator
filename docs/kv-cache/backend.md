@@ -201,6 +201,17 @@ Nothing refuses a VRAM group that names no image: the default is an administrato
 so this paragraph is the guidance rather than a gate. A group names its image through
 `members[].image`, which wins over the backend's `spec.image`, which wins over the Setting.
 
+**The other direction fails at startup, on purpose.** A build with VRAM segments compiled in takes
+device memory whenever it can reach a device, whatever medium the group declared. So a DRAM group is
+rendered with every vendor's visibility variable set to `void`, which keeps the accelerators out of
+its containers: such an image then finds no device and refuses to start, against the group that
+asked for a medium it does not implement.
+
+Without that, the failure was silent and landed elsewhere. The group consumed device memory no Pod
+had requested, so neither the scheduler nor the quota chain knew it was gone, and what an operator
+saw was an unrelated deployment crash-looping on a figure nobody had configured. Pick the image that
+matches the medium; whether an image implements one is a fact about the image.
+
 **A private registry needs `spec.imagePullSecrets`**, and an explicit policy needs
 `spec.imagePullPolicy`. Both are backend-wide: they apply to the leader and to every member group,
 including a group that names its own `image`. Left unset, the policy is **resolved from the image

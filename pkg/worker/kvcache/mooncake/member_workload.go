@@ -171,6 +171,30 @@ const (
 	memberEnvGlobalSegmentSize = "MOONCAKE_GLOBAL_SEGMENT_SIZE"
 	memberEnvLocalBufferSize   = "MOONCAKE_LOCAL_BUFFER_SIZE"
 
+	// The vendor visibility variables, set to "void" on a host-memory group so that no accelerator
+	// is injected into it.
+	//
+	// "void" is not "none": it tells the vendor's container runtime hook to stay out of the
+	// container entirely, rather than to inject a device list that happens to be empty, so the
+	// driver libraries do not arrive either.
+	//
+	// EVERY VENDOR AT ONCE, without asking what the node carries. A group's medium is a property of
+	// what it declares, not of where it lands, and a node this operator manages can carry any of
+	// them; rendering the set that matches the node would make the same spec produce different
+	// containers on different hosts.
+	//
+	// These five are the vendors whose runtimes take a visibility variable at all. The others
+	// (Ascend, Hygon, Metax, T-Head) reach their devices through an explicitly mounted device
+	// plugin allocation instead, which a container that requested none never receives.
+	memberEnvVisibleDevicesAMD       = "AMD_VISIBLE_DEVICES"
+	memberEnvVisibleDevicesCambricon = "CAMBRICON_VISIBLE_DEVICES"
+	memberEnvVisibleDevicesIluvatar  = "IX_VISIBLE_DEVICES"
+	memberEnvVisibleDevicesMThreads  = "MTHREADS_VISIBLE_DEVICES"
+	memberEnvVisibleDevicesNVIDIA    = "NVIDIA_VISIBLE_DEVICES"
+
+	// memberVisibleDevicesNone is the value each of the above takes on a host-memory group.
+	memberVisibleDevicesNone = "void"
+
 	// The local disk tier's keys. The first two are the client's own enable_ssd_offload and
 	// ssd_offload_path; without both, the client registers no local disk segment and the leader's
 	// offload queue has nowhere to send it.
@@ -601,6 +625,31 @@ func renderMemberEnv(
 		},
 	}
 
+	if member.Medium != "VRAM" {
+		// A host-memory group is kept away from the accelerators, and this is what makes the
+		// declared medium bind to anything.
+		//
+		// The store decides where its segment lives by what its image was built with, not by what
+		// this API declares, and a build with device-memory segments takes a device whenever it can
+		// reach one. On a node whose container runtime injects the accelerators by default -- which
+		// is how a vendor-provided node image usually ships -- it can always reach one, so a group
+		// asking for host memory quietly consumed device memory instead. Nothing accounted for it:
+		// the Pod requested no accelerator, so neither the scheduler nor the quota chain knew, and
+		// the workload that had properly requested that card failed to start with a figure nobody
+		// had configured.
+		//
+		// Hiding the devices makes the two outcomes honest. An image that can serve host memory
+		// serves it. An image that cannot fails to start, visibly, against the group that asked for
+		// something it does not implement -- which is the right place for that error, because
+		// whether an image implements a medium is a fact about the image.
+		env = append(env,
+			core.EnvVar{Name: memberEnvVisibleDevicesAMD, Value: memberVisibleDevicesNone},
+			core.EnvVar{Name: memberEnvVisibleDevicesCambricon, Value: memberVisibleDevicesNone},
+			core.EnvVar{Name: memberEnvVisibleDevicesIluvatar, Value: memberVisibleDevicesNone},
+			core.EnvVar{Name: memberEnvVisibleDevicesMThreads, Value: memberVisibleDevicesNone},
+			core.EnvVar{Name: memberEnvVisibleDevicesNVIDIA, Value: memberVisibleDevicesNone},
+		)
+	}
 	if size := member.CapacityPerMember.Value(); size > 0 {
 		// One spelling for BOTH media: in a VRAM build the same size feeds the device allocation,
 		// because the build-time switch changes WHERE the segment is allocated, not how its total

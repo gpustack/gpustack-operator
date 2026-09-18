@@ -115,6 +115,23 @@ func memberEnv(t *testing.T, kvcb *workercore.KVCacheBackend, image string) map[
 	return env
 }
 
+// envWithoutDownwardAPIForGroup is envWithoutDownwardAPI for a backend carrying more than one member
+// group, where which group is being read is the point of the assertion.
+func envWithoutDownwardAPIForGroup(
+	t *testing.T, kvcb *workercore.KVCacheBackend, group int, image string,
+) map[string]string {
+	t.Helper()
+	ds := RenderMemberDaemonSet(kvcb, group, image)
+	require.Len(t, ds.Spec.Template.Spec.Containers, 1, "a member runs exactly one container")
+	env := make(map[string]string)
+	for _, e := range ds.Spec.Template.Spec.Containers[0].Env {
+		if e.ValueFrom == nil {
+			env[e.Name] = e.Value
+		}
+	}
+	return env
+}
+
 // TestMemberWorkload_Shape pins where the workload lands and what selects its nodes.
 func TestMemberWorkload_Shape(t *testing.T) {
 	kvcb := testMemberBackend()
@@ -195,12 +212,46 @@ func TestMemberWorkload_Environment(t *testing.T) {
 		"MOONCAKE_PROTOCOL":            "tcp",
 		"MOONCAKE_GLOBAL_SEGMENT_SIZE": fmt.Sprintf("%d", 500*1024*1024*1024),
 		"MOONCAKE_LOCAL_BUFFER_SIZE":   fmt.Sprintf("%d", 4*1024*1024*1024),
+		"AMD_VISIBLE_DEVICES":          "void",
+		"CAMBRICON_VISIBLE_DEVICES":    "void",
+		"IX_VISIBLE_DEVICES":           "void",
+		"MTHREADS_VISIBLE_DEVICES":     "void",
+		"NVIDIA_VISIBLE_DEVICES":       "void",
 	}, envWithoutDownwardAPI(t, kvcb, "mooncake:v0.3.13"),
 		"the whole environment, so a key added later has to be added here too")
 
 	_, hasMetadataNormalised := env["MOONCAKE_TE_METADATA_SERVER"]
 	assert.False(t, hasMetadataNormalised,
 		"MOONCAKE_TE_METADATA_SERVER is the wrong spelling and fails silently; it must never appear")
+}
+
+// TestMemberWorkload_VisibleDevicesFollowTheMedium is the other half of the assertion above: the
+// host-memory group hides the accelerators, and the device-memory group must not, or it would hide
+// the devices its own segment is made of.
+//
+// Asserted as a pair in one test because neither half means anything alone. "DRAM hides them" is
+// satisfied by a renderer that hides them from everybody, which would leave no VRAM group able to
+// start at all.
+func TestMemberWorkload_VisibleDevicesFollowTheMedium(t *testing.T) {
+	kvcb := testMemberBackend(withSecondMemberGroupVRAM())
+
+	dram := envWithoutDownwardAPIForGroup(t, kvcb, 0, "mooncake:v0.3.13")
+	vram := envWithoutDownwardAPIForGroup(t, kvcb, 1, "mooncake:v0.3.13")
+
+	for _, name := range []string{
+		"AMD_VISIBLE_DEVICES",
+		"CAMBRICON_VISIBLE_DEVICES",
+		"IX_VISIBLE_DEVICES",
+		"MTHREADS_VISIBLE_DEVICES",
+		"NVIDIA_VISIBLE_DEVICES",
+	} {
+		assert.Equal(t, "void", dram[name],
+			"a host-memory group must be denied every vendor's devices, or its image decides the medium")
+
+		_, present := vram[name]
+		assert.False(t, present,
+			"a device-memory group must keep its devices: %s", name)
+	}
 }
 
 // envWithoutDownwardAPI returns the literal-valued environment, leaving out the entries sourced from
@@ -563,19 +614,33 @@ func TestMemberWorkload_DeclaredRuntimeClassReachesThePodSpec(t *testing.T) {
 // TestMemberWorkload_NoDiskTierRendersWhatItAlwaysDid is the guard that this feature does not roll
 // every backend already running.
 //
-// It compares against a template RECORDED from the renderer as it stood before the disk tier
-// existed, not against a fresh render — a fresh one moves with the code and would be green by
-// construction, which is exactly the failure this guard exists to catch.
+// It compares against a RECORDED template rather than a fresh render — a fresh one moves with the
+// code and would be green by construction, which is exactly the failure this guard exists to catch.
 //
 // What is at stake is not cosmetic. The pod-spec hash is in the recording, and the reconciler
 // deletes every member Pod whose hash has moved. A byte of drift here means every member of every
 // existing backend is deleted and recreated on upgrade, and each one comes back with an empty
 // segment: the cache is gone, and nothing about the change said it would be.
 //
-// This guard was falsified before it was trusted: changing memberShutdownSeconds from 60 to 61 —
-// one byte, on a field that has nothing to do with the disk tier — turns it red and moves the hash
-// from e4e1f6a5… to 950bb64a…. A guard this load-bearing that has never been seen to fail is a
-// guard nobody has checked.
+// THE RECORDING HAS BEEN DELIBERATELY MOVED ONCE, and a reader comparing this against an older
+// checkout should know which change did it rather than treating it as drift. It was first recorded
+// from the renderer as it stood before the local disk tier existed, at hash e4e1f6a5…. It now holds
+// 8bae493a…, which is that same template plus the five vendor visibility variables a host-memory
+// group renders so that no accelerator is injected into it.
+//
+// That move was accepted with its cost understood: every host-memory member group is rolled once on
+// upgrade and comes back with an empty segment. The alternative was leaving a group that asks for
+// host memory free to consume device memory instead, unaccounted for by the scheduler and fatal to
+// whichever workload had properly requested that card. Device-memory groups are NOT affected --
+// they render exactly as before, which the paired assertions in
+// TestMemberWorkload_VisibleDevicesFollowTheMedium pin down.
+//
+// This guard has been seen to fail twice, which is why it is trusted. Changing
+// memberShutdownSeconds from 60 to 61 — one byte, on a field unrelated to any of this — turned it
+// red against the first recording. And the visibility variables above turned it red against that
+// same recording, which is how their cost became visible at all rather than being discovered on
+// somebody's cluster. A guard this load-bearing that has never been seen to fail is a guard nobody
+// has checked.
 func TestMemberWorkload_NoDiskTierRendersWhatItAlwaysDid(t *testing.T) {
 	recorded, err := os.ReadFile("testdata/member_pod_template_no_disk_tier.json")
 	require.NoError(t, err, "the recording is the contract; without it this test proves nothing")

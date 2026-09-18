@@ -388,6 +388,11 @@ var MemberDerivedEnvs = []string{
 	memberEnvOffloadWatermarkHigh,
 	memberEnvOffloadWatermarkLow,
 	memberEnvProtocol,
+	memberEnvVisibleDevicesAMD,
+	memberEnvVisibleDevicesCambricon,
+	memberEnvVisibleDevicesIluvatar,
+	memberEnvVisibleDevicesMThreads,
+	memberEnvVisibleDevicesNVIDIA,
 }
 
 // LeaderDerivedEnvs is every environment variable name the leader renderer emits, which is what
