@@ -172,6 +172,26 @@ spec:
         accelerator: 2
 ```
 
+**The replicas of a deployment become Kueue pod groups, one per distinct `instanceType` — not one
+per role.** Two roles naming the same type are two PodSets of ONE group; a role naming a second type
+starts a second group. The example above therefore has **one** group of four replicas.
+
+⛔ **The group is the unit of teardown as well as of admission: losing one replica takes its whole
+group down and back up.** A node drained, a replica preempted for higher-priority work, a kubelet
+evicting under pressure — each costs every replica in that group, and on a cluster with preemption
+enabled that is routine rather than exceptional.
+
+> **Why it cannot just replace the one** — the group is annotated as serving, so Kueue never treats
+> it as finished and never releases the finalizer it holds on its Pods; only the Workload's deletion
+> does. Kueue would accept a replacement and says so through `WaitingForReplacementPods`, but a
+> replica's name here is derived from its ordinal, so the dead Pod holds that name until its
+> finalizer goes — and that finalizer goes only once a replacement exists.
+
+⭐ **Splitting the roles across two `instanceType`s is what bounds the blast radius**, and it is the
+only knob that does. Two groups are admitted together — an `AdmissionCheck` holds one until the other
+can be admitted too, so `prefill` still never starts without `decode` — while a loss inside one group
+does not reach the other. The cost is that each group is scheduled against its own flavor and queue.
+
 **With a shared pool** — the same object plus one block:
 
 ```yaml

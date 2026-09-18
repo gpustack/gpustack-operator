@@ -273,8 +273,17 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// rather than theoretical. A node being drained, Kueue preempting for a higher-priority workload,
 	// and the kubelet evicting under pressure all delete a replica, and each therefore restarts every
 	// role of the deployment. On a cluster with preemption enabled that is a routine event, not an
-	// incident. It is also the only recovery available: the evicted Pod is held by Kueue's finalizer
-	// and cannot leave until the Workload does, so the group has to come down either way.
+	// incident.
+	//
+	// IT IS THE ONLY RECOVERY AVAILABLE HERE, AND THE REASON IS THIS OPERATOR'S NAMING RATHER THAN
+	// KUEUE'S DESIGN. Measured on the version this project runs: Kueue keeps a group's Workload
+	// admitted when a member disappears, reports the gap as WaitingForReplacementPods, and finalizes
+	// the departed Pod as soon as a replacement carrying the same role hash exists -- so replacing one
+	// replica is a path Kueue supports. What closes it here is that a replica's name is derived from
+	// its ordinal: the departed Pod holds that name until its finalizer is released, and Kueue
+	// releases it only once the replacement exists. Giving replacements fresh names is what would open
+	// that path, and it is a larger change than it looks -- the rollout, the status and the group
+	// bookkeeping all identify a replica by its name.
 	//
 	// IT IS ALSO PER GROUP. A replica leaving takes down the group it belongs to and no other: the
 	// finalizer that traps it is held by that group's Workload alone.
