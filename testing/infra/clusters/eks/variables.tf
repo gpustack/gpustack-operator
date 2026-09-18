@@ -52,8 +52,9 @@ variable "efa_enabled" {
   # default above is, and nor is any small size of the c7i/m7i/r7i families.
   # c5n.9xlarge is one that is. Check a candidate before enabling this with
   # `aws ec2 describe-instance-types --instance-types <type> --query
-  # 'InstanceTypes[].NetworkInfo.EfaSupported'`.
-  description = "Enable EFA on the CPU node group. EFA nodes are placed in one availability zone with an EFA launch template and placement group."
+  # 'InstanceTypes[].NetworkInfo.EfaSupported'`. With this on, every type in
+  # gpu_instance_types must pass the same check.
+  description = "Enable EFA on the CPU and GPU node groups. EFA nodes are placed in one availability zone with an EFA launch template and placement group."
   type        = bool
   default     = false
 }
@@ -68,6 +69,17 @@ variable "gpu_instance_types" {
   # default     = { xlarge = ["g4dn.xlarge", "g5.xlarge"], xlarge-alt = ["g5.xlarge", "g6.xlarge"], large = ["g4dn.12xlarge", "g5.12xlarge"] }
   # default     = { small = ["g4dn.xlarge", "g4dn.12xlarge", "g6.xlarge"], large = ["g4dn.12xlarge", "g5.12xlarge", "g6.12xlarge"] }
   # default     = { g4dn = ["g4dn.xlarge", "g4dn.12xlarge"], g5 = ["g5.xlarge", "g5.12xlarge"], g6 = ["g6.xlarge", "g6.12xlarge"] }
+}
+
+variable "gpu_node_count" {
+  description = "Number of nodes in each GPU node group (desired_size; max_size follows it but never drops below 1, which EKS refuses; min_size stays 0). Zero parks a group at no nodes without destroying it, so raising the count later adds nodes to the existing group."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.gpu_node_count >= 0 && var.gpu_node_count == floor(var.gpu_node_count)
+    error_message = "gpu_node_count must be a whole number of at least 0."
+  }
 }
 
 variable "node_boot_disk_type" {
