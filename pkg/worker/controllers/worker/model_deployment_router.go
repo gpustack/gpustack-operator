@@ -83,7 +83,7 @@ func renderModelDeploymentRouterObjects(
 			"router requires every role to use the same serving port; got %v", ports)
 	}
 
-	metrics, err := router.MetricsForEngine(md.Spec.Engine)
+	metrics, err := router.MetricsForEngine(md.Spec.Engine.Name)
 	if err != nil {
 		return ModelDeploymentRouterObjects{}, err
 	}
@@ -122,9 +122,9 @@ func renderModelDeploymentRouterObjects(
 		TokenizerEndpoint: modelDeploymentRoleEndpoint(md, modelDeploymentTokenizerRole(md)),
 		Namespace:         md.Namespace, EndpointSelector: endpointSelector,
 	}
-	if md.Spec.Engine == workercore.ModelDeploymentEngineVLLM {
+	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
 		routerInput.KVEvents = router.KVEvents{
-			Engine: md.Spec.Engine, Port: inject.VLLMKVEventsPort,
+			Engine: md.Spec.Engine.Name, Port: inject.VLLMKVEventsPort,
 			ReplayPort: inject.VLLMKVEventsReplayPort, Topic: inject.VLLMKVEventsTopic,
 		}
 	}
@@ -180,6 +180,7 @@ func renderModelDeploymentRouterObjects(
 				}},
 				Spec: core.PodSpec{
 					ServiceAccountName: name,
+					ImagePullSecrets:   md.Spec.Router.ImagePullSecrets,
 					Containers: []core.Container{
 						{
 							Name: "envoy", Image: redirectedImage(ctx,
@@ -193,6 +194,7 @@ func renderModelDeploymentRouterObjects(
 						},
 						{
 							Name: "epp", Image: image, Args: args,
+							ImagePullPolicy: md.Spec.Router.ImagePullPolicy,
 							Env: []core.EnvVar{
 								configMapEnv(modelDeploymentRouterSelectorKey, "ENDPOINT_SELECTOR", name),
 								configMapEnv(modelDeploymentRouterTargetPortsKey, "ENDPOINT_TARGET_PORTS", name),
@@ -379,6 +381,13 @@ func alignModelDeploymentRouterDeployment(actual, expected *app.Deployment) (cha
 	}
 	if actualPod.Spec.ServiceAccountName != expectedPod.Spec.ServiceAccountName {
 		actualPod.Spec.ServiceAccountName = expectedPod.Spec.ServiceAccountName
+		changed = true
+	}
+	// Compared although the pull policy below rides inside the containers: a secret added or
+	// removed here changes what a pull can authenticate, and a field rendered but never aligned
+	// is one an edit moves only by recreating the Deployment by hand.
+	if !kubemeta.DeepEqual(actualPod.Spec.ImagePullSecrets, expectedPod.Spec.ImagePullSecrets) {
+		actualPod.Spec.ImagePullSecrets = expectedPod.Spec.ImagePullSecrets
 		changed = true
 	}
 	if !kubemeta.DeepEqual(actualPod.Spec.Volumes, expectedPod.Spec.Volumes) {

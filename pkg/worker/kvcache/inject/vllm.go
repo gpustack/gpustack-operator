@@ -29,7 +29,7 @@ const (
 	// VLLMMooncakeBootstrapPort is where a prefiller exposes Mooncake's transfer handshake.
 	VLLMMooncakeBootstrapPort int32 = 8998
 
-	// vllmDirectTransferProtocol is the transport the prefill-to-decode leg is told to use when
+	// vllmKVTransferProtocol is the transport the prefill-to-decode leg is told to use when
 	// the caller declares none, and it is deliberately NOT resolved from the backend.
 	//
 	// KVCacheBackend.spec.transport defines the data plane the store MEMBERS run. This leg is
@@ -43,12 +43,12 @@ const (
 	// No source can DISCOVER the right value: the accepted set is a property of the mooncake
 	// build inside the engine's own image, which this operator neither ships nor can inspect.
 	// The value is therefore DECLARED, and the declarer is the ModelDeployment's
-	// spec.directTransfer.protocol. This constant is the default when that field is unset:
+	// spec.kvTransfer.protocol. This constant is the default when that field is unset:
 	// "tcp" is the one answer honest from here -- the transport every mooncake build carries,
 	// and what a store-less pair has always rendered. A pair whose engines can speak a fabric
 	// protocol says so through the API; the gating rule below binds the declared value exactly
 	// as it binds this default.
-	vllmDirectTransferProtocol = "tcp"
+	vllmKVTransferProtocol = "tcp"
 
 	// vllmStoreConnector is the name vLLM PROPER registers for the Mooncake store
 	// (`kv_connector/factory.py:223-226`, read at v0.25.1).
@@ -166,10 +166,10 @@ func renderVLLM(in Input) (*Result, error) {
 		}
 		transferConfigValue = &vllmTransferConfig{KVConnector: connector, KVRole: kvRole}
 	}
-	if in.DirectTransfer {
+	if in.KVTransfer {
 		if in.Engine != EngineVLLM || (in.Role != RolePrefill && in.Role != RoleDecode) {
 			return nil, newRefusal(ReasonRoleUnsupported,
-				"direct transfer requires a native vLLM prefill or decode role")
+				"point-to-point transfer requires a native vLLM prefill or decode role")
 		}
 		// This value is NOT gated, on purpose. The accepted set is a property of the mooncake
 		// build inside the engine's own image, which this operator neither ships nor can
@@ -180,9 +180,9 @@ func renderVLLM(in Input) (*Result, error) {
 		// working engine into a broken one. A mismatch therefore still raises at startup, in
 		// the container that owns the fact. The rule binds the declared value and the default
 		// alike.
-		protocol := vllmDirectTransferProtocol
-		if in.DirectTransferProtocol != "" {
-			protocol = in.DirectTransferProtocol
+		protocol := vllmKVTransferProtocol
+		if in.KVTransferProtocol != "" {
+			protocol = in.KVTransferProtocol
 		}
 		direct := vllmTransferConfig{
 			KVConnector: "MooncakeConnector", KVRole: kvRole,
@@ -214,7 +214,7 @@ func renderVLLM(in Input) (*Result, error) {
 	}
 
 	result := &Result{
-		DirectTransfer: in.DirectTransfer,
+		KVTransfer: in.KVTransfer,
 	}
 	if hasStore {
 		config, err := renderVLLMClientConfig(in.Connection, in.Domain)
@@ -255,7 +255,7 @@ func renderVLLM(in Input) (*Result, error) {
 		}
 		result.Args = append(result.Args, vllmTransferConfigArg, string(transferDoc))
 	}
-	if in.DirectTransfer && in.Role == RolePrefill {
+	if in.KVTransfer && in.Role == RolePrefill {
 		result.Env = append(result.Env, core.EnvVar{
 			Name: "VLLM_MOONCAKE_BOOTSTRAP_PORT", Value: fmt.Sprint(VLLMMooncakeBootstrapPort),
 		})

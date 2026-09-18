@@ -359,7 +359,7 @@ func newManagedSingleTenantReconcileBackend(name, admin string) *workercore.KVCa
 func newBoundBinding(namespace, name, pool, domain string, ceiling resource.Quantity) *workercore.KVCachePoolBinding {
 	kvcpb := newTestKVCachePoolBinding(namespace, name, pool)
 	kvcpb.Spec.Domain.Name = domain
-	kvcpb.Spec.QuotaCeiling = ceiling
+	kvcpb.Spec.Quota.Ceiling = ceiling
 	return kvcpb
 }
 

@@ -477,8 +477,8 @@ func checkHostPort(address string) error {
 
 // validateKVCacheBackendManaged enforces the two scope limits and the escape-hatch rules.
 //
-// oldManaged is nil on create. It is used for one thing: skipping the escape-hatch rules over a map
-// no update touched. See unchangedExtraArgs.
+// oldManaged is nil on create. It is used for one thing: skipping the escape-hatch rules over a
+// list no update touched. See unchangedPassthrough.
 func validateKVCacheBackendManaged(
 	managed, oldManaged *workercore.KVCacheBackendManaged, fldPath *field.Path,
 ) field.ErrorList {
@@ -503,23 +503,52 @@ func validateKVCacheBackendManaged(
 	}
 
 	// REQUIRED: an update that switches high availability on or off re-runs these rules even over a
-	// map it did not touch, and the exemption below is what makes that necessary. Turning the field
+	// list it did not touch, and the exemption below is what makes that necessary. Turning the field
 	// on is what turns `enable_ha`, `ha_backend_type`, `ha_backend_connstring` and `cluster_id` into
 	// DERIVED flags; an object admitted before they were derived may carry one, and the renderer
-	// appends the escape hatch AFTER the derived flags, so `enable_ha=false` left in the map would
+	// appends the escape hatch AFTER the derived flags, so `-enable_ha=false` left in the list would
 	// win over the `-enable_ha=true` the election needs -- several unelected masters, admitted by a
-	// rule that only ever looked at whether the map moved.
-	var oldLeaderExtraArgs map[string]string
+	// rule that only ever looked at whether the list moved.
+	// THE SNAPSHOT DECLARATION IS COUPLED THE SAME WAY, and for the same reason one step down: the
+	// snapshot keys are reserved unconditionally, but an object admitted BEFORE they were reserved
+	// can carry one, and it carries it inside an already-present high-availability block. Comparing
+	// only whether that block appeared or vanished leaves such an update reading as unchanged, the
+	// rules are skipped, and the stale `-enable_snapshot_restore=false` the hatch appends after the
+	// derived flags wins over the declaration that was just added.
+	var oldLeaderExtraArgs []string
 	haUnchanged := true
 	if oldManaged != nil {
 		oldLeaderExtraArgs = oldManaged.Leader.ExtraArgs
 		haUnchanged = (oldManaged.Leader.HighAvailability == nil) ==
-			(managed.Leader.HighAvailability == nil)
+			(managed.Leader.HighAvailability == nil) &&
+			leaderSnapshotDeclared(oldManaged.Leader.HighAvailability) ==
+				leaderSnapshotDeclared(managed.Leader.HighAvailability)
 	}
 	if !haUnchanged ||
-		!unchangedExtraArgs(oldManaged != nil, oldLeaderExtraArgs, managed.Leader.ExtraArgs) {
+		!unchangedPassthrough(oldManaged != nil, oldLeaderExtraArgs, managed.Leader.ExtraArgs) {
 		errs = append(errs, validateExtraArgs(managed.Leader.ExtraArgs,
 			mooncake.LeaderExtraArgsRules, fldPath.Child("leader", "extraArgs"))...)
+	}
+
+	// The leader's environment hatch is the same rules the member side of this validator enforces,
+	// against the leader's own derived names, and it is COUPLED TO THE SAME DECLARATIONS as the
+	// argument hatch above rather than to the passthrough alone.
+	//
+	// The reserved list being unconditional is what makes the coupling necessary, not what makes it
+	// unnecessary. What a declaration moves is which of those names the renderer EMITS: the snapshot
+	// path variable is emitted only under a snapshot declaration, and the Pod IP only under high
+	// availability. A list carrying one of those names from before it was reserved is exempted by
+	// the passthrough comparison, and the renderer appends the hatch AFTER the derived variables --
+	// so the update that turns the declaration on is the moment the stale value starts overriding
+	// the mount path the claim arrives at, and it is the one update this rule must not skip.
+	var oldLeaderExtraEnv []workercore.InstanceEnvVar
+	if oldManaged != nil {
+		oldLeaderExtraEnv = oldManaged.Leader.ExtraEnv
+	}
+	if !haUnchanged ||
+		!unchangedPassthrough(oldManaged != nil, oldLeaderExtraEnv, managed.Leader.ExtraEnv) {
+		errs = append(errs, validateExtraEnvs(managed.Leader.ExtraEnv,
+			mooncake.LeaderDerivedEnvs, fldPath.Child("leader", "extraEnv"))...)
 	}
 
 	for i := range managed.Members {
@@ -531,7 +560,7 @@ func validateKVCacheBackendManaged(
 			fldPath.Child("members").Index(i))...)
 	}
 
-	errs = append(errs, validateKVCacheBackendOffload(managed, oldManaged, fldPath)...)
+	errs = append(errs, validateKVCacheBackendLocalDiskUniqueness(managed, fldPath)...)
 	errs = append(errs, validateKVCacheBackendSnapshot(managed, fldPath)...)
 	errs = append(errs, validateKVCacheBackendScaleIn(managed, fldPath.Child("scaleIn"))...)
 
@@ -579,78 +608,26 @@ func validateKVCacheBackendSnapshot(
 	return nil
 }
 
-// validateKVCacheBackendOffload enforces that the disk tier is declared on both sides, and that
-// only one group carries it.
+// validateKVCacheBackendLocalDiskUniqueness enforces that only one member group declares a disk
+// tier.
 //
-// Every rule here refuses a combination the store ACCEPTS and then quietly does not honor, which
-// is the bar for putting a rule in a webhook rather than in the schema: a schema can say a value is
-// wrong, only a webhook can say a pair is.
-func validateKVCacheBackendOffload(
-	managed, oldManaged *workercore.KVCacheBackendManaged, fldPath *field.Path,
+// The reason is the capacity contract rather than any one renderer's reach, and it is the SAME
+// sentence that bounds the list itself to one entry: status.capacity is a single pair of figures
+// for the whole backend and cannot attribute a tier's bytes to one disk, so two tiers would
+// describe neither. Two gates carry it, one per level — the list's own entry bound, and this rule
+// across groups — and that is why they move together with that status shape or not at all.
+//
+// The rule lives in the webhook rather than in the schema because it is a rule about a PAIR of
+// positions: a schema can say a value is wrong, only a webhook can say that two groups may not
+// each carry one.
+func validateKVCacheBackendLocalDiskUniqueness(
+	managed *workercore.KVCacheBackendManaged, fldPath *field.Path,
 ) field.ErrorList {
-	var errs field.ErrorList
-
 	var withDisk []int
 	for i := range managed.Members {
-		if managed.Members[i].LocalDisk != nil {
+		if len(managed.Members[i].LocalDisks) > 0 {
 			withDisk = append(withDisk, i)
 		}
-	}
-
-	offloadPath := fldPath.Child("leader", "offload")
-	offload := managed.Leader.Offload
-	enabled := offload != nil && offload.Enabled
-
-	switch {
-	case len(withDisk) > 0 && !enabled:
-		// The member would report its disk capacity to the leader and the leader would never send
-		// it anything, so the backend reads as having a cold tier that never takes a byte.
-		errs = append(errs, field.Required(offloadPath.Child("enabled"), fmt.Sprintf(
-			"must be true when a member group declares localDisk (group %d does): the leader is "+
-				"what decides a key goes to disk, so without it the tier is never written to while "+
-				"still reporting its capacity", withDisk[0])))
-	case len(withDisk) == 0 && enabled:
-		// The mirror image: the leader queues offload work for clients that registered no local
-		// disk segment, and its own guard drops it without anything on this object saying so.
-		errs = append(errs, field.Required(fldPath.Child("members"), fmt.Sprintf(
-			"a member group must declare localDisk when %s is true: no group does, so the leader "+
-				"would queue offload work for members that have nowhere to put it",
-			offloadPath.Child("enabled"))))
-	}
-
-	if offload != nil && offload.OnEvict && !offload.Enabled {
-		errs = append(errs, field.Forbidden(offloadPath.Child("onEvict"), fmt.Sprintf(
-			"requires %s: the store ands the two together, so this alone is accepted, echoed back "+
-				"in the leader's own startup log, and then does nothing",
-			offloadPath.Child("enabled"))))
-	}
-
-	// The mirror image, and the reason it is a refusal rather than a documented caveat: the store
-	// gives this pair no protection at all. It holds an object queued for offload in memory by
-	// taking a reference on the memory replica when the object enters the queue and releasing it
-	// only once the client reports the disk write landed -- and that happens on the deferred branch
-	// alone. The write-through branch returns before reaching it, so an object whose bucket has not
-	// yet been flushed has its only replica evicted and is gone.
-	//
-	// Refusing the pair removes the mode. Defaulting the other one instead would leave an
-	// administrator who chose this one deliberately in exactly the same place.
-	//
-	// Scoped to the update that INTRODUCES the pair, like the capacityPerMember floor above it and
-	// for the same reason: re-judging a pair an update left alone would strand a backend admitted
-	// before this rule existed, and not every update is the user's. This webhook opts into
-	// ReceiveDeletionUpdate, so the reconciler removing the finalizer is one such update -- refusing
-	// that would leave the object undeletable rather than merely unsafe.
-	var oldOffload *workercore.KVCacheBackendLeaderOffload
-	if oldManaged != nil {
-		oldOffload = oldManaged.Leader.Offload
-	}
-	storedUnprotected := oldOffload != nil && oldOffload.Enabled && !oldOffload.OnEvict
-	if enabled && !offload.OnEvict && !storedUnprotected {
-		errs = append(errs, field.Required(offloadPath.Child("onEvict"), fmt.Sprintf(
-			"must be true when %s is true: the store pins a queued object's memory replica until "+
-				"its disk write lands only when this is set, and evicting without it destroys the "+
-				"sole replica of an object whose bucket has not been flushed",
-			offloadPath.Child("enabled"))))
 	}
 
 	// One disk tier per backend, and the reason is the capacity contract rather than the
@@ -663,14 +640,14 @@ func validateKVCacheBackendOffload(
 	// rule's reason, so relaxing it for a capacity reason would let the other case through
 	// silently — the case pinning it is named for the collision rather than for the attribution.
 	if len(withDisk) > 1 {
-		errs = append(errs, field.Forbidden(
-			fldPath.Child("members").Index(withDisk[1]).Child("localDisk"),
-			fmt.Sprintf("only one member group may declare localDisk, and groups %v declare one: "+
+		return field.ErrorList{field.Forbidden(
+			fldPath.Child("members").Index(withDisk[1]).Child("localDisks"),
+			fmt.Sprintf("only one member group may declare localDisks, and groups %v do: "+
 				"the leader reports every disk tier through one pair of gauges, so status.capacity "+
-				"could not say which figure belonged to which group", withDisk)))
+				"could not say which figure belonged to which group", withDisk))}
 	}
 
-	return errs
+	return nil
 }
 
 // validateKVCacheBackendScaleIn bounds the grace a departing member waits for.
@@ -737,11 +714,18 @@ func validateKVCacheBackendMember(
 	// enumerates the one value, so a medium this API does not render is refused before this handler
 	// runs and a rule for it would be code no request can reach.
 
-	var oldDisk *workercore.KVCacheBackendMemberLocalDisk
-	if oldMember != nil {
-		oldDisk = oldMember.LocalDisk
+	// One tier per group is the whole list today, and the rules below read it by position for the
+	// same reason the immutability ones do: the position identifies a group everywhere else, so it
+	// identifies the entry here too. The schema keys the list by path and refuses a duplicate, so
+	// two entries naming one directory never reach this loop.
+	for i := range member.LocalDisks {
+		var oldDisk *workercore.KVCacheBackendMemberLocalDisk
+		if oldMember != nil && i < len(oldMember.LocalDisks) {
+			oldDisk = &oldMember.LocalDisks[i]
+		}
+		errs = append(errs, validateKVCacheBackendLocalDisk(&member.LocalDisks[i], oldDisk,
+			fldPath.Child("localDisks").Index(i))...)
 	}
-	errs = append(errs, validateKVCacheBackendLocalDisk(member.LocalDisk, oldDisk, fldPath.Child("localDisk"))...)
 
 	errs = append(errs, validateKVCacheBackendMemberHostPaths(member, fldPath.Child("hostPaths"))...)
 
@@ -757,7 +741,7 @@ func validateKVCacheBackendMember(
 	case quantityx.OverflowsInt64(member.CapacityPerMember):
 		errs = append(errs, field.Invalid(fldPath.Child("capacityPerMember"),
 			member.CapacityPerMember.String(), quantityTooLarge))
-	case member.LocalDisk != nil &&
+	case len(member.LocalDisks) > 0 &&
 		member.CapacityPerMember.CmpInt64(mooncake.MemberBucketSizeLimit) < 0 &&
 		(oldMember == nil || member.CapacityPerMember.Cmp(oldMember.CapacityPerMember) != 0):
 		// The floor applies only to a group that declares a tier, and only when this update moved
@@ -765,7 +749,7 @@ func validateKVCacheBackendMember(
 		// admitted before the bound existed — and not every update is the user's.
 		errs = append(errs, field.Invalid(fldPath.Child("capacityPerMember"),
 			member.CapacityPerMember.String(), fmt.Sprintf(
-				"must be at least %s for a group declaring localDisk: that is one bucket, the unit the "+
+				"must be at least %s for a group declaring localDisks: that is one bucket, the unit the "+
 					"tier is written in, and its bytes are held in this segment until the bucket is "+
 					"complete — so a smaller segment leaves the tier empty under every workload, with "+
 					"nothing reporting it", memberBucketSize.String())))
@@ -806,16 +790,18 @@ func validateKVCacheBackendMember(
 		errs = append(errs, checkImageReference(member.Image, fldPath.Child("image"))...)
 	}
 
-	var oldExtraArgs, oldExtraEnvs map[string]string
+	var oldExtraArgs []string
+	var oldExtraEnv []workercore.InstanceEnvVar
 	if oldMember != nil {
-		oldExtraArgs, oldExtraEnvs = oldMember.ExtraArgs, oldMember.ExtraEnvs
+		oldExtraArgs, oldExtraEnv = oldMember.ExtraArgs, oldMember.ExtraEnv
 	}
-	if !unchangedExtraArgs(oldMember != nil, oldExtraArgs, member.ExtraArgs) {
+	if !unchangedPassthrough(oldMember != nil, oldExtraArgs, member.ExtraArgs) {
 		errs = append(errs, validateExtraArgs(member.ExtraArgs,
 			mooncake.MemberExtraArgsRules, fldPath.Child("extraArgs"))...)
 	}
-	if !unchangedExtraArgs(oldMember != nil, oldExtraEnvs, member.ExtraEnvs) {
-		errs = append(errs, validateExtraEnvs(member.ExtraEnvs, fldPath.Child("extraEnvs"))...)
+	if !unchangedPassthrough(oldMember != nil, oldExtraEnv, member.ExtraEnv) {
+		errs = append(errs, validateExtraEnvs(member.ExtraEnv,
+			mooncake.MemberDerivedEnvs, fldPath.Child("extraEnv"))...)
 	}
 
 	return errs
@@ -854,17 +840,12 @@ func pathsOverlap(a, b string) bool {
 // such mount today: the protocol is a field an update may change while a mount path is judged only
 // when it is written, so admitting it under tcp would leave a collision that arrives on the day
 // somebody edits an unrelated field. The disk tier's path is judged against the group's CURRENT
-// localDisk instead, because that path is itself declared right there — a group that moves its tier
-// is re-judged against the new one on the same update.
+// localDisks instead, because that path is itself declared right there — a group that moves its
+// tier is re-judged against the new one on the same update.
 func validateKVCacheBackendMemberHostPaths(
 	member *workercore.KVCacheBackendMember, fldPath *field.Path,
 ) field.ErrorList {
 	var errs field.ErrorList
-
-	var diskPath string
-	if member.LocalDisk != nil {
-		diskPath = member.LocalDisk.Path
-	}
 
 	for i := range member.HostPaths {
 		mountPath := member.HostPaths[i].MountPath
@@ -885,24 +866,34 @@ func validateKVCacheBackendMemberHostPaths(
 			continue
 		}
 
-		switch {
-		case pathsOverlap(mountPath, mooncake.RDMADevicePath):
+		// The device tree first, and unconditionally: the check is not about a tier at all, and a
+		// group with none must meet it just the same.
+		if pathsOverlap(mountPath, mooncake.RDMADevicePath) {
 			errs = append(errs, field.Invalid(mountPathPath, mountPath,
 				"overlaps where a host-fabric group's device tree is mounted ("+mooncake.RDMADevicePath+
 					"), which this operator renders whenever the group's protocol is RDMA or EFA: "+
 					"declaring it here would collide with that mount the day the protocol changes"))
-		case diskPath != "" && pathsOverlap(mountPath, diskPath):
-			errs = append(errs, field.Invalid(mountPathPath, mountPath,
-				"overlaps where this group's localDisk tier is mounted ("+diskPath+"): the tier is a "+
-					"declared capacity with its own deregistration hook, so it is reached through "+
-					"localDisk and not through a plain mount"))
+			continue
+		}
+
+		// Then every declared tier, and not just the first: the loop is one line longer than
+		// reading entry zero and stays correct the day the entry bound is lifted with the status
+		// shape that justifies it.
+		for _, disk := range member.LocalDisks {
+			if pathsOverlap(mountPath, disk.Path) {
+				errs = append(errs, field.Invalid(mountPathPath, mountPath,
+					fmt.Sprintf("overlaps where this group's localDisks tier is mounted (%s): the "+
+						"tier is a declared capacity with its own deregistration hook, so it is "+
+						"reached through localDisks and not through a plain mount", disk.Path)))
+			}
 		}
 	}
 
 	return errs
 }
 
-// validateExtraEnvs enforces the environment passthrough's two rules.
+// validateExtraEnvs enforces the environment passthrough's rules, against whichever side's derived
+// names it is handed.
 //
 // It is separate from validateExtraArgs rather than sharing it, because the half that differs is the
 // half that matters: a config key and an environment-variable name have different shapes, judged by
@@ -910,14 +901,16 @@ func validateKVCacheBackendMemberHostPaths(
 // they did not make. What they have in common is one list walk, which is smaller than the
 // abstraction that would hold it.
 //
-// Its scoping matches validateExtraArgs for the same reason: the derived list GROWS as this API
-// renders more, and re-judging a map an update did not touch would retroactively refuse an object
+// Its scoping matches validateExtraArgs for the same reason: the derived lists GROW as this API
+// renders more, and re-judging a list an update did not touch would retroactively refuse an object
 // admitted before the entry existed — on every update, including the reconciler's own removal of
-// this object's finalizer. See unchangedExtraArgs.
-func validateExtraEnvs(extraEnvs map[string]string, fldPath *field.Path) field.ErrorList {
+// this object's finalizer. See unchangedPassthrough.
+func validateExtraEnvs(
+	extraEnv []workercore.InstanceEnvVar, derived []string, fldPath *field.Path,
+) field.ErrorList {
 	var errs field.ErrorList
 
-	for _, name := range slices.Sorted(maps.Keys(extraEnvs)) {
+	for _, e := range extraEnv {
 		// Checked before the derived list, because that list holds names and anything that is not a
 		// name cannot collide with one while still reaching the container.
 		//
@@ -929,13 +922,13 @@ func validateExtraEnvs(extraEnvs map[string]string, fldPath *field.Path) field.E
 		// would admit a name that the cluster's own Pod validation then refuses inside a reconcile,
 		// where the only trace is a line in this operator's log while the group never comes up. No
 		// setting this hatch exists to reach carries such a name.
-		if msgs := validation.IsEnvVarName(name); len(msgs) > 0 {
-			errs = append(errs, field.Invalid(fldPath.Key(name), name,
+		if msgs := validation.IsEnvVarName(e.Name); len(msgs) > 0 {
+			errs = append(errs, field.Invalid(fldPath.Key(e.Name), e.Name,
 				"is not an environment variable name: "+strings.Join(msgs, "; ")))
 			continue
 		}
-		if slices.Contains(mooncake.MemberDerivedEnvs, name) {
-			errs = append(errs, field.Forbidden(fldPath.Key(name),
+		if slices.Contains(derived, e.Name) {
+			errs = append(errs, field.Forbidden(fldPath.Key(e.Name),
 				"this variable is rendered from this spec, and two definitions of one name make the "+
 					"rendered container ambiguous: Kubernetes accepts both and leaves the winner to "+
 					"the container runtime, so nothing would report the collision"))
@@ -1135,8 +1128,14 @@ func hasParentDirComponent(path string) bool {
 	return false
 }
 
-// unchangedExtraArgs reports whether this call is an UPDATE that left an extraArgs map exactly as it
-// already was, in which case its escape-hatch rules are not re-run.
+// leaderSnapshotDeclared reports whether a high-availability block asks for snapshots, reading an
+// absent block as "no" so the two sides of an update compare without either being dereferenced.
+func leaderSnapshotDeclared(ha *workercore.KVCacheBackendLeaderHighAvailability) bool {
+	return ha != nil && ha.Snapshot != nil
+}
+
+// unchangedPassthrough reports whether this call is an UPDATE that left one passthrough list
+// exactly as it already was, in which case that list's rules are not re-run.
 //
 // REQUIRED: this is not leniency, it is the same scoping the fallback-image check needs, and for the
 // same failure. These rules grow -- `enable_oplog` was added to the leader's forbidden list by the
@@ -1145,42 +1144,64 @@ func hasParentDirComponent(path string) bool {
 // every update is the user's: the reconciler removes this object's finalizer through one, and a
 // refusal there strands the object undeletable after teardown has already removed its workloads.
 //
-// A user who touches the map gets the rule. A user who touches anything else, and the controller
-// touching nothing, do not. The leader's caller adds one condition on top of this: an update that
-// moves `highAvailability` moves which keys are derived, so it re-runs the rules regardless.
-func unchangedExtraArgs(isUpdate bool, old, current map[string]string) bool {
-	return isUpdate && maps.Equal(old, current)
+// A user who touches the list gets the rule. A user who touches anything else, and the controller
+// touching nothing, do not. The leader's extraArgs caller adds one condition on top of this: an
+// update that moves `highAvailability` moves which keys are derived, so it re-runs the rules
+// regardless.
+func unchangedPassthrough[T comparable](isUpdate bool, old, current []T) bool {
+	return isUpdate && slices.Equal(old, current)
 }
 
 // validateExtraArgs enforces one side's escape-hatch rules. Each refusal says which KIND of problem
-// it is, because the fix differs: use the field instead, drop one of two keys, or drop the key.
+// it is, because the fix differs: use the field instead, spell the flag as one token, drop one of
+// two entries, or drop the entry.
 func validateExtraArgs(
-	extraArgs map[string]string, rules mooncake.ExtraArgsRules, fldPath *field.Path,
+	extraArgs []string, rules mooncake.ExtraArgsRules, fldPath *field.Path,
 ) field.ErrorList {
 	var errs field.ErrorList
 
-	for _, key := range slices.Sorted(maps.Keys(extraArgs)) {
-		// Checked before the tables, because the tables key on the BARE NAME and anything else
-		// misses every entry while still reaching the artifact as the flag they protect. Two
-		// decorations do it, and both were measured: the leader renderer prepends one dash, so
-		// "-rpc_port" renders "--rpc_port=" and gflags reads the flag "rpc_port" names; and it
-		// joins key and value with "=", so "rpc_port=1" renders "-rpc_port=1=60000" and gflags
-		// takes everything before the FIRST "=" as the flag — "rpc_port" again. A blank key and a
-		// key carrying a space are refused in the same breath: neither can be a setting's name,
-		// and both render an argument the artifact cannot read.
-		if key == "" || strings.HasPrefix(key, "-") || strings.ContainsAny(key, "= \t\n") {
-			errs = append(errs, field.Invalid(fldPath.Key(key), key,
-				"a key is the bare name of a setting: no leading dash, no \"=\", no spaces. The "+
-					"renderer adds what the artifact expects, and a decorated key reaches it as a "+
-					"flag no rule here could recognise"))
+	seen := make(map[string]int, len(extraArgs))
+	for i, entry := range extraArgs {
+		entryPath := fldPath.Index(i)
+
+		// One entry is one flag token, and the check runs first because the split spelling --
+		// ["-rpc_timeout", "5000"] -- puts a bare value where a key belongs, and the collision
+		// check would see nothing to collide with while both halves still reach the artifact.
+		if !strings.HasPrefix(entry, "-") {
+			errs = append(errs, field.Invalid(entryPath, entry,
+				`must begin with "-": one entry is one "-flag" or "-flag=value" token, and a value `+
+					`written beside its flag carries no key of its own -- a value that itself `+
+					`begins with "-" is spelled "-flag=--value"`))
 			continue
 		}
+
+		// The dashes are decoration the artifact's own parser treats alike, one or two, and the
+		// key stops at the first "=" so a boolean flag written as one token keeps its name. This
+		// is the key the tables and the duplicate check share.
+		//
+		// A blank key and a key carrying whitespace are refused in the same breath: neither can
+		// be a setting's name, and both render an argument the artifact cannot read.
+		key, _, _ := strings.Cut(strings.TrimLeft(entry, "-"), "=")
+		if key == "" || strings.ContainsAny(key, " \t\n") {
+			errs = append(errs, field.Invalid(entryPath, entry,
+				"the key here -- what precedes the first \"=\" once the dashes are off -- is not "+
+					"a setting's name, so the artifact cannot read the argument it renders"))
+			continue
+		}
+		if _, dup := seen[key]; dup {
+			errs = append(errs, field.Invalid(entryPath, entry, fmt.Sprintf(
+				"carries the key %q a second time: a list does not say which of two entries the "+
+					"artifact reads, and neither does anything on this object", key)))
+			continue
+		}
+		seen[key] = i
+
 		if reason, ok := rules.Forbidden[key]; ok {
-			errs = append(errs, field.Forbidden(fldPath.Key(key), reason))
+			errs = append(errs, field.Forbidden(entryPath, reason))
 			continue
 		}
 		if slices.Contains(rules.Derived, key) {
-			errs = append(errs, field.Forbidden(fldPath.Key(key),
+			errs = append(errs, field.Forbidden(entryPath,
 				"this key is derived from a field of this spec, and two sources for one setting "+
 					"make the rendered result ambiguous"))
 		}
@@ -1189,7 +1210,7 @@ func validateExtraArgs(
 	for _, group := range rules.Exclusive {
 		var present []string
 		for _, key := range group {
-			if _, ok := extraArgs[key]; ok {
+			if _, ok := seen[key]; ok {
 				present = append(present, key)
 			}
 		}
@@ -1213,7 +1234,7 @@ func validateExtraArgs(
 // why no per-field rule can reach it.
 //
 // Everything else is editable on purpose: an image, a node selector, a capacity, an extraArgs or
-// extraEnvs entry, a tier's ceilings and its eviction settings, and the transport block all converge
+// extraEnv entry, a tier's ceilings and its eviction settings, and the transport block all converge
 // on the next pass.
 func validateKVCacheBackendImmutable(oldKvcb, newKvcb *workercore.KVCacheBackend) field.ErrorList {
 	var errs field.ErrorList
@@ -1250,8 +1271,8 @@ func validateKVCacheBackendImmutable(oldKvcb, newKvcb *workercore.KVCacheBackend
 				"medium is immutable"))
 		}
 		errs = append(errs, validateKVCacheBackendLocalDiskImmutable(
-			oldMembers[i].LocalDisk, newMembers[i].LocalDisk,
-			membersPath.Index(i).Child("localDisk"))...)
+			oldMembers[i].LocalDisks, newMembers[i].LocalDisks,
+			membersPath.Index(i).Child("localDisks"))...)
 	}
 
 	return errs
@@ -1420,27 +1441,30 @@ func validateKVCacheBackendMultiTenancyWithdrawal(
 // rebuilt against a different group's spec, and their caches go with them. Refusing the immutable
 // fields there is reporting that, not mistaking it. The messages below say "at this position" so an
 // operator who reordered can tell which of the two happened.
+//
+// The entries are compared as the lists' first elements rather than paired by path, because the
+// list carries at most one entry and the position already identifies the group that owns it.
 func validateKVCacheBackendLocalDiskImmutable(
-	oldDisk, newDisk *workercore.KVCacheBackendMemberLocalDisk, fldPath *field.Path,
+	oldDisks, newDisks []workercore.KVCacheBackendMemberLocalDisk, fldPath *field.Path,
 ) field.ErrorList {
 	switch {
-	case oldDisk == nil && newDisk == nil:
+	case len(oldDisks) == 0 && len(newDisks) == 0:
 		return nil
-	case oldDisk == nil:
+	case len(oldDisks) == 0:
 		return field.ErrorList{field.Forbidden(fldPath,
 			"a local disk tier cannot be added to the group at this position: its members would "+
 				"have to restart to mount the host directory, and the leader would begin "+
 				"offloading to a tier that no existing key is on. If you reordered members or "+
 				"removed an earlier group, note that the position identifies a group here — the "+
 				"members at this position now belong to a different group's spec")}
-	case newDisk == nil:
+	case len(newDisks) == 0:
 		return field.ErrorList{field.Forbidden(fldPath,
 			"a local disk tier cannot be removed from the group at this position: whatever its "+
 				"members have already written stays on their nodes with nothing addressing it. "+
 				"Reordering members or removing an earlier group reaches this rule too, because "+
 				"the position is what identifies a group")}
-	case oldDisk.Path != newDisk.Path:
-		return field.ErrorList{field.Forbidden(fldPath.Child("path"),
+	case oldDisks[0].Path != newDisks[0].Path:
+		return field.ErrorList{field.Forbidden(fldPath.Index(0).Child("path"),
 			"the path is immutable: what the members at this position have already written stays "+
 				"at the old one. Reordering members reaches this rule as well, since the position "+
 				"is what identifies a group")}

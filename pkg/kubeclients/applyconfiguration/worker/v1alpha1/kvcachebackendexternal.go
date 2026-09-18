@@ -16,7 +16,7 @@ package v1alpha1
 // - The quota of a shared reuse domain flips and never settles. Uniqueness is enforced only
 // between Bindings whose pools name the SAME backend object, so two Bindings reaching one leader
 // through two objects are both admitted on one domain name, and each pool's reconciler writes
-// its own quotaCeiling back over the other's on every pass.
+// its own quota.ceiling back over the other's on every pass.
 // - An undersized quota shows up as a LOW HIT RATE and nothing else. Exceeding it does not refuse
 // the write: the store frees room by dropping that tenant's own older objects and retries,
 // irreversibly, without any counter moving.

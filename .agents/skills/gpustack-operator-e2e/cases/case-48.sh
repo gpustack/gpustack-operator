@@ -189,7 +189,8 @@ spec:
     name: ${DEAD_DOMAIN}
     blockSize: 16
     dtype: bfloat16
-  quotaCeiling: 256Mi
+  quota:
+    ceiling: 256Mi
 YAML
 )"
 # THREE DOCUMENTS, AND ALL THREE ARE READ BACK. `kubectl apply` reports them in ONE stream, so a run
@@ -259,11 +260,12 @@ metadata:
   name: ${1}
   namespace: ${TEST_NS}
 spec:
-  engine: vllm
-  # The newest vLLM the runner project publishes. Inert here -- the role names its image explicitly,
-  # so nothing is synthesized from this -- but a version no runner ships would read as the version
-  # under test, and this case tests nothing about an engine.
-  engineVersion: "0.27.1"
+  engine:
+    name: vllm
+    # The newest vLLM the runner project publishes. Inert here -- the role names its image
+    # explicitly, so nothing is synthesized from it -- but a version no runner ships would read as
+    # the version under test, and this case tests nothing about an engine.
+    version: "0.27.1"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:
@@ -273,8 +275,7 @@ spec:
   - name: server
     instanceType: ${IT}
     replicas: 1
-    template:
-      image: ${CLIENT_IMAGE}
+    image: ${CLIENT_IMAGE}
 YAML
 }
 

@@ -38,16 +38,15 @@ import (
 
 // newKVCacheBackendObject builds a managed backend with the given consumers already recorded in
 // status, which is the only input this task's status derivation reads.
-// withReconcilerDiskTier declares a complete local disk tier, both halves.
+// withReconcilerDiskTier declares a local disk tier on the canonical group.
 //
-// One helper rather than two, because a tier declared on one side only is refused at admission — a
-// fixture that set one half would put the reconciler a question the API never puts to it.
+// The member side is the whole declaration: a group carrying localDisks is what turns the tier on,
+// and the leader's flags are derived from it, so there is no second half for a fixture to set.
 func withReconcilerDiskTier(kvcb *workercore.KVCacheBackend) {
-	kvcb.Spec.Connection.Managed.Members[0].LocalDisk = &workercore.KVCacheBackendMemberLocalDisk{
+	kvcb.Spec.Connection.Managed.Members[0].LocalDisks = []workercore.KVCacheBackendMemberLocalDisk{{
 		Path:     "/var/lib/kvcache",
 		Capacity: resource.MustParse("4Ti"),
-	}
-	kvcb.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+	}}
 }
 
 func newKVCacheBackendObject(usedBy ...workercore.KVCacheObjectReference) *workercore.KVCacheBackend {
@@ -2132,7 +2131,7 @@ func TestKVCacheBackendScale_ADiskTierCapacityChangeRestartsThatGroupOnly(t *tes
 	// Raise the ceiling, which admission permits and the fingerprint therefore has to notice.
 	live := new(workercore.KVCacheBackend)
 	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, live))
-	live.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("8Ti")
+	live.Spec.Connection.Managed.Members[0].LocalDisks[0].Capacity = resource.MustParse("8Ti")
 	require.NoError(t, cli.Update(ctx, live))
 
 	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))

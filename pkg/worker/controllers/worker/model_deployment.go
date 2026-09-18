@@ -593,7 +593,7 @@ func (r *ModelDeploymentReconciler) recordModelDeploymentRuntimeVersionSkew(
 	if r.Recorder == nil {
 		return
 	}
-	if role.Template != nil && role.Template.Image != "" {
+	if role.Image != "" {
 		return
 	}
 
@@ -750,22 +750,22 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 		// because the accelerator is the role's: it selects the store connector the engine
 		// registers, and only the role's InstanceType knows it.
 		//
-		directTransfer := modelDeploymentUsesDirectTransfer(md, role, instType.Status.Detail.Manufacturer)
+		kvTransfer := modelDeploymentUsesKVTransfer(md, role, instType.Status.Detail.Manufacturer)
 		publishKVEvents := modelDeploymentPublishesKVEvents(md, role, instType.Status.Detail.Manufacturer)
-		if connection != nil || directTransfer || publishKVEvents {
+		if connection != nil || kvTransfer || publishKVEvents {
 			roleConnection := ModelDeploymentConnectorInput{}
 			if connection != nil {
 				roleConnection = *connection
 			}
-			roleConnection.Engine = md.Spec.Engine
+			roleConnection.Engine = md.Spec.Engine.Name
 			roleConnection.Manufacturer = instType.Status.Detail.Manufacturer
 			// The kind is the role's, and it is the only per-role term in the synthesized
 			// configuration: it is what makes a prefiller and a decoder two configurations rather
 			// than two copies of one, which is what the atomic admission of the pair is FOR.
 			roleConnection.Kind = role.Kind
-			roleConnection.DirectTransfer = directTransfer
-			if md.Spec.DirectTransfer != nil {
-				roleConnection.DirectTransferProtocol = md.Spec.DirectTransfer.Protocol
+			roleConnection.KVTransfer = kvTransfer
+			if md.Spec.KVTransfer != nil {
+				roleConnection.KVTransferProtocol = md.Spec.KVTransfer.Protocol
 			}
 			roleConnection.PublishKVEvents = publishKVEvents
 			if roleConnection.PublishKVEvents {

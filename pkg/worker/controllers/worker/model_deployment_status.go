@@ -316,7 +316,7 @@ func modelDeploymentRoleStatuses(
 			Ready:   ready[role.Name],
 			// A role that replaced the whole command line got no synthesized argument and no client
 			// environment, so nothing here can claim it is attached to the cache.
-			Unmanaged: role.Template != nil && len(role.Template.Command) > 0,
+			Unmanaged: len(role.Command) > 0,
 			// THE ROLE'S OWN GROUP'S WORKLOAD, not the deployment's first. A flavor is an answer Kueue
 			// gave to one pod group, so a role is told what happened to ITS group or nothing at all.
 			// Reading whichever Workload sorts first reports a flavor this role was never assigned for

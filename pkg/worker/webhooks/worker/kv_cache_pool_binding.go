@@ -145,7 +145,7 @@ func validateKVCachePoolBindingSpec(kvcpb *workercore.KVCachePoolBinding) field.
 	// Asked unconditionally: the schema guarantees the key is there, so what is left to judge is the
 	// value, and the master's own rule is what judges it.
 	errs = append(errs, mooncake.ValidateQuotaPolicyQuota(
-		kvcpb.Spec.QuotaCeiling, specPath.Child("quotaCeiling"))...)
+		kvcpb.Spec.Quota.Ceiling, specPath.Child("quota", "ceiling"))...)
 
 	return errs
 }
@@ -290,7 +290,7 @@ func (r *KVCachePoolBindingWebhook) validateKVCachePoolBindingDomainIsUnclaimed(
 // CREATE ONLY, and that is structural rather than a preference. spec.poolRef and spec.domain.name are
 // both frozen by validateKVCachePoolBindingImmutable, so no update can produce a pairing of domain and
 // master that did not exist at creation. A copy of this rule on the update path could therefore only
-// fail an unrelated quotaCeiling edit against a collision admitted before this check existed, which is
+// fail an unrelated quota.ceiling edit against a collision admitted before this check existed, which is
 // the hazard rather than the fix. Domains that already stand on a ledger-less master keep whatever the
 // master gives them; admission refuses what has not happened yet.
 func (r *KVCachePoolBindingWebhook) validateKVCachePoolBindingDomainIsSeparable(
@@ -643,12 +643,12 @@ func (r *KVCachePoolBindingWebhook) validateKVCachePoolBindingCeilingFitsPool(
 		}
 	}
 
-	ceiling := kvcpb.Spec.QuotaCeiling
+	ceiling := kvcpb.Spec.Quota.Ceiling
 	if ceiling.Cmp(kvcp.Spec.Quota.Total) <= 0 {
 		return nil
 	}
 
-	return field.ErrorList{field.Invalid(field.NewPath("spec", "quotaCeiling"), ceiling.String(),
+	return field.ErrorList{field.Invalid(field.NewPath("spec", "quota", "ceiling"), ceiling.String(),
 		fmt.Sprintf("must not exceed the pool's own ceiling of %s: a request larger than everything "+
 			"pool %q declares can never be granted, whatever the other Bindings ask for",
 			kvcp.Spec.Quota.Total.String(), kvcp.Name))}
@@ -660,7 +660,7 @@ func (r *KVCachePoolBindingWebhook) validateKVCachePoolBindingCeilingFitsPool(
 // and re-reading the pool for a rewritten spelling would put it back in the path of every apply from
 // a templating tool that normalises quantities.
 func ceilingMoved(oldKvcpb, newKvcpb *workercore.KVCachePoolBinding) bool {
-	return oldKvcpb.Spec.QuotaCeiling.Cmp(newKvcpb.Spec.QuotaCeiling) != 0
+	return oldKvcpb.Spec.Quota.Ceiling.Cmp(newKvcpb.Spec.Quota.Ceiling) != 0
 }
 
 // validateKVCachePoolBindingImmutable freezes what a warm cache cannot survive being told again.

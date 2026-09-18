@@ -1386,8 +1386,6 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendLeaderApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendLeaderHighAvailability"):
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendLeaderHighAvailabilityApplyConfiguration{}
-	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendLeaderOffload"):
-		return &applyconfigurationworkerv1alpha1.KVCacheBackendLeaderOffloadApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendLeaderSnapshot"):
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendLeaderSnapshotApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendManaged"):
@@ -1424,6 +1422,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.KVCachePoolBindingDomainApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolBindingPoolReference"):
 		return &applyconfigurationworkerv1alpha1.KVCachePoolBindingPoolReferenceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolBindingQuota"):
+		return &applyconfigurationworkerv1alpha1.KVCachePoolBindingQuotaApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolBindingReference"):
 		return &applyconfigurationworkerv1alpha1.KVCachePoolBindingReferenceApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolBindingSpec"):
@@ -1442,16 +1442,24 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.KVCachePoolUsageApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeployment"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentApplyConfiguration{}
-	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentDirectTransfer"):
-		return &applyconfigurationworkerv1alpha1.ModelDeploymentDirectTransferApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentAdditionalVolume"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentAdditionalVolumeApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentEngine"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentEngineApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentEnvVar"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentEnvVarApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentKVCache"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentKVCacheApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentKVCacheDomain"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentKVCacheDomainApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentKVCacheStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentKVCacheStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentKVTransfer"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentKVTransferApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentModel"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentModelApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentPort"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentPortApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRole"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleResources"):
@@ -1472,8 +1480,6 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentStatusApplyConfiguration{}
-	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentTemplate"):
-		return &applyconfigurationworkerv1alpha1.ModelDeploymentTemplateApplyConfiguration{}
 
 	}
 	return nil

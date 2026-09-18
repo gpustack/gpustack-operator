@@ -16,8 +16,9 @@ that serves it exists, and it is not the one most people reach for first.
 ## There is no disk-only member
 
 **Every member group mounts a memory segment, and a disk tier is a layer on a group that already
-holds one.** `members[].medium` carries the single value `DRAM`, and the disk is declared beside it
-in `members[].localDisk` — see [the two axes](backend.md#the-two-axes) for the full shape.
+holds one.** `members[].medium` names which memory — `DRAM` for the host's, `VRAM` for the
+accelerator's — and the disk is declared beside it in `members[].localDisks`, a layer on either one.
+See [the two axes](backend.md#the-two-axes) for the full shape.
 
 That is the store's own data flow rather than a simplification made here: the leader routes an
 offload task to the client holding the key's **memory** replica, so a group with none is never
@@ -34,9 +35,9 @@ little memory does a group need in order to drive its disk".
 ## The shape that works
 
 **Declare one group with a thin memory segment and a thick tier.** The terabytes go on
-`localDisk.capacity`; `capacityPerMember` is sized to drive the tier rather than to hold the cache,
-and both halves of the tier — the leader's and the group's — have to be present or the object is
-refused at admission.
+`localDisks[].capacity`; `capacityPerMember` is sized to drive the tier rather than to hold the cache,
+and **declaring the tier on the group is the whole switch** — the leader's offload flags are derived
+from that declaration, so there is no second half to forget.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1alpha1
@@ -48,20 +49,16 @@ spec:
   image: docker.io/kvcacheai/mooncake:0.3.13
   connection:
     managed:
-      leader:
-        offload:
-          enabled: true                # the leader's half; without it nothing is ever enqueued
-          onEvict: true
       members:
         - nodeSelector: {kvcache: "true"}
           medium: DRAM                 # the SEGMENT, which is memory on every group
           capacityPerMember: 8Gi       # sized below — NOT a figure to copy
-          localDisk:
-            path: /var/lib/kvcache     # must already exist on every selected node
-            capacity: 4Ti              # where the node's disk is declared
-            eviction:
-              enabled: true
-              policy: LRU
+          localDisks:                  # declaring an entry is what turns the tier on
+            - path: /var/lib/kvcache   # must already exist on every selected node
+              capacity: 4Ti            # where the node's disk is declared
+              eviction:
+                enabled: true
+                policy: LRU
 ```
 
 ⚠️ Pin the example's `spec.image` per [The store version must match the engine's
@@ -86,7 +83,7 @@ Three things that manifest depends on and does not state:
 
 ## How small the memory segment may be
 
-**`capacityPerMember` has a floor of 16Mi on a group declaring `localDisk`.** That is one bucket —
+**`capacityPerMember` has a floor of 16Mi on a group declaring `localDisks`.** That is one bucket —
 the unit the tier is written in, and the figure this operator renders as `MemberBucketSizeLimit` in
 `pkg/worker/kvcache/mooncake/member_workload.go`. Why a segment below one bucket can never fill one
 is in [the tier is written one bucket at a time](local-disk-tier.md#the-tier-is-written-one-bucket-at-a-time).

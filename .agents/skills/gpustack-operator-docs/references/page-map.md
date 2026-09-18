@@ -110,7 +110,7 @@ links here. It was split out when that page hit both the line and the `##` cap.
 
 ## `docs/kv-cache/local-disk-tier.md`
 
-**Owns** — the `members[].localDisk` layer end to end: the two halves admission pairs, the rendering
+**Owns** — the `members[].localDisks` layer end to end: the two halves admission pairs, the rendering
 table, the bucket that is the tier's write unit and the three bounds that follow from it, the
 eviction algebra and its four refusals, the five path rules and the host directory's ownership, the
 tier's immutability and its one exit, and the `hostPath` cost nothing accounts for.
@@ -150,7 +150,7 @@ are not. It is the delivery surface for `KVCacheBackend` and `ModelDeployment` t
 page that answers "what do I type first".
 
 **Never** — a field's semantics. Every explanation here is one clause plus a link to the page that
-owns it; a second account of `quotaCeiling` or of the snapshot's access modes is how the two drift
+owns it; a second account of `quota.ceiling` or of the snapshot's access modes is how the two drift
 apart. If a paragraph here grows past a clause, it belongs on `backend.md`, `leader.md` or `pool.md`
 and this page should link to it instead.
 

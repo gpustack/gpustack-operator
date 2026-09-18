@@ -20,7 +20,7 @@ import (
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:crd-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["md"],subResources=["status"]
-// +k8s:crd-gen:printcolumn:name="Engine",type="string",jsonPath=".spec.engine"
+// +k8s:crd-gen:printcolumn:name="Engine",type="string",jsonPath=".spec.engine.name"
 // +k8s:crd-gen:printcolumn:name="Phase",type="string",jsonPath=".status.phase"
 // +k8s:crd-gen:printcolumn:name="Endpoint",type="string",jsonPath=".status.endpoint"
 type ModelDeployment struct {
@@ -40,36 +40,16 @@ type ModelDeploymentSpec struct {
 	// +required
 	Model ModelDeploymentModel `json:"model" protobuf:"bytes,1,name=model"`
 
-	// Engine selects the inference engine, which decides which argument keys the operator owns and
-	// which carrier the transfer configuration arrives on. Ownership is per (engine, key): a key one
-	// engine owns is an ordinary user argument on another.
+	// Engine is the inference engine this deployment runs, which decides which argument keys the
+	// operator owns and which carrier the transfer configuration arrives on. Ownership is per
+	// (engine, key): a key one engine owns is an ordinary user argument on another.
 	//
-	// It does NOT decide the connector, which follows the role's hardware instead: the connector is a
-	// property of the accelerator backend, so an Ascend pool and an NVIDIA pool running this engine
-	// get different ones.
-	//
-	// +required
-	// +k8s:validation:enum=["vllm","sglang"]
-	Engine string `json:"engine" protobuf:"bytes,2,name=engine"`
-
-	// EngineVersion is the engine's own version, e.g. "0.25.1" for vllm or "0.5.18" for sglang.
-	//
-	//   - It is free-form and UNVALIDATED, by decision: the user guarantees that the version and the
-	//     driver each role's hardware installed are aligned. A gate would need the runner's release
-	//     matrix compiled into the operator, and the failure it would prevent is already legible as
-	//     an ImagePullBackOff on a tag that does not exist.
-	//   - It is per deployment rather than per role, which is what lets one version assemble a
-	//     DIFFERENT image for each role: the backend half of the tag comes from the role's own
-	//     InstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.
-	//     Published version sets do NOT overlap across every backend, so one version has to name a
-	//     tag that exists for each backend the roles land on.
-	//   - The lower bound is not decoration: `required` makes the key present, not the value
-	//     non-empty, and an empty version assembles a malformed tag naming something never typed.
+	// It does NOT decide the connector, which follows the role's hardware instead: the connector is
+	// a property of the accelerator backend, so an Ascend pool and an NVIDIA pool running this
+	// engine get different ones.
 	//
 	// +required
-	// +k8s:validation:minLength=1
-	// +k8s:validation:maxLength=64
-	EngineVersion string `json:"engineVersion" protobuf:"bytes,5,name=engineVersion"`
+	Engine ModelDeploymentEngine `json:"engine" protobuf:"bytes,2,name=engine"`
 
 	// KVCache optionally attaches the deployment to a shared KV cache pool. A managed vLLM
 	// prefill/decode deployment without it still uses its router's point-to-point connector; it does
@@ -115,21 +95,28 @@ type ModelDeploymentSpec struct {
 	// this field existed serves exactly as it did.
 	//
 	// +optional
-	Router *ModelDeploymentRouter `json:"router,omitempty" protobuf:"bytes,6,opt,name=router"`
+	Router *ModelDeploymentRouter `json:"router,omitempty" protobuf:"bytes,5,opt,name=router"`
 
-	// DirectTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode
+	// KVTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode
 	// pair.
+	//
+	// THIS FIELD AND KVCache ABOVE ARE TWO ORTHOGONAL AXES, NOT TWO BRANCHES OF ONE CHOICE, and
+	// both may be set at once. The gate that turns this leg on — a managed llm-d router, vLLM, not
+	// Ascend, and a role kind of prefill or decode — reads none of spec.kvCache, and when both are
+	// set the two are synthesized into ONE connector and one --kv-transfer-config: a deployment may
+	// share a pool for its blocks AND hand them from prefill to decode directly, at the same time.
 	//
 	// THE LEG THIS COVERS NEVER TRAVERSES THE STORE, and that is why the value does not come from
 	// the KVCacheBackend: spec.transport there defines the data plane the store MEMBERS run, this
 	// one is engine to engine, and the two planes declare separately. A deployment can render
-	// this leg with no pool attached at all, which is why the field cannot live under KVCache.
+	// this leg with no pool attached at all, which is another reason the field cannot live under
+	// KVCache.
 	//
 	// +optional
-	DirectTransfer *ModelDeploymentDirectTransfer `json:"directTransfer,omitempty" protobuf:"bytes,7,opt,name=directTransfer"`
+	KVTransfer *ModelDeploymentKVTransfer `json:"kvTransfer,omitempty" protobuf:"bytes,6,opt,name=kvTransfer"`
 }
 
-// The engines a ModelDeployment can run, which are the values of ModelDeploymentSpec.Engine's enum.
+// The engines a ModelDeployment can run, which are the values of ModelDeploymentEngine.Name's enum.
 //
 // They are declared beside the field whose schema closes the set, so that a reader of either finds
 // the other. There is deliberately no "vllm-ascend": `vllm_ascend` is a Python package the runner
@@ -142,7 +129,7 @@ const (
 
 // ModelDeploymentModel names the model the engine serves.
 //
-// It provisions nothing. Weights arrive through the role template's volumes or through the engine's
+// It provisions nothing. Weights arrive through the role's additional volumes or through the engine's
 // own hub client; a weight-provisioning block here would be the first step towards the
 // general-purpose serving CR this deliberately is not.
 type ModelDeploymentModel struct {
@@ -152,6 +139,46 @@ type ModelDeploymentModel struct {
 	// +k8s:validation:minLength=1
 	// +k8s:validation:maxLength=253
 	Name string `json:"name" protobuf:"bytes,1,name=name"`
+}
+
+// ModelDeploymentEngine is the engine a deployment runs and the version of it.
+//
+// The two are one object because they were never meaningful apart: a role that names no image of
+// its own has one assembled from the engine and the version together with the role's own
+// InstanceType. The version carries no obligation of its own — it is owed exactly when some role
+// needs that assembly, which admission rather than the schema decides, because which roles need it
+// is a fact about the roles and not about this field.
+type ModelDeploymentEngine struct {
+	// Name selects the engine.
+	//
+	// It is the half of this object that is the deployment's identity and is frozen after creation,
+	// while Version answers which build runs and stays editable — stated here because one object
+	// reading otherwise would freeze the pair together.
+	//
+	// +required
+	// +k8s:validation:enum=["vllm","sglang"]
+	Name string `json:"name" protobuf:"bytes,1,name=name"`
+
+	// Version is the engine's own version, e.g. "0.25.1" for vllm or "0.5.18" for sglang.
+	//
+	//   - It is OPTIONAL, and the obligation sits with the roles instead: a role that names no image
+	//     of its own has one synthesized from this version, so admission refuses an empty version
+	//     beside such a role rather than letting the render assemble a malformed tag naming
+	//     something never typed. A role that names an image never reads this field.
+	//   - It is free-form and UNVALIDATED, by decision: the user guarantees that the version and the
+	//     driver each role's hardware installed are aligned. A gate would need the runner's release
+	//     matrix compiled into the operator, and the failure it would prevent is already legible as
+	//     an ImagePullBackOff on a tag that does not exist.
+	//   - It is per deployment rather than per role, which is what lets one version assemble a
+	//     DIFFERENT image for each role: the backend half of the tag comes from the role's own
+	//     InstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.
+	//     Published version sets do NOT overlap across every backend, so one version has to name a
+	//     tag that exists for each backend the roles land on.
+	//
+	// +optional
+	// +k8s:validation:minLength=1
+	// +k8s:validation:maxLength=64
+	Version string `json:"version,omitempty" protobuf:"bytes,2,opt,name=version"`
 }
 
 // ModelDeploymentKVCache attaches the deployment to a KV cache pool.
@@ -171,10 +198,11 @@ type ModelDeploymentKVCache struct {
 	// +required
 	PoolRef core.LocalObjectReference `json:"poolRef" protobuf:"bytes,1,name=poolRef"`
 
-	// Connector selects how the engine's transfer configuration is produced. "auto" synthesizes it
-	// from the pool's backend type and the engine. There is no "none" — synthesizing nothing is
-	// reachable through a full command replacement, which also marks the role unmanaged and moves
-	// CacheAttached to Unknown.
+	// Connector names the connector implementation this deployment is configured for. The value is
+	// an identity the deployment carries, not a setting the operator derives: "mooncake" says which
+	// connector this is, and nothing reads the field to produce the configuration. There is no
+	// "none" — synthesizing nothing is reachable through a full command replacement, which also
+	// marks the role unmanaged and moves CacheAttached to Unknown.
 	//
 	// THE KV TRANSFER CONVERGES ON MOONCAKE, and that is why the enum has one value. Mooncake is the
 	// implementation that supports heterogeneous prefill and decode, which is the shape this API
@@ -197,14 +225,16 @@ type ModelDeploymentKVCache struct {
 	// than edited onto one. That is stated here because "widening the enum" otherwise reads as a
 	// migration path for deployments that are already running.
 	//
-	// +k8s:validation:default="auto"
-	// +k8s:validation:enum=["auto"]
+	// +k8s:validation:default="mooncake"
+	// +k8s:validation:enum=["mooncake"]
 	Connector string `json:"connector,omitempty" protobuf:"bytes,2,opt,name=connector"`
 }
 
-// ModelDeploymentDirectTransfer carries the settings of the point-to-point KV transfer leg
-// between a prefill role and a decode role.
-type ModelDeploymentDirectTransfer struct {
+// ModelDeploymentKVTransfer carries the settings of the point-to-point KV transfer leg
+// between a prefill role and a decode role. It composes with a shared store rather than excluding
+// one: both legs may be configured on one deployment, and the synthesized connector carries the
+// pair together.
+type ModelDeploymentKVTransfer struct {
 	// Protocol is the transport both ends of the leg are told to use, in the mooncake
 	// configuration's own spelling, e.g. "tcp" or "rdma".
 	//
@@ -220,7 +250,7 @@ type ModelDeploymentDirectTransfer struct {
 	//   - UNSET RENDERS "tcp", the transport every mooncake build carries. The default lives in
 	//     the renderer rather than in this schema, so the stored object holds exactly what was
 	//     asked.
-	//   - IT IS READ ONLY ON THE DIRECT-TRANSFER LEG: a managed llm-d router in front of vLLM
+	//   - IT IS READ ONLY ON THE POINT-TO-POINT LEG: a managed llm-d router in front of vLLM
 	//     prefill/decode roles. On every other shape -- sglang, Ascend, or no router -- the value
 	//     is accepted and renders nothing, which is stated here because an accepted field that
 	//     silently does nothing is a promise broken quietly.
@@ -228,7 +258,7 @@ type ModelDeploymentDirectTransfer struct {
 	//     argv, so a change rebuilds every Kueue pod group of the deployment. With roles split
 	//     across InstanceTypes the groups rebuild independently, and a mixed-protocol window
 	//     between a prefiller and a decoder exists until both converge -- the same window an
-	//     engineVersion edit already opens.
+	//     engine version edit already opens.
 	//
 	// +optional
 	// +k8s:validation:maxLength=64
@@ -237,10 +267,25 @@ type ModelDeploymentDirectTransfer struct {
 
 // ModelDeploymentRole is one engine role and its replicas.
 //
-// Replicas and InstanceType are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to admission and
-// scheduling — Kueue PodSet counts and flavor selection — so a template that could shadow them would
-// make the admission feasibility check read a ledger that does not match reality. The template may
-// override container content and nothing else.
+// Replicas, InstanceType and Resources are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to
+// admission and scheduling — Kueue PodSet counts, flavor selection and the request the queue
+// accounts — so a container field able to shadow any of them would make the admission feasibility
+// check read a ledger that does not match reality. That is why the container fields below carry no
+// resource request at all: the accelerator half belongs in Resources and the rest is derived from
+// the InstanceType, and neither can be overridden here.
+//
+// EDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's. Each role forms its
+// own Kueue pod group, whose members cannot leave one at a time, so that one group is rebuilt whole
+// while every sibling role keeps serving. A `replicas` change on this role does the same.
+//
+// ADDING OR REMOVING A ROLE REACHES FURTHER THAN THE ROLE IT NAMES. A deployment whose roles are one
+// names that group after the DEPLOYMENT, and a deployment with more than one names each group after
+// its ROLE, so going from one role to two renames the first role's group and rebuilds it as well.
+//
+// A DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A REBUILD. The replica that left is replaced on
+// its own, under a new name, while its siblings keep serving — see
+// docs/reference/model-deployment.md under "One group per role" and "Rollout is a rolling
+// replacement".
 type ModelDeploymentRole struct {
 	// Name identifies the role, and it is also the name of the Kueue PodSet the role becomes.
 	//
@@ -258,6 +303,19 @@ type ModelDeploymentRole struct {
 	// +k8s:validation:maxLength=63
 	// +k8s:validation:pattern="^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
 	Name string `json:"name" protobuf:"bytes,1,name=name"`
+
+	// Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name
+	// is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable
+	// by typing a string is one typo away from silently changing. Two roles may share a kind and
+	// differ in name ONLY where that kind is Server, because a pair of servers is a set of equals and
+	// two prefillers are not: nothing that consumes these roles expresses a second prefiller, so a
+	// deployment declaring one would render a role no reader of the rendered configuration could
+	// reach. It defaults to Server, the shape a deployment written before disaggregation existed has,
+	// so such a deployment renders exactly as it did.
+	//
+	// +k8s:validation:default="server"
+	// +k8s:validation:enum=["server","prefill","decode"]
+	Kind ModelDeploymentRoleKind `json:"kind,omitempty" protobuf:"bytes,8,opt,name=kind,casttype=ModelDeploymentRoleKind"`
 
 	// Replicas is how many Pods this role runs. They are NOT independent Workloads: every replica of
 	// every role joins one Kueue pod group, so the deployment is admitted as a unit or not at all.
@@ -286,16 +344,80 @@ type ModelDeploymentRole struct {
 	// decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit
 	// resources scaled by the requested card count, so they are not expressible here at all — a
 	// stronger guarantee than refusing them, since a field that does not exist cannot be shadowed by
-	// a template either.
+	// the container fields below either.
 	//
 	// InstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards
 	// a replica wants is a property of the model being served, so two deployments on one InstanceType
 	// routinely want different counts.
 	Resources *ModelDeploymentRoleResources `json:"resources,omitempty" protobuf:"bytes,4,opt,name=resources"`
 
+	// Image is the container image to run. Leaving it empty is the ordinary case: the operator then
+	// synthesizes one from the pool's accelerator backend, the observed runtime version and the
+	// requested engine.
+	//
+	// +optional
+	// +k8s:validation:maxLength=512
+	Image string `json:"image,omitempty" protobuf:"bytes,7,opt,name=image"`
+
+	// ImagePullPolicy is the pull policy for Image.
+	//
+	// +optional
+	ImagePullPolicy core.PullPolicy `json:"imagePullPolicy,omitempty" protobuf:"bytes,9,opt,name=imagePullPolicy"`
+
+	// ImagePullSecrets are the secrets used to pull Image.
+	//
+	// +optional
+	// +listType=atomic
+	// +k8s:validation:maxItems=32
+	ImagePullSecrets []core.LocalObjectReference `json:"imagePullSecrets,omitempty" protobuf:"bytes,10,rep,name=imagePullSecrets"`
+
+	// Privileged runs the container privileged.
+	//
+	// +optional
+	Privileged bool `json:"privileged,omitempty" protobuf:"varint,11,opt,name=privileged"`
+
+	// Ports are the container ports to expose in addition to the engine's own. They do not
+	// reserve or select the transfer engine's runtime port window.
+	//
+	// +optional
+	// +patchMergeKey=port
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=port
+	// +listMapKey=protocol
+	Ports []ModelDeploymentPort `json:"ports,omitempty" patchStrategy:"merge" patchMergeKey:"port" protobuf:"bytes,12,rep,name=ports"`
+
+	// AdditionalVolumes are volumes mounted into the container alongside the operator's own.
+	//
+	// +optional
+	// +listType=atomic
+	AdditionalVolumes []ModelDeploymentAdditionalVolume `json:"additionalVolumes,omitempty" protobuf:"bytes,13,rep,name=additionalVolumes"` // nolint: lll
+
+	// Command replaces the whole argv, which is the TAKE-OVER tier: the user owns the whole
+	// command line, the operator synthesizes no engine argument and no client environment, the
+	// role is marked unmanaged and CacheAttached goes to Unknown. Arguments fold into Command;
+	// there is deliberately no Args, because a second append tier beside ExtraArgs would have no
+	// defined precedence.
+	//
+	// IT IS FROZEN AFTER CREATION, because it decides whether the operator configures this role at
+	// all: a role that supplies one is taken over by its author, which changes cache injection and
+	// what status can claim. The rest of the container fields are how the build is fetched, shaped
+	// and tuned, and stay editable.
+	//
+	// +optional
+	// +listType=atomic
+	Command []string `json:"command,omitempty" protobuf:"bytes,14,rep,name=command"`
+
 	// ExtraArgs is appended AFTER the operator-synthesized arguments. An entry naming a key the
 	// operator owns is REJECTED rather than merged: a silent merge produces two values for one
 	// connector argument and no way to tell which one won.
+	//
+	// The name stays ExtraArgs rather than Args because args would read as the whole argv, which is
+	// what Command means; the two tiers differ in whether the operator contributes anything at all.
+	//
+	// THIS LIST IS NOT READ WHEN COMMAND IS SET: appending to an argv the role's author replaced
+	// would put words into a command line they own, so the take-over tier takes the whole line and
+	// this field does nothing beside it.
 	//
 	// +listType=atomic
 	ExtraArgs []string `json:"extraArgs,omitempty" protobuf:"bytes,5,rep,name=extraArgs"`
@@ -303,42 +425,15 @@ type ModelDeploymentRole struct {
 	// Env is appended the same way and refused on the same terms. Keys the operator merely defaults
 	// are not owned: a user's value wins there and no rejection follows.
 	//
+	// There is ONE list here rather than an overlay beside it: the former second tier was appended
+	// and refused for owned names on exactly the same terms, so the nesting expressed a precedence
+	// that never existed.
+	//
 	// +patchMergeKey=name
 	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=name
-	Env []InstanceEnvVar `json:"env,omitempty" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,6,rep,name=env"`
-
-	// Template overlays the rendered container: the operator renders first and merges this on top.
-	//
-	//   - A non-empty Command is the TAKE-OVER tier — the user owns the whole argv, the operator
-	//     synthesizes no engine arguments and no client environment, the role is marked unmanaged and
-	//     CacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args,
-	//     because a second append tier beside ExtraArgs would have no defined precedence.
-	//   - It is MUTABLE, unlike the one an Instance carries, which is what makes a rollout possible
-	//     at all.
-	//   - EDITING IT RESTARTS EVERY ROLE, not just the replicas this template belongs to: every
-	//     replica of the deployment is one member of a single Kueue pod group whose members cannot
-	//     leave one at a time, so the group is rebuilt whole. The same is true of a `replicas` change,
-	//     of adding or removing a role, and of a departure this operator did not initiate — see
-	//     docs/reference/model-deployment.md under "Rollout is recreate".
-	//   - Its Resources are refused at admission. The accelerator request belongs in the role's own
-	//     Resources and the rest is derived from the InstanceType, so a template able to shadow either
-	//     would make the admission feasibility check read a ledger that does not match reality.
-	Template *ModelDeploymentTemplate `json:"template,omitempty" protobuf:"bytes,7,opt,name=template"`
-
-	// Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name
-	// is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable
-	// by typing a string is one typo away from silently changing. Two roles may share a kind and
-	// differ in name ONLY where that kind is Server, because a pair of servers is a set of equals and
-	// two prefillers are not: nothing that consumes these roles expresses a second prefiller, so a
-	// deployment declaring one would render a role no reader of the rendered configuration could
-	// reach. It defaults to Server, the shape a deployment written before disaggregation existed has,
-	// so such a deployment renders exactly as it did.
-	//
-	// +k8s:validation:default="server"
-	// +k8s:validation:enum=["server","prefill","decode"]
-	Kind ModelDeploymentRoleKind `json:"kind,omitempty" protobuf:"bytes,8,opt,name=kind,casttype=ModelDeploymentRoleKind"`
+	Env []ModelDeploymentEnvVar `json:"env,omitempty" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,6,rep,name=env"`
 }
 
 // ModelDeploymentRoleKind is what a role is told it is, in a prefill/decode disaggregated
@@ -365,81 +460,77 @@ const (
 	ModelDeploymentRoleKindDecode ModelDeploymentRoleKind = "decode"
 )
 
-// ModelDeploymentTemplate overlays the container the operator renders for one replica.
+// ModelDeploymentPort defines one port a role's replica exposes beside the engine's own.
 //
-// IT EXISTS BECAUSE InstanceTemplate'S Image IS REQUIRED AND THIS ONE'S CANNOT BE: a role that names
-// no image has one synthesized from the accelerator backend its InstanceType observed, so requiring
-// the field would force every user of the overlay to give up synthesis.
-//
-// The fields are InstanceTemplate's, minus VolumeMount, which nothing here reads: an unused field in
-// a schema is a promise, and strict decoding turns leaving it out into a clear refusal rather than a
-// value silently ignored.
-type ModelDeploymentTemplate struct {
-	// Image is the container image to run. Leaving it empty is the ordinary case: the operator then
-	// synthesizes one from the pool's accelerator backend, the observed runtime version and the
-	// requested engine.
+// IT CARRIES NO NAME, and that is a decision rather than an omission. The rendered container port is
+// named from the protocol and the number, so a name written here would be accepted by the schema and
+// then discarded — the pattern this API refuses everywhere else, a promise broken quietly. Two ports
+// of one role are told apart by their numbers, which the webhook already requires to be unique.
+type ModelDeploymentPort struct {
+	// Port is the port number to expose on the replica.
 	//
-	// +optional
-	// +k8s:validation:maxLength=512
-	Image string `json:"image,omitempty" protobuf:"bytes,1,opt,name=image"`
+	// The bounds are the container port's own. Without them a zero or out-of-range number is
+	// admitted here and refused later by the API server, on the rendered Pod, as a per-pass create
+	// failure naming a container port instead of an admission error naming this field.
+	//
+	// +k8s:validation:minimum=1
+	// +k8s:validation:maximum=65535
+	Port int32 `json:"port" protobuf:"varint,1,name=port"`
 
-	// ImagePullPolicy is the pull policy for Image.
+	// Protocol is the protocol to use for the port.
 	//
-	// +optional
-	ImagePullPolicy core.PullPolicy `json:"imagePullPolicy,omitempty" protobuf:"bytes,2,opt,name=imagePullPolicy"`
+	// +k8s:validation:enum=["TCP","UDP","SCTP"]
+	// +k8s:validation:default="TCP"
+	Protocol core.Protocol `json:"protocol,omitempty" protobuf:"bytes,2,opt,name=protocol"`
+}
 
-	// Command replaces the whole argv, which is the TAKE-OVER tier described on the role's Template
-	// field. The operator contributes no engine argument and no client environment.
-	//
-	// +optional
-	Command []string `json:"command,omitempty" protobuf:"bytes,3,rep,name=command"`
+// ModelDeploymentEnvVar defines one environment variable appended to a role's replica.
+type ModelDeploymentEnvVar struct {
+	// Name is the name of the environment variable; each name in one role must be unique.
+	Name string `json:"name" protobuf:"bytes,1,name=name"`
 
-	// Privileged runs the container privileged.
-	//
-	// +optional
-	Privileged bool `json:"privileged,omitempty" protobuf:"varint,4,opt,name=privileged"`
+	// Value is the value of the environment variable.
+	Value string `json:"value" protobuf:"bytes,2,name=value"`
+}
 
-	// Ports are the container ports to expose in addition to the engine's own. They do not
-	// reserve or select the transfer engine's runtime port window.
+// ModelDeploymentAdditionalVolume defines one volume to mount in a role's replica besides the
+// operator's own. One of the sources below must be set; an entry naming none is skipped by the
+// render rather than refused.
+type ModelDeploymentAdditionalVolume struct {
+	// MountPath is the absolute in-container path to mount the volume at. It must not duplicate
+	// another entry's path, nor a path the operator's own volumes already mount.
 	//
-	// +optional
-	// +patchMergeKey=port
-	// +patchStrategy=merge
-	// +listType=map
-	// +listMapKey=port
-	// +listMapKey=protocol
-	Ports []InstancePort `json:"ports,omitempty" patchStrategy:"merge" patchMergeKey:"port" protobuf:"bytes,5,rep,name=ports"` // nolint: lll
+	// +required
+	// +k8s:validation:pattern="^(/[^/]+)+$"
+	// +k8s:validation:maxLength=1024
+	MountPath string `json:"mountPath" protobuf:"bytes,1,name=mountPath"`
 
-	// Env are environment entries merged on top of the role's own. A name the operator owns is
-	// refused here just as it is in the role's Env: the renderer drops owned names from both tiers,
-	// so admission has to refuse both, or one path becomes a silent drop.
-	//
-	// +optional
-	// +patchMergeKey=name
-	// +patchStrategy=merge
-	// +listType=map
-	// +listMapKey=name
-	Env []InstanceEnvVar `json:"env,omitempty" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,6,rep,name=env"`
+	// ReadOnly mounts the volume read-only.
+	ReadOnly bool `json:"readOnly,omitempty" protobuf:"varint,2,opt,name=readOnly"`
 
-	// Resources is present ONLY so that supplying it can be refused with a message that says where
-	// the request belongs. Dropping the field would let strict decoding refuse it earlier and more
-	// cheaply, but an unknown-field error says "not here" while the webhook's says "it goes in the
-	// role's own Resources" — and mistaking the template for the place resources live is the whole
-	// reason anyone writes this field.
+	// SubPath mounts a relative path inside the volume rather than its root.
+	// It must not be absolute nor contain a ".." element.
 	//
-	// +optional
-	Resources *InstanceResources `json:"resources,omitempty" protobuf:"bytes,7,opt,name=resources"`
+	// The pattern below enforces only the first half. A ".." element cannot be excluded by this
+	// engine's regular expressions, which have no negative lookahead, so admission carries that
+	// half — see the webhook. Both halves are refused there rather than left to the API server's
+	// rejection of the rendered Pod, which arrives as a per-pass create failure naming a
+	// volumeMount instead of an admission error naming this field.
+	//
+	// +k8s:validation:pattern="^[^/].*$"
+	// +k8s:validation:maxLength=1024
+	SubPath string `json:"subPath,omitempty" protobuf:"bytes,3,opt,name=subPath"`
 
-	// ImagePullSecret is the secret used to pull Image.
-	//
-	// +optional
-	ImagePullSecret *core.LocalObjectReference `json:"imagePullSecret,omitempty" protobuf:"bytes,8,opt,name=imagePullSecret"`
+	// ConfigMap is the reference to the ConfigMap to mount, in the same namespace.
+	ConfigMap *core.LocalObjectReference `json:"configMap,omitempty" protobuf:"bytes,4,opt,name=configMap"`
 
-	// AdditionalVolumes are volumes mounted into the container alongside the operator's own.
-	//
-	// +optional
-	// +listType=atomic
-	AdditionalVolumes []InstanceAdditionalVolume `json:"additionalVolumes,omitempty" protobuf:"bytes,9,rep,name=additionalVolumes"` // nolint: lll
+	// Secret is the reference to the Secret to mount, in the same namespace.
+	Secret *core.LocalObjectReference `json:"secret,omitempty" protobuf:"bytes,5,opt,name=secret"`
+
+	// HostPath is the path on the Kubernetes Node to mount. It crosses the node boundary: the
+	// mount reaches the node's own filesystem rather than a namespaced object, so what it exposes
+	// is decided by what the node carries rather than by anything this API can see.
+	HostPath *core.HostPathVolumeSource `json:"hostPath,omitempty" protobuf:"bytes,6,opt,name=hostPath"`
 }
 
 // ModelDeploymentRoleResources is what one replica of a role asks of an accelerator.
@@ -537,7 +628,7 @@ type ModelDeploymentRouter struct {
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,2,opt,name=replicas"`
 
 	// Image overrides the router's container image. Empty means the operator assembles one from Name,
-	// the same way a role's image is assembled when its template names none.
+	// the same way a role's image is assembled when the role names none.
 	//
 	// +optional
 	// +k8s:validation:maxLength=512
@@ -552,6 +643,18 @@ type ModelDeploymentRouter struct {
 	// +optional
 	// +listType=atomic
 	ExtraArgs []string `json:"extraArgs,omitempty" protobuf:"bytes,4,rep,name=extraArgs"`
+
+	// ImagePullPolicy is the pull policy for Image.
+	//
+	// +optional
+	ImagePullPolicy core.PullPolicy `json:"imagePullPolicy,omitempty" protobuf:"bytes,5,opt,name=imagePullPolicy"`
+
+	// ImagePullSecrets are the secrets used to pull Image.
+	//
+	// +optional
+	// +listType=atomic
+	// +k8s:validation:maxItems=32
+	ImagePullSecrets []core.LocalObjectReference `json:"imagePullSecrets,omitempty" protobuf:"bytes,6,rep,name=imagePullSecrets"`
 }
 
 // The routers a ModelDeployment can name, which are the values of ModelDeploymentRouter.Name's enum.

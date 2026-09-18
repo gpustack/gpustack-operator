@@ -35,12 +35,13 @@ metadata:
 spec:
   model:
     name: Qwen/Qwen2.5-72B-Instruct      # served, never provisioned
-  engine: vllm                           # vllm | sglang
-  engineVersion: "0.27.1"                # free-form; you guarantee alignment
+  engine:                                # vllm | sglang
+    name: vllm
+    version: "0.27.1"                    # free-form; you guarantee alignment
   kvCache:                               # OPTIONAL; omit it and no shared pool is attached
     poolRef:
       name: team-a-dram                  # a KVCachePoolBinding IN THIS NAMESPACE
-    connector: auto                      # the only value; defaulted
+    connector: mooncake                  # the only value; defaulted
   roles:
     - name: server
       replicas: 4
@@ -72,7 +73,7 @@ and it lives in the validating webhook rather than in the schema so the refusal 
 is, and so tracking an upstream number is not a schema change every stored object must survive.
 
 `replicas` and `instanceType` are structured fields and stay so: they are inputs to Kueue PodSet
-counts and flavor selection, so a template able to shadow them would make the feasibility check read
+counts and flavor selection, so an override able to shadow them would make the feasibility check read
 a ledger that does not match reality.
 
 Each replica's accelerator request lives in `roles[].resources`, whose fields mirror
@@ -153,8 +154,9 @@ metadata:
 spec:
   model:
     name: Qwen/Qwen2.5-72B-Instruct
-  engine: vllm                           # the native P/D path is vLLM only
-  engineVersion: "0.27.1"
+  engine:                                # the native P/D path is vLLM only
+    name: vllm
+    version: "0.27.1"
   router:
     name: llm-d                          # required to pair the roles; the only value today
   roles:
@@ -227,7 +229,7 @@ The point-to-point leg renders `tcp` unless the deployment says otherwise:
 
 ```yaml
 spec:
-  directTransfer:
+  kvTransfer:
     protocol: rdma                     # unset renders "tcp"
 ```
 
@@ -255,7 +257,7 @@ this leg to configure.
 Editing it [restarts every role](#rollout-is-recreate): the value renders into both ends' arguments,
 so every pod group rebuilds. With roles split across `instanceType`s the groups rebuild
 independently, and a prefiller and a decoder can disagree on the protocol until both converge — the
-same window an `engineVersion` edit opens.
+same window an `engine.version` edit opens.
 
 ### What every Pod of the group carries
 
@@ -319,7 +321,7 @@ over](#prefill-and-decode).
 
 **The direct transfer across manufacturers follows a different rule — not "two manufacturers",
 but "is either half Ascend".** It is rendered per role, and the render excludes Ascend
-(`modelDeploymentUsesDirectTransfer`): an Ascend half renders without it while the other half
+(`modelDeploymentUsesKVTransfer`): an Ascend half renders without it while the other half
 renders with it, and the transfer never forms. Two non-Ascend roles both render it — NVIDIA and
 AMD, say — and what the engines then do is upstream's answer, unmeasured here.
 
@@ -384,12 +386,12 @@ Without one, users patch the rendered Pod and the reconcile loop silently overwr
 | Tier | Field | Semantics |
 |---|---|---|
 | append | `roles[].extraArgs`, `roles[].env` | appended **after** the operator-synthesized arguments; a key the operator owns is refused, never merged |
-| overlay | `roles[].template` | the operator renders first, then merges this overlay on top |
-| take over | `roles[].template.command` | the user owns the whole argv; the operator synthesizes **no** engine argument and **no** client environment |
+| overlay | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes` | the operator renders first, then merges this overlay on top |
+| take over | `roles[].command` | the user owns the whole argv; the operator synthesizes **no** engine argument and **no** client environment |
 
-Unlike the `Instance` that shares the `InstanceTemplate` type, this template is **mutable** — that
-immutability is a rule the Instance webhook enforces, not a property of the type, and dropping it is
-what makes a rollout possible at all.
+Unlike the `Instance` that keeps its pod shape inside an `InstanceTemplate`, a role's Pod fields sit
+on the role itself and are **mutable** — the Instance's immutability is a rule its webhook enforces,
+not a property of the type, and dropping it here is what makes a rollout possible at all.
 
 Arguments fold into `command`; there is deliberately no `args`. A second append tier beside
 `extraArgs` would have no defined precedence, and would make the take-over tier ambiguous, since
@@ -411,7 +413,7 @@ cache client for that role, so it does not report on one it did not render.
 
 ⚠️ **A role that owns its whole argv can name any reuse domain, and this operator does not stop it.**
 `MOONCAKE_TENANT_ID` is refused in `roles[].env` on the engines that own it — the table under
-[What the operator owns](#what-the-operator-owns) is the authority — but `template.command` is a
+[What the operator owns](#what-the-operator-owns) is the authority — but `roles[].command` is a
 program and its arguments, so the same value travels inside a shell assignment or inside the script
 the argv names, and admission has nothing to read either way.
 
@@ -444,7 +446,7 @@ name follows the accelerator backend, so an Ascend pool and an NVIDIA pool runni
 the same keys and differ only in the connector the operator names.
 
 **Owned** means the operator refuses a user-supplied duplicate, because two values for one connector
-argument cannot be told apart. The refusal names the key, the engine, and `template.command` as the
+argument cannot be told apart. The refusal names the key, the engine, and `roles[].command` as the
 way to own it instead.
 
 **Defaulted** is the other case, and `MC_TE_METRIC` is the one that matters: the operator sets it to
@@ -488,25 +490,25 @@ fault: nothing in that engine's rendering emits the stream.
 
 The wildcard addresses are bind addresses only. The role's Service hostname with ports 5557 and
 5558 is the dialable form published in status, and both ports are declared on the producing
-container. A decode-only role does not need to publish. A role with `template.command` receives none
+container. A decode-only role does not need to publish. A role with `roles[].command` receives none
 of this configuration because the operator does not own its command line.
 
 Nothing is created beside the Pod, no RBAC for one is needed, and the configuration's lifetime is
 exactly the replica's. It is also part of the Pod's spec hash, which is what moves the replicas when
 the pool's published endpoint changes.
 
-It sits under `/etc` rather than in the image's workspace so that a template's own volumes are
+It sits under `/etc` rather than in the image's workspace so that a role's own volumes are
 unlikely to collide — but an overlay that mounts over that path replaces the configuration silently,
 and the owned `MOONCAKE_CONFIG_PATH` cannot protect against it. SGLang gets no file at all; its
 configuration travels entirely in the environment.
 
 ## The runner image is a formula
 
-A role with no `template.image` gets one assembled from the engine the deployment declares and the
+A role with no `roles[].image` gets one assembled from the engine the deployment declares and the
 hardware its InstanceType observed. A stated image always wins.
 
 ```text
-gpustack/runner:<backend><runtimeVersion>[-<variant>]-<engine><engineVersion>
+gpustack/runner:<backend><runtimeVersion>[-<variant>]-<engine><version>
 ```
 
 `gpustack/runner:cuda12.9-vllm0.27.1` on an NVIDIA pool; `gpustack/runner:cann9.0-910b-sglang0.5.18`
@@ -530,9 +532,10 @@ The variant applies to **Ascend only**: `310P` to `310p`, `910B` to `910b`, `910
 `950`. Across the whole matrix the variant is populated for `cann` alone. Ascend `910` and `310B`
 publish none, so a role on one of those must name an image.
 
-`engineVersion` is required and non-empty — a schema `minLength`, not a webhook rule — and otherwise
-**free-form**: the operator checks neither that the combination was ever published nor that the
-version supports the installed driver. You guarantee
+`engine.version` is optional in the schema, and the obligation sits with the roles: a role that
+names no image of its own has one synthesized from this version, so admission refuses an empty
+version beside such a role. It is otherwise **free-form**: the operator checks neither that the
+combination was ever published nor that the version supports the installed driver. You guarantee
 version alignment; a bad combination surfaces as an `ImagePullBackOff` on a tag that does not exist.
 
 It is per deployment rather than per role, which is what lets one engine and one version assemble a
@@ -577,16 +580,16 @@ this deployment being run right now*.**
 
 | Frozen | Editable |
 |---|---|
-| `model`, `engine`, `kvCache` | `engineVersion`, `directTransfer` |
+| `model`, `engine.name`, `kvCache` | `engine.version`, `kvTransfer` |
 | the set of roles, and each role's `name` and `kind` | `roles[].replicas` |
 | `roles[].instanceType` | `roles[].extraArgs`, `roles[].env` |
-| `roles[].resources` | the whole `roles[].template` except `command` |
-| `roles[].template.command` | labels and annotations |
+| `roles[].resources` | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes` |
+| `roles[].command` | labels and annotations |
 
 `roles[].resources` is frozen against the criterion rather than by it, and that is marked here so it
 does not read as an oversight: it does not say which deployment this is, but changing it renegotiates
 the scheduling, which is not materially different from deleting and recreating. Its mirror image is
-`template.privileged`, which the criterion leaves editable even though a different argument could
+`roles[].privileged`, which the criterion leaves editable even though a different argument could
 move it.
 
 **What to do instead of editing one is create another deployment.** A frozen field is not a lock
@@ -599,7 +602,7 @@ by precedent and stops meaning anything.
 
 > **A merge patch that omits a frozen field is an edit to that frozen field.** `roles` is a list, and
 > `kubectl patch --type=merge` replaces a list wholesale rather than merging into it — so a role
-> restated without its `template` sets `template.command` to null, and the edit is refused naming
+> restated without its `command` sets `command` to null, and the edit is refused naming
 > that field rather than the one you meant to change.
 >
 > Change one field with a JSON patch (`--type=json`, `/spec/roles/0/replicas`), or send the whole
@@ -617,7 +620,7 @@ on another is a second.
 **How expensive an edit is depends on which shape you are in**, and that is worth knowing where it is
 not where anyone would look for it:
 
-| Shape | What a `replicas` or `template` edit rebuilds |
+| Shape | What a `replicas` or role-field edit rebuilds |
 |---|---|
 | every role on one `instanceType` | every role of the deployment |
 | roles split across types | only the group whose shape moved; the others keep serving |
@@ -639,7 +642,7 @@ rebuilt whole on the next pass.
 | Cause | Who initiates it |
 |---|---|
 | a `replicas` change, or adding or removing a role | you |
-| a `template` edit, or any change to a replica's rendered Pod | you |
+| a role-field edit, or any change to a replica's rendered Pod | you |
 | **Kueue preempting** the deployment for a higher-priority workload | the scheduler |
 | **a node being drained**, cordoned or replaced | the cluster |
 | **the kubelet evicting** a replica under node pressure | the node |
@@ -663,7 +666,7 @@ depends on the `InstanceType` the role names.
 |---|---|
 | more than 10 roles | Kueue's 10-PodSet cap on `Workload.spec.podSets` as the cause, not merely the number |
 | two roles sharing a `name` | the duplicate — refused by the **schema**, since `roles` is a list keyed on `name`, so this one never reaches the webhook |
-| an edit to an identity field — `model`, `engine`, `kvCache`, or the shape of the roles | the field path, and that a different value describes a different **deployment**, which is created rather than edited. See [Which fields are the deployment's identity](#which-fields-are-the-deployments-identity) |
+| an edit to an identity field — `model`, `engine.name`, `kvCache`, or the shape of the roles | the field path, and that a different value describes a different **deployment**, which is created rather than edited. See [Which fields are the deployment's identity](#which-fields-are-the-deployments-identity) |
 | a resource mode the named `InstanceType` does not offer | the mode and the type — a slice on a type that offers no slicing, a partition profile on a type that cannot partition, or one outside its profile inventory, with the offered list |
 | a request over the type's per-unit ceiling | the ceiling itself, not only that the request was too large, so the next attempt is not a guess |
 | an explicit `accelerator: 0` on an acceleratable `InstanceType` shared by another role | the accelerator field, the shared type, and two recommended remedies: request at least one accelerator or move the CPU-only role to a non-acceleratable type |
@@ -672,9 +675,9 @@ depends on the `InstanceType` the role names.
 | a role whose `<deployment>-<role>` is not a DNS-1035 label | the combined **Service** name, which is what the pair becomes; over 63 characters or carrying a dot from a subdomain-shaped deployment name. A role the object **already had** is exempt, so a rule added later cannot strand a stored object |
 | `kind: server` beside any other kind | that a server serves whole requests by itself, so the combination describes no arrangement |
 | a `kind` the engine has no term for | the engine and the kind — today, `prefill` or `decode` on SGLang |
-| an owned key in `extraArgs` | the key, the engine, and `template.command` as the way to own it |
+| an owned key in `extraArgs` | the key, the engine, and `roles[].command` as the way to own it |
 | an owned name in `env` | the same three |
-| `template.resources` | `roles[].resources` and `roles[].instanceType` as where the request is decided |
+| a `template` field on a role | the unknown field itself — the block is gone, so strict decoding refuses it rather than a webhook rule |
 | a partition profile together with a slice percentage | both slice fields; one accelerator cannot serve both |
 | a `poolRef` outside this namespace | nothing — it is unrepresentable in the type |
 | a self-declared reuse domain | nothing — the field does not exist |
@@ -712,7 +715,7 @@ configured, so a NetworkPolicy or port reservation has to be a range rather than
 `transfer_metadata.cpp` "Local segment descriptor not found" line at startup is an `ERROR` that is
 benign on a client mounting no segment of its own — which is what every replica here is.
 
-**A replica serves on port 8000** unless the role's template names its own container port. The
+**A replica serves on port 8000** unless the role names its own container port. The
 Service and `status.endpoint` keep that external port. On a managed native-vLLM decoder the routing
 proxy owns it and vLLM listens behind the proxy on an internal port; every other role tells the engine
 itself to open the external port. The startup, readiness and liveness probes follow the external
@@ -720,7 +723,7 @@ listener, so a decoder becomes Ready only when the proxy can reach the engine.
 
 ### Transfer ports are runtime-selected
 
-`roles[].template.ports` exposes container ports for the engine and Service. It neither reserves nor
+`roles[].ports` exposes container ports for the engine and Service. It neither reserves nor
 selects transfer-engine ports. AscendDirect binds its transfer ports inside the container's own
 network namespace, so a declaration here cannot prevent a collision with another process in that
 same namespace.

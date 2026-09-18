@@ -2,12 +2,14 @@
 
 package v1alpha1
 
-// ModelDeploymentDirectTransferApplyConfiguration represents a declarative configuration of the ModelDeploymentDirectTransfer type for use
+// ModelDeploymentKVTransferApplyConfiguration represents a declarative configuration of the ModelDeploymentKVTransfer type for use
 // with apply.
 //
-// ModelDeploymentDirectTransfer carries the settings of the point-to-point KV transfer leg
-// between a prefill role and a decode role.
-type ModelDeploymentDirectTransferApplyConfiguration struct {
+// ModelDeploymentKVTransfer carries the settings of the point-to-point KV transfer leg
+// between a prefill role and a decode role. It composes with a shared store rather than excluding
+// one: both legs may be configured on one deployment, and the synthesized connector carries the
+// pair together.
+type ModelDeploymentKVTransferApplyConfiguration struct {
 	// Protocol is the transport both ends of the leg are told to use, in the mooncake
 	// configuration's own spelling, e.g. "tcp" or "rdma".
 	//
@@ -23,7 +25,7 @@ type ModelDeploymentDirectTransferApplyConfiguration struct {
 	// - UNSET RENDERS "tcp", the transport every mooncake build carries. The default lives in
 	// the renderer rather than in this schema, so the stored object holds exactly what was
 	// asked.
-	// - IT IS READ ONLY ON THE DIRECT-TRANSFER LEG: a managed llm-d router in front of vLLM
+	// - IT IS READ ONLY ON THE POINT-TO-POINT LEG: a managed llm-d router in front of vLLM
 	// prefill/decode roles. On every other shape -- sglang, Ascend, or no router -- the value
 	// is accepted and renders nothing, which is stated here because an accepted field that
 	// silently does nothing is a promise broken quietly.
@@ -31,20 +33,20 @@ type ModelDeploymentDirectTransferApplyConfiguration struct {
 	// argv, so a change rebuilds every Kueue pod group of the deployment. With roles split
 	// across InstanceTypes the groups rebuild independently, and a mixed-protocol window
 	// between a prefiller and a decoder exists until both converge -- the same window an
-	// engineVersion edit already opens.
+	// engine version edit already opens.
 	Protocol *string `json:"protocol,omitempty"`
 }
 
-// ModelDeploymentDirectTransferApplyConfiguration constructs a declarative configuration of the ModelDeploymentDirectTransfer type for use with
+// ModelDeploymentKVTransferApplyConfiguration constructs a declarative configuration of the ModelDeploymentKVTransfer type for use with
 // apply.
-func ModelDeploymentDirectTransfer() *ModelDeploymentDirectTransferApplyConfiguration {
-	return &ModelDeploymentDirectTransferApplyConfiguration{}
+func ModelDeploymentKVTransfer() *ModelDeploymentKVTransferApplyConfiguration {
+	return &ModelDeploymentKVTransferApplyConfiguration{}
 }
 
 // WithProtocol sets the Protocol field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Protocol field is set to the value of the last call.
-func (b *ModelDeploymentDirectTransferApplyConfiguration) WithProtocol(value string) *ModelDeploymentDirectTransferApplyConfiguration {
+func (b *ModelDeploymentKVTransferApplyConfiguration) WithProtocol(value string) *ModelDeploymentKVTransferApplyConfiguration {
 	b.Protocol = &value
 	return b
 }

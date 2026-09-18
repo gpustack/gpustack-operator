@@ -64,19 +64,30 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// Unset and false both mean no ledger, and unset renders NO flag rather than an explicit false.
 	MultiTenancy *bool `json:"multiTenancy,omitempty"`
 	// ExtraArgs passes flags this API does not enumerate straight through to the leader, after
-	// the derived ones. A key that collides with a flag rendered from a field above is refused
-	// at admission, because two sources for one flag make the rendered command ambiguous.
+	// the derived ones. Each entry is one flag token of its own, "-flag" or "-flag=value", and the
+	// entries render verbatim in the order written. An entry whose key — what precedes the first
+	// "=" once the leading dashes are off — collides with a flag rendered from a field above is
+	// refused at admission, because two sources for one flag make the rendered command ambiguous.
 	//
 	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
-	// rendered into the leader container's argv as -key=value, readable by anyone who can reach the
-	// Pod or the Deployment, for the life of the object. A credential does not belong here, and
-	// since this operator renders no flag that carries one, this field is the only way one arrives.
-	ExtraArgs map[string]string `json:"extraArgs,omitempty"`
-	// Offload turns on writing evicted keys to the members' local disk tier. It is the leader's
-	// half of a pair: the other half is members[].localDisk, which says where on each node those
-	// bytes go, and admission refuses either half alone because the store degrades on both
-	// mismatches without reporting either.
-	Offload *KVCacheBackendLeaderOffloadApplyConfiguration `json:"offload,omitempty"`
+	// rendered into the leader container's argv, readable by anyone who can reach the Pod or the
+	// Deployment, for the life of the object. A credential does not belong here, and since this
+	// operator renders no flag that carries one, this field is the only way one arrives.
+	ExtraArgs []string `json:"extraArgs,omitempty"`
+	// ExtraEnv passes environment variables this API does not enumerate straight through to the
+	// leader container. The leader reads a handful of its settings from the environment rather
+	// than from flags — the store's local snapshot path is one — and this is the hatch for
+	// whichever of those grows a use this API has no field for.
+	//
+	// A name this operator already renders is REFUSED at admission, for the same reason a
+	// colliding ExtraArgs key is: Kubernetes accepts a container carrying one name twice and
+	// leaves the winner to the runtime, so the collision would not even be reported.
+	//
+	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
+	// rendered into the leader container's environment, readable by anyone who can reach the Pod
+	// or the Deployment, for the life of the object. A credential does not belong here, and since
+	// this operator renders no variable that carries one, this field is the only way one arrives.
+	ExtraEnv []InstanceEnvVarApplyConfiguration `json:"extraEnv,omitempty"`
 }
 
 // KVCacheBackendLeaderApplyConfiguration constructs a declarative configuration of the KVCacheBackendLeader type for use with
@@ -117,24 +128,25 @@ func (b *KVCacheBackendLeaderApplyConfiguration) WithMultiTenancy(value bool) *K
 	return b
 }
 
-// WithExtraArgs puts the entries into the ExtraArgs field in the declarative configuration
+// WithExtraArgs adds the given value to the ExtraArgs field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
-// If called multiple times, the entries provided by each call will be put on the ExtraArgs field,
-// overwriting an existing map entries in ExtraArgs field with the same key.
-func (b *KVCacheBackendLeaderApplyConfiguration) WithExtraArgs(entries map[string]string) *KVCacheBackendLeaderApplyConfiguration {
-	if b.ExtraArgs == nil && len(entries) > 0 {
-		b.ExtraArgs = make(map[string]string, len(entries))
-	}
-	for k, v := range entries {
-		b.ExtraArgs[k] = v
+// If called multiple times, values provided by each call will be appended to the ExtraArgs field.
+func (b *KVCacheBackendLeaderApplyConfiguration) WithExtraArgs(values ...string) *KVCacheBackendLeaderApplyConfiguration {
+	for i := range values {
+		b.ExtraArgs = append(b.ExtraArgs, values[i])
 	}
 	return b
 }
 
-// WithOffload sets the Offload field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Offload field is set to the value of the last call.
-func (b *KVCacheBackendLeaderApplyConfiguration) WithOffload(value *KVCacheBackendLeaderOffloadApplyConfiguration) *KVCacheBackendLeaderApplyConfiguration {
-	b.Offload = value
+// WithExtraEnv adds the given value to the ExtraEnv field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the ExtraEnv field.
+func (b *KVCacheBackendLeaderApplyConfiguration) WithExtraEnv(values ...*InstanceEnvVarApplyConfiguration) *KVCacheBackendLeaderApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithExtraEnv")
+		}
+		b.ExtraEnv = append(b.ExtraEnv, *values[i])
+	}
 	return b
 }

@@ -1435,7 +1435,7 @@ func selectKVCacheBackendCapacity(
 // same figure with no way to tell the two apart.
 func kvCacheBackendHasDiskTier(managed *workercore.KVCacheBackendManaged) bool {
 	for i := range managed.Members {
-		if managed.Members[i].LocalDisk != nil {
+		if len(managed.Members[i].LocalDisks) > 0 {
 			return true
 		}
 	}

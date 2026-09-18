@@ -281,11 +281,6 @@ func (in KVCacheBackendLeaderHighAvailability) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
-func (in KVCacheBackendLeaderOffload) OpenAPIModelName() string {
-	return "ai.gpustack.worker.v1alpha1.KVCacheBackendLeaderOffload"
-}
-
-// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in KVCacheBackendLeaderSnapshot) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.KVCacheBackendLeaderSnapshot"
 }
@@ -386,6 +381,11 @@ func (in KVCachePoolBindingPoolReference) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in KVCachePoolBindingQuota) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.KVCachePoolBindingQuota"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in KVCachePoolBindingReference) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.KVCachePoolBindingReference"
 }
@@ -436,8 +436,18 @@ func (in ModelDeployment) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
-func (in ModelDeploymentDirectTransfer) OpenAPIModelName() string {
-	return "ai.gpustack.worker.v1alpha1.ModelDeploymentDirectTransfer"
+func (in ModelDeploymentAdditionalVolume) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentAdditionalVolume"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentEngine) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentEngine"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentEnvVar) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentEnvVar"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
@@ -456,6 +466,11 @@ func (in ModelDeploymentKVCacheStatus) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentKVTransfer) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentKVTransfer"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentList) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentList"
 }
@@ -463,6 +478,11 @@ func (in ModelDeploymentList) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentModel) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentModel"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentPort) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentPort"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
@@ -513,9 +533,4 @@ func (in ModelDeploymentSpec) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentStatus) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentStatus"
-}
-
-// OpenAPIModelName returns the OpenAPI model name for this type.
-func (in ModelDeploymentTemplate) OpenAPIModelName() string {
-	return "ai.gpustack.worker.v1alpha1.ModelDeploymentTemplate"
 }

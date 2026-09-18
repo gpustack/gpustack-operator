@@ -22,7 +22,7 @@ func TestMetricsForEngine_CoversEveryAPIEngine(t *testing.T) {
 				continue
 			}
 			spec := version.Schema.OpenAPIV3Schema.Properties["spec"]
-			engine := spec.Properties["engine"]
+			engine := spec.Properties["engine"].Properties["name"]
 			for _, value := range engine.Enum {
 				engines = append(engines, strings.Trim(string(value.Raw), `"`))
 			}

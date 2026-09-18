@@ -45,9 +45,9 @@ func newRenderBinding(mutate ...func(*workercore.KVCachePoolBinding)) *workercor
 	kvcpb := &workercore.KVCachePoolBinding{
 		ObjectMeta: meta.ObjectMeta{Name: "shared-kv", Namespace: "team-a"},
 		Spec: workercore.KVCachePoolBindingSpec{
-			PoolRef:      workercore.KVCachePoolBindingPoolReference{Name: "shared"},
-			Domain:       workercore.KVCachePoolBindingDomain{Name: "chat", BlockSize: 256, Dtype: "bfloat16"},
-			QuotaCeiling: resource.MustParse("100Gi"),
+			PoolRef: workercore.KVCachePoolBindingPoolReference{Name: "shared"},
+			Domain:  workercore.KVCachePoolBindingDomain{Name: "chat", BlockSize: 256, Dtype: "bfloat16"},
+			Quota:   workercore.KVCachePoolBindingQuota{Ceiling: resource.MustParse("100Gi")},
 		},
 		Status: workercore.KVCachePoolBindingStatus{
 			Phase:        KVCachePoolPhaseReady,

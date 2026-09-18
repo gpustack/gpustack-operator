@@ -292,8 +292,6 @@ func TestPodKVCacheInject_StampRecordsWhatWasDecided(t *testing.T) {
 	assert.Equal(t, "file", record.Vehicle)
 	assert.Equal(t, "team-a-chat", record.Domain)
 	assert.True(t, record.TenantInjected)
-	assert.NotContains(t, pod.Annotations[KVCacheInjectedAnnotationKey], `"engineVersion"`,
-		"the stamp does not claim an engine version admission never inspected")
 }
 
 // TestPodKVCacheInject_StampTenantFollowsTheEngine is the paired control for the field above.

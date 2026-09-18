@@ -95,7 +95,7 @@ func ModelDeploymentImageVariant(manufacturer, family string) (string, bool) {
 // The shape is a formula, verified against the runner project's own 338 published records with zero
 // mismatches:
 //
-//	gpustack/runner:<backend><runtimeVersion>[-<variant>]-<engine><engineVersion>
+//	gpustack/runner:<backend><runtimeVersion>[-<variant>]-<engine><version>
 //
 // It reads no release matrix, so it cannot check that the combination was ever published. That is
 // the stated trade: the user guarantees version alignment, and the failure it declines to prevent is
@@ -107,9 +107,9 @@ func ModelDeploymentImageVariant(manufacturer, family string) (string, bool) {
 // backend or a family with no variant will never resolve and the role has to name an image, while an
 // unobserved runtime version resolves on a later reconcile.
 func SynthesizeModelDeploymentImage(
-	engine, engineVersion string, detail workercore.InstanceTypeDetail,
+	engine, version string, detail workercore.InstanceTypeDetail,
 ) (string, error) {
-	if engineVersion == "" {
+	if version == "" {
 		return "", fmt.Errorf("engine version is empty")
 	}
 	if detail.Manufacturer == "" {
@@ -141,7 +141,7 @@ func SynthesizeModelDeploymentImage(
 	}
 	tag.WriteString("-")
 	tag.WriteString(engine)
-	tag.WriteString(engineVersion)
+	tag.WriteString(version)
 
 	return modelDeploymentRunnerRepository + ":" + tag.String(), nil
 }

@@ -128,8 +128,8 @@ fi
 role() {
   local name="$1" kind="$2" managed="$3"
   printf '  - name: %s\n    kind: %s\n    instanceType: %s\n    replicas: 1\n' "$name" "$kind" "$IT"
-  printf '    template:\n      image: %s\n' "$IMAGE"
-  [ "$managed" = yes ] || printf '      command: ["/pause"]\n'
+  printf '    image: %s\n' "$IMAGE"
+  [ "$managed" = yes ] || printf '    command: ["/pause"]\n'
 }
 
 apply_md() {
@@ -142,8 +142,9 @@ metadata:
   name: ${name}
   namespace: ${NS}
 spec:
-  engine: ${engine}
-  engineVersion: "0.11.0"
+  engine:
+    name: ${engine}
+    version: "0.11.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:

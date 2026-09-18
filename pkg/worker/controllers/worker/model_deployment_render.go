@@ -72,7 +72,7 @@ const (
 	// before a spec change is told from one built after it.
 	modelDeploymentPodSpecHashAnnotation = "modeldeployment." + systemname.LabelPrefix + "pod-spec-hash"
 
-	// modelDeploymentDefaultPort is the port a replica serves on when the role's template names
+	// modelDeploymentDefaultPort is the port a replica serves on when the role names
 	// none, and it is RENDERED INTO THE ENGINE'S OWN LISTEN ARGUMENT rather than left to the engine
 	// to pick, because the supported engines do not agree on a default. vLLM opens 8000 on every
 	// interface; SGLang opens 30000 on the loopback address alone, which neither a Service endpoint
@@ -257,22 +257,15 @@ func modelDeploymentSelectorLabels(
 func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput) (*core.Pod, error) {
 	md, role := in.Deployment, in.Role
 
-	tmpl := role.Template
-	if tmpl == nil {
-		// A role may name no template at all and still render, because the image can be
-		// synthesized. Every other template field then takes its zero value.
-		tmpl = new(workercore.ModelDeploymentTemplate)
-	}
-
 	// A STATED IMAGE ALWAYS WINS, and synthesis is the fallback rather than the rule: it is how a
 	// role runs a private build, a vendor with no published runner backend, or an Ascend family the
 	// matrix does not carry. The formula reads no release matrix, so it cannot know the tag it
 	// assembles was ever published - that is the accepted trade, and its failure is an
 	// ImagePullBackOff rather than a silent misconfiguration.
-	image := tmpl.Image
+	image := role.Image
 	if image == "" {
 		synthesized, err := SynthesizeModelDeploymentImage(
-			md.Spec.Engine, md.Spec.EngineVersion, in.InstanceType.Status.Detail)
+			md.Spec.Engine.Name, md.Spec.Engine.Version, in.InstanceType.Status.Detail)
 		if err != nil {
 			return nil, fmt.Errorf("role %q names no image and none could be synthesized: %w", role.Name, err)
 		}
@@ -306,20 +299,20 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 
 	// A role that replaces the command owns the whole argv, so the operator contributes neither
 	// engine arguments nor the client environment that only its own arguments would have used.
-	takeOver := len(tmpl.Command) > 0
+	takeOver := len(role.Command) > 0
 
-	command := tmpl.Command
-	// declaredPorts is the template's port list, computed once: the connector's synthesized ports
-	// are deduplicated against it below, and a direct decoder's engine port must clear every entry
-	// in it, not only the one the Service fronts.
-	declaredPorts := modelDeploymentContainerPorts(tmpl)
+	command := role.Command
+	// declaredPorts is the role's declared port list, computed once: the connector's synthesized
+	// ports are deduplicated against it below, and a direct decoder's engine port must clear every
+	// entry in it, not only the one the Service fronts.
+	declaredPorts := modelDeploymentContainerPorts(role)
 	// gradable is false for a take-over role, whose argv the operator did not build.
 	var (
 		scheme     core.URIScheme
 		gradable   bool
 		enginePort = modelDeploymentServicePort(role).ContainerPort
 	)
-	directDecode := !takeOver && in.Connector.DirectTransfer &&
+	directDecode := !takeOver && in.Connector.KVTransfer &&
 		ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindDecode
 	if directDecode {
 		enginePort = modelDeploymentInternalPort
@@ -328,7 +321,7 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 		}
 	}
 	if !takeOver {
-		command, err = ModelDeploymentEngineCommand(md.Spec.Engine, md.Spec.Model.Name)
+		command, err = ModelDeploymentEngineCommand(md.Spec.Engine.Name, md.Spec.Model.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -350,7 +343,7 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 			for _, declared := range declaredPorts {
 				if enginePort == declared.ContainerPort {
 					return nil, fmt.Errorf(
-						"role %q places its model server on port %d, which the template already "+
+						"role %q places its model server on port %d, which the role already "+
 							"declares as %q", role.Name, enginePort, declared.Name)
 				}
 			}
@@ -365,7 +358,7 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 	//
 	// A take-over role gets NEITHER, along with no synthesized argument and no client environment.
 	// The operator did not build that command line and cannot claim the container uses the cache.
-	vols, mounts := convertAdditionalVolumes(tmpl.AdditionalVolumes)
+	vols, mounts := convertModelDeploymentAdditionalVolumes(role.AdditionalVolumes)
 	if !takeOver {
 		vols = append(vols, in.Connector.Volumes...)
 		mounts = append(mounts, in.Connector.VolumeMounts...)
@@ -390,18 +383,18 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 	mainC := core.Container{
 		Name:            "main",
 		Image:           image,
-		ImagePullPolicy: tmpl.ImagePullPolicy,
+		ImagePullPolicy: role.ImagePullPolicy,
 		Command:         command,
 		Resources: getResourceRequirements(
 			ress, in.InstanceType, true, in.GeneralResourcesOvercommit, true, false),
 		Ports:          ports,
-		Env:            mergeModelDeploymentEnv(md.Spec.Engine, role, in.Connector, takeOver),
+		Env:            mergeModelDeploymentEnv(md.Spec.Engine.Name, role, in.Connector, takeOver),
 		VolumeMounts:   mounts,
 		StartupProbe:   startupProbe,
 		ReadinessProbe: readinessProbe,
 		LivenessProbe:  livenessProbe,
 	}
-	if tmpl.Privileged {
+	if role.Privileged {
 		mainC.SecurityContext = &core.SecurityContext{Privileged: ptr.To(true)}
 	}
 
@@ -418,15 +411,10 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 			EnableServiceLinks:           ptr.To(false),
 			// Recreate is the rollout policy, and a replica that exits is replaced by the
 			// reconciler under the same name rather than restarted in place with a stale spec.
-			RestartPolicy: core.RestartPolicyAlways,
-			ImagePullSecrets: func() []core.LocalObjectReference {
-				if tmpl.ImagePullSecret == nil {
-					return nil
-				}
-				return []core.LocalObjectReference{*tmpl.ImagePullSecret}
-			}(),
-			Volumes:    vols,
-			Containers: []core.Container{mainC},
+			RestartPolicy:    core.RestartPolicyAlways,
+			ImagePullSecrets: role.ImagePullSecrets,
+			Volumes:          vols,
+			Containers:       []core.Container{mainC},
 		},
 	}
 	if directDecode {
@@ -656,8 +644,8 @@ func modelDeploymentPodLabels(
 // A role that names none still gets one, because a replica nothing can reach serves nothing and the
 // Service fronting the deployment needs a target. Every supported engine's OpenAI-compatible server
 // listens on 8000 by default.
-func modelDeploymentContainerPorts(tmpl *workercore.ModelDeploymentTemplate) []core.ContainerPort {
-	if len(tmpl.Ports) == 0 {
+func modelDeploymentContainerPorts(role *workercore.ModelDeploymentRole) []core.ContainerPort {
+	if len(role.Ports) == 0 {
 		return []core.ContainerPort{{
 			Name:          modelDeploymentDefaultPortName,
 			Protocol:      core.ProtocolTCP,
@@ -665,13 +653,67 @@ func modelDeploymentContainerPorts(tmpl *workercore.ModelDeploymentTemplate) []c
 		}}
 	}
 
-	return slicex.Transform(tmpl.Ports, func(p workercore.InstancePort) core.ContainerPort {
+	return slicex.Transform(role.Ports, func(p workercore.ModelDeploymentPort) core.ContainerPort {
 		return core.ContainerPort{
-			Name:          getPortName(p),
+			Name:          modelDeploymentPortName(p),
 			Protocol:      p.Protocol,
 			ContainerPort: p.Port,
 		}
 	})
+}
+
+// modelDeploymentPortName derives a container port's name from its protocol and number, because a
+// container port name must satisfy Kubernetes' own DNS-label rule and a user-supplied free-form
+// name need not. The Instance path derives its own names the same way.
+func modelDeploymentPortName(port workercore.ModelDeploymentPort) string {
+	return strings.ToLower(fmt.Sprintf("%s-%d", port.Protocol, port.Port))
+}
+
+// convertModelDeploymentAdditionalVolumes turns a role's declared volumes into Pod volumes and
+// container mounts. An entry with no source is skipped rather than rendered: a volume with an empty
+// source would make the API server refuse the whole Pod on every reconcile.
+func convertModelDeploymentAdditionalVolumes(
+	avs []workercore.ModelDeploymentAdditionalVolume,
+) (vols []core.Volume, mounts []core.VolumeMount) {
+	if len(avs) == 0 {
+		return nil, nil
+	}
+
+	vols = make([]core.Volume, 0, len(avs))
+	mounts = make([]core.VolumeMount, 0, len(avs))
+	for i := range avs {
+		av := &avs[i]
+
+		var vs core.VolumeSource
+		switch {
+		case av.ConfigMap != nil:
+			vs.ConfigMap = &core.ConfigMapVolumeSource{
+				LocalObjectReference: *av.ConfigMap,
+			}
+		case av.Secret != nil:
+			vs.Secret = &core.SecretVolumeSource{
+				SecretName: av.Secret.Name,
+			}
+		case av.HostPath != nil:
+			vs.HostPath = av.HostPath.DeepCopy()
+		default:
+			continue
+		}
+
+		name := additionalVolumeName(i)
+		vols = append(vols, core.Volume{
+			Name:         name,
+			VolumeSource: vs,
+		})
+		mounts = append(mounts, core.VolumeMount{
+			Name:      name,
+			MountPath: av.MountPath,
+			ReadOnly:  av.ReadOnly,
+			SubPath:   av.SubPath,
+		})
+	}
+
+	return vols, mounts
 }
 
 // appendModelDeploymentBindArgs fills the engine's listen address when the role did not supply it.
@@ -815,8 +857,8 @@ func modelDeploymentDemandsClientCert(command []string, i int) bool {
 // to a command the user replaced, so reading them here would describe a command line that is not
 // being run.
 func modelDeploymentRoleArgs(role *workercore.ModelDeploymentRole) []string {
-	if role.Template != nil && len(role.Template.Command) > 0 {
-		return role.Template.Command
+	if len(role.Command) > 0 {
+		return role.Command
 	}
 
 	return role.ExtraArgs
@@ -861,7 +903,7 @@ func modelDeploymentRoleArgs(role *workercore.ModelDeploymentRole) []string {
 // still the operator's own, and the kubelet does not verify the server certificate. The one
 // exception is the flag that can demand a CLIENT certificate, which a probe cannot present.
 //
-// A DECLARED template.ports NO LONGER WITHHOLDS THE GATES, because the rendered --port is taken from
+// A DECLARED ports LIST NO LONGER WITHHOLDS THE GATES, because the rendered --port is taken from
 // the same figure the Service targets. The two agreeing is what makes "ready" and "the endpoint
 // answers" one fact rather than two.
 //
@@ -914,14 +956,13 @@ func modelDeploymentProbes(
 		gate(modelDeploymentLivenessFailureThreshold)
 }
 
-// mergeModelDeploymentEnv folds the three tiers into one environment list.
+// mergeModelDeploymentEnv folds the operator's environment and the role's into one list.
 //
 // The order of the result is the order of authority, most authoritative first, so that reading a
 // rendered Pod answers "who set this" without consulting the table: what the operator OWNS, then
-// what it merely DEFAULTS, then what the user appended, then the user's template overlay. Owned
-// entries are refused at admission, so skipping them here is belt and braces rather than the
-// enforcement — but a renderer that let one through would hand the failure to the engine, one layer
-// away from the field that caused it.
+// what it merely DEFAULTS, then what the user appended. Owned entries are refused at admission, so
+// skipping them here is belt and braces rather than the enforcement — but a renderer that let one
+// through would hand the failure to the engine, one layer away from the field that caused it.
 //
 // A role that takes over the command line gets none of the operator's entries. Its argv never names
 // the file they point at, so setting them would describe a configuration nothing reads.
@@ -929,32 +970,26 @@ func mergeModelDeploymentEnv(
 	engine string, role *workercore.ModelDeploymentRole,
 	connector ModelDeploymentConnectorRender, takeOver bool,
 ) []core.EnvVar {
-	userEnv := make([]workercore.InstanceEnvVar, 0, len(role.Env))
-	userEnv = append(userEnv, role.Env...)
-	if role.Template != nil {
-		userEnv = append(userEnv, role.Template.Env...)
-	}
-
 	if takeOver {
-		return mergeModelDeploymentUserEnv(nil, engine, userEnv)
+		return mergeModelDeploymentUserEnv(nil, engine, role.Env)
 	}
 
-	env := make([]core.EnvVar, 0, len(connector.Env)+len(connector.DefaultedEnv)+len(userEnv))
+	env := make([]core.EnvVar, 0, len(connector.Env)+len(connector.DefaultedEnv)+len(role.Env))
 	env = append(env, connector.Env...)
 	for _, e := range connector.DefaultedEnv {
-		if modelDeploymentUserSetsEnv(userEnv, e.Name) {
+		if modelDeploymentUserSetsEnv(role.Env, e.Name) {
 			continue
 		}
 		env = append(env, e)
 	}
 
-	return mergeModelDeploymentUserEnv(env, engine, userEnv)
+	return mergeModelDeploymentUserEnv(env, engine, role.Env)
 }
 
 // mergeModelDeploymentUserEnv appends the user's entries to what the operator already rendered,
 // letting a later tier replace an earlier one by name and never replacing what the operator owns.
 func mergeModelDeploymentUserEnv(
-	env []core.EnvVar, engine string, userEnv []workercore.InstanceEnvVar,
+	env []core.EnvVar, engine string, userEnv []workercore.ModelDeploymentEnvVar,
 ) []core.EnvVar {
 	for i := range userEnv {
 		if ModelDeploymentOwnsEnv(engine, userEnv[i].Name) {
@@ -978,8 +1013,8 @@ func mergeModelDeploymentUserEnv(
 	return env
 }
 
-// modelDeploymentUserSetsEnv reports whether the user supplied the named variable in either tier.
-func modelDeploymentUserSetsEnv(userEnv []workercore.InstanceEnvVar, name string) bool {
+// modelDeploymentUserSetsEnv reports whether the user supplied the named variable.
+func modelDeploymentUserSetsEnv(userEnv []workercore.ModelDeploymentEnvVar, name string) bool {
 	for i := range userEnv {
 		if userEnv[i].Name == name {
 			return true

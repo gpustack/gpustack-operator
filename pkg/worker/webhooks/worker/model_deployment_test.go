@@ -41,11 +41,12 @@ func modelDeployment(engine string, roles ...workercore.ModelDeploymentRole) *wo
 	return &workercore.ModelDeployment{
 		ObjectMeta: meta.ObjectMeta{Name: "qwen-72b", Namespace: "team-a"},
 		Spec: workercore.ModelDeploymentSpec{
-			Model:         workercore.ModelDeploymentModel{Name: "Qwen/Qwen2.5-72B-Instruct"},
-			Engine:        engine,
-			EngineVersion: "0.25.1",
-			KVCache:       &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
-			Roles:         roles,
+			Model: workercore.ModelDeploymentModel{Name: "Qwen/Qwen2.5-72B-Instruct"},
+			Engine: workercore.ModelDeploymentEngine{
+				Name: engine, Version: "0.25.1",
+			},
+			KVCache: &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
+			Roles:   roles,
 		},
 	}
 }
@@ -343,7 +344,7 @@ func TestValidateModelDeployment(t *testing.T) {
 		{
 			name: "env_owned_key",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
-				r.Env = []workercore.InstanceEnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/tmp/mine.json"}}
+				r.Env = []workercore.ModelDeploymentEnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/tmp/mine.json"}}
 			})),
 			wantMessage: "MOONCAKE_CONFIG_PATH",
 		},
@@ -352,54 +353,32 @@ func TestValidateModelDeployment(t *testing.T) {
 			// MOONCAKE_CONFIG_PATH is not what the operator rendered for it.
 			name: "env_owned_key_wrong_engine",
 			md: modelDeployment(workercore.ModelDeploymentEngineSGLang, role(func(r *workercore.ModelDeploymentRole) {
-				r.Env = []workercore.InstanceEnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/tmp/mine.json"}}
+				r.Env = []workercore.ModelDeploymentEnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/tmp/mine.json"}}
 			})),
 		},
 		{
 			name: "env_defaulted_key",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
-				r.Env = []workercore.InstanceEnvVar{{Name: "MC_TE_METRIC", Value: "0"}}
+				r.Env = []workercore.ModelDeploymentEnvVar{{Name: "MC_TE_METRIC", Value: "0"}}
 			})),
-		},
-		{
-			// The overlay tier is the path the rule originally missed: the renderer merges
-			// template.env together with env, so an owned key here used to pass admission and be
-			// dropped silently at render time.
-			//
-			// wantMessage asserts the PATH, not just the variable name. Asserting only
-			// "MOONCAKE_CONFIG_PATH" would also pass if the append-tier rule fired on a
-			// differently-placed value, and would pass with the overlay rule deleted -- the case
-			// has to fail for the one reason it exists.
-			name: "env_owned_key_in_template",
-			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
-				r.Template = &workercore.ModelDeploymentTemplate{
-					Image: "vllm/vllm-openai:latest",
-					Env:   []workercore.InstanceEnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/tmp/mine.json"}},
-				}
-			})),
-			wantMessage: "roles[0].template.env[0]",
 		},
 		{
 			// A role that took over the command line is refused too, because the renderer drops
 			// owned keys unconditionally. Admission and rendering must agree on the set: whichever
 			// way they disagree, the result is a value the user wrote and nothing reads.
-			name: "env_owned_key_in_template_take_over",
+			name: "env_owned_key_take_over",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
-				r.Template = &workercore.ModelDeploymentTemplate{
-					Image:   "vllm/vllm-openai:latest",
-					Command: []string{"python", "-m", "vllm.entrypoints.openai.api_server"},
-					Env:     []workercore.InstanceEnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/tmp/mine.json"}},
-				}
+				r.Image = "vllm/vllm-openai:latest"
+				r.Command = []string{"python", "-m", "vllm.entrypoints.openai.api_server"}
+				r.Env = []workercore.ModelDeploymentEnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/tmp/mine.json"}}
 			})),
-			wantMessage: "roles[0].template.env[0]",
+			wantMessage: "roles[0].env[0]",
 		},
 		{
-			name: "env_unowned_key_in_template",
+			name: "env_unowned_key",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
-				r.Template = &workercore.ModelDeploymentTemplate{
-					Image: "vllm/vllm-openai:latest",
-					Env:   []workercore.InstanceEnvVar{{Name: "HF_HOME", Value: "/weights"}},
-				}
+				r.Image = "vllm/vllm-openai:latest"
+				r.Env = []workercore.ModelDeploymentEnvVar{{Name: "HF_HOME", Value: "/weights"}}
 			})),
 		},
 		{
@@ -414,18 +393,6 @@ func TestValidateModelDeployment(t *testing.T) {
 				return md
 			}(),
 			wantMessage: "spec.kvCache.poolRef.name",
-		},
-		{
-			// The refusal must name the structured field that DOES decide the request. Naming only
-			// instanceType would send a user to a field that cannot express a card count.
-			name: "template_resources",
-			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
-				r.Template = &workercore.ModelDeploymentTemplate{
-					Image:     "vllm/vllm-openai:latest",
-					Resources: &workercore.InstanceResources{},
-				}
-			})),
-			wantMessage: "roles[0].resources",
 		},
 		{
 			name: "resources_accelerator_only",
@@ -487,20 +454,10 @@ func TestValidateModelDeployment(t *testing.T) {
 			})),
 		},
 		{
-			name: "template_command",
+			name: "role_command",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
-				r.Template = &workercore.ModelDeploymentTemplate{
-					Image:   "vllm/vllm-openai:latest",
-					Command: []string{"vllm", "serve", "/models/qwen"},
-				}
-			})),
-		},
-		{
-			// A template with no resources is the ordinary overlay, and must not be caught by the
-			// resources rule reading a nil pointer as a set one.
-			name: "template_without_resources",
-			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
-				r.Template = &workercore.ModelDeploymentTemplate{Image: "vllm/vllm-openai:latest"}
+				r.Image = "vllm/vllm-openai:latest"
+				r.Command = []string{"vllm", "serve", "/models/qwen"}
 			})),
 		},
 		{
@@ -537,7 +494,7 @@ func TestValidateModelDeployment(t *testing.T) {
 			name: "router_metric_unavailable",
 			md: func() *workercore.ModelDeployment {
 				md := routedModelDeployment(nil)
-				md.Spec.Engine = "engine-without-metrics"
+				md.Spec.Engine.Name = "engine-without-metrics"
 				return md
 			}(),
 			wantMessage: `metric "queued requests" required by router "llm-d" is unavailable on engine "engine-without-metrics"`,
@@ -548,15 +505,11 @@ func TestValidateModelDeployment(t *testing.T) {
 				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
 					role(func(r *workercore.ModelDeploymentRole) {
 						r.Name = "prefill"
-						r.Template = &workercore.ModelDeploymentTemplate{
-							Ports: []workercore.InstancePort{{Port: 8000}},
-						}
+						r.Ports = []workercore.ModelDeploymentPort{{Port: 8000}}
 					}),
 					role(func(r *workercore.ModelDeploymentRole) {
 						r.Name = "decode"
-						r.Template = &workercore.ModelDeploymentTemplate{
-							Ports: []workercore.InstancePort{{Port: 8100}},
-						}
+						r.Ports = []workercore.ModelDeploymentPort{{Port: 8100}}
 					}),
 				)
 				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
@@ -568,9 +521,7 @@ func TestValidateModelDeployment(t *testing.T) {
 			name: "router_role_serving_port_is_not_tcp",
 			md: func() *workercore.ModelDeployment {
 				md := routedModelDeployment(nil)
-				md.Spec.Roles[0].Template = &workercore.ModelDeploymentTemplate{
-					Ports: []workercore.InstancePort{{Port: 8000, Protocol: core.ProtocolUDP}},
-				}
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8000, Protocol: core.ProtocolUDP}}
 				return md
 			}(),
 			wantMessage: "every routed role must use TCP serving ports",
@@ -590,9 +541,7 @@ func TestValidateModelDeployment(t *testing.T) {
 			name: "router_role_declares_kv_events_port",
 			md: func() *workercore.ModelDeployment {
 				md := routedModelDeployment(nil)
-				md.Spec.Roles[0].Template = &workercore.ModelDeploymentTemplate{
-					Ports: []workercore.InstancePort{{Port: 5557, Protocol: core.ProtocolTCP}},
-				}
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 5557, Protocol: core.ProtocolTCP}}
 				return md
 			}(),
 			wantMessage: `role "server" declares port 5557, which the operator reserves`,
@@ -601,9 +550,7 @@ func TestValidateModelDeployment(t *testing.T) {
 			name: "router_role_declares_kv_replay_port",
 			md: func() *workercore.ModelDeployment {
 				md := routedModelDeployment(nil)
-				md.Spec.Roles[0].Template = &workercore.ModelDeploymentTemplate{
-					Ports: []workercore.InstancePort{{Port: 8000, Protocol: core.ProtocolTCP}, {Port: 5558, Protocol: core.ProtocolTCP}},
-				}
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8000, Protocol: core.ProtocolTCP}, {Port: 5558, Protocol: core.ProtocolTCP}}
 				return md
 			}(),
 			wantMessage: `role "server" declares port 5558, which the operator reserves`,
@@ -612,9 +559,7 @@ func TestValidateModelDeployment(t *testing.T) {
 			name: "router_role_declares_mooncake_bootstrap_port",
 			md: func() *workercore.ModelDeployment {
 				md := routedModelDeployment(nil)
-				md.Spec.Roles[0].Template = &workercore.ModelDeploymentTemplate{
-					Ports: []workercore.InstancePort{{Port: 8998, Protocol: core.ProtocolTCP}},
-				}
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8998, Protocol: core.ProtocolTCP}}
 				return md
 			}(),
 			wantMessage: `role "server" declares port 8998, which the operator reserves`,
@@ -625,10 +570,8 @@ func TestValidateModelDeployment(t *testing.T) {
 			name: "router_role_declares_5557_on_sglang",
 			md: func() *workercore.ModelDeployment {
 				md := routedModelDeployment(nil)
-				md.Spec.Engine = workercore.ModelDeploymentEngineSGLang
-				md.Spec.Roles[0].Template = &workercore.ModelDeploymentTemplate{
-					Ports: []workercore.InstancePort{{Port: 5557, Protocol: core.ProtocolTCP}},
-				}
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 5557, Protocol: core.ProtocolTCP}}
 				return md
 			}(),
 		},
@@ -638,10 +581,8 @@ func TestValidateModelDeployment(t *testing.T) {
 			name: "router_take_over_role_declares_kv_events_port",
 			md: func() *workercore.ModelDeployment {
 				md := routedModelDeployment(nil)
-				md.Spec.Roles[0].Template = &workercore.ModelDeploymentTemplate{
-					Command: []string{"/bin/my-server"},
-					Ports:   []workercore.InstancePort{{Port: 5557, Protocol: core.ProtocolTCP}},
-				}
+				md.Spec.Roles[0].Command = []string{"/bin/my-server"}
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 5557, Protocol: core.ProtocolTCP}}
 				return md
 			}(),
 		},
@@ -710,9 +651,7 @@ func TestValidateModelDeployment(t *testing.T) {
 					}),
 					role(func(r *workercore.ModelDeploymentRole) {
 						r.Name, r.Kind = "decode", workercore.ModelDeploymentRoleKindDecode
-						r.Template = &workercore.ModelDeploymentTemplate{
-							Command: []string{"/bin/my-server", "--port=8000"},
-						}
+						r.Command = []string{"/bin/my-server", "--port=8000"}
 					}),
 				)
 				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
@@ -777,6 +716,100 @@ func TestValidateModelDeployment_TwoRolesPassTheWholePath(t *testing.T) {
 
 func errsContain(aggregate, want string) bool {
 	return strings.Contains(aggregate, want)
+}
+
+// TestValidateModelDeploymentRoleAdditionalVolumes covers the three rules the field documentation
+// states and the schema cannot carry: a mount path used twice, a subPath that climbs out of its
+// volume, and an entry naming no source. The first two used to reach the API server as a rejected
+// Pod on every reconcile pass; the third reached nothing at all, because the renderer skips such an
+// entry and the container simply comes up without the mount.
+//
+// The ".." cases are the pair that matters: a segment equal to ".." is the traversal, while a NAME
+// merely containing those characters is an ordinary directory and must pass.
+//
+// THE SOURCELESS CASE IS PAIRED WITH ONE PER SOURCE, because the rule is a three-way disjunction: an
+// implementation testing only configMap accepts the same table, and each accepting case is what says
+// the other two sources still satisfy it.
+func TestValidateModelDeploymentRoleAdditionalVolumes(t *testing.T) {
+	volumes := func(avs ...workercore.ModelDeploymentAdditionalVolume) *workercore.ModelDeployment {
+		return modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) { r.AdditionalVolumes = avs }))
+	}
+	cm := &core.LocalObjectReference{Name: "weights"}
+
+	testCases := []struct {
+		name        string
+		md          *workercore.ModelDeployment
+		wantMessage string
+	}{
+		{
+			name: "duplicate_mount_path",
+			md: volumes(
+				workercore.ModelDeploymentAdditionalVolume{MountPath: "/data", ConfigMap: cm},
+				workercore.ModelDeploymentAdditionalVolume{MountPath: "/data", ConfigMap: cm},
+			),
+			wantMessage: "is already mounted by",
+		},
+		{
+			name: "sub_path_climbs_out",
+			md: volumes(workercore.ModelDeploymentAdditionalVolume{
+				MountPath: "/data", SubPath: "a/../../etc", ConfigMap: cm,
+			}),
+			wantMessage: `must not contain a ".." element`,
+		},
+		{
+			name: "sub_path_is_only_dot_dot",
+			md: volumes(workercore.ModelDeploymentAdditionalVolume{
+				MountPath: "/data", SubPath: "..", ConfigMap: cm,
+			}),
+			wantMessage: `must not contain a ".." element`,
+		},
+		{
+			name: "no_source_named",
+			md:   volumes(workercore.ModelDeploymentAdditionalVolume{MountPath: "/data"}),
+			// Named by mount path, because that is the only thing the entry carries: an error
+			// quoting the index alone leaves the writer counting list entries.
+			wantMessage: `"/data" names something to mount`,
+		},
+		{
+			name: "secret_source_passes",
+			md: volumes(workercore.ModelDeploymentAdditionalVolume{
+				MountPath: "/creds", Secret: &core.LocalObjectReference{Name: "hf-token"},
+			}),
+			wantMessage: "",
+		},
+		{
+			name: "host_path_source_passes",
+			md: volumes(workercore.ModelDeploymentAdditionalVolume{
+				MountPath: "/dev/shm", HostPath: &core.HostPathVolumeSource{Path: "/dev/shm"},
+			}),
+			wantMessage: "",
+		},
+		{
+			name: "distinct_paths_and_an_ordinary_sub_path_pass",
+			md: volumes(
+				workercore.ModelDeploymentAdditionalVolume{
+					MountPath: "/data", SubPath: "a..b/c", ConfigMap: cm,
+				},
+				workercore.ModelDeploymentAdditionalVolume{MountPath: "/cache", ConfigMap: cm},
+			),
+			wantMessage: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			errs := validateModelDeploymentRoles(tc.md)
+			if tc.wantMessage == "" {
+				assert.Empty(t, errs, "a legal set of volumes is not refused")
+
+				return
+			}
+			require.NotEmpty(t, errs, "the rule must refuse this shape")
+			assert.True(t, errsContain(errs.ToAggregate().Error(), tc.wantMessage),
+				"the refusal names what is wrong; got %q", errs.ToAggregate().Error())
+		})
+	}
 }
 
 func TestValidateModelDeploymentRoleServiceNames_ExemptsRolesTheObjectAlreadyHad(t *testing.T) {
@@ -1189,21 +1222,21 @@ func modelDeploymentWithEveryField() *workercore.ModelDeployment {
 				Accelerator: resource.NewQuantity(1, resource.DecimalSI),
 			}
 			r.ExtraArgs = []string{"--max-model-len=8192"}
-			r.Env = []workercore.InstanceEnvVar{{Name: "HF_HOME", Value: "/cache"}}
-			r.Template = &workercore.ModelDeploymentTemplate{
-				Image:             "vllm/vllm-openai:v0.25.1",
-				ImagePullPolicy:   core.PullIfNotPresent,
-				ImagePullSecret:   &core.LocalObjectReference{Name: "registry"},
-				Command:           []string{"/bin/serve"},
-				Ports:             []workercore.InstancePort{{Port: 8000}},
-				Env:               []workercore.InstanceEnvVar{{Name: "VLLM_LOG", Value: "info"}},
-				AdditionalVolumes: []workercore.InstanceAdditionalVolume{{MountPath: "/data"}},
+			r.Env = []workercore.ModelDeploymentEnvVar{{Name: "HF_HOME", Value: "/cache"}}
+			r.Image = "vllm/vllm-openai:v0.25.1"
+			r.ImagePullPolicy = core.PullIfNotPresent
+			r.ImagePullSecrets = []core.LocalObjectReference{{Name: "registry"}}
+			r.Command = []string{"/bin/serve"}
+			r.Ports = []workercore.ModelDeploymentPort{{Port: 8000}}
+			r.AdditionalVolumes = []workercore.ModelDeploymentAdditionalVolume{
+				{MountPath: "/data", ConfigMap: &core.LocalObjectReference{Name: "weights"}},
 			}
+			r.Env = append(r.Env, []workercore.ModelDeploymentEnvVar{{Name: "VLLM_LOG", Value: "info"}}...)
 		}),
 	)
 	// The connector's one legal value is a schema default and a schema enum, with no Go constant to
 	// name it; the literal is what a stored object carries.
-	md.Spec.KVCache.Connector = "auto"
+	md.Spec.KVCache.Connector = "mooncake"
 
 	return md
 }
@@ -1228,13 +1261,13 @@ func TestValidateModelDeploymentIdentity(t *testing.T) {
 		// Frozen: what makes this deployment the deployment it is.
 		{"model", func(md *workercore.ModelDeployment) { md.Spec.Model.Name = "Qwen/Qwen3-32B" }, "spec.model"},
 		{"engine", func(md *workercore.ModelDeployment) {
-			md.Spec.Engine = workercore.ModelDeploymentEngineSGLang
-		}, "spec.engine"},
+			md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+		}, "spec.engine.name"},
 		{"kvcache_pool_ref", func(md *workercore.ModelDeployment) {
 			md.Spec.KVCache.PoolRef.Name = "another-kv"
 		}, "spec.kvCache"},
 		{"kvcache_connector", func(md *workercore.ModelDeployment) {
-			md.Spec.KVCache.Connector = "mooncake"
+			md.Spec.KVCache.Connector = "auto"
 		}, "spec.kvCache"},
 		{"role_kind", func(md *workercore.ModelDeployment) {
 			md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
@@ -1245,9 +1278,9 @@ func TestValidateModelDeploymentIdentity(t *testing.T) {
 		{"role_resources", func(md *workercore.ModelDeployment) {
 			md.Spec.Roles[0].Resources.Accelerator = accel2
 		}, "spec.roles[0].resources"},
-		{"role_template_command", func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Template.Command = []string{"/bin/other"}
-		}, "spec.roles[0].template.command"},
+		{"role_command", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Command = []string{"/bin/other"}
+		}, "spec.roles[0].command"},
 		{"role_added", func(md *workercore.ModelDeployment) {
 			md.Spec.Roles = append(md.Spec.Roles, role(func(r *workercore.ModelDeploymentRole) {
 				r.Name = "decode"
@@ -1258,34 +1291,33 @@ func TestValidateModelDeploymentIdentity(t *testing.T) {
 		}, "spec.roles"},
 
 		// Editable: how the deployment is being run right now.
-		{"engine_version", func(md *workercore.ModelDeployment) { md.Spec.EngineVersion = "0.26.0" }, ""},
+		{"engine_version", func(md *workercore.ModelDeployment) { md.Spec.Engine.Version = "0.26.0" }, ""},
 		{"role_replicas", func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 8 }, ""},
 		{"role_extra_args", func(md *workercore.ModelDeployment) {
 			md.Spec.Roles[0].ExtraArgs = []string{"--max-model-len=16384"}
 		}, ""},
 		{"role_env", func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Env = []workercore.InstanceEnvVar{{Name: "HF_HOME", Value: "/other"}}
+			md.Spec.Roles[0].Env = []workercore.ModelDeploymentEnvVar{{Name: "HF_HOME", Value: "/other"}}
 		}, ""},
-		{"template_image", func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Template.Image = "vllm/vllm-openai:v0.26.0"
+		{"role_image", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
 		}, ""},
-		{"template_image_pull_policy", func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Template.ImagePullPolicy = core.PullAlways
+		{"role_image_pull_policy", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].ImagePullPolicy = core.PullAlways
 		}, ""},
-		{"template_image_pull_secret", func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Template.ImagePullSecret = &core.LocalObjectReference{Name: "other-registry"}
+		{"role_image_pull_secrets", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].ImagePullSecrets = []core.LocalObjectReference{{Name: "other-registry"}}
 		}, ""},
-		{"template_privileged", func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Template.Privileged = true
+		{"role_privileged", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Privileged = true
 		}, ""},
-		{"template_ports", func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{{Port: 9000}}
+		{"role_ports", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 9000}}
 		}, ""},
-		{"template_env", func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Template.Env = []workercore.InstanceEnvVar{{Name: "VLLM_LOG", Value: "debug"}}
-		}, ""},
-		{"template_additional_volumes", func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Template.AdditionalVolumes = []workercore.InstanceAdditionalVolume{{MountPath: "/other"}}
+		{"role_additional_volumes", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].AdditionalVolumes = []workercore.ModelDeploymentAdditionalVolume{
+				{MountPath: "/other", ConfigMap: &core.LocalObjectReference{Name: "weights"}},
+			}
 		}, ""},
 
 		// The no-op every controller and GitOps agent performs constantly.
@@ -1409,7 +1441,7 @@ func TestModelDeploymentWebhook_ValidateUpdateStatesTheRuleNotTheMechanism(t *te
 	r := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
 	old := modelDeploymentWithEveryField()
 	md := old.DeepCopy()
-	md.Spec.Engine = workercore.ModelDeploymentEngineSGLang
+	md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
 
 	_, err := r.ValidateUpdate(context.Background(), old, md)
 	require.Error(t, err)
@@ -1872,7 +1904,7 @@ func TestModelDeploymentWebhook_APairMayNotShareOneAccelerator(t *testing.T) {
 			r := newModelDeploymentWebhookWith(live)
 
 			md := modelDeployment(workercore.ModelDeploymentEngineVLLM, tc.roles...)
-			md.Spec.KVCache.Connector = "auto"
+			md.Spec.KVCache.Connector = "mooncake"
 
 			_, err := r.ValidateCreate(context.Background(), md)
 			if !tc.refuse {
@@ -1935,7 +1967,7 @@ func TestModelDeploymentWebhook_ThePairRuleReadsEveryPair(t *testing.T) {
 		pdRole("prefill-disjoint", workercore.ModelDeploymentRoleKindPrefill, "a100-8x", sliced()),
 		pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "h20-8x", sliced()),
 	)
-	md.Spec.KVCache.Connector = "auto"
+	md.Spec.KVCache.Connector = "mooncake"
 
 	_, err := r.ValidateCreate(context.Background(), md)
 	require.Error(t, err, "the prefiller declared first shares one accelerator group with the decoder")
@@ -2020,7 +2052,7 @@ func TestModelDeploymentWebhook_AMissingTypeDoesNotHideTheRest(t *testing.T) {
 	)
 	// A SECOND, UNRELATED FAULT that is answerable from the object alone. Without it this case cannot
 	// tell "the missing type was reported" from "the missing type was the only thing reported".
-	md.Spec.Engine = ""
+	md.Spec.Engine.Name = ""
 
 	_, err := r.ValidateCreate(context.Background(), md)
 	require.Error(t, err)
@@ -2062,7 +2094,7 @@ func TestModelDeploymentWebhook_AnUnsetAcceleratorGroupIsUnknown(t *testing.T) {
 		pdRole("prefill", workercore.ModelDeploymentRoleKindPrefill, "h20-8x", sliced()),
 		pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "a100-8x", sliced()),
 	)
-	md.Spec.KVCache.Connector = "auto"
+	md.Spec.KVCache.Connector = "mooncake"
 
 	_, err := r.ValidateCreate(context.Background(), md)
 	assert.NoError(t, err,

@@ -216,7 +216,7 @@ fi
 
 # The paired half: the domain Binding must report NOTHING. Without this, the check above cannot tell
 # "the writes went to the default tenant" from "usage moves on whichever Binding you ask", and the
-# documented consequence - that a namespace's quotaCeiling does not bound its injected Pods - would
+# documented consequence - that a namespace's quota.ceiling does not bound its injected Pods - would
 # rest on the reference page alone.
 # Polled until the figure EXISTS, and only then required to be zero. status.usage is a pointer with
 # omitempty precisely so that "granted zero" and "never observed" do not serialize the same way, so an
@@ -237,7 +237,7 @@ zero, and this run cannot say where the bytes were charged"
 elif [ "$domain_usage" = "0" ]; then
   record PASS "the declared domain is charged nothing" \
     "${BINDING} reports '${domain_usage:-<absent>}' while the same bytes moved under 'default' - so a \
-namespace's quotaCeiling does not bound the traffic its injected Pods generate"
+namespace's quota.ceiling does not bound the traffic its injected Pods generate"
 else
   record FAIL "the declared domain is charged nothing" \
     "${BINDING} reports usage ${domain_usage}, so the writes did carry the declared domain after all - \

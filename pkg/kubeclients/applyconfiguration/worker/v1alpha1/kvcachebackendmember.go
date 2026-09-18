@@ -29,7 +29,7 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// declared.
 	//
 	// - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and
-	// each is reached elsewhere: the first through localDisk below, NVMe-oF as a target
+	// each is reached elsewhere: the first through localDisks below, NVMe-oF as a target
 	// coordinate with no Pod, and the last two on the leader's own process.
 	// - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one
 	// of those values, while this CRD was installed but the webhook was not, becomes undeletable:
@@ -42,10 +42,11 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// and is counted into the member Pod's own resource request, so a member that does not fit stays
 	// Pending instead of overcommitting the node.
 	//
-	// - A group carrying LocalDisk needs at least one BUCKET here, which is the unit that tier is
-	// written in. A bucket's bytes are held in this segment until the bucket is complete, so a
-	// smaller segment never holds a bucket's worth at once and the tier stays empty under every
-	// workload, which nothing else reports. A group with no tier has no such floor.
+	// - A group declaring a tier in LocalDisks needs at least one BUCKET here, which is the unit
+	// that tier is written in. A bucket's bytes are held in this segment until the bucket is
+	// complete, so a smaller segment never holds a bucket's worth at once and the tier stays
+	// empty under every workload, which nothing else reports. A group with no tier has no such
+	// floor.
 	// - The name is "per member" for a shape that is DECIDED AND NOT DONE: several members per
 	// node, split by NUMA domain. Today one selected node runs one member.
 	// - What would reopen that is a two-socket node reporting RDMA interfaces on more than one NUMA
@@ -57,17 +58,18 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// LocalBufferSize is the member client's local staging buffer, counted into the Pod's
 	// memory request beside CapacityPerMember.
 	LocalBufferSize *resource.Quantity `json:"localBufferSize,omitempty"`
-	// ExtraArgs passes config keys this API does not enumerate straight through to the member. It
-	// is keyed by CONFIG KEY rather than by environment-variable name — one namespace per side,
-	// each the one its own binary documents. A key that collides with one derived from a field
-	// above is refused at admission.
+	// ExtraArgs passes config keys this API does not enumerate straight through to the member. An
+	// entry is written as its own flag token, "-key=value", and renders as the entrypoint's own
+	// "-D key=value" override with the dashes gone — one namespace per side, each the one its own
+	// binary documents. A key that collides with one derived from a field above is refused at
+	// admission.
 	//
 	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
-	// rendered into the member container's argv as -D key=value, readable by anyone who can reach
-	// the Pod or the DaemonSet, for the life of the object. A credential does not belong here, and
-	// since this operator renders no flag that carries one, this field is the only way one arrives.
-	ExtraArgs map[string]string `json:"extraArgs,omitempty"`
-	// ExtraEnvs passes environment variables this API does not enumerate straight through to the
+	// rendered into the member container's argv, readable by anyone who can reach the Pod or the
+	// DaemonSet, for the life of the object. A credential does not belong here, and since this
+	// operator renders no flag that carries one, this field is the only way one arrives.
+	ExtraArgs []string `json:"extraArgs,omitempty"`
+	// ExtraEnv passes environment variables this API does not enumerate straight through to the
 	// member container.
 	//
 	// - It is NOT a second spelling of ExtraArgs: the two reach different places. ExtraArgs renders
@@ -80,11 +82,13 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// includes the tier's bucket thresholds, which this operator sizes itself; a tuner who needs
 	// to move them needs a field, and this hatch is deliberately not it.
 	//
+	// The list is keyed by name, and the schema refuses two entries sharing one.
+	//
 	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
 	// rendered into the member container's environment, readable by anyone who can reach the Pod or
 	// the DaemonSet, for the life of the object. A credential does not belong here, and since this
 	// operator renders no variable that carries one, this field is the only way one arrives.
-	ExtraEnvs map[string]string `json:"extraEnvs,omitempty"`
+	ExtraEnv []InstanceEnvVarApplyConfiguration `json:"extraEnv,omitempty"`
 	// Image overrides the backend's Image for this member group only. Left unset, the group runs
 	// the backend's Image.
 	//
@@ -94,20 +98,29 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// also the medium's: a VRAM group needs a build with VRAM segments compiled in, which the stock
 	// CPU default is not.
 	Image *string `json:"image,omitempty"`
-	// LocalDisk declares a directory on the nodes this group already selects and points the store
-	// client's offload keys at it. Left unset, the group is memory only.
+	// LocalDisks declares the local disk tiers this group's nodes contribute, one entry per host
+	// directory, and an empty list leaves the group memory only. Declaring an entry is what turns
+	// the tier on: the store's leader takes the switch from this list's presence, not from any
+	// field of its own.
 	//
 	// - What the tier is written in is a BUCKET, and that is why this operator sizes one. The store
 	// writes nothing until a bucket is full, by bytes or by object count, so under the store's
 	// own thresholds — sized for a saturated production store — the tier stays empty while every
 	// other signal looks healthy. The pair this operator renders instead is not in this API, and
-	// members[].extraEnvs refuses those names.
+	// members[].extraEnv refuses those names.
 	// - It is a LAYER on this group rather than a group of its own, which is the store's shape: the
 	// leader routes an offload task to the client that owns the key's memory replica, so a member
 	// holding no memory segment is never chosen and would report a cold tier that never fills.
 	// - To check what the tier actually holds rather than what it declared, read the leader's own
 	// master_allocated_file_size_bytes; status.capacity reports the declared CAPACITY only.
-	LocalDisk *KVCacheBackendMemberLocalDiskApplyConfiguration `json:"localDisk,omitempty"`
+	// - At most ONE entry, and the bound is the status contract rather than any one renderer's
+	// reach: status.capacity is a single pair of figures for the whole backend and cannot
+	// attribute a tier's bytes to one disk, so two entries would describe neither. The same
+	// sentence, at the group level, is why admission allows only one group to carry a list at
+	// all — lift these together with that status shape or not at all.
+	//
+	// The list is keyed by path, and the schema refuses two entries naming one directory.
+	LocalDisks []KVCacheBackendMemberLocalDiskApplyConfiguration `json:"localDisks,omitempty"`
 	// Transport declares the data plane this group uses, overriding the backend's
 	// spec.transport.protocol for this group only. Left unset, the group inherits the backend's.
 	//
@@ -145,9 +158,9 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// POSITION rather than from anything declared here, so an entry can collide with neither
 	// another entry nor a volume the renderer owns.
 	//
-	// LocalDisk above is not this field spelled differently: that tier is a declared capacity the
+	// LocalDisks above is not this field spelled differently: that list declares tier capacity the
 	// leader routes offload tasks to, with a deregistration hook and a grace period derived from
-	// it. A directory mounted here is a mount and nothing more.
+	// its presence. A directory mounted here is a mount and nothing more.
 	HostPaths []KVCacheBackendMemberHostPathApplyConfiguration `json:"hostPaths,omitempty"`
 	// RuntimeClassName selects the container runtime the member's Pods run under, which is how a
 	// vendor runtime injects its driver libraries and device nodes without any of them being named
@@ -208,30 +221,25 @@ func (b *KVCacheBackendMemberApplyConfiguration) WithLocalBufferSize(value resou
 	return b
 }
 
-// WithExtraArgs puts the entries into the ExtraArgs field in the declarative configuration
+// WithExtraArgs adds the given value to the ExtraArgs field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
-// If called multiple times, the entries provided by each call will be put on the ExtraArgs field,
-// overwriting an existing map entries in ExtraArgs field with the same key.
-func (b *KVCacheBackendMemberApplyConfiguration) WithExtraArgs(entries map[string]string) *KVCacheBackendMemberApplyConfiguration {
-	if b.ExtraArgs == nil && len(entries) > 0 {
-		b.ExtraArgs = make(map[string]string, len(entries))
-	}
-	for k, v := range entries {
-		b.ExtraArgs[k] = v
+// If called multiple times, values provided by each call will be appended to the ExtraArgs field.
+func (b *KVCacheBackendMemberApplyConfiguration) WithExtraArgs(values ...string) *KVCacheBackendMemberApplyConfiguration {
+	for i := range values {
+		b.ExtraArgs = append(b.ExtraArgs, values[i])
 	}
 	return b
 }
 
-// WithExtraEnvs puts the entries into the ExtraEnvs field in the declarative configuration
+// WithExtraEnv adds the given value to the ExtraEnv field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
-// If called multiple times, the entries provided by each call will be put on the ExtraEnvs field,
-// overwriting an existing map entries in ExtraEnvs field with the same key.
-func (b *KVCacheBackendMemberApplyConfiguration) WithExtraEnvs(entries map[string]string) *KVCacheBackendMemberApplyConfiguration {
-	if b.ExtraEnvs == nil && len(entries) > 0 {
-		b.ExtraEnvs = make(map[string]string, len(entries))
-	}
-	for k, v := range entries {
-		b.ExtraEnvs[k] = v
+// If called multiple times, values provided by each call will be appended to the ExtraEnv field.
+func (b *KVCacheBackendMemberApplyConfiguration) WithExtraEnv(values ...*InstanceEnvVarApplyConfiguration) *KVCacheBackendMemberApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithExtraEnv")
+		}
+		b.ExtraEnv = append(b.ExtraEnv, *values[i])
 	}
 	return b
 }
@@ -244,11 +252,16 @@ func (b *KVCacheBackendMemberApplyConfiguration) WithImage(value string) *KVCach
 	return b
 }
 
-// WithLocalDisk sets the LocalDisk field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the LocalDisk field is set to the value of the last call.
-func (b *KVCacheBackendMemberApplyConfiguration) WithLocalDisk(value *KVCacheBackendMemberLocalDiskApplyConfiguration) *KVCacheBackendMemberApplyConfiguration {
-	b.LocalDisk = value
+// WithLocalDisks adds the given value to the LocalDisks field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the LocalDisks field.
+func (b *KVCacheBackendMemberApplyConfiguration) WithLocalDisks(values ...*KVCacheBackendMemberLocalDiskApplyConfiguration) *KVCacheBackendMemberApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithLocalDisks")
+		}
+		b.LocalDisks = append(b.LocalDisks, *values[i])
+	}
 	return b
 }
 

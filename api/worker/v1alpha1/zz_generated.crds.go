@@ -2399,15 +2399,43 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																	},
 																},
 																"extraArgs": {
-																	Description: "ExtraArgs passes flags this API does not enumerate straight through to the leader, after\nthe derived ones. A key that collides with a flag rendered from a field above is refused\nat admission, because two sources for one flag make the rendered command ambiguous.\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then\nrendered into the leader container's argv as -key=value, readable by anyone who can reach the\nPod or the Deployment, for the life of the object. A credential does not belong here, and\nsince this operator renders no flag that carries one, this field is the only way one arrives.",
-																	Type:        "object",
-																	AdditionalProperties: &v1.JSONSchemaPropsOrBool{
-																		Allows: true,
+																	Description: "ExtraArgs passes flags this API does not enumerate straight through to the leader, after\nthe derived ones. Each entry is one flag token of its own, \"-flag\" or \"-flag=value\", and the\nentries render verbatim in the order written. An entry whose key — what precedes the first\n\"=\" once the leading dashes are off — collides with a flag rendered from a field above is\nrefused at admission, because two sources for one flag make the rendered command ambiguous.\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then\nrendered into the leader container's argv, readable by anyone who can reach the Pod or the\nDeployment, for the life of the object. A credential does not belong here, and since this\noperator renders no flag that carries one, this field is the only way one arrives.",
+																	Type:        "array",
+																	Items: &v1.JSONSchemaPropsOrArray{
 																		Schema: &v1.JSONSchemaProps{
 																			Type: "string",
 																		},
 																	},
+																	Nullable:  true,
+																	XListType: ptr.To[string]("atomic"),
+																},
+																"extraEnv": {
+																	Description: "ExtraEnv passes environment variables this API does not enumerate straight through to the\nleader container. The leader reads a handful of its settings from the environment rather\nthan from flags — the store's local snapshot path is one — and this is the hatch for\nwhichever of those grows a use this API has no field for.\nA name this operator already renders is REFUSED at admission, for the same reason a\ncolliding ExtraArgs key is: Kubernetes accepts a container carrying one name twice and\nleaves the winner to the runtime, so the collision would not even be reported.\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then\nrendered into the leader container's environment, readable by anyone who can reach the Pod\nor the Deployment, for the life of the object. A credential does not belong here, and since\nthis operator renders no variable that carries one, this field is the only way one arrives.",
+																	Type:        "array",
+																	Items: &v1.JSONSchemaPropsOrArray{
+																		Schema: &v1.JSONSchemaProps{
+																			Type: "object",
+																			Required: []string{
+																				"name",
+																				"value",
+																			},
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"name": {
+																					Description: "Name is the name of the environment variable,\neach name in one Instance must be unique.",
+																					Type:        "string",
+																				},
+																				"value": {
+																					Description: "Value is the value of the environment variable.",
+																					Type:        "string",
+																				},
+																			},
+																		},
+																	},
 																	Nullable: true,
+																	XListMapKeys: []string{
+																		"name",
+																	},
+																	XListType: ptr.To[string]("map"),
 																},
 																"highAvailability": {
 																	Description: "HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas\nabove 1. The election itself needs no settings: the Lease is named after this backend, so\nthere is no connection target to supply, and the API access it needs is rendered beside the\nworkload. What the block does carry is what a standby is allowed to start from.\n- Unset, the leader runs as a single process exactly as before — no election flag, no extra\nobject, the command line it ran before this field existed.\n- Set with Replicas at 1, the ELECTION is INERT: one process has nothing to elect between,\nso no election flag, Lease or API token is rendered until Replicas rises above 1. That\nmakes an empty block safe to set up front on a store image built without the k8s-lease\nbackend, whose master fails at startup the moment the election flags appear — those flags\narrive only when there is something for them to elect. Snapshot is the exception and says\nso on itself.\n- With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile\ninterval. Each replica seeds its tenant quota policy at its own start, so a standby that\ntook over after a quota was raised applies the older, lower ceiling, and an over-quota\nwrite in this store is not refused — it evicts that tenant's own older objects,\nirreversibly and without moving any counter. The quota itself is not lost: the pool\nreconciler is the authority and writes the difference back on its next pass.",
@@ -2465,21 +2493,6 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																	Description: "MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index\nbehind it. Off, every request falls into one default tenant and the index degrades to a plain\nkey hash, so two callers using different tenant names read each other's cache.\nIt is a FIELD rather than an extraArgs entry because another API validates against it: a\nKVCachePool is refused when its backend has no ledger to write quota into, and a webhook\nreading an unschema'd \"true\", \"1\" or \"True\" would be judging a value domain that belongs to\nwhoever typed it. The store's global -quota_bytes flag stays in extraArgs for the converse\nreason: no other API needs to interpret it.\nUnset and false both mean no ledger, and unset renders NO flag rather than an explicit false.",
 																	Type:        "boolean",
 																},
-																"offload": {
-																	Description: "Offload turns on writing evicted keys to the members' local disk tier. It is the leader's\nhalf of a pair: the other half is members[].localDisk, which says where on each node those\nbytes go, and admission refuses either half alone because the store degrades on both\nmismatches without reporting either.",
-																	Type:        "object",
-																	Properties: map[string]v1.JSONSchemaProps{
-																		"enabled": {
-																			Description: "Enabled turns on offloading to the members' local disks. Unset and false both mean no\noffloading, and unset renders NO flag rather than an explicit false.",
-																			Type:        "boolean",
-																		},
-																		"onEvict": {
-																			Description: "OnEvict defers the write to disk from the moment a key is stored to the moment it is evicted,\nso a key that is never evicted is never written to disk.\nIt REQUIRES Enabled and Enabled REQUIRES it, and admission refuses both directions. The store\nANDs the two, so this alone is accepted, echoed back in the leader's own startup log, and then\ndoes nothing. Enabled alone selects write-through, which the store leaves unprotected: an\nobject queued for offload is held in memory only on the deferred branch this field selects, so\nevicting without it destroys the sole replica of an object whose bucket has not been flushed.",
-																			Type:        "boolean",
-																		},
-																	},
-																	Nullable: true,
-																},
 																"replicas": {
 																	Description: "Replicas is how many leader processes run, of which exactly one serves at a time. The rest are\nstandbys: they hold no data, answer no request, and exist to take over.\n- More than one REQUIRES HighAvailability. Electing a leader among several needs a leadership\nrecord, and the webhook refuses the pair without one rather than silently running two\nleaders against the same members.\n- Raising this past one TURNS THE ELECTION ON, and the flip is re-evaluated on every\nreconcile rather than decided at create. It restarts the leader and rolls every member —\nthe member's master entry changes shape with it — so the store's cached contents do not\nsurvive the crossing. The same holds on the way back down to one.\n- Raising this adds no capacity, which members do. The ceiling is here to catch the reading\nthat it does, and it is duplicated in the webhook on purpose: this one still holds when\nthe webhook is not installed, which is when a second leader would be rendered rather than\nrefused. Raise both together; widening a maximum is not a breaking change.",
 																	Type:        "integer",
@@ -2508,7 +2521,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																	},
 																	Properties: map[string]v1.JSONSchemaProps{
 																		"capacityPerMember": {
-																			Description: "CapacityPerMember sizes ONE member, not one node. It becomes the member's global segment size\nand is counted into the member Pod's own resource request, so a member that does not fit stays\nPending instead of overcommitting the node.\n- A group carrying LocalDisk needs at least one BUCKET here, which is the unit that tier is\nwritten in. A bucket's bytes are held in this segment until the bucket is complete, so a\nsmaller segment never holds a bucket's worth at once and the tier stays empty under every\nworkload, which nothing else reports. A group with no tier has no such floor.\n- The name is \"per member\" for a shape that is DECIDED AND NOT DONE: several members per\nnode, split by NUMA domain. Today one selected node runs one member.\n- What would reopen that is a two-socket node reporting RDMA interfaces on more than one NUMA\nnode AND that node's member observed transferring across the socket boundary, there being\nnothing else on this path that consumes the NUMA affinity this operator already discovers.\nOne group per NUMA domain is not the shape it would take — a group selects nodes through\nnodeSelector, while NUMA is a property inside a node rather than a label on one.",
+																			Description: "CapacityPerMember sizes ONE member, not one node. It becomes the member's global segment size\nand is counted into the member Pod's own resource request, so a member that does not fit stays\nPending instead of overcommitting the node.\n- A group declaring a tier in LocalDisks needs at least one BUCKET here, which is the unit\nthat tier is written in. A bucket's bytes are held in this segment until the bucket is\ncomplete, so a smaller segment never holds a bucket's worth at once and the tier stays\nempty under every workload, which nothing else reports. A group with no tier has no such\nfloor.\n- The name is \"per member\" for a shape that is DECIDED AND NOT DONE: several members per\nnode, split by NUMA domain. Today one selected node runs one member.\n- What would reopen that is a two-socket node reporting RDMA interfaces on more than one NUMA\nnode AND that node's member observed transferring across the socket boundary, there being\nnothing else on this path that consumes the NUMA affinity this operator already discovers.\nOne group per NUMA domain is not the shape it would take — a group selects nodes through\nnodeSelector, while NUMA is a property inside a node rather than a label on one.",
 																			Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
 																			AnyOf: []v1.JSONSchemaProps{
 																				{
@@ -2521,29 +2534,46 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																			XIntOrString: true,
 																		},
 																		"extraArgs": {
-																			Description: "ExtraArgs passes config keys this API does not enumerate straight through to the member. It\nis keyed by CONFIG KEY rather than by environment-variable name — one namespace per side,\neach the one its own binary documents. A key that collides with one derived from a field\nabove is refused at admission.\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then\nrendered into the member container's argv as -D key=value, readable by anyone who can reach\nthe Pod or the DaemonSet, for the life of the object. A credential does not belong here, and\nsince this operator renders no flag that carries one, this field is the only way one arrives.",
-																			Type:        "object",
-																			AdditionalProperties: &v1.JSONSchemaPropsOrBool{
-																				Allows: true,
+																			Description: "ExtraArgs passes config keys this API does not enumerate straight through to the member. An\nentry is written as its own flag token, \"-key=value\", and renders as the entrypoint's own\n\"-D key=value\" override with the dashes gone — one namespace per side, each the one its own\nbinary documents. A key that collides with one derived from a field above is refused at\nadmission.\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then\nrendered into the member container's argv, readable by anyone who can reach the Pod or the\nDaemonSet, for the life of the object. A credential does not belong here, and since this\noperator renders no flag that carries one, this field is the only way one arrives.",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
 																				Schema: &v1.JSONSchemaProps{
 																					Type: "string",
 																				},
 																			},
-																			Nullable: true,
+																			Nullable:  true,
+																			XListType: ptr.To[string]("atomic"),
 																		},
-																		"extraEnvs": {
-																			Description: "ExtraEnvs passes environment variables this API does not enumerate straight through to the\nmember container.\n- It is NOT a second spelling of ExtraArgs: the two reach different places. ExtraArgs renders\nas the entrypoint's \"-D key=value\" config override, while a whole family of this store's\nsettings — the local disk tier's flush thresholds, its promotion behavior, the rest of its\neviction knobs — has no config key at all and is read from the ENVIRONMENT only.\n- A name this operator already renders is REFUSED at admission, for the same reason a\ncolliding ExtraArgs key is: Kubernetes accepts a container carrying one name twice and\nleaves the winner to the runtime, so the collision would not even be reported. That\nincludes the tier's bucket thresholds, which this operator sizes itself; a tuner who needs\nto move them needs a field, and this hatch is deliberately not it.\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then\nrendered into the member container's environment, readable by anyone who can reach the Pod or\nthe DaemonSet, for the life of the object. A credential does not belong here, and since this\noperator renders no variable that carries one, this field is the only way one arrives.",
-																			Type:        "object",
-																			AdditionalProperties: &v1.JSONSchemaPropsOrBool{
-																				Allows: true,
+																		"extraEnv": {
+																			Description: "ExtraEnv passes environment variables this API does not enumerate straight through to the\nmember container.\n- It is NOT a second spelling of ExtraArgs: the two reach different places. ExtraArgs renders\nas the entrypoint's \"-D key=value\" config override, while a whole family of this store's\nsettings — the local disk tier's flush thresholds, its promotion behavior, the rest of its\neviction knobs — has no config key at all and is read from the ENVIRONMENT only.\n- A name this operator already renders is REFUSED at admission, for the same reason a\ncolliding ExtraArgs key is: Kubernetes accepts a container carrying one name twice and\nleaves the winner to the runtime, so the collision would not even be reported. That\nincludes the tier's bucket thresholds, which this operator sizes itself; a tuner who needs\nto move them needs a field, and this hatch is deliberately not it.\nThe list is keyed by name, and the schema refuses two entries sharing one.\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then\nrendered into the member container's environment, readable by anyone who can reach the Pod or\nthe DaemonSet, for the life of the object. A credential does not belong here, and since this\noperator renders no variable that carries one, this field is the only way one arrives.",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
 																				Schema: &v1.JSONSchemaProps{
-																					Type: "string",
+																					Type: "object",
+																					Required: []string{
+																						"name",
+																						"value",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"name": {
+																							Description: "Name is the name of the environment variable,\neach name in one Instance must be unique.",
+																							Type:        "string",
+																						},
+																						"value": {
+																							Description: "Value is the value of the environment variable.",
+																							Type:        "string",
+																						},
+																					},
 																				},
 																			},
 																			Nullable: true,
+																			XListMapKeys: []string{
+																				"name",
+																			},
+																			XListType: ptr.To[string]("map"),
 																		},
 																		"hostPaths": {
-																			Description: "HostPaths mounts directories or files from the selected nodes into the member container.\nIt exists because a vendor's USER-SPACE DRIVER is not in the image and is not under /dev, so\nno device grant reaches it: an Ascend member needs the driver tree and the DCMI library from\nthe node, and a container runtime that injects them is the other way to get there. Privileged\nalone does NOT cover this — it opens the node's device tree, which is where the device nodes\nare and is not where the libraries are.\nEntries are mounted in the order written. The volume backing each one is named from its\nPOSITION rather than from anything declared here, so an entry can collide with neither\nanother entry nor a volume the renderer owns.\nLocalDisk above is not this field spelled differently: that tier is a declared capacity the\nleader routes offload tasks to, with a deregistration hook and a grace period derived from\nit. A directory mounted here is a mount and nothing more.",
+																			Description: "HostPaths mounts directories or files from the selected nodes into the member container.\nIt exists because a vendor's USER-SPACE DRIVER is not in the image and is not under /dev, so\nno device grant reaches it: an Ascend member needs the driver tree and the DCMI library from\nthe node, and a container runtime that injects them is the other way to get there. Privileged\nalone does NOT cover this — it opens the node's device tree, which is where the device nodes\nare and is not where the libraries are.\nEntries are mounted in the order written. The volume backing each one is named from its\nPOSITION rather than from anything declared here, so an entry can collide with neither\nanother entry nor a volume the renderer owns.\nLocalDisks above is not this field spelled differently: that list declares tier capacity the\nleader routes offload tasks to, with a deregistration hook and a grace period derived from\nits presence. A directory mounted here is a mount and nothing more.",
 																			Type:        "array",
 																			MaxItems:    ptr.To[int64](32),
 																			Items: &v1.JSONSchemaPropsOrArray{
@@ -2624,98 +2654,108 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																			},
 																			XIntOrString: true,
 																		},
-																		"localDisk": {
-																			Description: "LocalDisk declares a directory on the nodes this group already selects and points the store\nclient's offload keys at it. Left unset, the group is memory only.\n- What the tier is written in is a BUCKET, and that is why this operator sizes one. The store\nwrites nothing until a bucket is full, by bytes or by object count, so under the store's\nown thresholds — sized for a saturated production store — the tier stays empty while every\nother signal looks healthy. The pair this operator renders instead is not in this API, and\nmembers[].extraEnvs refuses those names.\n- It is a LAYER on this group rather than a group of its own, which is the store's shape: the\nleader routes an offload task to the client that owns the key's memory replica, so a member\nholding no memory segment is never chosen and would report a cold tier that never fills.\n- To check what the tier actually holds rather than what it declared, read the leader's own\nmaster_allocated_file_size_bytes; status.capacity reports the declared CAPACITY only.",
-																			Type:        "object",
-																			Required: []string{
-																				"path",
-																			},
-																			Properties: map[string]v1.JSONSchemaProps{
-																				"capacity": {
-																					Description: "Capacity caps what this tier stores, in bytes. Left unset, the store's own ceiling applies and\nnothing is rendered, so a ceiling that moves upstream is a change to investigate rather than\none this API silently restated.\n- It is also the figure EVICTION measures against, which is why Eviction below is not usable\nwithout it: the store's watermark quota defaults to zero, which that path reads as \"no\nquota\" and returns from having evicted nothing. One value is rendered into both ceilings.\n- A set capacity must hold one BUCKET, the unit this tier is written in: the store stops\ntaking offload work as soon as one more bucket would not fit, so a smaller tier never\nreceives a key. The bucket size is this operator's to choose, so the floor moves with it.\n- It is NOT counted into the Pod's resource requests, unlike CapacityPerMember. The tier is a\nhost directory, outside the kubelet's ephemeral-storage accounting entirely, so a request\nagainst it would reserve a figure nothing polices and would then keep the member off the\nvery node that has the disk. Watching that filesystem is the operator's.",
-																					Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
-																					AnyOf: []v1.JSONSchemaProps{
-																						{
-																							Type: "integer",
-																						},
-																						{
-																							Type: "string",
-																						},
+																		"localDisks": {
+																			Description: "LocalDisks declares the local disk tiers this group's nodes contribute, one entry per host\ndirectory, and an empty list leaves the group memory only. Declaring an entry is what turns\nthe tier on: the store's leader takes the switch from this list's presence, not from any\nfield of its own.\n- What the tier is written in is a BUCKET, and that is why this operator sizes one. The store\nwrites nothing until a bucket is full, by bytes or by object count, so under the store's\nown thresholds — sized for a saturated production store — the tier stays empty while every\nother signal looks healthy. The pair this operator renders instead is not in this API, and\nmembers[].extraEnv refuses those names.\n- It is a LAYER on this group rather than a group of its own, which is the store's shape: the\nleader routes an offload task to the client that owns the key's memory replica, so a member\nholding no memory segment is never chosen and would report a cold tier that never fills.\n- To check what the tier actually holds rather than what it declared, read the leader's own\nmaster_allocated_file_size_bytes; status.capacity reports the declared CAPACITY only.\n- At most ONE entry, and the bound is the status contract rather than any one renderer's\nreach: status.capacity is a single pair of figures for the whole backend and cannot\nattribute a tier's bytes to one disk, so two entries would describe neither. The same\nsentence, at the group level, is why admission allows only one group to carry a list at\nall — lift these together with that status shape or not at all.\nThe list is keyed by path, and the schema refuses two entries naming one directory.",
+																			Type:        "array",
+																			MaxItems:    ptr.To[int64](1),
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"path",
 																					},
-																					XIntOrString: true,
-																				},
-																				"cleanAfterDelete": {
-																					Description: "CleanAfterDelete asks this operator to empty Path when the backend is deleted, on every node\nthis group's NodeSelector picks AT THAT MOMENT. It DEFAULTS TO FALSE, and left alone the\ndirectory keeps whatever it holds.\nIt is a switch rather than a default because what is on that disk is the administrator's, and\ndeleting it is not a decision this operator may take on their behalf. That is also why it is\nreachable where preparing the directory is not: removing content needs no uid, creating does.\n- \"At that moment\" is the whole of the promise. Nothing stores the selector's history and the\nmembers are gone by the time cleanup runs, so narrowing NodeSelector or removing the\nLocalDisk block before deleting the backend leaves the dropped nodes holding their content\nwith nothing reported about them. Delete the backend first and edit afterwards.\n- WHAT IS REMOVED IS THE CONTENT, NOT THE DIRECTORY, which was made by whoever prepared the\nnode, may be a mount point, and carries an owner this operator did not choose.\n- The cleanup runs the image THIS GROUP runs, on the nodes it selects, with the backend's\nimagePullSecrets, so it does not wait on a pull the members already did.\n- A node this operator cannot reach in time keeps its content, and deletion is not held open\nfor it: a finalizer waiting on a node that is gone leaves an object nobody can delete. The\nnode gets a warning Event naming what was left.\n- A node where another KVCacheBackend declares an overlapping path is SKIPPED, with the same\nkind of Event. Nothing refuses two backends naming one directory, and emptying it for this\none would take the other one's live data with it.",
-																					Type:        "boolean",
-																				},
-																				"eviction": {
-																					Description: "Eviction is what this tier does once it is full. Left unset, nothing is rendered and the\nstore's own behavior applies, so a default that moves upstream is a change to investigate\nrather than one this API silently restated.",
-																					Type:        "object",
 																					Properties: map[string]v1.JSONSchemaProps{
-																						"enabled": {
-																							Description: "Enabled is whether this tier evicts at all. It DEFAULTS TO TRUE, so declaring this block\nwithout it asks for eviction rather than against it.\nOMITTING THIS KEY AND WRITING `enabled: false` ARE DIFFERENT, and the default is what makes\nthem different: only the explicit false turns eviction off. Without that, declaring this block\nmerely to set a Watermark would stop the tier evicting for everyone who did so.\nTurning it off renders TWO settings, not one: an eviction policy of \"none\", the store's own\nname for that value, and an explicit false on its watermark-eviction switch. They belong to\ndifferent layers, and eviction should be off at whichever layer ends up asking.",
+																						"capacity": {
+																							Description: "Capacity caps what this tier stores, in bytes. Left unset, the store's own ceiling applies and\nnothing is rendered, so a ceiling that moves upstream is a change to investigate rather than\none this API silently restated.\n- It is also the figure EVICTION measures against, which is why Eviction below is not usable\nwithout it: the store's watermark quota defaults to zero, which that path reads as \"no\nquota\" and returns from having evicted nothing. One value is rendered into both ceilings.\n- A set capacity must hold one BUCKET, the unit this tier is written in: the store stops\ntaking offload work as soon as one more bucket would not fit, so a smaller tier never\nreceives a key. The bucket size is this operator's to choose, so the floor moves with it.\n- It is NOT counted into the Pod's resource requests, unlike CapacityPerMember. The tier is a\nhost directory, outside the kubelet's ephemeral-storage accounting entirely, so a request\nagainst it would reserve a figure nothing polices and would then keep the member off the\nvery node that has the disk. Watching that filesystem is the operator's.",
+																							Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																							AnyOf: []v1.JSONSchemaProps{
+																								{
+																									Type: "integer",
+																								},
+																								{
+																									Type: "string",
+																								},
+																							},
+																							XIntOrString: true,
+																						},
+																						"cleanAfterDelete": {
+																							Description: "CleanAfterDelete asks this operator to empty Path when the backend is deleted, on every node\nthis group's NodeSelector picks AT THAT MOMENT. It DEFAULTS TO FALSE, and left alone the\ndirectory keeps whatever it holds.\nIt is a switch rather than a default because what is on that disk is the administrator's, and\ndeleting it is not a decision this operator may take on their behalf. That is also why it is\nreachable where preparing the directory is not: removing content needs no uid, creating does.\n- \"At that moment\" is the whole of the promise. Nothing stores the selector's history and the\nmembers are gone by the time cleanup runs, so narrowing NodeSelector or removing the\nLocalDisks entry before deleting the backend leaves the dropped nodes holding their content\nwith nothing reported about them. Delete the backend first and edit afterwards.\n- WHAT IS REMOVED IS THE CONTENT, NOT THE DIRECTORY, which was made by whoever prepared the\nnode, may be a mount point, and carries an owner this operator did not choose.\n- The cleanup runs the image THIS GROUP runs, on the nodes it selects, with the backend's\nimagePullSecrets, so it does not wait on a pull the members already did.\n- A node this operator cannot reach in time keeps its content, and deletion is not held open\nfor it: a finalizer waiting on a node that is gone leaves an object nobody can delete. The\nnode gets a warning Event naming what was left.\n- A node where another KVCacheBackend declares an overlapping path is SKIPPED, with the same\nkind of Event. Nothing refuses two backends naming one directory, and emptying it for this\none would take the other one's live data with it.",
 																							Type:        "boolean",
-																							Default: &v1.JSON{
-																								Raw: []byte(`true`),
-																							},
-																							Nullable: true,
 																						},
-																						"policy": {
-																							Description: "Policy is the order in which entries leave. FIFO drops the oldest written first, LRU the least\nrecently read. It is REFUSED together with Enabled set to false, because there is no order in\nwhich nothing leaves.\n- The enum is the two any cache would offer, deliberately, rather than every string the\nstore's parser happens to read. It carries NO value meaning \"do not evict\": that is\nEnabled's job, and a third value saying the same thing would be a second spelling\nadmission would then have to adjudicate against the first.\n- Left unset NOTHING IS RENDERED and the store's own default applies, which is first-in\nfirst-out. That earns more here than usual: the store maps a policy string it does not\nrecognize onto no eviction at all — no error, no warning, no failure to start — so a policy\nis only ever sent when this API is the one that chose it, from a fixed set of spellings.",
-																							Type:        "string",
-																							Enum: []v1.JSON{
-																								{
-																									Raw: []byte(`"FIFO"`),
-																								},
-																								{
-																									Raw: []byte(`"LRU"`),
-																								},
-																							},
-																						},
-																						"watermark": {
-																							Description: "Watermark is WHEN eviction runs: it starts once the tier passes High and stops once it is back\nunder Low, both as a percentage of Capacity. Left unset, nothing is rendered and the store's\nown marks apply.\nIt REQUIRES Capacity, which is what the percentages are of, and it is refused together with\nEnabled set to false.",
+																						"eviction": {
+																							Description: "Eviction is what this tier does once it is full. Left unset, nothing is rendered and the\nstore's own behavior applies, so a default that moves upstream is a change to investigate\nrather than one this API silently restated.",
 																							Type:        "object",
-																							Required: []string{
-																								"high",
-																								"low",
-																							},
 																							Properties: map[string]v1.JSONSchemaProps{
-																								"high": {
-																									Description: "High is the percentage of Capacity at which eviction starts. A PERCENTAGE and not a quantity:\nthe store takes a fraction of its own quota rather than a size, and a size here would restate\na figure Capacity already carries — one that would quietly stop matching the moment Capacity\nmoved.",
-																									Type:        "integer",
-																									Format:      "int32",
-																									Maximum:     ptr.To[float64](100),
-																									Minimum:     ptr.To[float64](1),
+																								"enabled": {
+																									Description: "Enabled is whether this tier evicts at all. It DEFAULTS TO TRUE, so declaring this block\nwithout it asks for eviction rather than against it.\nOMITTING THIS KEY AND WRITING `enabled: false` ARE DIFFERENT, and the default is what makes\nthem different: only the explicit false turns eviction off. Without that, declaring this block\nmerely to set a Watermark would stop the tier evicting for everyone who did so.\nTurning it off renders TWO settings, not one: an eviction policy of \"none\", the store's own\nname for that value, and an explicit false on its watermark-eviction switch. They belong to\ndifferent layers, and eviction should be off at whichever layer ends up asking.",
+																									Type:        "boolean",
+																									Default: &v1.JSON{
+																										Raw: []byte(`true`),
+																									},
+																									Nullable: true,
 																								},
-																								"low": {
-																									Description: "Low is the percentage of Capacity eviction stops at, and it MUST be below High. Equal marks\nwould make every write past the mark evict, which is the thrashing a band exists to prevent.\nThe store refuses the pair when its member starts; admission refuses it here instead, where\nthe message reaches whoever wrote it.",
-																									Type:        "integer",
-																									Format:      "int32",
-																									Maximum:     ptr.To[float64](100),
-																									Minimum:     ptr.To[float64](1),
+																								"policy": {
+																									Description: "Policy is the order in which entries leave. FIFO drops the oldest written first, LRU the least\nrecently read. It is REFUSED together with Enabled set to false, because there is no order in\nwhich nothing leaves.\n- The enum is the two any cache would offer, deliberately, rather than every string the\nstore's parser happens to read. It carries NO value meaning \"do not evict\": that is\nEnabled's job, and a third value saying the same thing would be a second spelling\nadmission would then have to adjudicate against the first.\n- Left unset NOTHING IS RENDERED and the store's own default applies, which is first-in\nfirst-out. That earns more here than usual: the store maps a policy string it does not\nrecognize onto no eviction at all — no error, no warning, no failure to start — so a policy\nis only ever sent when this API is the one that chose it, from a fixed set of spellings.",
+																									Type:        "string",
+																									Enum: []v1.JSON{
+																										{
+																											Raw: []byte(`"FIFO"`),
+																										},
+																										{
+																											Raw: []byte(`"LRU"`),
+																										},
+																									},
+																								},
+																								"watermark": {
+																									Description: "Watermark is WHEN eviction runs: it starts once the tier passes High and stops once it is back\nunder Low, both as a percentage of Capacity. Left unset, nothing is rendered and the store's\nown marks apply.\nIt REQUIRES Capacity, which is what the percentages are of, and it is refused together with\nEnabled set to false.",
+																									Type:        "object",
+																									Required: []string{
+																										"high",
+																										"low",
+																									},
+																									Properties: map[string]v1.JSONSchemaProps{
+																										"high": {
+																											Description: "High is the percentage of Capacity at which eviction starts. A PERCENTAGE and not a quantity:\nthe store takes a fraction of its own quota rather than a size, and a size here would restate\na figure Capacity already carries — one that would quietly stop matching the moment Capacity\nmoved.",
+																											Type:        "integer",
+																											Format:      "int32",
+																											Maximum:     ptr.To[float64](100),
+																											Minimum:     ptr.To[float64](1),
+																										},
+																										"low": {
+																											Description: "Low is the percentage of Capacity eviction stops at, and it MUST be below High. Equal marks\nwould make every write past the mark evict, which is the thrashing a band exists to prevent.\nThe store refuses the pair when its member starts; admission refuses it here instead, where\nthe message reaches whoever wrote it.",
+																											Type:        "integer",
+																											Format:      "int32",
+																											Maximum:     ptr.To[float64](100),
+																											Minimum:     ptr.To[float64](1),
+																										},
+																									},
+																									Nullable: true,
 																								},
 																							},
 																							Nullable: true,
+																						},
+																						"keyLimit": {
+																							Description: "KeyLimit caps how many keys this tier holds. It is Capacity's other HALF rather than an\nalternative to it: the store bounds the tier by bytes AND by key count, stops taking offload\nwork when either would be exceeded, and applies its own ceiling to whichever this object\nleaves out. Left unset or zero, nothing is rendered, on the same rule as Capacity. It carries\nthe same bucket floor and for the same reason — the store checks against one whole bucket's\nworth of keys, so a limit below that is a tier that can never receive one.",
+																							Type:        "integer",
+																							Format:      "int64",
+																							Minimum:     ptr.To[float64](0),
+																						},
+																						"path": {
+																							Description: "Path is the directory on each selected node that holds this tier, mounted into the member\ncontainer from the host at the same location. It is REQUIRED and has no default: choosing a\nhost directory on somebody else's nodes is not a default this operator may pick, because the\nwrong one fills a filesystem that nothing in Kubernetes accounts for.\n- Declaring a tier REQUIRES a shell in the group's image. An init container surveys this\ndirectory before the member starts, so that reusing a path is something an administrator is\ntold rather than discovers through a key that reads back as somebody else's. It runs\n`sh -c`, and an image without a shell keeps the member from starting at all.\n- Creating this directory and giving it the right owner is YOURS, not this operator's, and a\nmember whose container cannot write it fails at start. The omission is deliberate: an init\ncontainer that chowns has to name a uid, while members[].image can put a different vendor's\nbuild on each group, and a chmod 0777 instead opens the directory to every process on the\nnode. An operator whose uid holds for a whole backend has what would settle it.",
+																							Type:        "string",
+																							MaxLength:   ptr.To[int64](4096),
 																						},
 																					},
-																					Nullable: true,
-																				},
-																				"keyLimit": {
-																					Description: "KeyLimit caps how many keys this tier holds. It is Capacity's other HALF rather than an\nalternative to it: the store bounds the tier by bytes AND by key count, stops taking offload\nwork when either would be exceeded, and applies its own ceiling to whichever this object\nleaves out. Left unset or zero, nothing is rendered, on the same rule as Capacity. It carries\nthe same bucket floor and for the same reason — the store checks against one whole bucket's\nworth of keys, so a limit below that is a tier that can never receive one.",
-																					Type:        "integer",
-																					Format:      "int64",
-																					Minimum:     ptr.To[float64](0),
-																				},
-																				"path": {
-																					Description: "Path is the directory on each selected node that holds this tier, mounted into the member\ncontainer from the host at the same location. It is REQUIRED and has no default: choosing a\nhost directory on somebody else's nodes is not a default this operator may pick, because the\nwrong one fills a filesystem that nothing in Kubernetes accounts for.\n- Declaring a tier REQUIRES a shell in the group's image. An init container surveys this\ndirectory before the member starts, so that reusing a path is something an administrator is\ntold rather than discovers through a key that reads back as somebody else's. It runs\n`sh -c`, and an image without a shell keeps the member from starting at all.\n- Creating this directory and giving it the right owner is YOURS, not this operator's, and a\nmember whose container cannot write it fails at start. The omission is deliberate: an init\ncontainer that chowns has to name a uid, while members[].image can put a different vendor's\nbuild on each group, and a chmod 0777 instead opens the directory to every process on the\nnode. An operator whose uid holds for a whole backend has what would settle it.",
-																					Type:        "string",
-																					MaxLength:   ptr.To[int64](4096),
 																				},
 																			},
 																			Nullable: true,
+																			XListMapKeys: []string{
+																				"path",
+																			},
+																			XListType: ptr.To[string]("map"),
 																		},
 																		"medium": {
-																			Description: "Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or\ndevice memory (VRAM).\nIt is a choice rather than an identity: the renderer splits on it. A DRAM member charges\nCapacityPerMember against the Pod's host memory; a VRAM member charges it against nothing,\nbecause its segment is device memory and claiming it is allocating it. What lets a VRAM member\nreach its device is declared and never inferred — SecurityContext, HostPaths and\nRuntimeClassName below, each on its own. The field stays immutable — a segment already mounted\ncannot change kind underneath the data in it — so the choice is made when the group is\ndeclared.\n- A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and\neach is reached elsewhere: the first through localDisk below, NVMe-oF as a target\ncoordinate with no Pod, and the last two on the leader's own process.\n- Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one\nof those values, while this CRD was installed but the webhook was not, becomes undeletable:\nschema validation runs on the write path only, so it reads back fine while every update is\nrefused, the controller's finalizer removal included. The exposure is development clusters\nonly, this type being absent from every tag through v0.8.6, so clearing it is the first\nshipping release's job — confirm no leftover object exists, or write a recovery procedure.",
+																			Description: "Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or\ndevice memory (VRAM).\nIt is a choice rather than an identity: the renderer splits on it. A DRAM member charges\nCapacityPerMember against the Pod's host memory; a VRAM member charges it against nothing,\nbecause its segment is device memory and claiming it is allocating it. What lets a VRAM member\nreach its device is declared and never inferred — SecurityContext, HostPaths and\nRuntimeClassName below, each on its own. The field stays immutable — a segment already mounted\ncannot change kind underneath the data in it — so the choice is made when the group is\ndeclared.\n- A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and\neach is reached elsewhere: the first through localDisks below, NVMe-oF as a target\ncoordinate with no Pod, and the last two on the leader's own process.\n- Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one\nof those values, while this CRD was installed but the webhook was not, becomes undeletable:\nschema validation runs on the write path only, so it reads back fine while every update is\nrefused, the controller's finalizer removal included. The exposure is development clusters\nonly, this type being absent from every tag through v0.8.6, so clearing it is the first\nshipping release's job — confirm no leftover object exists, or write a recovery procedure.",
 																			Type:        "string",
 																			Enum: []v1.JSON{
 																				{
@@ -3744,7 +3784,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding() *v1.CustomResourceDef
 									Required: []string{
 										"poolRef",
 										"domain",
-										"quotaCeiling",
+										"quota",
 									},
 									Properties: map[string]v1.JSONSchemaProps{
 										"domain": {
@@ -3785,18 +3825,27 @@ func crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding() *v1.CustomResourceDef
 												},
 											},
 										},
-										"quotaCeiling": {
-											Description: "QuotaCeiling is what this namespace may consume in its reuse domain, written verbatim into that\none tenant's requested quota rather than kept as a total this operator maintains.\n- IT IS A REQUEST, NOT A GRANT. The pool reduces every tenant's effective quota in proportion\nwhen the sum of requests exceeds allocatable capacity, and Status.EffectiveQuota is what\nwas actually granted.\n- EXCEEDING IT EVICTS RATHER THAN REFUSES, which is the opposite of what the word suggests.\nA write past the ceiling is not rejected: the store frees room by dropping this namespace's\nown older objects and retries. A ceiling set too low therefore costs cache inside this\nnamespace rather than failed writes, and costs it without any counter moving. Writes are\nrefused only when eviction cannot free enough, which needs those older objects held by\nunexpired read leases.\n- It is REQUIRED, because the state it would otherwise allow does not work: the storage layer\nhas no default policy and refuses a tenant it holds no policy for, so a Binding without\nthis field would pass admission, report Ready and refuse every byte its workloads wrote.\n- A value that is not positive is refused at admission.",
-											Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
-											AnyOf: []v1.JSONSchemaProps{
-												{
-													Type: "integer",
-												},
-												{
-													Type: "string",
+										"quota": {
+											Description: "Quota is what this namespace asks of its pool, shaped like the pool's own declared ceiling so\none concept is spelled one way on both sides of the grant.",
+											Type:        "object",
+											Required: []string{
+												"ceiling",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"ceiling": {
+													Description: "Ceiling is what this namespace may consume in its reuse domain, written verbatim into that\none tenant's requested quota rather than kept as a total this operator maintains.\n- IT IS A REQUEST, NOT A GRANT. The pool reduces every tenant's effective quota in proportion\nwhen the sum of requests exceeds allocatable capacity, and Status.EffectiveQuota is what\nwas actually granted.\n- EXCEEDING IT EVICTS RATHER THAN REFUSES, which is the opposite of what the word suggests.\nA write past the ceiling is not rejected: the store frees room by dropping this namespace's\nown older objects and retries. A ceiling set too low therefore costs cache inside this\nnamespace rather than failed writes, and costs it without any counter moving. Writes are\nrefused only when eviction cannot free enough, which needs those older objects held by\nunexpired read leases.\n- It is REQUIRED, because the state it would otherwise allow does not work: the storage layer\nhas no default policy and refuses a tenant it holds no policy for, so a Binding without\nthis field would pass admission, report Ready and refuse every byte its workloads wrote.\n- A value that is not positive is refused at admission.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
 												},
 											},
-											XIntOrString: true,
 										},
 									},
 								},
@@ -4080,39 +4129,35 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 									Required: []string{
 										"model",
 										"engine",
-										"engineVersion",
 										"roles",
 									},
 									Properties: map[string]v1.JSONSchemaProps{
-										"directTransfer": {
-											Description: "DirectTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode\npair.\nTHE LEG THIS COVERS NEVER TRAVERSES THE STORE, and that is why the value does not come from\nthe KVCacheBackend: spec.transport there defines the data plane the store MEMBERS run, this\none is engine to engine, and the two planes declare separately. A deployment can render\nthis leg with no pool attached at all, which is why the field cannot live under KVCache.",
+										"engine": {
+											Description: "Engine is the inference engine this deployment runs, which decides which argument keys the\noperator owns and which carrier the transfer configuration arrives on. Ownership is per\n(engine, key): a key one engine owns is an ordinary user argument on another.\nIt does NOT decide the connector, which follows the role's hardware instead: the connector is\na property of the accelerator backend, so an Ascend pool and an NVIDIA pool running this\nengine get different ones.",
 											Type:        "object",
+											Required: []string{
+												"name",
+											},
 											Properties: map[string]v1.JSONSchemaProps{
-												"protocol": {
-													Description: "Protocol is the transport both ends of the leg are told to use, in the mooncake\nconfiguration's own spelling, e.g. \"tcp\" or \"rdma\".\n- IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either\nend, so a per-role field could only express a contradiction -- two ends naming different\nvalues for one connection, which fails at transfer time rather than at admission.\n- THE VALUE IS DECLARED, NOT DISCOVERED, AND IT IS NOT GATED. The accepted set is a\nproperty of the mooncake build inside the engine's own image, which this operator\nneither ships nor can inspect: a HIP-compiled build makes \"hip\" a working point-to-point\ntransport, and an enum here would hard-code one image's compile set onto another image's\nconnector. The value is passed through verbatim, and a value the engine build rejects\nraises at engine startup, in the container that owns the fact.\n- UNSET RENDERS \"tcp\", the transport every mooncake build carries. The default lives in\nthe renderer rather than in this schema, so the stored object holds exactly what was\nasked.\n- IT IS READ ONLY ON THE DIRECT-TRANSFER LEG: a managed llm-d router in front of vLLM\nprefill/decode roles. On every other shape -- sglang, Ascend, or no router -- the value\nis accepted and renders nothing, which is stated here because an accepted field that\nsilently does nothing is a promise broken quietly.\n- IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'\nargv, so a change rebuilds every Kueue pod group of the deployment. With roles split\nacross InstanceTypes the groups rebuild independently, and a mixed-protocol window\nbetween a prefiller and a decoder exists until both converge -- the same window an\nengineVersion edit already opens.",
+												"name": {
+													Description: "Name selects the engine.\nIt is the half of this object that is the deployment's identity and is frozen after creation,\nwhile Version answers which build runs and stays editable — stated here because one object\nreading otherwise would freeze the pair together.",
+													Type:        "string",
+													Enum: []v1.JSON{
+														{
+															Raw: []byte(`"vllm"`),
+														},
+														{
+															Raw: []byte(`"sglang"`),
+														},
+													},
+												},
+												"version": {
+													Description: "Version is the engine's own version, e.g. \"0.25.1\" for vllm or \"0.5.18\" for sglang.\n- It is OPTIONAL, and the obligation sits with the roles instead: a role that names no image\nof its own has one synthesized from this version, so admission refuses an empty version\nbeside such a role rather than letting the render assemble a malformed tag naming\nsomething never typed. A role that names an image never reads this field.\n- It is free-form and UNVALIDATED, by decision: the user guarantees that the version and the\ndriver each role's hardware installed are aligned. A gate would need the runner's release\nmatrix compiled into the operator, and the failure it would prevent is already legible as\nan ImagePullBackOff on a tag that does not exist.\n- It is per deployment rather than per role, which is what lets one version assemble a\nDIFFERENT image for each role: the backend half of the tag comes from the role's own\nInstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.\nPublished version sets do NOT overlap across every backend, so one version has to name a\ntag that exists for each backend the roles land on.",
 													Type:        "string",
 													MaxLength:   ptr.To[int64](64),
+													MinLength:   ptr.To[int64](1),
 												},
 											},
-											Nullable: true,
-										},
-										"engine": {
-											Description: "Engine selects the inference engine, which decides which argument keys the operator owns and\nwhich carrier the transfer configuration arrives on. Ownership is per (engine, key): a key one\nengine owns is an ordinary user argument on another.\nIt does NOT decide the connector, which follows the role's hardware instead: the connector is a\nproperty of the accelerator backend, so an Ascend pool and an NVIDIA pool running this engine\nget different ones.",
-											Type:        "string",
-											Enum: []v1.JSON{
-												{
-													Raw: []byte(`"vllm"`),
-												},
-												{
-													Raw: []byte(`"sglang"`),
-												},
-											},
-										},
-										"engineVersion": {
-											Description: "EngineVersion is the engine's own version, e.g. \"0.25.1\" for vllm or \"0.5.18\" for sglang.\n- It is free-form and UNVALIDATED, by decision: the user guarantees that the version and the\ndriver each role's hardware installed are aligned. A gate would need the runner's release\nmatrix compiled into the operator, and the failure it would prevent is already legible as\nan ImagePullBackOff on a tag that does not exist.\n- It is per deployment rather than per role, which is what lets one version assemble a\nDIFFERENT image for each role: the backend half of the tag comes from the role's own\nInstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.\nPublished version sets do NOT overlap across every backend, so one version has to name a\ntag that exists for each backend the roles land on.\n- The lower bound is not decoration: `required` makes the key present, not the value\nnon-empty, and an empty version assembles a malformed tag naming something never typed.",
-											Type:        "string",
-											MaxLength:   ptr.To[int64](64),
-											MinLength:   ptr.To[int64](1),
 										},
 										"kvCache": {
 											Description: "KVCache optionally attaches the deployment to a shared KV cache pool. A managed vLLM\nprefill/decode deployment without it still uses its router's point-to-point connector; it does\nnot render the shared-store connector or its client configuration.",
@@ -4122,14 +4167,14 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											},
 											Properties: map[string]v1.JSONSchemaProps{
 												"connector": {
-													Description: "Connector selects how the engine's transfer configuration is produced. \"auto\" synthesizes it\nfrom the pool's backend type and the engine. There is no \"none\" — synthesizing nothing is\nreachable through a full command replacement, which also marks the role unmanaged and moves\nCacheAttached to Unknown.\nTHE KV TRANSFER CONVERGES ON MOONCAKE, and that is why the enum has one value. Mooncake is the\nimplementation that supports heterogeneous prefill and decode, which is the shape this API\nexists to express. NIXL and ROCm NIXL stay reachable; nothing here has run them, and no claim\nthat they would work is made by this field's existence.\nTHE RESERVATION IS IN THE SCHEMA AND IN NOTHING ELSE. This field is read by no code: binding\nresolution passes a domain, an endpoint and a protocol; connector synthesis takes an engine, a\nkind, a manufacturer and that connection; and the renderer dispatches on the ENGINE. So the\ndiscriminator is reserved for an API that names a second one, and the seam it would dispatch\nthrough does not exist yet.\nWIDENING THE ENUM IS FOUR THINGS, NOT ONE: one sub-package under pkg/worker/kvcache, one entry\nhere, one renderer, AND the wiring that threads this value to a dispatch point. That last item\nis what the reservation does not already cover, and it is the reason a second implementation is\na piece of work rather than a constant.\nA WIDENED ENUM REACHES NEW DEPLOYMENTS ONLY. This field answers which deployment this is, so it\nis frozen after creation: an existing deployment is recreated onto a second connector rather\nthan edited onto one. That is stated here because \"widening the enum\" otherwise reads as a\nmigration path for deployments that are already running.",
+													Description: "Connector names the connector implementation this deployment is configured for. The value is\nan identity the deployment carries, not a setting the operator derives: \"mooncake\" says which\nconnector this is, and nothing reads the field to produce the configuration. There is no\n\"none\" — synthesizing nothing is reachable through a full command replacement, which also\nmarks the role unmanaged and moves CacheAttached to Unknown.\nTHE KV TRANSFER CONVERGES ON MOONCAKE, and that is why the enum has one value. Mooncake is the\nimplementation that supports heterogeneous prefill and decode, which is the shape this API\nexists to express. NIXL and ROCm NIXL stay reachable; nothing here has run them, and no claim\nthat they would work is made by this field's existence.\nTHE RESERVATION IS IN THE SCHEMA AND IN NOTHING ELSE. This field is read by no code: binding\nresolution passes a domain, an endpoint and a protocol; connector synthesis takes an engine, a\nkind, a manufacturer and that connection; and the renderer dispatches on the ENGINE. So the\ndiscriminator is reserved for an API that names a second one, and the seam it would dispatch\nthrough does not exist yet.\nWIDENING THE ENUM IS FOUR THINGS, NOT ONE: one sub-package under pkg/worker/kvcache, one entry\nhere, one renderer, AND the wiring that threads this value to a dispatch point. That last item\nis what the reservation does not already cover, and it is the reason a second implementation is\na piece of work rather than a constant.\nA WIDENED ENUM REACHES NEW DEPLOYMENTS ONLY. This field answers which deployment this is, so it\nis frozen after creation: an existing deployment is recreated onto a second connector rather\nthan edited onto one. That is stated here because \"widening the enum\" otherwise reads as a\nmigration path for deployments that are already running.",
 													Type:        "string",
 													Default: &v1.JSON{
-														Raw: []byte(`"auto"`),
+														Raw: []byte(`"mooncake"`),
 													},
 													Enum: []v1.JSON{
 														{
-															Raw: []byte(`"auto"`),
+															Raw: []byte(`"mooncake"`),
 														},
 													},
 												},
@@ -4145,6 +4190,18 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															},
 														},
 													},
+												},
+											},
+											Nullable: true,
+										},
+										"kvTransfer": {
+											Description: "KVTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode\npair.\nTHIS FIELD AND KVCache ABOVE ARE TWO ORTHOGONAL AXES, NOT TWO BRANCHES OF ONE CHOICE, and\nboth may be set at once. The gate that turns this leg on — a managed llm-d router, vLLM, not\nAscend, and a role kind of prefill or decode — reads none of spec.kvCache, and when both are\nset the two are synthesized into ONE connector and one --kv-transfer-config: a deployment may\nshare a pool for its blocks AND hand them from prefill to decode directly, at the same time.\nTHE LEG THIS COVERS NEVER TRAVERSES THE STORE, and that is why the value does not come from\nthe KVCacheBackend: spec.transport there defines the data plane the store MEMBERS run, this\none is engine to engine, and the two planes declare separately. A deployment can render\nthis leg with no pool attached at all, which is another reason the field cannot live under\nKVCache.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"protocol": {
+													Description: "Protocol is the transport both ends of the leg are told to use, in the mooncake\nconfiguration's own spelling, e.g. \"tcp\" or \"rdma\".\n- IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either\nend, so a per-role field could only express a contradiction -- two ends naming different\nvalues for one connection, which fails at transfer time rather than at admission.\n- THE VALUE IS DECLARED, NOT DISCOVERED, AND IT IS NOT GATED. The accepted set is a\nproperty of the mooncake build inside the engine's own image, which this operator\nneither ships nor can inspect: a HIP-compiled build makes \"hip\" a working point-to-point\ntransport, and an enum here would hard-code one image's compile set onto another image's\nconnector. The value is passed through verbatim, and a value the engine build rejects\nraises at engine startup, in the container that owns the fact.\n- UNSET RENDERS \"tcp\", the transport every mooncake build carries. The default lives in\nthe renderer rather than in this schema, so the stored object holds exactly what was\nasked.\n- IT IS READ ONLY ON THE POINT-TO-POINT LEG: a managed llm-d router in front of vLLM\nprefill/decode roles. On every other shape -- sglang, Ascend, or no router -- the value\nis accepted and renders nothing, which is stated here because an accepted field that\nsilently does nothing is a promise broken quietly.\n- IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'\nargv, so a change rebuilds every Kueue pod group of the deployment. With roles split\nacross InstanceTypes the groups rebuild independently, and a mixed-protocol window\nbetween a prefiller and a decoder exists until both converge -- the same window an\nengine version edit already opens.",
+													Type:        "string",
+													MaxLength:   ptr.To[int64](64),
 												},
 											},
 											Nullable: true,
@@ -4176,8 +4233,98 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 														"instanceType",
 													},
 													Properties: map[string]v1.JSONSchemaProps{
+														"additionalVolumes": {
+															Description: "AdditionalVolumes are volumes mounted into the container alongside the operator's own.",
+															Type:        "array",
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"mountPath",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"configMap": {
+																			Description: "ConfigMap is the reference to the ConfigMap to mount, in the same namespace.",
+																			Type:        "object",
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"name": {
+																					Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																					Type:        "string",
+																					Default: &v1.JSON{
+																						Raw: []byte(`""`),
+																					},
+																				},
+																			},
+																			Nullable: true,
+																		},
+																		"hostPath": {
+																			Description: "HostPath is the path on the Kubernetes Node to mount. It crosses the node boundary: the\nmount reaches the node's own filesystem rather than a namespaced object, so what it exposes\nis decided by what the node carries rather than by anything this API can see.",
+																			Type:        "object",
+																			Required: []string{
+																				"path",
+																			},
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"path": {
+																					Description: "path of the directory on the host.\nIf the path is a symlink, it will follow the link to the real path.\nMore info: https://kubernetes.io/docs/concepts/storage/volumes#hostpath",
+																					Type:        "string",
+																				},
+																				"type": {
+																					Description: "type for HostPath Volume\nDefaults to \"\"\nMore info: https://kubernetes.io/docs/concepts/storage/volumes#hostpath",
+																					Type:        "string",
+																					Nullable:    true,
+																				},
+																			},
+																			Nullable: true,
+																		},
+																		"mountPath": {
+																			Description: "MountPath is the absolute in-container path to mount the volume at. It must not duplicate\nanother entry's path, nor a path the operator's own volumes already mount.",
+																			Type:        "string",
+																			MaxLength:   ptr.To[int64](1024),
+																			Pattern:     `^(/[^/]+)+$`,
+																		},
+																		"readOnly": {
+																			Description: "ReadOnly mounts the volume read-only.",
+																			Type:        "boolean",
+																		},
+																		"secret": {
+																			Description: "Secret is the reference to the Secret to mount, in the same namespace.",
+																			Type:        "object",
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"name": {
+																					Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																					Type:        "string",
+																					Default: &v1.JSON{
+																						Raw: []byte(`""`),
+																					},
+																				},
+																			},
+																			Nullable: true,
+																		},
+																		"subPath": {
+																			Description: "SubPath mounts a relative path inside the volume rather than its root.\nIt must not be absolute nor contain a \"..\" element.\nThe pattern below enforces only the first half. A \"..\" element cannot be excluded by this\nengine's regular expressions, which have no negative lookahead, so admission carries that\nhalf — see the webhook. Both halves are refused there rather than left to the API server's\nrejection of the rendered Pod, which arrives as a per-pass create failure naming a\nvolumeMount instead of an admission error naming this field.",
+																			Type:        "string",
+																			MaxLength:   ptr.To[int64](1024),
+																			Pattern:     `^[^/].*$`,
+																		},
+																	},
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
+														},
+														"command": {
+															Description: "Command replaces the whole argv, which is the TAKE-OVER tier: the user owns the whole\ncommand line, the operator synthesizes no engine argument and no client environment, the\nrole is marked unmanaged and CacheAttached goes to Unknown. Arguments fold into Command;\nthere is deliberately no Args, because a second append tier beside ExtraArgs would have no\ndefined precedence.\nIT IS FROZEN AFTER CREATION, because it decides whether the operator configures this role at\nall: a role that supplies one is taken over by its author, which changes cache injection and\nwhat status can claim. The rest of the container fields are how the build is fetched, shaped\nand tuned, and stay editable.",
+															Type:        "array",
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "string",
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
+														},
 														"env": {
-															Description: "Env is appended the same way and refused on the same terms. Keys the operator merely defaults\nare not owned: a user's value wins there and no rejection follows.",
+															Description: "Env is appended the same way and refused on the same terms. Keys the operator merely defaults\nare not owned: a user's value wins there and no rejection follows.\nThere is ONE list here rather than an overlay beside it: the former second tier was appended\nand refused for owned names on exactly the same terms, so the nesting expressed a precedence\nthat never existed.",
 															Type:        "array",
 															Items: &v1.JSONSchemaPropsOrArray{
 																Schema: &v1.JSONSchemaProps{
@@ -4188,7 +4335,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																	},
 																	Properties: map[string]v1.JSONSchemaProps{
 																		"name": {
-																			Description: "Name is the name of the environment variable,\neach name in one Instance must be unique.",
+																			Description: "Name is the name of the environment variable; each name in one role must be unique.",
 																			Type:        "string",
 																		},
 																		"value": {
@@ -4205,11 +4352,41 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															XListType: ptr.To[string]("map"),
 														},
 														"extraArgs": {
-															Description: "ExtraArgs is appended AFTER the operator-synthesized arguments. An entry naming a key the\noperator owns is REJECTED rather than merged: a silent merge produces two values for one\nconnector argument and no way to tell which one won.",
+															Description: "ExtraArgs is appended AFTER the operator-synthesized arguments. An entry naming a key the\noperator owns is REJECTED rather than merged: a silent merge produces two values for one\nconnector argument and no way to tell which one won.\nThe name stays ExtraArgs rather than Args because args would read as the whole argv, which is\nwhat Command means; the two tiers differ in whether the operator contributes anything at all.\nTHIS LIST IS NOT READ WHEN COMMAND IS SET: appending to an argv the role's author replaced\nwould put words into a command line they own, so the take-over tier takes the whole line and\nthis field does nothing beside it.",
 															Type:        "array",
 															Items: &v1.JSONSchemaPropsOrArray{
 																Schema: &v1.JSONSchemaProps{
 																	Type: "string",
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
+														},
+														"image": {
+															Description: "Image is the container image to run. Leaving it empty is the ordinary case: the operator then\nsynthesizes one from the pool's accelerator backend, the observed runtime version and the\nrequested engine.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](512),
+														},
+														"imagePullPolicy": {
+															Description: "ImagePullPolicy is the pull policy for Image.",
+															Type:        "string",
+														},
+														"imagePullSecrets": {
+															Description: "ImagePullSecrets are the secrets used to pull Image.",
+															Type:        "array",
+															MaxItems:    ptr.To[int64](32),
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"name": {
+																			Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																			Type:        "string",
+																			Default: &v1.JSON{
+																				Raw: []byte(`""`),
+																			},
+																		},
+																	},
 																},
 															},
 															Nullable:  true,
@@ -4246,6 +4423,55 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															MinLength:   ptr.To[int64](1),
 															Pattern:     `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`,
 														},
+														"ports": {
+															Description: "Ports are the container ports to expose in addition to the engine's own. They do not\nreserve or select the transfer engine's runtime port window.",
+															Type:        "array",
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"port",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"port": {
+																			Description: "Port is the port number to expose on the replica.\nThe bounds are the container port's own. Without them a zero or out-of-range number is\nadmitted here and refused later by the API server, on the rendered Pod, as a per-pass create\nfailure naming a container port instead of an admission error naming this field.",
+																			Type:        "integer",
+																			Format:      "int32",
+																			Maximum:     ptr.To[float64](65535),
+																			Minimum:     ptr.To[float64](1),
+																		},
+																		"protocol": {
+																			Description: "Protocol is the protocol to use for the port.",
+																			Type:        "string",
+																			Default: &v1.JSON{
+																				Raw: []byte(`"TCP"`),
+																			},
+																			Enum: []v1.JSON{
+																				{
+																					Raw: []byte(`"TCP"`),
+																				},
+																				{
+																					Raw: []byte(`"UDP"`),
+																				},
+																				{
+																					Raw: []byte(`"SCTP"`),
+																				},
+																			},
+																		},
+																	},
+																},
+															},
+															Nullable: true,
+															XListMapKeys: []string{
+																"port",
+																"protocol",
+															},
+															XListType: ptr.To[string]("map"),
+														},
+														"privileged": {
+															Description: "Privileged runs the container privileged.",
+															Type:        "boolean",
+														},
 														"replicas": {
 															Description: "Replicas is how many Pods this role runs. They are NOT independent Workloads: every replica of\nevery role joins one Kueue pod group, so the deployment is admitted as a unit or not at all.\nCHANGING THIS NUMBER REBUILDS THE GROUP. It moves the total the group declares, which every Pod\ncarries and which Kueue requires them all to agree on, so the operator deletes the group's Pods\nand recreates them under the new total rather than adding or trimming a few. A replica that\nleaves loses its cached blocks to its siblings.",
 															Type:        "integer",
@@ -4256,7 +4482,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Minimum: ptr.To[float64](1),
 														},
 														"resources": {
-															Description: "Resources is what one replica of this role asks of an accelerator, and it is a STRUCTURED\nFIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.\nIt carries only the ACCELERATOR half of a request, because that is the only half a workload\ndecides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit\nresources scaled by the requested card count, so they are not expressible here at all — a\nstronger guarantee than refusing them, since a field that does not exist cannot be shadowed by\na template either.\nInstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards\na replica wants is a property of the model being served, so two deployments on one InstanceType\nroutinely want different counts.",
+															Description: "Resources is what one replica of this role asks of an accelerator, and it is a STRUCTURED\nFIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.\nIt carries only the ACCELERATOR half of a request, because that is the only half a workload\ndecides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit\nresources scaled by the requested card count, so they are not expressible here at all — a\nstronger guarantee than refusing them, since a field that does not exist cannot be shadowed by\nthe container fields below either.\nInstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards\na replica wants is a property of the model being served, so two deployments on one InstanceType\nroutinely want different counts.",
 															Type:        "object",
 															Properties: map[string]v1.JSONSchemaProps{
 																"accelerator": {
@@ -4295,297 +4521,6 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															},
 															Nullable: true,
 														},
-														"template": {
-															Description: "Template overlays the rendered container: the operator renders first and merges this on top.\n- A non-empty Command is the TAKE-OVER tier — the user owns the whole argv, the operator\nsynthesizes no engine arguments and no client environment, the role is marked unmanaged and\nCacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args,\nbecause a second append tier beside ExtraArgs would have no defined precedence.\n- It is MUTABLE, unlike the one an Instance carries, which is what makes a rollout possible\nat all.\n- EDITING IT RESTARTS EVERY ROLE, not just the replicas this template belongs to: every\nreplica of the deployment is one member of a single Kueue pod group whose members cannot\nleave one at a time, so the group is rebuilt whole. The same is true of a `replicas` change,\nof adding or removing a role, and of a departure this operator did not initiate — see\ndocs/reference/model-deployment.md under \"Rollout is recreate\".\n- Its Resources are refused at admission. The accelerator request belongs in the role's own\nResources and the rest is derived from the InstanceType, so a template able to shadow either\nwould make the admission feasibility check read a ledger that does not match reality.",
-															Type:        "object",
-															Properties: map[string]v1.JSONSchemaProps{
-																"additionalVolumes": {
-																	Description: "AdditionalVolumes are volumes mounted into the container alongside the operator's own.",
-																	Type:        "array",
-																	Items: &v1.JSONSchemaPropsOrArray{
-																		Schema: &v1.JSONSchemaProps{
-																			Type: "object",
-																			Required: []string{
-																				"mountPath",
-																			},
-																			Properties: map[string]v1.JSONSchemaProps{
-																				"configMap": {
-																					Description: "ConfigMap is the reference to the ConfigMap to mount, in the same namespace.",
-																					Type:        "object",
-																					Properties: map[string]v1.JSONSchemaProps{
-																						"name": {
-																							Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
-																							Type:        "string",
-																							Default: &v1.JSON{
-																								Raw: []byte(`""`),
-																							},
-																						},
-																					},
-																					Nullable: true,
-																				},
-																				"hostPath": {
-																					Description: "HostPath is the path on the Kubernetes Node to mount. It crosses the node boundary, so\ntaking it requires the instance-host-path-volume-allowed Setting — at creation, and on any\nlater change that adds or widens such a mount. One the Instance already holds is never\nre-judged, so the Setting going off does not strand it.",
-																					Type:        "object",
-																					Required: []string{
-																						"path",
-																					},
-																					Properties: map[string]v1.JSONSchemaProps{
-																						"path": {
-																							Description: "path of the directory on the host.\nIf the path is a symlink, it will follow the link to the real path.\nMore info: https://kubernetes.io/docs/concepts/storage/volumes#hostpath",
-																							Type:        "string",
-																						},
-																						"type": {
-																							Description: "type for HostPath Volume\nDefaults to \"\"\nMore info: https://kubernetes.io/docs/concepts/storage/volumes#hostpath",
-																							Type:        "string",
-																							Nullable:    true,
-																						},
-																					},
-																					Nullable: true,
-																				},
-																				"mountPath": {
-																					Description: "MountPath is the absolute in-container path to mount the volume at. It must not duplicate\nanother entry's path, nor the workspace's VolumeMount.",
-																					Type:        "string",
-																					MaxLength:   ptr.To[int64](1024),
-																					Pattern:     `^(/[^/]+)+$`,
-																				},
-																				"persistent": {
-																					Description: "Persistent is the reference to the InstancePersistentVolume to mount, in the same namespace.",
-																					Type:        "object",
-																					Properties: map[string]v1.JSONSchemaProps{
-																						"name": {
-																							Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
-																							Type:        "string",
-																							Default: &v1.JSON{
-																								Raw: []byte(`""`),
-																							},
-																						},
-																					},
-																					Nullable: true,
-																				},
-																				"readOnly": {
-																					Description: "ReadOnly mounts the volume read-only.",
-																					Type:        "boolean",
-																				},
-																				"secret": {
-																					Description: "Secret is the reference to the Secret to mount, in the same namespace.",
-																					Type:        "object",
-																					Properties: map[string]v1.JSONSchemaProps{
-																						"name": {
-																							Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
-																							Type:        "string",
-																							Default: &v1.JSON{
-																								Raw: []byte(`""`),
-																							},
-																						},
-																					},
-																					Nullable: true,
-																				},
-																				"subPath": {
-																					Description: "SubPath mounts a relative path inside the volume rather than its root.\nIt must not be absolute nor contain a \"..\" element.",
-																					Type:        "string",
-																					MaxLength:   ptr.To[int64](1024),
-																				},
-																			},
-																		},
-																	},
-																	Nullable:  true,
-																	XListType: ptr.To[string]("atomic"),
-																},
-																"command": {
-																	Description: "Command replaces the whole argv, which is the TAKE-OVER tier described on the role's Template\nfield. The operator contributes no engine argument and no client environment.",
-																	Type:        "array",
-																	Items: &v1.JSONSchemaPropsOrArray{
-																		Schema: &v1.JSONSchemaProps{
-																			Type: "string",
-																		},
-																	},
-																	Nullable: true,
-																},
-																"env": {
-																	Description: "Env are environment entries merged on top of the role's own. A name the operator owns is\nrefused here just as it is in the role's Env: the renderer drops owned names from both tiers,\nso admission has to refuse both, or one path becomes a silent drop.",
-																	Type:        "array",
-																	Items: &v1.JSONSchemaPropsOrArray{
-																		Schema: &v1.JSONSchemaProps{
-																			Type: "object",
-																			Required: []string{
-																				"name",
-																				"value",
-																			},
-																			Properties: map[string]v1.JSONSchemaProps{
-																				"name": {
-																					Description: "Name is the name of the environment variable,\neach name in one Instance must be unique.",
-																					Type:        "string",
-																				},
-																				"value": {
-																					Description: "Value is the value of the environment variable.",
-																					Type:        "string",
-																				},
-																			},
-																		},
-																	},
-																	Nullable: true,
-																	XListMapKeys: []string{
-																		"name",
-																	},
-																	XListType: ptr.To[string]("map"),
-																},
-																"image": {
-																	Description: "Image is the container image to run. Leaving it empty is the ordinary case: the operator then\nsynthesizes one from the pool's accelerator backend, the observed runtime version and the\nrequested engine.",
-																	Type:        "string",
-																	MaxLength:   ptr.To[int64](512),
-																},
-																"imagePullPolicy": {
-																	Description: "ImagePullPolicy is the pull policy for Image.",
-																	Type:        "string",
-																},
-																"imagePullSecret": {
-																	Description: "ImagePullSecret is the secret used to pull Image.",
-																	Type:        "object",
-																	Properties: map[string]v1.JSONSchemaProps{
-																		"name": {
-																			Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
-																			Type:        "string",
-																			Default: &v1.JSON{
-																				Raw: []byte(`""`),
-																			},
-																		},
-																	},
-																	Nullable: true,
-																},
-																"ports": {
-																	Description: "Ports are the container ports to expose in addition to the engine's own. They do not\nreserve or select the transfer engine's runtime port window.",
-																	Type:        "array",
-																	Items: &v1.JSONSchemaPropsOrArray{
-																		Schema: &v1.JSONSchemaProps{
-																			Type: "object",
-																			Required: []string{
-																				"port",
-																			},
-																			Properties: map[string]v1.JSONSchemaProps{
-																				"name": {
-																					Description: "Name is the name of the port.",
-																					Type:        "string",
-																					MaxLength:   ptr.To[int64](16),
-																				},
-																				"port": {
-																					Description: "Port is the port number to expose on the Instance.",
-																					Type:        "integer",
-																					Format:      "int32",
-																				},
-																				"protocol": {
-																					Description: "Protocol is the protocol to use for the port.",
-																					Type:        "string",
-																					Default: &v1.JSON{
-																						Raw: []byte(`"TCP"`),
-																					},
-																					Enum: []v1.JSON{
-																						{
-																							Raw: []byte(`"TCP"`),
-																						},
-																						{
-																							Raw: []byte(`"UDP"`),
-																						},
-																						{
-																							Raw: []byte(`"SCTP"`),
-																						},
-																					},
-																				},
-																			},
-																		},
-																	},
-																	Nullable: true,
-																	XListMapKeys: []string{
-																		"port",
-																		"protocol",
-																	},
-																	XListType: ptr.To[string]("map"),
-																},
-																"privileged": {
-																	Description: "Privileged runs the container privileged.",
-																	Type:        "boolean",
-																},
-																"resources": {
-																	Description: "Resources is present ONLY so that supplying it can be refused with a message that says where\nthe request belongs. Dropping the field would let strict decoding refuse it earlier and more\ncheaply, but an unknown-field error says \"not here\" while the webhook's says \"it goes in the\nrole's own Resources\" — and mistaking the template for the place resources live is the whole\nreason anyone writes this field.",
-																	Type:        "object",
-																	Required: []string{
-																		"cpu",
-																		"ram",
-																		"localStorage",
-																	},
-																	Properties: map[string]v1.JSONSchemaProps{
-																		"accelerator": {
-																			Description: "Accelerator is the accelerator resource requirement for the Instance, e.g. \"1\", \"2\".",
-																			Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
-																			AnyOf: []v1.JSONSchemaProps{
-																				{
-																					Type: "integer",
-																				},
-																				{
-																					Type: "string",
-																				},
-																			},
-																			Nullable:     true,
-																			XIntOrString: true,
-																		},
-																		"acceleratorPartitionedProfile": {
-																			Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a\npartition-offering InstanceType, e.g. \"3g.40gb\". A non-empty value makes this a\nrequest for one hardware partition of that shape, which is mutually exclusive with\nthe two slice percentages above: hardware partitioning and software slicing cannot\nboth apply to one accelerator. It is ignored by InstanceTypes offering no partition.",
-																			Type:        "string",
-																		},
-																		"acceleratorSlicedCoresPercentage": {
-																			Description: "AcceleratorSlicedCoresPercentage is the per-accelerator compute (SM) budget requested on\na sliced InstanceType, as a percentage in [0,100]. It is independent of\nAcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook\ncopies it to the other. It is ignored by non-sliced requests.",
-																			Type:        "integer",
-																			Format:      "int32",
-																		},
-																		"acceleratorSlicedMemoryPercentage": {
-																			Description: "AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a\nsliced InstanceType, as a percentage in [0,100]. 0 disables slicing (the request\nbecomes an exclusive whole-accelerator request). The Pod webhook folds it into the\nnormalized .sliced.units; it is ignored by non-sliced requests.",
-																			Type:        "integer",
-																			Format:      "int32",
-																		},
-																		"cpu": {
-																			Description: "CPU is the CPU resource requirement for the Instance, e.g. \"4\", \"8\".",
-																			Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
-																			AnyOf: []v1.JSONSchemaProps{
-																				{
-																					Type: "integer",
-																				},
-																				{
-																					Type: "string",
-																				},
-																			},
-																			XIntOrString: true,
-																		},
-																		"localStorage": {
-																			Description: "LocalStorage is the local storage resource requirement for the Instance, e.g. \"100G\", \"500G\".",
-																			Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
-																			AnyOf: []v1.JSONSchemaProps{
-																				{
-																					Type: "integer",
-																				},
-																				{
-																					Type: "string",
-																				},
-																			},
-																			XIntOrString: true,
-																		},
-																		"ram": {
-																			Description: "RAM is the RAM resource requirement for the Instance, e.g. \"40G\", \"16G\".",
-																			Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
-																			AnyOf: []v1.JSONSchemaProps{
-																				{
-																					Type: "integer",
-																				},
-																				{
-																					Type: "string",
-																				},
-																			},
-																			XIntOrString: true,
-																		},
-																	},
-																	Nullable: true,
-																},
-															},
-															Nullable: true,
-														},
 													},
 												},
 											},
@@ -4614,9 +4549,34 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													XListType: ptr.To[string]("atomic"),
 												},
 												"image": {
-													Description: "Image overrides the router's container image. Empty means the operator assembles one from Name,\nthe same way a role's image is assembled when its template names none.",
+													Description: "Image overrides the router's container image. Empty means the operator assembles one from Name,\nthe same way a role's image is assembled when the role names none.",
 													Type:        "string",
 													MaxLength:   ptr.To[int64](512),
+												},
+												"imagePullPolicy": {
+													Description: "ImagePullPolicy is the pull policy for Image.",
+													Type:        "string",
+												},
+												"imagePullSecrets": {
+													Description: "ImagePullSecrets are the secrets used to pull Image.",
+													Type:        "array",
+													MaxItems:    ptr.To[int64](32),
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"name": {
+																	Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																	Type:        "string",
+																	Default: &v1.JSON{
+																		Raw: []byte(`""`),
+																	},
+																},
+															},
+														},
+													},
+													Nullable:  true,
+													XListType: ptr.To[string]("atomic"),
 												},
 												"name": {
 													Description: "Name selects which router implementation fronts this deployment.\nTHE VALUE FOLLOWS THE PROJECT'S OWN SPELLING, NOT THIS API'S HOUSE STYLE, and the difference is\nvisible in the same word twice: the transport protocol on the cache backend types spells it\n\"Auto\" while the connector here spells it \"auto\". The casing convention is per API type, and the\nreason is the one ModelDeploymentRoleKind states about itself -- these values are terms the\noutside tool understands, not terms this operator invents. \"llm-d\" is how that project spells\nitself in its module path, its API group and its label domain, so it is spelled that way here.\nONE VALUE TODAY IS A CHOICE TAKEN FOR NOW, NOT THE ABSENCE OF ONE. This field exists ahead of a\nsecond implementation precisely so that adding one is a widening of this enum rather than a new\nfield appearing on an API that already shipped without it.\nWIDENING IT IS FOUR THINGS, NOT ONE: one entry here, one configuration renderer, the object set\nthat router needs, AND the wiring that threads this value to a dispatch point. The schema\nreservation covers the first of those and nothing else, which is why a second router is a piece\nof work rather than a constant.",
@@ -4961,7 +4921,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 							Format:      "",
 							Description: "",
 							Priority:    0,
-							JSONPath:    ".spec.engine",
+							JSONPath:    ".spec.engine.name",
 						},
 						{
 							Name:        "Phase",

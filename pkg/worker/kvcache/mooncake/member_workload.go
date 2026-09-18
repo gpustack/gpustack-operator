@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -556,7 +555,7 @@ func MemberMasterEntry(kvcb *workercore.KVCacheBackend) string {
 	return fmt.Sprintf("%s:%d", LeaderServiceHost(kvcb), LeaderRPCPort)
 }
 
-// renderMemberEnv builds the member's whole configuration, the group's extraEnvs last.
+// renderMemberEnv builds the member's whole configuration, the group's extraEnv last.
 //
 // What is NOT set is deliberate. MOONCAKE_DEVICE is left unset so the client's device filter comes
 // out empty, which is what it reads as "every device" — see keys.go for why the documented
@@ -618,7 +617,11 @@ func renderMemberEnv(
 		})
 	}
 
-	if disk := member.LocalDisk; disk != nil {
+	// One entry is the whole list today, and this renderer reads the first: admission bounds a
+	// group to one tier, so a second entry is a shape no cluster can carry rather than a rendering
+	// question left open here.
+	if len(member.LocalDisks) > 0 {
+		disk := member.LocalDisks[0]
 		// Both keys or neither. The client registers a local disk segment only when offloading is
 		// enabled AND it has somewhere to put the bytes, so a path without the switch, or a switch
 		// without a path, is a member that comes up holding no tier while the object says it has
@@ -662,12 +665,12 @@ func renderMemberEnv(
 		env = append(env, renderMemberEviction(disk.Eviction)...)
 	}
 
-	// The escape hatch goes last and in key order, so two renders of one spec are byte-identical.
-	// It cannot shade anything above it: admission refuses a name this renderer derives, which is
-	// what keeps every variable here single-sourced -- Kubernetes accepts a container carrying one
-	// name twice and leaves the winner to the runtime.
-	for _, name := range slices.Sorted(maps.Keys(member.ExtraEnvs)) {
-		env = append(env, core.EnvVar{Name: name, Value: member.ExtraEnvs[name]})
+	// The escape hatch goes last and in the order written, so two renders of one spec are
+	// byte-identical. It cannot shade anything above it: admission refuses a name this renderer
+	// derives, which is what keeps every variable here single-sourced -- Kubernetes accepts a
+	// container carrying one name twice and leaves the winner to the runtime.
+	for _, e := range member.ExtraEnv {
+		env = append(env, core.EnvVar{Name: e.Name, Value: e.Value})
 	}
 
 	return env
@@ -759,9 +762,11 @@ func renderMemberArgs(member workercore.KVCacheBackendMember, group int) []strin
 		args = append(args, "--port", strconv.Itoa(int(port)))
 	}
 
-	// Sorted, so two renders of one spec are byte-identical and the DaemonSet does not churn.
-	for _, key := range slices.Sorted(maps.Keys(member.ExtraArgs)) {
-		args = append(args, "-D", fmt.Sprintf("%s=%s", key, member.ExtraArgs[key]))
+	// In the order written, so two renders of one spec are byte-identical and the DaemonSet does
+	// not churn. Each entry carries its own dashes as typed; the dashes are this API's decoration
+	// for "one flag token", and the entrypoint's own override is what they are stripped down to.
+	for _, entry := range member.ExtraArgs {
+		args = append(args, "-D", strings.TrimLeft(entry, "-"))
 	}
 	return args
 }
@@ -1048,7 +1053,7 @@ func applyMemberSecurityContext(ds *apps.DaemonSet, member workercore.KVCacheBac
 func memberTerminationGracePeriodSeconds(
 	kvcb *workercore.KVCacheBackend, member workercore.KVCacheBackendMember,
 ) int64 {
-	if member.LocalDisk == nil {
+	if len(member.LocalDisks) == 0 {
 		return memberShutdownSeconds
 	}
 	return int64(memberScaleInGraceSeconds(kvcb)) + memberShutdownSeconds
@@ -1076,7 +1081,7 @@ func applyMemberLocalDisk(
 	member workercore.KVCacheBackendMember,
 	group int,
 ) {
-	if member.LocalDisk == nil {
+	if len(member.LocalDisks) == 0 {
 		return
 	}
 
@@ -1103,7 +1108,7 @@ func applyMemberLocalDisk(
 		Name: memberLocalDiskVolumeName,
 		VolumeSource: core.VolumeSource{
 			HostPath: &core.HostPathVolumeSource{
-				Path: member.LocalDisk.Path,
+				Path: member.LocalDisks[0].Path,
 				Type: ptr.To(core.HostPathDirectory),
 			},
 		},
@@ -1114,14 +1119,14 @@ func applyMemberLocalDisk(
 	// host the bytes live and where in the container they are addressed.
 	container.VolumeMounts = append(container.VolumeMounts, core.VolumeMount{
 		Name:      memberLocalDiskVolumeName,
-		MountPath: member.LocalDisk.Path,
+		MountPath: member.LocalDisks[0].Path,
 	})
 	container.Lifecycle = &core.Lifecycle{
 		PreStop: memberUnmountLocalDiskHook(memberScaleInGraceSeconds(kvcb), memberRESTPort(group)),
 	}
 
 	podSpec.InitContainers = append(podSpec.InitContainers,
-		memberLocalDiskSurveyContainer(container.Image, member.LocalDisk.Path))
+		memberLocalDiskSurveyContainer(container.Image, member.LocalDisks[0].Path))
 }
 
 // memberLocalDiskSurveyContainer reports what was already in the tier directory when this member

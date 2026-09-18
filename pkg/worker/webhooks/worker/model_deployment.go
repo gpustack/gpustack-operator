@@ -318,7 +318,7 @@ func validateModelDeploymentRouterName(md, old *workercore.ModelDeployment) fiel
 // ONE FIELD IS FROZEN AGAINST THE CRITERION and is marked here so it is not read as an oversight:
 // roles[].resources does not answer which deployment this is, but it changes what admission has to
 // find. Changing it renegotiates the scheduling, which is not materially different from deleting and
-// recreating. Its mirror image is template.privileged, which the criterion leaves editable even
+// recreating. Its mirror image is the role's privileged field, which the criterion leaves editable even
 // though a different argument could move it.
 //
 // ROLES ARE MATCHED BY NAME, NEVER BY POSITION. The field is a listType=map keyed by name, so a
@@ -347,9 +347,9 @@ func validateModelDeploymentIdentity(md, old *workercore.ModelDeployment) field.
 		errs = append(errs, field.Invalid(
 			specPath.Child("model"), md.Spec.Model, modelDeploymentIdentityMessage))
 	}
-	if md.Spec.Engine != old.Spec.Engine {
+	if md.Spec.Engine.Name != old.Spec.Engine.Name {
 		errs = append(errs, field.Invalid(
-			specPath.Child("engine"), md.Spec.Engine, modelDeploymentIdentityMessage))
+			specPath.Child("engine", "name"), md.Spec.Engine.Name, modelDeploymentIdentityMessage))
 	}
 	if !kubemeta.DeepEqual(md.Spec.KVCache, old.Spec.KVCache) {
 		errs = append(errs, field.Invalid(
@@ -403,11 +403,10 @@ func validateModelDeploymentRoleIdentity(md, old *workercore.ModelDeployment) fi
 // validateModelDeploymentRoleIdentityFields compares one role's frozen fields against the stored
 // role of the same name.
 //
-// template.command is frozen because it decides whether the operator configures this role at all: a
+// command is frozen because it decides whether the operator configures this role at all: a
 // role that supplies one is taken over by its author, which changes cache injection and what status
-// can claim. The rest of the template is how the build is fetched, shaped and tuned, and is
-// editable. template.resources has no side here because an existing rule refuses it outright, so it
-// is never part of an update in either direction.
+// can claim. The rest of the role's container fields are how the build is fetched, shaped and
+// tuned, and are editable.
 func validateModelDeploymentRoleIdentityFields(
 	rolePath *field.Path, role, was *workercore.ModelDeploymentRole,
 ) field.ErrorList {
@@ -424,22 +423,12 @@ func validateModelDeploymentRoleIdentityFields(
 		errs = append(errs, field.Invalid(
 			rolePath.Child("resources"), role.Resources, modelDeploymentIdentityMessage))
 	}
-	if cmd, wasCmd := modelDeploymentRoleCommand(role), modelDeploymentRoleCommand(was); !kubemeta.DeepEqual(cmd, wasCmd) {
+	if !kubemeta.DeepEqual(role.Command, was.Command) {
 		errs = append(errs, field.Invalid(
-			rolePath.Child("template", "command"), cmd, modelDeploymentIdentityMessage))
+			rolePath.Child("command"), role.Command, modelDeploymentIdentityMessage))
 	}
 
 	return errs
-}
-
-// modelDeploymentRoleCommand reads a role's command through an absent template, so that a role
-// gaining a template it did not have is not reported as a command change it did not make.
-func modelDeploymentRoleCommand(role *workercore.ModelDeploymentRole) []string {
-	if role.Template == nil {
-		return nil
-	}
-
-	return role.Template.Command
 }
 
 // modelDeploymentRoleNames is the set of role names an object already carried, or nil on create.
@@ -474,6 +463,7 @@ func validateModelDeployment(
 	md *workercore.ModelDeployment, existingRoles sets.Set[string],
 ) field.ErrorList {
 	errs := validateModelDeploymentRoles(md)
+	errs = append(errs, validateModelDeploymentEngineVersion(md)...)
 	errs = append(errs, validateModelDeploymentKVCache(md)...)
 	errs = append(errs, validateModelDeploymentRolesCount(md)...)
 	errs = append(errs, validateModelDeploymentRoleNames(md)...)
@@ -512,8 +502,8 @@ func validateModelDeploymentRouter(md *workercore.ModelDeployment) field.ErrorLi
 				"values for it cannot be told apart", name, md.Spec.Router.Name)))
 	}
 
-	if _, err := router.MetricsForEngine(md.Spec.Engine); err != nil {
-		errs = append(errs, field.Invalid(field.NewPath("spec", "engine"), md.Spec.Engine, err.Error()))
+	if _, err := router.MetricsForEngine(md.Spec.Engine.Name); err != nil {
+		errs = append(errs, field.Invalid(field.NewPath("spec", "engine"), md.Spec.Engine.Name, err.Error()))
 	}
 
 	ports := make([]int32, 0, len(md.Spec.Roles))
@@ -530,7 +520,7 @@ func validateModelDeploymentRouter(md *workercore.ModelDeployment) field.ErrorLi
 					role.Name)))
 		}
 		ports = append(ports, workerctrl.ModelDeploymentRoleServingPort(role))
-		if md.Spec.Engine == workercore.ModelDeploymentEngineVLLM {
+		if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
 			errs = append(errs, validateModelDeploymentRouterVLLMPorts(md, role)...)
 		}
 	}
@@ -554,12 +544,12 @@ func validateModelDeploymentRouterVLLMPorts(
 	var errs field.ErrorList
 
 	// The reserved ports are the KV event publisher, its replay port and the Mooncake bootstrap
-	// listener, which the render places on the same container the role's template ports describe.
-	// The serving port is one of the declared ports when a template exists, and the default when it
-	// does not, so the declared set is the whole collision surface. A take-over role is exempt:
+	// listener, which the render places on the same container the role's declared ports describe.
+	// The serving port is one of the declared ports when the role declares any, and the default when
+	// it names none, so the declared set is the whole collision surface. A take-over role is exempt:
 	// the render synthesizes none of those listeners onto it, so nothing is there to collide with.
-	if role.Template != nil && len(role.Template.Command) == 0 {
-		for _, port := range role.Template.Ports {
+	if len(role.Command) == 0 {
+		for _, port := range role.Ports {
 			if !slices.Contains(modelDeploymentRouterReservedPorts, port.Port) {
 				continue
 			}
@@ -579,7 +569,7 @@ func validateModelDeploymentRouterVLLMPorts(
 	// would have set that very value.
 	if md.Spec.Router.Name != workercore.ModelDeploymentRouterLLMD ||
 		workerctrl.ModelDeploymentEffectiveRoleKind(role) != workercore.ModelDeploymentRoleKindDecode ||
-		(role.Template != nil && len(role.Template.Command) > 0) {
+		len(role.Command) > 0 {
 		return errs
 	}
 	if port, ok := modelDeploymentRoleExplicitServingPort(role); ok &&
@@ -626,6 +616,42 @@ func modelDeploymentRoleExplicitServingPort(role *workercore.ModelDeploymentRole
 	}
 
 	return port, found
+}
+
+// validateModelDeploymentEngineVersion refuses an engine without a version when any role would
+// have its image synthesized.
+//
+// The version is optional ONLY because a role that names its own image never reads it. A role
+// naming none has its image assembled from the engine, the version and the role's own
+// InstanceType, and an empty version assembles a malformed tag naming something never typed.
+// Refusing that here, where the writer can act, beats what the render would do with it: a
+// reconcile error loop on a Pod that is never created, reported as an Event far from the field
+// that caused it.
+//
+// The rule is answerable from the object alone and runs on create and on update alike: dropping
+// the version while a role still needs it is the same mistake as omitting it on create.
+func validateModelDeploymentEngineVersion(md *workercore.ModelDeployment) field.ErrorList {
+	if md.Spec.Engine.Version != "" {
+		return nil
+	}
+
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		if role.Image != "" {
+			continue
+		}
+
+		return field.ErrorList{field.Required(
+			field.NewPath("spec", "engine", "version"),
+			fmt.Sprintf(
+				"role %q names no image of its own, so its image is synthesized from the engine "+
+					"and its version, and an empty version assembles a tag naming something never "+
+					"typed. Give the engine a version, or name an image on the role",
+				role.Name),
+		)}
+	}
+
+	return nil
 }
 
 // validateModelDeploymentKVCache refuses a Binding reference with an empty name.
@@ -851,11 +877,11 @@ func validateModelDeploymentRoleKinds(md *workercore.ModelDeployment) field.Erro
 			firstOfKind[kind] = i
 		}
 
-		if !workerctrl.ModelDeploymentSupportsRoleKind(md.Spec.Engine, kind) {
+		if !workerctrl.ModelDeploymentSupportsRoleKind(md.Spec.Engine.Name, kind) {
 			errs = append(errs, field.Invalid(kindPath, kind, fmt.Sprintf(
 				"engine %q has no rendering term for kind %q; accepting it would leave the container "+
 					"looking configured and behaving as though the role were never declared",
-				md.Spec.Engine, kind,
+				md.Spec.Engine.Name, kind,
 			)))
 		}
 	}
@@ -871,10 +897,75 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 	for i := range md.Spec.Roles {
 		role, rolePath := &md.Spec.Roles[i], rolesPath.Index(i)
 
-		errs = append(errs, validateModelDeploymentRoleExtraArgs(md.Spec.Engine, role, rolePath)...)
-		errs = append(errs, validateModelDeploymentRoleEnv(md.Spec.Engine, role, rolePath)...)
-		errs = append(errs, validateModelDeploymentRoleTemplate(role, rolePath)...)
+		errs = append(errs, validateModelDeploymentRoleExtraArgs(md.Spec.Engine.Name, role, rolePath)...)
+		errs = append(errs, validateModelDeploymentRoleEnv(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleResources(role, rolePath)...)
+		errs = append(errs, validateModelDeploymentRoleAdditionalVolumes(role, rolePath)...)
+	}
+
+	return errs
+}
+
+// validateModelDeploymentRoleAdditionalVolumes enforces the three rules the field documentation
+// states and the schema cannot.
+//
+// THEY ARE REFUSED HERE RATHER THAN BY THE API SERVER LATER. Without them the first sign of either
+// path mistake is the rendered Pod being rejected on every reconcile pass, which surfaces as a
+// create failure quoting a volumeMount the user never wrote, on an object that was admitted cleanly.
+//
+// AN ENTRY NAMING NO SOURCE IS WORSE THAN EITHER, because nothing rejects it at all: the renderer
+// has no volume source to build and skips the entry, so the container starts without the mount that
+// was asked for and no error, Event or condition says so. The three sources are separate optional
+// pointers, which is a shape the schema cannot constrain to exactly one.
+//
+// A ".." ELEMENT IS CHECKED PER SEGMENT, not by substring: a subPath of "a..b" contains those two
+// characters and is a perfectly ordinary directory name, while "a/../b" is the traversal the rule
+// is about.
+//
+// THE UNIQUENESS RULE REACHES THESE ENTRIES AND NOT THE OPERATOR'S OWN MOUNTS, which is a limit
+// rather than an oversight. The renderer appends the connector's volume mounts to the same
+// container, and those come from the KV cache backend this deployment resolves at reconcile time --
+// an object admission cannot see, since resolving it is the controller's work and its result can
+// change without this object changing. So a path colliding with an operator-rendered mount is still
+// admitted here and still diverges silently at render. Closing that needs the check where the
+// mounts are known, which is the renderer, not this validator.
+func validateModelDeploymentRoleAdditionalVolumes(
+	role *workercore.ModelDeploymentRole, rolePath *field.Path,
+) field.ErrorList {
+	var errs field.ErrorList
+
+	avsPath := rolePath.Child("additionalVolumes")
+	seen := make(map[string]int, len(role.AdditionalVolumes))
+	for i := range role.AdditionalVolumes {
+		av, avPath := &role.AdditionalVolumes[i], avsPath.Index(i)
+
+		if av.ConfigMap == nil && av.Secret == nil && av.HostPath == nil {
+			errs = append(errs, field.Required(avPath, fmt.Sprintf(
+				"one of configMap, secret or hostPath, so that %q names something to mount; an "+
+					"entry naming none is skipped at render and the container starts without it",
+				av.MountPath,
+			)))
+		}
+
+		if first, duplicate := seen[av.MountPath]; duplicate {
+			errs = append(errs, field.Duplicate(avPath.Child("mountPath"), fmt.Sprintf(
+				"%q is already mounted by %s; two volumes cannot occupy one path, and which of them "+
+					"the container would see is not something this API decides",
+				av.MountPath, avsPath.Index(first).Child("mountPath"),
+			)))
+		} else {
+			seen[av.MountPath] = i
+		}
+
+		if av.SubPath == "" {
+			continue
+		}
+		if slices.Contains(strings.Split(av.SubPath, "/"), "..") {
+			errs = append(errs, field.Invalid(avPath.Child("subPath"), av.SubPath,
+				"must not contain a \"..\" element: the path is resolved inside the volume, and an "+
+					"element that climbs out of it reaches the host filesystem of whatever backs the "+
+					"volume"))
+		}
 	}
 
 	return errs
@@ -901,25 +992,19 @@ func validateModelDeploymentRoleExtraArgs(
 			"%q is set by the operator for engine %q and must not be supplied here, because two "+
 				"values for it cannot be told apart; replace the whole command line through "+
 				"%s to own it instead",
-			name, engine, rolePath.Child("template", "command"),
+			name, engine, rolePath.Child("command"),
 		)))
 	}
 
 	return errs
 }
 
-// validateModelDeploymentRoleEnv refuses an append-tier environment entry the operator owns.
+// validateModelDeploymentRoleEnv refuses an environment entry the operator owns.
 //
 // Ownership here is about what a key destroys rather than what it duplicates: the config-path
 // variable is the only pointer to the file the operator wrote, so re-pointing it swaps the entire
 // client configuration for another file's and moves every symptom one layer away from its cause.
 // Keys the operator merely defaults are not owned, so a user's value wins there with no refusal.
-//
-// BOTH TIERS ARE CHECKED BECAUSE THE RENDERER READS BOTH. mergeModelDeploymentEnv appends role.Env
-// and role.Template.Env into one list and then skips every owned name in it. Validating only the
-// append tier let an owned key arrive through the overlay, pass admission, and be dropped at render
-// time with no refusal and no event -- exactly the silent outcome this rule exists to prevent,
-// reached by the one path the rule did not cover.
 //
 // The set refused here must equal the set the renderer drops. The renderer drops unconditionally,
 // including when a role takes over the command line, so this refuses unconditionally too: a
@@ -927,64 +1012,23 @@ func validateModelDeploymentRoleExtraArgs(
 func validateModelDeploymentRoleEnv(
 	engine string, role *workercore.ModelDeploymentRole, rolePath *field.Path,
 ) field.ErrorList {
-	errs := validateModelDeploymentOwnedEnv(engine, role.Env, rolePath, rolePath.Child("env"))
-	if role.Template != nil {
-		errs = append(errs, validateModelDeploymentOwnedEnv(
-			engine, role.Template.Env, rolePath, rolePath.Child("template", "env"),
-		)...)
-	}
-
-	return errs
-}
-
-// validateModelDeploymentOwnedEnv refuses every owned name in one tier of environment entries.
-//
-// envPath is passed rather than derived so that the refusal names the tier the user actually wrote
-// in: a message pointing at roles[i].env for a value supplied under roles[i].template.env sends the
-// reader to a field they never touched.
-func validateModelDeploymentOwnedEnv(
-	engine string, env []workercore.InstanceEnvVar, rolePath, envPath *field.Path,
-) field.ErrorList {
 	var errs field.ErrorList
 
-	for i := range env {
-		name := env[i].Name
+	for i := range role.Env {
+		name := role.Env[i].Name
 		if !workerctrl.ModelDeploymentOwnsEnv(engine, name) {
 			continue
 		}
 
-		errs = append(errs, field.Invalid(envPath.Index(i), name, fmt.Sprintf(
+		errs = append(errs, field.Invalid(rolePath.Child("env").Index(i), name, fmt.Sprintf(
 			"%q is set by the operator for engine %q and must not be supplied here, because it "+
 				"selects the client configuration the operator rendered; replace the whole "+
 				"command line through %s to own it instead",
-			name, engine, rolePath.Child("template", "command"),
+			name, engine, rolePath.Child("command"),
 		)))
 	}
 
 	return errs
-}
-
-// validateModelDeploymentRoleTemplate keeps the scheduling scalars out of the overlay tier.
-//
-// The template may override container content and never the resource request. Inferring the request
-// from container content would make the admission feasibility check read a ledger that does not
-// match reality, so the refusal names the structured field that does decide it.
-func validateModelDeploymentRoleTemplate(
-	role *workercore.ModelDeploymentRole, rolePath *field.Path,
-) field.ErrorList {
-	if role.Template == nil || role.Template.Resources == nil {
-		return nil
-	}
-
-	return field.ErrorList{field.Invalid(
-		rolePath.Child("template", "resources"), role.Template.Resources,
-		fmt.Sprintf(
-			"the accelerator request belongs in %s and the rest is derived from %s; a template "+
-				"that could shadow either would make the feasibility check read a ledger that "+
-				"does not match reality",
-			rolePath.Child("resources"), rolePath.Child("instanceType"),
-		),
-	)}
 }
 
 // validateModelDeploymentRoleResources refuses a request that asks for hardware partitioning and

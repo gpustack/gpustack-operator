@@ -292,6 +292,13 @@ func leaderEnv(kvcb *workercore.KVCacheBackend) []core.EnvVar {
 		})
 	}
 
+	// The hatch goes last and in the order written, mirroring the member side: admission refuses a
+	// name any line above already renders, which is what keeps one variable from carrying two
+	// values with the winner left to the runtime.
+	for _, e := range kvcb.Spec.Connection.Managed.Leader.ExtraEnv {
+		env = append(env, core.EnvVar{Name: e.Name, Value: e.Value})
+	}
+
 	return env
 }
 

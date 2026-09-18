@@ -149,7 +149,7 @@ type TenantQuota struct {
 	OverQuota bool
 
 	// HasExplicitPolicy distinguishes a tenant the ledger carries a policy for from one it is
-	// serving under a default. A Binding with no quotaCeiling produces the second, and the two must
+	// serving under a default. A Binding with no quota.ceiling produces the second, and the two must
 	// not look alike: one is a ceiling this operator wrote, the other is the absence of one.
 	HasExplicitPolicy bool
 }

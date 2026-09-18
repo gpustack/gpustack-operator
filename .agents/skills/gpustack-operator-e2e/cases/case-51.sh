@@ -83,8 +83,9 @@ metadata:
   name: ${MD_NAME:-case51-probe}
   namespace: ${NS}
 spec:
-  engine: ${ENGINE:-vllm}
-  engineVersion: "0.11.0"
+  engine:
+    name: ${ENGINE:-vllm}
+    version: "0.11.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:
@@ -106,16 +107,14 @@ two_roles() {
     kind: prefill
     instanceType: ${IT}
     replicas: 1
-    template:
-      image: ${IMAGE}
-      command: ["/pause"]
+    image: ${IMAGE}
+    command: ["/pause"]
   - name: decode
     kind: decode
     instanceType: ${IT}
     replicas: 1
-    template:
-      image: ${IMAGE}
-      command: ["/pause"]
+    image: ${IMAGE}
+    command: ["/pause"]
 YAML
 }
 
@@ -284,7 +283,7 @@ else
     "observed totals: '$(totals)'; apply said: ${REBUILD_APPLY:0:200}"
 fi
 
-TPL='"template":{"image":"'"$IMAGE"'","command":["/pause"]}'
+TPL='"image":"'"$IMAGE"'","command":["/pause"]}'
 kubectl -n "$NS" patch modeldeployments.worker.gpustack.ai "$REBUILD_MD" --type=merge \
   -p '{"spec":{"roles":[{"name":"prefill","kind":"prefill","instanceType":"'"$IT"'","replicas":2,'"$TPL"'},{"name":"decode","kind":"decode","instanceType":"'"$IT"'","replicas":1,'"$TPL"'}]}}' \
   >/dev/null 2>&1

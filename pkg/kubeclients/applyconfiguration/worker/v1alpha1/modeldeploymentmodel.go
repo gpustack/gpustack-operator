@@ -7,7 +7,7 @@ package v1alpha1
 //
 // ModelDeploymentModel names the model the engine serves.
 //
-// It provisions nothing. Weights arrive through the role template's volumes or through the engine's
+// It provisions nothing. Weights arrive through the role's additional volumes or through the engine's
 // own hub client; a weight-provisioning block here would be the first step towards the
 // general-purpose serving CR this deliberately is not.
 type ModelDeploymentModelApplyConfiguration struct {

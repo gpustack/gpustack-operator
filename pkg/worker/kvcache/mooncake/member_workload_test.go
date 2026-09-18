@@ -40,17 +40,15 @@ func memberGroup(kvcb *workercore.KVCacheBackend) workercore.KVCacheBackendMembe
 	return kvcb.Spec.Connection.Managed.Members[0]
 }
 
-// withMemberDiskTier declares a complete local disk tier on the canonical group.
+// withMemberDiskTier declares a local disk tier on the canonical group.
 //
-// Both halves, because a tier declared on one side only is refused at admission — a fixture that
-// set one would describe an object that cannot exist, and the renderer would be asked a question
-// the API never puts to it.
+// The member side is the whole declaration: the group's localDisks is what turns the tier on, and
+// the leader's flags are derived from it, so there is no second half for a fixture to set.
 func withMemberDiskTier(kvcb *workercore.KVCacheBackend) {
-	kvcb.Spec.Connection.Managed.Members[0].LocalDisk = &workercore.KVCacheBackendMemberLocalDisk{
+	kvcb.Spec.Connection.Managed.Members[0].LocalDisks = []workercore.KVCacheBackendMemberLocalDisk{{
 		Path:     "/var/lib/kvcache",
 		Capacity: resource.MustParse("4Ti"),
-	}
-	kvcb.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+	}}
 }
 
 // withMemberScaleInGrace sets the wait a departing member's process holds for after deregistering
@@ -95,11 +93,10 @@ func withSecondMemberGroupVRAM(mutate ...func(*workercore.KVCacheBackendMember))
 // withSecondGroupDiskTier puts the tier on the SECOND group, so the preStop hook is rendered for a
 // group whose port moved. Only one group may carry a tier, so this is the tier rather than a second.
 func withSecondGroupDiskTier(kvcb *workercore.KVCacheBackend) {
-	kvcb.Spec.Connection.Managed.Members[1].LocalDisk = &workercore.KVCacheBackendMemberLocalDisk{
+	kvcb.Spec.Connection.Managed.Members[1].LocalDisks = []workercore.KVCacheBackendMemberLocalDisk{{
 		Path:     "/var/lib/kvcache",
 		Capacity: resource.MustParse("4Ti"),
-	}
-	kvcb.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+	}}
 }
 
 func memberContainer(t *testing.T, kvcb *workercore.KVCacheBackend, image string) core.Container {
@@ -677,7 +674,7 @@ func TestMemberWorkload_DiskTierIsAllOrNothing(t *testing.T) {
 	t.Run("an unset capacity leaves the store's own ceilings alone", func(t *testing.T) {
 		kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 			withMemberDiskTier(k)
-			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("0")
+			k.Spec.Connection.Managed.Members[0].LocalDisks[0].Capacity = resource.MustParse("0")
 		})
 		env := memberEnv(t, kvcb, "mooncake:v0.3.13")
 
@@ -708,7 +705,7 @@ func TestMemberWorkload_DiskTierIsAllOrNothing(t *testing.T) {
 	t.Run("a set key limit is rendered", func(t *testing.T) {
 		kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 			withMemberDiskTier(k)
-			k.Spec.Connection.Managed.Members[0].LocalDisk.KeyLimit = 500000
+			k.Spec.Connection.Managed.Members[0].LocalDisks[0].KeyLimit = 500000
 		})
 		env := memberEnv(t, kvcb, "mooncake:v0.3.13")
 
@@ -756,7 +753,7 @@ func TestMemberWorkload_DiskTierEviction(t *testing.T) {
 			withMemberDiskTier(k)
 			eviction := &workercore.KVCacheBackendMemberLocalDiskEviction{}
 			mutate(eviction)
-			k.Spec.Connection.Managed.Members[0].LocalDisk.Eviction = eviction
+			k.Spec.Connection.Managed.Members[0].LocalDisks[0].Eviction = eviction
 		}
 	}
 
@@ -855,13 +852,13 @@ func TestMemberWorkload_DiskTierEviction(t *testing.T) {
 	}
 }
 
-// TestMemberWorkload_ExtraEnvs pins the hatch's rendering: every entry reaches the container, in key
-// order, after everything derived.
-func TestMemberWorkload_ExtraEnvs(t *testing.T) {
+// TestMemberWorkload_ExtraEnv pins the hatch's rendering: every entry reaches the container, in
+// the order written, after everything derived.
+func TestMemberWorkload_ExtraEnv(t *testing.T) {
 	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
-		k.Spec.Connection.Managed.Members[0].ExtraEnvs = map[string]string{
-			"MOONCAKE_OFFLOAD_USE_URING":                  "true",
-			"MOONCAKE_OFFLOAD_HEARTBEAT_INTERVAL_SECONDS": "5",
+		k.Spec.Connection.Managed.Members[0].ExtraEnv = []workercore.InstanceEnvVar{
+			{Name: "MOONCAKE_OFFLOAD_USE_URING", Value: "true"},
+			{Name: "MOONCAKE_OFFLOAD_HEARTBEAT_INTERVAL_SECONDS", Value: "5"},
 		}
 	})
 	container := memberContainer(t, kvcb, "mooncake:v0.3.13")
@@ -877,15 +874,15 @@ func TestMemberWorkload_ExtraEnvs(t *testing.T) {
 	require.Len(t, names, len(env), "no name may appear twice: Kubernetes takes a duplicate and "+
 		"leaves the winner to the runtime, which is why admission refuses a derived name here")
 	assert.Equal(t,
-		[]string{"MOONCAKE_OFFLOAD_HEARTBEAT_INTERVAL_SECONDS", "MOONCAKE_OFFLOAD_USE_URING"},
+		[]string{"MOONCAKE_OFFLOAD_USE_URING", "MOONCAKE_OFFLOAD_HEARTBEAT_INTERVAL_SECONDS"},
 		names[len(names)-2:],
-		"last and in key order, so two renders of one spec are byte-identical")
+		"last and in the order written, so two renders of one spec are byte-identical")
 }
 
 // TestMemberDerivedEnvs_CoversEveryNameTheRendererEmits holds the reserved list equal to what is
 // actually rendered, in both directions.
 //
-// The list is what admission refuses in extraEnvs, and it is a SECOND copy of a fact the renderer
+// The list is what admission refuses in extraEnv, and it is a SECOND copy of a fact the renderer
 // already has — so the failure it is exposed to is drift, in either direction and both silent. A
 // name the renderer emits but the list forgets is a container carrying that name twice, with the
 // winner left to the runtime; a name the list holds but nothing emits is a hatch entry refused for a
@@ -903,7 +900,7 @@ func TestMemberDerivedEnvs_CoversEveryNameTheRendererEmits(t *testing.T) {
 		{"a tier with every ceiling and an eviction band", []func(*workercore.KVCacheBackend){
 			func(k *workercore.KVCacheBackend) {
 				withMemberDiskTier(k)
-				disk := k.Spec.Connection.Managed.Members[0].LocalDisk
+				disk := &k.Spec.Connection.Managed.Members[0].LocalDisks[0]
 				disk.KeyLimit = 500000
 				disk.Eviction = &workercore.KVCacheBackendMemberLocalDiskEviction{
 					Enabled: ptr.To(true),
@@ -917,7 +914,7 @@ func TestMemberDerivedEnvs_CoversEveryNameTheRendererEmits(t *testing.T) {
 		{"a tier with eviction switched off", []func(*workercore.KVCacheBackend){
 			func(k *workercore.KVCacheBackend) {
 				withMemberDiskTier(k)
-				k.Spec.Connection.Managed.Members[0].LocalDisk.Eviction = &workercore.KVCacheBackendMemberLocalDiskEviction{Enabled: ptr.To(false)}
+				k.Spec.Connection.Managed.Members[0].LocalDisks[0].Eviction = &workercore.KVCacheBackendMemberLocalDiskEviction{Enabled: ptr.To(false)}
 			},
 		}},
 		{"the transport that mounts the host's libfabric", []func(*workercore.KVCacheBackend){
@@ -936,7 +933,7 @@ func TestMemberDerivedEnvs_CoversEveryNameTheRendererEmits(t *testing.T) {
 	for name, fixture := range rendered {
 		assert.Contains(t, MemberDerivedEnvs, name,
 			"%s is rendered by %q and is not reserved, so a group could define it a second time "+
-				"through extraEnvs and nothing would report the collision", name, fixture)
+				"through extraEnv and nothing would report the collision", name, fixture)
 	}
 	for _, name := range MemberDerivedEnvs {
 		_, ok := rendered[name]
@@ -1481,22 +1478,22 @@ func TestMemberWorkload_PullPolicyAndSecrets(t *testing.T) {
 	})
 }
 
-// TestMemberWorkload_ExtraArgs pins the escape hatch's rendering. It is `-D key=value` on this
-// side — the entrypoint's own per-key override — and not the leader's `-key=value`, because the two
-// binaries accept different things.
+// TestMemberWorkload_ExtraArgs pins the escape hatch's rendering. An entry is written as its own
+// flag token and renders as the entrypoint's "-D key=value" override with the dashes gone — and
+// not the leader's verbatim "-key=value", because the two binaries accept different things.
 func TestMemberWorkload_ExtraArgs(t *testing.T) {
 	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
-		k.Spec.Connection.Managed.Members[0].ExtraArgs = map[string]string{
-			"enable_ssd_offload": "true",
-			"client_ttl":         "30",
+		k.Spec.Connection.Managed.Members[0].ExtraArgs = []string{
+			"-enable_ssd_offload=true",
+			"-client_ttl=30",
 		}
 	})
 
 	assert.Equal(t, []string{
-		"-D", "client_ttl=30",
 		"-D", "enable_ssd_offload=true",
+		"-D", "client_ttl=30",
 	}, memberContainer(t, kvcb, "mooncake:v0.3.13").Args,
-		"sorted by key, so two renders of one spec are byte-identical")
+		"in the order written, so two renders of one spec are byte-identical")
 }
 
 // TestMemberWorkload_IsDeterministic pins that one group renders identically every time. The
@@ -1504,8 +1501,8 @@ func TestMemberWorkload_ExtraArgs(t *testing.T) {
 // forever and roll every member with it.
 func TestMemberWorkload_IsDeterministic(t *testing.T) {
 	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
-		k.Spec.Connection.Managed.Members[0].ExtraArgs = map[string]string{
-			"a": "1", "b": "2", "c": "3", "d": "4", "e": "5",
+		k.Spec.Connection.Managed.Members[0].ExtraArgs = []string{
+			"-a=1", "-b=2", "-c=3", "-d=4", "-e=5",
 		}
 	})
 
@@ -1526,7 +1523,7 @@ func TestMemberWorkload_SelectorSurvivesASpecChange(t *testing.T) {
 		group := &k.Spec.Connection.Managed.Members[0]
 		group.NodeSelector = map[string]string{"kvcache-dram": "true", "zone": "b"}
 		group.CapacityPerMember = resource.MustParse("1Ti")
-		group.ExtraArgs = map[string]string{"client_ttl": "30"}
+		group.ExtraArgs = []string{"-client_ttl=30"}
 	}), 0, "mooncake:v0.4.0")
 
 	require.NotNil(t, before.Spec.Selector)
@@ -1623,7 +1620,7 @@ func TestMemberWorkload_FingerprintCoversEveryOtherField(t *testing.T) {
 		{
 			field: "extraArgs",
 			mutate: func(k *workercore.KVCacheBackend) {
-				k.Spec.Connection.Managed.Members[0].ExtraArgs = map[string]string{"client_ttl": "30"}
+				k.Spec.Connection.Managed.Members[0].ExtraArgs = []string{"-client_ttl=30"}
 			},
 		},
 		{
@@ -1681,13 +1678,13 @@ func TestMemberWorkload_FingerprintCoversTheDiskTier(t *testing.T) {
 		{
 			field: "the tier's path, which is both a mount and an environment variable",
 			mutate: func(k *workercore.KVCacheBackend) {
-				k.Spec.Connection.Managed.Members[0].LocalDisk.Path = "/var/lib/elsewhere"
+				k.Spec.Connection.Managed.Members[0].LocalDisks[0].Path = "/var/lib/elsewhere"
 			},
 		},
 		{
 			field: "the tier's capacity, which admission deliberately leaves editable",
 			mutate: func(k *workercore.KVCacheBackend) {
-				k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("8Ti")
+				k.Spec.Connection.Managed.Members[0].LocalDisks[0].Capacity = resource.MustParse("8Ti")
 			},
 		},
 		{
@@ -1794,7 +1791,7 @@ func TestMemberWorkload_SurveyQuotesThePathAgainstTheShell(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ds := RenderMemberDaemonSet(testMemberBackend(func(kvcb *workercore.KVCacheBackend) {
 				withMemberDiskTier(kvcb)
-				kvcb.Spec.Connection.Managed.Members[0].LocalDisk.Path = tc.path
+				kvcb.Spec.Connection.Managed.Members[0].LocalDisks[0].Path = tc.path
 			}), 0, "mooncake:v0.3.13")
 
 			var script string

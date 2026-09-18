@@ -68,7 +68,7 @@ each is reached another way:
 
 | Was a `medium` value | What it actually is | Where it lives |
 |---|---|---|
-| `LocalDisk` | a tier on the members that already hold the memory replica | [`members[].localDisk`](local-disk-tier.md) |
+| `LocalDisk` | a tier on the members that already hold the memory replica | [`members[].localDisks`](local-disk-tier.md) |
 | `NoF` | an NVMe-oF target coordinate, registered once, with no node affinity and no Pod | no API surface; it is not a member group |
 | `CXL` | a DAX device the **leader process** allocates from | nowhere in this API: `enable_cxl`, `cxl_path` and `cxl_size` are refused in `leader.extraArgs`, because the first replaces `leader.allocationStrategy` and then brings the leader up advertising the allocator's size as capacity even where no DAX device exists |
 | `DFS` | a distributed filesystem the **leader process** allocates from | the leader's own environment, which this API does not render |
@@ -418,7 +418,7 @@ be brought in. Nothing is inferred; every route is written on the group:
 
 | Field | What it is for |
 |---|---|
-| `members[].extraEnvs` | The vendor runtime's own trigger, where one exists — `NVIDIA_VISIBLE_DEVICES: all` makes the NVIDIA toolkit inject the driver and every device. Ascend has no counterpart. |
+| `members[].extraEnv` | The vendor runtime's own trigger, where one exists — `NVIDIA_VISIBLE_DEVICES: all` makes the NVIDIA toolkit inject the driver and every device. Ascend has no counterpart. |
 | `members[].runtimeClassName` | The vendor container runtime named explicitly, for a cluster where it is not the default runtime. |
 | `members[].hostPaths[]` | The driver tree taken from the node directly, for a cluster running no vendor runtime at all. |
 | `members[].securityContext` | Privilege, when a mount alone is not enough to open what was mounted. |
@@ -439,7 +439,7 @@ Each `hostPaths[]` entry is `{path, mountPath, type, readOnly}`. Name a `type` �
 kubelet checks nothing, so a missing path becomes an empty directory in the container and the member
 starts anyway. A mount path is refused if it duplicates another entry's, if it is `/dev/infiniband`
 (the device tree a host-fabric group gets rendered, refused even under `TCP`, since the protocol can
-change later), or if it is this group's own `localDisk.path`.
+change later), or if it is this group's own `localDisks[].path`.
 
 Two worked groups. The NVIDIA one needs no mounts at all, because the container runtime injects the
 driver once the variable tells it which devices to inject:
@@ -450,7 +450,9 @@ members:
     medium: VRAM
     image: gpustack/mirrored-mooncake:0.3.13.post1-cuda13.0
     capacityPerMember: 8Gi              # the engine's gpu_memory_utilization must leave this free
-    extraEnvs: {NVIDIA_VISIBLE_DEVICES: all}
+    extraEnv:
+      - name: NVIDIA_VISIBLE_DEVICES
+        value: all
 ```
 
 ⚠️ That variable is honored only while the toolkit's
@@ -793,7 +795,7 @@ backend object**, so two Bindings reaching one leader through two objects are bo
 `domain.name`:
 
 1. **The quota of a shared domain flips and never settles.** The leader keeps one ledger entry per
-   tenant, and each pool's reconciler converges that entry toward its own Binding's `quotaCeiling`
+   tenant, and each pool's reconciler converges that entry toward its own Binding's `quota.ceiling`
    **on every pass**. Each pass reads the other's figure, finds it wrong, and writes its own back.
 2. **The symptom of an undersized quota is a low hit rate and nothing else.** Exceeding a tenant's
    quota does not refuse the write: the store frees room by dropping that tenant's own older objects
@@ -808,7 +810,7 @@ backend object**, so two Bindings reaching one leader through two objects are bo
 
 ⇒ If you point two objects at one leader, either keep their pools' Bindings on **different**
 `domain.name` values, or make sure every Binding that shares a name also shares its `blockSize`,
-`dtype` and `quotaCeiling`.
+`dtype` and `quota.ceiling`.
 
 ## Operating notes
 

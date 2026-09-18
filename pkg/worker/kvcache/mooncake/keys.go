@@ -67,7 +67,9 @@ type ExtraArgsRules struct {
 // address that is not the Pod's own still breaks the probes; that failure stops the rollout rather
 // than passing silently, which is the line this list draws.
 var LeaderExtraArgsRules = ExtraArgsRules{
-	// Keys are the flag's own name without its leading dash, which is how extraArgs is keyed.
+	// Keys are the flag's own name without its leading dashes, and that is NOT how extraArgs
+	// entries arrive: an entry carries its dashes and may carry its value, so admission strips the
+	// dashes and everything from the first "=" on before it compares a key against these tables.
 	Derived: []string{
 		"allocation_strategy",
 		// The four the election renders, reserved as one group because that is how they are
@@ -89,10 +91,10 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 		// there.
 		"rpc_address",
 		"rpc_interface",
-		// Both halves of the disk tier's leader switch. They are derived from leader.offload, and
-		// reaching them through the hatch would put the tier's two sides out of step with the
-		// admission rule that keeps them paired — a leader offloading with no member declaring a
-		// tier, or the reverse, with nothing on the object saying so.
+		// Both halves of the disk tier's leader switch. They are derived from members[].localDisks —
+		// a group declaring a tier is what turns the tier on — and reaching them through the hatch
+		// would put the leader's half of that decision out of step with the members' half, with
+		// nothing on the object saying so.
 		"enable_offload",
 		// The snapshot group, derived from leader.highAvailability.snapshot. Reserved
 		// UNCONDITIONALLY, like the election group above, and for a sharper version of the same
@@ -303,12 +305,12 @@ const snapshotCatalogConnstringKeyReason = "it is read only when the snapshot ca
 
 // MemberExtraArgsRules governs a member group's passthrough.
 //
-// These are CONFIG keys, not environment-variable names: the member's extraArgs is keyed the way its
-// own entrypoint documents, and the renderer maps each to its MOONCAKE_* variable. Names the client
-// reads from the ENVIRONMENT ONLY are not reachable through this map at all and are not listed here;
-// members[].extraEnvs is the hatch for those, and MemberDerivedEnvs is what it reserves.
+// These are CONFIG keys, not environment-variable names: the member's own entrypoint documents
+// them as its per-key overrides, and the renderer maps each to its MOONCAKE_* variable. Names the
+// client reads from the ENVIRONMENT ONLY are not reachable through this list at all and are not
+// listed here; members[].extraEnv is the hatch for those, and MemberDerivedEnvs is what it reserves.
 //
-// The disk tier's two are NOT reachable any more: they come from members[].localDisk now, so they
+// The disk tier's two are NOT reachable any more: they come from members[].localDisks now, so they
 // are derived.
 //
 // There is no Forbidden entry here, and the rendering shape is the reason: a member's extraArgs
@@ -331,7 +333,7 @@ const snapshotCatalogConnstringKeyReason = "it is read only when the snapshot ca
 // environment and wins over it.
 var MemberExtraArgsRules = ExtraArgsRules{
 	Derived: []string{
-		// The disk tier's member half, rendered from members[].localDisk. Reserving them matters
+		// The disk tier's member half, rendered from members[].localDisks. Reserving them matters
 		// more here than on the leader, because of where a member's extraArgs lands in the
 		// precedence chain: a real flag beats a config key, and a config key beats the environment.
 		// These two are rendered as ENVIRONMENT, and extraArgs renders as a -D config key — so an
@@ -354,7 +356,7 @@ var MemberExtraArgsRules = ExtraArgsRules{
 }
 
 // MemberDerivedEnvs is every environment variable name the member renderer emits, which is what
-// admission refuses in a group's extraEnvs.
+// admission refuses in a group's extraEnv.
 //
 // It is a PLAIN LIST and not an ExtraArgsRules, because the other two kinds that type carries would
 // both be empty and an empty field invites a reader to wonder what belongs in it. No two of these
@@ -386,4 +388,21 @@ var MemberDerivedEnvs = []string{
 	memberEnvOffloadWatermarkHigh,
 	memberEnvOffloadWatermarkLow,
 	memberEnvProtocol,
+}
+
+// LeaderDerivedEnvs is every environment variable name the leader renderer emits, which is what
+// admission refuses in the leader's extraEnv.
+//
+// It is a PLAIN LIST for the same reason MemberDerivedEnvs is: the exclusive and forbidden kinds
+// would both be empty here, and nothing in the leader's namespace voids another setting.
+//
+// The last two are rendered only under high availability and under a snapshot declaration, and are
+// reserved UNCONDITIONALLY for the same reason the election flags are: an object must be creatable
+// with the variable already in place and the field turned on afterwards, and a passthrough value
+// would silently win over the reference the rendered argv or the mounted claim arrives with.
+var LeaderDerivedEnvs = []string{
+	LeaderPodIPEnv,
+	LeaderPodNameEnv,
+	LeaderPodNamespaceEnv,
+	LeaderSnapshotLocalPathEnv,
 }

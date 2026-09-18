@@ -36,7 +36,7 @@
 #              node. EXITS 2 (input required) when the cluster has no InstanceType.
 #
 # Inputs:      All real, nothing mocked. The KVCachePoolBinding is not resolved by anything asserted
-#              here, so it may be absent. Each role carries an explicit `template.image` because a
+#              here, so it may be absent. Each role carries an explicit `image` because a
 #              CPU-only InstanceType has observed no accelerator and the operator can therefore
 #              synthesize no engine image -- the replicas are placeholders, and no assertion reads
 #              anything they run. Override with E2E_MD_IMAGE, the InstanceType with
@@ -133,8 +133,9 @@ metadata:
   name: ${name}
   namespace: ${NS}
 spec:
-  engine: vllm
-  engineVersion: "0.11.0"
+  engine:
+    name: vllm
+    version: "0.11.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:
@@ -152,7 +153,7 @@ role_block() {
   printf '  - name: %s\n' "$1"
   [ -n "$2" ] && printf '    kind: %s\n' "$2"
   printf '    instanceType: %s\n    replicas: %s\n' "$IT" "$3"
-  printf '    template:\n      image: %s\n      command: ["/pause"]\n' "$IMAGE"
+  printf '    image: %s\n    command: ["/pause"]\n' "$IMAGE"
 }
 
 # The Workload Kueue composed for this deployment's group, by NAME.

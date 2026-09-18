@@ -40,7 +40,7 @@ func kvCacheFixture() []ctrlcli.Object {
 				BlockSize: 16,
 				Dtype:     "bfloat16",
 			},
-			QuotaCeiling: resource.MustParse("20Ti"),
+			Quota: workercore.KVCachePoolBindingQuota{Ceiling: resource.MustParse("20Ti")},
 		},
 	}
 	pool := &workercore.KVCachePool{

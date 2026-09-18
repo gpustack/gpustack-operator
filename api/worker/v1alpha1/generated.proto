@@ -1431,7 +1431,7 @@ message KVCacheBackendEndpoint {
 //   - The quota of a shared reuse domain flips and never settles. Uniqueness is enforced only
 //     between Bindings whose pools name the SAME backend object, so two Bindings reaching one leader
 //     through two objects are both admitted on one domain name, and each pool's reconciler writes
-//     its own quotaCeiling back over the other's on every pass.
+//     its own quota.ceiling back over the other's on every pass.
 //   - An undersized quota shows up as a LOW HIT RATE and nothing else. Exceeding it does not refuse
 //     the write: the store frees room by dropping that tenant's own older objects and retries,
 //     irreversibly, without any counter moving.
@@ -1495,7 +1495,7 @@ message KVCacheBackendLeader {
   //     write in this store is not refused — it evicts that tenant's own older objects,
   //     irreversibly and without moving any counter. The quota itself is not lost: the pool
   //     reconciler is the authority and writes the difference back on its next pass.
-  optional KVCacheBackendLeaderHighAvailability highAvailability = 6;
+  optional KVCacheBackendLeaderHighAvailability highAvailability = 2;
 
   // AllocationStrategy is how the leader picks which member takes a new write. Random spreads
   // them; FreeRatioFirst biases toward the emptier member.
@@ -1507,7 +1507,7 @@ message KVCacheBackendLeader {
   //
   // +k8s:validation:default="FreeRatioFirst"
   // +k8s:validation:enum=["Random","FreeRatioFirst"]
-  optional string allocationStrategy = 2;
+  optional string allocationStrategy = 3;
 
   // MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index
   // behind it. Off, every request falls into one default tenant and the index degrades to a plain
@@ -1523,20 +1523,36 @@ message KVCacheBackendLeader {
   optional bool multiTenancy = 4;
 
   // ExtraArgs passes flags this API does not enumerate straight through to the leader, after
-  // the derived ones. A key that collides with a flag rendered from a field above is refused
-  // at admission, because two sources for one flag make the rendered command ambiguous.
+  // the derived ones. Each entry is one flag token of its own, "-flag" or "-flag=value", and the
+  // entries render verbatim in the order written. An entry whose key — what precedes the first
+  // "=" once the leading dashes are off — collides with a flag rendered from a field above is
+  // refused at admission, because two sources for one flag make the rendered command ambiguous.
   //
   // EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
-  // rendered into the leader container's argv as -key=value, readable by anyone who can reach the
-  // Pod or the Deployment, for the life of the object. A credential does not belong here, and
-  // since this operator renders no flag that carries one, this field is the only way one arrives.
-  map<string, string> extraArgs = 3;
+  // rendered into the leader container's argv, readable by anyone who can reach the Pod or the
+  // Deployment, for the life of the object. A credential does not belong here, and since this
+  // operator renders no flag that carries one, this field is the only way one arrives.
+  //
+  // +listType=atomic
+  repeated string extraArgs = 5;
 
-  // Offload turns on writing evicted keys to the members' local disk tier. It is the leader's
-  // half of a pair: the other half is members[].localDisk, which says where on each node those
-  // bytes go, and admission refuses either half alone because the store degrades on both
-  // mismatches without reporting either.
-  optional KVCacheBackendLeaderOffload offload = 5;
+  // ExtraEnv passes environment variables this API does not enumerate straight through to the
+  // leader container. The leader reads a handful of its settings from the environment rather
+  // than from flags — the store's local snapshot path is one — and this is the hatch for
+  // whichever of those grows a use this API has no field for.
+  //
+  // A name this operator already renders is REFUSED at admission, for the same reason a
+  // colliding ExtraArgs key is: Kubernetes accepts a container carrying one name twice and
+  // leaves the winner to the runtime, so the collision would not even be reported.
+  //
+  // EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
+  // rendered into the leader container's environment, readable by anyone who can reach the Pod
+  // or the Deployment, for the life of the object. A credential does not belong here, and since
+  // this operator renders no variable that carries one, this field is the only way one arrives.
+  //
+  // +listType=map
+  // +listMapKey=name
+  repeated InstanceEnvVar extraEnv = 6;
 }
 
 // KVCacheBackendLeaderHighAvailability turns leader election on, and carries what a standby is
@@ -1584,27 +1600,6 @@ message KVCacheBackendLeaderHighAvailability {
   // +k8s:validation:default="Lease"
   // +k8s:validation:enum=["Lease","Service"]
   optional string memberAddressing = 2;
-}
-
-// KVCacheBackendLeaderOffload turns the local disk tier on, leader side.
-//
-// Both settings are the leader's, and Enabled gates the feature outright: every offload entry point
-// returns early without it. A tier configured on the member alone is inert, which is why admission
-// requires the two halves together rather than letting one render on its own.
-message KVCacheBackendLeaderOffload {
-  // Enabled turns on offloading to the members' local disks. Unset and false both mean no
-  // offloading, and unset renders NO flag rather than an explicit false.
-  optional bool enabled = 1;
-
-  // OnEvict defers the write to disk from the moment a key is stored to the moment it is evicted,
-  // so a key that is never evicted is never written to disk.
-  //
-  // It REQUIRES Enabled and Enabled REQUIRES it, and admission refuses both directions. The store
-  // ANDs the two, so this alone is accepted, echoed back in the leader's own startup log, and then
-  // does nothing. Enabled alone selects write-through, which the store leaves unprotected: an
-  // object queued for offload is held in memory only on the deferred branch this field selects, so
-  // evicting without it destroys the sole replica of an object whose bucket has not been flushed.
-  optional bool onEvict = 2;
 }
 
 // KVCacheBackendLeaderSnapshot is where the leader's metadata baseline is kept, and how much of it.
@@ -1735,7 +1730,7 @@ message KVCacheBackendMember {
   // declared.
   //
   //   - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and
-  //     each is reached elsewhere: the first through localDisk below, NVMe-oF as a target
+  //     each is reached elsewhere: the first through localDisks below, NVMe-oF as a target
   //     coordinate with no Pod, and the last two on the leader's own process.
   //   - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one
   //     of those values, while this CRD was installed but the webhook was not, becomes undeletable:
@@ -1752,10 +1747,11 @@ message KVCacheBackendMember {
   // and is counted into the member Pod's own resource request, so a member that does not fit stays
   // Pending instead of overcommitting the node.
   //
-  //   - A group carrying LocalDisk needs at least one BUCKET here, which is the unit that tier is
-  //     written in. A bucket's bytes are held in this segment until the bucket is complete, so a
-  //     smaller segment never holds a bucket's worth at once and the tier stays empty under every
-  //     workload, which nothing else reports. A group with no tier has no such floor.
+  //   - A group declaring a tier in LocalDisks needs at least one BUCKET here, which is the unit
+  //     that tier is written in. A bucket's bytes are held in this segment until the bucket is
+  //     complete, so a smaller segment never holds a bucket's worth at once and the tier stays
+  //     empty under every workload, which nothing else reports. A group with no tier has no such
+  //     floor.
   //   - The name is "per member" for a shape that is DECIDED AND NOT DONE: several members per
   //     node, split by NUMA domain. Today one selected node runs one member.
   //   - What would reopen that is a two-socket node reporting RDMA interfaces on more than one NUMA
@@ -1771,18 +1767,21 @@ message KVCacheBackendMember {
   // memory request beside CapacityPerMember.
   optional .k8s.io.apimachinery.pkg.api.resource.Quantity localBufferSize = 4;
 
-  // ExtraArgs passes config keys this API does not enumerate straight through to the member. It
-  // is keyed by CONFIG KEY rather than by environment-variable name — one namespace per side,
-  // each the one its own binary documents. A key that collides with one derived from a field
-  // above is refused at admission.
+  // ExtraArgs passes config keys this API does not enumerate straight through to the member. An
+  // entry is written as its own flag token, "-key=value", and renders as the entrypoint's own
+  // "-D key=value" override with the dashes gone — one namespace per side, each the one its own
+  // binary documents. A key that collides with one derived from a field above is refused at
+  // admission.
   //
   // EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
-  // rendered into the member container's argv as -D key=value, readable by anyone who can reach
-  // the Pod or the DaemonSet, for the life of the object. A credential does not belong here, and
-  // since this operator renders no flag that carries one, this field is the only way one arrives.
-  map<string, string> extraArgs = 5;
+  // rendered into the member container's argv, readable by anyone who can reach the Pod or the
+  // DaemonSet, for the life of the object. A credential does not belong here, and since this
+  // operator renders no flag that carries one, this field is the only way one arrives.
+  //
+  // +listType=atomic
+  repeated string extraArgs = 5;
 
-  // ExtraEnvs passes environment variables this API does not enumerate straight through to the
+  // ExtraEnv passes environment variables this API does not enumerate straight through to the
   // member container.
   //
   //   - It is NOT a second spelling of ExtraArgs: the two reach different places. ExtraArgs renders
@@ -1795,11 +1794,16 @@ message KVCacheBackendMember {
   //     includes the tier's bucket thresholds, which this operator sizes itself; a tuner who needs
   //     to move them needs a field, and this hatch is deliberately not it.
   //
+  // The list is keyed by name, and the schema refuses two entries sharing one.
+  //
   // EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
   // rendered into the member container's environment, readable by anyone who can reach the Pod or
   // the DaemonSet, for the life of the object. A credential does not belong here, and since this
   // operator renders no variable that carries one, this field is the only way one arrives.
-  map<string, string> extraEnvs = 8;
+  //
+  // +listType=map
+  // +listMapKey=name
+  repeated InstanceEnvVar extraEnv = 6;
 
   // Image overrides the backend's Image for this member group only. Left unset, the group runs
   // the backend's Image.
@@ -1811,22 +1815,35 @@ message KVCacheBackendMember {
   // CPU default is not.
   //
   // +k8s:validation:maxLength=512
-  optional string image = 6;
+  optional string image = 7;
 
-  // LocalDisk declares a directory on the nodes this group already selects and points the store
-  // client's offload keys at it. Left unset, the group is memory only.
+  // LocalDisks declares the local disk tiers this group's nodes contribute, one entry per host
+  // directory, and an empty list leaves the group memory only. Declaring an entry is what turns
+  // the tier on: the store's leader takes the switch from this list's presence, not from any
+  // field of its own.
   //
   //   - What the tier is written in is a BUCKET, and that is why this operator sizes one. The store
   //     writes nothing until a bucket is full, by bytes or by object count, so under the store's
   //     own thresholds — sized for a saturated production store — the tier stays empty while every
   //     other signal looks healthy. The pair this operator renders instead is not in this API, and
-  //     members[].extraEnvs refuses those names.
+  //     members[].extraEnv refuses those names.
   //   - It is a LAYER on this group rather than a group of its own, which is the store's shape: the
   //     leader routes an offload task to the client that owns the key's memory replica, so a member
   //     holding no memory segment is never chosen and would report a cold tier that never fills.
   //   - To check what the tier actually holds rather than what it declared, read the leader's own
   //     master_allocated_file_size_bytes; status.capacity reports the declared CAPACITY only.
-  optional KVCacheBackendMemberLocalDisk localDisk = 7;
+  //   - At most ONE entry, and the bound is the status contract rather than any one renderer's
+  //     reach: status.capacity is a single pair of figures for the whole backend and cannot
+  //     attribute a tier's bytes to one disk, so two entries would describe neither. The same
+  //     sentence, at the group level, is why admission allows only one group to carry a list at
+  //     all — lift these together with that status shape or not at all.
+  //
+  // The list is keyed by path, and the schema refuses two entries naming one directory.
+  //
+  // +k8s:validation:maxItems=1
+  // +listType=map
+  // +listMapKey=path
+  repeated KVCacheBackendMemberLocalDisk localDisks = 8;
 
   // Transport declares the data plane this group uses, overriding the backend's
   // spec.transport.protocol for this group only. Left unset, the group inherits the backend's.
@@ -1853,7 +1870,7 @@ message KVCacheBackendMember {
   // not an escalation of who can make it — this object is cluster-scoped precisely because it is
   // a privileged physical resource, so whoever can write one already holds the cluster. It is
   // written here rather than inferred so that reading the object tells you what was granted.
-  optional .k8s.io.api.core.v1.SecurityContext securityContext = 11;
+  optional .k8s.io.api.core.v1.SecurityContext securityContext = 10;
 
   // HostPaths mounts directories or files from the selected nodes into the member container.
   //
@@ -1867,12 +1884,12 @@ message KVCacheBackendMember {
   // POSITION rather than from anything declared here, so an entry can collide with neither
   // another entry nor a volume the renderer owns.
   //
-  // LocalDisk above is not this field spelled differently: that tier is a declared capacity the
+  // LocalDisks above is not this field spelled differently: that list declares tier capacity the
   // leader routes offload tasks to, with a deregistration hook and a grace period derived from
-  // it. A directory mounted here is a mount and nothing more.
+  // its presence. A directory mounted here is a mount and nothing more.
   //
   // +k8s:validation:maxItems=32
-  repeated KVCacheBackendMemberHostPath hostPaths = 12;
+  repeated KVCacheBackendMemberHostPath hostPaths = 11;
 
   // RuntimeClassName selects the container runtime the member's Pods run under, which is how a
   // vendor runtime injects its driver libraries and device nodes without any of them being named
@@ -1889,7 +1906,7 @@ message KVCacheBackendMember {
   //
   // +k8s:validation:pattern="^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
   // +k8s:validation:maxLength=253
-  optional string runtimeClassName = 13;
+  optional string runtimeClassName = 12;
 }
 
 // KVCacheBackendMemberHostPath is one directory or file taken from a selected node into the member
@@ -1929,11 +1946,14 @@ message KVCacheBackendMemberHostPath {
   optional bool readOnly = 4;
 }
 
-// KVCacheBackendMemberLocalDisk is the local SSD tier this member group's nodes contribute.
+// KVCacheBackendMemberLocalDisk is one local disk tier a member group's nodes contribute.
 //
-// It is the member's half of a pair; the leader's half is leader.offload, and admission refuses
-// either half alone. Set on its own, the leader never enqueues an offload task and the disk stays
-// empty while the member reports its capacity, which is a tier that reads as present and is not.
+// An entry in a group's list is what turns the tier on, on both sides at once: the leader renders
+// the flags that send evicted keys to disk from the list's presence alone, and it renders them in
+// the deferred mode — a key's write lands at eviction time and never at storage time — because
+// that is the only mode the store protects. The other mode has no field and none is wanted: it
+// evicts an unflushed bucket's sole replica, so there is nothing to pair this declaration with and
+// nothing to forget.
 message KVCacheBackendMemberLocalDisk {
   // Path is the directory on each selected node that holds this tier, mounted into the member
   // container from the host at the same location. It is REQUIRED and has no default: choosing a
@@ -1995,7 +2015,7 @@ message KVCacheBackendMemberLocalDisk {
   //
   //   - "At that moment" is the whole of the promise. Nothing stores the selector's history and the
   //     members are gone by the time cleanup runs, so narrowing NodeSelector or removing the
-  //     LocalDisk block before deleting the backend leaves the dropped nodes holding their content
+  //     LocalDisks entry before deleting the backend leaves the dropped nodes holding their content
   //     with nothing reported about them. Delete the backend first and edit afterwards.
   //   - WHAT IS REMOVED IS THE CONTENT, NOT THE DIRECTORY, which was made by whoever prepared the
   //     node, may be a mount point, and carries an owner this operator did not choose.
@@ -2540,6 +2560,29 @@ message KVCachePoolBindingPoolReference {
   optional string name = 1;
 }
 
+// KVCachePoolBindingQuota is the quota this namespace asks of its pool.
+message KVCachePoolBindingQuota {
+  // Ceiling is what this namespace may consume in its reuse domain, written verbatim into that
+  // one tenant's requested quota rather than kept as a total this operator maintains.
+  //
+  //   - IT IS A REQUEST, NOT A GRANT. The pool reduces every tenant's effective quota in proportion
+  //     when the sum of requests exceeds allocatable capacity, and Status.EffectiveQuota is what
+  //     was actually granted.
+  //   - EXCEEDING IT EVICTS RATHER THAN REFUSES, which is the opposite of what the word suggests.
+  //     A write past the ceiling is not rejected: the store frees room by dropping this namespace's
+  //     own older objects and retries. A ceiling set too low therefore costs cache inside this
+  //     namespace rather than failed writes, and costs it without any counter moving. Writes are
+  //     refused only when eviction cannot free enough, which needs those older objects held by
+  //     unexpired read leases.
+  //   - It is REQUIRED, because the state it would otherwise allow does not work: the storage layer
+  //     has no default policy and refuses a tenant it holds no policy for, so a Binding without
+  //     this field would pass admission, report Ready and refuse every byte its workloads wrote.
+  //   - A value that is not positive is refused at admission.
+  //
+  // +required
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity ceiling = 1;
+}
+
 // KVCachePoolBindingReference names one KVCachePoolBinding.
 //
 // It carries no kind, unlike KVCacheObjectReference, because it is not a usedBy: it is the back
@@ -2578,25 +2621,11 @@ message KVCachePoolBindingSpec {
   // +required
   optional KVCachePoolBindingDomain domain = 2;
 
-  // QuotaCeiling is what this namespace may consume in its reuse domain, written verbatim into that
-  // one tenant's requested quota rather than kept as a total this operator maintains.
-  //
-  //   - IT IS A REQUEST, NOT A GRANT. The pool reduces every tenant's effective quota in proportion
-  //     when the sum of requests exceeds allocatable capacity, and Status.EffectiveQuota is what
-  //     was actually granted.
-  //   - EXCEEDING IT EVICTS RATHER THAN REFUSES, which is the opposite of what the word suggests.
-  //     A write past the ceiling is not rejected: the store frees room by dropping this namespace's
-  //     own older objects and retries. A ceiling set too low therefore costs cache inside this
-  //     namespace rather than failed writes, and costs it without any counter moving. Writes are
-  //     refused only when eviction cannot free enough, which needs those older objects held by
-  //     unexpired read leases.
-  //   - It is REQUIRED, because the state it would otherwise allow does not work: the storage layer
-  //     has no default policy and refuses a tenant it holds no policy for, so a Binding without
-  //     this field would pass admission, report Ready and refuse every byte its workloads wrote.
-  //   - A value that is not positive is refused at admission.
+  // Quota is what this namespace asks of its pool, shaped like the pool's own declared ceiling so
+  // one concept is spelled one way on both sides of the grant.
   //
   // +required
-  optional .k8s.io.apimachinery.pkg.api.resource.Quantity quotaCeiling = 3;
+  optional KVCachePoolBindingQuota quota = 3;
 }
 
 // KVCachePoolBindingStatus is the namespace's own view of the pool: what it asked for, what the pool
@@ -2864,7 +2893,7 @@ message KVCachePoolUsage {
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:crd-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["md"],subResources=["status"]
-// +k8s:crd-gen:printcolumn:name="Engine",type="string",jsonPath=".spec.engine"
+// +k8s:crd-gen:printcolumn:name="Engine",type="string",jsonPath=".spec.engine.name"
 // +k8s:crd-gen:printcolumn:name="Phase",type="string",jsonPath=".status.phase"
 // +k8s:crd-gen:printcolumn:name="Endpoint",type="string",jsonPath=".status.endpoint"
 message ModelDeployment {
@@ -2875,37 +2904,93 @@ message ModelDeployment {
   optional ModelDeploymentStatus status = 3;
 }
 
-// ModelDeploymentDirectTransfer carries the settings of the point-to-point KV transfer leg
-// between a prefill role and a decode role.
-message ModelDeploymentDirectTransfer {
-  // Protocol is the transport both ends of the leg are told to use, in the mooncake
-  // configuration's own spelling, e.g. "tcp" or "rdma".
+// ModelDeploymentAdditionalVolume defines one volume to mount in a role's replica besides the
+// operator's own. One of the sources below must be set; an entry naming none is skipped by the
+// render rather than refused.
+message ModelDeploymentAdditionalVolume {
+  // MountPath is the absolute in-container path to mount the volume at. It must not duplicate
+  // another entry's path, nor a path the operator's own volumes already mount.
   //
-  //   - IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either
-  //     end, so a per-role field could only express a contradiction -- two ends naming different
-  //     values for one connection, which fails at transfer time rather than at admission.
-  //   - THE VALUE IS DECLARED, NOT DISCOVERED, AND IT IS NOT GATED. The accepted set is a
-  //     property of the mooncake build inside the engine's own image, which this operator
-  //     neither ships nor can inspect: a HIP-compiled build makes "hip" a working point-to-point
-  //     transport, and an enum here would hard-code one image's compile set onto another image's
-  //     connector. The value is passed through verbatim, and a value the engine build rejects
-  //     raises at engine startup, in the container that owns the fact.
-  //   - UNSET RENDERS "tcp", the transport every mooncake build carries. The default lives in
-  //     the renderer rather than in this schema, so the stored object holds exactly what was
-  //     asked.
-  //   - IT IS READ ONLY ON THE DIRECT-TRANSFER LEG: a managed llm-d router in front of vLLM
-  //     prefill/decode roles. On every other shape -- sglang, Ascend, or no router -- the value
-  //     is accepted and renders nothing, which is stated here because an accepted field that
-  //     silently does nothing is a promise broken quietly.
-  //   - IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'
-  //     argv, so a change rebuilds every Kueue pod group of the deployment. With roles split
-  //     across InstanceTypes the groups rebuild independently, and a mixed-protocol window
-  //     between a prefiller and a decoder exists until both converge -- the same window an
-  //     engineVersion edit already opens.
+  // +required
+  // +k8s:validation:pattern="^(/[^/]+)+$"
+  // +k8s:validation:maxLength=1024
+  optional string mountPath = 1;
+
+  // ReadOnly mounts the volume read-only.
+  optional bool readOnly = 2;
+
+  // SubPath mounts a relative path inside the volume rather than its root.
+  // It must not be absolute nor contain a ".." element.
+  //
+  // The pattern below enforces only the first half. A ".." element cannot be excluded by this
+  // engine's regular expressions, which have no negative lookahead, so admission carries that
+  // half — see the webhook. Both halves are refused there rather than left to the API server's
+  // rejection of the rendered Pod, which arrives as a per-pass create failure naming a
+  // volumeMount instead of an admission error naming this field.
+  //
+  // +k8s:validation:pattern="^[^/].*$"
+  // +k8s:validation:maxLength=1024
+  optional string subPath = 3;
+
+  // ConfigMap is the reference to the ConfigMap to mount, in the same namespace.
+  optional .k8s.io.api.core.v1.LocalObjectReference configMap = 4;
+
+  // Secret is the reference to the Secret to mount, in the same namespace.
+  optional .k8s.io.api.core.v1.LocalObjectReference secret = 5;
+
+  // HostPath is the path on the Kubernetes Node to mount. It crosses the node boundary: the
+  // mount reaches the node's own filesystem rather than a namespaced object, so what it exposes
+  // is decided by what the node carries rather than by anything this API can see.
+  optional .k8s.io.api.core.v1.HostPathVolumeSource hostPath = 6;
+}
+
+// ModelDeploymentEngine is the engine a deployment runs and the version of it.
+//
+// The two are one object because they were never meaningful apart: a role that names no image of
+// its own has one assembled from the engine and the version together with the role's own
+// InstanceType. The version carries no obligation of its own — it is owed exactly when some role
+// needs that assembly, which admission rather than the schema decides, because which roles need it
+// is a fact about the roles and not about this field.
+message ModelDeploymentEngine {
+  // Name selects the engine.
+  //
+  // It is the half of this object that is the deployment's identity and is frozen after creation,
+  // while Version answers which build runs and stays editable — stated here because one object
+  // reading otherwise would freeze the pair together.
+  //
+  // +required
+  // +k8s:validation:enum=["vllm","sglang"]
+  optional string name = 1;
+
+  // Version is the engine's own version, e.g. "0.25.1" for vllm or "0.5.18" for sglang.
+  //
+  //   - It is OPTIONAL, and the obligation sits with the roles instead: a role that names no image
+  //     of its own has one synthesized from this version, so admission refuses an empty version
+  //     beside such a role rather than letting the render assemble a malformed tag naming
+  //     something never typed. A role that names an image never reads this field.
+  //   - It is free-form and UNVALIDATED, by decision: the user guarantees that the version and the
+  //     driver each role's hardware installed are aligned. A gate would need the runner's release
+  //     matrix compiled into the operator, and the failure it would prevent is already legible as
+  //     an ImagePullBackOff on a tag that does not exist.
+  //   - It is per deployment rather than per role, which is what lets one version assemble a
+  //     DIFFERENT image for each role: the backend half of the tag comes from the role's own
+  //     InstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.
+  //     Published version sets do NOT overlap across every backend, so one version has to name a
+  //     tag that exists for each backend the roles land on.
   //
   // +optional
+  // +k8s:validation:minLength=1
   // +k8s:validation:maxLength=64
-  optional string protocol = 1;
+  optional string version = 2;
+}
+
+// ModelDeploymentEnvVar defines one environment variable appended to a role's replica.
+message ModelDeploymentEnvVar {
+  // Name is the name of the environment variable; each name in one role must be unique.
+  optional string name = 1;
+
+  // Value is the value of the environment variable.
+  optional string value = 2;
 }
 
 // ModelDeploymentKVCache attaches the deployment to a KV cache pool.
@@ -2925,10 +3010,11 @@ message ModelDeploymentKVCache {
   // +required
   optional .k8s.io.api.core.v1.LocalObjectReference poolRef = 1;
 
-  // Connector selects how the engine's transfer configuration is produced. "auto" synthesizes it
-  // from the pool's backend type and the engine. There is no "none" — synthesizing nothing is
-  // reachable through a full command replacement, which also marks the role unmanaged and moves
-  // CacheAttached to Unknown.
+  // Connector names the connector implementation this deployment is configured for. The value is
+  // an identity the deployment carries, not a setting the operator derives: "mooncake" says which
+  // connector this is, and nothing reads the field to produce the configuration. There is no
+  // "none" — synthesizing nothing is reachable through a full command replacement, which also
+  // marks the role unmanaged and moves CacheAttached to Unknown.
   //
   // THE KV TRANSFER CONVERGES ON MOONCAKE, and that is why the enum has one value. Mooncake is the
   // implementation that supports heterogeneous prefill and decode, which is the shape this API
@@ -2951,8 +3037,8 @@ message ModelDeploymentKVCache {
   // than edited onto one. That is stated here because "widening the enum" otherwise reads as a
   // migration path for deployments that are already running.
   //
-  // +k8s:validation:default="auto"
-  // +k8s:validation:enum=["auto"]
+  // +k8s:validation:default="mooncake"
+  // +k8s:validation:enum=["mooncake"]
   optional string connector = 2;
 }
 
@@ -2998,6 +3084,41 @@ message ModelDeploymentKVCacheStatus {
   optional ModelDeploymentKVCacheDomain domain = 3;
 }
 
+// ModelDeploymentKVTransfer carries the settings of the point-to-point KV transfer leg
+// between a prefill role and a decode role. It composes with a shared store rather than excluding
+// one: both legs may be configured on one deployment, and the synthesized connector carries the
+// pair together.
+message ModelDeploymentKVTransfer {
+  // Protocol is the transport both ends of the leg are told to use, in the mooncake
+  // configuration's own spelling, e.g. "tcp" or "rdma".
+  //
+  //   - IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either
+  //     end, so a per-role field could only express a contradiction -- two ends naming different
+  //     values for one connection, which fails at transfer time rather than at admission.
+  //   - THE VALUE IS DECLARED, NOT DISCOVERED, AND IT IS NOT GATED. The accepted set is a
+  //     property of the mooncake build inside the engine's own image, which this operator
+  //     neither ships nor can inspect: a HIP-compiled build makes "hip" a working point-to-point
+  //     transport, and an enum here would hard-code one image's compile set onto another image's
+  //     connector. The value is passed through verbatim, and a value the engine build rejects
+  //     raises at engine startup, in the container that owns the fact.
+  //   - UNSET RENDERS "tcp", the transport every mooncake build carries. The default lives in
+  //     the renderer rather than in this schema, so the stored object holds exactly what was
+  //     asked.
+  //   - IT IS READ ONLY ON THE POINT-TO-POINT LEG: a managed llm-d router in front of vLLM
+  //     prefill/decode roles. On every other shape -- sglang, Ascend, or no router -- the value
+  //     is accepted and renders nothing, which is stated here because an accepted field that
+  //     silently does nothing is a promise broken quietly.
+  //   - IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'
+  //     argv, so a change rebuilds every Kueue pod group of the deployment. With roles split
+  //     across InstanceTypes the groups rebuild independently, and a mixed-protocol window
+  //     between a prefiller and a decoder exists until both converge -- the same window an
+  //     engine version edit already opens.
+  //
+  // +optional
+  // +k8s:validation:maxLength=64
+  optional string protocol = 1;
+}
+
 // ModelDeploymentList holds the list of ModelDeployment.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -3009,7 +3130,7 @@ message ModelDeploymentList {
 
 // ModelDeploymentModel names the model the engine serves.
 //
-// It provisions nothing. Weights arrive through the role template's volumes or through the engine's
+// It provisions nothing. Weights arrive through the role's additional volumes or through the engine's
 // own hub client; a weight-provisioning block here would be the first step towards the
 // general-purpose serving CR this deliberately is not.
 message ModelDeploymentModel {
@@ -3021,12 +3142,51 @@ message ModelDeploymentModel {
   optional string name = 1;
 }
 
+// ModelDeploymentPort defines one port a role's replica exposes beside the engine's own.
+//
+// IT CARRIES NO NAME, and that is a decision rather than an omission. The rendered container port is
+// named from the protocol and the number, so a name written here would be accepted by the schema and
+// then discarded — the pattern this API refuses everywhere else, a promise broken quietly. Two ports
+// of one role are told apart by their numbers, which the webhook already requires to be unique.
+message ModelDeploymentPort {
+  // Port is the port number to expose on the replica.
+  //
+  // The bounds are the container port's own. Without them a zero or out-of-range number is
+  // admitted here and refused later by the API server, on the rendered Pod, as a per-pass create
+  // failure naming a container port instead of an admission error naming this field.
+  //
+  // +k8s:validation:minimum=1
+  // +k8s:validation:maximum=65535
+  optional int32 port = 1;
+
+  // Protocol is the protocol to use for the port.
+  //
+  // +k8s:validation:enum=["TCP","UDP","SCTP"]
+  // +k8s:validation:default="TCP"
+  optional string protocol = 2;
+}
+
 // ModelDeploymentRole is one engine role and its replicas.
 //
-// Replicas and InstanceType are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to admission and
-// scheduling — Kueue PodSet counts and flavor selection — so a template that could shadow them would
-// make the admission feasibility check read a ledger that does not match reality. The template may
-// override container content and nothing else.
+// Replicas, InstanceType and Resources are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to
+// admission and scheduling — Kueue PodSet counts, flavor selection and the request the queue
+// accounts — so a container field able to shadow any of them would make the admission feasibility
+// check read a ledger that does not match reality. That is why the container fields below carry no
+// resource request at all: the accelerator half belongs in Resources and the rest is derived from
+// the InstanceType, and neither can be overridden here.
+//
+// EDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's. Each role forms its
+// own Kueue pod group, whose members cannot leave one at a time, so that one group is rebuilt whole
+// while every sibling role keeps serving. A `replicas` change on this role does the same.
+//
+// ADDING OR REMOVING A ROLE REACHES FURTHER THAN THE ROLE IT NAMES. A deployment whose roles are one
+// names that group after the DEPLOYMENT, and a deployment with more than one names each group after
+// its ROLE, so going from one role to two renames the first role's group and rebuilds it as well.
+//
+// A DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A REBUILD. The replica that left is replaced on
+// its own, under a new name, while its siblings keep serving — see
+// docs/reference/model-deployment.md under "One group per role" and "Rollout is a rolling
+// replacement".
 message ModelDeploymentRole {
   // Name identifies the role, and it is also the name of the Kueue PodSet the role becomes.
   //
@@ -3044,6 +3204,19 @@ message ModelDeploymentRole {
   // +k8s:validation:maxLength=63
   // +k8s:validation:pattern="^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
   optional string name = 1;
+
+  // Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name
+  // is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable
+  // by typing a string is one typo away from silently changing. Two roles may share a kind and
+  // differ in name ONLY where that kind is Server, because a pair of servers is a set of equals and
+  // two prefillers are not: nothing that consumes these roles expresses a second prefiller, so a
+  // deployment declaring one would render a role no reader of the rendered configuration could
+  // reach. It defaults to Server, the shape a deployment written before disaggregation existed has,
+  // so such a deployment renders exactly as it did.
+  //
+  // +k8s:validation:default="server"
+  // +k8s:validation:enum=["server","prefill","decode"]
+  optional string kind = 8;
 
   // Replicas is how many Pods this role runs. They are NOT independent Workloads: every replica of
   // every role joins one Kueue pod group, so the deployment is admitted as a unit or not at all.
@@ -3072,16 +3245,80 @@ message ModelDeploymentRole {
   // decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit
   // resources scaled by the requested card count, so they are not expressible here at all — a
   // stronger guarantee than refusing them, since a field that does not exist cannot be shadowed by
-  // a template either.
+  // the container fields below either.
   //
   // InstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards
   // a replica wants is a property of the model being served, so two deployments on one InstanceType
   // routinely want different counts.
   optional ModelDeploymentRoleResources resources = 4;
 
+  // Image is the container image to run. Leaving it empty is the ordinary case: the operator then
+  // synthesizes one from the pool's accelerator backend, the observed runtime version and the
+  // requested engine.
+  //
+  // +optional
+  // +k8s:validation:maxLength=512
+  optional string image = 7;
+
+  // ImagePullPolicy is the pull policy for Image.
+  //
+  // +optional
+  optional string imagePullPolicy = 9;
+
+  // ImagePullSecrets are the secrets used to pull Image.
+  //
+  // +optional
+  // +listType=atomic
+  // +k8s:validation:maxItems=32
+  repeated .k8s.io.api.core.v1.LocalObjectReference imagePullSecrets = 10;
+
+  // Privileged runs the container privileged.
+  //
+  // +optional
+  optional bool privileged = 11;
+
+  // Ports are the container ports to expose in addition to the engine's own. They do not
+  // reserve or select the transfer engine's runtime port window.
+  //
+  // +optional
+  // +patchMergeKey=port
+  // +patchStrategy=merge
+  // +listType=map
+  // +listMapKey=port
+  // +listMapKey=protocol
+  repeated ModelDeploymentPort ports = 12;
+
+  // AdditionalVolumes are volumes mounted into the container alongside the operator's own.
+  //
+  // +optional
+  // +listType=atomic
+  repeated ModelDeploymentAdditionalVolume additionalVolumes = 13;
+
+  // Command replaces the whole argv, which is the TAKE-OVER tier: the user owns the whole
+  // command line, the operator synthesizes no engine argument and no client environment, the
+  // role is marked unmanaged and CacheAttached goes to Unknown. Arguments fold into Command;
+  // there is deliberately no Args, because a second append tier beside ExtraArgs would have no
+  // defined precedence.
+  //
+  // IT IS FROZEN AFTER CREATION, because it decides whether the operator configures this role at
+  // all: a role that supplies one is taken over by its author, which changes cache injection and
+  // what status can claim. The rest of the container fields are how the build is fetched, shaped
+  // and tuned, and stay editable.
+  //
+  // +optional
+  // +listType=atomic
+  repeated string command = 14;
+
   // ExtraArgs is appended AFTER the operator-synthesized arguments. An entry naming a key the
   // operator owns is REJECTED rather than merged: a silent merge produces two values for one
   // connector argument and no way to tell which one won.
+  //
+  // The name stays ExtraArgs rather than Args because args would read as the whole argv, which is
+  // what Command means; the two tiers differ in whether the operator contributes anything at all.
+  //
+  // THIS LIST IS NOT READ WHEN COMMAND IS SET: appending to an argv the role's author replaced
+  // would put words into a command line they own, so the take-over tier takes the whole line and
+  // this field does nothing beside it.
   //
   // +listType=atomic
   repeated string extraArgs = 5;
@@ -3089,42 +3326,15 @@ message ModelDeploymentRole {
   // Env is appended the same way and refused on the same terms. Keys the operator merely defaults
   // are not owned: a user's value wins there and no rejection follows.
   //
+  // There is ONE list here rather than an overlay beside it: the former second tier was appended
+  // and refused for owned names on exactly the same terms, so the nesting expressed a precedence
+  // that never existed.
+  //
   // +patchMergeKey=name
   // +patchStrategy=merge
   // +listType=map
   // +listMapKey=name
-  repeated InstanceEnvVar env = 6;
-
-  // Template overlays the rendered container: the operator renders first and merges this on top.
-  //
-  //   - A non-empty Command is the TAKE-OVER tier — the user owns the whole argv, the operator
-  //     synthesizes no engine arguments and no client environment, the role is marked unmanaged and
-  //     CacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args,
-  //     because a second append tier beside ExtraArgs would have no defined precedence.
-  //   - It is MUTABLE, unlike the one an Instance carries, which is what makes a rollout possible
-  //     at all.
-  //   - EDITING IT RESTARTS EVERY ROLE, not just the replicas this template belongs to: every
-  //     replica of the deployment is one member of a single Kueue pod group whose members cannot
-  //     leave one at a time, so the group is rebuilt whole. The same is true of a `replicas` change,
-  //     of adding or removing a role, and of a departure this operator did not initiate — see
-  //     docs/reference/model-deployment.md under "Rollout is recreate".
-  //   - Its Resources are refused at admission. The accelerator request belongs in the role's own
-  //     Resources and the rest is derived from the InstanceType, so a template able to shadow either
-  //     would make the admission feasibility check read a ledger that does not match reality.
-  optional ModelDeploymentTemplate template = 7;
-
-  // Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name
-  // is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable
-  // by typing a string is one typo away from silently changing. Two roles may share a kind and
-  // differ in name ONLY where that kind is Server, because a pair of servers is a set of equals and
-  // two prefillers are not: nothing that consumes these roles expresses a second prefiller, so a
-  // deployment declaring one would render a role no reader of the rendered configuration could
-  // reach. It defaults to Server, the shape a deployment written before disaggregation existed has,
-  // so such a deployment renders exactly as it did.
-  //
-  // +k8s:validation:default="server"
-  // +k8s:validation:enum=["server","prefill","decode"]
-  optional string kind = 8;
+  repeated ModelDeploymentEnvVar env = 6;
 }
 
 // ModelDeploymentRoleResources is what one replica of a role asks of an accelerator.
@@ -3273,7 +3483,7 @@ message ModelDeploymentRouter {
   optional int32 replicas = 2;
 
   // Image overrides the router's container image. Empty means the operator assembles one from Name,
-  // the same way a role's image is assembled when its template names none.
+  // the same way a role's image is assembled when the role names none.
   //
   // +optional
   // +k8s:validation:maxLength=512
@@ -3288,6 +3498,18 @@ message ModelDeploymentRouter {
   // +optional
   // +listType=atomic
   repeated string extraArgs = 4;
+
+  // ImagePullPolicy is the pull policy for Image.
+  //
+  // +optional
+  optional string imagePullPolicy = 5;
+
+  // ImagePullSecrets are the secrets used to pull Image.
+  //
+  // +optional
+  // +listType=atomic
+  // +k8s:validation:maxItems=32
+  repeated .k8s.io.api.core.v1.LocalObjectReference imagePullSecrets = 6;
 }
 
 // ModelDeploymentRouterKVEvents is one role's cache-event stream, as something a consumer can reach.
@@ -3410,36 +3632,16 @@ message ModelDeploymentSpec {
   // +required
   optional ModelDeploymentModel model = 1;
 
-  // Engine selects the inference engine, which decides which argument keys the operator owns and
-  // which carrier the transfer configuration arrives on. Ownership is per (engine, key): a key one
-  // engine owns is an ordinary user argument on another.
+  // Engine is the inference engine this deployment runs, which decides which argument keys the
+  // operator owns and which carrier the transfer configuration arrives on. Ownership is per
+  // (engine, key): a key one engine owns is an ordinary user argument on another.
   //
-  // It does NOT decide the connector, which follows the role's hardware instead: the connector is a
-  // property of the accelerator backend, so an Ascend pool and an NVIDIA pool running this engine
-  // get different ones.
-  //
-  // +required
-  // +k8s:validation:enum=["vllm","sglang"]
-  optional string engine = 2;
-
-  // EngineVersion is the engine's own version, e.g. "0.25.1" for vllm or "0.5.18" for sglang.
-  //
-  //   - It is free-form and UNVALIDATED, by decision: the user guarantees that the version and the
-  //     driver each role's hardware installed are aligned. A gate would need the runner's release
-  //     matrix compiled into the operator, and the failure it would prevent is already legible as
-  //     an ImagePullBackOff on a tag that does not exist.
-  //   - It is per deployment rather than per role, which is what lets one version assemble a
-  //     DIFFERENT image for each role: the backend half of the tag comes from the role's own
-  //     InstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.
-  //     Published version sets do NOT overlap across every backend, so one version has to name a
-  //     tag that exists for each backend the roles land on.
-  //   - The lower bound is not decoration: `required` makes the key present, not the value
-  //     non-empty, and an empty version assembles a malformed tag naming something never typed.
+  // It does NOT decide the connector, which follows the role's hardware instead: the connector is
+  // a property of the accelerator backend, so an Ascend pool and an NVIDIA pool running this
+  // engine get different ones.
   //
   // +required
-  // +k8s:validation:minLength=1
-  // +k8s:validation:maxLength=64
-  optional string engineVersion = 5;
+  optional ModelDeploymentEngine engine = 2;
 
   // KVCache optionally attaches the deployment to a shared KV cache pool. A managed vLLM
   // prefill/decode deployment without it still uses its router's point-to-point connector; it does
@@ -3485,18 +3687,25 @@ message ModelDeploymentSpec {
   // this field existed serves exactly as it did.
   //
   // +optional
-  optional ModelDeploymentRouter router = 6;
+  optional ModelDeploymentRouter router = 5;
 
-  // DirectTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode
+  // KVTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode
   // pair.
+  //
+  // THIS FIELD AND KVCache ABOVE ARE TWO ORTHOGONAL AXES, NOT TWO BRANCHES OF ONE CHOICE, and
+  // both may be set at once. The gate that turns this leg on — a managed llm-d router, vLLM, not
+  // Ascend, and a role kind of prefill or decode — reads none of spec.kvCache, and when both are
+  // set the two are synthesized into ONE connector and one --kv-transfer-config: a deployment may
+  // share a pool for its blocks AND hand them from prefill to decode directly, at the same time.
   //
   // THE LEG THIS COVERS NEVER TRAVERSES THE STORE, and that is why the value does not come from
   // the KVCacheBackend: spec.transport there defines the data plane the store MEMBERS run, this
   // one is engine to engine, and the two planes declare separately. A deployment can render
-  // this leg with no pool attached at all, which is why the field cannot live under KVCache.
+  // this leg with no pool attached at all, which is another reason the field cannot live under
+  // KVCache.
   //
   // +optional
-  optional ModelDeploymentDirectTransfer directTransfer = 7;
+  optional ModelDeploymentKVTransfer kvTransfer = 6;
 }
 
 // ModelDeploymentStatus defines the observed state of ModelDeployment.
@@ -3558,82 +3767,5 @@ message ModelDeploymentStatus {
   // an empty object here cannot be told apart from a contract whose every string happens to be
   // empty.
   optional ModelDeploymentRouterStatus router = 7;
-}
-
-// ModelDeploymentTemplate overlays the container the operator renders for one replica.
-//
-// IT EXISTS BECAUSE InstanceTemplate'S Image IS REQUIRED AND THIS ONE'S CANNOT BE: a role that names
-// no image has one synthesized from the accelerator backend its InstanceType observed, so requiring
-// the field would force every user of the overlay to give up synthesis.
-//
-// The fields are InstanceTemplate's, minus VolumeMount, which nothing here reads: an unused field in
-// a schema is a promise, and strict decoding turns leaving it out into a clear refusal rather than a
-// value silently ignored.
-message ModelDeploymentTemplate {
-  // Image is the container image to run. Leaving it empty is the ordinary case: the operator then
-  // synthesizes one from the pool's accelerator backend, the observed runtime version and the
-  // requested engine.
-  //
-  // +optional
-  // +k8s:validation:maxLength=512
-  optional string image = 1;
-
-  // ImagePullPolicy is the pull policy for Image.
-  //
-  // +optional
-  optional string imagePullPolicy = 2;
-
-  // Command replaces the whole argv, which is the TAKE-OVER tier described on the role's Template
-  // field. The operator contributes no engine argument and no client environment.
-  //
-  // +optional
-  repeated string command = 3;
-
-  // Privileged runs the container privileged.
-  //
-  // +optional
-  optional bool privileged = 4;
-
-  // Ports are the container ports to expose in addition to the engine's own. They do not
-  // reserve or select the transfer engine's runtime port window.
-  //
-  // +optional
-  // +patchMergeKey=port
-  // +patchStrategy=merge
-  // +listType=map
-  // +listMapKey=port
-  // +listMapKey=protocol
-  repeated InstancePort ports = 5;
-
-  // Env are environment entries merged on top of the role's own. A name the operator owns is
-  // refused here just as it is in the role's Env: the renderer drops owned names from both tiers,
-  // so admission has to refuse both, or one path becomes a silent drop.
-  //
-  // +optional
-  // +patchMergeKey=name
-  // +patchStrategy=merge
-  // +listType=map
-  // +listMapKey=name
-  repeated InstanceEnvVar env = 6;
-
-  // Resources is present ONLY so that supplying it can be refused with a message that says where
-  // the request belongs. Dropping the field would let strict decoding refuse it earlier and more
-  // cheaply, but an unknown-field error says "not here" while the webhook's says "it goes in the
-  // role's own Resources" — and mistaking the template for the place resources live is the whole
-  // reason anyone writes this field.
-  //
-  // +optional
-  optional InstanceResources resources = 7;
-
-  // ImagePullSecret is the secret used to pull Image.
-  //
-  // +optional
-  optional .k8s.io.api.core.v1.LocalObjectReference imagePullSecret = 8;
-
-  // AdditionalVolumes are volumes mounted into the container alongside the operator's own.
-  //
-  // +optional
-  // +listType=atomic
-  repeated InstanceAdditionalVolume additionalVolumes = 9;
 }
 

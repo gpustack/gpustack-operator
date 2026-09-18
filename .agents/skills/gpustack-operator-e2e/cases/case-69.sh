@@ -118,8 +118,9 @@ metadata:
 spec:
   model:
     name: case69/model
-  engine: vllm
-  engineVersion: "0.25.1"
+  engine:
+    name: vllm
+    version: "0.25.1"
   kvCache:
     poolRef:
       name: $BINDING
@@ -128,9 +129,8 @@ spec:
       kind: server
       replicas: 1
       instanceType: $IT
-      template:
-        image: $IMAGE
-        command: ["/pause"]
+      image: $IMAGE
+      command: ["/pause"]
 YAML
 )"
 
@@ -191,10 +191,10 @@ fi
 # THE POSITIVE SIDE. Without it every row above passes against a webhook that refuses every update.
 #
 # A JSON PATCH ON ONE FIELD, NOT A MERGE PATCH ON THE LIST, and the difference is the whole result.
-# A merge patch replaces `roles` wholesale, so a role restated without its `template` sets
-# template.command to null -- and template.command is FROZEN, so the identity rule refuses the edit.
-# Measured: this row failed with `spec.roles[0].template.command: Invalid value: null`, and the
-# refusal was CORRECT. Omitting a frozen field in a merge patch IS changing it.
+# A merge patch replaces `roles` wholesale, so a role restated without its `command` sets
+# command to null -- and command is FROZEN, so the identity rule refuses the edit.
+# Measured before the field moved onto the role: this row failed naming the command path,
+# and the refusal was CORRECT. Omitting a frozen field in a merge patch IS changing it.
 if k -n "$NS" patch modeldeployment "$MD" --type=json \
   -p '[{"op":"replace","path":"/spec/roles/0/replicas","value":2}]' \
   >/dev/null 2>&1; then

@@ -19,13 +19,12 @@
 #
 #              THE TRAP THIS CASE EXISTS TO AVOID. A refusal test whose sample is incomplete
 #              measures the schema and never reaches the webhook, and it stays green if the webhook
-#              is deleted outright. Measured on a live cluster: a role carrying only
-#              `template.resources.cpu` comes back `resources.ram: Required value` — the schema —
-#              and adding cpu+ram+localStorage then yields `template.image: Required value`, still
-#              the schema. Only a template complete enough to satisfy every required field reaches
-#              the webhook and produces the message this case asserts. So each webhook row here
-#              carries a COMPLETE manifest and asserts a fragment of the operator's own wording,
-#              never the bare fact of a rejection.
+#              is deleted outright. Measured on a live cluster when the role carried a template
+#              tier: a role with only part of that tier came back naming a required field of the
+#              schema, never the webhook's wording, and only a complete tier reached the webhook.
+#              The tier is gone and its required fields with it, but the rule the measurement
+#              taught stays: each webhook row here carries a COMPLETE manifest and asserts a
+#              fragment of the operator's own wording, never the bare fact of a rejection.
 #
 #              The same reasoning drives row 0: a baseline that must be ACCEPTED. Without it every
 #              row below can pass for the wrong reason — a typo in an unrelated field refuses all
@@ -36,7 +35,7 @@
 #              has to exist.
 #
 #              ONE ROW PAYS FOR THE "NO GPU" PART EXPLICITLY, and it did not always. The
-#              replica-rendering row gives its role a `template.image`, because a role naming no
+#              replica-rendering row gives its role an explicit `image`, because a role naming no
 #              image has one SYNTHESIZED from the accelerator backend its InstanceType observed —
 #              and a CPU-only InstanceType has observed none. Measured on a single-node CPU-only
 #              cluster: without the explicit image that row polls out at 0 Pods, and the operator
@@ -123,8 +122,9 @@ metadata:
   name: case45-probe
   namespace: ${NS}
 spec:
-  engine: ${ENGINE:-vllm}
-  engineVersion: "0.11.0"
+  engine:
+    name: ${ENGINE:-vllm}
+    version: "0.11.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:
@@ -187,50 +187,30 @@ refuses "an owned variable in env is refused" \
     - name: MOONCAKE_CONFIG_PATH
       value: /tmp/x.json" ""
 
-# The overlay tier is a SECOND path to the same key, and it was the one the rule missed: the
-# renderer merges template.env together with env, so an owned key here passed admission and was
-# dropped silently at render time.
-#
-# The wanted fragment is `template.env` rather than the variable name, because the append-tier
-# refusal above already quotes the variable -- a case that asserted only the name would pass with
-# the overlay rule deleted. It is also not the fully indexed path, so it does not depend on how the
-# API server renders a field index.
-refuses "an owned variable in the template overlay is refused, naming that tier" \
-  "template.env" \
+# The template tier no longer exists, and strict decoding is the refusal that says so: a field kept
+# only to improve one error message was a promise the schema made and nothing kept. This row pins
+# the disappearance itself, which is what replaced the old resources rule -- an unknown-field error
+# naming `template` rather than a webhook message about where the request belongs.
+refuses "the template tier is refused as an unknown field" \
+  "strict decoding error" \
   "    template:
-      image: docker.io/library/busybox:1.36
-      env:
-      - name: MOONCAKE_CONFIG_PATH
-        value: /tmp/x.json" ""
+      image: docker.io/library/busybox:1.36" ""
 
-# The complete template is the point: see the trap in the header. cpu/ram/localStorage and image are
-# all required by the schema, so a shorter sample never reaches this webhook.
-refuses "a resource-bearing template is refused, pointing at the two fields that do own it" \
-  "the accelerator request belongs in" \
-  "    template:
-      image: docker.io/library/busybox:1.36
-      resources:
-        cpu: \"1\"
-        ram: \"1Gi\"
-        localStorage: \"1Gi\"" ""
-
-# The take-over tier, with NO image. This row asserts an ACCEPTANCE, and it is the one that pins the
-# fix for the defect where `roles[].template` inherited a required `image`: every override tier lives
-# under `template`, so requiring an image there forced anyone using an overlay to give up the
-# synthesized image -- two advertised capabilities excluding each other.
+# The take-over tier, with NO image. This row asserts an ACCEPTANCE: a role that replaces the whole
+# command line is not required to name an image, because the two capabilities do not exclude each
+# other -- image synthesis is independent of who owns the argv.
 #
-# WHAT DOES NOT PIN IT: the same manifest WITH an image. That one is accepted before and after the
-# fix, so it discriminates nothing. The absence of `image` is the entire assertion.
-takeover_out="$(manifest "    template:
-      command:
-      - /bin/sh
-      - -c
-      - sleep 3600" "" | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
+# WHAT DOES NOT PIN IT: the same manifest WITH an image. That one is accepted either way, so it
+# discriminates nothing. The absence of `image` is the entire assertion.
+takeover_out="$(manifest "    command:
+    - /bin/sh
+    - -c
+    - sleep 3600" "" | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
 if [ -n "$takeover_out" ] && [ -z "${takeover_out##*created*}" ]; then
-  record PASS "a take-over template without an image is accepted" \
-    "template.command with no template.image passes schema and webhook — the overlay tiers do not cost the synthesized image"
+  record PASS "a take-over role without an image is accepted" \
+    "command with no image passes schema and webhook — taking over the argv does not cost the synthesized image"
 else
-  record FAIL "a take-over template without an image is accepted" \
+  record FAIL "a take-over role without an image is accepted" \
     "wanted acceptance, got: $(echo "$takeover_out" | cut -c1-160)"
 fi
 
@@ -323,8 +303,7 @@ trap 'kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai case45-nobind 
   --ignore-not-found --wait=false >/dev/null 2>&1' EXIT
 
 if [ "$nobind_ready" = yes ]; then
-  apply_out="$(manifest "    template:
-      image: docker.io/library/busybox:1.36" "" \
+  apply_out="$(manifest "    image: docker.io/library/busybox:1.36" "" \
     | sed "s/case45-probe/case45-nobind/" | kubectl apply -f - 2>&1 | tr '\n' ' ')"
   # `created` OR `configured` OR `unchanged`: the delete at the top of this block passes
   # --timeout=60s, and a finalizer that outlasts it leaves the object in place, so a re-apply

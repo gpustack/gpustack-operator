@@ -2,10 +2,6 @@
 
 package v1alpha1
 
-import (
-	resource "k8s.io/apimachinery/pkg/api/resource"
-)
-
 // KVCachePoolBindingSpecApplyConfiguration represents a declarative configuration of the KVCachePoolBindingSpec type for use
 // with apply.
 //
@@ -28,23 +24,9 @@ type KVCachePoolBindingSpecApplyConfiguration struct {
 	// ledger and strands the old one. BlockSize or Dtype changed under a warm cache is silent
 	// corruption: the writes succeed, the reads succeed, and the tensors are wrong.
 	Domain *KVCachePoolBindingDomainApplyConfiguration `json:"domain,omitempty"`
-	// QuotaCeiling is what this namespace may consume in its reuse domain, written verbatim into that
-	// one tenant's requested quota rather than kept as a total this operator maintains.
-	//
-	// - IT IS A REQUEST, NOT A GRANT. The pool reduces every tenant's effective quota in proportion
-	// when the sum of requests exceeds allocatable capacity, and Status.EffectiveQuota is what
-	// was actually granted.
-	// - EXCEEDING IT EVICTS RATHER THAN REFUSES, which is the opposite of what the word suggests.
-	// A write past the ceiling is not rejected: the store frees room by dropping this namespace's
-	// own older objects and retries. A ceiling set too low therefore costs cache inside this
-	// namespace rather than failed writes, and costs it without any counter moving. Writes are
-	// refused only when eviction cannot free enough, which needs those older objects held by
-	// unexpired read leases.
-	// - It is REQUIRED, because the state it would otherwise allow does not work: the storage layer
-	// has no default policy and refuses a tenant it holds no policy for, so a Binding without
-	// this field would pass admission, report Ready and refuse every byte its workloads wrote.
-	// - A value that is not positive is refused at admission.
-	QuotaCeiling *resource.Quantity `json:"quotaCeiling,omitempty"`
+	// Quota is what this namespace asks of its pool, shaped like the pool's own declared ceiling so
+	// one concept is spelled one way on both sides of the grant.
+	Quota *KVCachePoolBindingQuotaApplyConfiguration `json:"quota,omitempty"`
 }
 
 // KVCachePoolBindingSpecApplyConfiguration constructs a declarative configuration of the KVCachePoolBindingSpec type for use with
@@ -69,10 +51,10 @@ func (b *KVCachePoolBindingSpecApplyConfiguration) WithDomain(value *KVCachePool
 	return b
 }
 
-// WithQuotaCeiling sets the QuotaCeiling field in the declarative configuration to the given value
+// WithQuota sets the Quota field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the QuotaCeiling field is set to the value of the last call.
-func (b *KVCachePoolBindingSpecApplyConfiguration) WithQuotaCeiling(value resource.Quantity) *KVCachePoolBindingSpecApplyConfiguration {
-	b.QuotaCeiling = &value
+// If called multiple times, the Quota field is set to the value of the last call.
+func (b *KVCachePoolBindingSpecApplyConfiguration) WithQuota(value *KVCachePoolBindingQuotaApplyConfiguration) *KVCachePoolBindingSpecApplyConfiguration {
+	b.Quota = value
 	return b
 }

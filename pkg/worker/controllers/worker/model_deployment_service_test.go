@@ -208,19 +208,19 @@ func TestRenderModelDeploymentService_SelectsExactlyTheRolesPods(t *testing.T) {
 func TestRenderModelDeploymentService_Port(t *testing.T) {
 	testCases := []struct {
 		name     string
-		ports    []workercore.InstancePort
+		ports    []workercore.ModelDeploymentPort
 		wantPort int32
 		wantName string
 	}{
 		{name: "no port declared falls back to the engines' default", wantPort: 8000, wantName: "http"},
 		{
 			name:     "a declared port is used as it stands",
-			ports:    []workercore.InstancePort{{Port: 9000, Protocol: core.ProtocolTCP}},
+			ports:    []workercore.ModelDeploymentPort{{Port: 9000, Protocol: core.ProtocolTCP}},
 			wantPort: 9000,
 		},
 		{
 			name: "the FIRST declared port is the one the deployment is reached on",
-			ports: []workercore.InstancePort{
+			ports: []workercore.ModelDeploymentPort{
 				{Port: 9000, Protocol: core.ProtocolTCP},
 				{Port: 9001, Protocol: core.ProtocolTCP},
 			},
@@ -231,7 +231,7 @@ func TestRenderModelDeploymentService_Port(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-				md.Spec.Roles[0].Template.Ports = tc.ports
+				md.Spec.Roles[0].Ports = tc.ports
 			})
 
 			svc := renderModelDeploymentService(md)
@@ -257,7 +257,7 @@ func TestModelDeploymentEndpoint(t *testing.T) {
 	assert.Equal(t, "http://qwen.team-a.svc:8000", modelDeploymentEndpoint(newRenderDeployment()))
 
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{{Port: 9000, Protocol: core.ProtocolTCP}}
+		md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 9000, Protocol: core.ProtocolTCP}}
 	})
 	assert.Equal(t, "http://qwen.team-a.svc:9000", modelDeploymentEndpoint(md))
 }
@@ -348,7 +348,7 @@ func TestModelDeploymentEndpoint_Scheme(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Roles[0].ExtraArgs = tc.extraArgs
-				md.Spec.Roles[0].Template.Command = tc.command
+				md.Spec.Roles[0].Command = tc.command
 			})
 
 			assert.Equal(t, tc.expected, modelDeploymentEndpoint(md))

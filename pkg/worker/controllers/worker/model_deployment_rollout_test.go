@@ -167,7 +167,7 @@ func TestModelDeploymentReconciler_ReportsARolloutHeldByAnUnreachableStore(t *te
 	require.NoError(t, cli.Status().Update(context.Background(), kvcpb))
 
 	changed := getModelDeployment(t, cli)
-	changed.Spec.Roles[0].Template.Image = "vllm/vllm-openai:v0.26.0"
+	changed.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
 	require.NoError(t, cli.Update(context.Background(), changed))
 
 	_, err = reconcileModelDeployment(t, cli)
@@ -205,7 +205,7 @@ func TestModelDeploymentReconciler_ARebuildPassClaimsNothingAboutTheRollout(t *t
 	require.NoError(t, cli.Status().Update(context.Background(), kvcpb))
 
 	changed := getModelDeployment(t, cli)
-	changed.Spec.Roles[0].Template.Image = "vllm/vllm-openai:v0.26.0"
+	changed.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
 	require.NoError(t, cli.Update(context.Background(), changed))
 
 	_, err = reconcileModelDeployment(t, cli)
@@ -261,7 +261,7 @@ func TestModelDeploymentReconciler_AGroupShapeChangeCarriesAWithheldEditThroughA
 	require.NoError(t, cli.Status().Update(context.Background(), kvcpb))
 
 	edited := getModelDeployment(t, cli)
-	edited.Spec.Roles[0].Template.Image = "vllm/vllm-openai:v0.26.0"
+	edited.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
 	require.NoError(t, cli.Update(context.Background(), edited))
 
 	_, err = reconcileModelDeployment(t, cli)
@@ -360,7 +360,7 @@ func TestModelDeploymentReconciler_ARolloutReportsInProgressThenCurrent(t *testi
 		ModelDeploymentConditionReplicasUpToDate.GetReason(getModelDeployment(t, cli)))
 
 	changed := getModelDeployment(t, cli)
-	changed.Spec.Roles[0].Template.Image = "vllm/vllm-openai:v0.26.0"
+	changed.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
 	require.NoError(t, cli.Update(context.Background(), changed))
 
 	_, err = reconcileModelDeployment(t, cli)
@@ -470,7 +470,7 @@ func TestModelDeploymentReconciler_ClearsTheHeldConditionWhenTheStoreReturns(t *
 	require.NoError(t, cli.Status().Update(context.Background(), kvcpb))
 
 	changed := getModelDeployment(t, cli)
-	changed.Spec.Roles[0].Template.Image = "vllm/vllm-openai:v0.26.0"
+	changed.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
 	require.NoError(t, cli.Update(context.Background(), changed))
 
 	_, err = reconcileModelDeployment(t, cli)

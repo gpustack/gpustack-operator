@@ -2,8 +2,6 @@ package mooncake
 
 import (
 	"fmt"
-	"maps"
-	"slices"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
@@ -156,30 +154,40 @@ func RenderLeaderFlags(kvcb *workercore.KVCacheBackend) []string {
 			"-tenant_quota_connector_uri="+QuotaPolicyFilePath)
 	}
 
-	// The disk tier's leader half. Rendered only when asked for, like every other flag here: the
-	// artifact's own default is false, so an explicit -enable_offload=false would restate a default
-	// and move the command line of every backend that never wanted the tier.
+	// The disk tier's leader half, and it has no field of its own: a member group declaring a
+	// localDisks entry is what turns the tier on, so the leader's flags are derived from the
+	// members' declaration. Rendered only when a group declares one, like every other flag here —
+	// the artifact's own default is false, so an explicit -enable_offload=false would restate a
+	// default while moving the command line of every backend that never wanted the tier.
 	//
-	// -offload_on_evict is rendered only WITH the switch, and never apart from it. The artifact ands
-	// the two, so alone it is accepted, echoed back in the startup log, and does nothing — admission
-	// refuses that pairing, and this renderer would have no way to report it if one slipped through.
-	if offload := leader.Offload; offload != nil && offload.Enabled {
-		flags = append(flags, "-enable_offload=true")
-		if offload.OnEvict {
-			flags = append(flags, "-offload_on_evict=true")
-		}
+	// The two flags are one decision and render together: -offload_on_evict selects the deferred
+	// mode, the only one the store protects, so no shape of this object renders one without the
+	// other. Admission reserves both keys on the hatch for the same reason.
+	if memberHasDiskTier(kvcb) {
+		flags = append(flags, "-enable_offload=true", "-offload_on_evict=true")
 	}
 
 	flags = append(flags,
 		fmt.Sprintf("-pod_name=$(%s)", LeaderPodNameEnv),
 		fmt.Sprintf("-pod_namespace=$(%s)", LeaderPodNamespaceEnv))
 
-	// The escape hatch goes last and in key order, so two renders of one spec are byte-identical
-	// and a passthrough can override nothing the lines above already decided — admission refuses a
-	// key that collides with a derived flag, which is what keeps that true.
-	for _, key := range slices.Sorted(maps.Keys(leader.ExtraArgs)) {
-		flags = append(flags, fmt.Sprintf("-%s=%s", key, leader.ExtraArgs[key]))
-	}
+	// The escape hatch goes last and in the order written, so two renders of one spec are
+	// byte-identical and a passthrough can override nothing the lines above already decided —
+	// admission refuses a key that collides with a derived flag, which is what keeps that true.
+	// Entries carry their own dashes and render verbatim: one entry is one flag token, the shape
+	// the artifact's own parser reads.
+	flags = append(flags, leader.ExtraArgs...)
 
 	return flags
+}
+
+// memberHasDiskTier reports whether any member group of this backend declares a local disk tier,
+// which is the one fact the leader's offload flags are derived from.
+func memberHasDiskTier(kvcb *workercore.KVCacheBackend) bool {
+	for i := range kvcb.Spec.Connection.Managed.Members {
+		if len(kvcb.Spec.Connection.Managed.Members[i].LocalDisks) > 0 {
+			return true
+		}
+	}
+	return false
 }

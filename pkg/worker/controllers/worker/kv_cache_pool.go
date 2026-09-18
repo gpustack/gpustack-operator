@@ -12,6 +12,7 @@ import (
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/sets"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -109,6 +110,19 @@ const (
 	// KVCachePoolConditionQuotaPolicyWritable is False when the master accepted no quota write —
 	// reason QuotaPolicyNotWritable when its own policy source is what refused it.
 	KVCachePoolConditionQuotaPolicyWritable kubeapistatus.ConditionType = "QuotaPolicyWritable"
+	// KVCachePoolConditionQuotaWithinTotal is False when the ceilings this pool's Bindings ask for
+	// together exceed the total the pool itself declared — reason Oversubscribed, naming the sum and
+	// the total both. False is NOT a fault and nothing is broken: the store grants every tenant a
+	// share of what it can serve in proportion to what each asked, and each Binding's
+	// status.effectiveQuota reports the figure actually granted. It is a Condition and not a refusal
+	// because refusing would break the ordinary sequence of creating Bindings and then growing the
+	// backend; admission refuses only the one ceiling that could never be granted alone.
+	//
+	// It is deliberately absent from the axes summarizeKVCachePool reads, so an oversubscribed pool
+	// does not read as Degraded: what False names is a proportional division the store performs by
+	// design, and a pool telling an operator to fix what is working is the reading this spelling
+	// exists to avoid.
+	KVCachePoolConditionQuotaWithinTotal kubeapistatus.ConditionType = "QuotaWithinTotal"
 	// KVCachePoolConditionCapacityAllocatable is False when the master reports nothing to allocate.
 	// That is the startup-ordering trap: no member has mounted, so every effective quota is zero and
 	// no write can succeed while every object still looks correctly configured.
@@ -124,6 +138,7 @@ const (
 const (
 	KVCachePoolReasonMultiTenancyDisabled   = "MultiTenancyDisabled"
 	KVCachePoolReasonQuotaPolicyNotWritable = "QuotaPolicyNotWritable"
+	KVCachePoolReasonOversubscribed         = "Oversubscribed"
 )
 
 // KVCacheMasterSeparatesTenants reports whether the master serving a pool can hold two reuse
@@ -293,6 +308,7 @@ func (r *KVCachePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	holder.Status.Domains = master.domainsOf(kvcp)
 	holder.Status.UsedBy = master.usedByOf(kvcp)
+	observeKVCachePoolQuotaWithinTotal(kvcp, holder, master)
 
 	// Before the first external write, never after: what goes onto the master below can only be
 	// removed while an object still names it, so a Binding written for must not be deletable without
@@ -708,7 +724,7 @@ func (r *KVCachePoolReconciler) observeKVCachePoolMaster(
 
 			master.tenants = append(master.tenants, mooncake.QuotaPolicyTenant{
 				Name:  name,
-				Quota: kvcpb.Spec.QuotaCeiling,
+				Quota: kvcpb.Spec.Quota.Ceiling,
 			})
 		}
 	}
@@ -828,11 +844,84 @@ func retainedTenantCeiling(
 	for _, bindings := range master.bindings {
 		for i := range bindings {
 			if bindings[i].Spec.Domain.Name == domain {
-				return bindings[i].Spec.QuotaCeiling, true
+				return bindings[i].Spec.Quota.Ceiling, true
 			}
 		}
 	}
 	return resource.Quantity{}, false
+}
+
+// observeKVCachePoolQuotaWithinTotal writes the pool's verdict on whether every ceiling it has
+// granted still fits the total it declared.
+//
+// The sum skips a releasing Binding because its claim is over, a domain two Bindings are contesting
+// because its ceiling was dropped from the desired set rather than counted twice, and an empty
+// domain name because the observation pass skips it first. The condition therefore flips the same
+// pass the ledger does: deleting a Binding to fix the oversubscription is visible immediately, not
+// one scrape later.
+//
+// IT IS NOT THE LEDGER'S OWN SET, and the difference is one case wide. A pool naming more than one
+// backend has no single master to hold a ledger, so the tenant pass writes NO ceiling for any of its
+// Bindings, while this sum still counts them — the arithmetic then describes what the pool's objects
+// declare rather than what any store was told. That is the right answer for this axis, which is over
+// declarations by construction and runs even when no master answers, and the gap itself is reported
+// by the backend-count condition rather than hidden. Reading this one as "the ledger agrees" is what
+// the wording above used to invite.
+//
+// Nothing is refused and no Binding is touched here. The arithmetic is over declarations only, so
+// it needs no master scrape and runs even while the master answers nothing — unlike the axes that
+// read the store, this one describes what the pool's own objects say.
+func observeKVCachePoolQuotaWithinTotal(
+	kvcp, holder *workercore.KVCachePool, master *kvCachePoolMaster,
+) {
+	// The sum carries the total's own format, so the two figures the message names share one
+	// spelling instead of arriving as 17179869184 next to 16Gi.
+	sum := resource.Quantity{Format: kvcp.Spec.Quota.Total.Format}
+	excluded := sets.New[string]()
+	for i := range master.bindings[kvcp.Name] {
+		kvcpb := &master.bindings[kvcp.Name][i]
+		name := kvcpb.Spec.Domain.Name
+		if name == "" || kvCachePoolBindingIsReleasing(kvcpb) {
+			continue
+		}
+		if _, contested := master.contested[name]; contested {
+			excluded.Insert(name)
+
+			continue
+		}
+		sum.Add(kvcpb.Spec.Quota.Ceiling)
+	}
+
+	total := kvcp.Spec.Quota.Total
+	if sum.Cmp(total) <= 0 {
+		// THE MESSAGE NAMES THE SET THE SUM ACTUALLY COVERED. A contested domain's ceiling is dropped
+		// from the desired tenants rather than counted, so it is not in this sum -- and it is not
+		// being granted to anybody either, since the contested branch writes no ceiling for it at
+		// all. Saying "every binding" over a sum that excluded some would tell a reader the one thing
+		// the arithmetic did not check.
+		if excluded.Len() > 0 {
+			KVCachePoolConditionQuotaWithinTotal.True(holder, "WithinTotal", fmt.Sprintf(
+				"every uncontested binding's ceiling can be granted in full: those ceilings sum to "+
+					"%s against the pool's declared total of %s. The contested domains %s are left "+
+					"out of that sum, and no ceiling is written for them at all, so this comparison "+
+					"says nothing about what they asked for",
+				sum.String(), total.String(), strings.Join(sets.List(excluded), ", ")))
+
+			return
+		}
+		KVCachePoolConditionQuotaWithinTotal.True(holder, "WithinTotal",
+			fmt.Sprintf("every binding's ceiling can be granted in full: the ceilings sum to %s "+
+				"against the pool's declared total of %s", sum.String(), total.String()))
+
+		return
+	}
+
+	KVCachePoolConditionQuotaWithinTotal.False(holder, KVCachePoolReasonOversubscribed,
+		fmt.Sprintf("the bindings' ceilings sum to %s, over the pool's declared total of %s. "+
+			"Nothing is refused and nothing is broken: the store grants every tenant a share of what "+
+			"it can serve in proportion to what each asked, and each binding's "+
+			"status.effectiveQuota reports the figure actually granted",
+			sum.String(), total.String()))
 }
 
 // lockKVCachePoolBindings takes the finalizer on every live Binding on this master, and must run
@@ -1507,7 +1596,7 @@ func quotaObservedMessage(domain string, explicit *bool, inflight bool) string {
 	case explicit != nil && !*explicit:
 		// Asked for, and the master says it is running without one. The write has not landed yet, or
 		// it was refused — the pool's own conditions carry which.
-		parts = append(parts, fmt.Sprintf("a quotaCeiling is set, but the master reports reuse "+
+		parts = append(parts, fmt.Sprintf("a quota.ceiling is set, but the master reports reuse "+
 			"domain %q as running without an explicit policy; see the pool's conditions", domain))
 	default:
 		parts = append(parts, fmt.Sprintf("the master's figures for reuse domain %q were read", domain))

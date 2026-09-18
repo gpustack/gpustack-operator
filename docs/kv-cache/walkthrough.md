@@ -99,7 +99,8 @@ metadata:
   namespace: team-a
 spec:
   poolRef: {name: shared-dram}
-  quotaCeiling: 8Gi
+  quota:
+    ceiling: 8Gi
   domain:
     name: qwen-7b-v1                     # every field here is immutable
     blockSize: 64
@@ -126,8 +127,9 @@ metadata:
 spec:
   model:
     name: Qwen/Qwen2.5-7B-Instruct
-  engine: vllm
-  engineVersion: "0.27.1"
+  engine:
+    name: vllm
+    version: "0.29.0"                    # on the same store line as Step 1's default image
   kvCache:
     poolRef:
       name: team-a                       # the Binding above, in this namespace
@@ -147,8 +149,9 @@ Binding, reads the backend's endpoint and the domain, and injects the store's en
 role's Pod. What is injected per engine, and every refusal, is on
 [KV Cache Injection](../reference/kv-cache-injection.md).
 
-**The store version must match the engine's client.** The two speak a wire protocol with no
-negotiation, so a mismatch fails at connect time with a message about neither — see
+**The store version must match the engine's client.** The engine version above decides the client,
+and Step 1's unset `spec.image` leaves the store on the Settings default. A pair off DIFFERENT lines
+starts healthy and then fails every write, so the version above is a choice — see
 [The store version must match the engine's client](backend.md#the-store-version-must-match-the-engines-client).
 
 Check the attachment from the deployment's own status rather than from the Pods:

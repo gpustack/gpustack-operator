@@ -42,6 +42,11 @@ listens on IPv6 and, on a dual-stack host, on both.
 own. The leader then stays not-ready rather than reporting the cause, so `0.0.0.0` and `::` are the
 only two values worth setting.
 
+`leader.extraEnv` is the same hatch for the environment: every entry renders after the derived
+variables, and a name the renderer derives — the pod's own identity variables and the snapshot path —
+is refused with the same message a member gets. The schema keys the list by `name`, so one name
+cannot carry two values.
+
 `replicas` defaults to `1`, and `5` is the ceiling in the **webhook** and in the schema alike: only
 one leader ever serves, so further replicas are spare processes rather than capacity. More than one
 requires [`highAvailability`](#high-availability) and is refused by the webhook without it, naming
@@ -262,8 +267,8 @@ store problem.
 ---
 
 **See also** — [KV Cache Backend](backend.md) (the object this leader belongs to, its members, and
-what status reports) · [KV Cache Local Disk Tier](local-disk-tier.md) (the leader's half of the
-offload pair) · [High Availability Operations](../operation/high-availability.md) (the replica knob
+what status reports) · [KV Cache Local Disk Tier](local-disk-tier.md) (the disk tier, whose offload
+flags this leader derives from the members' declaration) · [High Availability Operations](../operation/high-availability.md) (the replica knob
 per control-plane component) · [Settings & Environment Variables](../settings.md) (the
 `kv-cache-backend-image` Setting)
 

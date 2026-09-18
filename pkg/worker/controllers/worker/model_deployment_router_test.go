@@ -170,7 +170,7 @@ func TestRenderModelDeploymentRouterObjects_CarriesEngineContracts(t *testing.T)
 func TestRenderModelDeploymentRouterObjects_MetricsUseServingPort(t *testing.T) {
 	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
 		for i := range md.Spec.Roles {
-			md.Spec.Roles[i].Template.Ports = []workercore.InstancePort{{Port: 8100}}
+			md.Spec.Roles[i].Ports = []workercore.ModelDeploymentPort{{Port: 8100}}
 		}
 	})
 	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
@@ -182,9 +182,7 @@ func TestRenderModelDeploymentRouterObjects_MetricsUseServingPort(t *testing.T) 
 
 func TestRenderModelDeploymentRouterObjects_RefusesDifferentServingPorts(t *testing.T) {
 	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
-		template := *md.Spec.Roles[1].Template
-		template.Ports = []workercore.InstancePort{{Port: 8100}}
-		md.Spec.Roles[1].Template = &template
+		md.Spec.Roles[1].Ports = []workercore.ModelDeploymentPort{{Port: 8100}}
 	})
 
 	_, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
@@ -230,7 +228,7 @@ func TestRenderModelDeploymentRouterObjects_CarriesRuntimeIdentityAndStreamingTr
 
 func TestRenderModelDeploymentRouterObjects_UnmanagedProducerPublishesNoKVEvents(t *testing.T) {
 	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Roles[0].Template.Command = []string{"vllm", "serve", "custom-model"}
+		md.Spec.Roles[0].Command = []string{"vllm", "serve", "custom-model"}
 	})
 
 	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)

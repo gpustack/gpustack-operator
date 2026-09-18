@@ -109,7 +109,6 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.KVCacheBackendExternal{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_KVCacheBackendExternal(ref),
 		v1alpha1.KVCacheBackendLeader{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref),
 		v1alpha1.KVCacheBackendLeaderHighAvailability{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderHighAvailability(ref),
-		v1alpha1.KVCacheBackendLeaderOffload{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderOffload(ref),
 		v1alpha1.KVCacheBackendLeaderSnapshot{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderSnapshot(ref),
 		v1alpha1.KVCacheBackendList{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_KVCacheBackendList(ref),
 		v1alpha1.KVCacheBackendManaged{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_KVCacheBackendManaged(ref),
@@ -130,6 +129,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.KVCachePoolBindingDomain{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingDomain(ref),
 		v1alpha1.KVCachePoolBindingList{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingList(ref),
 		v1alpha1.KVCachePoolBindingPoolReference{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingPoolReference(ref),
+		v1alpha1.KVCachePoolBindingQuota{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingQuota(ref),
 		v1alpha1.KVCachePoolBindingReference{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingReference(ref),
 		v1alpha1.KVCachePoolBindingSpec{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingSpec(ref),
 		v1alpha1.KVCachePoolBindingStatus{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingStatus(ref),
@@ -140,12 +140,16 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.KVCachePoolStatus{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_KVCachePoolStatus(ref),
 		v1alpha1.KVCachePoolUsage{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1alpha1_KVCachePoolUsage(ref),
 		v1alpha1.ModelDeployment{}.OpenAPIModelName():                                schema_gpustack_api_worker_v1alpha1_ModelDeployment(ref),
-		v1alpha1.ModelDeploymentDirectTransfer{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentDirectTransfer(ref),
+		v1alpha1.ModelDeploymentAdditionalVolume{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentAdditionalVolume(ref),
+		v1alpha1.ModelDeploymentEngine{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelDeploymentEngine(ref),
+		v1alpha1.ModelDeploymentEnvVar{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelDeploymentEnvVar(ref),
 		v1alpha1.ModelDeploymentKVCache{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCache(ref),
 		v1alpha1.ModelDeploymentKVCacheDomain{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCacheDomain(ref),
 		v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCacheStatus(ref),
+		v1alpha1.ModelDeploymentKVTransfer{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVTransfer(ref),
 		v1alpha1.ModelDeploymentList{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentList(ref),
 		v1alpha1.ModelDeploymentModel{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_ModelDeploymentModel(ref),
+		v1alpha1.ModelDeploymentPort{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentPort(ref),
 		v1alpha1.ModelDeploymentRole{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref),
 		v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref),
 		v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref),
@@ -156,7 +160,6 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterStatus(ref),
 		v1alpha1.ModelDeploymentSpec{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref),
 		v1alpha1.ModelDeploymentStatus{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref),
-		v1alpha1.ModelDeploymentTemplate{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_ModelDeploymentTemplate(ref),
 		corev1.AWSElasticBlockStoreVolumeSource{}.OpenAPIModelName():                 schema_k8sio_api_core_v1_AWSElasticBlockStoreVolumeSource(ref),
 		corev1.Affinity{}.OpenAPIModelName():                                         schema_k8sio_api_core_v1_Affinity(ref),
 		corev1.AppArmorProfile{}.OpenAPIModelName():                                  schema_k8sio_api_core_v1_AppArmorProfile(ref),
@@ -5337,7 +5340,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendExternal(ref common.Refer
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "KVCacheBackendExternal is a backend this operator does not run.\n\nTWO OF THESE MAY NAME THE SAME BACKEND, AND NOTHING HERE NOTICES. The same leader is reachable under more than one spelling, and this operator compares no addresses across objects, deliberately: every identity it could compare is either editable or needs the leader reachable at admission. Keeping two objects off one leader is YOURS, and three things go wrong when they are not, none of them a refusal on any object:\n\n  - The quota of a shared reuse domain flips and never settles. Uniqueness is enforced only\n    between Bindings whose pools name the SAME backend object, so two Bindings reaching one leader\n    through two objects are both admitted on one domain name, and each pool's reconciler writes\n    its own quotaCeiling back over the other's on every pass.\n  - An undersized quota shows up as a LOW HIT RATE and nothing else. Exceeding it does not refuse\n    the write: the store frees room by dropping that tenant's own older objects and retries,\n    irreversibly, without any counter moving.\n  - Two Bindings claiming one domain.name with a different blockSize or dtype CORRUPT each other's\n    blocks — the only one of the three that produces wrong answers rather than slow ones. The\n    reuse identity an engine is handed is the domain NAME alone, so two differently-shaped caches\n    land under one identity: the writes succeed, the reads succeed, and the tensors are wrong.",
+				Description: "KVCacheBackendExternal is a backend this operator does not run.\n\nTWO OF THESE MAY NAME THE SAME BACKEND, AND NOTHING HERE NOTICES. The same leader is reachable under more than one spelling, and this operator compares no addresses across objects, deliberately: every identity it could compare is either editable or needs the leader reachable at admission. Keeping two objects off one leader is YOURS, and three things go wrong when they are not, none of them a refusal on any object:\n\n  - The quota of a shared reuse domain flips and never settles. Uniqueness is enforced only\n    between Bindings whose pools name the SAME backend object, so two Bindings reaching one leader\n    through two objects are both admitted on one domain name, and each pool's reconciler writes\n    its own quota.ceiling back over the other's on every pass.\n  - An undersized quota shows up as a LOW HIT RATE and nothing else. Exceeding it does not refuse\n    the write: the store frees room by dropping that tenant's own older objects and retries,\n    irreversibly, without any counter moving.\n  - Two Bindings claiming one domain.name with a different blockSize or dtype CORRUPT each other's\n    blocks — the only one of the three that produces wrong answers rather than slow ones. The\n    reuse identity an engine is handed is the domain NAME alone, so two differently-shaped caches\n    land under one identity: the writes succeed, the reads succeed, and the tensors are wrong.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"endpoints": {
@@ -5409,11 +5412,15 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref common.Referen
 						},
 					},
 					"extraArgs": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
 						SchemaProps: spec.SchemaProps{
-							Description: "ExtraArgs passes flags this API does not enumerate straight through to the leader, after the derived ones. A key that collides with a flag rendered from a field above is refused at admission, because two sources for one flag make the rendered command ambiguous.\n\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then rendered into the leader container's argv as -key=value, readable by anyone who can reach the Pod or the Deployment, for the life of the object. A credential does not belong here, and since this operator renders no flag that carries one, this field is the only way one arrives.",
-							Type:        []string{"object"},
-							AdditionalProperties: &spec.SchemaOrBool{
-								Allows: true,
+							Description: "ExtraArgs passes flags this API does not enumerate straight through to the leader, after the derived ones. Each entry is one flag token of its own, \"-flag\" or \"-flag=value\", and the entries render verbatim in the order written. An entry whose key — what precedes the first \"=\" once the leading dashes are off — collides with a flag rendered from a field above is refused at admission, because two sources for one flag make the rendered command ambiguous.\n\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then rendered into the leader container's argv, readable by anyone who can reach the Pod or the Deployment, for the life of the object. A credential does not belong here, and since this operator renders no flag that carries one, this field is the only way one arrives.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
 									SchemaProps: spec.SchemaProps{
 										Default: "",
@@ -5424,17 +5431,33 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref common.Referen
 							},
 						},
 					},
-					"offload": {
+					"extraEnv": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Offload turns on writing evicted keys to the members' local disk tier. It is the leader's half of a pair: the other half is members[].localDisk, which says where on each node those bytes go, and admission refuses either half alone because the store degrades on both mismatches without reporting either.",
-							Ref:         ref(v1alpha1.KVCacheBackendLeaderOffload{}.OpenAPIModelName()),
+							Description: "ExtraEnv passes environment variables this API does not enumerate straight through to the leader container. The leader reads a handful of its settings from the environment rather than from flags — the store's local snapshot path is one — and this is the hatch for whichever of those grows a use this API has no field for.\n\nA name this operator already renders is REFUSED at admission, for the same reason a colliding ExtraArgs key is: Kubernetes accepts a container carrying one name twice and leaves the winner to the runtime, so the collision would not even be reported.\n\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then rendered into the leader container's environment, readable by anyone who can reach the Pod or the Deployment, for the life of the object. A credential does not belong here, and since this operator renders no variable that carries one, this field is the only way one arrives.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstanceEnvVar{}.OpenAPIModelName()),
+									},
+								},
+							},
 						},
 					},
 				},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.KVCacheBackendLeaderHighAvailability{}.OpenAPIModelName(), v1alpha1.KVCacheBackendLeaderOffload{}.OpenAPIModelName()},
+			v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.KVCacheBackendLeaderHighAvailability{}.OpenAPIModelName()},
 	}
 }
 
@@ -5463,33 +5486,6 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderHighAvailability(re
 		},
 		Dependencies: []string{
 			v1alpha1.KVCacheBackendLeaderSnapshot{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderOffload(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "KVCacheBackendLeaderOffload turns the local disk tier on, leader side.\n\nBoth settings are the leader's, and Enabled gates the feature outright: every offload entry point returns early without it. A tier configured on the member alone is inert, which is why admission requires the two halves together rather than letting one render on its own.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"enabled": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Enabled turns on offloading to the members' local disks. Unset and false both mean no offloading, and unset renders NO flag rather than an explicit false.",
-							Type:        []string{"boolean"},
-							Format:      "",
-						},
-					},
-					"onEvict": {
-						SchemaProps: spec.SchemaProps{
-							Description: "OnEvict defers the write to disk from the moment a key is stored to the moment it is evicted, so a key that is never evicted is never written to disk.\n\nIt REQUIRES Enabled and Enabled REQUIRES it, and admission refuses both directions. The store ANDs the two, so this alone is accepted, echoed back in the leader's own startup log, and then does nothing. Enabled alone selects write-through, which the store leaves unprotected: an object queued for offload is held in memory only on the deferred branch this field selects, so evicting without it destroys the sole replica of an object whose bucket has not been flushed.",
-							Type:        []string{"boolean"},
-							Format:      "",
-						},
-					},
-				},
-			},
-		},
 	}
 }
 
@@ -5657,7 +5653,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 					},
 					"medium": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or device memory (VRAM).\n\nIt is a choice rather than an identity: the renderer splits on it. A DRAM member charges CapacityPerMember against the Pod's host memory; a VRAM member charges it against nothing, because its segment is device memory and claiming it is allocating it. What lets a VRAM member reach its device is declared and never inferred — SecurityContext, HostPaths and RuntimeClassName below, each on its own. The field stays immutable — a segment already mounted cannot change kind underneath the data in it — so the choice is made when the group is declared.\n\n  - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and\n    each is reached elsewhere: the first through localDisk below, NVMe-oF as a target\n    coordinate with no Pod, and the last two on the leader's own process.\n  - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one\n    of those values, while this CRD was installed but the webhook was not, becomes undeletable:\n    schema validation runs on the write path only, so it reads back fine while every update is\n    refused, the controller's finalizer removal included. The exposure is development clusters\n    only, this type being absent from every tag through v0.8.6, so clearing it is the first\n    shipping release's job — confirm no leftover object exists, or write a recovery procedure.",
+							Description: "Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or device memory (VRAM).\n\nIt is a choice rather than an identity: the renderer splits on it. A DRAM member charges CapacityPerMember against the Pod's host memory; a VRAM member charges it against nothing, because its segment is device memory and claiming it is allocating it. What lets a VRAM member reach its device is declared and never inferred — SecurityContext, HostPaths and RuntimeClassName below, each on its own. The field stays immutable — a segment already mounted cannot change kind underneath the data in it — so the choice is made when the group is declared.\n\n  - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and\n    each is reached elsewhere: the first through localDisks below, NVMe-oF as a target\n    coordinate with no Pod, and the last two on the leader's own process.\n  - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one\n    of those values, while this CRD was installed but the webhook was not, becomes undeletable:\n    schema validation runs on the write path only, so it reads back fine while every update is\n    refused, the controller's finalizer removal included. The exposure is development clusters\n    only, this type being absent from every tag through v0.8.6, so clearing it is the first\n    shipping release's job — confirm no leftover object exists, or write a recovery procedure.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -5665,7 +5661,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 					},
 					"capacityPerMember": {
 						SchemaProps: spec.SchemaProps{
-							Description: "CapacityPerMember sizes ONE member, not one node. It becomes the member's global segment size and is counted into the member Pod's own resource request, so a member that does not fit stays Pending instead of overcommitting the node.\n\n  - A group carrying LocalDisk needs at least one BUCKET here, which is the unit that tier is\n    written in. A bucket's bytes are held in this segment until the bucket is complete, so a\n    smaller segment never holds a bucket's worth at once and the tier stays empty under every\n    workload, which nothing else reports. A group with no tier has no such floor.\n  - The name is \"per member\" for a shape that is DECIDED AND NOT DONE: several members per\n    node, split by NUMA domain. Today one selected node runs one member.\n  - What would reopen that is a two-socket node reporting RDMA interfaces on more than one NUMA\n    node AND that node's member observed transferring across the socket boundary, there being\n    nothing else on this path that consumes the NUMA affinity this operator already discovers.\n    One group per NUMA domain is not the shape it would take — a group selects nodes through\n    nodeSelector, while NUMA is a property inside a node rather than a label on one.",
+							Description: "CapacityPerMember sizes ONE member, not one node. It becomes the member's global segment size and is counted into the member Pod's own resource request, so a member that does not fit stays Pending instead of overcommitting the node.\n\n  - A group declaring a tier in LocalDisks needs at least one BUCKET here, which is the unit\n    that tier is written in. A bucket's bytes are held in this segment until the bucket is\n    complete, so a smaller segment never holds a bucket's worth at once and the tier stays\n    empty under every workload, which nothing else reports. A group with no tier has no such\n    floor.\n  - The name is \"per member\" for a shape that is DECIDED AND NOT DONE: several members per\n    node, split by NUMA domain. Today one selected node runs one member.\n  - What would reopen that is a two-socket node reporting RDMA interfaces on more than one NUMA\n    node AND that node's member observed transferring across the socket boundary, there being\n    nothing else on this path that consumes the NUMA affinity this operator already discovers.\n    One group per NUMA domain is not the shape it would take — a group selects nodes through\n    nodeSelector, while NUMA is a property inside a node rather than a label on one.",
 							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
 						},
 					},
@@ -5676,11 +5672,15 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 						},
 					},
 					"extraArgs": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
 						SchemaProps: spec.SchemaProps{
-							Description: "ExtraArgs passes config keys this API does not enumerate straight through to the member. It is keyed by CONFIG KEY rather than by environment-variable name — one namespace per side, each the one its own binary documents. A key that collides with one derived from a field above is refused at admission.\n\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then rendered into the member container's argv as -D key=value, readable by anyone who can reach the Pod or the DaemonSet, for the life of the object. A credential does not belong here, and since this operator renders no flag that carries one, this field is the only way one arrives.",
-							Type:        []string{"object"},
-							AdditionalProperties: &spec.SchemaOrBool{
-								Allows: true,
+							Description: "ExtraArgs passes config keys this API does not enumerate straight through to the member. An entry is written as its own flag token, \"-key=value\", and renders as the entrypoint's own \"-D key=value\" override with the dashes gone — one namespace per side, each the one its own binary documents. A key that collides with one derived from a field above is refused at admission.\n\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then rendered into the member container's argv, readable by anyone who can reach the Pod or the DaemonSet, for the life of the object. A credential does not belong here, and since this operator renders no flag that carries one, this field is the only way one arrives.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
 									SchemaProps: spec.SchemaProps{
 										Default: "",
@@ -5691,17 +5691,23 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 							},
 						},
 					},
-					"extraEnvs": {
+					"extraEnv": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
 						SchemaProps: spec.SchemaProps{
-							Description: "ExtraEnvs passes environment variables this API does not enumerate straight through to the member container.\n\n  - It is NOT a second spelling of ExtraArgs: the two reach different places. ExtraArgs renders\n    as the entrypoint's \"-D key=value\" config override, while a whole family of this store's\n    settings — the local disk tier's flush thresholds, its promotion behavior, the rest of its\n    eviction knobs — has no config key at all and is read from the ENVIRONMENT only.\n  - A name this operator already renders is REFUSED at admission, for the same reason a\n    colliding ExtraArgs key is: Kubernetes accepts a container carrying one name twice and\n    leaves the winner to the runtime, so the collision would not even be reported. That\n    includes the tier's bucket thresholds, which this operator sizes itself; a tuner who needs\n    to move them needs a field, and this hatch is deliberately not it.\n\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then rendered into the member container's environment, readable by anyone who can reach the Pod or the DaemonSet, for the life of the object. A credential does not belong here, and since this operator renders no variable that carries one, this field is the only way one arrives.",
-							Type:        []string{"object"},
-							AdditionalProperties: &spec.SchemaOrBool{
-								Allows: true,
+							Description: "ExtraEnv passes environment variables this API does not enumerate straight through to the member container.\n\n  - It is NOT a second spelling of ExtraArgs: the two reach different places. ExtraArgs renders\n    as the entrypoint's \"-D key=value\" config override, while a whole family of this store's\n    settings — the local disk tier's flush thresholds, its promotion behavior, the rest of its\n    eviction knobs — has no config key at all and is read from the ENVIRONMENT only.\n  - A name this operator already renders is REFUSED at admission, for the same reason a\n    colliding ExtraArgs key is: Kubernetes accepts a container carrying one name twice and\n    leaves the winner to the runtime, so the collision would not even be reported. That\n    includes the tier's bucket thresholds, which this operator sizes itself; a tuner who needs\n    to move them needs a field, and this hatch is deliberately not it.\n\nThe list is keyed by name, and the schema refuses two entries sharing one.\n\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then rendered into the member container's environment, readable by anyone who can reach the Pod or the DaemonSet, for the life of the object. A credential does not belong here, and since this operator renders no variable that carries one, this field is the only way one arrives.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
 									SchemaProps: spec.SchemaProps{
-										Default: "",
-										Type:    []string{"string"},
-										Format:  "",
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstanceEnvVar{}.OpenAPIModelName()),
 									},
 								},
 							},
@@ -5715,10 +5721,27 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 							Format:      "",
 						},
 					},
-					"localDisk": {
+					"localDisks": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"path",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
 						SchemaProps: spec.SchemaProps{
-							Description: "LocalDisk declares a directory on the nodes this group already selects and points the store client's offload keys at it. Left unset, the group is memory only.\n\n  - What the tier is written in is a BUCKET, and that is why this operator sizes one. The store\n    writes nothing until a bucket is full, by bytes or by object count, so under the store's\n    own thresholds — sized for a saturated production store — the tier stays empty while every\n    other signal looks healthy. The pair this operator renders instead is not in this API, and\n    members[].extraEnvs refuses those names.\n  - It is a LAYER on this group rather than a group of its own, which is the store's shape: the\n    leader routes an offload task to the client that owns the key's memory replica, so a member\n    holding no memory segment is never chosen and would report a cold tier that never fills.\n  - To check what the tier actually holds rather than what it declared, read the leader's own\n    master_allocated_file_size_bytes; status.capacity reports the declared CAPACITY only.",
-							Ref:         ref(v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName()),
+							Description: "LocalDisks declares the local disk tiers this group's nodes contribute, one entry per host directory, and an empty list leaves the group memory only. Declaring an entry is what turns the tier on: the store's leader takes the switch from this list's presence, not from any field of its own.\n\n  - What the tier is written in is a BUCKET, and that is why this operator sizes one. The store\n    writes nothing until a bucket is full, by bytes or by object count, so under the store's\n    own thresholds — sized for a saturated production store — the tier stays empty while every\n    other signal looks healthy. The pair this operator renders instead is not in this API, and\n    members[].extraEnv refuses those names.\n  - It is a LAYER on this group rather than a group of its own, which is the store's shape: the\n    leader routes an offload task to the client that owns the key's memory replica, so a member\n    holding no memory segment is never chosen and would report a cold tier that never fills.\n  - To check what the tier actually holds rather than what it declared, read the leader's own\n    master_allocated_file_size_bytes; status.capacity reports the declared CAPACITY only.\n  - At most ONE entry, and the bound is the status contract rather than any one renderer's\n    reach: status.capacity is a single pair of figures for the whole backend and cannot\n    attribute a tier's bytes to one disk, so two entries would describe neither. The same\n    sentence, at the group level, is why admission allows only one group to carry a list at\n    all — lift these together with that status shape or not at all.\n\nThe list is keyed by path, and the schema refuses two entries naming one directory.",
+							MaxItems:    ptr.To[int64](1),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName()),
+									},
+								},
+							},
 						},
 					},
 					"transport": {
@@ -5735,7 +5758,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 					},
 					"hostPaths": {
 						SchemaProps: spec.SchemaProps{
-							Description: "HostPaths mounts directories or files from the selected nodes into the member container.\n\nIt exists because a vendor's USER-SPACE DRIVER is not in the image and is not under /dev, so no device grant reaches it: an Ascend member needs the driver tree and the DCMI library from the node, and a container runtime that injects them is the other way to get there. Privileged alone does NOT cover this — it opens the node's device tree, which is where the device nodes are and is not where the libraries are.\n\nEntries are mounted in the order written. The volume backing each one is named from its POSITION rather than from anything declared here, so an entry can collide with neither another entry nor a volume the renderer owns.\n\nLocalDisk above is not this field spelled differently: that tier is a declared capacity the leader routes offload tasks to, with a deregistration hook and a grace period derived from it. A directory mounted here is a mount and nothing more.",
+							Description: "HostPaths mounts directories or files from the selected nodes into the member container.\n\nIt exists because a vendor's USER-SPACE DRIVER is not in the image and is not under /dev, so no device grant reaches it: an Ascend member needs the driver tree and the DCMI library from the node, and a container runtime that injects them is the other way to get there. Privileged alone does NOT cover this — it opens the node's device tree, which is where the device nodes are and is not where the libraries are.\n\nEntries are mounted in the order written. The volume backing each one is named from its POSITION rather than from anything declared here, so an entry can collide with neither another entry nor a volume the renderer owns.\n\nLocalDisks above is not this field spelled differently: that list declares tier capacity the leader routes offload tasks to, with a deregistration hook and a grace period derived from its presence. A directory mounted here is a mount and nothing more.",
 							MaxItems:    ptr.To[int64](32),
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
@@ -5762,7 +5785,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.KVCacheBackendMemberHostPath{}.OpenAPIModelName(), v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName(), v1alpha1.KVCacheBackendMemberTransport{}.OpenAPIModelName(), corev1.SecurityContext{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+			v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.KVCacheBackendMemberHostPath{}.OpenAPIModelName(), v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName(), v1alpha1.KVCacheBackendMemberTransport{}.OpenAPIModelName(), corev1.SecurityContext{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
 	}
 }
 
@@ -5819,7 +5842,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberLocalDisk(ref commo
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "KVCacheBackendMemberLocalDisk is the local SSD tier this member group's nodes contribute.\n\nIt is the member's half of a pair; the leader's half is leader.offload, and admission refuses either half alone. Set on its own, the leader never enqueues an offload task and the disk stays empty while the member reports its capacity, which is a tier that reads as present and is not.",
+				Description: "KVCacheBackendMemberLocalDisk is one local disk tier a member group's nodes contribute.\n\nAn entry in a group's list is what turns the tier on, on both sides at once: the leader renders the flags that send evicted keys to disk from the list's presence alone, and it renders them in the deferred mode — a key's write lands at eviction time and never at storage time — because that is the only mode the store protects. The other mode has no field and none is wanted: it evicts an unflushed bucket's sole replica, so there is nothing to pair this declaration with and nothing to forget.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"path": {
@@ -5853,7 +5876,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberLocalDisk(ref commo
 					},
 					"cleanAfterDelete": {
 						SchemaProps: spec.SchemaProps{
-							Description: "CleanAfterDelete asks this operator to empty Path when the backend is deleted, on every node this group's NodeSelector picks AT THAT MOMENT. It DEFAULTS TO FALSE, and left alone the directory keeps whatever it holds.\n\nIt is a switch rather than a default because what is on that disk is the administrator's, and deleting it is not a decision this operator may take on their behalf. That is also why it is reachable where preparing the directory is not: removing content needs no uid, creating does.\n\n  - \"At that moment\" is the whole of the promise. Nothing stores the selector's history and the\n    members are gone by the time cleanup runs, so narrowing NodeSelector or removing the\n    LocalDisk block before deleting the backend leaves the dropped nodes holding their content\n    with nothing reported about them. Delete the backend first and edit afterwards.\n  - WHAT IS REMOVED IS THE CONTENT, NOT THE DIRECTORY, which was made by whoever prepared the\n    node, may be a mount point, and carries an owner this operator did not choose.\n  - The cleanup runs the image THIS GROUP runs, on the nodes it selects, with the backend's\n    imagePullSecrets, so it does not wait on a pull the members already did.\n  - A node this operator cannot reach in time keeps its content, and deletion is not held open\n    for it: a finalizer waiting on a node that is gone leaves an object nobody can delete. The\n    node gets a warning Event naming what was left.\n  - A node where another KVCacheBackend declares an overlapping path is SKIPPED, with the same\n    kind of Event. Nothing refuses two backends naming one directory, and emptying it for this\n    one would take the other one's live data with it.",
+							Description: "CleanAfterDelete asks this operator to empty Path when the backend is deleted, on every node this group's NodeSelector picks AT THAT MOMENT. It DEFAULTS TO FALSE, and left alone the directory keeps whatever it holds.\n\nIt is a switch rather than a default because what is on that disk is the administrator's, and deleting it is not a decision this operator may take on their behalf. That is also why it is reachable where preparing the directory is not: removing content needs no uid, creating does.\n\n  - \"At that moment\" is the whole of the promise. Nothing stores the selector's history and the\n    members are gone by the time cleanup runs, so narrowing NodeSelector or removing the\n    LocalDisks entry before deleting the backend leaves the dropped nodes holding their content\n    with nothing reported about them. Delete the backend first and edit afterwards.\n  - WHAT IS REMOVED IS THE CONTENT, NOT THE DIRECTORY, which was made by whoever prepared the\n    node, may be a mount point, and carries an owner this operator did not choose.\n  - The cleanup runs the image THIS GROUP runs, on the nodes it selects, with the backend's\n    imagePullSecrets, so it does not wait on a pull the members already did.\n  - A node this operator cannot reach in time keeps its content, and deletion is not held open\n    for it: a finalizer waiting on a node that is gone leaves an object nobody can delete. The\n    node gets a warning Event naming what was left.\n  - A node where another KVCacheBackend declares an overlapping path is SKIPPED, with the same\n    kind of Event. Nothing refuses two backends naming one directory, and emptying it for this\n    one would take the other one's live data with it.",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
@@ -6514,6 +6537,28 @@ func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingPoolReference(ref com
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingQuota(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolBindingQuota is the quota this namespace asks of its pool.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"ceiling": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Ceiling is what this namespace may consume in its reuse domain, written verbatim into that one tenant's requested quota rather than kept as a total this operator maintains.\n\n  - IT IS A REQUEST, NOT A GRANT. The pool reduces every tenant's effective quota in proportion\n    when the sum of requests exceeds allocatable capacity, and Status.EffectiveQuota is what\n    was actually granted.\n  - EXCEEDING IT EVICTS RATHER THAN REFUSES, which is the opposite of what the word suggests.\n    A write past the ceiling is not rejected: the store frees room by dropping this namespace's\n    own older objects and retries. A ceiling set too low therefore costs cache inside this\n    namespace rather than failed writes, and costs it without any counter moving. Writes are\n    refused only when eviction cannot free enough, which needs those older objects held by\n    unexpired read leases.\n  - It is REQUIRED, because the state it would otherwise allow does not work: the storage layer\n    has no default policy and refuses a tenant it holds no policy for, so a Binding without\n    this field would pass admission, report Ready and refuse every byte its workloads wrote.\n  - A value that is not positive is refused at admission.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"ceiling"},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingReference(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -6563,18 +6608,19 @@ func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingSpec(ref common.Refer
 							Ref:         ref(v1alpha1.KVCachePoolBindingDomain{}.OpenAPIModelName()),
 						},
 					},
-					"quotaCeiling": {
+					"quota": {
 						SchemaProps: spec.SchemaProps{
-							Description: "QuotaCeiling is what this namespace may consume in its reuse domain, written verbatim into that one tenant's requested quota rather than kept as a total this operator maintains.\n\n  - IT IS A REQUEST, NOT A GRANT. The pool reduces every tenant's effective quota in proportion\n    when the sum of requests exceeds allocatable capacity, and Status.EffectiveQuota is what\n    was actually granted.\n  - EXCEEDING IT EVICTS RATHER THAN REFUSES, which is the opposite of what the word suggests.\n    A write past the ceiling is not rejected: the store frees room by dropping this namespace's\n    own older objects and retries. A ceiling set too low therefore costs cache inside this\n    namespace rather than failed writes, and costs it without any counter moving. Writes are\n    refused only when eviction cannot free enough, which needs those older objects held by\n    unexpired read leases.\n  - It is REQUIRED, because the state it would otherwise allow does not work: the storage layer\n    has no default policy and refuses a tenant it holds no policy for, so a Binding without\n    this field would pass admission, report Ready and refuse every byte its workloads wrote.\n  - A value that is not positive is refused at admission.",
-							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+							Description: "Quota is what this namespace asks of its pool, shaped like the pool's own declared ceiling so one concept is spelled one way on both sides of the grant.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.KVCachePoolBindingQuota{}.OpenAPIModelName()),
 						},
 					},
 				},
-				Required: []string{"poolRef", "domain", "quotaCeiling"},
+				Required: []string{"poolRef", "domain", "quota"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.KVCachePoolBindingDomain{}.OpenAPIModelName(), v1alpha1.KVCachePoolBindingPoolReference{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+			v1alpha1.KVCachePoolBindingDomain{}.OpenAPIModelName(), v1alpha1.KVCachePoolBindingPoolReference{}.OpenAPIModelName(), v1alpha1.KVCachePoolBindingQuota{}.OpenAPIModelName()},
 	}
 }
 
@@ -7053,22 +7099,122 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeployment(ref common.ReferenceCal
 	}
 }
 
-func schema_gpustack_api_worker_v1alpha1_ModelDeploymentDirectTransfer(ref common.ReferenceCallback) common.OpenAPIDefinition {
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentAdditionalVolume(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentDirectTransfer carries the settings of the point-to-point KV transfer leg between a prefill role and a decode role.",
+				Description: "ModelDeploymentAdditionalVolume defines one volume to mount in a role's replica besides the operator's own. One of the sources below must be set; an entry naming none is skipped by the render rather than refused.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
-					"protocol": {
+					"mountPath": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Protocol is the transport both ends of the leg are told to use, in the mooncake configuration's own spelling, e.g. \"tcp\" or \"rdma\".\n\n  - IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either\n    end, so a per-role field could only express a contradiction -- two ends naming different\n    values for one connection, which fails at transfer time rather than at admission.\n  - THE VALUE IS DECLARED, NOT DISCOVERED, AND IT IS NOT GATED. The accepted set is a\n    property of the mooncake build inside the engine's own image, which this operator\n    neither ships nor can inspect: a HIP-compiled build makes \"hip\" a working point-to-point\n    transport, and an enum here would hard-code one image's compile set onto another image's\n    connector. The value is passed through verbatim, and a value the engine build rejects\n    raises at engine startup, in the container that owns the fact.\n  - UNSET RENDERS \"tcp\", the transport every mooncake build carries. The default lives in\n    the renderer rather than in this schema, so the stored object holds exactly what was\n    asked.\n  - IT IS READ ONLY ON THE DIRECT-TRANSFER LEG: a managed llm-d router in front of vLLM\n    prefill/decode roles. On every other shape -- sglang, Ascend, or no router -- the value\n    is accepted and renders nothing, which is stated here because an accepted field that\n    silently does nothing is a promise broken quietly.\n  - IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'\n    argv, so a change rebuilds every Kueue pod group of the deployment. With roles split\n    across InstanceTypes the groups rebuild independently, and a mixed-protocol window\n    between a prefiller and a decoder exists until both converge -- the same window an\n    engineVersion edit already opens.",
+							Description: "MountPath is the absolute in-container path to mount the volume at. It must not duplicate another entry's path, nor a path the operator's own volumes already mount.",
+							Default:     "",
+							MaxLength:   ptr.To[int64](1024),
+							Pattern:     "^(/[^/]+)+$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"readOnly": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReadOnly mounts the volume read-only.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"subPath": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SubPath mounts a relative path inside the volume rather than its root. It must not be absolute nor contain a \"..\" element.\n\nThe pattern below enforces only the first half. A \"..\" element cannot be excluded by this engine's regular expressions, which have no negative lookahead, so admission carries that half — see the webhook. Both halves are refused there rather than left to the API server's rejection of the rendered Pod, which arrives as a per-pass create failure naming a volumeMount instead of an admission error naming this field.",
+							MaxLength:   ptr.To[int64](1024),
+							Pattern:     "^[^/].*$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"configMap": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ConfigMap is the reference to the ConfigMap to mount, in the same namespace.",
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
+					"secret": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Secret is the reference to the Secret to mount, in the same namespace.",
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
+					"hostPath": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HostPath is the path on the Kubernetes Node to mount. It crosses the node boundary: the mount reaches the node's own filesystem rather than a namespaced object, so what it exposes is decided by what the node carries rather than by anything this API can see.",
+							Ref:         ref(corev1.HostPathVolumeSource{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"mountPath"},
+			},
+		},
+		Dependencies: []string{
+			corev1.HostPathVolumeSource{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentEngine(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentEngine is the engine a deployment runs and the version of it.\n\nThe two are one object because they were never meaningful apart: a role that names no image of its own has one assembled from the engine and the version together with the role's own InstanceType. The version carries no obligation of its own — it is owed exactly when some role needs that assembly, which admission rather than the schema decides, because which roles need it is a fact about the roles and not about this field.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name selects the engine.\n\nIt is the half of this object that is the deployment's identity and is frozen after creation, while Version answers which build runs and stays editable — stated here because one object reading otherwise would freeze the pair together.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"version": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Version is the engine's own version, e.g. \"0.25.1\" for vllm or \"0.5.18\" for sglang.\n\n  - It is OPTIONAL, and the obligation sits with the roles instead: a role that names no image\n    of its own has one synthesized from this version, so admission refuses an empty version\n    beside such a role rather than letting the render assemble a malformed tag naming\n    something never typed. A role that names an image never reads this field.\n  - It is free-form and UNVALIDATED, by decision: the user guarantees that the version and the\n    driver each role's hardware installed are aligned. A gate would need the runner's release\n    matrix compiled into the operator, and the failure it would prevent is already legible as\n    an ImagePullBackOff on a tag that does not exist.\n  - It is per deployment rather than per role, which is what lets one version assemble a\n    DIFFERENT image for each role: the backend half of the tag comes from the role's own\n    InstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.\n    Published version sets do NOT overlap across every backend, so one version has to name a\n    tag that exists for each backend the roles land on.",
+							MinLength:   ptr.To[int64](1),
 							MaxLength:   ptr.To[int64](64),
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 				},
+				Required: []string{"name"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentEnvVar(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentEnvVar defines one environment variable appended to a role's replica.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the name of the environment variable; each name in one role must be unique.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"value": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Value is the value of the environment variable.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"name", "value"},
 			},
 		},
 	}
@@ -7090,7 +7236,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCache(ref common.Refer
 					},
 					"connector": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Connector selects how the engine's transfer configuration is produced. \"auto\" synthesizes it from the pool's backend type and the engine. There is no \"none\" — synthesizing nothing is reachable through a full command replacement, which also marks the role unmanaged and moves CacheAttached to Unknown.\n\nTHE KV TRANSFER CONVERGES ON MOONCAKE, and that is why the enum has one value. Mooncake is the implementation that supports heterogeneous prefill and decode, which is the shape this API exists to express. NIXL and ROCm NIXL stay reachable; nothing here has run them, and no claim that they would work is made by this field's existence.\n\nTHE RESERVATION IS IN THE SCHEMA AND IN NOTHING ELSE. This field is read by no code: binding resolution passes a domain, an endpoint and a protocol; connector synthesis takes an engine, a kind, a manufacturer and that connection; and the renderer dispatches on the ENGINE. So the discriminator is reserved for an API that names a second one, and the seam it would dispatch through does not exist yet.\n\nWIDENING THE ENUM IS FOUR THINGS, NOT ONE: one sub-package under pkg/worker/kvcache, one entry here, one renderer, AND the wiring that threads this value to a dispatch point. That last item is what the reservation does not already cover, and it is the reason a second implementation is a piece of work rather than a constant.\n\nA WIDENED ENUM REACHES NEW DEPLOYMENTS ONLY. This field answers which deployment this is, so it is frozen after creation: an existing deployment is recreated onto a second connector rather than edited onto one. That is stated here because \"widening the enum\" otherwise reads as a migration path for deployments that are already running.",
+							Description: "Connector names the connector implementation this deployment is configured for. The value is an identity the deployment carries, not a setting the operator derives: \"mooncake\" says which connector this is, and nothing reads the field to produce the configuration. There is no \"none\" — synthesizing nothing is reachable through a full command replacement, which also marks the role unmanaged and moves CacheAttached to Unknown.\n\nTHE KV TRANSFER CONVERGES ON MOONCAKE, and that is why the enum has one value. Mooncake is the implementation that supports heterogeneous prefill and decode, which is the shape this API exists to express. NIXL and ROCm NIXL stay reachable; nothing here has run them, and no claim that they would work is made by this field's existence.\n\nTHE RESERVATION IS IN THE SCHEMA AND IN NOTHING ELSE. This field is read by no code: binding resolution passes a domain, an endpoint and a protocol; connector synthesis takes an engine, a kind, a manufacturer and that connection; and the renderer dispatches on the ENGINE. So the discriminator is reserved for an API that names a second one, and the seam it would dispatch through does not exist yet.\n\nWIDENING THE ENUM IS FOUR THINGS, NOT ONE: one sub-package under pkg/worker/kvcache, one entry here, one renderer, AND the wiring that threads this value to a dispatch point. That last item is what the reservation does not already cover, and it is the reason a second implementation is a piece of work rather than a constant.\n\nA WIDENED ENUM REACHES NEW DEPLOYMENTS ONLY. This field answers which deployment this is, so it is frozen after creation: an existing deployment is recreated onto a second connector rather than edited onto one. That is stated here because \"widening the enum\" otherwise reads as a migration path for deployments that are already running.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -7181,6 +7327,27 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCacheStatus(ref common
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVTransfer(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentKVTransfer carries the settings of the point-to-point KV transfer leg between a prefill role and a decode role. It composes with a shared store rather than excluding one: both legs may be configured on one deployment, and the synthesized connector carries the pair together.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"protocol": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Protocol is the transport both ends of the leg are told to use, in the mooncake configuration's own spelling, e.g. \"tcp\" or \"rdma\".\n\n  - IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either\n    end, so a per-role field could only express a contradiction -- two ends naming different\n    values for one connection, which fails at transfer time rather than at admission.\n  - THE VALUE IS DECLARED, NOT DISCOVERED, AND IT IS NOT GATED. The accepted set is a\n    property of the mooncake build inside the engine's own image, which this operator\n    neither ships nor can inspect: a HIP-compiled build makes \"hip\" a working point-to-point\n    transport, and an enum here would hard-code one image's compile set onto another image's\n    connector. The value is passed through verbatim, and a value the engine build rejects\n    raises at engine startup, in the container that owns the fact.\n  - UNSET RENDERS \"tcp\", the transport every mooncake build carries. The default lives in\n    the renderer rather than in this schema, so the stored object holds exactly what was\n    asked.\n  - IT IS READ ONLY ON THE POINT-TO-POINT LEG: a managed llm-d router in front of vLLM\n    prefill/decode roles. On every other shape -- sglang, Ascend, or no router -- the value\n    is accepted and renders nothing, which is stated here because an accepted field that\n    silently does nothing is a promise broken quietly.\n  - IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'\n    argv, so a change rebuilds every Kueue pod group of the deployment. With roles split\n    across InstanceTypes the groups rebuild independently, and a mixed-protocol window\n    between a prefiller and a decoder exists until both converge -- the same window an\n    engine version edit already opens.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelDeploymentList(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -7234,7 +7401,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentModel(ref common.Referen
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentModel names the model the engine serves.\n\nIt provisions nothing. Weights arrive through the role template's volumes or through the engine's own hub client; a weight-provisioning block here would be the first step towards the general-purpose serving CR this deliberately is not.",
+				Description: "ModelDeploymentModel names the model the engine serves.\n\nIt provisions nothing. Weights arrive through the role's additional volumes or through the engine's own hub client; a weight-provisioning block here would be the first step towards the general-purpose serving CR this deliberately is not.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"name": {
@@ -7254,11 +7421,43 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentModel(ref common.Referen
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentPort(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentPort defines one port a role's replica exposes beside the engine's own.\n\nIT CARRIES NO NAME, and that is a decision rather than an omission. The rendered container port is named from the protocol and the number, so a name written here would be accepted by the schema and then discarded — the pattern this API refuses everywhere else, a promise broken quietly. Two ports of one role are told apart by their numbers, which the webhook already requires to be unique.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"port": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Port is the port number to expose on the replica.\n\nThe bounds are the container port's own. Without them a zero or out-of-range number is admitted here and refused later by the API server, on the rendered Pod, as a per-pass create failure naming a container port instead of an admission error naming this field.",
+							Default:     0,
+							Minimum:     ptr.To[float64](1),
+							Maximum:     ptr.To[float64](65535),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"protocol": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Protocol is the protocol to use for the port.\n\n\nPossible enum values:\n - `\"SCTP\"` is the SCTP protocol.\n - `\"TCP\"` is the TCP protocol.\n - `\"UDP\"` is the UDP protocol.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"SCTP", "TCP", "UDP"},
+						},
+					},
+				},
+				Required: []string{"port"},
+			},
+		},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentRole is one engine role and its replicas.\n\nReplicas and InstanceType are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to admission and scheduling — Kueue PodSet counts and flavor selection — so a template that could shadow them would make the admission feasibility check read a ledger that does not match reality. The template may override container content and nothing else.",
+				Description: "ModelDeploymentRole is one engine role and its replicas.\n\nReplicas, InstanceType and Resources are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to admission and scheduling — Kueue PodSet counts, flavor selection and the request the queue accounts — so a container field able to shadow any of them would make the admission feasibility check read a ledger that does not match reality. That is why the container fields below carry no resource request at all: the accelerator half belongs in Resources and the rest is derived from the InstanceType, and neither can be overridden here.\n\nEDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's. Each role forms its own Kueue pod group, whose members cannot leave one at a time, so that one group is rebuilt whole while every sibling role keeps serving. A `replicas` change on this role does the same.\n\nADDING OR REMOVING A ROLE REACHES FURTHER THAN THE ROLE IT NAMES. A deployment whose roles are one names that group after the DEPLOYMENT, and a deployment with more than one names each group after its ROLE, so going from one role to two renames the first role's group and rebuilds it as well.\n\nA DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A REBUILD. The replica that left is replaced on its own, under a new name, while its siblings keep serving — see docs/reference/model-deployment.md under \"One group per role\" and \"Rollout is a rolling replacement\".",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"name": {
@@ -7270,6 +7469,14 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 							Pattern:     "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
 							Type:        []string{"string"},
 							Format:      "",
+						},
+					},
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable by typing a string is one typo away from silently changing. Two roles may share a kind and differ in name ONLY where that kind is Server, because a pair of servers is a set of equals and two prefillers are not: nothing that consumes these roles expresses a second prefiller, so a deployment declaring one would render a role no reader of the rendered configuration could reach. It defaults to Server, the shape a deployment written before disaggregation existed has, so such a deployment renders exactly as it did.\n\n\nPossible enum values:\n - `\"decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"decode", "prefill", "server"},
 						},
 					},
 					"replicas": {
@@ -7292,8 +7499,115 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 					},
 					"resources": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Resources is what one replica of this role asks of an accelerator, and it is a STRUCTURED FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.\n\nIt carries only the ACCELERATOR half of a request, because that is the only half a workload decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit resources scaled by the requested card count, so they are not expressible here at all — a stronger guarantee than refusing them, since a field that does not exist cannot be shadowed by a template either.\n\nInstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards a replica wants is a property of the model being served, so two deployments on one InstanceType routinely want different counts.",
+							Description: "Resources is what one replica of this role asks of an accelerator, and it is a STRUCTURED FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.\n\nIt carries only the ACCELERATOR half of a request, because that is the only half a workload decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit resources scaled by the requested card count, so they are not expressible here at all — a stronger guarantee than refusing them, since a field that does not exist cannot be shadowed by the container fields below either.\n\nInstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards a replica wants is a property of the model being served, so two deployments on one InstanceType routinely want different counts.",
 							Ref:         ref(v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName()),
+						},
+					},
+					"image": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Image is the container image to run. Leaving it empty is the ordinary case: the operator then synthesizes one from the pool's accelerator backend, the observed runtime version and the requested engine.",
+							MaxLength:   ptr.To[int64](512),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"imagePullPolicy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagePullPolicy is the pull policy for Image.\n\n\nPossible enum values:\n - `\"Always\"` means that kubelet always attempts to pull the latest image. Container will fail If the pull fails.\n - `\"IfNotPresent\"` means that kubelet pulls if the image isn't present on disk. Container will fail if the image isn't present and the pull fails.\n - `\"Never\"` means that kubelet never pulls an image, but only uses a local image. Container will fail if the image isn't present",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Always", "IfNotPresent", "Never"},
+						},
+					},
+					"imagePullSecrets": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagePullSecrets are the secrets used to pull Image.",
+							MaxItems:    ptr.To[int64](32),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"privileged": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Privileged runs the container privileged.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"ports": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"port",
+									"protocol",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "port",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Ports are the container ports to expose in addition to the engine's own. They do not reserve or select the transfer engine's runtime port window.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelDeploymentPort{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"additionalVolumes": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "AdditionalVolumes are volumes mounted into the container alongside the operator's own.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelDeploymentAdditionalVolume{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"command": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Command replaces the whole argv, which is the TAKE-OVER tier: the user owns the whole command line, the operator synthesizes no engine argument and no client environment, the role is marked unmanaged and CacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args, because a second append tier beside ExtraArgs would have no defined precedence.\n\nIT IS FROZEN AFTER CREATION, because it decides whether the operator configures this role at all: a role that supplies one is taken over by its author, which changes cache injection and what status can claim. The rest of the container fields are how the build is fetched, shaped and tuned, and stay editable.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
 						},
 					},
 					"extraArgs": {
@@ -7303,7 +7617,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "ExtraArgs is appended AFTER the operator-synthesized arguments. An entry naming a key the operator owns is REJECTED rather than merged: a silent merge produces two values for one connector argument and no way to tell which one won.",
+							Description: "ExtraArgs is appended AFTER the operator-synthesized arguments. An entry naming a key the operator owns is REJECTED rather than merged: a silent merge produces two values for one connector argument and no way to tell which one won.\n\nThe name stays ExtraArgs rather than Args because args would read as the whole argv, which is what Command means; the two tiers differ in whether the operator contributes anything at all.\n\nTHIS LIST IS NOT READ WHEN COMMAND IS SET: appending to an argv the role's author replaced would put words into a command line they own, so the take-over tier takes the whole line and this field does nothing beside it.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -7328,30 +7642,16 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Env is appended the same way and refused on the same terms. Keys the operator merely defaults are not owned: a user's value wins there and no rejection follows.",
+							Description: "Env is appended the same way and refused on the same terms. Keys the operator merely defaults are not owned: a user's value wins there and no rejection follows.\n\nThere is ONE list here rather than an overlay beside it: the former second tier was appended and refused for owned names on exactly the same terms, so the nesting expressed a precedence that never existed.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
 									SchemaProps: spec.SchemaProps{
 										Default: map[string]interface{}{},
-										Ref:     ref(v1alpha1.InstanceEnvVar{}.OpenAPIModelName()),
+										Ref:     ref(v1alpha1.ModelDeploymentEnvVar{}.OpenAPIModelName()),
 									},
 								},
 							},
-						},
-					},
-					"template": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Template overlays the rendered container: the operator renders first and merges this on top.\n\n  - A non-empty Command is the TAKE-OVER tier — the user owns the whole argv, the operator\n    synthesizes no engine arguments and no client environment, the role is marked unmanaged and\n    CacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args,\n    because a second append tier beside ExtraArgs would have no defined precedence.\n  - It is MUTABLE, unlike the one an Instance carries, which is what makes a rollout possible\n    at all.\n  - EDITING IT RESTARTS EVERY ROLE, not just the replicas this template belongs to: every\n    replica of the deployment is one member of a single Kueue pod group whose members cannot\n    leave one at a time, so the group is rebuilt whole. The same is true of a `replicas` change,\n    of adding or removing a role, and of a departure this operator did not initiate — see\n    docs/reference/model-deployment.md under \"Rollout is recreate\".\n  - Its Resources are refused at admission. The accelerator request belongs in the role's own\n    Resources and the rest is derived from the InstanceType, so a template able to shadow either\n    would make the admission feasibility check read a ledger that does not match reality.",
-							Ref:         ref(v1alpha1.ModelDeploymentTemplate{}.OpenAPIModelName()),
-						},
-					},
-					"kind": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable by typing a string is one typo away from silently changing. Two roles may share a kind and differ in name ONLY where that kind is Server, because a pair of servers is a set of equals and two prefillers are not: nothing that consumes these roles expresses a second prefiller, so a deployment declaring one would render a role no reader of the rendered configuration could reach. It defaults to Server, the shape a deployment written before disaggregation existed has, so such a deployment renders exactly as it did.\n\n\nPossible enum values:\n - `\"decode\"` is a role that consumes KV blocks a prefiller produced and generates tokens from them.\n - `\"prefill\"` is a role that computes the prompt's KV blocks and hands them on rather than decoding them itself.\n - `\"server\"` is a role that serves whole requests by itself: prefill and decode in one process. It is the default and the only kind a single-role deployment has, and it is refused alongside any other kind, because \"one plain server plus a prefiller\" is not a shape anything consumes.",
-							Type:        []string{"string"},
-							Format:      "",
-							Enum:        []interface{}{"decode", "prefill", "server"},
 						},
 					},
 				},
@@ -7359,7 +7659,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName(), v1alpha1.ModelDeploymentTemplate{}.OpenAPIModelName()},
+			v1alpha1.ModelDeploymentAdditionalVolume{}.OpenAPIModelName(), v1alpha1.ModelDeploymentEnvVar{}.OpenAPIModelName(), v1alpha1.ModelDeploymentPort{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
 	}
 }
 
@@ -7496,7 +7796,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouter(ref common.Refere
 					},
 					"image": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Image overrides the router's container image. Empty means the operator assembles one from Name, the same way a role's image is assembled when its template names none.",
+							Description: "Image overrides the router's container image. Empty means the operator assembles one from Name, the same way a role's image is assembled when the role names none.",
 							MaxLength:   ptr.To[int64](512),
 							Type:        []string{"string"},
 							Format:      "",
@@ -7522,10 +7822,40 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouter(ref common.Refere
 							},
 						},
 					},
+					"imagePullPolicy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagePullPolicy is the pull policy for Image.\n\n\nPossible enum values:\n - `\"Always\"` means that kubelet always attempts to pull the latest image. Container will fail If the pull fails.\n - `\"IfNotPresent\"` means that kubelet pulls if the image isn't present on disk. Container will fail if the image isn't present and the pull fails.\n - `\"Never\"` means that kubelet never pulls an image, but only uses a local image. Container will fail if the image isn't present",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Always", "IfNotPresent", "Never"},
+						},
+					},
+					"imagePullSecrets": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagePullSecrets are the secrets used to pull Image.",
+							MaxItems:    ptr.To[int64](32),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
 				},
 				Required: []string{"name"},
 			},
 		},
+		Dependencies: []string{
+			corev1.LocalObjectReference{}.OpenAPIModelName()},
 	}
 }
 
@@ -7761,20 +8091,9 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref common.Referenc
 					},
 					"engine": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Engine selects the inference engine, which decides which argument keys the operator owns and which carrier the transfer configuration arrives on. Ownership is per (engine, key): a key one engine owns is an ordinary user argument on another.\n\nIt does NOT decide the connector, which follows the role's hardware instead: the connector is a property of the accelerator backend, so an Ascend pool and an NVIDIA pool running this engine get different ones.",
-							Default:     "",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"engineVersion": {
-						SchemaProps: spec.SchemaProps{
-							Description: "EngineVersion is the engine's own version, e.g. \"0.25.1\" for vllm or \"0.5.18\" for sglang.\n\n  - It is free-form and UNVALIDATED, by decision: the user guarantees that the version and the\n    driver each role's hardware installed are aligned. A gate would need the runner's release\n    matrix compiled into the operator, and the failure it would prevent is already legible as\n    an ImagePullBackOff on a tag that does not exist.\n  - It is per deployment rather than per role, which is what lets one version assemble a\n    DIFFERENT image for each role: the backend half of the tag comes from the role's own\n    InstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.\n    Published version sets do NOT overlap across every backend, so one version has to name a\n    tag that exists for each backend the roles land on.\n  - The lower bound is not decoration: `required` makes the key present, not the value\n    non-empty, and an empty version assembles a malformed tag naming something never typed.",
-							Default:     "",
-							MinLength:   ptr.To[int64](1),
-							MaxLength:   ptr.To[int64](64),
-							Type:        []string{"string"},
-							Format:      "",
+							Description: "Engine is the inference engine this deployment runs, which decides which argument keys the operator owns and which carrier the transfer configuration arrives on. Ownership is per (engine, key): a key one engine owns is an ordinary user argument on another.\n\nIt does NOT decide the connector, which follows the role's hardware instead: the connector is a property of the accelerator backend, so an Ascend pool and an NVIDIA pool running this engine get different ones.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentEngine{}.OpenAPIModelName()),
 						},
 					},
 					"kvCache": {
@@ -7812,18 +8131,18 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref common.Referenc
 							Ref:         ref(v1alpha1.ModelDeploymentRouter{}.OpenAPIModelName()),
 						},
 					},
-					"directTransfer": {
+					"kvTransfer": {
 						SchemaProps: spec.SchemaProps{
-							Description: "DirectTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode pair.\n\nTHE LEG THIS COVERS NEVER TRAVERSES THE STORE, and that is why the value does not come from the KVCacheBackend: spec.transport there defines the data plane the store MEMBERS run, this one is engine to engine, and the two planes declare separately. A deployment can render this leg with no pool attached at all, which is why the field cannot live under KVCache.",
-							Ref:         ref(v1alpha1.ModelDeploymentDirectTransfer{}.OpenAPIModelName()),
+							Description: "KVTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode pair.\n\nTHIS FIELD AND KVCache ABOVE ARE TWO ORTHOGONAL AXES, NOT TWO BRANCHES OF ONE CHOICE, and both may be set at once. The gate that turns this leg on — a managed llm-d router, vLLM, not Ascend, and a role kind of prefill or decode — reads none of spec.kvCache, and when both are set the two are synthesized into ONE connector and one --kv-transfer-config: a deployment may share a pool for its blocks AND hand them from prefill to decode directly, at the same time.\n\nTHE LEG THIS COVERS NEVER TRAVERSES THE STORE, and that is why the value does not come from the KVCacheBackend: spec.transport there defines the data plane the store MEMBERS run, this one is engine to engine, and the two planes declare separately. A deployment can render this leg with no pool attached at all, which is another reason the field cannot live under KVCache.",
+							Ref:         ref(v1alpha1.ModelDeploymentKVTransfer{}.OpenAPIModelName()),
 						},
 					},
 				},
-				Required: []string{"model", "engine", "engineVersion", "roles"},
+				Required: []string{"model", "engine", "roles"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.ModelDeploymentDirectTransfer{}.OpenAPIModelName(), v1alpha1.ModelDeploymentKVCache{}.OpenAPIModelName(), v1alpha1.ModelDeploymentModel{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRole{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRouter{}.OpenAPIModelName()},
+			v1alpha1.ModelDeploymentEngine{}.OpenAPIModelName(), v1alpha1.ModelDeploymentKVCache{}.OpenAPIModelName(), v1alpha1.ModelDeploymentKVTransfer{}.OpenAPIModelName(), v1alpha1.ModelDeploymentModel{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRole{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRouter{}.OpenAPIModelName()},
 	}
 }
 
@@ -7919,139 +8238,6 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 		},
 		Dependencies: []string{
 			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1alpha1_ModelDeploymentTemplate(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentTemplate overlays the container the operator renders for one replica.\n\nIT EXISTS BECAUSE InstanceTemplate'S Image IS REQUIRED AND THIS ONE'S CANNOT BE: a role that names no image has one synthesized from the accelerator backend its InstanceType observed, so requiring the field would force every user of the overlay to give up synthesis.\n\nThe fields are InstanceTemplate's, minus VolumeMount, which nothing here reads: an unused field in a schema is a promise, and strict decoding turns leaving it out into a clear refusal rather than a value silently ignored.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"image": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Image is the container image to run. Leaving it empty is the ordinary case: the operator then synthesizes one from the pool's accelerator backend, the observed runtime version and the requested engine.",
-							MaxLength:   ptr.To[int64](512),
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"imagePullPolicy": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ImagePullPolicy is the pull policy for Image.\n\n\nPossible enum values:\n - `\"Always\"` means that kubelet always attempts to pull the latest image. Container will fail If the pull fails.\n - `\"IfNotPresent\"` means that kubelet pulls if the image isn't present on disk. Container will fail if the image isn't present and the pull fails.\n - `\"Never\"` means that kubelet never pulls an image, but only uses a local image. Container will fail if the image isn't present",
-							Type:        []string{"string"},
-							Format:      "",
-							Enum:        []interface{}{"Always", "IfNotPresent", "Never"},
-						},
-					},
-					"command": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Command replaces the whole argv, which is the TAKE-OVER tier described on the role's Template field. The operator contributes no engine argument and no client environment.",
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: "",
-										Type:    []string{"string"},
-										Format:  "",
-									},
-								},
-							},
-						},
-					},
-					"privileged": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Privileged runs the container privileged.",
-							Type:        []string{"boolean"},
-							Format:      "",
-						},
-					},
-					"ports": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-list-map-keys": []interface{}{
-									"port",
-									"protocol",
-								},
-								"x-kubernetes-list-type":       "map",
-								"x-kubernetes-patch-merge-key": "port",
-								"x-kubernetes-patch-strategy":  "merge",
-							},
-						},
-						SchemaProps: spec.SchemaProps{
-							Description: "Ports are the container ports to expose in addition to the engine's own. They do not reserve or select the transfer engine's runtime port window.",
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: map[string]interface{}{},
-										Ref:     ref(v1alpha1.InstancePort{}.OpenAPIModelName()),
-									},
-								},
-							},
-						},
-					},
-					"env": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-list-map-keys": []interface{}{
-									"name",
-								},
-								"x-kubernetes-list-type":       "map",
-								"x-kubernetes-patch-merge-key": "name",
-								"x-kubernetes-patch-strategy":  "merge",
-							},
-						},
-						SchemaProps: spec.SchemaProps{
-							Description: "Env are environment entries merged on top of the role's own. A name the operator owns is refused here just as it is in the role's Env: the renderer drops owned names from both tiers, so admission has to refuse both, or one path becomes a silent drop.",
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: map[string]interface{}{},
-										Ref:     ref(v1alpha1.InstanceEnvVar{}.OpenAPIModelName()),
-									},
-								},
-							},
-						},
-					},
-					"resources": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Resources is present ONLY so that supplying it can be refused with a message that says where the request belongs. Dropping the field would let strict decoding refuse it earlier and more cheaply, but an unknown-field error says \"not here\" while the webhook's says \"it goes in the role's own Resources\" — and mistaking the template for the place resources live is the whole reason anyone writes this field.",
-							Ref:         ref(v1alpha1.InstanceResources{}.OpenAPIModelName()),
-						},
-					},
-					"imagePullSecret": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ImagePullSecret is the secret used to pull Image.",
-							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
-						},
-					},
-					"additionalVolumes": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-list-type": "atomic",
-							},
-						},
-						SchemaProps: spec.SchemaProps{
-							Description: "AdditionalVolumes are volumes mounted into the container alongside the operator's own.",
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: map[string]interface{}{},
-										Ref:     ref(v1alpha1.InstanceAdditionalVolume{}.OpenAPIModelName()),
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		Dependencies: []string{
-			v1alpha1.InstanceAdditionalVolume{}.OpenAPIModelName(), v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.InstancePort{}.OpenAPIModelName(), v1alpha1.InstanceResources{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
 	}
 }
 

@@ -298,7 +298,7 @@ func TestModelDeploymentReconciler_RecreatesOnASpecChange(t *testing.T) {
 	require.Len(t, before, 2)
 
 	changed := getModelDeployment(t, cli)
-	changed.Spec.Roles[0].Template.Image = "vllm/vllm-openai:v0.26.0"
+	changed.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
 	require.NoError(t, cli.Update(context.Background(), changed))
 
 	_, err = reconcileModelDeployment(t, cli)
@@ -348,7 +348,7 @@ func TestModelDeploymentReconciler_DoesNotExtendTheGroupInAPassThatRemovesFromIt
 
 	// And the spec moves, so the surviving replica's fingerprint no longer matches.
 	changed := getModelDeployment(t, cli)
-	changed.Spec.Roles[0].Template.Image = "vllm/vllm-openai:v0.26.0"
+	changed.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
 	require.NoError(t, cli.Update(context.Background(), changed))
 
 	_, err = reconcileModelDeployment(t, cli)
@@ -481,7 +481,7 @@ func TestModelDeploymentReconciler_MissingInstanceTypeIsRetried(t *testing.T) {
 func TestModelDeploymentReconciler_RenderFailureIsEventedNotOnlyLogged(t *testing.T) {
 	// A role naming no image, against an InstanceType whose detail cannot synthesize one.
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Roles[0].Template.Image = ""
+		md.Spec.Roles[0].Image = ""
 	})
 	// The PERMANENT shape deliberately, not the transient one: a manufacturer with no runner backend
 	// never resolves, so this is the case a retry cannot fix and a reader has to be told about.
@@ -513,7 +513,7 @@ func TestModelDeploymentReconciler_RenderFailureIsEventedNotOnlyLogged(t *testin
 // case: a guard whose absence panics is only tested by a caller that would have panicked.
 func TestModelDeploymentReconciler_RenderFailureWithoutARecorderDoesNotPanic(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Roles[0].Template.Image = ""
+		md.Spec.Roles[0].Image = ""
 	})
 	it := newRenderInstanceType(func(it *worker.InstanceType) {
 		it.Status.Detail.Manufacturer = "cambricon" // no runner backend, and never will resolve

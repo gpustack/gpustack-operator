@@ -308,17 +308,17 @@ func TestSynthesizeModelDeploymentConnector_KVEventsPerRole(t *testing.T) {
 	assert.NotContains(t, decode.Args, "--kv-events-config")
 }
 
-func TestSynthesizeModelDeploymentConnector_DirectTransfer(t *testing.T) {
+func TestSynthesizeModelDeploymentConnector_KVTransfer(t *testing.T) {
 	in := connectorInputForKind(
 		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
 		workercore.ModelDeploymentRoleKindPrefill)
-	in.DirectTransfer = true
+	in.KVTransfer = true
 	in.PublishKVEvents = true
 	in.KVEventsHost = "qwen-prefill.team-a.svc"
 
 	got, err := SynthesizeModelDeploymentConnector(in)
 	require.NoError(t, err)
-	assert.True(t, got.DirectTransfer)
+	assert.True(t, got.KVTransfer)
 	require.Len(t, got.Args, 4)
 	assert.JSONEq(t, `{
 		"kv_connector":"MultiConnector","kv_role":"kv_producer",
@@ -338,15 +338,15 @@ func TestSynthesizeModelDeploymentConnector_DirectTransfer(t *testing.T) {
 	}, got.Ports)
 }
 
-// TestSynthesizeModelDeploymentConnector_DirectTransferProtocol pins the thread from the
+// TestSynthesizeModelDeploymentConnector_KVTransferProtocol pins the thread from the
 // deployment's declaration to the rendered leg: the value passes through unchanged, and the
 // unset case -- the renderer's default -- is pinned by the test above.
-func TestSynthesizeModelDeploymentConnector_DirectTransferProtocol(t *testing.T) {
+func TestSynthesizeModelDeploymentConnector_KVTransferProtocol(t *testing.T) {
 	in := connectorInputForKind(
 		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
 		workercore.ModelDeploymentRoleKindDecode)
-	in.DirectTransfer = true
-	in.DirectTransferProtocol = "rdma"
+	in.KVTransfer = true
+	in.KVTransferProtocol = "rdma"
 
 	got, err := SynthesizeModelDeploymentConnector(in)
 	require.NoError(t, err)
@@ -361,30 +361,30 @@ func TestSynthesizeModelDeploymentConnector_DirectTransferProtocol(t *testing.T)
 	}`, got.Args[1])
 }
 
-func TestModelDeploymentUsesDirectTransfer(t *testing.T) {
+func TestModelDeploymentUsesKVTransfer(t *testing.T) {
 	base := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
 	})
 
-	assert.True(t, modelDeploymentUsesDirectTransfer(
+	assert.True(t, modelDeploymentUsesKVTransfer(
 		base, &base.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
-	assert.False(t, modelDeploymentUsesDirectTransfer(
+	assert.False(t, modelDeploymentUsesKVTransfer(
 		base, &base.Spec.Roles[0], nodefeature.ManufacturerAscend))
 
 	server := base.DeepCopy()
 	server.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
-	assert.False(t, modelDeploymentUsesDirectTransfer(
+	assert.False(t, modelDeploymentUsesKVTransfer(
 		server, &server.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
 
 	unrouted := base.DeepCopy()
 	unrouted.Spec.Router = nil
-	assert.False(t, modelDeploymentUsesDirectTransfer(
+	assert.False(t, modelDeploymentUsesKVTransfer(
 		unrouted, &unrouted.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
 
 	sglang := base.DeepCopy()
-	sglang.Spec.Engine = workercore.ModelDeploymentEngineSGLang
-	assert.False(t, modelDeploymentUsesDirectTransfer(
+	sglang.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+	assert.False(t, modelDeploymentUsesKVTransfer(
 		sglang, &sglang.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
 }
 
@@ -416,7 +416,7 @@ func TestModelDeploymentPublishesKVEvents(t *testing.T) {
 		decode, &decode.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
 
 	unmanaged := base.DeepCopy()
-	unmanaged.Spec.Roles[0].Template.Command = []string{"/bin/my-server"}
+	unmanaged.Spec.Roles[0].Command = []string{"/bin/my-server"}
 	assert.False(t, modelDeploymentPublishesKVEvents(
 		unmanaged, &unmanaged.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
 }
@@ -570,7 +570,7 @@ func TestModelDeploymentConnector_ReachesThePodPerRole(t *testing.T) {
 		`{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}`, byRole["decode"])
 }
 
-func TestModelDeploymentConnector_RoutedPairWithoutKVCacheUsesDirectTransferOnly(t *testing.T) {
+func TestModelDeploymentConnector_RoutedPairWithoutKVCacheUsesKVTransferOnly(t *testing.T) {
 	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.KVCache = nil
 	})
@@ -1151,9 +1151,9 @@ func TestModelDeploymentConnectorEnumHasOneValue(t *testing.T) {
 
 	require.NotNil(t, schema, "spec.kvCache.connector must be in the served schema")
 	require.Len(t, schema.Enum, 1, "the enum reserves the discriminator; widening it is a piece of work")
-	assert.JSONEq(t, `"auto"`, string(schema.Enum[0].Raw))
+	assert.JSONEq(t, `"mooncake"`, string(schema.Enum[0].Raw))
 	require.NotNil(t, schema.Default)
-	assert.JSONEq(t, `"auto"`, string(schema.Default.Raw))
+	assert.JSONEq(t, `"mooncake"`, string(schema.Default.Raw))
 }
 
 // TestModelDeploymentConnectorFieldIsInert renders one deployment twice, with the field unset and
@@ -1179,7 +1179,7 @@ func TestModelDeploymentConnectorFieldIsInert(t *testing.T) {
 			md.Spec.KVCache.Connector = connector
 		})
 
-		in := connectorInput(md.Spec.Engine, it.Status.Detail.Manufacturer)
+		in := connectorInput(md.Spec.Engine.Name, it.Status.Detail.Manufacturer)
 		in.Kind = md.Spec.Roles[0].Kind
 		synthesized, err := SynthesizeModelDeploymentConnector(in)
 		require.NoError(t, err)
@@ -1197,12 +1197,12 @@ func TestModelDeploymentConnectorFieldIsInert(t *testing.T) {
 	}
 
 	unset := render("")
-	auto := render("auto")
+	mooncake := render("mooncake")
 
 	// The premise: this render carries a connector at all. Without it the two Pods would agree
 	// because neither has one, and the case would pass against a renderer that did read the field.
 	require.NotEmpty(t, unset.Annotations, "the render under comparison must carry the connector")
 
-	assert.Equal(t, unset, auto,
+	assert.Equal(t, unset, mooncake,
 		"the connector value is read by nothing; a difference here means somebody wired it in")
 }

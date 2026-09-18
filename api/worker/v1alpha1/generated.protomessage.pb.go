@@ -120,8 +120,6 @@ func (*KVCacheBackendLeader) ProtoMessage() {}
 
 func (*KVCacheBackendLeaderHighAvailability) ProtoMessage() {}
 
-func (*KVCacheBackendLeaderOffload) ProtoMessage() {}
-
 func (*KVCacheBackendLeaderSnapshot) ProtoMessage() {}
 
 func (*KVCacheBackendList) ProtoMessage() {}
@@ -162,6 +160,8 @@ func (*KVCachePoolBindingList) ProtoMessage() {}
 
 func (*KVCachePoolBindingPoolReference) ProtoMessage() {}
 
+func (*KVCachePoolBindingQuota) ProtoMessage() {}
+
 func (*KVCachePoolBindingReference) ProtoMessage() {}
 
 func (*KVCachePoolBindingSpec) ProtoMessage() {}
@@ -182,7 +182,11 @@ func (*KVCachePoolUsage) ProtoMessage() {}
 
 func (*ModelDeployment) ProtoMessage() {}
 
-func (*ModelDeploymentDirectTransfer) ProtoMessage() {}
+func (*ModelDeploymentAdditionalVolume) ProtoMessage() {}
+
+func (*ModelDeploymentEngine) ProtoMessage() {}
+
+func (*ModelDeploymentEnvVar) ProtoMessage() {}
 
 func (*ModelDeploymentKVCache) ProtoMessage() {}
 
@@ -190,9 +194,13 @@ func (*ModelDeploymentKVCacheDomain) ProtoMessage() {}
 
 func (*ModelDeploymentKVCacheStatus) ProtoMessage() {}
 
+func (*ModelDeploymentKVTransfer) ProtoMessage() {}
+
 func (*ModelDeploymentList) ProtoMessage() {}
 
 func (*ModelDeploymentModel) ProtoMessage() {}
+
+func (*ModelDeploymentPort) ProtoMessage() {}
 
 func (*ModelDeploymentRole) ProtoMessage() {}
 
@@ -213,5 +221,3 @@ func (*ModelDeploymentRouterStatus) ProtoMessage() {}
 func (*ModelDeploymentSpec) ProtoMessage() {}
 
 func (*ModelDeploymentStatus) ProtoMessage() {}
-
-func (*ModelDeploymentTemplate) ProtoMessage() {}

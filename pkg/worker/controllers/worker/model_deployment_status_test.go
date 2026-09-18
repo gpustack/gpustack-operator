@@ -273,7 +273,7 @@ func readyRouterRolePods(md *workercore.ModelDeployment) []core.Pod {
 // condition will ever be True for this role.
 func TestComputeModelDeploymentStatus_Unmanaged(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Roles[0].Template.Command = []string{"/bin/my-server"}
+		md.Spec.Roles[0].Command = []string{"/bin/my-server"}
 	})
 	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
 

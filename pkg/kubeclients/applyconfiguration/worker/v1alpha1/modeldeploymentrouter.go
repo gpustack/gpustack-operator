@@ -2,6 +2,11 @@
 
 package v1alpha1
 
+import (
+	corev1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/core/v1"
+	v1 "k8s.io/api/core/v1"
+)
+
 // ModelDeploymentRouterApplyConfiguration represents a declarative configuration of the ModelDeploymentRouter type for use
 // with apply.
 //
@@ -49,7 +54,7 @@ type ModelDeploymentRouterApplyConfiguration struct {
 	// found on a dashboard.
 	Replicas *int32 `json:"replicas,omitempty"`
 	// Image overrides the router's container image. Empty means the operator assembles one from Name,
-	// the same way a role's image is assembled when its template names none.
+	// the same way a role's image is assembled when the role names none.
 	Image *string `json:"image,omitempty"`
 	// ExtraArgs are additional flags for the router process.
 	//
@@ -57,6 +62,10 @@ type ModelDeploymentRouterApplyConfiguration struct {
 	// source. The owned catalog is keyed by router because the engine-keyed catalog guarding a role's
 	// extraArgs answers a different question and cannot stand in for it.
 	ExtraArgs []string `json:"extraArgs,omitempty"`
+	// ImagePullPolicy is the pull policy for Image.
+	ImagePullPolicy *v1.PullPolicy `json:"imagePullPolicy,omitempty"`
+	// ImagePullSecrets are the secrets used to pull Image.
+	ImagePullSecrets []corev1.LocalObjectReferenceApplyConfiguration `json:"imagePullSecrets,omitempty"`
 }
 
 // ModelDeploymentRouterApplyConfiguration constructs a declarative configuration of the ModelDeploymentRouter type for use with
@@ -95,6 +104,27 @@ func (b *ModelDeploymentRouterApplyConfiguration) WithImage(value string) *Model
 func (b *ModelDeploymentRouterApplyConfiguration) WithExtraArgs(values ...string) *ModelDeploymentRouterApplyConfiguration {
 	for i := range values {
 		b.ExtraArgs = append(b.ExtraArgs, values[i])
+	}
+	return b
+}
+
+// WithImagePullPolicy sets the ImagePullPolicy field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ImagePullPolicy field is set to the value of the last call.
+func (b *ModelDeploymentRouterApplyConfiguration) WithImagePullPolicy(value v1.PullPolicy) *ModelDeploymentRouterApplyConfiguration {
+	b.ImagePullPolicy = &value
+	return b
+}
+
+// WithImagePullSecrets adds the given value to the ImagePullSecrets field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the ImagePullSecrets field.
+func (b *ModelDeploymentRouterApplyConfiguration) WithImagePullSecrets(values ...*corev1.LocalObjectReferenceApplyConfiguration) *ModelDeploymentRouterApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithImagePullSecrets")
+		}
+		b.ImagePullSecrets = append(b.ImagePullSecrets, *values[i])
 	}
 	return b
 }

@@ -77,7 +77,7 @@ func (r *KVCacheBackendReconciler) cleanKVCacheBackendTier(
 	if member == nil {
 		return true, nil
 	}
-	path := filepath.Clean(member.LocalDisk.Path)
+	path := filepath.Clean(member.LocalDisks[0].Path)
 
 	nodes := new(core.NodeList)
 	if err = r.Client.List(ctx, nodes, ctrlcli.MatchingLabels(member.NodeSelector)); err != nil {
@@ -310,7 +310,7 @@ func (r *KVCacheBackendReconciler) kvCacheBackendTierCleanupPods(
 // kvCacheBackendCleanableTier returns the disk tier this backend asked to have emptied, with the
 // node selector of the group that declared it.
 //
-// Admission allows only one member group to declare localDisk, so there is one tier and one
+// Admission allows only one member group to declare localDisks, so there is one tier and one
 // selector rather than a set of them. The loop is still written over every group, because a rule
 // enforced elsewhere is not a fact this function can read.
 // It returns the whole member group rather than the tier alone, because the cleanup has to run the
@@ -324,10 +324,10 @@ func kvCacheBackendCleanableTier(
 	}
 	for i := range kvcb.Spec.Connection.Managed.Members {
 		member := &kvcb.Spec.Connection.Managed.Members[i]
-		if member.LocalDisk == nil || !member.LocalDisk.CleanAfterDelete {
+		if len(member.LocalDisks) == 0 || !member.LocalDisks[0].CleanAfterDelete {
 			continue
 		}
-		if strings.TrimSpace(member.LocalDisk.Path) == "" {
+		if strings.TrimSpace(member.LocalDisks[0].Path) == "" {
 			continue
 		}
 		return member
@@ -365,10 +365,10 @@ func kvCacheBackendTierSharedWith(
 		}
 		for j := range other.Spec.Connection.Managed.Members {
 			member := &other.Spec.Connection.Managed.Members[j]
-			if member.LocalDisk == nil {
+			if len(member.LocalDisks) == 0 {
 				continue
 			}
-			if !kvCacheBackendPathsOverlap(path, filepath.Clean(member.LocalDisk.Path)) {
+			if !kvCacheBackendPathsOverlap(path, filepath.Clean(member.LocalDisks[0].Path)) {
 				continue
 			}
 			// The other backend only reaches this node if its own group selects it.

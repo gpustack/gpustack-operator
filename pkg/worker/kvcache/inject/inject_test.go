@@ -305,7 +305,7 @@ func TestRender_TenantOmittedForAnEmptyDomain(t *testing.T) {
 	}
 }
 
-func TestRender_VLLMDirectTransferComposesPointToPointAndStore(t *testing.T) {
+func TestRender_VLLMKVTransferComposesPointToPointAndStore(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		role      Role
@@ -318,7 +318,7 @@ func TestRender_VLLMDirectTransferComposesPointToPointAndStore(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := Render(Input{
 				Engine: EngineVLLM, Role: tc.role, Domain: "team-a-chat",
-				Connection: testConnection(), DirectTransfer: true,
+				Connection: testConnection(), KVTransfer: true,
 			})
 			require.NoError(t, err)
 			require.Len(t, result.Args, 2)
@@ -332,7 +332,7 @@ func TestRender_VLLMDirectTransferComposesPointToPointAndStore(t *testing.T) {
 					{"kv_connector":"MooncakeStoreConnector","kv_role":%q}
 				]}
 			}`, tc.pointRole, tc.pointRole, tc.storeRole), result.Args[1])
-			assert.True(t, result.DirectTransfer)
+			assert.True(t, result.KVTransfer)
 			for _, port := range result.Ports {
 				assert.Empty(t, utilvalidation.IsValidPortName(port.Name),
 					"rendered port %q must be accepted by the Kubernetes API", port.Name)
@@ -341,9 +341,9 @@ func TestRender_VLLMDirectTransferComposesPointToPointAndStore(t *testing.T) {
 	}
 }
 
-func TestRender_VLLMDirectTransferWithoutStore(t *testing.T) {
+func TestRender_VLLMKVTransferWithoutStore(t *testing.T) {
 	result, err := Render(Input{
-		Engine: EngineVLLM, Role: RolePrefill, DirectTransfer: true,
+		Engine: EngineVLLM, Role: RolePrefill, KVTransfer: true,
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Args, 2)
@@ -353,7 +353,7 @@ func TestRender_VLLMDirectTransferWithoutStore(t *testing.T) {
 		"kv_role":"kv_producer",
 		"kv_connector_extra_config":{"mooncake_protocol":"tcp"}
 	}`, result.Args[1])
-	assert.True(t, result.DirectTransfer)
+	assert.True(t, result.KVTransfer)
 	assert.False(t, result.TenantInjected)
 	assert.NotContains(t, envNames(result.Env), vllmConfigPathEnv)
 	assert.Empty(t, result.Volumes)
@@ -362,13 +362,13 @@ func TestRender_VLLMDirectTransferWithoutStore(t *testing.T) {
 	assert.Contains(t, envNames(result.Env), "VLLM_MOONCAKE_BOOTSTRAP_PORT")
 }
 
-// TestRender_DirectTransferProtocolIsNotTheMembers pins the split between the two data planes one
+// TestRender_KVTransferProtocolIsNotTheMembers pins the split between the two data planes one
 // backend feeds. The STORE plane keeps following the backend's transport; the direct
 // prefill-to-decode leg does not read it, because it is engine to engine and never traverses the
 // store. All three assertions ride on ONE backend, because the change being pinned is that one
 // value's consumers came apart: an edit that switched BOTH legs to tcp -- or both to the members'
 // transport -- would pass an assertion on either leg alone.
-func TestRender_DirectTransferProtocolIsNotTheMembers(t *testing.T) {
+func TestRender_KVTransferProtocolIsNotTheMembers(t *testing.T) {
 	backend := &workercore.KVCacheBackend{
 		ObjectMeta: meta.ObjectMeta{Name: "mooncake-dram"},
 		Spec: workercore.KVCacheBackendSpec{
@@ -401,7 +401,7 @@ func TestRender_DirectTransferProtocolIsNotTheMembers(t *testing.T) {
 	// The direct leg came apart: handed that same backend's transport, it renders its own
 	// declaration rather than inheriting a fabric this operator gives engine Pods no access to.
 	result, err := Render(Input{
-		Engine: EngineVLLM, Role: RolePrefill, Connection: conn, DirectTransfer: true,
+		Engine: EngineVLLM, Role: RolePrefill, Connection: conn, KVTransfer: true,
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Args, 2)
@@ -419,16 +419,16 @@ func TestRender_DirectTransferProtocolIsNotTheMembers(t *testing.T) {
 	// The STORE plane of the very same render still follows the backend: only the direct leg
 	// moved, so the engine reaches its pool over the transport the pool runs.
 	assert.Equal(t, "rdma", renderedConfig(t, Input{
-		Engine: EngineVLLM, Role: RolePrefill, Connection: conn, DirectTransfer: true,
+		Engine: EngineVLLM, Role: RolePrefill, Connection: conn, KVTransfer: true,
 	})["protocol"])
 }
 
-// TestRender_DirectTransferProtocolDeclared pins the declared source of the direct leg's
+// TestRender_KVTransferProtocolDeclared pins the declared source of the direct leg's
 // transport: a caller naming a protocol gets it VERBATIM -- including one no enum would admit,
 // because the accepted set belongs to the engine image's mooncake build -- and the store plane of
 // the same render is untouched. The unset case is pinned by the two tests above: everything they
 // assert rides on the renderer's default.
-func TestRender_DirectTransferProtocolDeclared(t *testing.T) {
+func TestRender_KVTransferProtocolDeclared(t *testing.T) {
 	for _, protocol := range []string{"rdma", "hip"} {
 		t.Run(protocol, func(t *testing.T) {
 			conn := testConnection()
@@ -436,7 +436,7 @@ func TestRender_DirectTransferProtocolDeclared(t *testing.T) {
 
 			result, err := Render(Input{
 				Engine: EngineVLLM, Role: RoleDecode, Connection: conn,
-				DirectTransfer: true, DirectTransferProtocol: protocol,
+				KVTransfer: true, KVTransferProtocol: protocol,
 			})
 			require.NoError(t, err)
 			require.Len(t, result.Args, 2)
@@ -452,7 +452,7 @@ func TestRender_DirectTransferProtocolDeclared(t *testing.T) {
 
 			assert.Equal(t, "tcp", renderedConfig(t, Input{
 				Engine: EngineVLLM, Role: RoleDecode, Connection: conn,
-				DirectTransfer: true, DirectTransferProtocol: protocol,
+				KVTransfer: true, KVTransferProtocol: protocol,
 			})["protocol"], "the declared value moves the direct leg alone")
 		})
 	}
@@ -622,11 +622,11 @@ func TestRender_RefusesAHalfConnection(t *testing.T) {
 	}
 }
 
-// TestRender_RefusesDirectTransferOnEnginesThatDropIt covers the capabilities only vLLM renders.
+// TestRender_RefusesKVTransferOnEnginesThatDropIt covers the capabilities only vLLM renders.
 //
 // The positive baseline matters more than the refusals: without it a renderer that refused every
 // engine would pass this test, and the whole point is that vLLM must still be accepted.
-func TestRender_RefusesDirectTransferOnEnginesThatDropIt(t *testing.T) {
+func TestRender_RefusesKVTransferOnEnginesThatDropIt(t *testing.T) {
 	store := Connection{MasterAddress: "master:50051", Protocol: "tcp"}
 	cases := []struct {
 		name     string
@@ -660,7 +660,7 @@ func TestRender_RefusesDirectTransferOnEnginesThatDropIt(t *testing.T) {
 			}
 			in := Input{
 				Engine: c.engine, Role: c.role, Connection: conn,
-				DirectTransfer: c.direct, PublishKVEvents: c.publish,
+				KVTransfer: c.direct, PublishKVEvents: c.publish,
 			}
 			if c.publish {
 				in.KVEventsHost = "role.ns.svc"

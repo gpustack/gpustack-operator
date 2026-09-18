@@ -86,8 +86,9 @@ metadata:
   name: ${MD}
   namespace: ${NS}
 spec:
-  engine: vllm
-  engineVersion: "0.11.0"
+  engine:
+    name: vllm
+    version: "0.11.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:
@@ -100,14 +101,12 @@ spec:
     kind: prefill
     instanceType: ${IT}
     replicas: 1
-    template:
-      image: ${IMAGE}
+    image: ${IMAGE}
   - name: decode
     kind: decode
     instanceType: ${IT}
     replicas: 1
-    template:
-      image: ${IMAGE}
+    image: ${IMAGE}
 YAML
 
 ready=no

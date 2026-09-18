@@ -88,8 +88,8 @@ func asPD(md *workercore.ModelDeployment) {
 // from the hardware instead. A case keeping the shared fixture's template would assert that
 // literal rather than anything the manufacturer decided.
 func synthesizingImages(md *workercore.ModelDeployment) {
-	md.Spec.Roles[0].Template.Image = ""
-	md.Spec.Roles[1].Template.Image = ""
+	md.Spec.Roles[0].Image = ""
+	md.Spec.Roles[1].Image = ""
 }
 
 // crossManufacturerClient converges the deployment against both types, on a pool offering the

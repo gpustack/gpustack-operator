@@ -140,8 +140,6 @@ func (m *KVCacheBackendLeader) Reset() { *m = KVCacheBackendLeader{} }
 
 func (m *KVCacheBackendLeaderHighAvailability) Reset() { *m = KVCacheBackendLeaderHighAvailability{} }
 
-func (m *KVCacheBackendLeaderOffload) Reset() { *m = KVCacheBackendLeaderOffload{} }
-
 func (m *KVCacheBackendLeaderSnapshot) Reset() { *m = KVCacheBackendLeaderSnapshot{} }
 
 func (m *KVCacheBackendList) Reset() { *m = KVCacheBackendList{} }
@@ -184,6 +182,8 @@ func (m *KVCachePoolBindingList) Reset() { *m = KVCachePoolBindingList{} }
 
 func (m *KVCachePoolBindingPoolReference) Reset() { *m = KVCachePoolBindingPoolReference{} }
 
+func (m *KVCachePoolBindingQuota) Reset() { *m = KVCachePoolBindingQuota{} }
+
 func (m *KVCachePoolBindingReference) Reset() { *m = KVCachePoolBindingReference{} }
 
 func (m *KVCachePoolBindingSpec) Reset() { *m = KVCachePoolBindingSpec{} }
@@ -204,7 +204,11 @@ func (m *KVCachePoolUsage) Reset() { *m = KVCachePoolUsage{} }
 
 func (m *ModelDeployment) Reset() { *m = ModelDeployment{} }
 
-func (m *ModelDeploymentDirectTransfer) Reset() { *m = ModelDeploymentDirectTransfer{} }
+func (m *ModelDeploymentAdditionalVolume) Reset() { *m = ModelDeploymentAdditionalVolume{} }
+
+func (m *ModelDeploymentEngine) Reset() { *m = ModelDeploymentEngine{} }
+
+func (m *ModelDeploymentEnvVar) Reset() { *m = ModelDeploymentEnvVar{} }
 
 func (m *ModelDeploymentKVCache) Reset() { *m = ModelDeploymentKVCache{} }
 
@@ -212,9 +216,13 @@ func (m *ModelDeploymentKVCacheDomain) Reset() { *m = ModelDeploymentKVCacheDoma
 
 func (m *ModelDeploymentKVCacheStatus) Reset() { *m = ModelDeploymentKVCacheStatus{} }
 
+func (m *ModelDeploymentKVTransfer) Reset() { *m = ModelDeploymentKVTransfer{} }
+
 func (m *ModelDeploymentList) Reset() { *m = ModelDeploymentList{} }
 
 func (m *ModelDeploymentModel) Reset() { *m = ModelDeploymentModel{} }
+
+func (m *ModelDeploymentPort) Reset() { *m = ModelDeploymentPort{} }
 
 func (m *ModelDeploymentRole) Reset() { *m = ModelDeploymentRole{} }
 
@@ -235,8 +243,6 @@ func (m *ModelDeploymentRouterStatus) Reset() { *m = ModelDeploymentRouterStatus
 func (m *ModelDeploymentSpec) Reset() { *m = ModelDeploymentSpec{} }
 
 func (m *ModelDeploymentStatus) Reset() { *m = ModelDeploymentStatus{} }
-
-func (m *ModelDeploymentTemplate) Reset() { *m = ModelDeploymentTemplate{} }
 
 func (m *Accelerator) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
@@ -3277,6 +3283,42 @@ func (m *KVCacheBackendLeader) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if len(m.ExtraEnv) > 0 {
+		for iNdEx := len(m.ExtraEnv) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.ExtraEnv[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x32
+		}
+	}
+	if len(m.ExtraArgs) > 0 {
+		for iNdEx := len(m.ExtraArgs) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.ExtraArgs[iNdEx])
+			copy(dAtA[i:], m.ExtraArgs[iNdEx])
+			i = encodeVarintGenerated(dAtA, i, uint64(len(m.ExtraArgs[iNdEx])))
+			i--
+			dAtA[i] = 0x2a
+		}
+	}
+	i--
+	if m.MultiTenancy {
+		dAtA[i] = 1
+	} else {
+		dAtA[i] = 0
+	}
+	i--
+	dAtA[i] = 0x20
+	i -= len(m.AllocationStrategy)
+	copy(dAtA[i:], m.AllocationStrategy)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.AllocationStrategy)))
+	i--
+	dAtA[i] = 0x1a
 	if m.HighAvailability != nil {
 		{
 			size, err := m.HighAvailability.MarshalToSizedBuffer(dAtA[:i])
@@ -3287,57 +3329,8 @@ func (m *KVCacheBackendLeader) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 			i = encodeVarintGenerated(dAtA, i, uint64(size))
 		}
 		i--
-		dAtA[i] = 0x32
+		dAtA[i] = 0x12
 	}
-	if m.Offload != nil {
-		{
-			size, err := m.Offload.MarshalToSizedBuffer(dAtA[:i])
-			if err != nil {
-				return 0, err
-			}
-			i -= size
-			i = encodeVarintGenerated(dAtA, i, uint64(size))
-		}
-		i--
-		dAtA[i] = 0x2a
-	}
-	i--
-	if m.MultiTenancy {
-		dAtA[i] = 1
-	} else {
-		dAtA[i] = 0
-	}
-	i--
-	dAtA[i] = 0x20
-	if len(m.ExtraArgs) > 0 {
-		keysForExtraArgs := make([]string, 0, len(m.ExtraArgs))
-		for k := range m.ExtraArgs {
-			keysForExtraArgs = append(keysForExtraArgs, string(k))
-		}
-		sort.Strings(keysForExtraArgs)
-		for iNdEx := len(keysForExtraArgs) - 1; iNdEx >= 0; iNdEx-- {
-			v := m.ExtraArgs[string(keysForExtraArgs[iNdEx])]
-			baseI := i
-			i -= len(v)
-			copy(dAtA[i:], v)
-			i = encodeVarintGenerated(dAtA, i, uint64(len(v)))
-			i--
-			dAtA[i] = 0x12
-			i -= len(keysForExtraArgs[iNdEx])
-			copy(dAtA[i:], keysForExtraArgs[iNdEx])
-			i = encodeVarintGenerated(dAtA, i, uint64(len(keysForExtraArgs[iNdEx])))
-			i--
-			dAtA[i] = 0xa
-			i = encodeVarintGenerated(dAtA, i, uint64(baseI-i))
-			i--
-			dAtA[i] = 0x1a
-		}
-	}
-	i -= len(m.AllocationStrategy)
-	copy(dAtA[i:], m.AllocationStrategy)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.AllocationStrategy)))
-	i--
-	dAtA[i] = 0x12
 	if m.Replicas != nil {
 		i = encodeVarintGenerated(dAtA, i, uint64(*m.Replicas))
 		i--
@@ -3383,45 +3376,6 @@ func (m *KVCacheBackendLeaderHighAvailability) MarshalToSizedBuffer(dAtA []byte)
 		i--
 		dAtA[i] = 0xa
 	}
-	return len(dAtA) - i, nil
-}
-
-func (m *KVCacheBackendLeaderOffload) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBuffer(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *KVCacheBackendLeaderOffload) MarshalTo(dAtA []byte) (int, error) {
-	size := m.Size()
-	return m.MarshalToSizedBuffer(dAtA[:size])
-}
-
-func (m *KVCacheBackendLeaderOffload) MarshalToSizedBuffer(dAtA []byte) (int, error) {
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
-	i--
-	if m.OnEvict {
-		dAtA[i] = 1
-	} else {
-		dAtA[i] = 0
-	}
-	i--
-	dAtA[i] = 0x10
-	i--
-	if m.Enabled {
-		dAtA[i] = 1
-	} else {
-		dAtA[i] = 0
-	}
-	i--
-	dAtA[i] = 0x8
 	return len(dAtA) - i, nil
 }
 
@@ -3593,7 +3547,7 @@ func (m *KVCacheBackendMember) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	copy(dAtA[i:], m.RuntimeClassName)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.RuntimeClassName)))
 	i--
-	dAtA[i] = 0x6a
+	dAtA[i] = 0x62
 	if len(m.HostPaths) > 0 {
 		for iNdEx := len(m.HostPaths) - 1; iNdEx >= 0; iNdEx-- {
 			{
@@ -3605,7 +3559,7 @@ func (m *KVCacheBackendMember) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 				i = encodeVarintGenerated(dAtA, i, uint64(size))
 			}
 			i--
-			dAtA[i] = 0x62
+			dAtA[i] = 0x5a
 		}
 	}
 	if m.SecurityContext != nil {
@@ -3618,7 +3572,7 @@ func (m *KVCacheBackendMember) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 			i = encodeVarintGenerated(dAtA, i, uint64(size))
 		}
 		i--
-		dAtA[i] = 0x5a
+		dAtA[i] = 0x52
 	}
 	if m.Transport != nil {
 		{
@@ -3632,67 +3586,44 @@ func (m *KVCacheBackendMember) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x4a
 	}
-	if len(m.ExtraEnvs) > 0 {
-		keysForExtraEnvs := make([]string, 0, len(m.ExtraEnvs))
-		for k := range m.ExtraEnvs {
-			keysForExtraEnvs = append(keysForExtraEnvs, string(k))
-		}
-		sort.Strings(keysForExtraEnvs)
-		for iNdEx := len(keysForExtraEnvs) - 1; iNdEx >= 0; iNdEx-- {
-			v := m.ExtraEnvs[string(keysForExtraEnvs[iNdEx])]
-			baseI := i
-			i -= len(v)
-			copy(dAtA[i:], v)
-			i = encodeVarintGenerated(dAtA, i, uint64(len(v)))
-			i--
-			dAtA[i] = 0x12
-			i -= len(keysForExtraEnvs[iNdEx])
-			copy(dAtA[i:], keysForExtraEnvs[iNdEx])
-			i = encodeVarintGenerated(dAtA, i, uint64(len(keysForExtraEnvs[iNdEx])))
-			i--
-			dAtA[i] = 0xa
-			i = encodeVarintGenerated(dAtA, i, uint64(baseI-i))
+	if len(m.LocalDisks) > 0 {
+		for iNdEx := len(m.LocalDisks) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.LocalDisks[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
 			i--
 			dAtA[i] = 0x42
 		}
-	}
-	if m.LocalDisk != nil {
-		{
-			size, err := m.LocalDisk.MarshalToSizedBuffer(dAtA[:i])
-			if err != nil {
-				return 0, err
-			}
-			i -= size
-			i = encodeVarintGenerated(dAtA, i, uint64(size))
-		}
-		i--
-		dAtA[i] = 0x3a
 	}
 	i -= len(m.Image)
 	copy(dAtA[i:], m.Image)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Image)))
 	i--
-	dAtA[i] = 0x32
-	if len(m.ExtraArgs) > 0 {
-		keysForExtraArgs := make([]string, 0, len(m.ExtraArgs))
-		for k := range m.ExtraArgs {
-			keysForExtraArgs = append(keysForExtraArgs, string(k))
+	dAtA[i] = 0x3a
+	if len(m.ExtraEnv) > 0 {
+		for iNdEx := len(m.ExtraEnv) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.ExtraEnv[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x32
 		}
-		sort.Strings(keysForExtraArgs)
-		for iNdEx := len(keysForExtraArgs) - 1; iNdEx >= 0; iNdEx-- {
-			v := m.ExtraArgs[string(keysForExtraArgs[iNdEx])]
-			baseI := i
-			i -= len(v)
-			copy(dAtA[i:], v)
-			i = encodeVarintGenerated(dAtA, i, uint64(len(v)))
-			i--
-			dAtA[i] = 0x12
-			i -= len(keysForExtraArgs[iNdEx])
-			copy(dAtA[i:], keysForExtraArgs[iNdEx])
-			i = encodeVarintGenerated(dAtA, i, uint64(len(keysForExtraArgs[iNdEx])))
-			i--
-			dAtA[i] = 0xa
-			i = encodeVarintGenerated(dAtA, i, uint64(baseI-i))
+	}
+	if len(m.ExtraArgs) > 0 {
+		for iNdEx := len(m.ExtraArgs) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.ExtraArgs[iNdEx])
+			copy(dAtA[i:], m.ExtraArgs[iNdEx])
+			i = encodeVarintGenerated(dAtA, i, uint64(len(m.ExtraArgs[iNdEx])))
 			i--
 			dAtA[i] = 0x2a
 		}
@@ -4510,6 +4441,39 @@ func (m *KVCachePoolBindingPoolReference) MarshalToSizedBuffer(dAtA []byte) (int
 	return len(dAtA) - i, nil
 }
 
+func (m *KVCachePoolBindingQuota) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *KVCachePoolBindingQuota) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *KVCachePoolBindingQuota) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	{
+		size, err := m.Ceiling.MarshalToSizedBuffer(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = encodeVarintGenerated(dAtA, i, uint64(size))
+	}
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
 func (m *KVCachePoolBindingReference) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -4564,7 +4528,7 @@ func (m *KVCachePoolBindingSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) 
 	var l int
 	_ = l
 	{
-		size, err := m.QuotaCeiling.MarshalToSizedBuffer(dAtA[:i])
+		size, err := m.Quota.MarshalToSizedBuffer(dAtA[:i])
 		if err != nil {
 			return 0, err
 		}
@@ -5071,7 +5035,7 @@ func (m *ModelDeployment) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
-func (m *ModelDeploymentDirectTransfer) Marshal() (dAtA []byte, err error) {
+func (m *ModelDeploymentAdditionalVolume) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
 	n, err := m.MarshalToSizedBuffer(dAtA[:size])
@@ -5081,19 +5045,134 @@ func (m *ModelDeploymentDirectTransfer) Marshal() (dAtA []byte, err error) {
 	return dAtA[:n], nil
 }
 
-func (m *ModelDeploymentDirectTransfer) MarshalTo(dAtA []byte) (int, error) {
+func (m *ModelDeploymentAdditionalVolume) MarshalTo(dAtA []byte) (int, error) {
 	size := m.Size()
 	return m.MarshalToSizedBuffer(dAtA[:size])
 }
 
-func (m *ModelDeploymentDirectTransfer) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+func (m *ModelDeploymentAdditionalVolume) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	i := len(dAtA)
 	_ = i
 	var l int
 	_ = l
-	i -= len(m.Protocol)
-	copy(dAtA[i:], m.Protocol)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Protocol)))
+	if m.HostPath != nil {
+		{
+			size, err := m.HostPath.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x32
+	}
+	if m.Secret != nil {
+		{
+			size, err := m.Secret.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x2a
+	}
+	if m.ConfigMap != nil {
+		{
+			size, err := m.ConfigMap.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x22
+	}
+	i -= len(m.SubPath)
+	copy(dAtA[i:], m.SubPath)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.SubPath)))
+	i--
+	dAtA[i] = 0x1a
+	i--
+	if m.ReadOnly {
+		dAtA[i] = 1
+	} else {
+		dAtA[i] = 0
+	}
+	i--
+	dAtA[i] = 0x10
+	i -= len(m.MountPath)
+	copy(dAtA[i:], m.MountPath)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.MountPath)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
+func (m *ModelDeploymentEngine) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ModelDeploymentEngine) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ModelDeploymentEngine) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	i -= len(m.Version)
+	copy(dAtA[i:], m.Version)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Version)))
+	i--
+	dAtA[i] = 0x12
+	i -= len(m.Name)
+	copy(dAtA[i:], m.Name)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Name)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
+func (m *ModelDeploymentEnvVar) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ModelDeploymentEnvVar) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ModelDeploymentEnvVar) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	i -= len(m.Value)
+	copy(dAtA[i:], m.Value)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Value)))
+	i--
+	dAtA[i] = 0x12
+	i -= len(m.Name)
+	copy(dAtA[i:], m.Name)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Name)))
 	i--
 	dAtA[i] = 0xa
 	return len(dAtA) - i, nil
@@ -5216,6 +5295,34 @@ func (m *ModelDeploymentKVCacheStatus) MarshalToSizedBuffer(dAtA []byte) (int, e
 	return len(dAtA) - i, nil
 }
 
+func (m *ModelDeploymentKVTransfer) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ModelDeploymentKVTransfer) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ModelDeploymentKVTransfer) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	i -= len(m.Protocol)
+	copy(dAtA[i:], m.Protocol)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Protocol)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
 func (m *ModelDeploymentList) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -5291,6 +5398,37 @@ func (m *ModelDeploymentModel) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
+func (m *ModelDeploymentPort) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ModelDeploymentPort) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ModelDeploymentPort) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	i -= len(m.Protocol)
+	copy(dAtA[i:], m.Protocol)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Protocol)))
+	i--
+	dAtA[i] = 0x12
+	i = encodeVarintGenerated(dAtA, i, uint64(m.Port))
+	i--
+	dAtA[i] = 0x8
+	return len(dAtA) - i, nil
+}
+
 func (m *ModelDeploymentRole) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -5311,23 +5449,80 @@ func (m *ModelDeploymentRole) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if len(m.Command) > 0 {
+		for iNdEx := len(m.Command) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.Command[iNdEx])
+			copy(dAtA[i:], m.Command[iNdEx])
+			i = encodeVarintGenerated(dAtA, i, uint64(len(m.Command[iNdEx])))
+			i--
+			dAtA[i] = 0x72
+		}
+	}
+	if len(m.AdditionalVolumes) > 0 {
+		for iNdEx := len(m.AdditionalVolumes) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.AdditionalVolumes[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x6a
+		}
+	}
+	if len(m.Ports) > 0 {
+		for iNdEx := len(m.Ports) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.Ports[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x62
+		}
+	}
+	i--
+	if m.Privileged {
+		dAtA[i] = 1
+	} else {
+		dAtA[i] = 0
+	}
+	i--
+	dAtA[i] = 0x58
+	if len(m.ImagePullSecrets) > 0 {
+		for iNdEx := len(m.ImagePullSecrets) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.ImagePullSecrets[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x52
+		}
+	}
+	i -= len(m.ImagePullPolicy)
+	copy(dAtA[i:], m.ImagePullPolicy)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.ImagePullPolicy)))
+	i--
+	dAtA[i] = 0x4a
 	i -= len(m.Kind)
 	copy(dAtA[i:], m.Kind)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Kind)))
 	i--
 	dAtA[i] = 0x42
-	if m.Template != nil {
-		{
-			size, err := m.Template.MarshalToSizedBuffer(dAtA[:i])
-			if err != nil {
-				return 0, err
-			}
-			i -= size
-			i = encodeVarintGenerated(dAtA, i, uint64(size))
-		}
-		i--
-		dAtA[i] = 0x3a
-	}
+	i -= len(m.Image)
+	copy(dAtA[i:], m.Image)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Image)))
+	i--
+	dAtA[i] = 0x3a
 	if len(m.Env) > 0 {
 		for iNdEx := len(m.Env) - 1; iNdEx >= 0; iNdEx-- {
 			{
@@ -5499,6 +5694,25 @@ func (m *ModelDeploymentRouter) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if len(m.ImagePullSecrets) > 0 {
+		for iNdEx := len(m.ImagePullSecrets) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.ImagePullSecrets[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x32
+		}
+	}
+	i -= len(m.ImagePullPolicy)
+	copy(dAtA[i:], m.ImagePullPolicy)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.ImagePullPolicy)))
+	i--
+	dAtA[i] = 0x2a
 	if len(m.ExtraArgs) > 0 {
 		for iNdEx := len(m.ExtraArgs) - 1; iNdEx >= 0; iNdEx-- {
 			i -= len(m.ExtraArgs[iNdEx])
@@ -5763,9 +5977,9 @@ func (m *ModelDeploymentSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if m.DirectTransfer != nil {
+	if m.KVTransfer != nil {
 		{
-			size, err := m.DirectTransfer.MarshalToSizedBuffer(dAtA[:i])
+			size, err := m.KVTransfer.MarshalToSizedBuffer(dAtA[:i])
 			if err != nil {
 				return 0, err
 			}
@@ -5773,7 +5987,7 @@ func (m *ModelDeploymentSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 			i = encodeVarintGenerated(dAtA, i, uint64(size))
 		}
 		i--
-		dAtA[i] = 0x3a
+		dAtA[i] = 0x32
 	}
 	if m.Router != nil {
 		{
@@ -5785,13 +5999,8 @@ func (m *ModelDeploymentSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 			i = encodeVarintGenerated(dAtA, i, uint64(size))
 		}
 		i--
-		dAtA[i] = 0x32
+		dAtA[i] = 0x2a
 	}
-	i -= len(m.EngineVersion)
-	copy(dAtA[i:], m.EngineVersion)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.EngineVersion)))
-	i--
-	dAtA[i] = 0x2a
 	if len(m.Roles) > 0 {
 		for iNdEx := len(m.Roles) - 1; iNdEx >= 0; iNdEx-- {
 			{
@@ -5818,9 +6027,14 @@ func (m *ModelDeploymentSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x1a
 	}
-	i -= len(m.Engine)
-	copy(dAtA[i:], m.Engine)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Engine)))
+	{
+		size, err := m.Engine.MarshalToSizedBuffer(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = encodeVarintGenerated(dAtA, i, uint64(size))
+	}
 	i--
 	dAtA[i] = 0x12
 	{
@@ -5921,122 +6135,6 @@ func (m *ModelDeploymentStatus) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	i -= len(m.Phase)
 	copy(dAtA[i:], m.Phase)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Phase)))
-	i--
-	dAtA[i] = 0xa
-	return len(dAtA) - i, nil
-}
-
-func (m *ModelDeploymentTemplate) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBuffer(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *ModelDeploymentTemplate) MarshalTo(dAtA []byte) (int, error) {
-	size := m.Size()
-	return m.MarshalToSizedBuffer(dAtA[:size])
-}
-
-func (m *ModelDeploymentTemplate) MarshalToSizedBuffer(dAtA []byte) (int, error) {
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
-	if len(m.AdditionalVolumes) > 0 {
-		for iNdEx := len(m.AdditionalVolumes) - 1; iNdEx >= 0; iNdEx-- {
-			{
-				size, err := m.AdditionalVolumes[iNdEx].MarshalToSizedBuffer(dAtA[:i])
-				if err != nil {
-					return 0, err
-				}
-				i -= size
-				i = encodeVarintGenerated(dAtA, i, uint64(size))
-			}
-			i--
-			dAtA[i] = 0x4a
-		}
-	}
-	if m.ImagePullSecret != nil {
-		{
-			size, err := m.ImagePullSecret.MarshalToSizedBuffer(dAtA[:i])
-			if err != nil {
-				return 0, err
-			}
-			i -= size
-			i = encodeVarintGenerated(dAtA, i, uint64(size))
-		}
-		i--
-		dAtA[i] = 0x42
-	}
-	if m.Resources != nil {
-		{
-			size, err := m.Resources.MarshalToSizedBuffer(dAtA[:i])
-			if err != nil {
-				return 0, err
-			}
-			i -= size
-			i = encodeVarintGenerated(dAtA, i, uint64(size))
-		}
-		i--
-		dAtA[i] = 0x3a
-	}
-	if len(m.Env) > 0 {
-		for iNdEx := len(m.Env) - 1; iNdEx >= 0; iNdEx-- {
-			{
-				size, err := m.Env[iNdEx].MarshalToSizedBuffer(dAtA[:i])
-				if err != nil {
-					return 0, err
-				}
-				i -= size
-				i = encodeVarintGenerated(dAtA, i, uint64(size))
-			}
-			i--
-			dAtA[i] = 0x32
-		}
-	}
-	if len(m.Ports) > 0 {
-		for iNdEx := len(m.Ports) - 1; iNdEx >= 0; iNdEx-- {
-			{
-				size, err := m.Ports[iNdEx].MarshalToSizedBuffer(dAtA[:i])
-				if err != nil {
-					return 0, err
-				}
-				i -= size
-				i = encodeVarintGenerated(dAtA, i, uint64(size))
-			}
-			i--
-			dAtA[i] = 0x2a
-		}
-	}
-	i--
-	if m.Privileged {
-		dAtA[i] = 1
-	} else {
-		dAtA[i] = 0
-	}
-	i--
-	dAtA[i] = 0x20
-	if len(m.Command) > 0 {
-		for iNdEx := len(m.Command) - 1; iNdEx >= 0; iNdEx-- {
-			i -= len(m.Command[iNdEx])
-			copy(dAtA[i:], m.Command[iNdEx])
-			i = encodeVarintGenerated(dAtA, i, uint64(len(m.Command[iNdEx])))
-			i--
-			dAtA[i] = 0x1a
-		}
-	}
-	i -= len(m.ImagePullPolicy)
-	copy(dAtA[i:], m.ImagePullPolicy)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.ImagePullPolicy)))
-	i--
-	dAtA[i] = 0x12
-	i -= len(m.Image)
-	copy(dAtA[i:], m.Image)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Image)))
 	i--
 	dAtA[i] = 0xa
 	return len(dAtA) - i, nil
@@ -7141,24 +7239,24 @@ func (m *KVCacheBackendLeader) Size() (n int) {
 	if m.Replicas != nil {
 		n += 1 + sovGenerated(uint64(*m.Replicas))
 	}
-	l = len(m.AllocationStrategy)
-	n += 1 + l + sovGenerated(uint64(l))
-	if len(m.ExtraArgs) > 0 {
-		for k, v := range m.ExtraArgs {
-			_ = k
-			_ = v
-			mapEntrySize := 1 + len(k) + sovGenerated(uint64(len(k))) + 1 + len(v) + sovGenerated(uint64(len(v)))
-			n += mapEntrySize + 1 + sovGenerated(uint64(mapEntrySize))
-		}
-	}
-	n += 2
-	if m.Offload != nil {
-		l = m.Offload.Size()
-		n += 1 + l + sovGenerated(uint64(l))
-	}
 	if m.HighAvailability != nil {
 		l = m.HighAvailability.Size()
 		n += 1 + l + sovGenerated(uint64(l))
+	}
+	l = len(m.AllocationStrategy)
+	n += 1 + l + sovGenerated(uint64(l))
+	n += 2
+	if len(m.ExtraArgs) > 0 {
+		for _, s := range m.ExtraArgs {
+			l = len(s)
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
+	if len(m.ExtraEnv) > 0 {
+		for _, e := range m.ExtraEnv {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
+		}
 	}
 	return n
 }
@@ -7175,17 +7273,6 @@ func (m *KVCacheBackendLeaderHighAvailability) Size() (n int) {
 	}
 	l = len(m.MemberAddressing)
 	n += 1 + l + sovGenerated(uint64(l))
-	return n
-}
-
-func (m *KVCacheBackendLeaderOffload) Size() (n int) {
-	if m == nil {
-		return 0
-	}
-	var l int
-	_ = l
-	n += 2
-	n += 2
 	return n
 }
 
@@ -7265,25 +7352,23 @@ func (m *KVCacheBackendMember) Size() (n int) {
 	l = m.LocalBufferSize.Size()
 	n += 1 + l + sovGenerated(uint64(l))
 	if len(m.ExtraArgs) > 0 {
-		for k, v := range m.ExtraArgs {
-			_ = k
-			_ = v
-			mapEntrySize := 1 + len(k) + sovGenerated(uint64(len(k))) + 1 + len(v) + sovGenerated(uint64(len(v)))
-			n += mapEntrySize + 1 + sovGenerated(uint64(mapEntrySize))
+		for _, s := range m.ExtraArgs {
+			l = len(s)
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
+	if len(m.ExtraEnv) > 0 {
+		for _, e := range m.ExtraEnv {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
 	l = len(m.Image)
 	n += 1 + l + sovGenerated(uint64(l))
-	if m.LocalDisk != nil {
-		l = m.LocalDisk.Size()
-		n += 1 + l + sovGenerated(uint64(l))
-	}
-	if len(m.ExtraEnvs) > 0 {
-		for k, v := range m.ExtraEnvs {
-			_ = k
-			_ = v
-			mapEntrySize := 1 + len(k) + sovGenerated(uint64(len(k))) + 1 + len(v) + sovGenerated(uint64(len(v)))
-			n += mapEntrySize + 1 + sovGenerated(uint64(mapEntrySize))
+	if len(m.LocalDisks) > 0 {
+		for _, e := range m.LocalDisks {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
 	if m.Transport != nil {
@@ -7581,6 +7666,17 @@ func (m *KVCachePoolBindingPoolReference) Size() (n int) {
 	return n
 }
 
+func (m *KVCachePoolBindingQuota) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = m.Ceiling.Size()
+	n += 1 + l + sovGenerated(uint64(l))
+	return n
+}
+
 func (m *KVCachePoolBindingReference) Size() (n int) {
 	if m == nil {
 		return 0
@@ -7604,7 +7700,7 @@ func (m *KVCachePoolBindingSpec) Size() (n int) {
 	n += 1 + l + sovGenerated(uint64(l))
 	l = m.Domain.Size()
 	n += 1 + l + sovGenerated(uint64(l))
-	l = m.QuotaCeiling.Size()
+	l = m.Quota.Size()
 	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
@@ -7785,13 +7881,54 @@ func (m *ModelDeployment) Size() (n int) {
 	return n
 }
 
-func (m *ModelDeploymentDirectTransfer) Size() (n int) {
+func (m *ModelDeploymentAdditionalVolume) Size() (n int) {
 	if m == nil {
 		return 0
 	}
 	var l int
 	_ = l
-	l = len(m.Protocol)
+	l = len(m.MountPath)
+	n += 1 + l + sovGenerated(uint64(l))
+	n += 2
+	l = len(m.SubPath)
+	n += 1 + l + sovGenerated(uint64(l))
+	if m.ConfigMap != nil {
+		l = m.ConfigMap.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
+	if m.Secret != nil {
+		l = m.Secret.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
+	if m.HostPath != nil {
+		l = m.HostPath.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
+	return n
+}
+
+func (m *ModelDeploymentEngine) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Name)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.Version)
+	n += 1 + l + sovGenerated(uint64(l))
+	return n
+}
+
+func (m *ModelDeploymentEnvVar) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Name)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.Value)
 	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
@@ -7838,6 +7975,17 @@ func (m *ModelDeploymentKVCacheStatus) Size() (n int) {
 	return n
 }
 
+func (m *ModelDeploymentKVTransfer) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Protocol)
+	n += 1 + l + sovGenerated(uint64(l))
+	return n
+}
+
 func (m *ModelDeploymentList) Size() (n int) {
 	if m == nil {
 		return 0
@@ -7862,6 +8010,18 @@ func (m *ModelDeploymentModel) Size() (n int) {
 	var l int
 	_ = l
 	l = len(m.Name)
+	n += 1 + l + sovGenerated(uint64(l))
+	return n
+}
+
+func (m *ModelDeploymentPort) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += 1 + sovGenerated(uint64(m.Port))
+	l = len(m.Protocol)
 	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
@@ -7893,12 +8053,37 @@ func (m *ModelDeploymentRole) Size() (n int) {
 			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
-	if m.Template != nil {
-		l = m.Template.Size()
-		n += 1 + l + sovGenerated(uint64(l))
-	}
+	l = len(m.Image)
+	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.Kind)
 	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.ImagePullPolicy)
+	n += 1 + l + sovGenerated(uint64(l))
+	if len(m.ImagePullSecrets) > 0 {
+		for _, e := range m.ImagePullSecrets {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
+	n += 2
+	if len(m.Ports) > 0 {
+		for _, e := range m.Ports {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
+	if len(m.AdditionalVolumes) > 0 {
+		for _, e := range m.AdditionalVolumes {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
+	if len(m.Command) > 0 {
+		for _, s := range m.Command {
+			l = len(s)
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
 	return n
 }
 
@@ -7955,6 +8140,14 @@ func (m *ModelDeploymentRouter) Size() (n int) {
 	if len(m.ExtraArgs) > 0 {
 		for _, s := range m.ExtraArgs {
 			l = len(s)
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
+	l = len(m.ImagePullPolicy)
+	n += 1 + l + sovGenerated(uint64(l))
+	if len(m.ImagePullSecrets) > 0 {
+		for _, e := range m.ImagePullSecrets {
+			l = e.Size()
 			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
@@ -8052,7 +8245,7 @@ func (m *ModelDeploymentSpec) Size() (n int) {
 	_ = l
 	l = m.Model.Size()
 	n += 1 + l + sovGenerated(uint64(l))
-	l = len(m.Engine)
+	l = m.Engine.Size()
 	n += 1 + l + sovGenerated(uint64(l))
 	if m.KVCache != nil {
 		l = m.KVCache.Size()
@@ -8064,14 +8257,12 @@ func (m *ModelDeploymentSpec) Size() (n int) {
 			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
-	l = len(m.EngineVersion)
-	n += 1 + l + sovGenerated(uint64(l))
 	if m.Router != nil {
 		l = m.Router.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
-	if m.DirectTransfer != nil {
-		l = m.DirectTransfer.Size()
+	if m.KVTransfer != nil {
+		l = m.KVTransfer.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
 	return n
@@ -8108,52 +8299,6 @@ func (m *ModelDeploymentStatus) Size() (n int) {
 	if m.Router != nil {
 		l = m.Router.Size()
 		n += 1 + l + sovGenerated(uint64(l))
-	}
-	return n
-}
-
-func (m *ModelDeploymentTemplate) Size() (n int) {
-	if m == nil {
-		return 0
-	}
-	var l int
-	_ = l
-	l = len(m.Image)
-	n += 1 + l + sovGenerated(uint64(l))
-	l = len(m.ImagePullPolicy)
-	n += 1 + l + sovGenerated(uint64(l))
-	if len(m.Command) > 0 {
-		for _, s := range m.Command {
-			l = len(s)
-			n += 1 + l + sovGenerated(uint64(l))
-		}
-	}
-	n += 2
-	if len(m.Ports) > 0 {
-		for _, e := range m.Ports {
-			l = e.Size()
-			n += 1 + l + sovGenerated(uint64(l))
-		}
-	}
-	if len(m.Env) > 0 {
-		for _, e := range m.Env {
-			l = e.Size()
-			n += 1 + l + sovGenerated(uint64(l))
-		}
-	}
-	if m.Resources != nil {
-		l = m.Resources.Size()
-		n += 1 + l + sovGenerated(uint64(l))
-	}
-	if m.ImagePullSecret != nil {
-		l = m.ImagePullSecret.Size()
-		n += 1 + l + sovGenerated(uint64(l))
-	}
-	if len(m.AdditionalVolumes) > 0 {
-		for _, e := range m.AdditionalVolumes {
-			l = e.Size()
-			n += 1 + l + sovGenerated(uint64(l))
-		}
 	}
 	return n
 }
@@ -9012,23 +9157,18 @@ func (this *KVCacheBackendLeader) String() string {
 	if this == nil {
 		return "nil"
 	}
-	keysForExtraArgs := make([]string, 0, len(this.ExtraArgs))
-	for k := range this.ExtraArgs {
-		keysForExtraArgs = append(keysForExtraArgs, k)
+	repeatedStringForExtraEnv := "[]InstanceEnvVar{"
+	for _, f := range this.ExtraEnv {
+		repeatedStringForExtraEnv += strings.Replace(strings.Replace(f.String(), "InstanceEnvVar", "InstanceEnvVar", 1), `&`, ``, 1) + ","
 	}
-	sort.Strings(keysForExtraArgs)
-	mapStringForExtraArgs := "map[string]string{"
-	for _, k := range keysForExtraArgs {
-		mapStringForExtraArgs += fmt.Sprintf("%v: %v,", k, this.ExtraArgs[k])
-	}
-	mapStringForExtraArgs += "}"
+	repeatedStringForExtraEnv += "}"
 	s := strings.Join([]string{`&KVCacheBackendLeader{`,
 		`Replicas:` + valueToStringGenerated(this.Replicas) + `,`,
-		`AllocationStrategy:` + fmt.Sprintf("%v", this.AllocationStrategy) + `,`,
-		`ExtraArgs:` + mapStringForExtraArgs + `,`,
-		`MultiTenancy:` + fmt.Sprintf("%v", this.MultiTenancy) + `,`,
-		`Offload:` + strings.Replace(this.Offload.String(), "KVCacheBackendLeaderOffload", "KVCacheBackendLeaderOffload", 1) + `,`,
 		`HighAvailability:` + strings.Replace(this.HighAvailability.String(), "KVCacheBackendLeaderHighAvailability", "KVCacheBackendLeaderHighAvailability", 1) + `,`,
+		`AllocationStrategy:` + fmt.Sprintf("%v", this.AllocationStrategy) + `,`,
+		`MultiTenancy:` + fmt.Sprintf("%v", this.MultiTenancy) + `,`,
+		`ExtraArgs:` + fmt.Sprintf("%v", this.ExtraArgs) + `,`,
+		`ExtraEnv:` + repeatedStringForExtraEnv + `,`,
 		`}`,
 	}, "")
 	return s
@@ -9040,17 +9180,6 @@ func (this *KVCacheBackendLeaderHighAvailability) String() string {
 	s := strings.Join([]string{`&KVCacheBackendLeaderHighAvailability{`,
 		`Snapshot:` + strings.Replace(this.Snapshot.String(), "KVCacheBackendLeaderSnapshot", "KVCacheBackendLeaderSnapshot", 1) + `,`,
 		`MemberAddressing:` + fmt.Sprintf("%v", this.MemberAddressing) + `,`,
-		`}`,
-	}, "")
-	return s
-}
-func (this *KVCacheBackendLeaderOffload) String() string {
-	if this == nil {
-		return "nil"
-	}
-	s := strings.Join([]string{`&KVCacheBackendLeaderOffload{`,
-		`Enabled:` + fmt.Sprintf("%v", this.Enabled) + `,`,
-		`OnEvict:` + fmt.Sprintf("%v", this.OnEvict) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -9104,6 +9233,16 @@ func (this *KVCacheBackendMember) String() string {
 	if this == nil {
 		return "nil"
 	}
+	repeatedStringForExtraEnv := "[]InstanceEnvVar{"
+	for _, f := range this.ExtraEnv {
+		repeatedStringForExtraEnv += strings.Replace(strings.Replace(f.String(), "InstanceEnvVar", "InstanceEnvVar", 1), `&`, ``, 1) + ","
+	}
+	repeatedStringForExtraEnv += "}"
+	repeatedStringForLocalDisks := "[]KVCacheBackendMemberLocalDisk{"
+	for _, f := range this.LocalDisks {
+		repeatedStringForLocalDisks += strings.Replace(strings.Replace(f.String(), "KVCacheBackendMemberLocalDisk", "KVCacheBackendMemberLocalDisk", 1), `&`, ``, 1) + ","
+	}
+	repeatedStringForLocalDisks += "}"
 	repeatedStringForHostPaths := "[]KVCacheBackendMemberHostPath{"
 	for _, f := range this.HostPaths {
 		repeatedStringForHostPaths += strings.Replace(strings.Replace(f.String(), "KVCacheBackendMemberHostPath", "KVCacheBackendMemberHostPath", 1), `&`, ``, 1) + ","
@@ -9119,35 +9258,15 @@ func (this *KVCacheBackendMember) String() string {
 		mapStringForNodeSelector += fmt.Sprintf("%v: %v,", k, this.NodeSelector[k])
 	}
 	mapStringForNodeSelector += "}"
-	keysForExtraArgs := make([]string, 0, len(this.ExtraArgs))
-	for k := range this.ExtraArgs {
-		keysForExtraArgs = append(keysForExtraArgs, k)
-	}
-	sort.Strings(keysForExtraArgs)
-	mapStringForExtraArgs := "map[string]string{"
-	for _, k := range keysForExtraArgs {
-		mapStringForExtraArgs += fmt.Sprintf("%v: %v,", k, this.ExtraArgs[k])
-	}
-	mapStringForExtraArgs += "}"
-	keysForExtraEnvs := make([]string, 0, len(this.ExtraEnvs))
-	for k := range this.ExtraEnvs {
-		keysForExtraEnvs = append(keysForExtraEnvs, k)
-	}
-	sort.Strings(keysForExtraEnvs)
-	mapStringForExtraEnvs := "map[string]string{"
-	for _, k := range keysForExtraEnvs {
-		mapStringForExtraEnvs += fmt.Sprintf("%v: %v,", k, this.ExtraEnvs[k])
-	}
-	mapStringForExtraEnvs += "}"
 	s := strings.Join([]string{`&KVCacheBackendMember{`,
 		`NodeSelector:` + mapStringForNodeSelector + `,`,
 		`Medium:` + fmt.Sprintf("%v", this.Medium) + `,`,
 		`CapacityPerMember:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.CapacityPerMember), "Quantity", "resource.Quantity", 1), `&`, ``, 1) + `,`,
 		`LocalBufferSize:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.LocalBufferSize), "Quantity", "resource.Quantity", 1), `&`, ``, 1) + `,`,
-		`ExtraArgs:` + mapStringForExtraArgs + `,`,
+		`ExtraArgs:` + fmt.Sprintf("%v", this.ExtraArgs) + `,`,
+		`ExtraEnv:` + repeatedStringForExtraEnv + `,`,
 		`Image:` + fmt.Sprintf("%v", this.Image) + `,`,
-		`LocalDisk:` + strings.Replace(this.LocalDisk.String(), "KVCacheBackendMemberLocalDisk", "KVCacheBackendMemberLocalDisk", 1) + `,`,
-		`ExtraEnvs:` + mapStringForExtraEnvs + `,`,
+		`LocalDisks:` + repeatedStringForLocalDisks + `,`,
 		`Transport:` + strings.Replace(this.Transport.String(), "KVCacheBackendMemberTransport", "KVCacheBackendMemberTransport", 1) + `,`,
 		`SecurityContext:` + strings.Replace(fmt.Sprintf("%v", this.SecurityContext), "SecurityContext", "v11.SecurityContext", 1) + `,`,
 		`HostPaths:` + repeatedStringForHostPaths + `,`,
@@ -9383,6 +9502,16 @@ func (this *KVCachePoolBindingPoolReference) String() string {
 	}, "")
 	return s
 }
+func (this *KVCachePoolBindingQuota) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&KVCachePoolBindingQuota{`,
+		`Ceiling:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.Ceiling), "Quantity", "resource.Quantity", 1), `&`, ``, 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
 func (this *KVCachePoolBindingReference) String() string {
 	if this == nil {
 		return "nil"
@@ -9401,7 +9530,7 @@ func (this *KVCachePoolBindingSpec) String() string {
 	s := strings.Join([]string{`&KVCachePoolBindingSpec{`,
 		`PoolRef:` + strings.Replace(strings.Replace(this.PoolRef.String(), "KVCachePoolBindingPoolReference", "KVCachePoolBindingPoolReference", 1), `&`, ``, 1) + `,`,
 		`Domain:` + strings.Replace(strings.Replace(this.Domain.String(), "KVCachePoolBindingDomain", "KVCachePoolBindingDomain", 1), `&`, ``, 1) + `,`,
-		`QuotaCeiling:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.QuotaCeiling), "Quantity", "resource.Quantity", 1), `&`, ``, 1) + `,`,
+		`Quota:` + strings.Replace(strings.Replace(this.Quota.String(), "KVCachePoolBindingQuota", "KVCachePoolBindingQuota", 1), `&`, ``, 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -9540,12 +9669,39 @@ func (this *ModelDeployment) String() string {
 	}, "")
 	return s
 }
-func (this *ModelDeploymentDirectTransfer) String() string {
+func (this *ModelDeploymentAdditionalVolume) String() string {
 	if this == nil {
 		return "nil"
 	}
-	s := strings.Join([]string{`&ModelDeploymentDirectTransfer{`,
-		`Protocol:` + fmt.Sprintf("%v", this.Protocol) + `,`,
+	s := strings.Join([]string{`&ModelDeploymentAdditionalVolume{`,
+		`MountPath:` + fmt.Sprintf("%v", this.MountPath) + `,`,
+		`ReadOnly:` + fmt.Sprintf("%v", this.ReadOnly) + `,`,
+		`SubPath:` + fmt.Sprintf("%v", this.SubPath) + `,`,
+		`ConfigMap:` + strings.Replace(fmt.Sprintf("%v", this.ConfigMap), "LocalObjectReference", "v11.LocalObjectReference", 1) + `,`,
+		`Secret:` + strings.Replace(fmt.Sprintf("%v", this.Secret), "LocalObjectReference", "v11.LocalObjectReference", 1) + `,`,
+		`HostPath:` + strings.Replace(fmt.Sprintf("%v", this.HostPath), "HostPathVolumeSource", "v11.HostPathVolumeSource", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *ModelDeploymentEngine) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ModelDeploymentEngine{`,
+		`Name:` + fmt.Sprintf("%v", this.Name) + `,`,
+		`Version:` + fmt.Sprintf("%v", this.Version) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *ModelDeploymentEnvVar) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ModelDeploymentEnvVar{`,
+		`Name:` + fmt.Sprintf("%v", this.Name) + `,`,
+		`Value:` + fmt.Sprintf("%v", this.Value) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -9585,6 +9741,16 @@ func (this *ModelDeploymentKVCacheStatus) String() string {
 	}, "")
 	return s
 }
+func (this *ModelDeploymentKVTransfer) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ModelDeploymentKVTransfer{`,
+		`Protocol:` + fmt.Sprintf("%v", this.Protocol) + `,`,
+		`}`,
+	}, "")
+	return s
+}
 func (this *ModelDeploymentList) String() string {
 	if this == nil {
 		return "nil"
@@ -9611,15 +9777,41 @@ func (this *ModelDeploymentModel) String() string {
 	}, "")
 	return s
 }
+func (this *ModelDeploymentPort) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ModelDeploymentPort{`,
+		`Port:` + fmt.Sprintf("%v", this.Port) + `,`,
+		`Protocol:` + fmt.Sprintf("%v", this.Protocol) + `,`,
+		`}`,
+	}, "")
+	return s
+}
 func (this *ModelDeploymentRole) String() string {
 	if this == nil {
 		return "nil"
 	}
-	repeatedStringForEnv := "[]InstanceEnvVar{"
+	repeatedStringForEnv := "[]ModelDeploymentEnvVar{"
 	for _, f := range this.Env {
-		repeatedStringForEnv += strings.Replace(strings.Replace(f.String(), "InstanceEnvVar", "InstanceEnvVar", 1), `&`, ``, 1) + ","
+		repeatedStringForEnv += strings.Replace(strings.Replace(f.String(), "ModelDeploymentEnvVar", "ModelDeploymentEnvVar", 1), `&`, ``, 1) + ","
 	}
 	repeatedStringForEnv += "}"
+	repeatedStringForImagePullSecrets := "[]LocalObjectReference{"
+	for _, f := range this.ImagePullSecrets {
+		repeatedStringForImagePullSecrets += fmt.Sprintf("%v", f) + ","
+	}
+	repeatedStringForImagePullSecrets += "}"
+	repeatedStringForPorts := "[]ModelDeploymentPort{"
+	for _, f := range this.Ports {
+		repeatedStringForPorts += strings.Replace(strings.Replace(f.String(), "ModelDeploymentPort", "ModelDeploymentPort", 1), `&`, ``, 1) + ","
+	}
+	repeatedStringForPorts += "}"
+	repeatedStringForAdditionalVolumes := "[]ModelDeploymentAdditionalVolume{"
+	for _, f := range this.AdditionalVolumes {
+		repeatedStringForAdditionalVolumes += strings.Replace(strings.Replace(f.String(), "ModelDeploymentAdditionalVolume", "ModelDeploymentAdditionalVolume", 1), `&`, ``, 1) + ","
+	}
+	repeatedStringForAdditionalVolumes += "}"
 	s := strings.Join([]string{`&ModelDeploymentRole{`,
 		`Name:` + fmt.Sprintf("%v", this.Name) + `,`,
 		`Replicas:` + fmt.Sprintf("%v", this.Replicas) + `,`,
@@ -9627,8 +9819,14 @@ func (this *ModelDeploymentRole) String() string {
 		`Resources:` + strings.Replace(this.Resources.String(), "ModelDeploymentRoleResources", "ModelDeploymentRoleResources", 1) + `,`,
 		`ExtraArgs:` + fmt.Sprintf("%v", this.ExtraArgs) + `,`,
 		`Env:` + repeatedStringForEnv + `,`,
-		`Template:` + strings.Replace(this.Template.String(), "ModelDeploymentTemplate", "ModelDeploymentTemplate", 1) + `,`,
+		`Image:` + fmt.Sprintf("%v", this.Image) + `,`,
 		`Kind:` + fmt.Sprintf("%v", this.Kind) + `,`,
+		`ImagePullPolicy:` + fmt.Sprintf("%v", this.ImagePullPolicy) + `,`,
+		`ImagePullSecrets:` + repeatedStringForImagePullSecrets + `,`,
+		`Privileged:` + fmt.Sprintf("%v", this.Privileged) + `,`,
+		`Ports:` + repeatedStringForPorts + `,`,
+		`AdditionalVolumes:` + repeatedStringForAdditionalVolumes + `,`,
+		`Command:` + fmt.Sprintf("%v", this.Command) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -9665,11 +9863,18 @@ func (this *ModelDeploymentRouter) String() string {
 	if this == nil {
 		return "nil"
 	}
+	repeatedStringForImagePullSecrets := "[]LocalObjectReference{"
+	for _, f := range this.ImagePullSecrets {
+		repeatedStringForImagePullSecrets += fmt.Sprintf("%v", f) + ","
+	}
+	repeatedStringForImagePullSecrets += "}"
 	s := strings.Join([]string{`&ModelDeploymentRouter{`,
 		`Name:` + fmt.Sprintf("%v", this.Name) + `,`,
 		`Replicas:` + valueToStringGenerated(this.Replicas) + `,`,
 		`Image:` + fmt.Sprintf("%v", this.Image) + `,`,
 		`ExtraArgs:` + fmt.Sprintf("%v", this.ExtraArgs) + `,`,
+		`ImagePullPolicy:` + fmt.Sprintf("%v", this.ImagePullPolicy) + `,`,
+		`ImagePullSecrets:` + repeatedStringForImagePullSecrets + `,`,
 		`}`,
 	}, "")
 	return s
@@ -9753,12 +9958,11 @@ func (this *ModelDeploymentSpec) String() string {
 	repeatedStringForRoles += "}"
 	s := strings.Join([]string{`&ModelDeploymentSpec{`,
 		`Model:` + strings.Replace(strings.Replace(this.Model.String(), "ModelDeploymentModel", "ModelDeploymentModel", 1), `&`, ``, 1) + `,`,
-		`Engine:` + fmt.Sprintf("%v", this.Engine) + `,`,
+		`Engine:` + strings.Replace(strings.Replace(this.Engine.String(), "ModelDeploymentEngine", "ModelDeploymentEngine", 1), `&`, ``, 1) + `,`,
 		`KVCache:` + strings.Replace(this.KVCache.String(), "ModelDeploymentKVCache", "ModelDeploymentKVCache", 1) + `,`,
 		`Roles:` + repeatedStringForRoles + `,`,
-		`EngineVersion:` + fmt.Sprintf("%v", this.EngineVersion) + `,`,
 		`Router:` + strings.Replace(this.Router.String(), "ModelDeploymentRouter", "ModelDeploymentRouter", 1) + `,`,
-		`DirectTransfer:` + strings.Replace(this.DirectTransfer.String(), "ModelDeploymentDirectTransfer", "ModelDeploymentDirectTransfer", 1) + `,`,
+		`KVTransfer:` + strings.Replace(this.KVTransfer.String(), "ModelDeploymentKVTransfer", "ModelDeploymentKVTransfer", 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -9785,39 +9989,6 @@ func (this *ModelDeploymentStatus) String() string {
 		`Roles:` + repeatedStringForRoles + `,`,
 		`KVCache:` + strings.Replace(this.KVCache.String(), "ModelDeploymentKVCacheStatus", "ModelDeploymentKVCacheStatus", 1) + `,`,
 		`Router:` + strings.Replace(this.Router.String(), "ModelDeploymentRouterStatus", "ModelDeploymentRouterStatus", 1) + `,`,
-		`}`,
-	}, "")
-	return s
-}
-func (this *ModelDeploymentTemplate) String() string {
-	if this == nil {
-		return "nil"
-	}
-	repeatedStringForPorts := "[]InstancePort{"
-	for _, f := range this.Ports {
-		repeatedStringForPorts += strings.Replace(strings.Replace(f.String(), "InstancePort", "InstancePort", 1), `&`, ``, 1) + ","
-	}
-	repeatedStringForPorts += "}"
-	repeatedStringForEnv := "[]InstanceEnvVar{"
-	for _, f := range this.Env {
-		repeatedStringForEnv += strings.Replace(strings.Replace(f.String(), "InstanceEnvVar", "InstanceEnvVar", 1), `&`, ``, 1) + ","
-	}
-	repeatedStringForEnv += "}"
-	repeatedStringForAdditionalVolumes := "[]InstanceAdditionalVolume{"
-	for _, f := range this.AdditionalVolumes {
-		repeatedStringForAdditionalVolumes += strings.Replace(strings.Replace(f.String(), "InstanceAdditionalVolume", "InstanceAdditionalVolume", 1), `&`, ``, 1) + ","
-	}
-	repeatedStringForAdditionalVolumes += "}"
-	s := strings.Join([]string{`&ModelDeploymentTemplate{`,
-		`Image:` + fmt.Sprintf("%v", this.Image) + `,`,
-		`ImagePullPolicy:` + fmt.Sprintf("%v", this.ImagePullPolicy) + `,`,
-		`Command:` + fmt.Sprintf("%v", this.Command) + `,`,
-		`Privileged:` + fmt.Sprintf("%v", this.Privileged) + `,`,
-		`Ports:` + repeatedStringForPorts + `,`,
-		`Env:` + repeatedStringForEnv + `,`,
-		`Resources:` + strings.Replace(this.Resources.String(), "InstanceResources", "InstanceResources", 1) + `,`,
-		`ImagePullSecret:` + strings.Replace(fmt.Sprintf("%v", this.ImagePullSecret), "LocalObjectReference", "v11.LocalObjectReference", 1) + `,`,
-		`AdditionalVolumes:` + repeatedStringForAdditionalVolumes + `,`,
 		`}`,
 	}, "")
 	return s
@@ -19814,221 +19985,6 @@ func (m *KVCacheBackendLeader) Unmarshal(dAtA []byte) error {
 			m.Replicas = &v
 		case 2:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AllocationStrategy", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.AllocationStrategy = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ExtraArgs", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			if m.ExtraArgs == nil {
-				m.ExtraArgs = make(map[string]string)
-			}
-			var mapkey string
-			var mapvalue string
-			for iNdEx < postIndex {
-				entryPreIndex := iNdEx
-				var wire uint64
-				for shift := uint(0); ; shift += 7 {
-					if shift >= 64 {
-						return ErrIntOverflowGenerated
-					}
-					if iNdEx >= l {
-						return io.ErrUnexpectedEOF
-					}
-					b := dAtA[iNdEx]
-					iNdEx++
-					wire |= uint64(b&0x7F) << shift
-					if b < 0x80 {
-						break
-					}
-				}
-				fieldNum := int32(wire >> 3)
-				if fieldNum == 1 {
-					var stringLenmapkey uint64
-					for shift := uint(0); ; shift += 7 {
-						if shift >= 64 {
-							return ErrIntOverflowGenerated
-						}
-						if iNdEx >= l {
-							return io.ErrUnexpectedEOF
-						}
-						b := dAtA[iNdEx]
-						iNdEx++
-						stringLenmapkey |= uint64(b&0x7F) << shift
-						if b < 0x80 {
-							break
-						}
-					}
-					intStringLenmapkey := int(stringLenmapkey)
-					if intStringLenmapkey < 0 {
-						return ErrInvalidLengthGenerated
-					}
-					postStringIndexmapkey := iNdEx + intStringLenmapkey
-					if postStringIndexmapkey < 0 {
-						return ErrInvalidLengthGenerated
-					}
-					if postStringIndexmapkey > l {
-						return io.ErrUnexpectedEOF
-					}
-					mapkey = string(dAtA[iNdEx:postStringIndexmapkey])
-					iNdEx = postStringIndexmapkey
-				} else if fieldNum == 2 {
-					var stringLenmapvalue uint64
-					for shift := uint(0); ; shift += 7 {
-						if shift >= 64 {
-							return ErrIntOverflowGenerated
-						}
-						if iNdEx >= l {
-							return io.ErrUnexpectedEOF
-						}
-						b := dAtA[iNdEx]
-						iNdEx++
-						stringLenmapvalue |= uint64(b&0x7F) << shift
-						if b < 0x80 {
-							break
-						}
-					}
-					intStringLenmapvalue := int(stringLenmapvalue)
-					if intStringLenmapvalue < 0 {
-						return ErrInvalidLengthGenerated
-					}
-					postStringIndexmapvalue := iNdEx + intStringLenmapvalue
-					if postStringIndexmapvalue < 0 {
-						return ErrInvalidLengthGenerated
-					}
-					if postStringIndexmapvalue > l {
-						return io.ErrUnexpectedEOF
-					}
-					mapvalue = string(dAtA[iNdEx:postStringIndexmapvalue])
-					iNdEx = postStringIndexmapvalue
-				} else {
-					iNdEx = entryPreIndex
-					skippy, err := skipGenerated(dAtA[iNdEx:])
-					if err != nil {
-						return err
-					}
-					if (skippy < 0) || (iNdEx+skippy) < 0 {
-						return ErrInvalidLengthGenerated
-					}
-					if (iNdEx + skippy) > postIndex {
-						return io.ErrUnexpectedEOF
-					}
-					iNdEx += skippy
-				}
-			}
-			m.ExtraArgs[mapkey] = mapvalue
-			iNdEx = postIndex
-		case 4:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field MultiTenancy", wireType)
-			}
-			var v int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				v |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			m.MultiTenancy = bool(v != 0)
-		case 5:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Offload", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			if m.Offload == nil {
-				m.Offload = &KVCacheBackendLeaderOffload{}
-			}
-			if err := m.Offload.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 6:
-			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field HighAvailability", wireType)
 			}
 			var msglen int
@@ -20060,6 +20016,124 @@ func (m *KVCacheBackendLeader) Unmarshal(dAtA []byte) error {
 				m.HighAvailability = &KVCacheBackendLeaderHighAvailability{}
 			}
 			if err := m.HighAvailability.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AllocationStrategy", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.AllocationStrategy = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MultiTenancy", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.MultiTenancy = bool(v != 0)
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtraArgs", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ExtraArgs = append(m.ExtraArgs, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtraEnv", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ExtraEnv = append(m.ExtraEnv, InstanceEnvVar{})
+			if err := m.ExtraEnv[len(m.ExtraEnv)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
@@ -20181,96 +20255,6 @@ func (m *KVCacheBackendLeaderHighAvailability) Unmarshal(dAtA []byte) error {
 			}
 			m.MemberAddressing = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipGenerated(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *KVCacheBackendLeaderOffload) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowGenerated
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= uint64(b&0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: KVCacheBackendLeaderOffload: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: KVCacheBackendLeaderOffload: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Enabled", wireType)
-			}
-			var v int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				v |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			m.Enabled = bool(v != 0)
-		case 2:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field OnEvict", wireType)
-			}
-			var v int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				v |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			m.OnEvict = bool(v != 0)
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -20942,6 +20926,38 @@ func (m *KVCacheBackendMember) Unmarshal(dAtA []byte) error {
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field ExtraArgs", wireType)
 			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ExtraArgs = append(m.ExtraArgs, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtraEnv", wireType)
+			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
@@ -20967,105 +20983,12 @@ func (m *KVCacheBackendMember) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			if m.ExtraArgs == nil {
-				m.ExtraArgs = make(map[string]string)
+			m.ExtraEnv = append(m.ExtraEnv, InstanceEnvVar{})
+			if err := m.ExtraEnv[len(m.ExtraEnv)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
 			}
-			var mapkey string
-			var mapvalue string
-			for iNdEx < postIndex {
-				entryPreIndex := iNdEx
-				var wire uint64
-				for shift := uint(0); ; shift += 7 {
-					if shift >= 64 {
-						return ErrIntOverflowGenerated
-					}
-					if iNdEx >= l {
-						return io.ErrUnexpectedEOF
-					}
-					b := dAtA[iNdEx]
-					iNdEx++
-					wire |= uint64(b&0x7F) << shift
-					if b < 0x80 {
-						break
-					}
-				}
-				fieldNum := int32(wire >> 3)
-				if fieldNum == 1 {
-					var stringLenmapkey uint64
-					for shift := uint(0); ; shift += 7 {
-						if shift >= 64 {
-							return ErrIntOverflowGenerated
-						}
-						if iNdEx >= l {
-							return io.ErrUnexpectedEOF
-						}
-						b := dAtA[iNdEx]
-						iNdEx++
-						stringLenmapkey |= uint64(b&0x7F) << shift
-						if b < 0x80 {
-							break
-						}
-					}
-					intStringLenmapkey := int(stringLenmapkey)
-					if intStringLenmapkey < 0 {
-						return ErrInvalidLengthGenerated
-					}
-					postStringIndexmapkey := iNdEx + intStringLenmapkey
-					if postStringIndexmapkey < 0 {
-						return ErrInvalidLengthGenerated
-					}
-					if postStringIndexmapkey > l {
-						return io.ErrUnexpectedEOF
-					}
-					mapkey = string(dAtA[iNdEx:postStringIndexmapkey])
-					iNdEx = postStringIndexmapkey
-				} else if fieldNum == 2 {
-					var stringLenmapvalue uint64
-					for shift := uint(0); ; shift += 7 {
-						if shift >= 64 {
-							return ErrIntOverflowGenerated
-						}
-						if iNdEx >= l {
-							return io.ErrUnexpectedEOF
-						}
-						b := dAtA[iNdEx]
-						iNdEx++
-						stringLenmapvalue |= uint64(b&0x7F) << shift
-						if b < 0x80 {
-							break
-						}
-					}
-					intStringLenmapvalue := int(stringLenmapvalue)
-					if intStringLenmapvalue < 0 {
-						return ErrInvalidLengthGenerated
-					}
-					postStringIndexmapvalue := iNdEx + intStringLenmapvalue
-					if postStringIndexmapvalue < 0 {
-						return ErrInvalidLengthGenerated
-					}
-					if postStringIndexmapvalue > l {
-						return io.ErrUnexpectedEOF
-					}
-					mapvalue = string(dAtA[iNdEx:postStringIndexmapvalue])
-					iNdEx = postStringIndexmapvalue
-				} else {
-					iNdEx = entryPreIndex
-					skippy, err := skipGenerated(dAtA[iNdEx:])
-					if err != nil {
-						return err
-					}
-					if (skippy < 0) || (iNdEx+skippy) < 0 {
-						return ErrInvalidLengthGenerated
-					}
-					if (iNdEx + skippy) > postIndex {
-						return io.ErrUnexpectedEOF
-					}
-					iNdEx += skippy
-				}
-			}
-			m.ExtraArgs[mapkey] = mapvalue
 			iNdEx = postIndex
-		case 6:
+		case 7:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Image", wireType)
 			}
@@ -21097,45 +21020,9 @@ func (m *KVCacheBackendMember) Unmarshal(dAtA []byte) error {
 			}
 			m.Image = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
-		case 7:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field LocalDisk", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			if m.LocalDisk == nil {
-				m.LocalDisk = &KVCacheBackendMemberLocalDisk{}
-			}
-			if err := m.LocalDisk.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
 		case 8:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ExtraEnvs", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field LocalDisks", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -21162,103 +21049,10 @@ func (m *KVCacheBackendMember) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			if m.ExtraEnvs == nil {
-				m.ExtraEnvs = make(map[string]string)
+			m.LocalDisks = append(m.LocalDisks, KVCacheBackendMemberLocalDisk{})
+			if err := m.LocalDisks[len(m.LocalDisks)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
 			}
-			var mapkey string
-			var mapvalue string
-			for iNdEx < postIndex {
-				entryPreIndex := iNdEx
-				var wire uint64
-				for shift := uint(0); ; shift += 7 {
-					if shift >= 64 {
-						return ErrIntOverflowGenerated
-					}
-					if iNdEx >= l {
-						return io.ErrUnexpectedEOF
-					}
-					b := dAtA[iNdEx]
-					iNdEx++
-					wire |= uint64(b&0x7F) << shift
-					if b < 0x80 {
-						break
-					}
-				}
-				fieldNum := int32(wire >> 3)
-				if fieldNum == 1 {
-					var stringLenmapkey uint64
-					for shift := uint(0); ; shift += 7 {
-						if shift >= 64 {
-							return ErrIntOverflowGenerated
-						}
-						if iNdEx >= l {
-							return io.ErrUnexpectedEOF
-						}
-						b := dAtA[iNdEx]
-						iNdEx++
-						stringLenmapkey |= uint64(b&0x7F) << shift
-						if b < 0x80 {
-							break
-						}
-					}
-					intStringLenmapkey := int(stringLenmapkey)
-					if intStringLenmapkey < 0 {
-						return ErrInvalidLengthGenerated
-					}
-					postStringIndexmapkey := iNdEx + intStringLenmapkey
-					if postStringIndexmapkey < 0 {
-						return ErrInvalidLengthGenerated
-					}
-					if postStringIndexmapkey > l {
-						return io.ErrUnexpectedEOF
-					}
-					mapkey = string(dAtA[iNdEx:postStringIndexmapkey])
-					iNdEx = postStringIndexmapkey
-				} else if fieldNum == 2 {
-					var stringLenmapvalue uint64
-					for shift := uint(0); ; shift += 7 {
-						if shift >= 64 {
-							return ErrIntOverflowGenerated
-						}
-						if iNdEx >= l {
-							return io.ErrUnexpectedEOF
-						}
-						b := dAtA[iNdEx]
-						iNdEx++
-						stringLenmapvalue |= uint64(b&0x7F) << shift
-						if b < 0x80 {
-							break
-						}
-					}
-					intStringLenmapvalue := int(stringLenmapvalue)
-					if intStringLenmapvalue < 0 {
-						return ErrInvalidLengthGenerated
-					}
-					postStringIndexmapvalue := iNdEx + intStringLenmapvalue
-					if postStringIndexmapvalue < 0 {
-						return ErrInvalidLengthGenerated
-					}
-					if postStringIndexmapvalue > l {
-						return io.ErrUnexpectedEOF
-					}
-					mapvalue = string(dAtA[iNdEx:postStringIndexmapvalue])
-					iNdEx = postStringIndexmapvalue
-				} else {
-					iNdEx = entryPreIndex
-					skippy, err := skipGenerated(dAtA[iNdEx:])
-					if err != nil {
-						return err
-					}
-					if (skippy < 0) || (iNdEx+skippy) < 0 {
-						return ErrInvalidLengthGenerated
-					}
-					if (iNdEx + skippy) > postIndex {
-						return io.ErrUnexpectedEOF
-					}
-					iNdEx += skippy
-				}
-			}
-			m.ExtraEnvs[mapkey] = mapvalue
 			iNdEx = postIndex
 		case 9:
 			if wireType != 2 {
@@ -21296,7 +21090,7 @@ func (m *KVCacheBackendMember) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
-		case 11:
+		case 10:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field SecurityContext", wireType)
 			}
@@ -21332,7 +21126,7 @@ func (m *KVCacheBackendMember) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
-		case 12:
+		case 11:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field HostPaths", wireType)
 			}
@@ -21366,7 +21160,7 @@ func (m *KVCacheBackendMember) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
-		case 13:
+		case 12:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field RuntimeClassName", wireType)
 			}
@@ -23850,6 +23644,89 @@ func (m *KVCachePoolBindingPoolReference) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
+func (m *KVCachePoolBindingQuota) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: KVCachePoolBindingQuota: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: KVCachePoolBindingQuota: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Ceiling", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if err := m.Ceiling.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
 func (m *KVCachePoolBindingReference) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
@@ -24061,7 +23938,7 @@ func (m *KVCachePoolBindingSpec) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field QuotaCeiling", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Quota", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -24088,7 +23965,7 @@ func (m *KVCachePoolBindingSpec) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			if err := m.QuotaCeiling.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+			if err := m.Quota.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
@@ -25528,7 +25405,7 @@ func (m *ModelDeployment) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
-func (m *ModelDeploymentDirectTransfer) Unmarshal(dAtA []byte) error {
+func (m *ModelDeploymentAdditionalVolume) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
 	for iNdEx < l {
@@ -25551,15 +25428,15 @@ func (m *ModelDeploymentDirectTransfer) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return fmt.Errorf("proto: ModelDeploymentDirectTransfer: wiretype end group for non-group")
+			return fmt.Errorf("proto: ModelDeploymentAdditionalVolume: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return fmt.Errorf("proto: ModelDeploymentDirectTransfer: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: ModelDeploymentAdditionalVolume: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Protocol", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field MountPath", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -25587,7 +25464,395 @@ func (m *ModelDeploymentDirectTransfer) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.Protocol = string(dAtA[iNdEx:postIndex])
+			m.MountPath = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ReadOnly", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.ReadOnly = bool(v != 0)
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SubPath", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.SubPath = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ConfigMap", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.ConfigMap == nil {
+				m.ConfigMap = &v11.LocalObjectReference{}
+			}
+			if err := m.ConfigMap.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Secret", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Secret == nil {
+				m.Secret = &v11.LocalObjectReference{}
+			}
+			if err := m.Secret.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field HostPath", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.HostPath == nil {
+				m.HostPath = &v11.HostPathVolumeSource{}
+			}
+			if err := m.HostPath.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ModelDeploymentEngine) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ModelDeploymentEngine: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ModelDeploymentEngine: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Name = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Version", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Version = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ModelDeploymentEnvVar) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ModelDeploymentEnvVar: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ModelDeploymentEnvVar: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Name = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Value", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Value = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
@@ -26005,6 +26270,88 @@ func (m *ModelDeploymentKVCacheStatus) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
+func (m *ModelDeploymentKVTransfer) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ModelDeploymentKVTransfer: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ModelDeploymentKVTransfer: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Protocol", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Protocol = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
 func (m *ModelDeploymentList) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
@@ -26182,6 +26529,107 @@ func (m *ModelDeploymentModel) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.Name = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ModelDeploymentPort) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ModelDeploymentPort: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ModelDeploymentPort: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Port", wireType)
+			}
+			m.Port = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Port |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Protocol", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Protocol = k8s_io_api_core_v1.Protocol(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
@@ -26413,16 +26861,16 @@ func (m *ModelDeploymentRole) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.Env = append(m.Env, InstanceEnvVar{})
+			m.Env = append(m.Env, ModelDeploymentEnvVar{})
 			if err := m.Env[len(m.Env)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
 		case 7:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Template", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Image", wireType)
 			}
-			var msglen int
+			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowGenerated
@@ -26432,27 +26880,23 @@ func (m *ModelDeploymentRole) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				msglen |= int(b&0x7F) << shift
+				stringLen |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
 			}
-			if msglen < 0 {
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
 				return ErrInvalidLengthGenerated
 			}
-			postIndex := iNdEx + msglen
+			postIndex := iNdEx + intStringLen
 			if postIndex < 0 {
 				return ErrInvalidLengthGenerated
 			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			if m.Template == nil {
-				m.Template = &ModelDeploymentTemplate{}
-			}
-			if err := m.Template.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
+			m.Image = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		case 8:
 			if wireType != 2 {
@@ -26485,6 +26929,192 @@ func (m *ModelDeploymentRole) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.Kind = ModelDeploymentRoleKind(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 9:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ImagePullPolicy", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ImagePullPolicy = k8s_io_api_core_v1.PullPolicy(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ImagePullSecrets", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ImagePullSecrets = append(m.ImagePullSecrets, v11.LocalObjectReference{})
+			if err := m.ImagePullSecrets[len(m.ImagePullSecrets)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 11:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Privileged", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Privileged = bool(v != 0)
+		case 12:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Ports", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Ports = append(m.Ports, ModelDeploymentPort{})
+			if err := m.Ports[len(m.Ports)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 13:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AdditionalVolumes", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.AdditionalVolumes = append(m.AdditionalVolumes, ModelDeploymentAdditionalVolume{})
+			if err := m.AdditionalVolumes[len(m.AdditionalVolumes)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 14:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Command", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Command = append(m.Command, string(dAtA[iNdEx:postIndex]))
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
@@ -27012,6 +27642,72 @@ func (m *ModelDeploymentRouter) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.ExtraArgs = append(m.ExtraArgs, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ImagePullPolicy", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ImagePullPolicy = k8s_io_api_core_v1.PullPolicy(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ImagePullSecrets", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ImagePullSecrets = append(m.ImagePullSecrets, v11.LocalObjectReference{})
+			if err := m.ImagePullSecrets[len(m.ImagePullSecrets)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
@@ -27936,7 +28632,7 @@ func (m *ModelDeploymentSpec) Unmarshal(dAtA []byte) error {
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Engine", wireType)
 			}
-			var stringLen uint64
+			var msglen int
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowGenerated
@@ -27946,23 +28642,24 @@ func (m *ModelDeploymentSpec) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
+				msglen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
 			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
+			if msglen < 0 {
 				return ErrInvalidLengthGenerated
 			}
-			postIndex := iNdEx + intStringLen
+			postIndex := iNdEx + msglen
 			if postIndex < 0 {
 				return ErrInvalidLengthGenerated
 			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.Engine = string(dAtA[iNdEx:postIndex])
+			if err := m.Engine.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
 			iNdEx = postIndex
 		case 3:
 			if wireType != 2 {
@@ -28036,38 +28733,6 @@ func (m *ModelDeploymentSpec) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 5:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field EngineVersion", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.EngineVersion = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 6:
-			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Router", wireType)
 			}
 			var msglen int
@@ -28102,9 +28767,9 @@ func (m *ModelDeploymentSpec) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
-		case 7:
+		case 6:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field DirectTransfer", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field KVTransfer", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -28131,10 +28796,10 @@ func (m *ModelDeploymentSpec) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			if m.DirectTransfer == nil {
-				m.DirectTransfer = &ModelDeploymentDirectTransfer{}
+			if m.KVTransfer == nil {
+				m.KVTransfer = &ModelDeploymentKVTransfer{}
 			}
-			if err := m.DirectTransfer.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+			if err := m.KVTransfer.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
@@ -28421,346 +29086,6 @@ func (m *ModelDeploymentStatus) Unmarshal(dAtA []byte) error {
 				m.Router = &ModelDeploymentRouterStatus{}
 			}
 			if err := m.Router.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipGenerated(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *ModelDeploymentTemplate) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowGenerated
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= uint64(b&0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: ModelDeploymentTemplate: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: ModelDeploymentTemplate: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Image", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Image = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ImagePullPolicy", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.ImagePullPolicy = k8s_io_api_core_v1.PullPolicy(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Command", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Command = append(m.Command, string(dAtA[iNdEx:postIndex]))
-			iNdEx = postIndex
-		case 4:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Privileged", wireType)
-			}
-			var v int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				v |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			m.Privileged = bool(v != 0)
-		case 5:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Ports", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Ports = append(m.Ports, InstancePort{})
-			if err := m.Ports[len(m.Ports)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 6:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Env", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Env = append(m.Env, InstanceEnvVar{})
-			if err := m.Env[len(m.Env)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 7:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Resources", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			if m.Resources == nil {
-				m.Resources = &InstanceResources{}
-			}
-			if err := m.Resources.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 8:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ImagePullSecret", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			if m.ImagePullSecret == nil {
-				m.ImagePullSecret = &v11.LocalObjectReference{}
-			}
-			if err := m.ImagePullSecret.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 9:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AdditionalVolumes", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.AdditionalVolumes = append(m.AdditionalVolumes, InstanceAdditionalVolume{})
-			if err := m.AdditionalVolumes[len(m.AdditionalVolumes)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex

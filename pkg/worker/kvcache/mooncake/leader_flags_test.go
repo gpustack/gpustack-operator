@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -99,15 +100,18 @@ func TestRenderLeaderFlags(t *testing.T) {
 		},
 		{
 			// The keys here are offload TUNING knobs, which stay on the hatch. The tier's own
-			// switch became a field and is refused here at admission, so a case setting it would
-			// describe an object no API server would accept.
-			name: "extraArgs come last, in key order",
+			// switch is derived from members[].localDisks and is refused here at admission, so a
+			// case setting it would describe an object no API server would accept.
+			//
+			// Entries carry their own dashes and render verbatim in the order written, which is
+			// the order this list spells rather than key order.
+			name: "extraArgs come last, in the order written",
 			leader: workercore.KVCacheBackendLeader{
 				AllocationStrategy: "FreeRatioFirst",
-				ExtraArgs: map[string]string{
-					"offload_cap_ratio": "0.5",
-					"promotion_on_hit":  "true",
-					"client_ttl":        "30",
+				ExtraArgs: []string{
+					"-offload_cap_ratio=0.5",
+					"-client_ttl=30",
+					"-promotion_on_hit=true",
 				},
 			},
 			want: []string{
@@ -116,54 +120,19 @@ func TestRenderLeaderFlags(t *testing.T) {
 				"-allocation_strategy=free_ratio_first",
 				"-pod_name=$(KUBERNETES_POD_NAME)",
 				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
-				"-client_ttl=30",
 				"-offload_cap_ratio=0.5",
+				"-client_ttl=30",
 				"-promotion_on_hit=true",
 			},
 		},
 		{
-			name: "the disk tier's leader half",
+			// A boolean flag written as one token renders as itself, which is the artifact's own
+			// reading of a bare flag. Asserted so a future edit that starts joining an "=value" on
+			// cannot pass silently.
+			name: "a one-token boolean entry renders as itself",
 			leader: workercore.KVCacheBackendLeader{
 				AllocationStrategy: "FreeRatioFirst",
-				Offload:            &workercore.KVCacheBackendLeaderOffload{Enabled: true},
-			},
-			want: []string{
-				"-rpc_port=50051",
-				"-metrics_port=9003",
-				"-allocation_strategy=free_ratio_first",
-				"-enable_offload=true",
-				"-pod_name=$(KUBERNETES_POD_NAME)",
-				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
-			},
-		},
-		{
-			name: "the disk tier deferring its writes to eviction time",
-			leader: workercore.KVCacheBackendLeader{
-				AllocationStrategy: "FreeRatioFirst",
-				Offload: &workercore.KVCacheBackendLeaderOffload{
-					Enabled: true,
-					OnEvict: true,
-				},
-			},
-			want: []string{
-				"-rpc_port=50051",
-				"-metrics_port=9003",
-				"-allocation_strategy=free_ratio_first",
-				"-enable_offload=true",
-				"-offload_on_evict=true",
-				"-pod_name=$(KUBERNETES_POD_NAME)",
-				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
-			},
-		},
-		{
-			// Admission refuses this pairing, and the renderer drops it too rather than emitting a
-			// flag the artifact ands away. Belt and braces on purpose: alone it would be accepted,
-			// echoed back in the startup log, and do nothing — the exact shape of a setting that
-			// reads as taken and is not.
-			name: "onEvict without its switch renders neither flag",
-			leader: workercore.KVCacheBackendLeader{
-				AllocationStrategy: "FreeRatioFirst",
-				Offload:            &workercore.KVCacheBackendLeaderOffload{OnEvict: true},
+				ExtraArgs:          []string{"-client_verbose_logging"},
 			},
 			want: []string{
 				"-rpc_port=50051",
@@ -171,20 +140,7 @@ func TestRenderLeaderFlags(t *testing.T) {
 				"-allocation_strategy=free_ratio_first",
 				"-pod_name=$(KUBERNETES_POD_NAME)",
 				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
-			},
-		},
-		{
-			name: "an offload block that asks for nothing renders nothing",
-			leader: workercore.KVCacheBackendLeader{
-				AllocationStrategy: "FreeRatioFirst",
-				Offload:            &workercore.KVCacheBackendLeaderOffload{},
-			},
-			want: []string{
-				"-rpc_port=50051",
-				"-metrics_port=9003",
-				"-allocation_strategy=free_ratio_first",
-				"-pod_name=$(KUBERNETES_POD_NAME)",
-				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
+				"-client_verbose_logging",
 			},
 		},
 	}
@@ -194,6 +150,32 @@ func TestRenderLeaderFlags(t *testing.T) {
 			assert.Equal(t, c.want, RenderLeaderFlags(leaderBackend(c.leader)))
 		})
 	}
+}
+
+// TestRenderLeaderFlags_DiskTier asserts the offload pair, which is the one part of this argv
+// derived from the MEMBERS rather than from the leader spec: a group declaring localDisks is what
+// turns the tier on, and no field on the leader says anything about it.
+//
+// The two flags are asserted as a contiguous pair, because there is no object that renders one
+// without the other: -offload_on_evict selects the deferred mode, the only one the store protects,
+// so the pair is one decision and renders as one.
+func TestRenderLeaderFlags_DiskTier(t *testing.T) {
+	withTier := testBackend(func(kvcb *workercore.KVCacheBackend) {
+		kvcb.Spec.Connection.Managed.Members[0].LocalDisks = []workercore.KVCacheBackendMemberLocalDisk{{
+			Path:     "/var/lib/kvcache",
+			Capacity: resource.MustParse("4Ti"),
+		}}
+	})
+
+	flags := strings.Join(RenderLeaderFlags(withTier), " ")
+	assert.Contains(t, flags, "-enable_offload=true -offload_on_evict=true",
+		"both flags, together, derived from the one group that declares a tier")
+
+	withoutTier := strings.Join(RenderLeaderFlags(testBackend()), " ")
+	assert.NotContains(t, withoutTier, "-enable_offload=",
+		"a backend whose groups declare no tier must not queue offload work")
+	assert.NotContains(t, withoutTier, "-offload_on_evict=",
+		"and never half of a pair whose other half says why")
 }
 
 // leaderBackend puts a leader spec on the shared fixture, which is what carries the identity the
@@ -298,13 +280,14 @@ func TestRenderLeaderFlags_ElectionTargetsAreDistinctPerBackend(t *testing.T) {
 }
 
 // TestRenderLeaderFlags_IsDeterministic pins that one spec renders identically every time. The
-// reconciler converges the leader Deployment on every pass, so an argv whose order wandered — a Go
-// map range, for instance — would rewrite the object forever.
+// reconciler converges the leader Deployment on every pass, so an argv whose order wandered — a
+// sort that looked at the entry rather than the list, for instance — would rewrite the object
+// forever.
 func TestRenderLeaderFlags_IsDeterministic(t *testing.T) {
 	leader := workercore.KVCacheBackendLeader{
 		AllocationStrategy: "FreeRatioFirst",
-		ExtraArgs: map[string]string{
-			"a": "1", "b": "2", "c": "3", "d": "4", "e": "5", "f": "6", "g": "7", "h": "8",
+		ExtraArgs: []string{
+			"-a=1", "-b=2", "-c=3", "-d=4", "-e=5", "-f=6", "-g=7", "-h=8",
 		},
 	}
 
@@ -333,9 +316,11 @@ func TestRenderLeaderFlags_OmitsWhatThisScopeDoesNotRun(t *testing.T) {
 		"-http_metadata_server_port",
 		"-cluster_id",
 		"-port",
-		// The disk tier's two flags. A backend that never declared a tier must not carry them:
-		// -enable_offload alone makes the leader queue offload work for members that registered no
-		// local disk segment, which its own guard then drops with nothing on the object saying so.
+		// The disk tier's two flags. A backend none of whose groups declares a tier must not carry
+		// them: -enable_offload alone makes the leader queue offload work for members that
+		// registered no local disk segment, which its own guard then drops with nothing on the
+		// object saying so. They are derived from members[].localDisks, and a tier-less object
+		// derives neither.
 		"-enable_offload",
 		"-offload_on_evict",
 	}
