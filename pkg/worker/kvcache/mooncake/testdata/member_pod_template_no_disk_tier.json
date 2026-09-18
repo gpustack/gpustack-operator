@@ -7,7 +7,7 @@
       "app.kubernetes.io/part-of": "gpustack-operator-worker"
     },
     "annotations": {
-      "kvcache.gpustack.ai/pod-spec-hash": "8bae493a20ab49a85903b2120ce664f648240ac9d7a20f7b500d13480613f06e"
+      "kvcache.gpustack.ai/pod-spec-hash": "47b8aec8a899f09c52dc2df45010653f7af9b3f33a5f2eaed3ff7ac508f24943"
     }
   },
   "spec": {
@@ -38,6 +38,10 @@
                 "fieldPath": "status.podIP"
               }
             }
+          },
+          {
+            "name": "MC_TE_METRIC",
+            "value": "1"
           },
           {
             "name": "AMD_VISIBLE_DEVICES",

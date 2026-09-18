@@ -835,7 +835,7 @@ and is harmless:
 E transfer_metadata.cpp:991] Local segment descriptor not found
 ```
 
-**Client-side environment knobs**, observed at startup and set on the *workload*, not here:
+**Client-side environment knobs**, observed at startup:
 
 ```
 MC_TE_METRIC=1                        enable transfer-engine metrics (OFF by default)
@@ -843,6 +843,16 @@ MC_STORE_CLIENT_METRIC_BANDWIDTH      client bandwidth summary
 MC_STORE_MEMCPY                       unset => auto-detected ("TCP-only environment, memcpy enabled")
 MC_METADATA_SERVER / P2PHANDSHAKE     the transfer engine's own low-level metadata knob
 ```
+
+**`MC_TE_METRIC` is rendered on every member group and cannot be turned off from the CR.** The other
+three are set on the *workload* and not here. It is reserved in `members[].extraEnv` for the reason
+every rendered name is: the hatch appends, and a container carrying one name twice leaves the winner
+to the runtime.
+
+The switch reports throughput and a task-latency distribution to the container log, on an interval
+that prints nothing when nothing moved. The leader's Prometheus surface counts keys and bytes and
+measures no data plane, so without it the receiving end of every transfer is unmeasured while the
+sending end already reports.
 
 ⛔ `MC_METADATA_SERVER` is **not** the variable this operator renders. The member is configured
 through the store client's key, `MOONCAKE_TE_META_DATA_SERVER`. Two names for the metadata plane is

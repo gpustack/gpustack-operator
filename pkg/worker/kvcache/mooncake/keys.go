@@ -370,6 +370,14 @@ var MemberExtraArgsRules = ExtraArgsRules{
 // segment size counted into the Pod's request. The bucket pair protects nothing; it is a value this
 // operator CHOSE, and reserving it is the deliberate decision that a tuner who needs to move it gets
 // a field rather than a hatch that silently doubles a name.
+//
+// The transfer metrics switch is reserved on the same ground, and it is the one entry whose
+// reservation COSTS something a reader should see stated: the engine side treats the same switch as
+// a default a user may turn off, and here it cannot be. The asymmetry is the rendering shape rather
+// than a second opinion about the switch -- a member's extraEnv appends, so a name this renderer
+// emits would arrive twice with the winner left to the runtime, and the engine side has a
+// yields-if-declared step that this one does not. Giving it that step would mean an entry rendered
+// conditionally on the hatch's own contents, which is the shape the list above exists to keep out.
 var MemberDerivedEnvs = []string{
 	memberEnvGlobalSegmentSize,
 	memberEnvLocalBufferSize,
@@ -388,6 +396,7 @@ var MemberDerivedEnvs = []string{
 	memberEnvOffloadWatermarkHigh,
 	memberEnvOffloadWatermarkLow,
 	memberEnvProtocol,
+	memberEnvTransferMetrics,
 	memberEnvVisibleDevicesAMD,
 	memberEnvVisibleDevicesCambricon,
 	memberEnvVisibleDevicesIluvatar,

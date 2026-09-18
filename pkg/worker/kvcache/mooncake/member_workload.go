@@ -195,6 +195,19 @@ const (
 	// memberVisibleDevicesNone is the value each of the above takes on a host-memory group.
 	memberVisibleDevicesNone = "void"
 
+	// memberEnvTransferMetrics turns on the transfer engine's own reporting, which is OFF by
+	// default in the artifact and is the only source of the member's throughput and task-latency
+	// distribution. The leader's Prometheus surface counts keys and bytes; it does not measure the
+	// data plane, so without this the receiving half of every transfer is unmeasurable.
+	//
+	// The engine side already sets it, and setting it here is what makes the two ends of one
+	// transfer symmetric rather than adding a cost the pool did not already carry.
+	//
+	// The reporting goes to the container log rather than to a port: one line per interval, and
+	// none at all in an interval that moved nothing.
+	memberEnvTransferMetrics   = "MC_TE_METRIC"
+	memberTransferMetricsValue = "1"
+
 	// The local disk tier's keys. The first two are the client's own enable_ssd_offload and
 	// ssd_offload_path; without both, the client registers no local disk segment and the leader's
 	// offload queue has nowhere to send it.
@@ -623,6 +636,7 @@ func renderMemberEnv(
 				FieldRef: &core.ObjectFieldSelector{FieldPath: "status.podIP"},
 			},
 		},
+		{Name: memberEnvTransferMetrics, Value: memberTransferMetricsValue},
 	}
 
 	if member.Medium != "VRAM" {

@@ -212,6 +212,7 @@ func TestMemberWorkload_Environment(t *testing.T) {
 		"MOONCAKE_PROTOCOL":            "tcp",
 		"MOONCAKE_GLOBAL_SEGMENT_SIZE": fmt.Sprintf("%d", 500*1024*1024*1024),
 		"MOONCAKE_LOCAL_BUFFER_SIZE":   fmt.Sprintf("%d", 4*1024*1024*1024),
+		"MC_TE_METRIC":                 "1",
 		"AMD_VISIBLE_DEVICES":          "void",
 		"CAMBRICON_VISIBLE_DEVICES":    "void",
 		"IX_VISIBLE_DEVICES":           "void",
@@ -252,6 +253,34 @@ func TestMemberWorkload_VisibleDevicesFollowTheMedium(t *testing.T) {
 		assert.False(t, present,
 			"a device-memory group must keep its devices: %s", name)
 	}
+}
+
+// TestMemberWorkload_TransferMetricsAreOnForEveryMedium pins the switch that does NOT follow the
+// medium, asserted against the same two groups as the test above so the contrast is in one place.
+//
+// The medium decides which devices a group may see; it says nothing about whether the group's data
+// plane is measured. Rendering this one conditionally would leave whichever medium lost the
+// condition reporting no throughput and no task latency at all, which reads exactly like a member
+// that is transferring nothing.
+//
+// That every group renders it is also what makes this switch cost a roll of every member rather
+// than of one medium's members, which the recording guard states as the wider of its two blast
+// radii.
+func TestMemberWorkload_TransferMetricsAreOnForEveryMedium(t *testing.T) {
+	kvcb := testMemberBackend(withSecondMemberGroupVRAM())
+
+	dram := envWithoutDownwardAPIForGroup(t, kvcb, 0, "mooncake:v0.3.13")
+	vram := envWithoutDownwardAPIForGroup(t, kvcb, 1, "mooncake:v0.3.13")
+
+	assert.Equal(t, "1", dram["MC_TE_METRIC"],
+		"the artifact defaults this OFF, so an absent key is an unmeasured host-memory data plane")
+	assert.Equal(t, "1", vram["MC_TE_METRIC"],
+		"the artifact defaults this OFF, so an absent key is an unmeasured device-memory data plane")
+
+	assert.Contains(t, MemberDerivedEnvs, "MC_TE_METRIC",
+		"rendered unconditionally and therefore reserved: a group could otherwise define it a "+
+			"second time through extraEnv, and a container carrying one name twice leaves the "+
+			"winner to the runtime")
 }
 
 // envWithoutDownwardAPI returns the literal-valued environment, leaving out the entries sourced from
@@ -622,25 +651,32 @@ func TestMemberWorkload_DeclaredRuntimeClassReachesThePodSpec(t *testing.T) {
 // existing backend is deleted and recreated on upgrade, and each one comes back with an empty
 // segment: the cache is gone, and nothing about the change said it would be.
 //
-// THE RECORDING HAS BEEN DELIBERATELY MOVED ONCE, and a reader comparing this against an older
+// THE RECORDING HAS BEEN DELIBERATELY MOVED TWICE, and a reader comparing this against an older
 // checkout should know which change did it rather than treating it as drift. It was first recorded
-// from the renderer as it stood before the local disk tier existed, at hash e4e1f6a5…. It now holds
+// from the renderer as it stood before the local disk tier existed, at hash e4e1f6a5…. It then held
 // 8bae493a…, which is that same template plus the five vendor visibility variables a host-memory
-// group renders so that no accelerator is injected into it.
+// group renders so that no accelerator is injected into it. It now holds 47b8aec8…, which adds the
+// transfer engine's metrics switch.
 //
-// That move was accepted with its cost understood: every host-memory member group is rolled once on
-// upgrade and comes back with an empty segment. The alternative was leaving a group that asks for
-// host memory free to consume device memory instead, unaccounted for by the scheduler and fatal to
-// whichever workload had properly requested that card. Device-memory groups are NOT affected --
-// they render exactly as before, which the paired assertions in
-// TestMemberWorkload_VisibleDevicesFollowTheMedium pin down.
+// EACH MOVE COST A ROLL, AND THE TWO DID NOT COST THE SAME ONE. The visibility variables render
+// only on a host-memory group, so that move rolled those and left device-memory groups rendering
+// exactly as before. The metrics switch renders on EVERY group, so the second move rolls every
+// member of every backend regardless of medium — a strictly wider blast radius than the first, and
+// the reason this paragraph separates them rather than counting moves.
 //
-// This guard has been seen to fail twice, which is why it is trusted. Changing
+// Both were accepted with that cost understood. The first refused to leave a group asking for host
+// memory free to consume device memory instead, unaccounted for by the scheduler and fatal to
+// whichever workload had properly requested that card. The second buys the only measurement of the
+// member's data plane there is: the leader's Prometheus surface counts keys and bytes and says
+// nothing about throughput or task latency, and the engine end of the same transfer already
+// reports both.
+//
+// This guard has been seen to fail three times, which is why it is trusted. Changing
 // memberShutdownSeconds from 60 to 61 — one byte, on a field unrelated to any of this — turned it
-// red against the first recording. And the visibility variables above turned it red against that
-// same recording, which is how their cost became visible at all rather than being discovered on
-// somebody's cluster. A guard this load-bearing that has never been seen to fail is a guard nobody
-// has checked.
+// red against the first recording. The visibility variables turned it red against that same
+// recording, and the metrics switch against the second. Each time that is how the cost became
+// visible at all rather than being discovered on somebody's cluster. A guard this load-bearing that
+// has never been seen to fail is a guard nobody has checked.
 func TestMemberWorkload_NoDiskTierRendersWhatItAlwaysDid(t *testing.T) {
 	recorded, err := os.ReadFile("testdata/member_pod_template_no_disk_tier.json")
 	require.NoError(t, err, "the recording is the contract; without it this test proves nothing")
