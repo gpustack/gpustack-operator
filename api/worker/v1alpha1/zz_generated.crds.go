@@ -2410,9 +2410,56 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																	Nullable: true,
 																},
 																"highAvailability": {
-																	Description: "HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas\nabove 1. It carries no settings: the Lease is named after this backend, so there is no\nconnection target to supply, and the API access the election needs is rendered beside the\nworkload.\n- Unset, the leader runs as a single process exactly as before — no election flag, no extra\nobject, the command line it ran before this field existed.\n- Set with Replicas at 1, it is INERT: one process has nothing to elect between, so no\nelection flag, Lease or API token is rendered until Replicas rises above 1. That makes\nthis safe to set up front on a store image built without the k8s-lease backend, whose\nmaster fails at startup the moment the election flags appear — the flags arrive only\nwhen there is something for them to elect.\n- With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile\ninterval. Each replica seeds its tenant quota policy at its own start, so a standby that\ntook over after a quota was raised applies the older, lower ceiling, and an over-quota\nwrite in this store is not refused — it evicts that tenant's own older objects,\nirreversibly and without moving any counter. The quota itself is not lost: the pool\nreconciler is the authority and writes the difference back on its next pass.",
+																	Description: "HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas\nabove 1. The election itself needs no settings: the Lease is named after this backend, so\nthere is no connection target to supply, and the API access it needs is rendered beside the\nworkload. What the block does carry is what a standby is allowed to start from.\n- Unset, the leader runs as a single process exactly as before — no election flag, no extra\nobject, the command line it ran before this field existed.\n- Set with Replicas at 1, the ELECTION is INERT: one process has nothing to elect between,\nso no election flag, Lease or API token is rendered until Replicas rises above 1. That\nmakes an empty block safe to set up front on a store image built without the k8s-lease\nbackend, whose master fails at startup the moment the election flags appear — those flags\narrive only when there is something for them to elect. Snapshot is the exception and says\nso on itself.\n- With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile\ninterval. Each replica seeds its tenant quota policy at its own start, so a standby that\ntook over after a quota was raised applies the older, lower ceiling, and an over-quota\nwrite in this store is not refused — it evicts that tenant's own older objects,\nirreversibly and without moving any counter. The quota itself is not lost: the pool\nreconciler is the authority and writes the difference back on its next pass.",
 																	Type:        "object",
-																	Nullable:    true,
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"memberAddressing": {
+																			Description: "MemberAddressing selects how a member is told to find the master once an election runs. Both\nforms reach the leader that is serving, by different routes, and they are rendered into the\nsame one variable — so changing this rolls every member group.\n- Lease: the member is handed the Lease's coordinates and reads the current holder itself.\nThis needs the member to talk to the API server, which is why the member image has to\ncarry the leadership backend at all.\n- Service: the member is handed the leader Service's address, exactly as it is without high\navailability. The Service publishes only READY endpoints and a standby deliberately is not\nready, so the address resolves to the serving leader — the open part is whether the\nclient's reconnect follows that endpoint across an election, and how long it takes.\nNEITHER FORM HAS BEEN MEASURED against the other. The default is Lease because that is what\nthis operator has always rendered, not because it won a comparison, and the number that would\nsettle it is how long a member cannot reach a master after the leader pod is deleted. Until\nthat is measured on a cluster, treat Service as the one to try rather than the one to trust.",
+																			Type:        "string",
+																			Default: &v1.JSON{
+																				Raw: []byte(`"Lease"`),
+																			},
+																			Enum: []v1.JSON{
+																				{
+																					Raw: []byte(`"Lease"`),
+																				},
+																				{
+																					Raw: []byte(`"Service"`),
+																				},
+																			},
+																		},
+																		"snapshot": {
+																			Description: "Snapshot writes the leader's own metadata to storage both leader Pods can reach, so a standby\nthat takes over starts from that baseline rather than from nothing.\nWithout it a standby REPLICATES NOTHING. The store's operation log is the only other way to\nfeed one, and it runs on a leadership backend this operator's image cannot carry, so the\nsnapshot is the whole of what a failover can recover. What it recovers is bounded by\nIntervalSeconds: the cache comes back partially cold rather than entirely cold.\n- The flags this renders arrive AS SOON AS THIS FIELD IS SET, unlike the election's, which\nwait for Replicas to rise above one. A single leader restores its own last snapshot when\nit restarts, which is worth having on its own — and it means a store image too old to\ncarry the snapshot subsystem refuses to start here instead of ignoring the field.\n- A snapshot older than the running process is read back without a version check of any\nkind. Moving the image BACKWARDS across a snapshot format change is outside what this API\nmakes any promise about.",
+																			Type:        "object",
+																			Required: []string{
+																				"persistentVolumeClaimName",
+																			},
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"intervalSeconds": {
+																					Description: "IntervalSeconds is how long the store waits between snapshots, which is the same thing as HOW\nMUCH A FAILOVER LOSES: objects written since the last one are not in the baseline the standby\nstarts from. Unset renders no flag and leaves the store's own default in place, so a default\nthat moves upstream shows up as a behavior change to investigate rather than as a value this\nAPI silently re-asserted.",
+																					Type:        "integer",
+																					Format:      "int32",
+																					Minimum:     ptr.To[float64](1),
+																					Nullable:    true,
+																				},
+																				"persistentVolumeClaimName": {
+																					Description: "PersistentVolumeClaimName names the claim the snapshot is written to and read from, resolved\nin the namespace this operator runs its workloads in — a KVCacheBackend is cluster-scoped and\nhas no namespace of its own to resolve it against.\nREQUIRED: the claim must be ReadWriteMany. The serving leader writes the snapshot and a\nstandby reads it, they are different Pods, and a claim only one of them can mount leaves the\nstandby reading an empty directory with nothing logging it. Admission does not check this —\nthe claim may not exist yet when the backend is created — so the reconciler checks it once it\ncan see the claim and publishes the answer as a condition.\nEVERY KEY THE CACHE HOLDS IS NAMEABLE FROM THIS VOLUME. A snapshot is the master's metadata\nwritten as plain bytes with no encryption, so whoever can mount this claim can enumerate those\nkeys, including their tenant names under MultiTenancy. The claim also outlives the backend:\nnothing here deletes it.",
+																					Type:        "string",
+																					MaxLength:   ptr.To[int64](253),
+																					MinLength:   ptr.To[int64](1),
+																				},
+																				"retentionCount": {
+																					Description: "RetentionCount is how many recent snapshots are kept, older ones being deleted as newer ones\nland. Its floor is one because the store refuses to start when snapshots are on and this is\nzero. Unset renders no flag, for the reason above.\nKeeping more than one is not spare capacity: a restore tries the stored snapshots in turn and\nfalls back to an older one when a payload cannot be read, so the count is how many times that\nfallback can happen.",
+																					Type:        "integer",
+																					Format:      "int32",
+																					Minimum:     ptr.To[float64](1),
+																					Nullable:    true,
+																				},
+																			},
+																			Nullable: true,
+																		},
+																	},
+																	Nullable: true,
 																},
 																"multiTenancy": {
 																	Description: "MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index\nbehind it. Off, every request falls into one default tenant and the index degrades to a plain\nkey hash, so two callers using different tenant names read each other's cache.\nIt is a FIELD rather than an extraArgs entry because another API validates against it: a\nKVCachePool is refused when its backend has no ledger to write quota into, and a webhook\nreading an unschema'd \"true\", \"1\" or \"True\" would be judging a value domain that belongs to\nwhoever typed it. The store's global -quota_bytes flag stays in extraArgs for the converse\nreason: no other API needs to interpret it.\nUnset and false both mean no ledger, and unset renders NO flag rather than an explicit false.",
@@ -3062,7 +3109,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 											Nullable: true,
 										},
 										"conditions": {
-											Description: "Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,\nCapacityObserved, Deletable. Every one is derived from an observed document.",
+											Description: "Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,\nCapacityObserved, Deletable, RolloutComplete, and — each only where it has something to be a\nverdict about — SnapshotStorageShared and ElectionObserved. Every one is derived from an\nobserved document.",
 											Type:        "array",
 											Items: &v1.JSONSchemaPropsOrArray{
 												Schema: &v1.JSONSchemaProps{

@@ -37,6 +37,7 @@ one, not to widen the overview.
 | The local disk tier itself: what it renders, its bucket, its eviction, its host directory | `docs/kv-cache/local-disk-tier.md` |
 | Configuring a node that is mostly disk: why a group is never disk alone, the thin-segment shape, the memory floor | `docs/kv-cache/disk-heavy-nodes.md` |
 | A `KVCachePool` or `KVCachePoolBinding`: the grant, the reuse domain, a quota ceiling or grant, what a full quota does | `docs/kv-cache/pool.md` |
+| Standing a cache up end to end, or which object comes first: the pasteable four-object sequence | `docs/kv-cache/walkthrough.md` |
 | How a **Pod** consumes a pool: the inject label and annotations, the injected keys per engine, a refusal, the isolation record | `docs/reference/kv-cache-injection.md` |
 | A resource key, a request rule, a request example | `docs/accelerator-requests.md` |
 | A `Setting` or a `GPUSTACK_*` variable | `docs/settings.md` |

@@ -110,6 +110,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.KVCacheBackendLeader{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref),
 		v1alpha1.KVCacheBackendLeaderHighAvailability{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderHighAvailability(ref),
 		v1alpha1.KVCacheBackendLeaderOffload{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderOffload(ref),
+		v1alpha1.KVCacheBackendLeaderSnapshot{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderSnapshot(ref),
 		v1alpha1.KVCacheBackendList{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_KVCacheBackendList(ref),
 		v1alpha1.KVCacheBackendManaged{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_KVCacheBackendManaged(ref),
 		v1alpha1.KVCacheBackendMember{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref),
@@ -5389,7 +5390,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref common.Referen
 					},
 					"highAvailability": {
 						SchemaProps: spec.SchemaProps{
-							Description: "HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas above 1. It carries no settings: the Lease is named after this backend, so there is no connection target to supply, and the API access the election needs is rendered beside the workload.\n\n  - Unset, the leader runs as a single process exactly as before — no election flag, no extra\n    object, the command line it ran before this field existed.\n  - Set with Replicas at 1, it is INERT: one process has nothing to elect between, so no\n    election flag, Lease or API token is rendered until Replicas rises above 1. That makes\n    this safe to set up front on a store image built without the k8s-lease backend, whose\n    master fails at startup the moment the election flags appear — the flags arrive only\n    when there is something for them to elect.\n  - With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile\n    interval. Each replica seeds its tenant quota policy at its own start, so a standby that\n    took over after a quota was raised applies the older, lower ceiling, and an over-quota\n    write in this store is not refused — it evicts that tenant's own older objects,\n    irreversibly and without moving any counter. The quota itself is not lost: the pool\n    reconciler is the authority and writes the difference back on its next pass.",
+							Description: "HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas above 1. The election itself needs no settings: the Lease is named after this backend, so there is no connection target to supply, and the API access it needs is rendered beside the workload. What the block does carry is what a standby is allowed to start from.\n\n  - Unset, the leader runs as a single process exactly as before — no election flag, no extra\n    object, the command line it ran before this field existed.\n  - Set with Replicas at 1, the ELECTION is INERT: one process has nothing to elect between,\n    so no election flag, Lease or API token is rendered until Replicas rises above 1. That\n    makes an empty block safe to set up front on a store image built without the k8s-lease\n    backend, whose master fails at startup the moment the election flags appear — those flags\n    arrive only when there is something for them to elect. Snapshot is the exception and says\n    so on itself.\n  - With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile\n    interval. Each replica seeds its tenant quota policy at its own start, so a standby that\n    took over after a quota was raised applies the older, lower ceiling, and an over-quota\n    write in this store is not refused — it evicts that tenant's own older objects,\n    irreversibly and without moving any counter. The quota itself is not lost: the pool\n    reconciler is the authority and writes the difference back on its next pass.",
 							Ref:         ref(v1alpha1.KVCacheBackendLeaderHighAvailability{}.OpenAPIModelName()),
 						},
 					},
@@ -5441,10 +5442,27 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderHighAvailability(re
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "KVCacheBackendLeaderHighAvailability turns leader election on, and carries nothing.\n\nDECLARING THE BLOCK IS THE SWITCH, and there is no key inside it to turn the feature back off. An `enabled: false` beside `replicas: 3` would be a third state that admission would have to adjudicate and every reader would have to remember, while presence has no such state. Lease tuning — duration, renew deadline — can also be added here later without a breaking change.",
+				Description: "KVCacheBackendLeaderHighAvailability turns leader election on, and carries what a standby is allowed to start from.\n\nDECLARING THE BLOCK IS THE SWITCH, and there is no key inside it to turn the feature back off. An `enabled: false` beside `replicas: 3` would be a third state that admission would have to adjudicate and every reader would have to remember, while presence has no such state. Lease tuning — duration, renew deadline — can also be added here later without a breaking change.",
 				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"snapshot": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Snapshot writes the leader's own metadata to storage both leader Pods can reach, so a standby that takes over starts from that baseline rather than from nothing.\n\nWithout it a standby REPLICATES NOTHING. The store's operation log is the only other way to feed one, and it runs on a leadership backend this operator's image cannot carry, so the snapshot is the whole of what a failover can recover. What it recovers is bounded by IntervalSeconds: the cache comes back partially cold rather than entirely cold.\n\n  - The flags this renders arrive AS SOON AS THIS FIELD IS SET, unlike the election's, which\n    wait for Replicas to rise above one. A single leader restores its own last snapshot when\n    it restarts, which is worth having on its own — and it means a store image too old to\n    carry the snapshot subsystem refuses to start here instead of ignoring the field.\n  - A snapshot older than the running process is read back without a version check of any\n    kind. Moving the image BACKWARDS across a snapshot format change is outside what this API\n    makes any promise about.",
+							Ref:         ref(v1alpha1.KVCacheBackendLeaderSnapshot{}.OpenAPIModelName()),
+						},
+					},
+					"memberAddressing": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MemberAddressing selects how a member is told to find the master once an election runs. Both forms reach the leader that is serving, by different routes, and they are rendered into the same one variable — so changing this rolls every member group.\n\n  - Lease: the member is handed the Lease's coordinates and reads the current holder itself.\n    This needs the member to talk to the API server, which is why the member image has to\n    carry the leadership backend at all.\n  - Service: the member is handed the leader Service's address, exactly as it is without high\n    availability. The Service publishes only READY endpoints and a standby deliberately is not\n    ready, so the address resolves to the serving leader — the open part is whether the\n    client's reconnect follows that endpoint across an election, and how long it takes.\n\nNEITHER FORM HAS BEEN MEASURED against the other. The default is Lease because that is what this operator has always rendered, not because it won a comparison, and the number that would settle it is how long a member cannot reach a master after the leader pod is deleted. Until that is measured on a cluster, treat Service as the one to try rather than the one to trust.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
 			},
 		},
+		Dependencies: []string{
+			v1alpha1.KVCacheBackendLeaderSnapshot{}.OpenAPIModelName()},
 	}
 }
 
@@ -5470,6 +5488,46 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderOffload(ref common.
 						},
 					},
 				},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderSnapshot(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCacheBackendLeaderSnapshot is where the leader's metadata baseline is kept, and how much of it.\n\nONE STORAGE SHAPE, and it is the narrower one. The store also speaks S3, which would need an endpoint, a bucket and a credential reference — a group of fields plus Secret handling, for a capability a ReadWriteMany claim already covers inside the cluster. Widening to it later adds a field beside this one and breaks nothing.\n\nThere is no catalog setting either, because the catalog rides in the same storage: the store's embedded catalog is constructed over the object store itself, so one claim carries both the payloads and the index of which ones exist. The alternative it offers is a Redis, which would add an external dependency to a feature whose whole premise is not having one.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"persistentVolumeClaimName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PersistentVolumeClaimName names the claim the snapshot is written to and read from, resolved in the namespace this operator runs its workloads in — a KVCacheBackend is cluster-scoped and has no namespace of its own to resolve it against.\n\nREQUIRED: the claim must be ReadWriteMany. The serving leader writes the snapshot and a standby reads it, they are different Pods, and a claim only one of them can mount leaves the standby reading an empty directory with nothing logging it. Admission does not check this — the claim may not exist yet when the backend is created — so the reconciler checks it once it can see the claim and publishes the answer as a condition.\n\nEVERY KEY THE CACHE HOLDS IS NAMEABLE FROM THIS VOLUME. A snapshot is the master's metadata written as plain bytes with no encryption, so whoever can mount this claim can enumerate those keys, including their tenant names under MultiTenancy. The claim also outlives the backend: nothing here deletes it.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"intervalSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "IntervalSeconds is how long the store waits between snapshots, which is the same thing as HOW MUCH A FAILOVER LOSES: objects written since the last one are not in the baseline the standby starts from. Unset renders no flag and leaves the store's own default in place, so a default that moves upstream shows up as a behavior change to investigate rather than as a value this API silently re-asserted.",
+							Minimum:     ptr.To[float64](1),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"retentionCount": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RetentionCount is how many recent snapshots are kept, older ones being deleted as newer ones land. Its floor is one because the store refuses to start when snapshots are on and this is zero. Unset renders no flag, for the reason above.\n\nKeeping more than one is not spare capacity: a restore tries the stored snapshots in turn and falls back to an older one when a payload cannot be read, so the count is how many times that fallback can happen.",
+							Minimum:     ptr.To[float64](1),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"persistentVolumeClaimName"},
 			},
 		},
 	}
@@ -6092,7 +6150,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendStatus(ref common.Referen
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted, CapacityObserved, Deletable. Every one is derived from an observed document.",
+							Description: "Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted, CapacityObserved, Deletable, RolloutComplete, and — each only where it has something to be a verdict about — SnapshotStorageShared and ElectionObserved. Every one is derived from an observed document.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{

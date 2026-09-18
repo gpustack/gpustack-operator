@@ -532,9 +532,51 @@ func validateKVCacheBackendManaged(
 	}
 
 	errs = append(errs, validateKVCacheBackendOffload(managed, oldManaged, fldPath)...)
+	errs = append(errs, validateKVCacheBackendSnapshot(managed, fldPath)...)
 	errs = append(errs, validateKVCacheBackendScaleIn(managed, fldPath.Child("scaleIn"))...)
 
 	return errs
+}
+
+// validateKVCacheBackendSnapshot refuses a snapshot that names no storage to keep itself on.
+//
+// The schema already requires the field and bounds its length. What it cannot say is that the value
+// has to be a name Kubernetes can resolve to a claim: an unresolvable one renders a volume the
+// kubelet refuses, so every leader replica stays pending with the reason on a Pod rather than on the
+// object somebody edited.
+//
+// It deliberately does NOT check the claim's ACCESS MODES, which is the requirement that actually
+// decides whether the feature works. That needs a read this handler does not have, against an object
+// that legitimately does not exist yet when the backend is created — claims are usually applied
+// alongside it. The reconciler asks once it can see the claim and publishes the answer as a
+// condition, so the check is late rather than absent.
+func validateKVCacheBackendSnapshot(
+	managed *workercore.KVCacheBackendManaged, fldPath *field.Path,
+) field.ErrorList {
+	snapshot := mooncake.LeaderSnapshot(managed.Leader)
+	if snapshot == nil {
+		return nil
+	}
+
+	claimPath := fldPath.Child("leader", "highAvailability", "snapshot",
+		"persistentVolumeClaimName")
+
+	// Reached when the schema is not the one enforcing this — a cluster whose CRD predates the
+	// field's minLength, or an object arriving through a path that skipped structural validation.
+	// The message names what the storage is FOR, because a reader who left it blank is usually one
+	// who took the snapshot block for a switch.
+	if snapshot.PersistentVolumeClaimName == "" {
+		return field.ErrorList{field.Required(claimPath,
+			"a snapshot has to name the claim it is kept on: the replica that serves writes the "+
+				"snapshot and a standby reads it back, so it cannot live inside either pod")}
+	}
+
+	if msgs := validation.IsDNS1123Subdomain(snapshot.PersistentVolumeClaimName); len(msgs) > 0 {
+		return field.ErrorList{field.Invalid(claimPath, snapshot.PersistentVolumeClaimName,
+			strings.Join(msgs, "; "))}
+	}
+
+	return nil
 }
 
 // validateKVCacheBackendOffload enforces that the disk tier is declared on both sides, and that

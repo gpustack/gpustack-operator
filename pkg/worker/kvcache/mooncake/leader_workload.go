@@ -54,6 +54,18 @@ const (
 	// killed for being slow.
 	leaderLivenessPath = "/health"
 
+	// The snapshot's volume and where it is mounted. The path is this operator's choice rather than
+	// anything the artifact suggests: the artifact has no default for it at all, which is the whole
+	// reason the variable below is rendered.
+	leaderSnapshotVolumeName = "snapshot"
+	leaderSnapshotDir        = "/var/lib/mooncake/snapshot"
+
+	// LeaderSnapshotLocalPathEnv is the environment variable the store's local snapshot object
+	// store reads its root from. It is an ENVIRONMENT variable and not a flag, it has NO default,
+	// and a master asked for snapshots without it refuses to start — so it is rendered wherever the
+	// snapshot flags are, and the claim is mounted at the same path in the same breath.
+	LeaderSnapshotLocalPathEnv = "MOONCAKE_SNAPSHOT_LOCAL_PATH"
+
 	// The two volumes the quota policy needs, and the container that bridges them. They are separate
 	// volumes because they answer opposite requirements: one has to be writable and cannot be a
 	// ConfigMap, the other has to carry the operator's desired state and can only be a ConfigMap.
@@ -94,13 +106,27 @@ const (
 		`printf '%s' "$POLICY_EMPTY" > "$POLICY_FILE"; fi`
 )
 
+// The two values leader.highAvailability.memberAddressing takes. Only the second is tested for,
+// because the field is schema-defaulted and an empty value means the object never went through
+// admission -- which is the same reading every other enum in this package gives an empty string.
+const (
+	MemberAddressingLease   = "Lease"
+	MemberAddressingService = "Service"
+)
+
+// LeaderObjectNameSuffix is what LeaderObjectName appends. It is exported because one object with
+// this name is created by the STORE rather than by this operator -- the Lease the election runs
+// through -- so the only way back from it to the backend is to strip this, and a second literal
+// spelling it is how that reverse stops agreeing with the forward direction.
+const LeaderObjectNameSuffix = "-leader"
+
 // LeaderObjectName is the name of every object rendered for a backend's leader.
 //
 // The backend is cluster-scoped and its objects are not, so the name has to survive the move into
 // one shared namespace: it is the backend's own name with a role suffix, which keeps two backends
 // apart and keeps a backend's own objects together.
 func LeaderObjectName(kvcb *workercore.KVCacheBackend) string {
-	return kvcb.Name + "-leader"
+	return kvcb.Name + LeaderObjectNameSuffix
 }
 
 // LeaderServiceHost is the in-cluster DNS name the leader answers on.
@@ -208,12 +234,32 @@ func leaderProgressDeadlineSeconds(replicas int32) *int32 {
 	return ptr.To(int32(math.MaxInt32))
 }
 
-// leaderEnv is every value the rendered argv refers to, and nothing else. A variable defined here
-// with no flag reading it would be dead weight; a flag referring to one not defined here reaches
-// the process as the literal "$(NAME)".
+// LeaderSnapshot is the snapshot settings a backend asks for, or nil when it asks for none.
+//
+// It exists because three renderers need the same answer — the flags, the volume and the mount —
+// and the field is two pointers deep, so each of them reaching for it would be three chances to
+// dereference one and not the other. Exported because the reconciler asks the same question before
+// looking the claim up.
+func LeaderSnapshot(
+	leader workercore.KVCacheBackendLeader,
+) *workercore.KVCacheBackendLeaderSnapshot {
+	if leader.HighAvailability == nil {
+		return nil
+	}
+	return leader.HighAvailability.Snapshot
+}
+
+// leaderEnv is every value the rendered argv refers to, plus the one the PROCESS reads for itself.
+// A variable defined here that neither the argv nor the process reads would be dead weight; a flag
+// referring to one not defined here reaches the process as the literal "$(NAME)".
 //
 // The Pod IP is the one that comes and goes, because -rpc_address is rendered only under high
 // availability -- see the election group in leader_flags.go for what that address decides.
+//
+// The snapshot path is the exception to the first sentence and the reason it is worded that way: no
+// flag names it, the store's local object store reads the variable directly, and there is no flag
+// that could name it. Its value is where the claim is mounted, and rendering one without the other
+// is a master that refuses to start or a standby reading an empty directory.
 func leaderEnv(kvcb *workercore.KVCacheBackend) []core.EnvVar {
 	env := []core.EnvVar{
 		{
@@ -239,7 +285,35 @@ func leaderEnv(kvcb *workercore.KVCacheBackend) []core.EnvVar {
 		})
 	}
 
+	if LeaderSnapshot(kvcb.Spec.Connection.Managed.Leader) != nil {
+		env = append(env, core.EnvVar{
+			Name:  LeaderSnapshotLocalPathEnv,
+			Value: leaderSnapshotDir,
+		})
+	}
+
 	return env
+}
+
+// leaderSnapshotVolume is the claim the snapshot lives on, mounted into the leader by name.
+//
+// The claim is NOT created here, and that is the whole shape of the field: storage two Pods can
+// both write is a cluster decision — which class, which capacity, which provisioner — and an
+// operator that guessed one would be guessing on behalf of a cluster administrator who has already
+// made it. So the field names an existing claim and this renders a reference to it.
+//
+// One claim serves the backend's leaders and no more. Two backends pointed at the same claim stay
+// apart on it because the store namespaces its snapshot objects by cluster identity, which is
+// already derived from this backend's own name — see -cluster_id in leader_flags.go.
+func leaderSnapshotVolume(snapshot *workercore.KVCacheBackendLeaderSnapshot) core.Volume {
+	return core.Volume{
+		Name: leaderSnapshotVolumeName,
+		VolumeSource: core.VolumeSource{
+			PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{
+				ClaimName: snapshot.PersistentVolumeClaimName,
+			},
+		},
+	}
 }
 
 // leaderSelectorLabels is what the Deployment selects its Pods by and what the Service fronts.
@@ -324,12 +398,15 @@ func RenderLeaderDeployment(kvcb *workercore.KVCacheBackend, image string) *apps
 		},
 	}
 
+	podSpec := &deploy.Spec.Template.Spec
 	if leader.MultiTenancy {
-		podSpec := &deploy.Spec.Template.Spec
-		podSpec.Volumes = quotaPolicyVolumes(kvcb)
+		podSpec.Volumes = append(podSpec.Volumes, quotaPolicyVolumes(kvcb)...)
 		podSpec.InitContainers = []core.Container{
 			quotaPolicySeedContainer(image, kvcache.EffectivePullPolicy(kvcb, image)),
 		}
+	}
+	if snapshot := LeaderSnapshot(leader); snapshot != nil {
+		podSpec.Volumes = append(podSpec.Volumes, leaderSnapshotVolume(snapshot))
 	}
 
 	systemmeta.NoteResource(deploy, kvcache.ResourceType, map[string]string{
@@ -345,8 +422,9 @@ func RenderLeaderDeployment(kvcb *workercore.KVCacheBackend, image string) *apps
 // leaderContainerSpec is the container the Deployment runs.
 //
 // What it does NOT ask for is load-bearing: no hostNetwork, no device, no privilege, and no volume
-// beyond the one multi-tenancy cannot start without. The leader is a metadata service that holds no
-// cache bytes — the members are the side that needs the host — so anything here would be a privilege
+// beyond the two a declared feature cannot work without — the writable copy of the tenant quota
+// policy, and the claim a snapshot is kept on. The leader is a metadata service that holds no cache
+// bytes — the members are the side that needs the host — so anything here would be a privilege
 // nobody asked for.
 func leaderContainerSpec(
 	kvcb *workercore.KVCacheBackend, image string, pullPolicy core.PullPolicy,
@@ -361,9 +439,18 @@ func leaderContainerSpec(
 		// The seed volume is deliberately absent here. The leader has no reason to read the
 		// ConfigMap, and a mount it could see would invite pointing the connector URI straight at
 		// it — which fails on the first quota write rather than at startup.
-		volumeMounts = []core.VolumeMount{
-			{Name: quotaPolicyVolumeName, MountPath: QuotaPolicyDir},
-		}
+		volumeMounts = append(volumeMounts, core.VolumeMount{
+			Name: quotaPolicyVolumeName, MountPath: QuotaPolicyDir,
+		})
+	}
+	if LeaderSnapshot(leader) != nil {
+		// Writable for the same kind of reason and a different one: every replica runs this same
+		// container, one of them is serving and writes the snapshots, and which one that is moves
+		// without the Pod spec changing. A read-only mount would be correct for a standby and wrong
+		// for the replica that just won the election.
+		volumeMounts = append(volumeMounts, core.VolumeMount{
+			Name: leaderSnapshotVolumeName, MountPath: leaderSnapshotDir,
+		})
 	}
 
 	return core.Container{

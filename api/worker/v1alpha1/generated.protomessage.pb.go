@@ -122,6 +122,8 @@ func (*KVCacheBackendLeaderHighAvailability) ProtoMessage() {}
 
 func (*KVCacheBackendLeaderOffload) ProtoMessage() {}
 
+func (*KVCacheBackendLeaderSnapshot) ProtoMessage() {}
+
 func (*KVCacheBackendList) ProtoMessage() {}
 
 func (*KVCacheBackendManaged) ProtoMessage() {}

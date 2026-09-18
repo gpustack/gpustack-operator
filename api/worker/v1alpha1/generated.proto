@@ -1477,17 +1477,18 @@ message KVCacheBackendLeader {
   optional int32 replicas = 1;
 
   // HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas
-  // above 1. It carries no settings: the Lease is named after this backend, so there is no
-  // connection target to supply, and the API access the election needs is rendered beside the
-  // workload.
+  // above 1. The election itself needs no settings: the Lease is named after this backend, so
+  // there is no connection target to supply, and the API access it needs is rendered beside the
+  // workload. What the block does carry is what a standby is allowed to start from.
   //
   //   - Unset, the leader runs as a single process exactly as before — no election flag, no extra
   //     object, the command line it ran before this field existed.
-  //   - Set with Replicas at 1, it is INERT: one process has nothing to elect between, so no
-  //     election flag, Lease or API token is rendered until Replicas rises above 1. That makes
-  //     this safe to set up front on a store image built without the k8s-lease backend, whose
-  //     master fails at startup the moment the election flags appear — the flags arrive only
-  //     when there is something for them to elect.
+  //   - Set with Replicas at 1, the ELECTION is INERT: one process has nothing to elect between,
+  //     so no election flag, Lease or API token is rendered until Replicas rises above 1. That
+  //     makes an empty block safe to set up front on a store image built without the k8s-lease
+  //     backend, whose master fails at startup the moment the election flags appear — those flags
+  //     arrive only when there is something for them to elect. Snapshot is the exception and says
+  //     so on itself.
   //   - With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile
   //     interval. Each replica seeds its tenant quota policy at its own start, so a standby that
   //     took over after a quota was raised applies the older, lower ceiling, and an over-quota
@@ -1538,13 +1539,51 @@ message KVCacheBackendLeader {
   optional KVCacheBackendLeaderOffload offload = 5;
 }
 
-// KVCacheBackendLeaderHighAvailability turns leader election on, and carries nothing.
+// KVCacheBackendLeaderHighAvailability turns leader election on, and carries what a standby is
+// allowed to start from.
 //
 // DECLARING THE BLOCK IS THE SWITCH, and there is no key inside it to turn the feature back off.
 // An `enabled: false` beside `replicas: 3` would be a third state that admission would have to
 // adjudicate and every reader would have to remember, while presence has no such state. Lease
 // tuning — duration, renew deadline — can also be added here later without a breaking change.
 message KVCacheBackendLeaderHighAvailability {
+  // Snapshot writes the leader's own metadata to storage both leader Pods can reach, so a standby
+  // that takes over starts from that baseline rather than from nothing.
+  //
+  // Without it a standby REPLICATES NOTHING. The store's operation log is the only other way to
+  // feed one, and it runs on a leadership backend this operator's image cannot carry, so the
+  // snapshot is the whole of what a failover can recover. What it recovers is bounded by
+  // IntervalSeconds: the cache comes back partially cold rather than entirely cold.
+  //
+  //   - The flags this renders arrive AS SOON AS THIS FIELD IS SET, unlike the election's, which
+  //     wait for Replicas to rise above one. A single leader restores its own last snapshot when
+  //     it restarts, which is worth having on its own — and it means a store image too old to
+  //     carry the snapshot subsystem refuses to start here instead of ignoring the field.
+  //   - A snapshot older than the running process is read back without a version check of any
+  //     kind. Moving the image BACKWARDS across a snapshot format change is outside what this API
+  //     makes any promise about.
+  optional KVCacheBackendLeaderSnapshot snapshot = 1;
+
+  // MemberAddressing selects how a member is told to find the master once an election runs. Both
+  // forms reach the leader that is serving, by different routes, and they are rendered into the
+  // same one variable — so changing this rolls every member group.
+  //
+  //   - Lease: the member is handed the Lease's coordinates and reads the current holder itself.
+  //     This needs the member to talk to the API server, which is why the member image has to
+  //     carry the leadership backend at all.
+  //   - Service: the member is handed the leader Service's address, exactly as it is without high
+  //     availability. The Service publishes only READY endpoints and a standby deliberately is not
+  //     ready, so the address resolves to the serving leader — the open part is whether the
+  //     client's reconnect follows that endpoint across an election, and how long it takes.
+  //
+  // NEITHER FORM HAS BEEN MEASURED against the other. The default is Lease because that is what
+  // this operator has always rendered, not because it won a comparison, and the number that would
+  // settle it is how long a member cannot reach a master after the leader pod is deleted. Until
+  // that is measured on a cluster, treat Service as the one to try rather than the one to trust.
+  //
+  // +k8s:validation:default="Lease"
+  // +k8s:validation:enum=["Lease","Service"]
+  optional string memberAddressing = 2;
 }
 
 // KVCacheBackendLeaderOffload turns the local disk tier on, leader side.
@@ -1566,6 +1605,59 @@ message KVCacheBackendLeaderOffload {
   // object queued for offload is held in memory only on the deferred branch this field selects, so
   // evicting without it destroys the sole replica of an object whose bucket has not been flushed.
   optional bool onEvict = 2;
+}
+
+// KVCacheBackendLeaderSnapshot is where the leader's metadata baseline is kept, and how much of it.
+//
+// ONE STORAGE SHAPE, and it is the narrower one. The store also speaks S3, which would need an
+// endpoint, a bucket and a credential reference — a group of fields plus Secret handling, for a
+// capability a ReadWriteMany claim already covers inside the cluster. Widening to it later adds a
+// field beside this one and breaks nothing.
+//
+// There is no catalog setting either, because the catalog rides in the same storage: the store's
+// embedded catalog is constructed over the object store itself, so one claim carries both the
+// payloads and the index of which ones exist. The alternative it offers is a Redis, which would add
+// an external dependency to a feature whose whole premise is not having one.
+message KVCacheBackendLeaderSnapshot {
+  // PersistentVolumeClaimName names the claim the snapshot is written to and read from, resolved
+  // in the namespace this operator runs its workloads in — a KVCacheBackend is cluster-scoped and
+  // has no namespace of its own to resolve it against.
+  //
+  // REQUIRED: the claim must be ReadWriteMany. The serving leader writes the snapshot and a
+  // standby reads it, they are different Pods, and a claim only one of them can mount leaves the
+  // standby reading an empty directory with nothing logging it. Admission does not check this —
+  // the claim may not exist yet when the backend is created — so the reconciler checks it once it
+  // can see the claim and publishes the answer as a condition.
+  //
+  // EVERY KEY THE CACHE HOLDS IS NAMEABLE FROM THIS VOLUME. A snapshot is the master's metadata
+  // written as plain bytes with no encryption, so whoever can mount this claim can enumerate those
+  // keys, including their tenant names under MultiTenancy. The claim also outlives the backend:
+  // nothing here deletes it.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string persistentVolumeClaimName = 1;
+
+  // IntervalSeconds is how long the store waits between snapshots, which is the same thing as HOW
+  // MUCH A FAILOVER LOSES: objects written since the last one are not in the baseline the standby
+  // starts from. Unset renders no flag and leaves the store's own default in place, so a default
+  // that moves upstream shows up as a behavior change to investigate rather than as a value this
+  // API silently re-asserted.
+  //
+  // +k8s:validation:minimum=1
+  optional int32 intervalSeconds = 2;
+
+  // RetentionCount is how many recent snapshots are kept, older ones being deleted as newer ones
+  // land. Its floor is one because the store refuses to start when snapshots are on and this is
+  // zero. Unset renders no flag, for the reason above.
+  //
+  // Keeping more than one is not spare capacity: a restore tries the stored snapshots in turn and
+  // falls back to an older one when a payload cannot be read, so the count is how many times that
+  // fallback can happen.
+  //
+  // +k8s:validation:minimum=1
+  optional int32 retentionCount = 3;
 }
 
 // KVCacheBackendList holds the list of KVCacheBackend.
@@ -2180,7 +2272,9 @@ message KVCacheBackendStatus {
   optional string phaseMessage = 2;
 
   // Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,
-  // CapacityObserved, Deletable. Every one is derived from an observed document.
+  // CapacityObserved, Deletable, RolloutComplete, and — each only where it has something to be a
+  // verdict about — SnapshotStorageShared and ElectionObserved. Every one is derived from an
+  // observed document.
   //
   // +patchMergeKey=type
   // +patchStrategy=merge
