@@ -486,10 +486,16 @@ members:
       - {path: /usr/local/bin/npu-smi, mountPath: /usr/local/bin/npu-smi, type: File, readOnly: true}
 ```
 
-⚠️ **A VRAM group may also carry a [local disk tier](local-disk-tier.md), and that combination is
-supported by design but not yet measured.** No upstream test covers it; measuring it on the vendor
-validation hosts is on this project's acceptance list. Until then, treat the pairing as unverified
-rather than as guaranteed.
+**A VRAM group may also carry a [local disk tier](local-disk-tier.md), and that combination is
+measured on NVIDIA.** Objects written past a 256Mi device segment left memory for the tier and read
+back with matching digests. No upstream test covers the pairing, so the reading is this project's own.
+
+⚠️ **The equivalent on Ascend (`cann`) and AMD (`rocm`) is still unmeasured.** Treat the pairing as
+verified on NVIDIA and as unverified elsewhere, rather than as guaranteed everywhere.
+
+⚠️ **A writer against this tier must retry.** A put that fails on a full segment means eviction has
+not caught up, not that the tier is full: the offload heartbeat runs on an interval, so a writer that
+abandons on first failure reads "eviction in progress" as "cannot write".
 
 **Reachability is a port range, never a list.** The transfer engine picks its data ports at random —
 one observed run bound `15002` and `15995`, a second client `16566` and `16655`, none of them
