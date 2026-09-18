@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -203,6 +204,50 @@ func TestRenderModelDeploymentRouterObjects_ProbesBothRouterContainers(t *testin
 	assert.Equal(t, int32(9003), epp.ReadinessProbe.GRPC.Port)
 }
 
+// TestRenderModelDeploymentRouterObjects_PullPolicyReachesBothContainers pins the policy onto BOTH
+// router containers rather than one.
+//
+// Both images are resolved through the same redirect, so both are as replaceable as each other, and
+// a mutable tag left on the default policy is served from whatever the node already has. The field
+// is the deployment's one answer for its router; a container it did not reach was a gap rather than
+// an exemption.
+func TestRenderModelDeploymentRouterObjects_PullPolicyReachesBothContainers(t *testing.T) {
+	md := routedModelDeployment()
+	md.Spec.Router.ImagePullPolicy = core.PullAlways
+
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	require.NoError(t, err)
+
+	containers := objects.Deployment.Spec.Template.Spec.Containers
+	require.Len(t, containers, 2)
+	for i := range containers {
+		assert.Equal(t, core.PullAlways, containers[i].ImagePullPolicy,
+			"%s carries the policy the router declared", containers[i].Name)
+	}
+}
+
+// TestRenderModelDeploymentRouterObjects_PullPolicyIsResolvedWhenUndeclared pins the case the test
+// above cannot see: the field is optional and nothing defaults it.
+//
+// An empty policy rendered here is one the API server fills in on write, and alignRenderedContainer
+// compares the field unconditionally — so the next pass reads the server's default as a difference,
+// writes the empty value back, and the Deployment updates forever. Asserting a non-empty value is
+// what makes that loop impossible rather than merely unobserved.
+func TestRenderModelDeploymentRouterObjects_PullPolicyIsResolvedWhenUndeclared(t *testing.T) {
+	md := routedModelDeployment()
+	md.Spec.Router.ImagePullPolicy = ""
+
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	require.NoError(t, err)
+
+	containers := objects.Deployment.Spec.Template.Spec.Containers
+	require.Len(t, containers, 2)
+	for i := range containers {
+		assert.NotEmpty(t, containers[i].ImagePullPolicy,
+			"%s renders a policy the API server has no reason to default", containers[i].Name)
+	}
+}
+
 func TestRenderModelDeploymentRouterObjects_CarriesRuntimeIdentityAndStreamingTrailers(t *testing.T) {
 	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil)
 	require.NoError(t, err)
@@ -223,7 +268,21 @@ func TestRenderModelDeploymentRouterObjects_CarriesRuntimeIdentityAndStreamingTr
 	assert.Contains(t, envoy, "explicit_http_config:")
 	// The original-destination cluster follows x-gateway-destination-endpoint, so a client-supplied
 	// copy of that header is what would pick the upstream. Only the EPP may set it.
-	assert.Contains(t, envoy, `request_headers_to_remove: ["x-gateway-destination-endpoint"]`)
+	//
+	// Three assertions rather than one, because the removal has to happen in a place Envoy accepts
+	// AND at a moment that leaves the EPP's own copy standing, and a single "the text is present"
+	// check reports neither. An earlier version of this file asserted the removal as a
+	// connection-manager field, which Envoy has never declared, so the assertion passed against a
+	// configuration that stopped the proxy from starting.
+	// The trailing colon matters: it matches the YAML key and not the prose in the comment beside
+	// it, which names the same field in order to say why it is not used.
+	assert.NotContains(t, envoy, "request_headers_to_remove:",
+		"HttpConnectionManager declares no such field, and a route-level removal would run after ext_proc")
+	assert.Contains(t, envoy, "- remove: x-gateway-destination-endpoint")
+	assert.Less(t,
+		strings.Index(envoy, "envoy.filters.http.header_mutation"),
+		strings.Index(envoy, "envoy.filters.http.ext_proc"),
+		"the client's copy must be dropped before the EPP is consulted, and filters run in order")
 }
 
 func TestRenderModelDeploymentRouterObjects_UnmanagedProducerPublishesNoKVEvents(t *testing.T) {

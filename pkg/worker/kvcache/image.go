@@ -22,7 +22,17 @@ import (
 //
 // With a concrete value rendered on every pass there is no default to fight and nothing to skip.
 func EffectivePullPolicy(kvcb *workercore.KVCacheBackend, image string) core.PullPolicy {
-	if declared := kvcb.Spec.ImagePullPolicy; declared != "" {
+	return ResolvePullPolicy(kvcb.Spec.ImagePullPolicy, image)
+}
+
+// ResolvePullPolicy is the rule EffectivePullPolicy applies, reachable by a renderer that has a
+// declared policy and an image without a KVCacheBackend to read them from.
+//
+// It exists because the hazard is the aligner's, not the backend's: every workload converged by
+// alignRenderedContainer needs a non-empty policy for the same reason, and one that renders the raw
+// optional field instead rolls forever against the value the API server defaulted.
+func ResolvePullPolicy(declared core.PullPolicy, image string) core.PullPolicy {
+	if declared != "" {
 		return declared
 	}
 	if imageTag(image) == "latest" {
