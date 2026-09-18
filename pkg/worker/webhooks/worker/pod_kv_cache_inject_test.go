@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -94,7 +96,7 @@ func TestPodKVCacheInject_ManufacturerSelectsTheVLLMRuntime(t *testing.T) {
 			name:            "Ascend vllm uses the Ascend connector",
 			manufacturer:    "ascend",
 			manufacturerSet: true,
-			protocol:        "Ascend",
+			protocol:        "CANN",
 			wantConnector:   "AscendStoreConnector",
 		},
 		{
@@ -107,33 +109,33 @@ func TestPodKVCacheInject_ManufacturerSelectsTheVLLMRuntime(t *testing.T) {
 			manufacturer:    "ascend",
 			manufacturerSet: true,
 			protocol:        "TCP",
-			wantErr:         `accepts only the "ascend" transport and this pool offers "tcp"`,
+			wantErr:         `accepts only the "ascend" transport and no group in this pool offers it`,
 		},
 		{
 			name:            "manufacturer spelling is exact",
 			manufacturer:    "Ascend",
 			manufacturerSet: true,
-			protocol:        "Ascend",
+			protocol:        "CANN",
 			wantErr:         "kvcache.gpustack.ai/manufacturer",
 		},
 		{
 			name:            "manufacturer whitespace is refused",
 			manufacturer:    " ascend",
 			manufacturerSet: true,
-			protocol:        "Ascend",
+			protocol:        "CANN",
 			wantErr:         "kvcache.gpustack.ai/manufacturer",
 		},
 		{
 			name:            "manufacturer has no unmeasured variant",
 			manufacturer:    "huawei",
 			manufacturerSet: true,
-			protocol:        "Ascend",
+			protocol:        "CANN",
 			wantErr:         "kvcache.gpustack.ai/manufacturer",
 		},
 		{
 			name:            "empty manufacturer is refused when declared",
 			manufacturerSet: true,
-			protocol:        "Ascend",
+			protocol:        "CANN",
 			wantErr:         "kvcache.gpustack.ai/manufacturer",
 		},
 		{
@@ -141,7 +143,7 @@ func TestPodKVCacheInject_ManufacturerSelectsTheVLLMRuntime(t *testing.T) {
 			engine:          "sglang",
 			manufacturer:    "ascend",
 			manufacturerSet: true,
-			protocol:        "Ascend",
+			protocol:        "CANN",
 			wantErr:         "kvcache.gpustack.ai/manufacturer",
 		},
 	}
@@ -177,6 +179,79 @@ func TestPodKVCacheInject_ManufacturerSelectsTheVLLMRuntime(t *testing.T) {
 				pod.Spec.Containers[0].Args[2])
 		})
 	}
+}
+
+// TestPodKVCacheInject_TheMatchedGroupsTransport is the per-group transport rule at the admission
+// boundary, with its control. vLLM on Ascend hardware accepts only the "ascend" transport, so it
+// is REFUSED against a pool whose groups serve nothing compatible — the typed refusal at submit
+// time, not a container that starts and raises — and admitted against a pool where one group
+// serves it, handed THAT group's protocol rather than the backend's.
+//
+// The control is what gives the refusal its teeth: a webhook that refused every Ascend Pod, or
+// one that handed the backend's transport regardless, would satisfy either half alone.
+func TestPodKVCacheInject_TheMatchedGroupsTransport(t *testing.T) {
+	ascendPod := func() *core.Pod {
+		pod := kvCachePod()
+		pod.Annotations[KVCacheManufacturerAnnotationKey] = "ascend"
+		return pod
+	}
+	// A two-group backend on the fixture's chain: the first group stays on the backend's TCP, the
+	// second carries the transport the case is about.
+	twoGroupBackend := func(second workercore.KVCacheBackendMember) []ctrlcli.Object {
+		objs := kvCacheFixture()
+		objs[2] = &workercore.KVCacheBackend{
+			ObjectMeta: meta.ObjectMeta{Name: "mc"},
+			Spec: workercore.KVCacheBackendSpec{
+				Transport: workercore.KVCacheBackendTransport{Protocol: "TCP"},
+				Connection: workercore.KVCacheBackendConnection{
+					Managed: &workercore.KVCacheBackendManaged{
+						Members: []workercore.KVCacheBackendMember{
+							{
+								NodeSelector:      map[string]string{"kvcache": "true"},
+								Medium:            "DRAM",
+								CapacityPerMember: resource.MustParse("64Gi"),
+							},
+							second,
+						},
+					},
+				},
+			},
+		}
+		return objs
+	}
+
+	t.Run("refused when no group serves the engine's transport", func(t *testing.T) {
+		pod := ascendPod()
+		err := admit(t, pod, twoGroupBackend(workercore.KVCacheBackendMember{
+			NodeSelector:      map[string]string{"kvcache": "true"},
+			Medium:            "VRAM",
+			CapacityPerMember: resource.MustParse("16Gi"),
+			Transport:         &workercore.KVCacheBackendMemberTransport{Protocol: "RDMA"},
+		})...)
+
+		require.Error(t, err)
+		var refusal *inject.RefusalError
+		require.ErrorAs(t, err, &refusal, "the refusal is typed, so a caller can branch on the reason")
+		assert.Equal(t, inject.ReasonTransportUnsupported, refusal.Reason)
+		assert.Contains(t, err.Error(), `["tcp" "rdma"]`,
+			"the refusal names what every group offers, so neither serving it is visible")
+	})
+
+	t.Run("admitted on the group that serves it, and handed that group's protocol", func(t *testing.T) {
+		pod := ascendPod()
+		require.NoError(t, admit(t, pod, twoGroupBackend(workercore.KVCacheBackendMember{
+			NodeSelector:      map[string]string{"kvcache": "true"},
+			Medium:            "VRAM",
+			CapacityPerMember: resource.MustParse("16Gi"),
+			Transport:         &workercore.KVCacheBackendMemberTransport{Protocol: "CANN"},
+		})...))
+
+		require.Contains(t, pod.Annotations, inject.ClientConfigAnnotationKey)
+		var config map[string]any
+		require.NoError(t, json.Unmarshal([]byte(pod.Annotations[inject.ClientConfigAnnotationKey]), &config))
+		assert.Equal(t, "ascend", config["protocol"],
+			"the engine is handed the matched group's protocol, not the backend's tcp")
+	})
 }
 
 // TestPodKVCacheInject_SGLangCarriesTheEnvironmentVehicle is the counterpart, and its negative half

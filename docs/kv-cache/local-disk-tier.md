@@ -53,6 +53,11 @@ documented, so there is nothing to opt into.
 [The two axes](backend.md#the-two-axes) for why the shape has to be this way, and
 [KV Cache on Disk-Heavy Nodes](disk-heavy-nodes.md) for what to write on a node that is mostly disk.
 
+⚠️ **Every example on this page is a `DRAM` group, and that is not incidental: pairing the tier with
+a `VRAM` group is unverified.** What is and is not measured about that pairing is stated once, with
+the medium it belongs to, at [Reaching a node's accelerator](backend.md#reaching-a-nodes-accelerator) —
+read it before writing one.
+
 ## Contents
 
 - [The tier is written one bucket at a time](#the-tier-is-written-one-bucket-at-a-time)

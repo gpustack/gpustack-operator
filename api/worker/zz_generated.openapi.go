@@ -113,10 +113,12 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.KVCacheBackendList{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_KVCacheBackendList(ref),
 		v1alpha1.KVCacheBackendManaged{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_KVCacheBackendManaged(ref),
 		v1alpha1.KVCacheBackendMember{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref),
+		v1alpha1.KVCacheBackendMemberHostPath{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberHostPath(ref),
 		v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberLocalDisk(ref),
 		v1alpha1.KVCacheBackendMemberLocalDiskEviction{}.OpenAPIModelName():          schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberLocalDiskEviction(ref),
 		v1alpha1.KVCacheBackendMemberLocalDiskEvictionWatermark{}.OpenAPIModelName(): schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberLocalDiskEvictionWatermark(ref),
 		v1alpha1.KVCacheBackendMemberStatus{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberStatus(ref),
+		v1alpha1.KVCacheBackendMemberTransport{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberTransport(ref),
 		v1alpha1.KVCacheBackendScaleIn{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_KVCacheBackendScaleIn(ref),
 		v1alpha1.KVCacheBackendSpec{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_KVCacheBackendSpec(ref),
 		v1alpha1.KVCacheBackendStatus{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_KVCacheBackendStatus(ref),
@@ -5597,7 +5599,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 					},
 					"medium": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Medium is what the SEGMENT this member group mounts is made of. One value: host memory.\n\nIt is an identity rather than a choice, which is why the field survives with a single value exactly as spec.type does: a second medium widens this enum instead of being inferred from a field that is not there.\n\n  - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and\n    each is reached elsewhere: the first through localDisk below, NVMe-oF as a target\n    coordinate with no Pod, and the last two on the leader's own process.\n  - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one\n    of those values, while this CRD was installed but the webhook was not, becomes undeletable:\n    schema validation runs on the write path only, so it reads back fine while every update is\n    refused, the controller's finalizer removal included. The exposure is development clusters\n    only, this type being absent from every tag through v0.8.6, so clearing it is the first\n    shipping release's job — confirm no leftover object exists, or write a recovery procedure.",
+							Description: "Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or device memory (VRAM).\n\nIt is a choice rather than an identity: the renderer splits on it. A DRAM member charges CapacityPerMember against the Pod's host memory; a VRAM member charges it against nothing, because its segment is device memory and claiming it is allocating it. What lets a VRAM member reach its device is declared and never inferred — SecurityContext, HostPaths and RuntimeClassName below, each on its own. The field stays immutable — a segment already mounted cannot change kind underneath the data in it — so the choice is made when the group is declared.\n\n  - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and\n    each is reached elsewhere: the first through localDisk below, NVMe-oF as a target\n    coordinate with no Pod, and the last two on the leader's own process.\n  - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one\n    of those values, while this CRD was installed but the webhook was not, becomes undeletable:\n    schema validation runs on the write path only, so it reads back fine while every update is\n    refused, the controller's finalizer removal included. The exposure is development clusters\n    only, this type being absent from every tag through v0.8.6, so clearing it is the first\n    shipping release's job — confirm no leftover object exists, or write a recovery procedure.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -5649,7 +5651,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 					},
 					"image": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Image overrides the backend's Image for this member group only. Left unset, the group runs the backend's Image.\n\nA group's NodeSelector is what makes this necessary: two groups can select nodes of different accelerator vendors or generations, and the store's client ships as one wheel per vendor, each carrying the transports it was compiled with and the runtime it links. The transport itself is backend-wide, so this is NOT a per-group transport — it is the per-group runtime that one transport needs on differing hardware.",
+							Description: "Image overrides the backend's Image for this member group only. Left unset, the group runs the backend's Image.\n\nA group's NodeSelector is what makes this necessary: two groups can select nodes of different accelerator vendors or generations, and the store's client ships as one wheel per vendor, each carrying the transports it was compiled with and the runtime it links. The vendor runtime is also the medium's: a VRAM group needs a build with VRAM segments compiled in, which the stock CPU default is not.",
 							MaxLength:   ptr.To[int64](512),
 							Type:        []string{"string"},
 							Format:      "",
@@ -5661,12 +5663,97 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 							Ref:         ref(v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName()),
 						},
 					},
+					"transport": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Transport declares the data plane this group uses, overriding the backend's spec.transport.protocol for this group only. Left unset, the group inherits the backend's.\n\nThe override exists for the one thing two media do not agree on: a VRAM group reaching its peers over a fabric while the DRAM group beside it stays on TCP. Everything else about the fabric — the device a host-fabric member asks for — stays backend-wide, since it describes the nodes' fabric rather than one group.",
+							Ref:         ref(v1alpha1.KVCacheBackendMemberTransport{}.OpenAPIModelName()),
+						},
+					},
+					"securityContext": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SecurityContext is the member container's security context, merged ONTO the one the renderer derives from the group's effective protocol rather than replacing it.\n\nThe merge is per field: a field set here wins, a field left unset keeps whatever the renderer put there, and capabilities.add is the UNION of both sides. The union is the part worth stating, because the alternative is silent: a host-fabric group needs IPC_LOCK to pin the memory it registers and SYS_RESOURCE to raise the limit that pinning hits, and replacing this value whole would drop both while leaving a container that starts, runs, and fails only at registration. Dropping one of the two is therefore not something this field can express; a group that must not hold them declares a protocol that does not ask for them.\n\nTHIS IS ROOT ON THE NODE, and deliberately so: Privileged, or a RunAsUser of zero paired with a HostPaths entry, gives the member container what a process on the node has. The grant is not an escalation of who can make it — this object is cluster-scoped precisely because it is a privileged physical resource, so whoever can write one already holds the cluster. It is written here rather than inferred so that reading the object tells you what was granted.",
+							Ref:         ref(corev1.SecurityContext{}.OpenAPIModelName()),
+						},
+					},
+					"hostPaths": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HostPaths mounts directories or files from the selected nodes into the member container.\n\nIt exists because a vendor's USER-SPACE DRIVER is not in the image and is not under /dev, so no device grant reaches it: an Ascend member needs the driver tree and the DCMI library from the node, and a container runtime that injects them is the other way to get there. Privileged alone does NOT cover this — it opens the node's device tree, which is where the device nodes are and is not where the libraries are.\n\nEntries are mounted in the order written. The volume backing each one is named from its POSITION rather than from anything declared here, so an entry can collide with neither another entry nor a volume the renderer owns.\n\nLocalDisk above is not this field spelled differently: that tier is a declared capacity the leader routes offload tasks to, with a deregistration hook and a grace period derived from it. A directory mounted here is a mount and nothing more.",
+							MaxItems:    ptr.To[int64](32),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.KVCacheBackendMemberHostPath{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"runtimeClassName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RuntimeClassName selects the container runtime the member's Pods run under, which is how a vendor runtime injects its driver libraries and device nodes without any of them being named here.\n\nIt is DECLARED rather than looked up from the group's hardware, unlike the equivalent on a model deployment, and the reason is that a member group has no InstanceType to ask: it selects nodes by label, and a label does not carry a manufacturer this operator can map. A cluster whose vendor runtime is the default runtime needs nothing here.\n\nA name no RuntimeClass on the cluster carries makes the API server REJECT the Pod outright, so the member group stops at admission of its own Pods rather than starting without the runtime. That is the loud failure, and it is the one wanted here.",
+							MaxLength:   ptr.To[int64](253),
+							Pattern:     "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 				Required: []string{"nodeSelector", "medium", "capacityPerMember"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+			v1alpha1.KVCacheBackendMemberHostPath{}.OpenAPIModelName(), v1alpha1.KVCacheBackendMemberLocalDisk{}.OpenAPIModelName(), v1alpha1.KVCacheBackendMemberTransport{}.OpenAPIModelName(), corev1.SecurityContext{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberHostPath(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCacheBackendMemberHostPath is one directory or file taken from a selected node into the member container.\n\nOnly a host path, and none of the other volume sources: what a member group needs from outside its image is the node's own driver tree and device nodes. A ConfigMap, a Secret or a claim has no use here that is known, and a source added without one is a validation surface nobody exercises.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"path": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Path is the absolute path on the node.",
+							Default:     "",
+							MaxLength:   ptr.To[int64](1024),
+							Pattern:     "^(/[^/]+)+$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"mountPath": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MountPath is the absolute path inside the member container. It must duplicate neither another entry's mount path nor one the renderer owns.",
+							Default:     "",
+							MaxLength:   ptr.To[int64](1024),
+							Pattern:     "^(/[^/]+)+$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"type": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Type is the kubelet's host-path type check, applied before the mount.\n\nLeft unset it is the EMPTY type, for which the kubelet's mounter returns immediately and looks at the path not at all — so a missing path becomes an empty directory in the container and the member starts anyway. Naming a type is what turns that into a FailedMount the Pod stops at.\n\n\nPossible enum values:\n - `\"\"` For backwards compatible, leave it empty if unset\n - `\"BlockDevice\"` A block device must exist at the given path\n - `\"CharDevice\"` A character device must exist at the given path\n - `\"Directory\"` A directory must exist at the given path\n - `\"DirectoryOrCreate\"` If nothing exists at the given path, an empty directory will be created there as needed with file mode 0755, having the same group and ownership with Kubelet.\n - `\"File\"` A file must exist at the given path\n - `\"FileOrCreate\"` If nothing exists at the given path, an empty file will be created there as needed with file mode 0644, having the same group and ownership with Kubelet.\n - `\"Socket\"` A UNIX socket must exist at the given path",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"", "BlockDevice", "CharDevice", "Directory", "DirectoryOrCreate", "File", "FileOrCreate", "Socket"},
+						},
+					},
+					"readOnly": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReadOnly mounts it read-only. A driver tree is read by the member and written by nobody, so this is the right setting for one, and it is not the default because a device node under /dev is the other thing mounted here and that one is written.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"path", "mountPath"},
+			},
+		},
 	}
 }
 
@@ -5852,6 +5939,26 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberStatus(ref common.R
 					},
 				},
 				Required: []string{"segmentID", "clientID", "segmentName"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMemberTransport(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCacheBackendMemberTransport is a member group's override of the backend's data plane. It carries a protocol only: the device a host-fabric member asks for describes the nodes' fabric rather than one group, so it stays on the backend.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"protocol": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Protocol is the transport this group's members are ASKED to use, with the same values and the same Auto-resolves-to-TCP rule as the backend's spec.transport.protocol, which this field replaces for this group when set — including the residual risk that field records for the respelling, which applies to a stored value here the same way.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
 			},
 		},
 	}
@@ -6088,14 +6195,14 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendTransport(ref common.Refe
 				Properties: map[string]spec.Schema{
 					"protocol": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Protocol is the transport the members are ASKED to use. Auto resolves to TCP.\n\n  - TCP is the universal fallback. RDMA, EFA, HIP and Ascend are peers of one another, each a\n    fabric- or vendor-specific fast path rather than a spelling of TCP: EFA in particular is\n    reached through libfabric's SRD provider and has no RC queue pairs, so the RDMA transport\n    cannot drive it.\n  - Whether a member came up on what it asked for is NOT visible through this API.\n    status.members[].protocol echoes this request back rather than reporting a result, so a\n    member that fell back to TCP still reads as the fabric there, while serving. Only the\n    member's own log says which transport the data plane installed.\n  - Auto is deliberately NOT a per-node probe that promotes itself to a faster fabric: a member\n    group renders one DaemonSet, whose single Pod template cannot carry a different transport\n    per node, and promoting to RDMA grants hostNetwork and two capabilities — a privilege is\n    requested, never inferred on an operator's behalf.\n  - Membership in this enum means MEASURED AS COMPILED into a published artifact, which is what\n    excludes the other ten strings that artifact's config parser accepts. It does not mean\n    measured to move bytes: only TCP has been exercised end to end.\n  - A host fabric needs two things this API cannot check: the member image must carry the\n    runtime its transport links — CANN for Ascend, libfabric for EFA — and the NODE must run a\n    device plugin, since a hostPath alone leaves the device cgroup refusing to open the device.\n    Which resource the member asks for is deviceResourceName below.",
+							Description: "Protocol is the transport the members are ASKED to use. Auto resolves to TCP.\n\nTHESE VALUES ARE NOT THE STORE'S OWN SPELLINGS. What is written here is translated before it reaches a member, and two of the eight change word entirely: CANN renders as ascend and ROCM as hip. So a member's environment, its logs, and status.members[].protocol below all report the store's lowercase spelling rather than the one written here, and comparing the two as strings finds a difference that is not one.\n\n  - TCP is the universal fallback. RDMA, EFA, CANN, ROCM, MUSA and MACA are peers of one\n    another, each a fabric- or vendor-specific fast path rather than a spelling of TCP: EFA in\n    particular is reached through libfabric's SRD provider and has no RC queue pairs, so the\n    RDMA transport cannot drive it. MUSA and MACA are intra-node IPC transports, not host\n    fabrics: they take no hostNetwork, no capabilities and no device resource.\n  - Whether a member came up on what it asked for is NOT visible through this API.\n    status.members[].protocol echoes this request back rather than reporting a result, so a\n    member that fell back to the store's tcp still reads as the fabric there, while serving.\n    Only the member's own log says which transport the data plane installed.\n  - Auto is deliberately NOT a per-node probe that promotes itself to a faster fabric: a member\n    group renders one DaemonSet, whose single Pod template cannot carry a different transport\n    per node, and promoting to RDMA grants hostNetwork and two capabilities — a privilege is\n    requested, never inferred on an operator's behalf.\n  - Membership in this enum means MEASURED AS COMPILED into an artifact a member can run, which\n    is what excludes the other eight strings that artifact's config parser accepts. It does not\n    mean measured to move bytes: only TCP has been exercised end to end. It also does not mean\n    this project publishes an image carrying it — MUSA and MACA are deliberately in the enum\n    with no variant in pack/mirrored-mooncake, so a group on either names its own image. A\n    value here with neither a project variant nor a working self-built image is what the rule\n    excludes; an absent variant on its own is not.\n  - A host fabric needs two things this API cannot check: the member image must carry the\n    runtime its transport links — the CANN toolkit for CANN, libfabric for EFA — and the NODE must run a\n    device plugin, since a hostPath alone leaves the device cgroup refusing to open the device.\n    Which resource the member asks for is deviceResourceName below.\n  - RESPELLING THIS ENUM CARRIES A RESIDUAL RISK, knowingly accepted, on the same terms as\n    Medium's. The values were once Auto, TCP, RDMA, EFA, HIP and Ascend; HIP and Ascend are\n    gone, replaced by the toolchain names ROCM and CANN, and the rest changed case. An object\n    storing one of the old values becomes undeletable, because schema validation runs on the\n    write path only: it reads back fine while every update is refused, the controller's\n    finalizer removal included. NO RELEASE IS EXPOSED — this type is absent from every tag\n    through v0.8.6, checked per tag — but a cluster tracking the default branch is, since that\n    branch carried the old spellings. Clearing it is the first shipping release's job: confirm\n    no leftover object exists, or write a recovery procedure. A conversion webhook is NOT the\n    answer here for the reason an alias map is not: the schema enum is the gate a stored object\n    meets first, so widening what admission accepts reaches nothing that the API server has\n    already refused.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"deviceResourceName": {
 						SchemaProps: spec.SchemaProps{
-							Description: "DeviceResourceName is the extended resource a host-fabric member asks one of, so the device cgroup lets it open the fabric device. It is CONSULTED ONLY on the RDMA and EFA protocols; beside any other it renders nothing.\n\n  - It is DECLARED rather than derived: the name belongs to whichever plugin the cluster's\n    administrator installed, so no name hard-coded here would be right on two clusters, and no\n    admission rule can check a node for a plugin whose resource it cannot know.\n  - EFA is the exception. Its plugin advertises exactly one name, so an EFA member asks for\n    vpc.amazonaws.com/efa when this is unset. That is a default rather than a property of the\n    protocol, and setting the field overrides it.\n  - UNSET IS NOT A SAFE DEFAULT, IT IS THE OLD BEHAVIOR. A fabric member naming no resource\n    mounts the device tree and requests nothing, so the cgroup refuses the open, the store\n    installs TCP, and the object still reads as the fabric it asked for. Naming one instead\n    keeps the member off a node that advertises none, which is the safer failure but not\n    always the wanted one, so both stay reachable.\n\nThe bounds below are the API server's own for a resource name: 63 characters after the slash and for each domain label, refused here rather than on the DaemonSet rendered from it, where they strand reconciliation with no obvious cause. The domain's 253-character limit is NOT among them — no regular expression can bound a repeated group whose labels vary in length, so 63.63.63.62 makes a domain of 254 that the 317 below still admits — and admission carries that one instead, so it is absent when the webhook is not installed.",
+							Description: "DeviceResourceName is the extended resource a host-fabric member asks one of, so the device cgroup lets it open the fabric device. It is CONSULTED ONLY on the RDMA and EFA protocols; beside any other it renders nothing.\n\n  - It is DECLARED rather than derived: the name belongs to whichever plugin the cluster's\n    administrator installed, so no name hard-coded here would be right on two clusters, and no\n    admission rule can check a node for a plugin whose resource it cannot know.\n  - EFA is the exception. Its plugin advertises exactly one name, so an EFA member asks for\n    vpc.amazonaws.com/efa when this is unset. That is a default rather than a property of the\n    protocol, and setting the field overrides it.\n  - UNSET IS NOT A SAFE DEFAULT, IT IS THE OLD BEHAVIOR. A fabric member naming no resource\n    mounts the device tree and requests nothing, so the cgroup refuses the open, the store\n    installs the store's tcp, and the object still reads as the fabric it asked for. Naming one instead\n    keeps the member off a node that advertises none, which is the safer failure but not\n    always the wanted one, so both stay reachable.\n\nThe bounds below are the API server's own for a resource name: 63 characters after the slash and for each domain label, refused here rather than on the DaemonSet rendered from it, where they strand reconciliation with no obvious cause. The domain's 253-character limit is NOT among them — no regular expression can bound a repeated group whose labels vary in length, so 63.63.63.62 makes a domain of 254 that the 317 below still admits — and admission carries that one instead, so it is absent when the webhook is not installed.",
 							MaxLength:   ptr.To[int64](317),
 							Pattern:     "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$",
 							Type:        []string{"string"},

@@ -104,10 +104,10 @@ var engineTransportConstraint = map[Engine]transportFacts{
 		// reaches :193.
 		Version: "v0.19.1rc1-2120-gcdad5a32e",
 		Source:  "vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/backend/mooncake_backend.py:193-194,544",
-		// The two spellings of one transport. The API enum is case-sensitive
-		// (KVCacheBackendTransport.Protocol), so the capitalized one is what a remediation may name.
+		// The two spellings of one transport. The API enum is uppercase
+		// (KVCacheBackendTransport.Protocol), so CANN is what a remediation may name.
 		Required:         "ascend",
-		RequiredAPIValue: "Ascend",
+		RequiredAPIValue: "CANN",
 	},
 	EngineSGLang: {
 		// Unconstrained, and the reason is worth recording because this file DOES compare protocol:
@@ -160,4 +160,57 @@ func checkTransport(engine Engine, protocol string) error {
 			"here: the field defaults to Auto, which the backend resolves to one concrete transport "+
 			"rather than to whatever an engine wants",
 		engine, facts.Required, protocol, facts.Version, facts.Source, facts.RequiredAPIValue)
+}
+
+// MatchTransport is checkTransport's pool-aware half: where the singular check answers whether one
+// engine-transport pair runs, this answers WHICH of a pool's effective transports the engine is
+// handed. The offers are each member group's effective protocol in declaration order, computed by
+// the caller through mooncake.MemberProtocols.
+//
+// THE MATCH IS THE FIRST OFFER IN DECLARATION ORDER THAT THE ENGINE'S CONSTRAINT ACCEPTS — and the
+// first offer outright for an unconstrained engine, which accepts them all. Nothing matches an
+// engine to a specific group: a pool names exactly one backend, and the engine only learns the
+// master address, so the rule has to pick without a binding. Declaration order is deterministic
+// and costs nothing to explain, and every accepted offer is one the engine can run on.
+//
+// A refusal means NO group satisfies the constraint, which is the case worth failing loudly for:
+// admitted, the engine's store backend raises at startup on every group the pool has, and the
+// container never serves a request. An engine with no measured entry claims less and is let
+// through, on the same rule as the singular check.
+//
+// An empty offer list is NOT a transport answer: it is the no-store shape, which Render refuses
+// for its own reason, so this returns no protocol and no error rather than borrowing that case.
+//
+// An empty offer INSIDE the list is a different thing and is skipped. A group's effective protocol
+// is the artifact's spelling looked up from the API's, so an API value with no entry in that map
+// resolves to the empty string. Nothing produces one today — a guard test asserts every enum value
+// has an entry — but an unconstrained engine accepts any offer, so without this the ninth enum value
+// added without its map entry would be handed to the engine as an empty transport variable rather
+// than refused. Skipping rather than refusing outright is what lets the groups that DID resolve still
+// answer; a pool where none of them did falls through to the refusal below.
+func MatchTransport(engine Engine, offers []string) (string, error) {
+	if len(offers) == 0 {
+		return "", nil
+	}
+
+	facts := engineTransportConstraint[engine]
+	for _, offer := range offers {
+		if offer == "" {
+			continue
+		}
+		if facts.Required == "" || facts.Required == offer {
+			return offer, nil
+		}
+	}
+
+	return "", newRefusal(ReasonTransportUnsupported,
+		"engine %q accepts only the %q transport and no group in this pool offers it — the groups "+
+			"offer %q — so its store backend would raise at startup instead of using the cache "+
+			"(measured at %s, %s). The transport belongs to the KVCacheBackend the pool names, not "+
+			"to the Binding: set that backend's spec.transport.protocol to %q or one member group's "+
+			"transport.protocol, which is that same transport in the API's spelling, or point this "+
+			"workload at a pool that already offers it. An unset protocol is not neutral here: the "+
+			"field defaults to Auto, which the backend resolves to one concrete transport rather "+
+			"than to whatever an engine wants",
+		engine, facts.Required, offers, facts.Version, facts.Source, facts.RequiredAPIValue)
 }

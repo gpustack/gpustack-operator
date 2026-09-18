@@ -136,10 +136,14 @@ A lease-less image is not refused outright: at one replica the election flags ar
 such an image runs a single-leader backend even with `highAvailability` set — the flags arrive only
 when `replicas` rises past 1, which is where the missing backend would fail the leader at startup.
 
-⛔ **A member group on `RDMA`, `HIP` or `Ascend` cannot run under high availability today.** Those
+⛔ **A member group on `RDMA`, `ROCM` or `CANN` cannot run under high availability today.** Those
 transports need a vendor runtime `mirrored-mooncake` does not carry, and the vendor build does not
 carry the leadership backend — the two axes are independent, so covering them means rebuilding each
 variant.
+
+`MUSA` and `MACA` are not on that list because this project builds no variant for either, by
+intent: a group on one of them runs an image you built, so whether it also carries the leadership
+backend is a property of your build rather than of anything here.
 
 `EFA` is the one fabric not on that list: it needs no vendor runtime, only libfabric, so
 `mirrored-mooncake` compiles it in — the image build proves the transport installed by running a

@@ -59,7 +59,7 @@ func newAscendTransportBackend() *workercore.KVCacheBackend {
 	return &workercore.KVCacheBackend{
 		ObjectMeta: meta.ObjectMeta{Name: "kvcb"},
 		Spec: workercore.KVCacheBackendSpec{
-			Transport: workercore.KVCacheBackendTransport{Protocol: "Ascend"},
+			Transport: workercore.KVCacheBackendTransport{Protocol: "CANN"},
 		},
 	}
 }
@@ -251,8 +251,8 @@ func TestModelDeploymentCrossManufacturer_ThePoolTransportDecidesWhetherItRender
 			// The message has to name the pair, not just report a refusal: the transport is a legal
 			// value and the engine is a legal engine, and it is the combination that raises.
 			assert.Contains(t, err.Error(),
-				`accepts only the "ascend" transport and this pool offers "tcp"`,
-				"the refusal names which transport the engine needs and which one the pool has")
+				`accepts only the "ascend" transport and no group in this pool offers it — the groups offer ["tcp"]`,
+				"the refusal names which transport the engine needs and which ones the pool has")
 			assert.Contains(t, err.Error(), "vllm-ascend",
 				"and names the engine the role's manufacturer selected")
 		})

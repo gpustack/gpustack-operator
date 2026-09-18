@@ -33,7 +33,7 @@ func connectorInput(engine, manufacturer string) ModelDeploymentConnectorInput {
 		Manufacturer:        manufacturer,
 		Domain:              "team-a-shared",
 		MasterServerAddress: "shared-kv-master.gpustack-system.svc:50051",
-		Protocol:            connectorTransportFor(manufacturer),
+		Protocols:           []string{connectorTransportFor(manufacturer)},
 	}
 }
 
@@ -487,7 +487,7 @@ func TestSynthesizeModelDeploymentConnector_DiscriminatorTravelsInAnOwnedKey(t *
 // the vLLM-Ascend renderer, and that engine's store backend accepts one transport.
 //
 // The condition is not that an operator chose the wrong transport. KVCacheBackend.spec.transport
-// .protocol defaults to Auto, which resolves to tcp, so the failing pool is the one nobody configured
+// .protocol defaults to Auto, which resolves to TCP, so the failing pool is the one nobody configured
 // -- which is why the refusal has to happen here rather than being left to the container.
 //
 // The pair is what fails, and both positive rows say so: the same accelerator renders with the
@@ -496,7 +496,7 @@ func TestSynthesizeModelDeploymentConnector_DiscriminatorTravelsInAnOwnedKey(t *
 func TestSynthesizeModelDeploymentConnector_TransportTheEngineCannotUse(t *testing.T) {
 	onAscendWith := func(protocol string) ModelDeploymentConnectorInput {
 		in := connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend)
-		in.Protocol = protocol
+		in.Protocols = []string{protocol}
 		return in
 	}
 
