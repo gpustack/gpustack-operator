@@ -197,7 +197,7 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 
 	r.observeModelDeploymentCache(ctx, md, pods, domain, holder)
 
-	observeModelDeploymentRollout(holder, rollout)
+	observeModelDeploymentRollout(holder, md, pods, wlByGroup, groupOfRole, rollout)
 
 	observeModelDeploymentRoleKinds(holder)
 
@@ -475,10 +475,10 @@ func observeModelDeploymentQuota(
 
 		ModelDeploymentConditionQuotaReserved.False(holder, modelDeploymentReasonPreemptedInPart,
 			fmt.Sprintf(
-				"a higher-priority workload reclaimed the quota of %d of this deployment's %d groups, "+
-					"on instance types %s. The groups on %s are still admitted and hold their "+
-					"accelerators, and %s. They are released only by deleting the deployment or by "+
-					"the reclaimed groups being admitted again once the capacity returns",
+				"a higher-priority workload reclaimed the quota of %d of this deployment's %d groups: "+
+					"the groups of roles %s. The groups of roles %s are still admitted and hold "+
+					"their accelerators, and %s. They are released only by deleting the deployment "+
+					"or by the reclaimed groups being admitted again once the capacity returns",
 				len(lost), len(modelDeploymentPodGroups(md)), strings.Join(lost, ", "),
 				strings.Join(kept, ", "), effect))
 
@@ -523,6 +523,9 @@ func observeModelDeploymentQuota(
 	//
 	// The ClusterQueue is named after the InstanceType, so the queue a refusal points at is read off
 	// the spec rather than resolved: the LocalQueue the entrance label names is derived from it.
+	// The message names the ROLE beside that queue, because the queue and the group are not the same
+	// thing to identify: two roles can name one instance type, so a queue names the pool two groups
+	// share and identifies neither, while the role names exactly the group that is short.
 	// A replica is attributed to a group through its ROLE rather than through the membership label it
 	// carries. That is the same source every other figure on this status reads, so a Pod cannot be
 	// counted in one place and not another -- and a replica that predates the label, or one still
@@ -540,9 +543,9 @@ func observeModelDeploymentQuota(
 		if want := int(group.TotalCount); alive < want {
 			ModelDeploymentConditionQuotaReserved.False(holder, modelDeploymentReasonPodGroupIncomplete,
 				fmt.Sprintf(
-					"%d of %d of the group's replicas exist, so Kueue composes no workload for it at "+
-						"all and there is nothing in cluster queue %q to hold quota%s",
-					alive, want, group.InstanceType, taken))
+					"%d of %d replicas role %q declares exist, so Kueue composes no workload for its "+
+						"group at all and there is nothing in cluster queue %q to hold quota%s",
+					alive, want, group.Role, group.InstanceType, taken))
 
 			return
 		}
@@ -558,7 +561,7 @@ func observeModelDeploymentQuota(
 	// A SINGLE-GROUP DEPLOYMENT HAS ONE QUEUE AND ITS WORDING SAYS SO; a multi-group one has no single
 	// queue to name, and naming the first role's is a statement about one group offered as a statement
 	// about the deployment. So this is read only where the branch has already established there is one
-	// group, and the multi-group branches name the instance types they are actually talking about.
+	// group, and the multi-group branches name the roles whose groups they are actually talking about.
 	queue := md.Spec.Roles[0].InstanceType
 
 	if withoutWorkload := modelDeploymentGroupsWithoutWorkload(groups, wlByGroup); len(withoutWorkload) > 0 {
@@ -576,8 +579,8 @@ func observeModelDeploymentQuota(
 			return
 		}
 		ModelDeploymentConditionQuotaReserved.Unknown(holder, "AdmissionInFlight", fmt.Sprintf(
-			"%d of this deployment's %d groups are complete but have no workload yet, on instance "+
-				"types %s%s",
+			"%d of this deployment's %d groups are complete but have no workload yet: the groups "+
+				"of roles %s%s",
 			len(withoutWorkload), len(groups), strings.Join(withoutWorkload, ", "), taken))
 
 		return
@@ -606,8 +609,8 @@ func observeModelDeploymentQuota(
 		return
 	}
 	ModelDeploymentConditionQuotaReserved.False(holder, "Pending", fmt.Sprintf(
-		"%d of this deployment's %d groups are waiting for quota, on instance types %s. No role is "+
-			"admitted until the whole set can run%s",
+		"%d of this deployment's %d groups are waiting for quota: the groups of roles %s. No role "+
+			"is admitted until the whole set can run%s",
 		len(waiting), len(groups), strings.Join(waiting, ", "), taken))
 }
 
@@ -620,7 +623,7 @@ func modelDeploymentGroupOfRole(md *workercore.ModelDeployment) map[string]strin
 	groupOfRole := make(map[string]string, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		groupOfRole[role.Name] = modelDeploymentPodGroupFor(md, role.InstanceType).Name
+		groupOfRole[role.Name] = modelDeploymentPodGroupFor(md, role.Name).Name
 	}
 
 	return groupOfRole
@@ -669,7 +672,7 @@ func modelDeploymentWorkloadByGroup(
 	return byGroup
 }
 
-// modelDeploymentPreemptedInPart names the instance types of the groups a higher-priority workload
+// modelDeploymentPreemptedInPart names the roles of the groups a higher-priority workload
 // reclaimed, and those of the groups that are still admitted, when BOTH sets are non-empty.
 //
 // THE SECOND SET IS THE WHOLE PREDICATE. A deployment every one of whose groups was preempted is an
@@ -709,9 +712,9 @@ func modelDeploymentPreemptedInPart(
 		}
 		switch {
 		case modelDeploymentWorkloadPreempted(wl):
-			lost = append(lost, group.InstanceType)
+			lost = append(lost, group.Role)
 		case kubeapistatus.ConditionType(kueue.WorkloadAdmitted).IsTrue(wl):
-			kept = append(kept, group.InstanceType)
+			kept = append(kept, group.Role)
 		}
 	}
 
@@ -783,7 +786,7 @@ func modelDeploymentKindsWithoutAdmittedGroup(
 	return unserved
 }
 
-// modelDeploymentGroupsWithoutWorkload names the instance types of the groups Kueue has composed no
+// modelDeploymentGroupsWithoutWorkload names the roles of the groups Kueue has composed no
 // Workload for. A complete group in that state is mid-admission; an incomplete one is reported by the
 // branch above this one, which is why the two are not the same answer.
 func modelDeploymentGroupsWithoutWorkload(
@@ -792,14 +795,14 @@ func modelDeploymentGroupsWithoutWorkload(
 	var missing []string
 	for _, group := range groups {
 		if wlByGroup[group.Name] == nil {
-			missing = append(missing, group.InstanceType)
+			missing = append(missing, group.Role)
 		}
 	}
 
 	return missing
 }
 
-// modelDeploymentGroupsWithoutQuota names the instance types of the groups that hold no quota
+// modelDeploymentGroupsWithoutQuota names the roles of the groups that hold no quota
 // reservation.
 //
 // A group is answered by the Workload owning ITS replicas. Reading one Workload for the whole
@@ -813,7 +816,7 @@ func modelDeploymentGroupsWithoutQuota(
 	for _, group := range groups {
 		w := wlByGroup[group.Name]
 		if w == nil || !kubeapistatus.ConditionType(kueue.WorkloadQuotaReserved).IsTrue(w) {
-			waiting = append(waiting, group.InstanceType)
+			waiting = append(waiting, group.Role)
 		}
 	}
 
@@ -1044,6 +1047,6 @@ func modelDeploymentPreemptionNote(lost []string) string {
 	}
 
 	return fmt.Sprintf(
-		". A higher-priority workload has also reclaimed the quota of the groups on instance types %s",
+		". A higher-priority workload has also reclaimed the quota of the groups of roles %s",
 		strings.Join(lost, ", "))
 }

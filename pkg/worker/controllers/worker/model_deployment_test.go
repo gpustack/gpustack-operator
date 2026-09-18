@@ -3,18 +3,22 @@ package worker
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrlrecord "k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -193,10 +197,55 @@ func getModelDeployment(t *testing.T, cli ctrlcli.Client) *workercore.ModelDeplo
 	return md
 }
 
-// TestModelDeploymentReconciler_RendersOnePodPerReplica is the shape of the whole feature: N
-// replicas of one role, each an ordinary Pod the existing admission chain already knows how to
+// askingGroupWorkload builds the Workload Kueue composes for the deployment's group -- plain owner
+// references to every replica, no controller reference -- with the replacement ask set or not. The
+// UID is stamped by the fixture rather than the environment, so a same-object assertion cannot pass
+// on two empty values.
+func askingGroupWorkload(pods []core.Pod, asking bool) *kueue.Workload {
+	wl := &kueue.Workload{}
+	wl.Name, wl.Namespace, wl.UID = "qwen-wl", "team-a", types.UID("wl-uid")
+	for i := range pods {
+		wl.OwnerReferences = append(wl.OwnerReferences, meta.OwnerReference{
+			APIVersion: "v1", Kind: "Pod", Name: pods[i].Name, UID: pods[i].UID,
+		})
+	}
+	if asking {
+		wl.Status.Conditions = []meta.Condition{{
+			Type:               kueueWorkloadWaitingForReplacementPods,
+			Status:             meta.ConditionTrue,
+			Reason:             "PodsDeleted",
+			LastTransitionTime: meta.Now(),
+		}}
+	}
+
+	return wl
+}
+
+// setGroupAsk flips the replacement ask on the stored Workload, standing in for the Kueue pass that
+// would write it: nothing in this tree runs Kueue, and the ask is its answer to a departure.
+func setGroupAsk(t *testing.T, cli ctrlcli.Client, asking bool) {
+	t.Helper()
+
+	wl := new(kueue.Workload)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen-wl"}, wl))
+	if asking {
+		wl.Status.Conditions = []meta.Condition{{
+			Type:               kueueWorkloadWaitingForReplacementPods,
+			Status:             meta.ConditionTrue,
+			Reason:             "PodsDeleted",
+			LastTransitionTime: meta.Now(),
+		}}
+	} else {
+		wl.Status.Conditions = nil
+	}
+	require.NoError(t, cli.Update(context.Background(), wl))
+}
+
+// TestModelDeploymentReconciler_CreatesOneReplicaPerDeclaredCount is the shape of the whole feature:
+// N replicas of one role, each an ordinary Pod the existing admission chain already knows how to
 // handle, and no Instance anywhere.
-func TestModelDeploymentReconciler_RendersOnePodPerReplica(t *testing.T) {
+func TestModelDeploymentReconciler_CreatesOneReplicaPerDeclaredCount(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Replicas = 4
 	})
@@ -205,13 +254,55 @@ func TestModelDeploymentReconciler_RendersOnePodPerReplica(t *testing.T) {
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
-	assert.Equal(t,
-		[]string{"qwen-server-0", "qwen-server-1", "qwen-server-2", "qwen-server-3"},
-		replicaNames(t, cli))
+	names := replicaNames(t, cli)
+	require.Len(t, names, 4)
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		assert.True(t, strings.HasPrefix(name, "qwen-server-"),
+			"a replica's name is the server-assigned completion of the rendered prefix: %s", name)
+		assert.False(t, seen[name], "each replica is a distinct instance: %s", name)
+		seen[name] = true
+	}
 
 	instList := new(workercore.InstanceList)
 	require.NoError(t, cli.List(context.Background(), instList))
 	assert.Empty(t, instList.Items, "a ModelDeployment renders Pods directly and creates no Instance")
+}
+
+// TestModelDeploymentReconciler_CreatedReplicasCarryNoName pins the create request itself: the
+// replica reaches the API server nameless, and the server completes the rendered prefix. A
+// reconciler that quietly minted slot names client-side would pass every name-shaped assertion
+// above while reintroducing the very blockage the generated names exist to remove -- a minted name
+// is held by the departed Pod until Kueue releases its finalizer, and the replacement could never
+// be created under it.
+func TestModelDeploymentReconciler_CreatedReplicasCarryNoName(t *testing.T) {
+	var created []*core.Pod
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{}).
+		WithObjects(newRenderDeployment(), newRenderInstanceType()).
+		WithInterceptorFuncs(ctrlinterceptor.Funcs{
+			Create: func(
+				ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.CreateOption,
+			) error {
+				if pod, ok := obj.(*core.Pod); ok {
+					created = append(created, pod.DeepCopy())
+				}
+
+				return c.Create(ctx, obj, opts...)
+			},
+		}).
+		Build()
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	require.Len(t, created, 2)
+	for _, pod := range created {
+		assert.Empty(t, pod.Name, "the API server names the replica; the create carries no name")
+		assert.Equal(t, "qwen-server-", pod.GenerateName,
+			"and the prefix names the deployment and the role, rendered")
+	}
 }
 
 // TestModelDeploymentReconciler_SecondPassWritesNothing is what makes a level-based controller safe
@@ -237,34 +328,62 @@ func TestModelDeploymentReconciler_SecondPassWritesNothing(t *testing.T) {
 		"an unchanged spec must issue no create, no update, no delete and no status write at all")
 }
 
-// TestModelDeploymentReconciler_RecreatesADeletedReplica states the difference between converging
-// and executing a workflow: the desired state is re-derived from the spec on every pass, so a
-// replica removed by anything at all comes back under the name it had.
-func TestModelDeploymentReconciler_RecreatesADeletedReplica(t *testing.T) {
+// TestModelDeploymentReconciler_ReplacesADeletedReplicaUnderAFreshName states the difference
+// between converging and executing a workflow: the desired state is re-derived from the spec on
+// every pass, so a replica removed by anything at all comes back -- under a name the API server
+// assigns fresh, never the name the departed replica held.
+//
+// THE WORKLOAD IS THE CREATE GATE, so it is in the fixture asking for a replacement, exactly as
+// Kueue does once it has read the departure. Its survival is half of what this case asserts: a
+// departure replaced in place costs the group nothing, where the old design took the whole group
+// down for one missing member.
+func TestModelDeploymentReconciler_ReplacesADeletedReplicaUnderAFreshName(t *testing.T) {
+	ctx := context.Background()
 	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
+	names := replicaNames(t, cli)
+	require.Len(t, names, 2)
 
-	gone := &core.Pod{ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen-server-1"}}
-	require.NoError(t, cli.Delete(context.Background(), gone))
-	require.Equal(t, []string{"qwen-server-0"}, replicaNames(t, cli))
+	gone := new(core.Pod)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: names[0]}, gone))
+	require.NoError(t, cli.Delete(ctx, gone))
+	require.NoError(t, cli.Create(ctx, askingGroupWorkload(replicaPods(t, cli), true)))
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"qwen-server-0", "qwen-server-1"}, replicaNames(t, cli))
+
+	after := replicaNames(t, cli)
+	require.Len(t, after, 2)
+	assert.Contains(t, after, names[1], "the survivor keeps its name and everything it holds")
+	var replacement string
+	for _, name := range after {
+		if name != names[1] {
+			replacement = name
+		}
+	}
+	require.NotEmpty(t, replacement)
+	assert.True(t, strings.HasPrefix(replacement, "qwen-server-"),
+		"the replacement carries the rendered prefix: %s", replacement)
+	assert.NotEqual(t, names[0], replacement,
+		"and never the departed replica's name, which is the whole point of generated names")
+
+	survivor := new(kueue.Workload)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen-wl"}, survivor),
+		"a departure replaced in place does not delete the group's Workload")
 }
 
-// TestModelDeploymentReconciler_ScaleDownRemovesTheHighestOrdinals pins why the ordinal is in the
-// name. Which replicas survive is decidable from the spec alone, so a scale down does not have to
-// choose between Pods that look alike.
+// TestModelDeploymentReconciler_CountChangeRebuildsTheGroup pins why a replicas edit cannot be a
+// trim: the total every member carries in its annotations is baked at render, so a change to the
+// declared count leaves every existing member disagreeing with the spec, and the group comes down
+// whole before the new count is built.
 //
-// IT TAKES TWO PASSES, and that is the pod group's doing rather than an accident of the fixture. A
-// replicas change moves the group's declared total, which every Pod carries and which Kueue requires
-// them all to agree on, so the change rebuilds the whole group: the first pass deletes, and the
-// second creates the new set once no Pod declares the old total. Asserting after one pass is what
-// the pre-group version of this test did.
-func TestModelDeploymentReconciler_ScaleDownRemovesTheHighestOrdinals(t *testing.T) {
+// IT TAKES TWO PASSES. The first deletes every member of the moved group and creates nothing; the
+// second finds the group gone and creates the new count in one go, exactly as a deployment that
+// never had a group is. Asserting after one pass is what a recreate-beside-terminating-members
+// implementation would pass and this one must not.
+func TestModelDeploymentReconciler_CountChangeRebuildsTheGroup(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 4 })
 	cli := newModelDeploymentClient(md, newRenderInstanceType())
 
@@ -283,55 +402,132 @@ func TestModelDeploymentReconciler_ScaleDownRemovesTheHighestOrdinals(t *testing
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"qwen-server-0", "qwen-server-1"}, replicaNames(t, cli))
+	names := replicaNames(t, cli)
+	require.Len(t, names, 2)
+	for _, name := range names {
+		assert.True(t, strings.HasPrefix(name, "qwen-server-"),
+			"the rebuilt replicas carry the rendered prefix: %s", name)
+	}
+}
+
+// surplusReplica renders one replica as the pass itself would, gives it an explicit identity, and
+// hands it to the fixture: the surplus cases need a member whose fingerprint matches the template
+// and whose creationTimestamp is under the test's control, which no reconciler-issued create gives.
+// The rendered prefix it still carries is inert once a name is assigned; nothing in the reconciler
+// reads it.
+func surplusReplica(t *testing.T, md *workercore.ModelDeployment, name string, created meta.Time) *core.Pod {
+	t.Helper()
+
+	pod := renderOne(t, md, newRenderInstanceType())
+	pod.Name = name
+	pod.CreationTimestamp = created
+
+	return pod
+}
+
+// TestModelDeploymentReconciler_ScaleDownRemovesTheNewestReplica pins the choice the surplus rule
+// makes. Three live replicas against a role declaring two -- every member agreeing on the current
+// total, which is the state a replacement created while the departed Pod was still active leaves
+// behind -- and the pass sheds exactly one: the NEWEST, so the longest-serving replicas survive a
+// scale-down. The choice is asserted, not observed: the names say which replica went.
+//
+// IT TAKES A HAND-BUILT SET, because a spec edit cannot produce this state: a replicas change moves
+// the total every member carries, which is a rebuild rather than a trim.
+func TestModelDeploymentReconciler_ScaleDownRemovesTheNewestReplica(t *testing.T) {
+	t.Run("by creation timestamp", func(t *testing.T) {
+		md := newRenderDeployment() // declares two
+		moment := time.Date(2026, 9, 18, 10, 0, 0, 0, time.UTC)
+
+		oldest := surplusReplica(t, md, "qwen-server-old", meta.NewTime(moment))
+		middle := surplusReplica(t, md, "qwen-server-mid", meta.NewTime(moment.Add(1*time.Minute)))
+		newest := surplusReplica(t, md, "qwen-server-new", meta.NewTime(moment.Add(2*time.Minute)))
+
+		cli := newModelDeploymentClient(md, newRenderInstanceType(), oldest, middle, newest)
+
+		res, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{"qwen-server-mid", "qwen-server-old"}, replicaNames(t, cli),
+			"the newest replica is the one shed, and the choice is the assertion")
+		assert.Positive(t, res.RequeueAfter, "a pass that removed a replica comes back for the ask")
+	})
+
+	t.Run("by name when the timestamps tie", func(t *testing.T) {
+		md := newRenderDeployment() // declares two
+		moment := meta.NewTime(time.Date(2026, 9, 18, 10, 0, 0, 0, time.UTC))
+
+		// One create pass, one second of granularity: every replica of a group can carry the same
+		// timestamp, so the rule has to stay total without it.
+		aaa := surplusReplica(t, md, "qwen-server-aaa", moment)
+		mmm := surplusReplica(t, md, "qwen-server-mmm", moment)
+		zzz := surplusReplica(t, md, "qwen-server-zzz", moment)
+
+		cli := newModelDeploymentClient(md, newRenderInstanceType(), aaa, mmm, zzz)
+
+		_, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{"qwen-server-aaa", "qwen-server-mmm"}, replicaNames(t, cli),
+			"the greater name reads as the newer replica when nothing else separates them")
+	})
 }
 
 // TestModelDeploymentReconciler_RecreatesOnASpecChange covers the rollout policy: recreate, no
-// surge. The replica is deleted on the pass that notices the difference and rebuilt by the pass that
-// notices its absence, so the fingerprint on the new one is the current spec's.
+// surge, ONE REPLICA AT A TIME. A pass deletes at most one outdated replica and creates nothing
+// beside the deletion; the next pass creates the replacement, and the two-step repeats until every
+// replica was built from the current spec. There is no Workload in this fixture, so the create
+// gate's no-Workload branch applies and each replace pass creates freely.
 func TestModelDeploymentReconciler_RecreatesOnASpecChange(t *testing.T) {
 	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	before := replicaHashes(t, cli)
+	before := replicaNames(t, cli)
 	require.Len(t, before, 2)
 
 	changed := getModelDeployment(t, cli)
 	changed.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
 	require.NoError(t, cli.Update(context.Background(), changed))
 
+	// One outdated replica goes; nothing is created beside the deletion.
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	assert.Empty(t, replicaNames(t, cli), "an outdated replica is deleted rather than patched in place")
+	mid := replicaNames(t, cli)
+	require.Len(t, mid, 1, "the rollout deletes at most one replica per pass")
+	assert.Contains(t, before, mid[0], "and it is one of the replicas that existed before the edit")
 
+	// The missing count comes back, built from the new spec.
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	assert.Len(t, replicaNames(t, cli), 2)
+	require.Len(t, replicaNames(t, cli), 2)
 
-	after := replicaHashes(t, cli)
-	for name := range before {
-		assert.NotEqual(t, before[name], after[name],
-			"%s must be built from the new spec, not carry the old fingerprint", name)
-	}
+	// The last outdated replica goes; the pass before's replacement survives it.
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	last := replicaNames(t, cli)
+	require.Len(t, last, 1)
+	assert.NotContains(t, before, last[0],
+		"the survivor of the second delete pass is the replica the second replace pass created")
+
+	// And the count is restored; every replica now carries the edit.
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
 
 	podList := new(core.PodList)
 	require.NoError(t, cli.List(context.Background(), podList, ctrlcli.InNamespace("team-a")))
+	require.Len(t, podList.Items, 2)
 	for i := range podList.Items {
-		assert.Equal(t, "vllm/vllm-openai:v0.26.0", podList.Items[i].Spec.Containers[0].Image)
+		assert.Equal(t, "vllm/vllm-openai:v0.26.0", podList.Items[i].Spec.Containers[0].Image,
+			"%s is built from the new spec, not the old one", podList.Items[i].Name)
 	}
 }
 
-// TestModelDeploymentReconciler_DoesNotExtendTheGroupInAPassThatRemovesFromIt pins the one window
-// where the converge loop could both create and delete in a single pass.
-//
-// The reshaping edits do not reach it: they move the resize predicate and take the rebuild branch,
-// which deletes everything and creates nothing. What reaches it is a replica that is already GONE --
-// not terminating, so `leaving` is deliberately false and its name is back in the desired set --
-// standing beside a replica whose fingerprint changed. Without the guard the pass deletes the second
-// and creates the first, leaving a group whose members disagree, and the next pass throws the fresh
-// replica away along with the rest.
-func TestModelDeploymentReconciler_DoesNotExtendTheGroupInAPassThatRemovesFromIt(t *testing.T) {
+// TestModelDeploymentReconciler_CountHealsBeforeTheHashRolls pins the order the convergence works
+// in. A role short of its declared count does not roll its outdated members in the same breath:
+// deleting from an already-short group widens exactly the gap the pass is trying to close, so the
+// missing replica is created first and the outdated survivor is rolled by the pass after.
+func TestModelDeploymentReconciler_CountHealsBeforeTheHashRolls(t *testing.T) {
+	ctx := context.Background()
 	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
 
 	_, err := reconcileModelDeployment(t, cli)
@@ -339,23 +535,48 @@ func TestModelDeploymentReconciler_DoesNotExtendTheGroupInAPassThatRemovesFromIt
 	names := replicaNames(t, cli)
 	require.Len(t, names, 2)
 
-	// One replica vanishes outright, the way a finished eviction leaves it: no DeletionTimestamp for
-	// the pass to observe, and its name owed by the spec again.
+	// One replica vanishes outright, the way a finished eviction leaves it: no DeletionTimestamp
+	// for the pass to observe, and the role merely short of its count.
 	gone := new(core.Pod)
-	require.NoError(t, cli.Get(context.Background(),
-		ctrlcli.ObjectKey{Namespace: "team-a", Name: names[0]}, gone))
-	require.NoError(t, cli.Delete(context.Background(), gone))
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: names[0]}, gone))
+	require.NoError(t, cli.Delete(ctx, gone))
 
 	// And the spec moves, so the surviving replica's fingerprint no longer matches.
 	changed := getModelDeployment(t, cli)
 	changed.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
-	require.NoError(t, cli.Update(context.Background(), changed))
+	require.NoError(t, cli.Update(ctx, changed))
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
-	assert.Empty(t, replicaNames(t, cli),
-		"the pass that deletes the outdated replica must not create the missing one beside it")
+	// The count is healed in this pass -- one new replica built from the current spec -- and the
+	// outdated survivor is left standing until the count is right.
+	images := replicaImages(t, cli)
+	require.Len(t, images, 2)
+	var byImage []string
+	for name, image := range images {
+		switch image {
+		case "vllm/vllm-openai:v0.25.1":
+			assert.Equal(t, names[1], name, "the survivor is the replica the edit found running")
+		case "vllm/vllm-openai:v0.26.0":
+			byImage = append(byImage, name)
+		default:
+			t.Fatalf("unexpected image %q on %s", image, name)
+		}
+	}
+	require.Len(t, byImage, 1, "the missing replica came back built from the current spec")
+
+	// The pass after rolls the survivor now that the count is whole.
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Len(t, replicaNames(t, cli), 1, "the outdated survivor goes once the count is right")
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	for _, image := range replicaImages(t, cli) {
+		assert.Equal(t, "vllm/vllm-openai:v0.26.0", image)
+	}
+	assert.Len(t, replicaImages(t, cli), 2)
 }
 
 // TestModelDeploymentReconciler_LocksBeforeRendering pins the ordering the teardown depends on. The
@@ -425,6 +646,11 @@ func TestModelDeploymentReconciler_TeardownHoldsTheFinalizerUntilTheReplicasAreG
 // TestModelDeploymentReconciler_IgnoresAPodItDoesNotOwn is the guard against adopting the replicas
 // of a deployment that carried the same name and has since been recreated. Their controller
 // reference names a UID this object does not have, so they are neither counted nor deleted.
+//
+// UNDER GENERATED NAMES THE STRAY BLOCKS NOTHING: the deployment's replicas arrive under
+// server-assigned names, so the one slot the stray occupies is not one of them. What is left to
+// assert is that the stray is invisible to the convergence -- neither counted toward the role nor
+// corrected -- while the deployment's own replicas are created around it.
 func TestModelDeploymentReconciler_IgnoresAPodItDoesNotOwn(t *testing.T) {
 	stray := &core.Pod{ObjectMeta: meta.ObjectMeta{
 		Namespace: "team-a",
@@ -444,11 +670,16 @@ func TestModelDeploymentReconciler_IgnoresAPodItDoesNotOwn(t *testing.T) {
 
 	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(), stray)
 
-	// The name it occupies is one this deployment wants, so the create collides and the pass asks to
-	// come back rather than adopting it or reporting success.
-	res, err := reconcileModelDeployment(t, cli)
+	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	assert.Positive(t, res.RequeueAfter)
+
+	ours := make([]string, 0, 2)
+	for _, name := range replicaNames(t, cli) {
+		if name != "qwen-server-0" {
+			ours = append(ours, name)
+		}
+	}
+	require.Len(t, ours, 2, "the deployment creates its replicas under names of their own")
 
 	kept := new(core.Pod)
 	require.NoError(t, cli.Get(context.Background(),
@@ -578,4 +809,162 @@ func TestMapModelDeploymentInstanceType(t *testing.T) {
 
 	assert.Equal(t, []string{"team-a/matching", "team-a/two-roles", "team-b/elsewhere"}, got,
 		"every deployment with a role on this type, once each, and none on another type")
+}
+
+// TestModelDeploymentReconciler_ReplacementWaitsForTheWorkloadsAsk walks the create gate's three
+// answers end to end. The ask is Kueue's own verdict on whether the departed Pod has stopped
+// counting, and each phase below is one answer: not asking yet -- where creating would put one more
+// active Pod in the group than its PodSet declares, and Kueue's response to that excess is to evict
+// the replacement itself; asking -- where the pass creates exactly the absent count; and no
+// Workload at all -- where waiting would deadlock a deployment whose group composes none.
+func TestModelDeploymentReconciler_ReplacementWaitsForTheWorkloadsAsk(t *testing.T) {
+	ctx := context.Background()
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	names := replicaNames(t, cli)
+	require.Len(t, names, 2)
+
+	gone := new(core.Pod)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: names[0]}, gone))
+	require.NoError(t, cli.Delete(ctx, gone))
+	require.NoError(t, cli.Create(ctx, askingGroupWorkload(replicaPods(t, cli), false)))
+
+	// Not asking yet: the departed Pod still counts as active, so the pass creates nothing and
+	// comes back for the ask.
+	res, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Len(t, replicaNames(t, cli), 1,
+		"with the departed Pod still counting, creating a replacement is the harmful move")
+	assert.Positive(t, res.RequeueAfter, "and the pass polls rather than sleeping forever")
+
+	// Asking: the pass creates exactly the absent count.
+	setGroupAsk(t, cli, true)
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Len(t, replicaNames(t, cli), 2,
+		"the ask answers for the departed member, and the pass creates exactly what is missing")
+
+	// No Workload at all: the group composes none, so the gate's wait has no object to watch and
+	// the pass creates freely.
+	second := replicaNames(t, cli)
+	goneAgain := new(core.Pod)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: second[0]}, goneAgain))
+	require.NoError(t, cli.Delete(ctx, goneAgain))
+	require.NoError(t, cli.Delete(ctx, &kueue.Workload{
+		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen-wl"},
+	}))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Len(t, replicaNames(t, cli), 2,
+		"with no Workload the pass creates freely, or a deployment's first pass would never start")
+}
+
+// TestModelDeploymentReconciler_ATemplateEditRollsOneReplicaAtATime is the whole rollout cadence on
+// a role of three. The edit must take at least three passes -- one departure at a time -- the role
+// must never be more than one replica away from its declared count, and the Workload that admitted
+// the group must be the same object at the end, which is what a departure no longer costs.
+//
+// THE FIXTURE STANDS IN FOR KUEUE'S HALF of the handshake: nothing in this tree runs it, so the
+// test writes the ask whenever the group is short, exactly when the real controller would.
+func TestModelDeploymentReconciler_ATemplateEditRollsOneReplicaAtATime(t *testing.T) {
+	ctx := context.Background()
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 3 })
+	cli := newModelDeploymentClient(md, newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaNames(t, cli), 3)
+
+	wl := askingGroupWorkload(replicaPods(t, cli), false)
+	require.NoError(t, cli.Create(ctx, wl))
+	require.NotEmpty(t, wl.UID, "the UID is the fixture's own stamp, not the environment's")
+
+	changed := getModelDeployment(t, cli)
+	changed.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
+	require.NoError(t, cli.Update(ctx, changed))
+
+	var deletePasses int
+	for pass := 0; pass < 12; pass++ {
+		if len(replicaNames(t, cli)) < 3 {
+			setGroupAsk(t, cli, true)
+		}
+
+		before := len(replicaNames(t, cli))
+		_, err = reconcileModelDeployment(t, cli)
+		require.NoError(t, err, "pass %d", pass)
+		after := len(replicaNames(t, cli))
+		require.GreaterOrEqual(t, after, 2,
+			"pass %d: never more than one replica away from the declared count", pass)
+		if after < before {
+			deletePasses++
+		}
+
+		current := true
+		for _, image := range replicaImages(t, cli) {
+			current = current && image == "vllm/vllm-openai:v0.26.0"
+		}
+		if current && after == 3 {
+			break
+		}
+	}
+	require.GreaterOrEqual(t, deletePasses, 3,
+		"a three-replica rollout takes at least three passes: one departure at a time")
+
+	survivor := new(kueue.Workload)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen-wl"}, survivor))
+	require.Len(t, replicaImages(t, cli), 3)
+	assert.Equal(t, wl.UID, survivor.UID,
+		"the Workload that admitted the group served the whole rollout: same object, asserted by UID")
+	for name, image := range replicaImages(t, cli) {
+		assert.Equal(t, "vllm/vllm-openai:v0.26.0", image,
+			"%s is built from the edited spec", name)
+	}
+}
+
+// TestModelDeploymentReconciler_TheAskIsReadAgainstTheAPIServer pins where the gate's Workload read
+// goes. The ask decides whether this pass creates, it is written by a controller nothing here
+// watches, and the pass is woken by Pod events -- so the read goes to the API server rather than a
+// cache that may not have seen the write, and a settled pass issues none at all.
+type countingAPIReader struct {
+	ctrlcli.Reader
+	lists int
+}
+
+func (r *countingAPIReader) List(
+	ctx context.Context, list ctrlcli.ObjectList, opts ...ctrlcli.ListOption,
+) error {
+	r.lists++
+
+	return r.Reader.List(ctx, list, opts...)
+}
+
+func TestModelDeploymentReconciler_TheAskIsReadAgainstTheAPIServer(t *testing.T) {
+	ctx := context.Background()
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+	reader := &countingAPIReader{Reader: cli}
+	r := &ModelDeploymentReconciler{Client: cli, APIReader: reader}
+
+	// The first pass and a settled pass read nothing through the API server: the group with no
+	// members has no Workload to ask, and a role at its count has no question.
+	for pass := 0; pass < 2; pass++ {
+		_, err := reconcileModelDeploymentWith(t, r)
+		require.NoError(t, err, "pass %d", pass)
+	}
+	assert.Zero(t, reader.lists,
+		"a settled pass issues no API-server read: the gate reads only when a role is short")
+
+	// A short role reads the group's Workload through the API server.
+	names := replicaNames(t, cli)
+	require.Len(t, names, 2)
+	gone := new(core.Pod)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: names[0]}, gone))
+	require.NoError(t, cli.Delete(ctx, gone))
+
+	_, err := reconcileModelDeploymentWith(t, r)
+	require.NoError(t, err)
+	assert.Positive(t, reader.lists,
+		"the short-role gate reads the Workload against the API server, not the cache")
 }

@@ -6,6 +6,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	core "k8s.io/api/core/v1"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
@@ -50,7 +54,7 @@ func TestModelDeploymentRollout_ReportsWhatThePassDecided(t *testing.T) {
 			rollout:     modelDeploymentRollout{accounted: 2, outdated: 2},
 			wantStatus:  "False",
 			wantReason:  modelDeploymentReasonRolloutInProgress,
-			wantMessage: "2 replicas differed from what this pass rendered and were deleted",
+			wantMessage: "2 replicas differ from what this pass rendered and turn over one per role per pass",
 		},
 		{
 			name:        "the store is away and the rollout is held",
@@ -345,11 +349,11 @@ func TestModelDeploymentReconciler_AFirstPassAnswersForTheReplicasItCreated(t *t
 // TestModelDeploymentReconciler_ARolloutReportsInProgressThenCurrent walks the ordinary rollout, so
 // the held case has a sibling that is not held and the reason is doing work.
 //
-// The pass that deletes cannot also create -- the group is rebuilt by the pass that finds the members
-// gone -- so the two answers arrive on two passes. If the names were still held by terminating
-// replicas the creates would not land either, and the pass would vouch for nothing and leave the
-// condition alone; that path is pinned on the record itself, since this client removes a deleted Pod
-// outright rather than leaving it terminating.
+// THE ROLLOUT IS ONE REPLICA AT A TIME: a pass that finds an outdated replica deletes it and creates
+// nothing beside the deletion, the next pass creates the replacement, and the two-step repeats once
+// per replica that carried the earlier spec. There is no Workload in this fixture, so each replace
+// pass creates freely -- the gate's no-Workload branch -- and the reasons arrive in the same order:
+// in progress while a replica is away or outdated, current once the last replacement lands.
 func TestModelDeploymentReconciler_ARolloutReportsInProgressThenCurrent(t *testing.T) {
 	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(),
 		newRenderBinding(), newRenderPool(), newRenderBackend())
@@ -365,9 +369,22 @@ func TestModelDeploymentReconciler_ARolloutReportsInProgressThenCurrent(t *testi
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	require.Empty(t, replicaNames(t, cli), "the rollout deletes before it recreates")
+	require.Len(t, replicaNames(t, cli), 1,
+		"the rollout deletes one outdated replica per pass and creates nothing beside it")
 	assert.Equal(t, modelDeploymentReasonRolloutInProgress,
 		ModelDeploymentConditionReplicasUpToDate.GetReason(getModelDeployment(t, cli)))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaNames(t, cli), 2,
+		"the pass after the deletion creates the replacement")
+	assert.Equal(t, modelDeploymentReasonRolloutInProgress,
+		ModelDeploymentConditionReplicasUpToDate.GetReason(getModelDeployment(t, cli)),
+		"one replica still carries the earlier spec, so the rollout is still in flight")
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaNames(t, cli), 1, "the last outdated replica goes in its own turn")
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -375,6 +392,116 @@ func TestModelDeploymentReconciler_ARolloutReportsInProgressThenCurrent(t *testi
 	assert.Equal(t, modelDeploymentReasonUpToDate,
 		ModelDeploymentConditionReplicasUpToDate.GetReason(getModelDeployment(t, cli)),
 		"the replacements were rendered from the current spec by the pass that created them")
+}
+
+// TestModelDeploymentReconciler_AReplacementIsNotARollout is the distinction this condition exists
+// to make, end to end, in one table: a replica missing because the SPEC changed is a rollout, and a
+// replica missing while the spec never moved is a replacement. The two states look alike from the
+// count alone -- one declared replica is absent either way -- and before they were told apart the
+// second read as UpToDate, exactly the steady state, while the deployment was serving below the
+// count it declared.
+//
+// THE REPLACEMENT ROW IS THE PASS THAT WAITS. The group's Workload exists and has not asked for the
+// replacement yet, which is the window a departure spends in: creating before the ask is the move
+// Kueue answers by evicting the replacement itself. The Workload is also what makes the state
+// legible at all -- Kueue composes one only for a group that once counted its full total, so a
+// short count under an existing Workload is a lost replica rather than a deployment still
+// assembling its first set.
+func TestModelDeploymentReconciler_AReplacementIsNotARollout(t *testing.T) {
+	cases := []struct {
+		name       string
+		arrange    func(t *testing.T) ctrlcli.Client
+		wantReason string
+		wantIn     string
+	}{
+		{
+			name: "the spec changed, so the missing replica is a rollout",
+			arrange: func(t *testing.T) ctrlcli.Client {
+				cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(),
+					newRenderBinding(), newRenderPool(), newRenderBackend())
+
+				_, err := reconcileModelDeployment(t, cli)
+				require.NoError(t, err)
+
+				changed := getModelDeployment(t, cli)
+				changed.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
+				require.NoError(t, cli.Update(context.Background(), changed))
+
+				_, err = reconcileModelDeployment(t, cli)
+				require.NoError(t, err)
+
+				return cli
+			},
+			wantReason: modelDeploymentReasonRolloutInProgress,
+			wantIn:     "turn over one per role per pass",
+		},
+		{
+			name: "a replica left while nothing changed the spec",
+			arrange: func(t *testing.T) ctrlcli.Client {
+				ctx := context.Background()
+				cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+
+				_, err := reconcileModelDeployment(t, cli)
+				require.NoError(t, err)
+				names := replicaNames(t, cli)
+				require.Len(t, names, 2)
+
+				gone := new(core.Pod)
+				require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: names[0]}, gone))
+				require.NoError(t, cli.Delete(ctx, gone))
+				require.NoError(t, cli.Create(ctx, askingGroupWorkload(replicaPods(t, cli), false)))
+
+				_, err = reconcileModelDeployment(t, cli)
+				require.NoError(t, err)
+
+				return cli
+			},
+			wantReason: modelDeploymentReasonReplacementInProgress,
+			wantIn:     "no rollout is in flight",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := getModelDeployment(t, tc.arrange(t))
+
+			assert.Equal(t, tc.wantReason, ModelDeploymentConditionReplicasUpToDate.GetReason(md))
+			assert.Contains(t, ModelDeploymentConditionReplicasUpToDate.GetMessage(md), tc.wantIn)
+		})
+	}
+
+	// THE REPLACEMENT ENDS, AND ENDS AS THE STEADY ANSWER. The ask releases the replacement, the
+	// count returns, and the condition that reported the loss goes quiet -- or the reason would be
+	// a state nothing clears.
+	t.Run("the replacement lands and the answer returns to UpToDate", func(t *testing.T) {
+		ctx := context.Background()
+		cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+
+		_, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		names := replicaNames(t, cli)
+		require.Len(t, names, 2)
+
+		gone := new(core.Pod)
+		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: names[0]}, gone))
+		require.NoError(t, cli.Delete(ctx, gone))
+		require.NoError(t, cli.Create(ctx, askingGroupWorkload(replicaPods(t, cli), false)))
+
+		_, err = reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		require.Equal(t, modelDeploymentReasonReplacementInProgress,
+			ModelDeploymentConditionReplicasUpToDate.GetReason(getModelDeployment(t, cli)),
+			"the wait window is the state the row above pinned; this walk starts from it")
+
+		setGroupAsk(t, cli, true)
+		_, err = reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		require.Len(t, replicaNames(t, cli), 2, "the ask answers for the departed member")
+
+		assert.Equal(t, modelDeploymentReasonUpToDate,
+			ModelDeploymentConditionReplicasUpToDate.GetReason(getModelDeployment(t, cli)),
+			"the count is whole again and every replica matches the render")
+	})
 }
 
 // TestModelDeploymentRollout_AHeldMessageDoesNotInventAnEdit pins the limit of what this condition
@@ -527,18 +654,101 @@ func TestModelDeploymentReconciler_ARebuildDoesNotLeaveAStaleTrue(t *testing.T) 
 		"it must not go on claiming every replica is current while none exists")
 }
 
-// TestModelDeploymentRollout_TheInProgressMessageDoesNotClaimARecreate pins the tense. The pass that
-// finds an outdated replica deletes it and requeues with no creates at all; the replacement is made
-// by the pass that observes it gone. Saying it was recreated describes something that pass did not
-// do, and a reader watching for the new replica would stop looking.
-func TestModelDeploymentRollout_TheInProgressMessageDoesNotClaimARecreate(t *testing.T) {
+// TestModelDeploymentRollout_TheInProgressMessageTellsTheCadence pins the tense and the count. The
+// pass turns an outdated set over one replica per role per pass, so a message that said "%d replicas
+// ... were deleted" claimed deletions that pass had not issued yet -- it read the DIFFERING count as
+// the DELETED count. What the pass does is delete at most one per role; the pass that observes a
+// deleted one gone creates its replacement, and a reader told the replacements were already made
+// would stop watching for them.
+func TestModelDeploymentRollout_TheInProgressMessageTellsTheCadence(t *testing.T) {
 	observed := rolloutConditionOf(t, newRenderDeployment(), &modelDeploymentRollout{
-		accounted: 2, outdated: 2,
+		accounted: 3, outdated: 3,
 	})
 	message := ModelDeploymentConditionReplicasUpToDate.GetMessage(observed)
 
+	assert.NotContains(t, message, "were deleted",
+		"the pass deleted at most one replica per role, so the differing count is not a deleted count")
 	assert.NotContains(t, message, "were recreated",
 		"the pass deletes and requeues; nothing is created until a later pass")
-	assert.Contains(t, message, "were deleted",
-		"it states what this pass did")
+	assert.Contains(t, message, "one per role per pass",
+		"it states the cadence, which is what tells a reader how long the rollout takes")
+	assert.Contains(t, message, "at most one replica per role",
+		"and what this pass itself did")
+}
+
+// TestModelDeploymentRollout_TheGapARolloutOpensStaysTheRollouts covers the one verdict that is not
+// answerable from the objects, and the one case where the same observation has two causes.
+//
+// A rollout's last pass deletes the last outdated replica and creates nothing; the pass after it
+// sees a shortfall with nothing outdated, which is what a replica leaving on its own also looks
+// like. The two are told apart by what this controller said one pass ago, so the case that matters
+// is the pair: the SAME inputs with only the previous verdict different must produce two different
+// answers. A test carrying only the rollout half would pass against an implementation that returned
+// that reason unconditionally.
+//
+// It calls the observer directly rather than through rolloutConditionOf, because the inputs this
+// branch reads — the live Pods and the group's Workload — are exactly the two that helper does not
+// take, and a shortfall cannot be expressed without them.
+func TestModelDeploymentRollout_TheGapARolloutOpensStaysTheRollouts(t *testing.T) {
+	const group = "qwen"
+
+	cases := []struct {
+		name       string
+		priorPass  func(*workercore.ModelDeployment)
+		wantReason string
+		wantPhrase string
+	}{
+		{
+			name: "the previous pass was rolling out",
+			priorPass: func(holder *workercore.ModelDeployment) {
+				ModelDeploymentConditionReplicasUpToDate.False(holder,
+					modelDeploymentReasonRolloutInProgress, "the pass before this one")
+			},
+			wantReason: modelDeploymentReasonRolloutInProgress,
+			wantPhrase: "being replaced by the rollout in flight",
+		},
+		{
+			name: "the previous pass said everything matched",
+			priorPass: func(holder *workercore.ModelDeployment) {
+				ModelDeploymentConditionReplicasUpToDate.True(holder,
+					modelDeploymentReasonUpToDate, "the pass before this one")
+			},
+			wantReason: modelDeploymentReasonReplacementInProgress,
+			wantPhrase: "",
+		},
+		{
+			name:       "there was no previous pass",
+			priorPass:  func(*workercore.ModelDeployment) {},
+			wantReason: modelDeploymentReasonReplacementInProgress,
+			wantPhrase: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment()
+			holder := new(workercore.ModelDeployment)
+			tc.priorPass(holder)
+
+			// One live replica of the two the role declares, so the shortfall is one and nothing
+			// this pass compared differed: rollout.outdated stays zero.
+			pods := []core.Pod{{ObjectMeta: meta.ObjectMeta{
+				Name:      "qwen-server-abcde",
+				Namespace: md.Namespace,
+				Labels:    map[string]string{modelDeploymentLabelKeyComponent: "server"},
+			}}}
+
+			observeModelDeploymentRollout(holder, md, pods,
+				map[string]*kueue.Workload{group: {}}, map[string]string{"server": group},
+				&modelDeploymentRollout{accounted: 1})
+
+			assert.Equal(t, tc.wantReason,
+				ModelDeploymentConditionReplicasUpToDate.GetReason(holder),
+				"the shortfall is attributed from what the previous pass recorded")
+			if tc.wantPhrase != "" {
+				assert.Contains(t, ModelDeploymentConditionReplicasUpToDate.GetMessage(holder),
+					tc.wantPhrase, "and the message sends the reader to the rollout, not to a diff")
+			}
+		})
+	}
 }

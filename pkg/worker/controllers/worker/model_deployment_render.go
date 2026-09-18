@@ -23,7 +23,6 @@ import (
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
-	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -201,8 +200,6 @@ type ModelDeploymentRenderInput struct {
 	Deployment *workercore.ModelDeployment
 	// Role is the entry of Deployment.Spec.Roles this replica belongs to.
 	Role *workercore.ModelDeploymentRole
-	// Ordinal is the replica's index within the role, starting at zero.
-	Ordinal int32
 	// InstanceType is the type the role's Pods are admitted against. It supplies how to spell the
 	// accelerator keys and the per-card unit resources the host request is derived from.
 	InstanceType *worker.InstanceType
@@ -225,15 +222,6 @@ type ModelDeploymentRenderInput struct {
 	// cluster's version rather than the render guessing, because the field is DROPPED without an
 	// error below 1.29, and a Pod rendered with it there never leaves Init.
 	NativeSidecar bool
-}
-
-// modelDeploymentPodName is the name of one replica's Pod: <deployment>-<role>-<ordinal>.
-//
-// The ordinal is part of the name rather than a random suffix so that scaling down is decidable
-// without reading anything: the replicas to remove are the ones whose ordinal is at or above the
-// new count, and a hand-deleted replica is recreated under the name it had.
-func modelDeploymentPodName(md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, ordinal int32) string {
-	return md.Name + "-" + role.Name + "-" + strconvx.Itoa(int(ordinal))
 }
 
 // modelDeploymentSelectorLabels is what fronts a role's replicas: the identity of the deployment and
@@ -400,17 +388,22 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 
 	pod := &core.Pod{
 		ObjectMeta: meta.ObjectMeta{
-			Name:      modelDeploymentPodName(md, role, in.Ordinal),
-			Namespace: md.Namespace,
-			Labels:    modelDeploymentPodLabels(md, role, entrance),
+			// The name is left empty and only a prefix is rendered: the spec declares a COUNT of
+			// interchangeable replicas and carries no identity for any one of them, so the suffix
+			// that tells one instance from another is assigned by the API server at creation. A
+			// replacement is a new instance and carries a new suffix, never the name of the
+			// replica it replaces.
+			GenerateName: md.Name + "-" + role.Name + "-",
+			Namespace:    md.Namespace,
+			Labels:       modelDeploymentPodLabels(md, role, entrance),
 		},
 		Spec: core.PodSpec{
 			// A replica is not a shell box: nothing nsenters into it, so it needs neither the host
 			// IPC namespace nor a shared process namespace, and it never reads the API.
 			AutomountServiceAccountToken: ptr.To(false),
 			EnableServiceLinks:           ptr.To(false),
-			// Recreate is the rollout policy, and a replica that exits is replaced by the
-			// reconciler under the same name rather than restarted in place with a stale spec.
+			// Recreate is the rollout policy, and a replica that exits is replaced by a newly
+			// created Pod rather than restarted in place with a stale spec.
 			RestartPolicy:    core.RestartPolicyAlways,
 			ImagePullSecrets: role.ImagePullSecrets,
 			Volumes:          vols,
@@ -451,8 +444,8 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 	})
 	kubemeta.ControlOnWithoutBlock(pod, md, workercore.SchemeGroupVersionKind("ModelDeployment"))
 
-	// The Kueue group metadata, which is what makes the replicas sharing an instanceType ONE Workload
-	// rather than one Workload each. It goes on here, before the fingerprint, for the same reason the
+	// The Kueue group metadata, which is what makes the replicas of one role ONE Workload rather
+	// than one Workload each. It goes on here, before the fingerprint, for the same reason the
 	// connector's annotations do: the group's declared total is one of the values a spec change
 	// moves, and a fingerprint blind to it would leave every replica declaring a size the deployment
 	// no longer has.

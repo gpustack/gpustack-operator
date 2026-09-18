@@ -175,10 +175,17 @@ func TestModelDeploymentService_SurvivesTheGroupRebuild(t *testing.T) {
 	grown.Spec.Roles[0].Replicas = 3
 	require.NoError(t, cli.Update(context.Background(), grown))
 
-	// The rebuild pass, the one that leaves the deployment with no replicas at all.
+	// The rebuild pass: the moved role's group is emptied and nothing is built back until it is
+	// gone, while the sibling role's Pods stay exactly where they were.
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	require.Empty(t, replicaNames(t, cli))
+	surviving := 0
+	for _, pod := range replicaPods(t, cli) {
+		if modelDeploymentPodRole(&pod) == "decode" {
+			surviving++
+		}
+	}
+	require.Equal(t, 2, surviving, "the sibling role's Pods stay exactly where they were")
 
 	assert.Equal(t, []string{"qwen", "qwen-decode", "qwen-prefill"}, serviceNames(t, cli),
 		"a deployment with no replicas still has its addresses")

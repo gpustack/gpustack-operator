@@ -86,7 +86,6 @@ func renderOne(t *testing.T, md *workercore.ModelDeployment, it *worker.Instance
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 		Deployment:   md,
 		Role:         &md.Spec.Roles[0],
-		Ordinal:      0,
 		InstanceType: it,
 	})
 	require.NoError(t, err)
@@ -105,19 +104,22 @@ func envValue(pod *core.Pod, name string) (string, bool) {
 }
 
 // TestRenderModelDeploymentPod_Identity pins what makes a rendered Pod findable and schedulable:
-// its name, the labels a Service selects on, the entrance label that routes it into the role's
-// pool, the resource note a watch filters on, and the controller reference that makes it ours.
+// its generated name prefix, the labels a Service selects on, the entrance label that routes it
+// into the role's pool, the resource note a watch filters on, and the controller reference that
+// makes it ours.
 func TestRenderModelDeploymentPod_Identity(t *testing.T) {
 	md := newRenderDeployment()
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 		Deployment:   md,
 		Role:         &md.Spec.Roles[0],
-		Ordinal:      3,
 		InstanceType: newRenderInstanceType(),
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, "qwen-server-3", pod.Name)
+	// The replica carries no name of its own: the prefix names the deployment and the role, and
+	// the suffix the API server appends to it is the only per-instance part.
+	assert.Empty(t, pod.Name)
+	assert.Equal(t, "qwen-server-", pod.GenerateName)
 	assert.Equal(t, "team-a", pod.Namespace)
 
 	assert.Equal(t, "model-deployment", pod.Labels[modelDeploymentLabelKeyName])
@@ -408,7 +410,6 @@ func TestRenderModelDeploymentPod_RoleKindLabelSeparatesAPair(t *testing.T) {
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment:   md,
 			Role:         &md.Spec.Roles[i],
-			Ordinal:      0,
 			InstanceType: it,
 		})
 		require.NoError(t, err)
@@ -1064,6 +1065,57 @@ func TestModelDeploymentPodSpecHash_DoesNotCoverItself(t *testing.T) {
 	stored := pod.Annotations[modelDeploymentPodSpecHashAnnotation]
 	assert.Equal(t, stored, modelDeploymentPodSpecHash(pod),
 		"rehashing a rendered Pod must reproduce the value it already carries")
+}
+
+// TestModelDeploymentPodSpecHash_DoesNotCoverTheName is the migration half of the fingerprint's
+// subject: the hash covers {Labels, Annotations, Spec} and no part of the naming, so a replica
+// named by an earlier scheme is not stale merely for being old. The rollout compares fingerprints,
+// and a hash that read the name would read every surviving replica as outdated the moment the
+// naming scheme changed.
+//
+// THE POSITIVE BASELINE RUNS IN THE SAME TABLE on purpose. "The fingerprint ignores the name" alone
+// would pass against a fingerprint that ignored everything, so beside the case that must not move
+// it sits one that must.
+func TestModelDeploymentPodSpecHash_DoesNotCoverTheName(t *testing.T) {
+	base := renderOne(t, newRenderDeployment(), newRenderInstanceType())
+	stored := base.Annotations[modelDeploymentPodSpecHashAnnotation]
+
+	testCases := []struct {
+		name   string
+		mutate func(*core.Pod)
+		moves  bool
+	}{
+		{
+			// The name an earlier scheme would have given this replica. Neither the rendered prefix
+			// nor this assigned name is part of the fingerprint's subject -- which is what lets a
+			// replica named before the generated naming exist beside ones named after it without
+			// reading as stale.
+			name: "a name assigned by an earlier scheme leaves the fingerprint where it was",
+			mutate: func(pod *core.Pod) {
+				pod.Name = "qwen-server-3"
+			},
+		},
+		{
+			name: "a spec change moves the fingerprint",
+			mutate: func(pod *core.Pod) {
+				pod.Spec.Containers[0].Image = "vllm/vllm-openai:v0.26.0"
+			},
+			moves: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := base.DeepCopy()
+			tc.mutate(pod)
+
+			if tc.moves {
+				assert.NotEqual(t, stored, modelDeploymentPodSpecHash(pod))
+				return
+			}
+			assert.Equal(t, stored, modelDeploymentPodSpecHash(pod))
+		})
+	}
 }
 
 // TestModelDeploymentPodSpecHash_MovesWithEveryRenderedInput walks the inputs a rollout must react

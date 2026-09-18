@@ -1187,7 +1187,6 @@ func TestModelDeploymentConnectorFieldIsInert(t *testing.T) {
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment:   md,
 			Role:         &md.Spec.Roles[0],
-			Ordinal:      0,
 			InstanceType: it,
 			Connector:    synthesized,
 		})

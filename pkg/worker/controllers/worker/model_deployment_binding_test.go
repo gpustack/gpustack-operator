@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -289,8 +290,13 @@ func TestModelDeploymentBinding_ConvergenceIsNotGatedOnTheBinding(t *testing.T) 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"qwen-server-0", "qwen-server-1"}, replicaNames(t, cli),
+	names := replicaNames(t, cli)
+	require.Len(t, names, 2,
 		"the replicas are rendered although no binding could be resolved")
+	for _, name := range names {
+		require.True(t, strings.HasPrefix(name, "qwen-server-"),
+			"a replica carries the rendered prefix and a server-assigned suffix: %s", name)
+	}
 
 	got := getModelDeployment(t, cli)
 	assert.True(t, ModelDeploymentConditionDomainRegistered.IsFalse(got))
