@@ -66,6 +66,15 @@ type ExtraArgsRules struct {
 // that becomes ready, and refusing it would cost far more than the hatch is worth. A concrete
 // address that is not the Pod's own still breaks the probes; that failure stops the rollout rather
 // than passing silently, which is the line this list draws.
+//
+// default_kv_lease_ttl is the second one DELIBERATELY LEFT REACHABLE, and it needs the louder note
+// because it is the only key the leader RENDERS and does not reserve. Reading the renderer alone
+// says it belongs in Derived; adding it there is what would break it. The renderer moves the
+// artifact's ten-second default to a starting point that survives a read by another engine replica,
+// but the value that suits a deployment follows its read pattern and its store size, which this API
+// does not describe -- so the operator supplies a better default and an entry here supersedes it,
+// the artifact taking the last of two duplicate flags and the passthrough rendering after ours.
+// Reserving the key would refuse that entry and leave the number reachable from nowhere.
 var LeaderExtraArgsRules = ExtraArgsRules{
 	// Keys are the flag's own name without its leading dashes, and that is NOT how extraArgs
 	// entries arrive: an entry carries its dashes and may carry its value, so admission strips the

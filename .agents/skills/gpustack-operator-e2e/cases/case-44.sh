@@ -19,7 +19,8 @@
 #
 #                master_service.cpp:9856 — that eviction skips any object whose lease is still live
 #                (`!member_metadata.IsLeaseExpired(now)`), and a GET grants a lease of
-# DEFAULT_DEFAULT_KV_LEASE_TTL = 10s (types.h:84).
+# default_kv_lease_ttl, which this case pins to 10s (the store's own default; the operator renders
+# five minutes).
 #
 # So the grant is a barrier ONLY while the objects holding it cannot be evicted. This case
 #              pins BOTH halves, because either one alone reads as a different product:
@@ -103,8 +104,8 @@ CEILING="16Mi"
 CEILING_BYTES=$((16 * 1024 * 1024))
 OBJ_BYTES=$((4 * 1024 * 1024))
 OBJ_COUNT=4
-# 1.5x the master's default lease TTL of 10s (types.h:84). The operator renders no lease flag, so the
-# default is what runs.
+# 1.5x the 10s this case pins through the backend's extraArgs above. The operator renders five
+# minutes, so the pinned value -- not any default -- is what this sleep is measured against.
 LEASE_LAPSE=15
 
 FAILS=0
@@ -182,6 +183,17 @@ spec:
     managed:
       leader:
         multiTenancy: true
+        # This case times a lease lapse, so it pins the lease rather than inheriting whatever default
+        # the operator renders. At the operator's own five minutes the lapse below would have to sleep
+        # past it, turning a fast case into a seven-minute one for no extra coverage.
+        #
+        # Pinning it through extraArgs is also the only place on a real cluster where the override
+        # path itself runs: the operator renders this same flag and deliberately leaves the key off
+        # its derived list, so a value here has to reach the master and win. If a later change
+        # reserves the key, admission refuses this object and the case fails at creation rather than
+        # in an assertion -- which is the right place for that breakage to appear.
+        extraArgs:
+          - -default_kv_lease_ttl=10s
       members:
         - nodeSelector: {kubernetes.io/os: linux}
           medium: DRAM
@@ -302,9 +314,9 @@ payload = b"x" * ${OBJ_BYTES}
 for i in range(${OBJ_COUNT}):
     print("FILL ${DOMAIN}-obj-%d rc=%d" % (i, store.put("${DOMAIN}-obj-%d" % i, payload)))
 
-# The lease is the whole mechanism. A GET makes the object un-evictable for the master's default
-# 10s (master_service.cpp:9856 skips replicas whose lease has not expired), so for that window the
-# grant has nothing it is allowed to throw away and has to refuse instead.
+# The lease is the whole mechanism. A GET makes the object un-evictable for the 10s this case pinned
+# (master_service.cpp:9856 skips replicas whose lease has not expired), so for that window the grant
+# has nothing it is allowed to throw away and has to refuse instead.
 for i in range(${OBJ_COUNT}):
     got = store.get("${DOMAIN}-obj-%d" % i)
     print("LEASED ${DOMAIN}-obj-%d len=%d" % (i, len(got) if got else -1))

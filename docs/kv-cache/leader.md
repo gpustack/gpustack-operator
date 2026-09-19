@@ -42,6 +42,15 @@ listens on IPv6 and, on a dual-stack host, on both.
 own. The leader then stays not-ready rather than reporting the cause, so `0.0.0.0` and `::` are the
 only two values worth setting.
 
+**`default_kv_lease_ttl` is reachable on purpose, and it is the one flag this operator renders and
+still lets you override.** A lease protects a cached object from eviction, and the store's own ten
+seconds expires before a second engine replica asks for a block the first one just read — so the
+operator renders `5m` instead. An entry in `leader.extraArgs` renders after it, and wins.
+
+A lease is granted when an object is **read**, never when it is written, so this value protects the
+recently-read set rather than everything written. Raise it where replicas share prefixes over longer
+turns; the cost arrives only once the set read within the window outgrows the store itself.
+
 `leader.extraEnv` is the same hatch for the environment: every entry renders after the derived
 variables, and a name the renderer derives — the pod's own identity variables and the snapshot path —
 is refused with the same message a member gets. The schema keys the list by `name`, so one name
