@@ -176,11 +176,12 @@ func TestModelDeploymentEvents_TheReconcilerLeavesReplicasObservableWhileTheyGo(
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
-	// TWO deletes for a 2-to-1 scale, because a replicas change rebuilds the whole group: the total
-	// every Pod declares has moved, and Kueue composes no Workload for a group that disagrees on it.
-	// What this case is about is unaffected -- how each delete is issued, not how many there are.
-	require.Equal(t, 2, writes.deletes, "the scale rebuilds the group rather than trimming it")
-	require.Len(t, writes.deleteGrace, 2)
+	// ONE delete for a 2-to-1 scale, because a replicas change trims the highest ordinal rather
+	// than rebuilding anything: the departing replica's group is its own, and the survivor's total
+	// never moved. What this case is about is unaffected -- how the delete is issued, not how many
+	// there are.
+	require.Equal(t, 1, writes.deletes, "the scale trims the ordinal the count no longer names")
+	require.Len(t, writes.deleteGrace, 1)
 	for i, grace := range writes.deleteGrace {
 		assert.Nil(t, grace,
 			"a replica deleted with no grace at all can be gone before any pass observes it leave "+

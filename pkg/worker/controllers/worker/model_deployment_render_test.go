@@ -1606,22 +1606,28 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 // render path could drop a field no case reads and every one of them would stay green; this is the
 // case that cannot, because it compares the bytes of everything at once.
 //
-// THE DIGESTS WERE CAPTURED FROM THE RENDERER AS IT STOOD BEFORE IT WAS SPLIT into a template half
-// and a stamp half, and that split had to reproduce every one of them exactly. Capturing them
-// afterwards instead would make this case testify for its own subject: it would pass, and pass
-// looking exactly like a proof. To re-baseline after an intended rendering change: empty the
-// table, run this case, and pin the digests the failures print.
+// THE ORIGINAL DIGESTS WERE CAPTURED FROM THE RENDERER AS IT STOOD BEFORE IT WAS SPLIT into a
+// template half and a stamp half, and that split had to reproduce every one of them exactly. The
+// table has been RE-BASELINED twice since, each time for a rendering change that was intended: once
+// for the per-replica groups, where the stamp began naming a (role, ordinal) group, declaring a
+// total of one and writing the ordinal label; and once when the ordinal label's key took the
+// modeldeployment prefix the role-kind label and the spec-hash annotation already carry, so that one
+// reader looking for this deployment's own keys finds all of them under one prefix. Every digest
+// here moved by intent rather than by drift. Each case renders ORDINAL ZERO -- the composite's zero value --
+// which is the one ordinal a digest can name without the table growing a dimension. To re-baseline
+// after an intended rendering change: empty the table, run this case, and pin the digests the
+// failures print.
 func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
-		"a sole server role": "d87c92f0c4cf18c007c92ac7bbd4c6b0d117684b0f2a460beb9e6a1f63ba93c7",
-		"a sole server role with a synthesized cache connector":                              "634ccbac2c1fdc7b3db9e8190cd31fcdfac5115deb9dffa0681974cf63f403ef",
-		"a take-over role carrying a connector it must be given no part of":                  "80050fc86966586eaf37db94764cf38d48ac9b155946c1add1684405229a2dcc",
-		"a direct decoder with a native routing sidecar":                                     "97e234d430d0f201e68c14c2f649d4cd8a26aba40d73020bca653b0c2bb33b72",
-		"a direct decoder with a classic routing sidecar":                                    "ed3ae2e67620a35c20f2ee39e99ec6d1959b1b5ccdac85552851673ecca285f0",
-		"a role naming no image, synthesized from the observed hardware":                     "915807215cff3e495900ceef93779525f503bf9a6d16bd6d01140fb3a3834f5c",
-		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "b50c586bffda63f6b76518d9f502540690d068f0c3e33fd82d9af5199c04f59c",
-		"the prefill role of a two-role deployment":                                          "ec03d04a12a8f8d342dfad637a206d7be04585d6f64691253e0807dabec3b55b",
-		"the decode role of a two-role deployment":                                           "d461a28fefe67c6a1774ea320f539893e9627daa7d9055a3a60408f8ed541ad6",
+		"a sole server role": "08f52247437b4925743d5b85ca010ac92f368391830cb5919e5f70fd6afd20c4",
+		"a sole server role with a synthesized cache connector":                              "2cb69c356d261024050512e2dcfdc297fdd914c96afd4d7c45aefde826b86098",
+		"a take-over role carrying a connector it must be given no part of":                  "42167cb00627d2d60bf26037123022df6e5a87973cdd5f40c15bf8123f7563a0",
+		"a direct decoder with a native routing sidecar":                                     "b4f7264275ec32c44c8ac81ec5e37a687ed092e0fb438d331e6f27d2477ea5c2",
+		"a direct decoder with a classic routing sidecar":                                    "1eb4e27a1f76ecd9ee7aa00ff11be477c525c6b767811ed3c427e5e18f5944cd",
+		"a role naming no image, synthesized from the observed hardware":                     "27b030d0cabb28c902f2be94112a313a4d51dab96c62f91bd650e09d3a0b9d7b",
+		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "6f3b9d8fc490e9c9b35446813b2616ba917e7e7031e483e1cdee6cd26759bcbb",
+		"the prefill role of a two-role deployment":                                          "29cc6963fec2503f0921a99b38256c9e9e0086a99d4ff399f913ba8c16fea959",
+		"the decode role of a two-role deployment":                                           "6179eb90c879011839f4d422b2e4654795738e64c5d2c272e4440c51eca4a442",
 	}
 
 	// newPinnedInput builds the render input the way the reconciler does: the deployment and its
@@ -1821,6 +1827,7 @@ func TestRenderModelDeploymentPod_TemplateCarriesNoGroupMetadataOrHash(t *testin
 	require.NoError(t, err)
 
 	assert.NotContains(t, template.Labels, "kueue.x-k8s.io/pod-group-name")
+	assert.NotContains(t, template.Labels, modelDeploymentReplicaOrdinalLabel)
 	assert.NotContains(t, template.Annotations, "kueue.x-k8s.io/pod-group-total-count")
 	assert.NotContains(t, template.Annotations, "kueue.x-k8s.io/role-hash")
 	assert.NotContains(t, template.Annotations, modelDeploymentPodSpecHashAnnotation)
@@ -1833,12 +1840,15 @@ func TestRenderModelDeploymentPod_TemplateCarriesNoGroupMetadataOrHash(t *testin
 	require.Len(t, template.OwnerReferences, 1)
 	assert.True(t, systemmeta.MatchResource(template, ModelDeploymentResourceType))
 
-	stampModelDeploymentPod(template, md, role)
+	stampModelDeploymentPod(template, md, role, 0)
 
-	assert.Equal(t, "qwen", template.Labels["kueue.x-k8s.io/pod-group-name"],
-		"a sole role's group keeps the deployment's own name")
-	assert.Equal(t, "2", template.Annotations["kueue.x-k8s.io/pod-group-total-count"],
-		"the group declares the role's replica count")
+	assert.Equal(t, modelDeploymentReplicaGroupName(md, role.Name, 0),
+		template.Labels["kueue.x-k8s.io/pod-group-name"],
+		"a replica's group is its own: the name is derived for its (role, ordinal) alone")
+	assert.Equal(t, "1", template.Annotations["kueue.x-k8s.io/pod-group-total-count"],
+		"the group declares one member: the replica the stamp names")
+	assert.Equal(t, "0", template.Labels[modelDeploymentReplicaOrdinalLabel],
+		"the ordinal is stamped beside the membership it derives")
 	assert.Equal(t, "server", template.Annotations["kueue.x-k8s.io/role-hash"],
 		"the role hash stays the role's own name")
 	assert.Contains(t, template.Annotations, modelDeploymentPodSpecHashAnnotation)

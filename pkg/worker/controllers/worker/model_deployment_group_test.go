@@ -14,6 +14,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -78,11 +79,12 @@ func replicaRoleCounts(t *testing.T, cli ctrlcli.Client) map[string]int {
 // TestModelDeployment_GroupIsCreatedInOnePass is F2's first obligation.
 //
 // Kueue composes NO Workload for a group it has not fully seen: fewer runnable Pods than the
-// declared total is an unretryable compose error. So the creates for every role's every replica are
-// issued in one pass, and none of them waits on another's readiness. A reconciler that staged them
-// role by role would leave the group short of its total for as long as the staging took, and the
-// symptom of that is nothing at all -- Pods exist, they are gated, and `kubectl get workloads` is
-// empty.
+// declared total is an unretryable compose error. Every group is one replica now, so the group is
+// complete the moment its Pod exists -- and the creates for every role's every ordinal are still
+// issued in one pass, none of them waiting on another's readiness. A reconciler that staged them
+// role by role would leave ordinals missing for as long as the staging took, and the symptom of
+// that is nothing at all -- Pods exist, they are gated, and the incomplete one composes no
+// Workload.
 func TestModelDeployment_GroupIsCreatedInOnePass(t *testing.T) {
 	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
 
@@ -92,8 +94,8 @@ func TestModelDeployment_GroupIsCreatedInOnePass(t *testing.T) {
 	assert.Equal(t, map[string]int{"decode": 2, "prefill": 2}, replicaRoleCounts(t, cli),
 		"every role's every replica, in the first pass")
 
-	assert.Equal(t, map[string]int{"2": 4}, groupTotals(t, cli),
-		"each Pod declares its own role's count, and each group's members agree on theirs")
+	assert.Equal(t, map[string]int{"1": 4}, groupTotals(t, cli),
+		"each Pod declares its own one-member group's total, which is the only count there is")
 }
 
 // TestModelDeployment_GroupMembersAgreeAndAreOwned covers the metadata the group is made of, read
@@ -125,95 +127,278 @@ func TestModelDeployment_GroupMembersAgreeAndAreOwned(t *testing.T) {
 	}
 
 	assert.Equal(t, map[string]int{"prefill": 2, "decode": 2}, byRole,
-		"two PodSets of two, not one of four")
-	require.Len(t, byGroup, 2, "two roles on one instanceType are two groups")
+		"two PodSets of two, not one of four: the role hash stays the role's, per replica")
+	require.Len(t, byGroup, 4, "four replicas are four groups, one member each")
 	for group, n := range byGroup {
-		assert.Equal(t, 2, n, "group %s holds its own role's two and nobody else's", group)
+		assert.Equal(t, 1, n, "group %s holds one replica and nobody else's", group)
 	}
 }
 
-// TestModelDeployment_ReplicasChangeRebuildsTheGroup is F10, and its middle assertion is the point.
+// TestModelDeployment_ScaleUpKeepsTheSurvivorsAndAddsTheMissingOrdinal is AC1.4, the property the
+// per-replica groups buy: a replicas change moves no total any running Pod carries and no group any
+// running Pod is a member of, so the survivors are left exactly as they stand and only the ordinals
+// the new count names that no Pod holds are created.
 //
-// A replicas change moves that role's group's declared total, which every Pod of the group carries
-// and which Kueue requires them all to agree on. So the change cannot be a per-replica rollout:
-// while any Pod still declares the old total, adding one that declares the new one produces a group
-// Kueue refuses to compose -- and refuses SILENTLY, with no Workload and no condition naming the
-// cause.
-//
-// THE INTERMEDIATE STATE IS WHAT IS ASSERTED, not only the end state. The end state is identical
-// whether the rebuild waited or not, so a test that only checked it would pass against exactly the
-// implementation this exists to rule out.
-func TestModelDeployment_ReplicasChangeRebuildsTheGroup(t *testing.T) {
+// THE SURVIVORS ARE THE SAME OBJECTS, asserted with a marker the renderer never writes -- the
+// precedent this file set before the ordinals existed. A name cannot say it: the API server owns
+// the names, and a UID the fake client assigns is the environment's to stamp, not the test's, so
+// both ends of a same-object comparison can be made to agree without anything having stayed.
+func TestModelDeployment_ScaleUpKeepsTheSurvivorsAndAddsTheMissingOrdinal(t *testing.T) {
 	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	require.Equal(t, map[string]int{"2": 4}, groupTotals(t, cli))
+	require.Equal(t, map[string]int{"1": 4}, groupTotals(t, cli))
+
+	const stayed = "test.gpustack.ai/stayed"
+	ctx := context.Background()
+	for _, pod := range replicaPods(t, cli) {
+		live := pod.DeepCopy()
+		live.Annotations[stayed] = "yes"
+		require.NoError(t, cli.Update(ctx, live))
+	}
 
 	grown := getModelDeployment(t, cli)
 	grown.Spec.Roles[0].Replicas = 3
-	require.NoError(t, cli.Update(context.Background(), grown))
+	require.NoError(t, cli.Update(ctx, grown))
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	assert.Equal(t, map[string]int{"decode": 2}, replicaRoleCounts(t, cli),
-		"the moved role's group goes before the new one arrives; a new prefill created here would "+
-			"declare 3 beside two declaring 2 -- and the sibling role's Pods are nobody's business")
 
-	_, err = reconcileModelDeployment(t, cli)
-	require.NoError(t, err)
-	assert.Equal(t, map[string]int{"3": 3, "2": 2}, groupTotals(t, cli),
-		"the rebuilt group agrees on the new count and the untouched one on its old one")
-	assert.Equal(t, map[string]int{"decode": 2, "prefill": 3}, replicaRoleCounts(t, cli))
+	// ONE PASS, no rebuild: the two prefill survivors stay as objects and the third ordinal is
+	// created beside them -- a rebuild that deleted every prefill first would leave this count
+	// short of three until a later pass, and would drop every marker with it.
+	assert.Equal(t, map[string]int{"decode": 2, "prefill": 3}, replicaRoleCounts(t, cli),
+		"the grown role gains its third ordinal in the same pass, and the sibling pays nothing")
+
+	marked := 0
+	for _, pod := range replicaPods(t, cli) {
+		if modelDeploymentPodRole(&pod) != "prefill" {
+			continue
+		}
+		if pod.Annotations[stayed] == "yes" {
+			marked++
+		}
+	}
+	assert.Equal(t, 2, marked,
+		"the two survivors are the very objects the edit found running; only the third is new")
+	assert.Equal(t, map[string]int{"1": 5}, groupTotals(t, cli))
 }
 
-// TestModelDeployment_RoleSetChangeRebuildsTheGroup covers the other axis: removing a role takes
-// that role's group down at once, and the survivor's Pods turn over ONE AT A TIME.
+// TestModelDeployment_ScaleDownRemovesTheDepartingOrdinalsWorkload is AC1.5, and the Workload half
+// is the point.
 //
-// The survivor's turnover is the sole-rename the group naming performs: a two-role deployment's
-// groups are all hashed, and the one remaining role's group becomes the readable deployment name,
-// so every existing Pod carries a group label the spec no longer forms and its fingerprint no
-// longer matches. The removed role's Pods go in the first pass; the survivor's roll out on the
-// ordinary cadence, one departure at a time, and the group settles once the last one landed.
-func TestModelDeployment_RoleSetChangeRebuildsTheGroup(t *testing.T) {
+// A scale-down removes the Pod AND the Workload of the replica whose ordinal the new count no
+// longer names, from the high end. The Pod alone would leak: the departing replica's Workload holds
+// Kueue's finalizer on it and the quota it was admitted for, and nothing but the Workload's removal
+// releases either -- the deployment would sit at its new count while holding the old one's quota,
+// with nothing erroring anywhere.
+func TestModelDeployment_ScaleDownRemovesTheDepartingOrdinalsWorkload(t *testing.T) {
+	ctx := context.Background()
 	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
 
+	// The Workload Kueue composed for each replica: plain owner references to its member, no
+	// controller reference, which is the shape the operator has to find them by. The SURVIVOR keeps
+	// one -- a scale-down must free the departing quota and nobody else's.
+	//
+	// THE PODS' UIDs ARE STAMPED BY THE FIXTURE, not the environment: the fake client leaves them
+	// empty on a generated-name create, and a Workload lookup that matches by UID would then match
+	// EVERY fixture Workload against every Pod -- the scale-down would look precise while deleting
+	// them all, or none. An API server assigns real UIDs, so stamped ones are the faithful shape.
+	const stayed = "test.gpustack.ai/stayed"
+	for _, pod := range replicaPods(t, cli) {
+		live := pod.DeepCopy()
+		live.UID = types.UID("uid-" + pod.Name)
+		live.Annotations[stayed] = "yes"
+		require.NoError(t, cli.Update(ctx, live))
+
+		wl := &kueue.Workload{}
+		wl.Name, wl.Namespace = "wl-"+pod.Name, pod.Namespace
+		wl.OwnerReferences = []meta.OwnerReference{{
+			APIVersion: "v1", Kind: "Pod", Name: pod.Name, UID: live.UID,
+		}}
+		require.NoError(t, cli.Create(ctx, wl))
+	}
+
 	shrunk := getModelDeployment(t, cli)
-	shrunk.Spec.Roles = shrunk.Spec.Roles[:1]
-	require.NoError(t, cli.Update(context.Background(), shrunk))
+	shrunk.Spec.Roles[0].Replicas = 1
+	require.NoError(t, cli.Update(ctx, shrunk))
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	assert.Equal(t, map[string]int{"prefill": 1}, replicaRoleCounts(t, cli),
-		"the removed role's group goes in the first pass, and one survivor rolls: the sole role's "+
-			"group is renamed by becoming the only one -- a readable name -- so its Pods are "+
-			"outdated and turn over on the rollout cadence")
 
-	// The survivor's turnover completes; the group settles under the readable name alone.
-	for pass := 0; pass < 6; pass++ {
-		if _, err = reconcileModelDeployment(t, cli); err != nil {
-			break
+	// One prefill survivor keeps its object; the departing ordinal's Pod AND its Workload are both
+	// gone. Which prefill survives is the ordinal's call -- the survivor is whichever carried
+	// ordinal 0, asserted by the marker rather than by a name.
+	assert.Equal(t, map[string]int{"decode": 2, "prefill": 1}, replicaRoleCounts(t, cli),
+		"the shrunk role sheds its highest ordinal, and the sibling pays nothing")
+
+	survivorKept := false
+	for _, pod := range replicaPods(t, cli) {
+		if modelDeploymentPodRole(&pod) != "prefill" {
+			continue
 		}
-		if got := replicaRoleCounts(t, cli); got["prefill"] == 2 && len(groupNameCounts(t, cli)) == 1 {
-			break
+		assert.Equal(t, "yes", pod.Annotations[stayed],
+			"%s carries a fresh render, so the survivor was rebuilt after all", pod.Name)
+		survivorKept = true
+	}
+	require.True(t, survivorKept)
+
+	// EVERY SURVIVING WORKLOAD BELONGS TO A SURVIVING POD, and that is the leak check: the
+	// departing ordinal's Workload went with its Pod, while the survivors' stayed exactly where
+	// they were. A pass that deleted only the Pods leaves the same count of survivors but one
+	// orphaned Workload holding the departed quota.
+	liveNames := sets.New[string]()
+	for _, pod := range replicaPods(t, cli) {
+		liveNames.Insert(pod.Name)
+	}
+	wlList := new(kueue.WorkloadList)
+	require.NoError(t, cli.List(ctx, wlList, ctrlcli.InNamespace("team-a")))
+	require.Len(t, wlList.Items, liveNames.Len(),
+		"one Workload per surviving replica: the departed ordinal's went with its Pod")
+	for i := range wlList.Items {
+		owner := wlList.Items[i].OwnerReferences[0].Name
+		assert.Truef(t, liveNames.Has(owner),
+			"workload %s outlives its Pod %s: the scale-down leaked it", wlList.Items[i].Name, owner)
+	}
+}
+
+// TestModelDeployment_RoleSetChangeSweepsTheRemovedRoleAlone covers the other axis: removing a role
+// takes that role's replicas and Workloads down at once, and the survivor's Pods are left exactly
+// where they stand.
+//
+// THE SURVIVOR'S GROUP NAMES NEVER MOVED, which is the property the per-role derivation could not
+// offer: a role's group names are its own and not a function of how many roles the deployment
+// declares, so losing a sibling renames nothing and rolls nothing.
+func TestModelDeployment_RoleSetChangeSweepsTheRemovedRoleAlone(t *testing.T) {
+	ctx := context.Background()
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaNames(t, cli), 4)
+
+	// A Workload per replica, so the sweep's obligation covers them: the removed role's replicas
+	// take theirs along, and the survivor's stay admitted. The pods' UIDs are stamped by the
+	// fixture, for the reason the scale-down case above states: empty UIDs make an ownership match
+	// answer every Workload for every Pod.
+	const stayed = "test.gpustack.ai/stayed"
+	for _, pod := range replicaPods(t, cli) {
+		live := pod.DeepCopy()
+		live.UID = types.UID("uid-" + pod.Name)
+		live.Annotations[stayed] = "yes"
+		require.NoError(t, cli.Update(ctx, live))
+
+		wl := &kueue.Workload{}
+		wl.Name, wl.Namespace = "wl-"+pod.Name, pod.Namespace
+		wl.OwnerReferences = []meta.OwnerReference{{
+			APIVersion: "v1", Kind: "Pod", Name: pod.Name, UID: live.UID,
+		}}
+		require.NoError(t, cli.Create(ctx, wl))
+	}
+
+	shrunk := getModelDeployment(t, cli)
+	shrunk.Spec.Roles = shrunk.Spec.Roles[:1]
+	require.NoError(t, cli.Update(ctx, shrunk))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int{"prefill": 2}, replicaRoleCounts(t, cli),
+		"the removed role's replicas go in the first pass, and the survivor's are nobody's business")
+
+	for _, pod := range replicaPods(t, cli) {
+		assert.Equal(t, "yes", pod.Annotations[stayed],
+			"%s carries a fresh render, so the surviving role turned over after all", pod.Name)
+	}
+
+	// The survivor's Workloads stay admitted; the removed role's are swept with their Pods. A
+	// Workload whose owner is gone is the leak: it holds quota and a finalizer on nothing.
+	live := replicaPods(t, cli)
+	liveNames := sets.New[string]()
+	for _, pod := range live {
+		liveNames.Insert(pod.Name)
+	}
+	wlList := new(kueue.WorkloadList)
+	require.NoError(t, cli.List(ctx, wlList, ctrlcli.InNamespace("team-a")))
+	require.Len(t, wlList.Items, len(live),
+		"one Workload per surviving replica, and none for the removed role's")
+	for i := range wlList.Items {
+		owner := wlList.Items[i].OwnerReferences[0].Name
+		assert.Truef(t, liveNames.Has(owner),
+			"workload %s outlives its Pod %s: the sweep left it behind", wlList.Items[i].Name, owner)
+	}
+}
+
+// TestModelDeployment_AnOrdinalLessPreExistingPodRollsOutRatherThanBeingAdopted covers the upgrade
+// path: every Pod this operator rendered before the per-replica groups carries no ordinal label,
+// and the pass after the upgrade meets a deployment full of them.
+//
+// SUCH A POD IS NOT ANY SLOT'S TO CLAIM -- adopting it onto an ordinal it never carried would key
+// the hash comparison on a guess -- so it is judged outdated instead and turns over on the ordinary
+// rollout cadence: one per pass, the count healing between departures, and the replacements arrive
+// carrying the label. The alternative the cadence rules out is tearing them all out at once, which
+// is an outage the upgrade does not need to be.
+func TestModelDeployment_AnOrdinalLessPreExistingPodRollsOutRatherThanBeingAdopted(t *testing.T) {
+	ctx := context.Background()
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaNames(t, cli), 4)
+
+	// Two pre-upgrade decode pods: no ordinal label, everything else as the pass rendered it.
+	aged := 0
+	for _, pod := range replicaPods(t, cli) {
+		if modelDeploymentPodRole(&pod) != "decode" {
+			continue
+		}
+		live := pod.DeepCopy()
+		delete(live.Labels, modelDeploymentReplicaOrdinalLabel)
+		require.NoError(t, cli.Update(ctx, live))
+		aged++
+	}
+	require.Equal(t, 2, aged)
+
+	// The turnover: one departure per pass, and a create between departures. The names never drop
+	// below one per role, and what settles carries the ordinal label the aged pods lacked.
+	for pass := 0; pass < 8; pass++ {
+		_, err = reconcileModelDeployment(t, cli)
+		require.NoError(t, err, "pass %d", pass)
+
+		counts := replicaRoleCounts(t, cli)
+		require.GreaterOrEqual(t, counts["decode"], 1,
+			"pass %d: the turnover never empties the role", pass)
+		require.Equal(t, 2, counts["prefill"], "pass %d: the sibling is nobody's cost", pass)
+
+		settled := counts["decode"] == 2
+		if settled {
+			for _, pod := range replicaPods(t, cli) {
+				if modelDeploymentPodRole(&pod) != "decode" {
+					continue
+				}
+				if _, ok := modelDeploymentPodOrdinal(&pod); !ok {
+					settled = false
+				}
+			}
+		}
+		if settled {
+			return
 		}
 	}
-	assert.Equal(t, map[string]int{"prefill": 2}, replicaRoleCounts(t, cli))
-	assert.Equal(t, map[string]int{"qwen": 2}, groupNameCounts(t, cli),
-		"the settled group is the readable one, whole and alone")
-	assert.Equal(t, map[string]int{"2": 2}, groupTotals(t, cli))
+
+	t.Fatal("the ordinal-less pods never turned over onto the per-replica groups")
 }
 
 // TestModelDeployment_GroupIsIdempotent pins that the rebuild predicate does not fire on a spec that
 // has not moved.
 //
-// This is the failure mode a rebuild policy invites: a predicate that answers "the group changed" on
-// every pass deletes and recreates the whole deployment forever, and each cycle looks, from a single
-// pass, exactly like a legitimate rollout.
+// This is the failure mode a converge policy invites: a pass that answers "something moved" on
+// every pass deletes and recreates replicas forever, and each cycle looks, from a single pass,
+// exactly like a legitimate rollout.
 func TestModelDeployment_GroupIsIdempotent(t *testing.T) {
 	writes := new(modelDeploymentWrites)
 	cli := newCountingModelDeploymentClient(writes, twoRoleDeployment(), newRenderInstanceType())
@@ -268,8 +453,8 @@ func TestModelDeployment_HandDeletedReplicaIsRecreatedWithoutARebuild(t *testing
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
-	assert.Len(t, replicaNames(t, cli), 4, "the survivors stay and the missing one comes back")
-	assert.Equal(t, map[string]int{"2": 4}, groupTotals(t, cli))
+	assert.Len(t, replicaNames(t, cli), 4, "the survivors stay and the missing ordinal comes back")
+	assert.Equal(t, map[string]int{"1": 4}, groupTotals(t, cli))
 }
 
 // TestModelDeploymentPodGroupIncomplete_IsAReportedStateNotASilentOne is T9, at the level this tree
@@ -496,37 +681,51 @@ func TestModelDeployment_NoDepartureLeavesTheWorkloadAlone(t *testing.T) {
 	assert.Len(t, replicaNames(t, cli), 4)
 }
 
-// TestModelDeployment_RedistributingReplicasRebuildsEachRolesOwnGroup is the case a type-keyed
+// TestModelDeployment_RedistributingReplicasMovesEachRolesOwnOrdinals is the case a type-keyed
 // group cannot survive.
 //
 // prefill 2 / decode 2 becoming prefill 1 / decode 3 moves counts between roles under a
-// deployment-wide sum that does not move. One role per group makes each role's total the thing that
-// moved, so BOTH groups rebuild -- each on its own predicate -- and no group ever holds a departing
-// role's replica beside an arriving one's. An implementation still keyed on the instanceType reads
-// one unchanged sum, rebuilds nothing, and lets the converge loop trim and create in place: exactly
-// the mixed group the rebuild exists to avoid.
-func TestModelDeployment_RedistributingReplicasRebuildsEachRolesOwnGroup(t *testing.T) {
+// deployment-wide sum that does not move. Per-replica groups make each role's ordinals the thing
+// that moved: prefill sheds its highest slot, decode gains its third, and every survivor stands
+// exactly where it was -- one pass, no teardown, no mixed group, because there is no group for a
+// departing and an arriving replica to share any more.
+func TestModelDeployment_RedistributingReplicasMovesEachRolesOwnOrdinals(t *testing.T) {
+	ctx := context.Background()
 	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
 
+	const stayed = "test.gpustack.ai/stayed"
+	for _, pod := range replicaPods(t, cli) {
+		live := pod.DeepCopy()
+		live.Annotations[stayed] = "yes"
+		require.NoError(t, cli.Update(ctx, live))
+	}
+
 	moved := getModelDeployment(t, cli)
 	moved.Spec.Roles[0].Replicas = 1
 	moved.Spec.Roles[1].Replicas = 3
-	require.NoError(t, cli.Update(context.Background(), moved))
+	require.NoError(t, cli.Update(ctx, moved))
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	assert.Empty(t, replicaNames(t, cli),
-		"both groups go: each role's total moved, and each group is its role's alone")
+	assert.Equal(t, map[string]int{"decode": 3, "prefill": 1}, replicaRoleCounts(t, cli),
+		"both moves land in the SAME pass: the shed slot and the gained slot are different "+
+			"replicas, and neither is the other's group to wait for")
+	assert.Equal(t, map[string]int{"1": 4}, groupTotals(t, cli),
+		"a total is a replica's own one, so no count any Pod carries moved at all")
 
-	_, err = reconcileModelDeployment(t, cli)
-	require.NoError(t, err)
-	assert.Equal(t, map[string]int{"decode": 3, "prefill": 1}, replicaRoleCounts(t, cli))
-	assert.Equal(t, map[string]int{"1": 1, "3": 3}, groupTotals(t, cli),
-		"each rebuilt group declares its own role's new count")
+	marked := 0
+	for _, pod := range replicaPods(t, cli) {
+		if pod.Annotations[stayed] == "yes" {
+			marked++
+		}
+	}
+	assert.Equal(t, 3, marked,
+		"decode's two survivors and prefill's one are the very objects the edit found; decode's "+
+			"third is new and carries no marker")
 }
 
 // TestModelDeployment_RenamingARoleWithoutChangingCountsRebuilds covers the other shape change that
@@ -545,8 +744,9 @@ func TestModelDeployment_RenamingARoleWithoutChangingCountsRebuilds(t *testing.T
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]int{"decoder": 2, "prefill": 2}, replicaRoleCounts(t, cli),
-		"a renamed role is a different group, so its replicas are rebuilt -- and only its: the "+
-			"sibling's Pods agree with everything they declare and never move")
+		"a renamed role names its replicas to groups nothing forms any more, so they are swept and "+
+			"rebuilt -- and only its: the sibling's replicas agree with every group they declare "+
+			"and never move")
 }
 
 // newRenderInstanceTypeB is the SECOND InstanceType, and it is what makes every two-group case
@@ -582,9 +782,10 @@ func groupNameCounts(t *testing.T, cli ctrlcli.Client) map[string]int {
 
 // TestModelDeployment_TwoTypesAreCreatedAsTwoGroupsInOnePass is F2's obligation for the split shape.
 //
-// Both groups are created by the SAME pass, for the reason the single-group case already states:
-// Kueue composes no Workload for a group short of its declared total, so a reconciler that staged one
-// group after the other would leave the first one gated with nothing reporting why.
+// Both roles' every ordinal is created by the SAME pass, for the reason the single-group case
+// already states: Kueue composes no Workload for a group it has not seen its member of, so a
+// reconciler that staged one role after the other would leave the first one gated with nothing
+// reporting why.
 func TestModelDeployment_TwoTypesAreCreatedAsTwoGroupsInOnePass(t *testing.T) {
 	cli := newModelDeploymentClient(twoTypeRoleDeployment(),
 		newRenderInstanceType(), newRenderInstanceTypeB())
@@ -593,33 +794,34 @@ func TestModelDeployment_TwoTypesAreCreatedAsTwoGroupsInOnePass(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, map[string]int{"decode": 2, "prefill": 2}, replicaRoleCounts(t, cli),
-		"every group's every replica, in the first pass")
+		"every role's every replica, in the first pass")
 
-	// Two group names, two replicas each -- and each group's total counts only its own role, which is
-	// the number Kueue waits for before it composes that group's Workload.
+	// Four group names, one replica each -- and each group's total counts its own replica only,
+	// which is the number Kueue waits for before it composes that group's Workload.
 	counts := groupNameCounts(t, cli)
-	assert.Len(t, counts, 2, "two instanceTypes cannot be one Workload, so they are two groups")
+	require.Len(t, counts, 4, "four replicas are four groups, whatever the instanceTypes beneath")
 	for group, n := range counts {
-		assert.Equal(t, 2, n, "group %s", group)
+		assert.Equal(t, 1, n, "group %s", group)
 	}
-	assert.Equal(t, map[string]int{"2": 4}, groupTotals(t, cli),
-		"each group declares its own two, not the deployment's four")
+	assert.Equal(t, map[string]int{"1": 4}, groupTotals(t, cli),
+		"each group declares one member, not the deployment's four")
 }
 
-// TestModelDeployment_OneGroupsChangeLeavesTheOtherAlone is the case a deployment-wide rebuild
-// decision fails.
+// TestModelDeployment_OneRolesScaleLeavesEverySurvivorAlone is the case a deployment-wide decision
+// fails, sharpened by the per-replica groups.
 //
-// Changing one role's replica count moves ONE group's shape. The other group's replicas agree with
-// their own total and their own share, so nothing about them changed -- and restarting them would
-// reload a model's weights for an edit that could not reach them.
+// Changing one role's replica count names ordinals only that role owns. The other role's replicas
+// agree with every group they declare, and so do the scaled role's SURVIVORS: a scale-up creates the
+// slot it adds and touches nothing else. Restarting any of them would reload a model's weights for
+// an edit that could not reach them.
 //
-// THE SURVIVING NAMES ARE NOT THE ASSERTION, AND A TEST THAT USED THEM PASSES AGAINST THE BUG.
-// A deployment-wide rebuild deletes every replica and then creates the untouched group's back in the
-// SAME pass -- its creates are not the ones being held -- so the names afterwards are identical
-// either way. Measured: with the per-group decision mutated away to a deployment-wide one, a
-// name-based assertion still passed. The UID is what tells a Pod that stayed from one that was
-// replaced by an identical one.
-func TestModelDeployment_OneGroupsChangeLeavesTheOtherAlone(t *testing.T) {
+// THE SURVIVING OBJECTS ARE NOT THE NAMES, AND A TEST THAT USED THEM PASSES AGAINST THE BUG.
+// A rebuild that deletes every replica and creates the untouched role's back in the SAME pass
+// leaves the names identical either way. Measured: with the per-role decision mutated away to a
+// deployment-wide one, a name-based assertion still passed. A marker the renderer never writes is
+// what tells a Pod that stayed from one that was replaced by an identical render -- the UID is no
+// better, for the reason the fake client states: it assigns nothing on a generated-name create.
+func TestModelDeployment_OneRolesScaleLeavesEverySurvivorAlone(t *testing.T) {
 	cli := newModelDeploymentClient(twoTypeRoleDeployment(),
 		newRenderInstanceType(), newRenderInstanceTypeB())
 
@@ -627,18 +829,15 @@ func TestModelDeployment_OneGroupsChangeLeavesTheOtherAlone(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
 
-	// A MARKER THE RENDERER NEVER WRITES is what tells a Pod that stayed from one that was replaced by
-	// an identical render. It is used rather than the UID or the resourceVersion because those are the
-	// fake client's to assign, and an assertion comparing two values it leaves empty is vacuously
-	// true -- measured: a UID-based version of this assertion passed against the mutation it exists to
-	// catch.
+	// A MARKER THE RENDERER NEVER WRITES is what tells a Pod that stayed from one that was replaced
+	// by an identical render. It is used rather than the UID or the resourceVersion because those
+	// are the fake client's to assign, and an assertion comparing two values it leaves empty is
+	// vacuously true -- measured: a UID-based version of this assertion passed against the mutation
+	// it exists to catch.
 	const stayed = "test.gpustack.ai/stayed"
 
 	ctx := context.Background()
 	for _, pod := range replicaPods(t, cli) {
-		if modelDeploymentPodRole(&pod) != "decode" {
-			continue
-		}
 		live := pod.DeepCopy()
 		live.Annotations[stayed] = "yes"
 		require.NoError(t, cli.Update(ctx, live))
@@ -651,22 +850,28 @@ func TestModelDeployment_OneGroupsChangeLeavesTheOtherAlone(t *testing.T) {
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
-	// prefill's group comes down whole; decode's is untouched, still holding the very same Pods.
-	assert.Equal(t, map[string]int{"decode": 2}, replicaRoleCounts(t, cli),
-		"only the group whose shape moved is rebuilt")
+	// The scaled role gains its third ordinal; nobody else's object moves.
+	assert.Equal(t, map[string]int{"decode": 2, "prefill": 3}, replicaRoleCounts(t, cli),
+		"the scaled role gains its slot, and the sibling pays nothing")
 
+	marked := 0
 	for _, pod := range replicaPods(t, cli) {
-		assert.Equal(t, "yes", pod.Annotations[stayed],
-			"%s carries a fresh render, so the other group came down and was rebuilt after all", pod.Name)
+		if pod.Annotations[stayed] == "yes" {
+			marked++
+		}
 	}
+	assert.Equal(t, 4, marked,
+		"the two decode replicas AND the two prefill survivors are the very objects the edit found; "+
+			"prefill's third is new and carries no marker")
 }
 
-// TestModelDeployment_TeardownRemovesEveryGroupsWorkload covers the half a first-match lookup fails.
+// TestModelDeployment_TeardownRemovesEveryReplicasWorkload covers the half a first-match lookup
+// fails.
 //
-// Each group has its own Workload and each holds Kueue's finalizer on its OWN replicas. Deleting one
-// of them releases one group and leaves the other's replicas unable to leave at all, which strands
-// the deployment in Deleting with nothing erroring anywhere.
-func TestModelDeployment_TeardownRemovesEveryGroupsWorkload(t *testing.T) {
+// Each replica has its own Workload and each holds Kueue's finalizer on its OWN Pod. Deleting one
+// of them releases one replica and leaves the others unable to leave at all, which strands the
+// deployment in Deleting with nothing erroring anywhere.
+func TestModelDeployment_TeardownRemovesEveryReplicasWorkload(t *testing.T) {
 	ctx := context.Background()
 	cli := newModelDeploymentClient(twoTypeRoleDeployment(),
 		newRenderInstanceType(), newRenderInstanceTypeB())
@@ -675,16 +880,16 @@ func TestModelDeployment_TeardownRemovesEveryGroupsWorkload(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, replicaPods(t, cli), 4)
 
-	// One Workload per group, owned by that group's members without a controller reference -- the
-	// shape Kueue builds and the one the operator has to find them by. The names are chosen so the
-	// decode group's sorts FIRST: a lookup taking the first match would then delete it and leave the
-	// prefill group's behind, and a case whose names sorted the other way would not notice.
+	// One Workload per replica, owned by its member without a controller reference -- the shape
+	// Kueue builds and the one the operator has to find them by. The names are chosen so the
+	// decode replicas' sort FIRST: a lookup taking the first match would then delete it and leave
+	// the others behind, and a case whose names sorted the other way would not notice.
 	byGroup := make(map[string][]core.Pod)
 	for _, pod := range replicaPods(t, cli) {
 		group := pod.Labels[kueuepodconst.GroupNameLabel]
 		byGroup[group] = append(byGroup[group], pod)
 	}
-	require.Len(t, byGroup, 2)
+	require.Len(t, byGroup, 4, "four replicas, four one-member groups")
 
 	names := make([]string, 0, len(byGroup))
 	for i, group := range slices.Sorted(maps.Keys(byGroup)) {
@@ -707,21 +912,22 @@ func TestModelDeployment_TeardownRemovesEveryGroupsWorkload(t *testing.T) {
 	for _, name := range names {
 		err = cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: name}, new(kueue.Workload))
 		assert.True(t, kerrors.IsNotFound(err),
-			"every group's Workload goes, not the first: %s is still there", name)
+			"every replica's Workload goes, not the first: %s is still there", name)
 	}
 }
 
-// TestModelDeployment_ARebuildDoesNotDelayAnotherGroupsRepair is the half the assertions above cannot
-// reach.
+// TestModelDeployment_ARolesScaleDoesNotDelayAnotherRolesRepair is the half the assertions above
+// cannot reach.
 //
 // Withholding creates is what keeps a replacement from landing beside a member on its way out, and
-// that hazard belongs to ONE group. Held for the deployment, a group that merely lost a replica waits
-// a pass for a rebuild happening somewhere it cannot reach -- and it waits while short of its own
-// declared total, which is the state in which Kueue composes no Workload for it at all.
+// that hazard belongs to ONE ordinal of ONE role. Held for the deployment, a role that merely lost
+// a replica would wait a pass for a scale happening somewhere it cannot reach -- and it would wait
+// while short of its own count, which is the state in which Kueue composes no Workload for its
+// missing ordinal at all.
 //
-// The untouched group has to be MISSING something for this to be observable: a complete group has no
-// create to withhold, which is why every other two-group case here passes either way.
-func TestModelDeployment_ARebuildDoesNotDelayAnotherGroupsRepair(t *testing.T) {
+// The other role has to be MISSING something for this to be observable: a complete role has no
+// create to withhold, which is why every other two-role case here passes either way.
+func TestModelDeployment_ARolesScaleDoesNotDelayAnotherRolesRepair(t *testing.T) {
 	ctx := context.Background()
 	cli := newModelDeploymentClient(twoTypeRoleDeployment(),
 		newRenderInstanceType(), newRenderInstanceTypeB())
@@ -730,8 +936,8 @@ func TestModelDeployment_ARebuildDoesNotDelayAnotherGroupsRepair(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
 
-	// decode loses one replica outright -- no finalizer, so it is GONE rather than departing, and its
-	// group is merely short rather than resizing.
+	// decode loses one replica outright -- no finalizer, so it is GONE rather than departing, and
+	// its role is merely short rather than shedding.
 	var goneName string
 	for _, pod := range replicaPods(t, cli) {
 		if modelDeploymentPodRole(&pod) == "decode" {
@@ -745,7 +951,7 @@ func TestModelDeployment_ARebuildDoesNotDelayAnotherGroupsRepair(t *testing.T) {
 	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: goneName}, gone))
 	require.NoError(t, cli.Delete(ctx, gone))
 
-	// ...while prefill's shape moves, which rebuilds prefill's group and nothing else.
+	// ...while prefill's count moves, which scales prefill's ordinals and nothing else.
 	moved := getModelDeployment(t, cli)
 	moved.Spec.Roles[0].Replicas = 3
 	require.NoError(t, cli.Update(ctx, moved))
@@ -753,7 +959,7 @@ func TestModelDeployment_ARebuildDoesNotDelayAnotherGroupsRepair(t *testing.T) {
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
-	assert.Equal(t, map[string]int{"decode": 2}, replicaRoleCounts(t, cli),
-		"decode's missing replica is created in this pass; holding it would leave that group short "+
-			"of its own total for a rebuild it has nothing to do with")
+	assert.Equal(t, map[string]int{"decode": 2, "prefill": 3}, replicaRoleCounts(t, cli),
+		"decode's missing ordinal is created in this pass and prefill's third with it; holding "+
+			"either would leave a role short of its own count for a scale it has nothing to do with")
 }

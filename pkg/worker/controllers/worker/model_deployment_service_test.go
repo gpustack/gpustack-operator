@@ -158,13 +158,15 @@ func TestModelDeploymentService_RemovingARoleRemovesItsService(t *testing.T) {
 		"the removed role's Service goes with it")
 }
 
-// TestModelDeploymentService_SurvivesTheGroupRebuild pins the one interaction between T4 and T7.
+// TestModelDeploymentService_SurvivesAScale pins the one interaction between the Service and a
+// replicas change.
 //
-// A replicas change deletes every Pod of the group and creates none until they are gone. A Service
-// rebuilt alongside them would drop its allocated ClusterIP, so every client that resolved the name
-// would be talking to an address nothing answers on -- for a change that was only ever about how
-// many replicas there are.
-func TestModelDeploymentService_SurvivesTheGroupRebuild(t *testing.T) {
+// A replicas change now trims or grows the affected role's ordinals and touches nothing else, but
+// the Service's obligation is unchanged: a scale must move its endpoints and leave the object
+// alone. A Service rebuilt alongside the replicas would drop its allocated ClusterIP, so every
+// client that resolved the name would be talking to an address nothing answers on -- for a change
+// that was only ever about how many replicas there are.
+func TestModelDeploymentService_SurvivesAScale(t *testing.T) {
 	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
 
 	_, err := reconcileModelDeployment(t, cli)
@@ -175,8 +177,8 @@ func TestModelDeploymentService_SurvivesTheGroupRebuild(t *testing.T) {
 	grown.Spec.Roles[0].Replicas = 3
 	require.NoError(t, cli.Update(context.Background(), grown))
 
-	// The rebuild pass: the moved role's group is emptied and nothing is built back until it is
-	// gone, while the sibling role's Pods stay exactly where they were.
+	// The scaled role gains its third ordinal beside the two that stay, and the sibling role's Pods
+	// are nobody's cost -- a deployment is never left without replicas at all.
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	surviving := 0
@@ -188,7 +190,7 @@ func TestModelDeploymentService_SurvivesTheGroupRebuild(t *testing.T) {
 	require.Equal(t, 2, surviving, "the sibling role's Pods stay exactly where they were")
 
 	assert.Equal(t, []string{"qwen", "qwen-decode", "qwen-prefill"}, serviceNames(t, cli),
-		"a deployment with no replicas still has its addresses")
+		"a deployment mid-scale still has its addresses")
 	after := getModelDeploymentService(t, cli)
 	assert.Equal(t, before.UID, after.UID)
 	assert.Equal(t, before.ResourceVersion, after.ResourceVersion)
@@ -465,26 +467,22 @@ func TestModelDeploymentReconciler_ScalingDoesNotRecreateTheService(t *testing.T
 	scaled.Spec.Roles[0].Replicas = 2
 	require.NoError(t, cli.Update(context.Background(), scaled))
 
-	// A replicas change rebuilds the group, so the scale takes two passes: the first deletes every
-	// Pod, the second creates the new set. The Service must survive BOTH -- the pass that leaves the
-	// deployment with no replicas at all is the one most likely to decide it has nothing to front.
+	// A replicas change trims the two highest ordinals in ONE pass -- no Pod that stays is deleted,
+	// no total any Pod declares moves, and nothing about the Service's Selector changes hands. The
+	// pass that removes replicas is the one most likely to decide it has nothing to front, which is
+	// what the assertions below are about.
 	*writes = modelDeploymentWrites{}
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
-	require.Empty(t, replicaNames(t, cli), "the rebuild pass creates nothing")
-	assert.Zero(t, writes.creates, "and it recreates no Service either")
+	require.Len(t, replicaNames(t, cli), 2, "the trim is done in the same pass")
+	assert.Zero(t, writes.creates, "a trim creates nothing -- and no Service either")
+	assert.Equal(t, 2, writes.deletes, "the only deletes are the two departing replicas")
 
-	*writes = modelDeploymentWrites{}
-	_, err = reconcileModelDeployment(t, cli)
-	require.NoError(t, err)
-
-	require.Len(t, replicaNames(t, cli), 2, "the replicas moved")
 	after := getModelDeploymentService(t, cli)
 	assert.Equal(t, before.UID, after.UID)
 	assert.Equal(t, before.ResourceVersion, after.ResourceVersion,
 		"and the Service was not touched at all")
-	assert.Equal(t, 2, writes.creates, "the only creates are the two replicas")
 }
 
 // TestAlignModelDeploymentService covers what convergence corrects and what it must leave alone.

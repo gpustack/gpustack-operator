@@ -70,9 +70,9 @@ type modelDeploymentRollout struct {
 	//
 	// It is what separates "nothing was outdated" from "nothing was looked at", and those are the
 	// same zero everywhere else in this record. A pass reaches the status write able to vouch for
-	// nothing more often than it looks: a rebuild that deletes every member without comparing, a
-	// teardown, and the pass between a rollout's delete and its create, where the names are still
-	// held by terminating replicas so the creates do not land either.
+	// nothing more often than it looks: a teardown, and the pass between a rollout's delete and its
+	// create, where the names are still held by terminating replicas so the creates do not land
+	// either.
 	//
 	// A create counts because the Pod it just issued was rendered from this pass's own desired state,
 	// which is a stronger claim than a hash comparison rather than a weaker one. Leaving it out would
@@ -90,14 +90,14 @@ type modelDeploymentRollout struct {
 //
 // A record that can vouch for no replica reports Unknown. It does NOT leave the stored value alone,
 // and the difference is the whole point: leaving it alone keeps whatever the last answering pass
-// wrote, which after a steady deployment is an authoritative True. A group-shape edit then deletes
-// every replica without vouching for one, and the object goes on saying every replica matches the
-// render while none exists.
+// wrote, which after a steady deployment is an authoritative True. A teardown then deletes every
+// replica without vouching for one, and the object goes on saying every replica matches the render
+// while none exists.
 //
-// Three passes arrive here -- a teardown, a whole-group rebuild, and the pass between a rollout's
-// delete and its create while the names are still taken -- and all three are moments when the
-// replicas are least current, so the stale answer is wrong in exactly the state it is read in.
-// Unknown is the same shape CacheAttached already uses for a reading it could not take.
+// Two passes arrive here -- a teardown, and the pass between a rollout's delete and its create
+// while the names are still taken -- and both are moments when the replicas are least current, so
+// the stale answer is wrong in exactly the state it is read in. Unknown is the same shape
+// CacheAttached already uses for a reading it could not take.
 //
 // THE PASS'S DECISION AND THE OBSERVED COUNT ANSWER TOGETHER, and the order they are asked in is
 // the ranking of causes. A held rollout outranks everything, because nothing else can be acted on
@@ -129,17 +129,18 @@ func observeModelDeploymentRollout(
 		// here. Naming a change the user may not have made would be wrong far more often than right,
 		// so the consequence is stated conditionally and the reader is pointed at the store.
 		//
-		// AND IT NAMES THE CLASS RATHER THAN "a spec edit", which is wider than this guard. An edit
-		// to the replica counts or the role set moves the group annotations, so the group resizes
-		// and takes the rebuild branch, which deletes every replica before this guard is reached:
-		// that edit proceeds during an outage. What waits is an edit that changes a replica's
-		// rendered Pod while leaving the group's shape alone.
+		// AND IT NAMES THE CLASS RATHER THAN "a spec edit", which is wider than this guard. What the
+		// guard holds is a difference on a replica that EXISTS: the ordinals a scale-up adds are
+		// created during the outage too, without a connector, because a replica that does not exist
+		// yet cannot be given an address that does not exist yet either. What waits is an edit that
+		// changes a running replica's rendered Pod -- and it waits whole, because there is no
+		// group-shape edit left that could carry it past the guard.
 		ModelDeploymentConditionReplicasUpToDate.False(holder, modelDeploymentReasonRolloutHeldByCache, fmt.Sprintf(
 			"%d of %d replicas differ from what this pass rendered and were left in place: the KV "+
 				"cache connection could not be resolved, and recreating them on that alone would "+
 				"rebuild every replica whenever the store blinks. Until it resolves, an edit that "+
-				"changes a replica's rendered Pod without changing the group's shape waits with "+
-				"them -- withheld rather than dropped, and it rolls out once the connection returns",
+				"changes a running replica's rendered Pod waits with them -- withheld rather than "+
+				"dropped, and it rolls out once the connection returns",
 			rollout.held, rollout.outdated))
 	case rollout.outdated > 0:
 		// DELETED, NOT ALL OF THEM AT ONCE. The rollout turns over one replica per role per pass,
@@ -218,16 +219,23 @@ func modelDeploymentRolloutWasInProgress(holder *workercore.ModelDeployment) boo
 // modelDeploymentReplicasMissing measures how far the deployment sits below the counts its roles
 // declare, and names the roles that are short.
 //
-// ONLY A GROUP WHOSE WORKLOAD KUEUE HAS COMPOSED COUNTS, and that test is what separates a
-// replacement from a beginning. Kueue composes a Workload for a group once it has seen its declared
-// total, so a group with a Workload and a missing replica has LOST one, while a group with no
-// Workload is still assembling the first set it ever had -- initial creation is not the replacement
-// of anything. Counting both would report every deployment's first passes as replacements, and
-// counting neither is the old answer, which read a lost replica exactly like the steady state.
+// ONLY A ROLE WITH A WORKLOAD IN THE MAP COUNTS, and that test is what separates a replacement from
+// a beginning. Kueue composes a Workload once a group has its member, so a role with a Workload and
+// a missing replica has LOST one, while a role with none is still assembling the first set it ever
+// had -- initial creation is not the replacement of anything. Counting both would report every
+// deployment's first passes as replacements, and counting neither is the old answer, which read a
+// lost replica exactly like the steady state.
 //
-// A REBUILD EXCLUDES ITSELF. A resizing group's Workload is deleted by the pass that tears it down,
-// so the roles of a scale change fall out of this count on their own and come back as the new
-// groups' first creation rather than as replacements.
+// THE LOOKUP IS AT ROLE GRANULARITY, and that is a downgrade the per-replica split left behind
+// rather than a choice this function made. A role's Workloads are one per replica now, and the
+// group-name-keyed maps it is handed resolve a role to the FIRST Workload owning any of its Pods --
+// so the hit condition reads "any replica of this role has a workload", and a role that lost its
+// only workload while keeping others is not distinguished here. The verdict this feeds reports
+// replacement at the role level; refining it per replica is the status work that follows, which is
+// the consumer these maps were kept in shape for.
+//
+// A ROLE SCALED AWAY EXCLUDES ITSELF. Its Workloads are deleted by the pass that sweeps its Pods,
+// so it falls out of this count on its own and never reads as a replacement.
 func modelDeploymentReplicasMissing(
 	md *workercore.ModelDeployment, pods []core.Pod,
 	wlByGroup map[string]*kueue.Workload, groupOfRole map[string]string,

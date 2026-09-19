@@ -222,6 +222,10 @@ type ModelDeploymentRenderInput struct {
 	// cluster's version rather than the render guessing, because the field is DROPPED without an
 	// error below 1.29, and a Pod rendered with it there never leaves Init.
 	NativeSidecar bool
+	// Ordinal is the replica this render is for, stamped into the group metadata. The template
+	// half never reads it -- only the stamp does -- and the zero value renders the first replica,
+	// which is what a caller with no particular replica in mind gets.
+	Ordinal int
 }
 
 // modelDeploymentSelectorLabels is what fronts a role's replicas: the identity of the deployment and
@@ -253,7 +257,7 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 		return nil, err
 	}
 
-	stampModelDeploymentPod(pod, in.Deployment, in.Role)
+	stampModelDeploymentPod(pod, in.Deployment, in.Role, in.Ordinal)
 
 	return pod, nil
 }
@@ -497,18 +501,19 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 // only the group -- a replica whose role was renamed would keep its old fingerprint and never be
 // seen as outdated.
 func stampModelDeploymentPod(
-	pod *core.Pod, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	pod *core.Pod, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, ordinal int,
 ) {
-	// The Kueue group metadata, which is what makes the replicas of one role ONE Workload rather
-	// than one Workload each. It goes on before the fingerprint below, for the same reason the
-	// connector's annotations do: the group's declared total is one of the values a spec change
-	// moves, and a fingerprint blind to it would leave every replica declaring a size the deployment
-	// no longer has.
+	// The Kueue group metadata, which is what makes a replica's admission unit that replica alone:
+	// the group name is derived per (role, ordinal), so each Pod joins its own one-member group.
+	// It goes on before the fingerprint below, for the same reason the connector's annotations do:
+	// the group name and the ordinal are two of the values a spec change or a scale moves, and a
+	// fingerprint blind to them would leave every replica declaring a membership the deployment no
+	// longer asks for.
 	//
 	// The labels and the annotations are applied together because the group's own type returns them
 	// together -- a Pod carrying the membership label without the total count joins a group whose
 	// size Kueue cannot learn, and no Workload is composed at all.
-	group := ModelDeploymentPodGroup(md, role)
+	group := ModelDeploymentPodGroup(md, role, ordinal)
 	for k, v := range group.Labels {
 		pod.Labels[k] = v
 	}
