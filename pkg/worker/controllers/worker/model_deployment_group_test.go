@@ -349,8 +349,18 @@ func TestModelDeployment_AnOrdinalLessPreExistingPodRollsOutRatherThanBeingAdopt
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
+	// The turnover's currency is an admitted replica, so the fixture starts with every replica's
+	// Workload admitted and the stand-in keeps them so as the count moves -- without an admission
+	// to trade on, the guard holds the aged pods in place forever and this walk never starts.
+	standInForKueue(t, cli, true)
 
 	// Two pre-upgrade decode pods: no ordinal label, everything else as the pass rendered it.
+	// NOTE that a real pre-upgrade Pod also carries the OLD group name, and this fixture keeps the
+	// new one -- so what it reproduces is the missing ordinal alone, not the whole pre-upgrade shape.
+	// That is deliberate, because the missing ordinal is what the adoption rule turns on; but it
+	// means this case cannot tell the create gate's two candidate selectors apart the way a real
+	// upgrade would, where neither the old group name nor the absent ordinal matches and both
+	// selectors read the slot as empty.
 	aged := 0
 	for _, pod := range replicaPods(t, cli) {
 		if modelDeploymentPodRole(&pod) != "decode" {
@@ -364,10 +374,13 @@ func TestModelDeployment_AnOrdinalLessPreExistingPodRollsOutRatherThanBeingAdopt
 	require.Equal(t, 2, aged)
 
 	// The turnover: one departure per pass, and a create between departures. The names never drop
-	// below one per role, and what settles carries the ordinal label the aged pods lacked.
+	// below one per role, and what settles carries the ordinal label the aged pods lacked. A
+	// replacement never lands beside an aged member: the create gate reads the ordinal's group
+	// occupied until the aged holder has gone, which is what keeps the turnover one-at-a-time.
 	for pass := 0; pass < 8; pass++ {
 		_, err = reconcileModelDeployment(t, cli)
 		require.NoError(t, err, "pass %d", pass)
+		standInForKueue(t, cli, true)
 
 		counts := replicaRoleCounts(t, cli)
 		require.GreaterOrEqual(t, counts["decode"], 1,
@@ -579,23 +592,24 @@ func TestModelDeploymentPodGroupIncomplete_ClearsWhenTheGroupCompletes(t *testin
 		"and what it is waiting on now is Kueue, which nothing here runs")
 }
 
-// TestModelDeployment_ADepartingReplicaKeepsTheWorkloadAndWaitsForTheAsk covers the departure path
-// the generated names opened.
+// TestModelDeployment_ADepartingReplicaIsNotReplacedUntilItsOrdinalReadsEmpty covers the departure
+// path the generated names opened.
 //
 // A replica asked to leave cannot leave on its own: Kueue holds a finalizer on every Pod of a group
-// annotated serving -- which Kueue defines as never finished -- and releases the departed one only
-// once a replacement carrying the same role hash exists. The old design forced the release by
-// deleting the Workload, and Kueue answers a deleted Workload by stopping every member; the
-// replacement path instead keeps the Workload, reads Kueue's WaitingForReplacementPods ask off it,
-// and creates the replacement beside the departing member -- which is exactly what releases it.
+// annotated serving -- which Kueue defines as never finished -- so the deleted Pod stays on the
+// books, still a member of its ordinal's group, until its Workload is deleted and the drain
+// completes. The replacement waits out exactly that: the create gate reads the ordinal's group on
+// the API server and creates only once no member reads, and Kueue's WaitingForReplacementPods ask
+// is staged mid-wait to show it gates nothing -- the member's existence is the whole of the gate,
+// and a replacement created beside it would be the excess member Kueue deletes first.
 //
 // THE FIXTURE IS THE FINALIZER. Without it the fake client removes the Pod on Delete, the
-// reconciler sees a missing replica rather than a departing one, and a reconciler that still
-// demolished the group on every departure would pass this case unread. Measured on a live cluster,
-// before the generated names: a template edit left one Pod undeletable, its replacement
-// uncreatable because the name was taken, and the reconciler reissuing the same delete every two
-// seconds with nothing erroring.
-func TestModelDeployment_ADepartingReplicaKeepsTheWorkloadAndWaitsForTheAsk(t *testing.T) {
+// reconciler sees a missing replica rather than a departing one, and a reconciler that created
+// beside a departing member would pass this case unread. Measured on a live cluster, before the
+// generated names: a template edit left one Pod undeletable, its replacement uncreatable because
+// the name was taken, and the reconciler reissuing the same delete every two seconds with nothing
+// erroring.
+func TestModelDeployment_ADepartingReplicaIsNotReplacedUntilItsOrdinalReadsEmpty(t *testing.T) {
 	ctx := context.Background()
 	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
 
@@ -625,30 +639,41 @@ func TestModelDeployment_ADepartingReplicaKeepsTheWorkloadAndWaitsForTheAsk(t *t
 	wl := askingGroupWorkload(replicaPods(t, cli), false)
 	require.NoError(t, cli.Create(ctx, wl))
 
-	// The pass that finds the departure creates nothing: Kueue has not yet said the departed member
-	// stopped counting, and a replacement created now would read to Kueue as one member over the
-	// count -- its answer is to evict the replacement itself.
+	// The pass that finds the departure creates nothing: the departing member still reads in its
+	// ordinal's group, and a replacement beside it is the excess member Kueue deletes first.
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
 	require.NoError(t,
 		cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: wl.Name}, new(kueue.Workload)),
-		"the Workload stays: releasing the departed member no longer costs the group")
+		"the Workload stays: nothing of this deployment's own deletes it while its members stand")
 	assert.Len(t, replicaNames(t, cli), 4,
-		"the departing member is still held, and nothing is created beside it before the ask")
+		"the departing member is still held, and nothing is created beside it")
 
-	// Kueue reads the departure and asks; the pass creates the replacement beside the held member,
-	// which is what releases it -- and the sibling role's group is nobody's cost to pay here.
+	// Kueue reads the departure and asks -- and the ask changes nothing, because the member still
+	// reads in the group and that is the whole of the gate.
 	setGroupAsk(t, cli, true)
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
-	assert.Equal(t, map[string]int{"decode": 3, "prefill": 2}, replicaRoleCounts(t, cli),
-		"the departing member still carries its role's label; beside it are its survivor and the "+
-			"replacement, and the sibling role paid nothing")
-	require.Len(t, replicaNames(t, cli), 5,
-		"the departing member is still on the books -- only Kueue releases it -- and the replacement "+
-			"was created beside it")
+	assert.Len(t, replicaNames(t, cli), 4,
+		"the ask reading True does not release the replacement: the departing member is still a "+
+			"member of the ordinal's group, whatever the condition on the Workload says")
+
+	// The departure completes -- only Kueue releases the finalizer, on its own clock -- and the
+	// object leaves; the pass that reads the ordinal empty creates the replacement, and the
+	// sibling role's group is nobody's cost to pay here.
+	released := new(core.Pod)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: departingName}, released))
+	released.Finalizers = nil
+	require.NoError(t, cli.Update(ctx, released))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.Equal(t, map[string]int{"decode": 2, "prefill": 2}, replicaRoleCounts(t, cli),
+		"the departing member is gone and its replacement stands beside the survivor, and the "+
+			"sibling role paid nothing")
 }
 
 // TestModelDeployment_NoDepartureLeavesTheWorkloadAlone is the other half, and without it the case

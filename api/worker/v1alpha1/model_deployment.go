@@ -755,6 +755,17 @@ type ModelDeploymentRoleStatus struct {
 
 	Ready int32 `json:"ready" protobuf:"varint,3,name=ready"`
 
+	// QuotaReserved is how many of the role's replicas hold a quota reservation. Each replica is
+	// its own Kueue workload, so a role sits at any count between zero and Desired while capacity
+	// arrives — where a role that shared one workload passed all-or-nothing and this figure could
+	// not exist.
+	//
+	// ALWAYS PRESENT, AND ITS ZERO IS AN OBSERVED ONE: the figure is counted from Pod and Workload
+	// lists that succeeded, and a failed list writes no status at all rather than a zero, because
+	// "this pass could not see" and "no replica holds quota" call for opposite actions — one waits,
+	// the other investigates — and a zero written for both makes them the same reading.
+	QuotaReserved int32 `json:"quotaReserved" protobuf:"varint,7,name=quotaReserved"`
+
 	// Unmanaged is true when the role replaced the whole command line, so the operator synthesized
 	// no engine argument and no client environment for it. It is ALWAYS present, for the same reason
 	// the counts are: false is the ordinary case and has to be visible as an answer rather than as a
@@ -775,21 +786,30 @@ type ModelDeploymentRoleStatus struct {
 	// +k8s:validation:enum=["server","prefill","decode"]
 	Kind ModelDeploymentRoleKind `json:"kind" protobuf:"bytes,5,name=kind,casttype=ModelDeploymentRoleKind"`
 
-	// AssignedFlavor is the ResourceFlavor Kueue assigned to this role's PodSet for its ACCELERATOR
-	// credits.
+	// AssignedFlavors is the set of ResourceFlavors Kueue assigned to this role's replicas for
+	// their ACCELERATOR credits, deduplicated and sorted. It is a set because each replica is its
+	// own workload and Kueue assigns a flavor per workload, so two replicas of one role can carry
+	// different assignments — a state one PodSet per role could not produce.
 	//
-	//   - NOT ASSIGNED YET AND ASSIGNED ARE DIFFERENT FACTS, so a role waiting for quota reports no
-	//     flavor at all rather than an empty name, which would read as an assignment to a flavor
-	//     called "".
-	//   - Per role rather than per deployment, because Kueue assigns a flavor per PodSet and two
-	//     roles of one deployment can be assigned different ones.
+	//   - ABSENT MEANS NO ASSIGNED REPLICA NAMED A FLAVOR, rather than an empty list reading as an
+	//     assignment to nothing: "not assigned yet" and "assigned, but on a pool carrying no
+	//     accelerator names" are both that same fact here, and absent keeps them from reading as a
+	//     third thing.
+	//   - ONE ENTRY MEANS EVERY ASSIGNED REPLICA OF THE ROLE NAMES IT. SEVERAL ENTRIES MEAN THE
+	//     REPLICAS WERE ASSIGNED DIFFERENT FLAVORS, which is the signal to investigate rather than a
+	//     degraded form of one answer: WHICH replica carries which flavor is deliberately not here,
+	//     because the ordinal a per-replica answer would key on is the converger's internal slotting
+	//     rather than a promise this API makes, and a reader needing it reads the replicas' own Pods.
 	//   - AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather
 	//     than a gap in it. The answer is read through the same function the per-accelerator
 	//     admission gate uses, which speaks only of accelerator credits, so a role admitted on a pool
 	//     carrying no accelerator names a flavor for `cpu` and nothing here. The two answers are kept
 	//     identical on purpose: a flavor reported here that the gate would not fit against would be
 	//     worse than none.
-	AssignedFlavor *string `json:"assignedFlavor,omitempty" protobuf:"bytes,6,opt,name=assignedFlavor"`
+	//
+	// +optional
+	// +listType=atomic
+	AssignedFlavors []string `json:"assignedFlavors,omitempty" protobuf:"bytes,6,rep,name=assignedFlavors"`
 }
 
 // ModelDeploymentKVCacheStatus is the reuse domain this deployment attached to.

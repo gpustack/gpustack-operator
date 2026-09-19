@@ -5643,12 +5643,17 @@ func (m *ModelDeploymentRoleStatus) MarshalToSizedBuffer(dAtA []byte) (int, erro
 	_ = i
 	var l int
 	_ = l
-	if m.AssignedFlavor != nil {
-		i -= len(*m.AssignedFlavor)
-		copy(dAtA[i:], *m.AssignedFlavor)
-		i = encodeVarintGenerated(dAtA, i, uint64(len(*m.AssignedFlavor)))
-		i--
-		dAtA[i] = 0x32
+	i = encodeVarintGenerated(dAtA, i, uint64(m.QuotaReserved))
+	i--
+	dAtA[i] = 0x38
+	if len(m.AssignedFlavors) > 0 {
+		for iNdEx := len(m.AssignedFlavors) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.AssignedFlavors[iNdEx])
+			copy(dAtA[i:], m.AssignedFlavors[iNdEx])
+			i = encodeVarintGenerated(dAtA, i, uint64(len(m.AssignedFlavors[iNdEx])))
+			i--
+			dAtA[i] = 0x32
+		}
 	}
 	i -= len(m.Kind)
 	copy(dAtA[i:], m.Kind)
@@ -8121,10 +8126,13 @@ func (m *ModelDeploymentRoleStatus) Size() (n int) {
 	n += 2
 	l = len(m.Kind)
 	n += 1 + l + sovGenerated(uint64(l))
-	if m.AssignedFlavor != nil {
-		l = len(*m.AssignedFlavor)
-		n += 1 + l + sovGenerated(uint64(l))
+	if len(m.AssignedFlavors) > 0 {
+		for _, s := range m.AssignedFlavors {
+			l = len(s)
+			n += 1 + l + sovGenerated(uint64(l))
+		}
 	}
+	n += 1 + sovGenerated(uint64(m.QuotaReserved))
 	return n
 }
 
@@ -9859,7 +9867,8 @@ func (this *ModelDeploymentRoleStatus) String() string {
 		`Ready:` + fmt.Sprintf("%v", this.Ready) + `,`,
 		`Unmanaged:` + fmt.Sprintf("%v", this.Unmanaged) + `,`,
 		`Kind:` + fmt.Sprintf("%v", this.Kind) + `,`,
-		`AssignedFlavor:` + valueToStringGenerated(this.AssignedFlavor) + `,`,
+		`AssignedFlavors:` + fmt.Sprintf("%v", this.AssignedFlavors) + `,`,
+		`QuotaReserved:` + fmt.Sprintf("%v", this.QuotaReserved) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -27470,7 +27479,7 @@ func (m *ModelDeploymentRoleStatus) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 6:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AssignedFlavor", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field AssignedFlavors", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -27498,9 +27507,27 @@ func (m *ModelDeploymentRoleStatus) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			s := string(dAtA[iNdEx:postIndex])
-			m.AssignedFlavor = &s
+			m.AssignedFlavors = append(m.AssignedFlavors, string(dAtA[iNdEx:postIndex]))
 			iNdEx = postIndex
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field QuotaReserved", wireType)
+			}
+			m.QuotaReserved = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.QuotaReserved |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

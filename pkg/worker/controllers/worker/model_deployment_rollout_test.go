@@ -2,12 +2,14 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
@@ -317,7 +319,11 @@ func TestModelDeploymentReconciler_AnOutageDoesNotCarryAWithheldEditOntoTheRunni
 
 		return true
 	}
+	// The turnover's currency is an admitted replica: the rollout guard trades one admitted replica
+	// for the departure it allows, so a world where nothing is admitted never starts rolling at all.
+	// Standing in for Kueue between passes is what keeps that currency in circulation here.
 	for pass := 0; pass < 8 && !allCurrent(); pass++ {
+		standInForKueue(t, cli, true)
 		if _, err = reconcileModelDeployment(t, cli); err != nil {
 			break
 		}
@@ -360,9 +366,12 @@ func TestModelDeploymentReconciler_AFirstPassAnswersForTheReplicasItCreated(t *t
 //
 // THE ROLLOUT IS ONE REPLICA AT A TIME: a pass that finds an outdated replica deletes it and creates
 // nothing beside the deletion, the next pass creates the replacement, and the two-step repeats once
-// per replica that carried the earlier spec. There is no Workload in this fixture, so each replace
-// pass creates freely -- the gate's no-Workload branch -- and the reasons arrive in the same order:
-// in progress while a replica is away or outdated, current once the last replacement lands.
+// per replica that carried the earlier spec. The reasons arrive in the same order: in progress while
+// a replica is away or outdated, current once the last replacement lands.
+//
+// THE FIXTURE STANDS IN FOR KUEUE BETWEEN PASSES because the rollout guard spends an admitted
+// replica on every departure it allows -- a world where nothing is admitted never starts rolling,
+// so without the stand-in this walk would not take its first step.
 func TestModelDeploymentReconciler_ARolloutReportsInProgressThenCurrent(t *testing.T) {
 	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(),
 		newRenderBinding(), newRenderPool(), newRenderBackend())
@@ -376,6 +385,7 @@ func TestModelDeploymentReconciler_ARolloutReportsInProgressThenCurrent(t *testi
 	changed.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
 	require.NoError(t, cli.Update(context.Background(), changed))
 
+	standInForKueue(t, cli, true)
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 1,
@@ -383,6 +393,7 @@ func TestModelDeploymentReconciler_ARolloutReportsInProgressThenCurrent(t *testi
 	assert.Equal(t, modelDeploymentReasonRolloutInProgress,
 		ModelDeploymentConditionReplicasUpToDate.GetReason(getModelDeployment(t, cli)))
 
+	standInForKueue(t, cli, true)
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 2,
@@ -391,10 +402,12 @@ func TestModelDeploymentReconciler_ARolloutReportsInProgressThenCurrent(t *testi
 		ModelDeploymentConditionReplicasUpToDate.GetReason(getModelDeployment(t, cli)),
 		"one replica still carries the earlier spec, so the rollout is still in flight")
 
+	standInForKueue(t, cli, true)
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 1, "the last outdated replica goes in its own turn")
 
+	standInForKueue(t, cli, true)
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 2)
@@ -485,9 +498,15 @@ func TestModelDeploymentReconciler_AReplacementIsNotARollout(t *testing.T) {
 		})
 	}
 
-	// THE REPLACEMENT ENDS, AND ENDS AS THE STEADY ANSWER. The ask releases the replacement, the
-	// count returns, and the condition that reported the loss goes quiet -- or the reason would be
-	// a state nothing clears.
+	// THE REPLACEMENT ENDS, AND ENDS AS THE STEADY ANSWER. The departing member leaving is what
+	// releases the replacement, the count returns, and the condition that reported the loss goes
+	// quiet -- or the reason would be a state nothing clears.
+	//
+	// WHAT RELEASES IT IS THE SLOT EMPTYING, NOT THE GROUP ASKING. A departing member still on the
+	// books is still a member of a group that declares one, so creating beside it would put two
+	// there and Kueue would delete the newer of them -- the replacement itself. The ask is asserted
+	// here precisely because it must NOT move anything: it is no longer an input to this decision,
+	// and a case that never set it could not tell that apart from a case where it still mattered.
 	t.Run("the replacement lands and the answer returns to UpToDate", func(t *testing.T) {
 		ctx := context.Background()
 		cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
@@ -513,9 +532,25 @@ func TestModelDeploymentReconciler_AReplacementIsNotARollout(t *testing.T) {
 		setGroupAsk(t, cli, true)
 		_, err = reconcileModelDeployment(t, cli)
 		require.NoError(t, err)
-		require.Len(t, replicaNames(t, cli), 3,
-			"the ask answers for the departed member: the replacement lands beside the survivor, "+
-				"and the departing member stays on the books until Kueue releases it")
+		require.Len(t, replicaNames(t, cli), 2,
+			"the ask moves nothing: the departing member is still on the books, so its slot is "+
+				"still taken and no replacement is created beside it")
+		require.Equal(t, modelDeploymentReasonReplacementInProgress,
+			ModelDeploymentConditionReplicasUpToDate.GetReason(getModelDeployment(t, cli)),
+			"and the deployment still reports the loss it is waiting out")
+
+		// Kueue releases the departing member: its finalizer goes and the object with it, which is
+		// the event the create gate has been reading for.
+		departing := new(core.Pod)
+		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: names[0]}, departing))
+		departing.Finalizers = nil
+		require.NoError(t, cli.Update(ctx, departing))
+
+		_, err = reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		require.Len(t, replicaNames(t, cli), 2,
+			"the slot read empty, so the replacement lands beside the survivor and the count is "+
+				"whole again -- the departed member is gone rather than counted alongside it")
 
 		assert.Equal(t, modelDeploymentReasonUpToDate,
 			ModelDeploymentConditionReplicasUpToDate.GetReason(getModelDeployment(t, cli)),
@@ -709,11 +744,9 @@ func TestModelDeploymentRollout_TheInProgressMessageTellsTheCadence(t *testing.T
 // that reason unconditionally.
 //
 // It calls the observer directly rather than through rolloutConditionOf, because the inputs this
-// branch reads — the live Pods and the group's Workload — are exactly the two that helper does not
+// branch reads — the live Pods and each replica's Workload — are exactly the two that helper does not
 // take, and a shortfall cannot be expressed without them.
 func TestModelDeploymentRollout_TheGapARolloutOpensStaysTheRollouts(t *testing.T) {
-	const group = "qwen"
-
 	cases := []struct {
 		name       string
 		priorPass  func(*workercore.ModelDeployment)
@@ -727,7 +760,7 @@ func TestModelDeploymentRollout_TheGapARolloutOpensStaysTheRollouts(t *testing.T
 					modelDeploymentReasonRolloutInProgress, "the pass before this one")
 			},
 			wantReason: modelDeploymentReasonRolloutInProgress,
-			wantPhrase: "being replaced by the rollout in flight",
+			wantPhrase: "being replaced by the rollout in flight: role server replica 1",
 		},
 		{
 			name: "the previous pass said everything matched",
@@ -736,13 +769,13 @@ func TestModelDeploymentRollout_TheGapARolloutOpensStaysTheRollouts(t *testing.T
 					modelDeploymentReasonUpToDate, "the pass before this one")
 			},
 			wantReason: modelDeploymentReasonReplacementInProgress,
-			wantPhrase: "",
+			wantPhrase: "are missing: role server replica 1",
 		},
 		{
 			name:       "there was no previous pass",
 			priorPass:  func(*workercore.ModelDeployment) {},
 			wantReason: modelDeploymentReasonReplacementInProgress,
-			wantPhrase: "",
+			wantPhrase: "are missing: role server replica 1",
 		},
 	}
 
@@ -752,16 +785,29 @@ func TestModelDeploymentRollout_TheGapARolloutOpensStaysTheRollouts(t *testing.T
 			holder := new(workercore.ModelDeployment)
 			tc.priorPass(holder)
 
-			// One live replica of the two the role declares, so the shortfall is one and nothing
-			// this pass compared differed: rollout.outdated stays zero.
+			// One live replica of the two the role declares, sitting at ORDINAL 0, so the empty slot
+			// is ordinal 1 specifically and nothing this pass compared differed:
+			// rollout.outdated stays zero.
 			pods := []core.Pod{{ObjectMeta: meta.ObjectMeta{
 				Name:      "qwen-server-abcde",
 				Namespace: md.Namespace,
-				Labels:    map[string]string{modelDeploymentLabelKeyComponent: "server"},
+				UID:       types.UID("uid-qwen-server-0"),
+				Labels: map[string]string{
+					modelDeploymentLabelKeyComponent:   "server",
+					modelDeploymentReplicaOrdinalLabel: "0",
+				},
 			}}}
 
+			// The survivor carries a workload of its own, which is what makes the empty slot read
+			// as a departure rather than as a role assembling its first set.
+			survivor := &kueue.Workload{}
+			survivor.Name, survivor.Namespace = "pod-qwen-server-abcde-abcde", md.Namespace
+			survivor.OwnerReferences = []meta.OwnerReference{{
+				APIVersion: "v1", Kind: "Pod", Name: pods[0].Name, UID: pods[0].UID,
+			}}
+
 			observeModelDeploymentRollout(holder, md, pods,
-				map[string]*kueue.Workload{group: {}}, map[string]string{"server": group},
+				modelDeploymentReplicaWorkloads(pods, []*kueue.Workload{survivor}),
 				&modelDeploymentRollout{accounted: 1})
 
 			assert.Equal(t, tc.wantReason,
@@ -769,8 +815,161 @@ func TestModelDeploymentRollout_TheGapARolloutOpensStaysTheRollouts(t *testing.T
 				"the shortfall is attributed from what the previous pass recorded")
 			if tc.wantPhrase != "" {
 				assert.Contains(t, ModelDeploymentConditionReplicasUpToDate.GetMessage(holder),
-					tc.wantPhrase, "and the message sends the reader to the rollout, not to a diff")
+					tc.wantPhrase, "and the message names the empty slot: %s",
+					ModelDeploymentConditionReplicasUpToDate.GetMessage(holder))
 			}
 		})
 	}
+}
+
+// TestModelDeploymentRollout_AMissingWorkloadAloneNamesNoReplacement pins the distinction the
+// per-role lookup could not make: a role that lost ONE replica's workload while the others keep
+// theirs is not a replacement, because no replica is missing.
+//
+// THE FIXTURE IS THE T5 HANDOFF'S OWN EXAMPLE. Three replicas declared, three Pods live, and the
+// middle one's workload deleted by hand while its siblings' survive: the old role-granularity
+// lookup hit a sibling's workload for the whole role, and the quota axis reported the survivors'
+// reservation for the missing one. The rollout axis stayed silent here -- a missing WORKLOAD is not
+// a missing REPLICA -- and this is the pin that it stays that way when the lookup finally knows
+// about replicas: the verdict is UpToDate, and the quota condition owns the missing reservation.
+func TestModelDeploymentRollout_AMissingWorkloadAloneNamesNoReplacement(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 3 })
+	holder := new(workercore.ModelDeployment)
+
+	pods := make([]core.Pod, 0, 3)
+	wls := make([]*kueue.Workload, 0, 2)
+	for ordinal := 0; ordinal < 3; ordinal++ {
+		pod := core.Pod{ObjectMeta: meta.ObjectMeta{
+			Name:      fmt.Sprintf("qwen-server-%d", ordinal),
+			Namespace: md.Namespace,
+			UID:       types.UID(fmt.Sprintf("uid-%d", ordinal)),
+			Labels: map[string]string{
+				modelDeploymentLabelKeyComponent:   "server",
+				modelDeploymentReplicaOrdinalLabel: fmt.Sprint(ordinal),
+			},
+		}}
+		pods = append(pods, pod)
+
+		if ordinal == 1 {
+			continue
+		}
+		wl := &kueue.Workload{}
+		wl.Name, wl.Namespace = fmt.Sprintf("pod-qwen-server-%d-abcde", ordinal), md.Namespace
+		wl.OwnerReferences = []meta.OwnerReference{{
+			APIVersion: "v1", Kind: "Pod", Name: pod.Name, UID: pod.UID,
+		}}
+		wls = append(wls, wl)
+	}
+
+	observeModelDeploymentRollout(holder, md, pods,
+		modelDeploymentReplicaWorkloads(pods, wls), &modelDeploymentRollout{accounted: 3})
+
+	assert.Equal(t, modelDeploymentReasonUpToDate,
+		ModelDeploymentConditionReplicasUpToDate.GetReason(holder),
+		"no replica is missing, so the rollout axis has nothing to report however many workloads are")
+}
+
+// TestModelDeploymentRollout_MissingSlotsFillLowestFirst pins the arithmetic the message names
+// slots by, against the one input where it can go wrong.
+//
+// A ROLE CARRYING A REPLICA WITH NO ORDINAL still counts that replica against the shortfall without
+// claiming any slot for it, and the empty slots must then be enumerated lowest-first and only as
+// many as the count is short -- the converger's own fill order -- or the message names a slot the
+// next create will not fill. The no-ordinal replica here is not decoration: without it the
+// arithmetic has no way to disagree with the obvious reading, and the case passes against an
+// implementation that simply numbers the gaps 0, 1, 2.
+func TestModelDeploymentRollout_MissingSlotsFillLowestFirst(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 4 })
+	holder := new(workercore.ModelDeployment)
+	ModelDeploymentConditionReplicasUpToDate.True(holder,
+		modelDeploymentReasonUpToDate, "the pass before this one")
+
+	// Ordinals 1 and 2 occupied, one legacy replica with no ordinal at all: three live Pods against
+	// four declared, so the count is short by one and the unoccupied ordinals are 0 and 3.
+	pods := []core.Pod{
+		{ObjectMeta: meta.ObjectMeta{
+			Name: "qwen-server-1", Namespace: md.Namespace, UID: types.UID("uid-1"),
+			Labels: map[string]string{
+				modelDeploymentLabelKeyComponent: "server", modelDeploymentReplicaOrdinalLabel: "1",
+			},
+		}},
+		{ObjectMeta: meta.ObjectMeta{
+			Name: "qwen-server-2", Namespace: md.Namespace, UID: types.UID("uid-2"),
+			Labels: map[string]string{
+				modelDeploymentLabelKeyComponent: "server", modelDeploymentReplicaOrdinalLabel: "2",
+			},
+		}},
+		{ObjectMeta: meta.ObjectMeta{
+			Name: "qwen-server-abcde", Namespace: md.Namespace, UID: types.UID("uid-legacy"),
+			Labels: map[string]string{modelDeploymentLabelKeyComponent: "server"},
+		}},
+	}
+
+	survivor := &kueue.Workload{}
+	survivor.Name, survivor.Namespace = "pod-qwen-server-1-abcde", md.Namespace
+	survivor.OwnerReferences = []meta.OwnerReference{{
+		APIVersion: "v1", Kind: "Pod", Name: pods[0].Name, UID: pods[0].UID,
+	}}
+
+	observeModelDeploymentRollout(holder, md, pods,
+		modelDeploymentReplicaWorkloads(pods, []*kueue.Workload{survivor}),
+		&modelDeploymentRollout{accounted: 3})
+
+	assert.Equal(t, modelDeploymentReasonReplacementInProgress,
+		ModelDeploymentConditionReplicasUpToDate.GetReason(holder))
+
+	msg := ModelDeploymentConditionReplicasUpToDate.GetMessage(holder)
+	assert.Contains(t, msg, "role server replica 0",
+		"the one slot named is the lowest unoccupied one, which is the one the converger fills: %s", msg)
+	assert.NotContains(t, msg, "replica 3",
+		"a no-ordinal replica absorbed the shortfall, so slot 3 is not named: %s", msg)
+}
+
+// TestModelDeploymentRollout_ATopSlotGapReadsAsReplacementWhileAssembled pins the documented
+// boundary from the other side: it is the classification the boundary comment says the
+// indistinguishable case falls into, stated as a test so the comment cannot outlive the code.
+//
+// A SCALE-UP WHOSE CREATE HAS NOT LANDED and a top-slot replica that departed produce the same
+// observation -- ordinals 0 and 1 live with workloads, slot 2 empty -- and this axis classifies
+// both as replacement, because the role assembled once and nothing prior says a rollout is in
+// flight. The boundary is real and it is deliberate: no reading available to a single pass could
+// sort those two apart, and the alternative (reading a top gap as assembly) turns a top-slot
+// rollout turnover into UpToDate mid-flight, which is a regression against yesterday's behavior
+// rather than a refinement of it.
+func TestModelDeploymentRollout_ATopSlotGapReadsAsReplacementWhileAssembled(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 3 })
+	holder := new(workercore.ModelDeployment)
+	ModelDeploymentConditionReplicasUpToDate.True(holder,
+		modelDeploymentReasonUpToDate, "the pass before this one")
+
+	pods := make([]core.Pod, 0, 2)
+	wls := make([]*kueue.Workload, 0, 2)
+	for ordinal := 0; ordinal < 2; ordinal++ {
+		pod := core.Pod{ObjectMeta: meta.ObjectMeta{
+			Name:      fmt.Sprintf("qwen-server-%d", ordinal),
+			Namespace: md.Namespace,
+			UID:       types.UID(fmt.Sprintf("uid-%d", ordinal)),
+			Labels: map[string]string{
+				modelDeploymentLabelKeyComponent:   "server",
+				modelDeploymentReplicaOrdinalLabel: fmt.Sprint(ordinal),
+			},
+		}}
+		wl := &kueue.Workload{}
+		wl.Name, wl.Namespace = fmt.Sprintf("pod-qwen-server-%d-abcde", ordinal), md.Namespace
+		wl.OwnerReferences = []meta.OwnerReference{{
+			APIVersion: "v1", Kind: "Pod", Name: pod.Name, UID: pod.UID,
+		}}
+
+		pods = append(pods, pod)
+		wls = append(wls, wl)
+	}
+
+	observeModelDeploymentRollout(holder, md, pods,
+		modelDeploymentReplicaWorkloads(pods, wls), &modelDeploymentRollout{accounted: 2})
+
+	assert.Equal(t, modelDeploymentReasonReplacementInProgress,
+		ModelDeploymentConditionReplicasUpToDate.GetReason(holder))
+	assert.Contains(t, ModelDeploymentConditionReplicasUpToDate.GetMessage(holder),
+		"role server replica 2",
+		"the top slot is named, and classified as the boundary comment says it is")
 }

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -283,21 +285,22 @@ func TestComputeModelDeploymentStatus_Unmanaged(t *testing.T) {
 	assert.True(t, status.Roles[0].Unmanaged)
 }
 
-// TestModelDeploymentStatus_AssignedFlavorIsAbsentUntilItIsAssigned is why the field is a pointer.
+// TestModelDeploymentStatus_AssignedFlavorIsAbsentUntilItIsAssigned is why the field is nil rather
+// than an empty list.
 //
 // "Not assigned yet" and "assigned to a flavor whose name is empty" are different facts, and a
-// zero value collapses them into one that READS AS AN ASSIGNMENT. The assertion is therefore nil,
-// not "", on the same object across two observations -- which is also what Story 4 needs: an
+// present list collapses them into one that READS AS AN ASSIGNMENT. The assertion is therefore nil,
+// not [], on the same object across two observations -- which is also what Story 4 needs: an
 // operator asking which accelerator model a role actually landed on must be able to tell "not yet"
 // from an answer.
 func TestModelDeploymentStatus_AssignedFlavorIsAbsentUntilItIsAssigned(t *testing.T) {
 	md := twoRoleDeployment()
 	prefill, decode := &md.Spec.Roles[0], &md.Spec.Roles[1]
 
-	// BOTH ROLES SIT ON ONE instanceType HERE, so this is one group with one Workload, and the
-	// replicas are what attach that Workload to the group. A case with no replicas resolves no
-	// Workload for any group and would answer nil to everything below -- passing the absence
-	// assertions for a reason that has nothing to do with the guard they exist to pin.
+	// BOTH ROLES SIT ON ONE instanceType HERE, so one Workload can own both replicas and carry a
+	// PodSet for each, and the replicas are what attach that Workload to the roles. A case with no
+	// replicas resolves no Workload at all and would answer nil to everything below -- passing the
+	// absence assertions for a reason that has nothing to do with the guard they exist to pin.
 	pods := []core.Pod{roleReplica(md, prefill.Name), roleReplica(md, decode.Name)}
 	owning := func(wl *kueue.Workload) []*kueue.Workload {
 		for i := range pods {
@@ -311,15 +314,15 @@ func TestModelDeploymentStatus_AssignedFlavorIsAbsentUntilItIsAssigned(t *testin
 
 	before := roleStatusesOver(md, pods, nil)
 	require.Len(t, before, 2)
-	assert.Nil(t, before[0].AssignedFlavor, "no Workload means no answer, not an empty answer")
+	assert.Nil(t, before[0].AssignedFlavors, "no Workload means no answer, not an empty answer")
 
 	// THE HARDER ABSENCE, and the one the nil above does not reach: a Workload that EXISTS and has
-	// no answer for this role. It is what a group looks like between composition and admission, and
-	// it is the input that turns a missing guard into ptr.To("") -- a pointer that is set, to
-	// nothing, which reads as an assignment to a flavor with no name.
+	// no answer for this role. It is what a replica looks like between composition and admission, and
+	// it is the input that turns a missing guard into an empty-but-present list -- a list that is
+	// set, to nothing, which reads as an assignment to a flavor with no name.
 	unadmitted := roleStatusesOver(md, pods, owning(&kueue.Workload{}))
 	require.Len(t, unadmitted, 2)
-	assert.Nil(t, unadmitted[0].AssignedFlavor,
+	assert.Nil(t, unadmitted[0].AssignedFlavors,
 		"a Workload with no admission has no answer either")
 
 	wl := &kueue.Workload{}
@@ -342,25 +345,124 @@ func TestModelDeploymentStatus_AssignedFlavorIsAbsentUntilItIsAssigned(t *testin
 
 	after := roleStatusesOver(md, pods, owning(wl))
 	require.Len(t, after, 2)
-	require.NotNil(t, after[0].AssignedFlavor)
-	require.NotNil(t, after[1].AssignedFlavor)
+	require.NotNil(t, after[0].AssignedFlavors)
+	require.NotNil(t, after[1].AssignedFlavors)
 
 	// TWO ROLES, TWO FLAVORS. Kueue assigns a ResourceFlavor per PodSet, which is what lets one pool
 	// serve two accelerator models -- and reading them per role is what makes that visible.
-	assert.Equal(t, "h20-8", *after[0].AssignedFlavor)
-	assert.Equal(t, "a100-8", *after[1].AssignedFlavor)
+	assert.Equal(t, []string{"h20-8"}, after[0].AssignedFlavors)
+	assert.Equal(t, []string{"a100-8"}, after[1].AssignedFlavors)
 
 	// One role assigned and the other not is a real intermediate state, and the unassigned one must
-	// still be nil rather than a set pointer to nothing.
+	// still be nil rather than a set list of nothing.
 	partial := &kueue.Workload{}
 	partial.Status.Admission = &kueue.Admission{
 		PodSetAssignments: wl.Status.Admission.PodSetAssignments[:1],
 	}
 	half := roleStatusesOver(md, pods, owning(partial))
 	require.Len(t, half, 2)
-	require.NotNil(t, half[0].AssignedFlavor)
-	assert.Nil(t, half[1].AssignedFlavor,
+	require.NotNil(t, half[0].AssignedFlavors)
+	assert.Nil(t, half[1].AssignedFlavors,
 		"a Workload that names no assignment for this role has no answer for it")
+}
+
+// TestModelDeploymentStatus_QuotaReservedCountsReplicas is AC7's first acceptance: the count that
+// says how far into admission a role actually is.
+//
+// ONE WORKLOAD PER REPLICA IS WHAT MAKES THE COUNT REACHABLE. A role that shared one workload
+// passed all-or-nothing -- every replica reserved or none -- and "2 of 3 hold quota" was not a
+// state the world could produce. Here it is the ordinary way capacity arrives, and a count beside
+// Desired and Ready that cannot express it would read every such role as either full or empty.
+//
+// THE LEGACY ROW IS THE ONE THAT MAKES THE OTHERS A TEST. A reader that counted workloads rather
+// than replicas answers 1 for the second row and 1 for the third, and the fixture cannot tell them
+// apart: one workload owning every replica is the shape the role had before the per-replica split,
+// and it still reads all-or-nothing today, which is the right answer for it.
+func TestModelDeploymentStatus_QuotaReservedCountsReplicas(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 3 })
+	pods := []core.Pod{*readyReplica(md, 0, true), *readyReplica(md, 1, true), *readyReplica(md, 2, true)}
+
+	first := groupWorkload(pods[:1], true)
+	first.Name = "wl-0"
+	second := groupWorkload(pods[1:2], false)
+	second.Name = "wl-1"
+	legacy := groupWorkload(pods, true)
+	legacy.Name = "wl-legacy"
+
+	cases := []struct {
+		name  string
+		wls   []*kueue.Workload
+		count int32
+	}{
+		{name: "a replica whose workload was never composed holds no quota", wls: nil, count: 0},
+		{
+			name:  "one of three reserved, one waiting, one uncomposed",
+			wls:   []*kueue.Workload{first, second},
+			count: 1,
+		},
+		{
+			name: "one workload owning every replica answers for all of them, as the shared shape " +
+				"always did",
+			wls:   []*kueue.Workload{legacy},
+			count: 3,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			statuses := roleStatusesOver(md, pods, tc.wls)
+			require.Len(t, statuses, 1)
+
+			assert.Equal(t, int32(3), statuses[0].Desired)
+			assert.Equal(t, int32(3), statuses[0].Ready,
+				"the quota count is a new axis, not a change to the ones beside it")
+			assert.Equal(t, tc.count, statuses[0].QuotaReserved)
+		})
+	}
+}
+
+// TestModelDeploymentStatus_MixedFlavorsAcrossReplicas is AC7's third acceptance, and the state one
+// PodSet per role could not produce.
+//
+// TWO REPLICAS OF ONE ROLE CARRY TWO DIFFERENT ASSIGNMENTS. Kueue assigns a flavor per workload and
+// a role's replicas are one workload each, so a cluster queue with two flavors covering the same
+// credits resource lands them separately -- and a field that reported one flavor could only ever
+// report one of the two, whichever rule picked it, while an operator reading it believed the whole
+// role sat there.
+//
+// THE ORDER IS SORTED RATHER THAN OBSERVED. The set is an answer about which models the role is
+// running on, and a reading that depended on the order the replicas happened to be visited in would
+// say the same role landed differently on two consecutive passes.
+func TestModelDeploymentStatus_MixedFlavorsAcrossReplicas(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 2 })
+	pods := []core.Pod{*readyReplica(md, 0, true), *readyReplica(md, 1, true)}
+
+	admitted := func(pod core.Pod, ordinal, flavor string) *kueue.Workload {
+		wl := groupWorkload([]core.Pod{pod}, true)
+		wl.Name = "wl-" + ordinal
+		wl.Status.Admission = &kueue.Admission{
+			PodSetAssignments: []kueue.PodSetAssignment{{
+				Name: kueue.PodSetReference(md.Spec.Roles[0].Name),
+				Flavors: map[core.ResourceName]kueue.ResourceFlavorReference{
+					nodefeature.GetAcceleratableCreditsResourceName(nodefeature.ManufacturerNVIDIA): kueue.ResourceFlavorReference(flavor),
+				},
+			}},
+		}
+
+		return wl
+	}
+
+	statuses := roleStatusesOver(md, pods, []*kueue.Workload{
+		admitted(pods[0], "0", "h20-8"),
+		admitted(pods[1], "1", "a100-8"),
+	})
+	require.Len(t, statuses, 1)
+
+	// SORTED, SO THE MIXED READING IS STABLE: "a100-8" sorts before "h20-8" whatever the fixtures
+	// do, and a reader told two flavors can go read the Pods for which replica carries which.
+	assert.Equal(t, []string{"a100-8", "h20-8"}, statuses[0].AssignedFlavors)
+	assert.Equal(t, int32(2), statuses[0].QuotaReserved,
+		"both replicas hold quota; the flavors they hold it on are what differ")
 }
 
 // roleReplica builds a replica belonging to a named role, which is how a Pod is attributed to a
@@ -374,18 +476,18 @@ func roleReplica(md *workercore.ModelDeployment, role string) core.Pod {
 	}}
 }
 
-// TestModelDeploymentStatus_AssignedFlavorIsPerGroup is the regression for reading one Workload for
-// a deployment that has one per group.
+// TestModelDeploymentStatus_AssignedFlavorsArePerReplica is the regression for reading one Workload
+// for a role whose replicas are one each.
 //
-// EACH GROUP GETS ITS OWN ANSWER FROM KUEUE. Roles on two instanceTypes are two pod groups and two
-// Workloads, and each Workload names only its own group's PodSets. An implementation taking whichever
-// Workload sorts first answers correctly for that one group and reports NOTHING for every other --
-// so flavor attribution disappears exactly for the multi-instanceType deployments this change exists
-// to enable, and it disappears silently, because nil is also what "not assigned yet" looks like.
+// EACH REPLICA GETS ITS OWN ANSWER FROM KUEUE. A role's replicas are one workload and one PodSet
+// assignment each, and each Workload names only its own replica's PodSet. An implementation taking
+// whichever Workload sorts first answers correctly for that one replica and reports NOTHING for
+// every other -- so flavor attribution disappears for the replicas this change exists to split,
+// and it disappears silently, because nil is also what "not assigned yet" looks like.
 //
-// THE FIXTURE PUTS THE ANSWER IN THE SECOND WORKLOAD BY NAME ORDER. With both flavors in the first,
-// a first-Workload implementation would pass.
-func TestModelDeploymentStatus_AssignedFlavorIsPerGroup(t *testing.T) {
+// THE FIXTURE PUTS THE PREFILLER'S ANSWER IN THE SECOND WORKLOAD BY NAME ORDER. With both flavors
+// in the first, a first-Workload implementation would pass.
+func TestModelDeploymentStatus_AssignedFlavorsArePerReplica(t *testing.T) {
 	md := twoRoleDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[1].InstanceType = "a100-8x"
 	})
@@ -420,13 +522,13 @@ func TestModelDeploymentStatus_AssignedFlavorIsPerGroup(t *testing.T) {
 	statuses := roleStatusesOver(md, []core.Pod{prefillPod, decodePod}, wls)
 	require.Len(t, statuses, 2)
 
-	require.NotNil(t, statuses[0].AssignedFlavor,
+	require.NotNil(t, statuses[0].AssignedFlavors,
 		"the prefiller's flavor is in the SECOND workload, which a first-workload reader never opens")
-	assert.Equal(t, "h20-8", *statuses[0].AssignedFlavor)
+	assert.Equal(t, []string{"h20-8"}, statuses[0].AssignedFlavors)
 
-	require.NotNil(t, statuses[1].AssignedFlavor)
-	assert.Equal(t, "a100-8", *statuses[1].AssignedFlavor,
-		"and the decoder reads its own group's answer rather than its sibling's")
+	require.NotNil(t, statuses[1].AssignedFlavors)
+	assert.Equal(t, []string{"a100-8"}, statuses[1].AssignedFlavors,
+		"and the decoder reads its own replica's answer rather than its sibling's")
 }
 
 // TestModelDeploymentStatus_WorkloadAttributionReadsOwnershipNotName pins the rule every role-level
@@ -513,22 +615,21 @@ func TestModelDeploymentStatus_WorkloadAttributionReadsOwnershipNotName(t *testi
 			statuses := roleStatusesOver(md, pods, tc.wls)
 			require.Len(t, statuses, 2)
 
-			// An empty want is the table's spelling of "no answer": the field is a pointer
-			// precisely so that "not attributed" and "attributed to an unnamed flavor" cannot
-			// collapse into one reading, and an assignment to an unnamed flavor is not a state
-			// Kueue writes.
+			// An empty want is the table's spelling of "no answer": the field is a list precisely so
+			// that "not attributed" and "attributed to unnamed flavors" cannot collapse into one
+			// reading, and an assignment to unnamed flavors is not a state Kueue writes.
 			for _, role := range []struct {
 				status workercore.ModelDeploymentRoleStatus
 				want   string
 			}{{statuses[0], tc.wantPrefillFlavor}, {statuses[1], tc.wantDecodeFlavor}} {
 				if role.want == "" {
-					assert.Nil(t, role.status.AssignedFlavor,
+					assert.Nil(t, role.status.AssignedFlavors,
 						"no Workload owns this role's replica, so it has no answer rather than an empty one")
 
 					continue
 				}
-				require.NotNil(t, role.status.AssignedFlavor)
-				assert.Equal(t, role.want, *role.status.AssignedFlavor)
+				require.NotNil(t, role.status.AssignedFlavors)
+				assert.Equal(t, []string{role.want}, role.status.AssignedFlavors)
 			}
 		})
 	}
@@ -589,12 +690,12 @@ func TestObserveModelDeploymentQuota(t *testing.T) {
 		{
 			name: "the group has quota", replicas: 2, live: 2, workload: true, reserved: true,
 			wantStatus: meta.ConditionTrue, wantReason: "Reserved",
-			wantMessage: `the group of 2 replicas has quota reserved in cluster queue "h20-8x"`,
+			wantMessage: `all 2 replicas have quota reserved in cluster queue "h20-8x"`,
 		},
 		{
 			name: "the group is waiting", replicas: 2, live: 2, workload: true,
 			wantStatus: meta.ConditionFalse, wantReason: "Pending",
-			wantMessage: `the group of 2 replicas is waiting for quota in cluster queue "h20-8x"`,
+			wantMessage: `2 of this deployment's 2 replicas are waiting for quota in cluster queue "h20-8x"`,
 		},
 		{
 			// Kueue composes the Workload asynchronously from the Pods, so its absence for a
@@ -616,7 +717,8 @@ func TestObserveModelDeploymentQuota(t *testing.T) {
 			name: "the group is short of its total", replicas: 4, live: 3,
 			wantStatus: meta.ConditionFalse, wantReason: "PodGroupIncomplete",
 			wantMessage: `3 of 4 replicas role "server" declares exist, so Kueue composes no workload for ` +
-				`its group at all and there is nothing in cluster queue "h20-8x" to hold quota`,
+				`the missing ones at all and there is nothing in cluster queue "h20-8x" to hold quota ` +
+				`for them`,
 		},
 	}
 
@@ -685,7 +787,7 @@ func TestObserveModelDeploymentQuota_TrueCoversEveryRole(t *testing.T) {
 
 	assert.True(t, ModelDeploymentConditionQuotaReserved.IsTrue(holder))
 	assert.Contains(t, ModelDeploymentConditionQuotaReserved.GetMessage(holder),
-		"all 2 of this deployment's groups")
+		"all 4 of this deployment's replicas")
 }
 
 // TestObserveModelDeploymentQuota_NamesTheClusterQueue states where an operator is sent when quota
@@ -773,6 +875,8 @@ func TestSyncModelDeploymentStatus_RebuiltWholesale(t *testing.T) {
 	require.Len(t, stored.Status.Roles, 1)
 	assert.Equal(t, int32(2), stored.Status.Roles[0].Desired, "the stale 9 must not survive")
 	assert.Equal(t, int32(1), stored.Status.Roles[0].Ready)
+	assert.Equal(t, int32(0), stored.Status.Roles[0].QuotaReserved,
+		"an observed zero, rebuilt like every other figure rather than carried over")
 }
 
 // TestSyncModelDeploymentStatus_WritesNothingWhenUnchanged is what keeps a status rebuilt on every
@@ -790,6 +894,53 @@ func TestSyncModelDeploymentStatus_WritesNothingWhenUnchanged(t *testing.T) {
 
 	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil))
 	assert.Equal(t, 1, writes.statusUpdates, "an unchanged status must not be written again")
+}
+
+// TestSyncModelDeploymentStatus_AFailingListWritesNoStatus is AC7's second acceptance, and the rule
+// is the counterfactual in its name.
+//
+// "I COULD NOT SEE" AND "THERE ARE NONE" MUST NOT SHARE A READING. The quota count sits beside
+// Desired and Ready, which already follow this rule through the Pod list; the Workload list is the
+// new read the count rests on, and a zero written off a failed one would tell an operator that no
+// replica holds quota -- a reading whose action is to investigate the deployment, while the true
+// state's action is to wait for the read to succeed again. The two halves of this test are
+// therefore a pair: the failed list writes nothing, and the same fixture with the list restored
+// writes the observed zero.
+func TestSyncModelDeploymentStatus_AFailingListWritesNoStatus(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 1 })
+	pods := []core.Pod{*readyReplica(md, 0, true)}
+
+	failing := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{}).
+		WithObjects(md, newRenderInstanceType()).
+		WithInterceptorFuncs(ctrlinterceptor.Funcs{
+			List: func(
+				ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.ObjectList, opts ...ctrlcli.ListOption,
+			) error {
+				if _, ok := obj.(*kueue.WorkloadList); ok {
+					return errors.New("the workload list failed")
+				}
+
+				return c.List(ctx, obj, opts...)
+			},
+		}).
+		Build()
+
+	stuck := &ModelDeploymentReconciler{Client: failing}
+	require.Error(t, stuck.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil))
+
+	stored := getModelDeployment(t, failing)
+	require.Empty(t, stored.Status.Roles,
+		"a failed Workload list writes no status at all, rather than a zero that reads as observed")
+
+	healthy := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+	require.NoError(t, healthy.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil))
+
+	stored = getModelDeployment(t, healthy.Client)
+	require.Len(t, stored.Status.Roles, 1)
+	assert.Equal(t, int32(0), stored.Status.Roles[0].QuotaReserved,
+		"an empty list that succeeded is an observed zero, and the one state that may write it")
 }
 
 // TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved states the difference between a
@@ -962,8 +1113,9 @@ func TestObserveModelDeploymentQuota_CountsPerGroup(t *testing.T) {
 	assert.Equal(t, "PodGroupIncomplete",
 		ModelDeploymentConditionQuotaReserved.GetReason(holder))
 	assert.Equal(t,
-		`2 of 3 replicas role "decode" declares exist, so Kueue composes no workload for its group `+
-			`at all and there is nothing in cluster queue "a100-8x" to hold quota`,
+		`2 of 3 replicas role "decode" declares exist, so Kueue composes no workload for the `+
+			`missing ones at all and there is nothing in cluster queue "a100-8x" to hold quota `+
+			`for them`,
 		ModelDeploymentConditionQuotaReserved.GetMessage(holder),
 		"the short group's own role, own numbers and its own queue, not the deployment's 4 of 5 on the other pool")
 }
@@ -1090,25 +1242,25 @@ func workloadSlice(wl *kueue.Workload) []*kueue.Workload {
 // observeQuotaOver resolves each group's Workload exactly as the production caller does, then
 // reports.
 //
-// A CASE MUST NOT HAND-BUILD THAT MAPPING. Which Workload answers for which group is part of what
-// these cases exercise, so a case supplying its own map would assert against a grouping it wrote
+// A CASE MUST NOT HAND-BUILD THAT MAPPING. Which Workload answers for which replica is part of what
+// these cases exercise, so a case supplying its own map would assert against a resolution it wrote
 // itself. An earlier version of this table passed nil for a later-added argument to keep the call
 // compiling, and every case then answered "no group has a workload" whatever its fixture said.
 func observeQuotaOver(
 	md *workercore.ModelDeployment, pods []core.Pod, wls []*kueue.Workload,
 	holder *workercore.ModelDeployment,
 ) {
-	groupOfRole, wlByGroup := modelDeploymentGroupWorkloads(md, pods, wls)
-	observeModelDeploymentQuota(md, pods, wls, wlByGroup, groupOfRole, holder)
+	wlByReplica := modelDeploymentReplicaWorkloads(pods, wls)
+	observeModelDeploymentQuota(md, pods, wls, wlByReplica, holder)
 }
 
 // roleStatusesOver is the same resolution for the per-role view, for the same reason.
 func roleStatusesOver(
 	md *workercore.ModelDeployment, pods []core.Pod, wls []*kueue.Workload,
 ) []workercore.ModelDeploymentRoleStatus {
-	groupOfRole, wlByGroup := modelDeploymentGroupWorkloads(md, pods, wls)
+	wlByReplica := modelDeploymentReplicaWorkloads(pods, wls)
 
-	return modelDeploymentRoleStatuses(md, pods, wlByGroup, groupOfRole)
+	return modelDeploymentRoleStatuses(md, pods, wlByReplica)
 }
 
 // TestObserveModelDeploymentQuota_OneGroupReservedIsNotTheDeployment is the regression the cluster
@@ -1192,7 +1344,7 @@ func TestObserveModelDeploymentQuota_TwoRolesOnOneInstanceTypeStillNameTheGroup(
 	assert.Equal(t, "Pending", ModelDeploymentConditionQuotaReserved.GetReason(holder))
 
 	msg := ModelDeploymentConditionQuotaReserved.GetMessage(holder)
-	assert.Contains(t, msg, "the groups of roles decode",
+	assert.Contains(t, msg, "the replicas of roles decode",
 		"the waiting group is the decoder's, and the role picks it out of the two that share the type")
 	assert.NotContains(t, msg, "prefill",
 		"the holding group is not named, which would read as the one waiting")
@@ -1547,13 +1699,14 @@ func TestObserveModelDeploymentQuota_ThePreemptionNoteContract(t *testing.T) {
 	t.Run("NoReplicas_cannot_be_reached_with_a_preemption", func(t *testing.T) {
 		md := twoGroups()
 
-		// The claim is structural: a group's Workload is resolved through that group's replicas, so
-		// with no Pods there is no Workload on which a preemption could have been seen. Asserting it
-		// on the predicate rather than on the answer is what makes it a statement about the reason.
-		_, wlByGroup := modelDeploymentGroupWorkloads(md, nil, []*kueue.Workload{
+		// The claim is structural: a replica's Workload is resolved through that replica's
+		// ownership, so with no Pods there is no Workload on which a preemption could have been
+		// seen. Asserting it on the predicate rather than on the answer is what makes it a
+		// statement about the reason.
+		wlByReplica := modelDeploymentReplicaWorkloads(nil, []*kueue.Workload{
 			preemptedWorkload(groupWorkload([]core.Pod{roleReplica(md, "prefill")}, false), "preempted"),
 		})
-		lost, kept := modelDeploymentPreemptedInPart(md, wlByGroup)
+		lost, kept, _ := modelDeploymentPreemptedInPart(md, nil, wlByReplica)
 
 		assert.Empty(t, lost, "with no replicas no Workload is resolved, so nothing can be seen preempted")
 		assert.Empty(t, kept)
@@ -1910,7 +2063,7 @@ func TestObserveModelDeploymentQuota_PreemptedInPartSaysWhatWasLost(t *testing.T
 		{
 			name:      "two_server_roles_on_two_instance_types_lose_capacity_only",
 			kinds:     false,
-			wantIn:    []string{"still serves", "without the capacity those groups provided"},
+			wantIn:    []string{"still serves", "without the capacity those replicas provided"},
 			wantNotIn: []string{"cannot serve", "the loss of that role"},
 		},
 		{
@@ -1919,7 +2072,7 @@ func TestObserveModelDeploymentQuota_PreemptedInPartSaysWhatWasLost(t *testing.T
 			// itself; the deployment is degraded and the phase is what carries that.
 			name:      "a_disaggregated_deployment_that_lost_a_whole_kind_says_which_role",
 			kinds:     true,
-			wantIn:    []string{"no admitted group of role kind decode", "loss of that role rather than of capacity"},
+			wantIn:    []string{"no admitted replica of role kind decode", "loss of that role rather than of capacity"},
 			wantNotIn: []string{"cannot serve", "still serves"},
 		},
 		{
@@ -1930,7 +2083,7 @@ func TestObserveModelDeploymentQuota_PreemptedInPartSaysWhatWasLost(t *testing.T
 			name:          "a_kind_that_never_had_an_admitted_group_is_not_described_as_having_lost_one",
 			kinds:         true,
 			neverAdmitted: true,
-			wantIn:        []string{"no admitted group of role kind decode at all"},
+			wantIn:        []string{"no admitted replica of role kind decode at all"},
 			wantNotIn:     []string{"any more", "still serves", "cannot serve"},
 		},
 	}

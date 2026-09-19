@@ -12,7 +12,6 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueueworkload "sigs.k8s.io/kueue/pkg/workload"
@@ -170,20 +169,20 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 	// and only the accessors know when it should move.
 	holder := &workercore.ModelDeployment{Status: *md.Status.DeepCopy()}
 
-	// EVERY Workload of the deployment, resolved once: a deployment whose roles sit on several
-	// instanceTypes is several pod groups and one Workload each, and both the per-role flavor and the
-	// group-level quota answer come from this same read. Reading it twice would let the two halves of
-	// the status describe two moments.
+	// EVERY Workload of the deployment, resolved once: both the per-role flavor answers and the
+	// quota verdicts come from this same read. Reading it twice would let two halves of the status
+	// describe two moments.
 	wls, err := r.findModelDeploymentGroupWorkloads(ctx, md, pods)
 	if err != nil {
 		return nil, err
 	}
-	// EACH GROUP'S OWN WORKLOAD, RESOLVED ONCE. There is no such thing as "the deployment's Workload"
-	// once its roles sit on several instanceTypes, and taking whichever sorts first answers for one
-	// group while misreporting every other.
-	groupOfRole, wlByGroup := modelDeploymentGroupWorkloads(md, pods, wls)
+	// EACH REPLICA'S OWN WORKLOAD, RESOLVED ONCE. There is no such thing as "the deployment's
+	// Workload" once each replica composes one of its own, and a per-role view that answered for a
+	// role from whichever Workload sorts first would report the survivors' answer for a replica
+	// whose own is missing.
+	wlByReplica := modelDeploymentReplicaWorkloads(pods, wls)
 
-	holder.Status.Roles = modelDeploymentRoleStatuses(md, pods, wlByGroup, groupOfRole)
+	holder.Status.Roles = modelDeploymentRoleStatuses(md, pods, wlByReplica)
 	if md.Spec.Router == nil {
 		holder.Status.Endpoint = modelDeploymentEndpoint(md)
 	} else {
@@ -192,11 +191,11 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 
 	observeModelDeploymentDomain(holder, domain)
 
-	observeModelDeploymentQuota(md, pods, wls, wlByGroup, groupOfRole, holder)
+	observeModelDeploymentQuota(md, pods, wls, wlByReplica, holder)
 
 	r.observeModelDeploymentCache(ctx, md, pods, domain, holder)
 
-	observeModelDeploymentRollout(holder, md, pods, wlByGroup, groupOfRole, rollout)
+	observeModelDeploymentRollout(holder, md, pods, wlByReplica, rollout)
 
 	observeModelDeploymentRoleKinds(holder)
 
@@ -284,21 +283,55 @@ func projectModelDeploymentRouterStatus(
 	return status
 }
 
-// modelDeploymentRoleStatuses counts, per role, how many replicas the spec asks for and how many of
-// them are Ready.
+// modelDeploymentRoleStatuses counts, per role, how many replicas the spec asks for, how many of
+// them are Ready, how many hold a quota reservation, and which flavors the assigned ones landed on.
 //
 // A role's replicas are identified by the Pod's resource note rather than by parsing its name,
 // because a name is a rendering and a note is what the renderer recorded.
+//
+// THE COUNTS AND THE FLAVOR SET ARE TAKEN OVER THE REPLICAS THAT ARE STAYING. A replica on its way
+// out still holds its workload and its quota, and counting it would let a shortfall be met by
+// replicas the deployment is shedding; its flavor is leaving with it, and naming it would answer
+// "where is this role landing" with a placement the role is moving off of.
+//
+// THE QUOTA COUNT AND THE FLAVOR SET READ THE SAME RESOLUTION BUT ASK DIFFERENT QUESTIONS, so the
+// second is not gated on the first: a workload carries its assignment after the reservation it came
+// with is gone -- a preemption in flight reads QuotaReserved false with the admission still naming
+// the flavor -- and "which model did this replica land on" is a question that moment still has an
+// answer to. What the two cannot do is disagree about WHICH replicas were looked at.
 func modelDeploymentRoleStatuses(
 	md *workercore.ModelDeployment, pods []core.Pod,
-	wlByGroup map[string]*kueue.Workload, groupOfRole map[string]string,
+	wlByReplica map[types.UID]*kueue.Workload,
 ) []workercore.ModelDeploymentRoleStatus {
 	ready := make(map[string]int32, len(md.Spec.Roles))
+	reserved := make(map[string]int32, len(md.Spec.Roles))
+	flavors := make(map[string]sets.Set[string], len(md.Spec.Roles))
 	for i := range pods {
-		if pods[i].DeletionTimestamp != nil || !podIsReady(&pods[i]) {
+		pod := &pods[i]
+		if pod.DeletionTimestamp != nil {
 			continue
 		}
-		ready[modelDeploymentPodRole(&pods[i])]++
+		role := modelDeploymentPodRole(pod)
+		if podIsReady(pod) {
+			ready[role]++
+		}
+
+		// THE REPLICA'S OWN WORKLOAD, not one resolved for its role: each replica composes one of
+		// its own, and a missing one is indistinguishable from an unassigned one through any
+		// coarser view.
+		wl := wlByReplica[pod.UID]
+		if wl == nil {
+			continue
+		}
+		if kubeapistatus.ConditionType(kueue.WorkloadQuotaReserved).IsTrue(wl) {
+			reserved[role]++
+		}
+		if flavor := assignedFlavor(wl, kueue.PodSetReference(role)); flavor != "" {
+			if flavors[role] == nil {
+				flavors[role] = sets.New[string]()
+			}
+			flavors[role].Insert(string(flavor))
+		}
 	}
 
 	statuses := make([]workercore.ModelDeploymentRoleStatus, 0, len(md.Spec.Roles))
@@ -310,46 +343,32 @@ func modelDeploymentRoleStatuses(
 			// resolved rather than copied: this field is required and enumerated, so writing an
 			// unset spec kind through would be refused, and the API server refuses the status write
 			// rather than the one field.
-			Kind:    ModelDeploymentEffectiveRoleKind(role),
-			Desired: role.Replicas,
-			Ready:   ready[role.Name],
+			Kind:          ModelDeploymentEffectiveRoleKind(role),
+			Desired:       role.Replicas,
+			Ready:         ready[role.Name],
+			QuotaReserved: reserved[role.Name],
 			// A role that replaced the whole command line got no synthesized argument and no client
 			// environment, so nothing here can claim it is attached to the cache.
-			Unmanaged: len(role.Command) > 0,
-			// THE ROLE'S OWN GROUP'S WORKLOAD, not the deployment's first. A flavor is an answer Kueue
-			// gave to one pod group, so a role is told what happened to ITS group or nothing at all.
-			// Reading whichever Workload sorts first reports a flavor this role was never assigned for
-			// every group but one, which is worse than the nil that means "no answer yet".
-			AssignedFlavor: modelDeploymentAssignedFlavor(wlByGroup[groupOfRole[role.Name]], role),
+			Unmanaged:       len(role.Command) > 0,
+			AssignedFlavors: modelDeploymentAssignedFlavors(flavors[role.Name]),
 		})
 	}
 
 	return statuses
 }
 
-// modelDeploymentAssignedFlavor is the accelerator model Kueue actually gave this role, or nil.
+// modelDeploymentAssignedFlavors is the sorted set of flavors Kueue assigned this role's replicas,
+// or nil when no assigned replica named one.
 //
-// NIL RATHER THAN EMPTY, and the distinction is the whole reason the field is a pointer: "not
-// assigned yet" and "assigned to a flavor whose name is empty" are different facts, and a zero value
-// collapses them into one that reads as an assignment.
-//
-// The flavor is read through the same function the per-accelerator check reads it with, so the
-// answer status reports and the answer the gate fits against cannot diverge. That function returns
-// empty for a Workload with no admission, a PodSet it does not name, and an assignment that is
-// ambiguous — all three of which are "no answer", which is exactly what nil says.
-func modelDeploymentAssignedFlavor(
-	wl *kueue.Workload, role *workercore.ModelDeploymentRole,
-) *string {
-	if wl == nil {
+// NIL RATHER THAN EMPTY: "no replica holds an assignment" is a fact, and a present-but-empty list
+// would read as an assignment to a flavor with no name — the same collapse the scalar form of this
+// field refused with its pointer.
+func modelDeploymentAssignedFlavors(flavors sets.Set[string]) []string {
+	if flavors.Len() == 0 {
 		return nil
 	}
 
-	flavor := assignedFlavor(wl, kueue.PodSetReference(role.Name))
-	if flavor == "" {
-		return nil
-	}
-
-	return ptr.To(string(flavor))
+	return sets.List(flavors)
 }
 
 // modelDeploymentPodRole reads which role a replica belongs to.
@@ -357,28 +376,27 @@ func modelDeploymentPodRole(pod *core.Pod) string {
 	return pod.Labels[modelDeploymentLabelKeyComponent]
 }
 
-// observeModelDeploymentQuota reports whether EVERY ONE of the deployment's Workloads holds quota.
+// observeModelDeploymentQuota reports whether EVERY ONE of the deployment's replicas holds quota.
 //
-// Roles on one instanceType are one pod group and one Workload; roles on several are one of each per
-// group. So `True` is an answer about the whole set rather than about whichever Workload sorts first,
-// and the branches below are what make it one: half a deployment holding quota is not the deployment
-// holding quota, and reporting the first Workload's answer for the rest was a defect a cluster found.
+// Each replica is its own workload and reserves on its own, so `True` is an answer about the whole
+// set rather than about whichever workload sorts first, and the branches below are what make it one:
+// half a deployment holding quota is not the deployment holding quota, and reporting a survivor's
+// answer for a replica whose own reservation is gone was a defect a cluster found.
 //
-// It reads those Workloads' OWN conditions rather than asking the admission gate. The gate stops
-// evaluating a Workload once it is admitted, so anything derived from the gate would answer for the
-// moment of admission and never again — and a Workload that has been preempted since would still
+// It reads those workloads' OWN conditions rather than asking the admission gate. The gate stops
+// evaluating a workload once it is admitted, so anything derived from the gate would answer for
+// the moment of admission and never again — and a workload that has been preempted since would still
 // read as reserved.
 //
-// THE ORDER OF THE BRANCHES IS THE POINT, and PodGroupIncomplete has to come before "no Workload
-// yet". A group short of its declared total has NO Workload by construction — Kueue refuses to
+// THE ORDER OF THE BRANCHES IS THE POINT, and PodGroupIncomplete has to come before "no workload
+// yet". A replica that does not exist composes NO workload by construction — Kueue refuses to
 // compose one and says so unretryably on the Pods — so the two states look identical from here and
 // mean opposite things: one resolves itself in a moment, the other is the deployment sitting with
-// gated Pods and an empty `kubectl get workloads` forever. Reporting the second as the first is the
-// failure this reason exists to name.
+// gated Pods and an empty `kubectl get workloads` forever. Reporting the second as the first is
+// the failure this reason exists to name.
 func observeModelDeploymentQuota(
 	md *workercore.ModelDeployment, pods []core.Pod, wls []*kueue.Workload,
-	wlByGroup map[string]*kueue.Workload, groupOfRole map[string]string,
-	holder *workercore.ModelDeployment,
+	wlByReplica map[types.UID]*kueue.Workload, holder *workercore.ModelDeployment,
 ) {
 	// A PARKED DEPLOYMENT IS REPORTED FIRST, because every other answer below would describe it
 	// wrongly. Its groups are complete and their Workloads deactivated, which the vocabulary here
@@ -425,19 +443,19 @@ func observeModelDeploymentQuota(
 	// group's Pods are removed, this is what keeps that group from being announced as merely short of
 	// its total; if they stay, the ordering is inert. Both ways the report is right, and the
 	// assumption decides only whether this ordering is load-bearing.
-	lost, kept := modelDeploymentPreemptedInPart(md, wlByGroup)
-	// WHAT ELSE IS WRONG STILL GETS REPORTED, and the preemption is carried down with it. A group
+	lost, kept, lostReplicas := modelDeploymentPreemptedInPart(md, pods, wlByReplica)
+	// WHAT ELSE IS WRONG STILL GETS REPORTED, and the preemption is carried down with it. A role
 	// preempted while no sibling survived is not the state PreemptedInPart names -- nothing is being
-	// held -- but "something took a group's quota" is a fact that would otherwise be dropped, and
+	// held -- but "something took a replica's quota" is a fact that would otherwise be dropped, and
 	// without it the answer sends the reader to investigate the wrong thing.
 	//
-	// EVERY ANSWER THAT CAN BE GIVEN WHILE A GROUP OF THIS DEPLOYMENT IS PREEMPTED CARRIES IT, and the
-	// ones that do not are listed here with the reason, because "deliberately not carried" and
+	// EVERY ANSWER THAT CAN BE GIVEN WHILE A REPLICA OF THIS DEPLOYMENT IS PREEMPTED CARRIES IT, and
+	// the ones that do not are listed here with the reason, because "deliberately not carried" and
 	// "forgotten" read the same in code:
 	//
-	//   - NoReplicas cannot be reached with a preemption observed. The Workload of a group is resolved
-	//     through that group's replicas, so a deployment with no Pods resolves no Workload and there is
-	//     nothing on which a preemption could have been seen.
+	//   - NoReplicas cannot be reached with a preemption observed. The Workload of a replica is
+	//     resolved through that replica's ownership, so a deployment with no Pods resolves no Workload
+	//     and there is nothing on which a preemption could have been seen.
 	//   - NoQueueInReservedNamespace is the same in a different way: a reserved namespace carries no
 	//     LocalQueue, so a deployment there is never scheduled, never holds quota, and has none to lose.
 	//   - Parked supersedes it rather than missing it. Those Workloads are deactivated and no longer ask
@@ -445,12 +463,12 @@ func observeModelDeploymentQuota(
 	//     next. It is also answered before this is computed, which is why it reads as an omission.
 	//
 	// AllReplicasTerminating DOES carry it, and it is the one that looks unreachable and is not: a
-	// group's replicas are resolved to a Workload whether or not they are terminating, so a preempted
-	// group whose Pods are on their way out lands exactly there.
+	// replica's workload is resolved whether or not it is terminating, so a preempted replica whose
+	// Pod is on its way out lands exactly there.
 	taken := modelDeploymentPreemptionNote(lost)
 	if len(lost) > 0 && len(kept) > 0 {
 		// WHAT WAS LOST DEPENDS ON THE SHAPE, so it is computed rather than asserted. Losing some
-		// groups of every kind costs capacity; losing every group of one kind costs that role
+		// replicas of every kind costs capacity; losing every replica of one kind costs that role
 		// outright, and an operator's next step differs between them.
 		//
 		// NEITHER SENTENCE SAYS THE DEPLOYMENT STOPPED, and the earlier one that did was wrong. A
@@ -460,25 +478,25 @@ func observeModelDeploymentQuota(
 		// front of them, not one this branch can settle from quota alone -- and the phase already
 		// carries availability, by summing replicas across roles without branching on kind.
 		//
-		// THE SENTENCE MUST NOT IMPLY THE KIND WAS EVER ADMITTED. A kind counts here when no group
-		// of it is admitted, and a group that never was -- one still short of its declared total,
-		// so Kueue has composed nothing for it -- reaches this branch too, because the preemption of
-		// a sibling kind's group is answered before incompleteness is.
-		effect := "the deployment still serves, without the capacity those groups provided"
-		if unserved := modelDeploymentKindsWithoutAdmittedGroup(md, wlByGroup, groupOfRole); len(unserved) > 0 {
+		// THE SENTENCE MUST NOT IMPLY THE KIND WAS EVER ADMITTED. A kind counts here when no replica
+		// of it is admitted, and a role that never was -- one still short of its declared count,
+		// so Kueue has composed nothing for its missing replicas -- reaches this branch too, because
+		// the preemption of a sibling kind's replica is answered before incompleteness is.
+		effect := "the deployment still serves, without the capacity those replicas provided"
+		if unserved := modelDeploymentKindsWithoutAdmittedReplica(md, pods, wlByReplica); len(unserved) > 0 {
 			effect = fmt.Sprintf(
-				"the deployment has no admitted group of role kind %s at all, which is the loss of "+
+				"the deployment has no admitted replica of role kind %s at all, which is the loss of "+
 					"that role rather than of capacity",
 				strings.Join(unserved, ", "))
 		}
 
 		ModelDeploymentConditionQuotaReserved.False(holder, modelDeploymentReasonPreemptedInPart,
 			fmt.Sprintf(
-				"a higher-priority workload reclaimed the quota of %d of this deployment's %d groups: "+
-					"the groups of roles %s. The groups of roles %s are still admitted and hold "+
+				"a higher-priority workload reclaimed the quota of %d of this deployment's %d replicas: "+
+					"the replicas of roles %s. The replicas of roles %s are still admitted and hold "+
 					"their accelerators, and %s. They are released only by deleting the deployment "+
-					"or by the reclaimed groups being admitted again once the capacity returns",
-				len(lost), len(modelDeploymentPodGroups(md)), strings.Join(lost, ", "),
+					"or by the reclaimed replicas being admitted again once the capacity returns",
+				lostReplicas, modelDeploymentDeclaredReplicas(md), strings.Join(lost, ", "),
 				strings.Join(kept, ", "), effect))
 
 		return
@@ -514,27 +532,27 @@ func observeModelDeploymentQuota(
 		return
 	}
 
-	// THE COUNT IS PER GROUP, and so is the queue it names. Kueue composes one Workload per group and
-	// withholds it until THAT group has its own declared total, so a deployment whose roles sit on
-	// different instanceTypes can have one group complete and another short. Comparing the
-	// deployment-wide sum answers about neither: it reads a complete group as short whenever a
+	// THE COUNT IS PER ROLE, and so is the queue it names. Each replica composes its own workload
+	// once its one-member group is seen, so a role short of its declared count has replicas Kueue
+	// has composed nothing for while a sibling role's are all admitted, and comparing the
+	// deployment-wide sum answers about neither: it reads a complete role as short whenever a
 	// sibling is, and reports a queue that is not the one holding anything back.
 	//
 	// The ClusterQueue is named after the InstanceType, so the queue a refusal points at is read off
 	// the spec rather than resolved: the LocalQueue the entrance label names is derived from it.
-	// The message names the ROLE beside that queue, because the queue and the group are not the same
-	// thing to identify: two roles can name one instance type, so a queue names the pool two groups
-	// share and identifies neither, while the role names exactly the group that is short.
-	// A replica is attributed to a group through its ROLE rather than through the membership label it
-	// carries. That is the same source every other figure on this status reads, so a Pod cannot be
-	// counted in one place and not another -- and a replica that predates the label, or one still
-	// being built, is counted against the group its role puts it in rather than against none.
+	// The message names the ROLE beside that queue, because the queue and the role are not the same
+	// thing to identify: two roles can name one instance type, so a queue names the pool two roles
+	// share and identifies neither, while the role names exactly the one that is short.
+	// A replica is attributed to its role through the SAME LABEL every other figure on this status
+	// reads, so a Pod cannot be counted in one place and not another -- and a replica that predates
+	// the label, or one still being built, is counted against the role it belongs to rather than
+	// against none.
 	groups := modelDeploymentPodGroups(md)
 	for _, group := range groups {
 		var alive int
 		for i := range pods {
 			if pods[i].DeletionTimestamp == nil &&
-				groupOfRole[modelDeploymentPodRole(&pods[i])] == group.Name {
+				modelDeploymentPodRole(&pods[i]) == group.Role {
 				alive++
 			}
 		}
@@ -542,28 +560,30 @@ func observeModelDeploymentQuota(
 		if want := int(group.TotalCount); alive < want {
 			ModelDeploymentConditionQuotaReserved.False(holder, modelDeploymentReasonPodGroupIncomplete,
 				fmt.Sprintf(
-					"%d of %d replicas role %q declares exist, so Kueue composes no workload for its "+
-						"group at all and there is nothing in cluster queue %q to hold quota%s",
+					"%d of %d replicas role %q declares exist, so Kueue composes no workload for the "+
+						"missing ones at all and there is nothing in cluster queue %q to hold quota "+
+						"for them%s",
 					alive, want, group.Role, group.InstanceType, taken))
 
 			return
 		}
 	}
 
-	// Every group is complete, so what is left to report is whether they hold quota.
+	// Every role is at its declared count, so what is left to report is whether every replica holds
+	// quota.
 	//
-	// THE ANSWER IS OVER EVERY GROUP, NOT OVER THE FIRST WORKLOAD. A deployment spread over several
-	// instanceTypes has one Workload per group, and reporting whichever sorts first says the
-	// deployment holds quota while half of it does not. Measured on a cluster: one group reserved,
-	// its sibling's queue was held, and this condition read Reserved with a message naming the
-	// deployment's whole replica count -- a reading that is wrong in both halves at once.
-	// A SINGLE-GROUP DEPLOYMENT HAS ONE QUEUE AND ITS WORDING SAYS SO; a multi-group one has no single
-	// queue to name, and naming the first role's is a statement about one group offered as a statement
-	// about the deployment. So this is read only where the branch has already established there is one
-	// group, and the multi-group branches name the roles whose groups they are actually talking about.
+	// THE ANSWER IS OVER EVERY REPLICA, NOT OVER THE FIRST WORKLOAD. A deployment spread over
+	// several instanceTypes has one workload per replica, and answering a role from whichever sorts
+	// first says the deployment holds quota while half of it does not. Measured on a cluster: one
+	// group reserved, its sibling's queue was held, and this condition read Reserved with a message
+	// naming the deployment's whole replica count -- a reading that is wrong in both halves at once.
+	// A SINGLE-ROLE DEPLOYMENT HAS ONE QUEUE AND ITS WORDING SAYS SO; a multi-role one has no single
+	// queue to name, and naming the first role's is a statement about one role offered as a statement
+	// about the deployment. So the queue is read only where the branch has already established there
+	// is one role, and the multi-role branches name the roles they are actually talking about.
 	queue := md.Spec.Roles[0].InstanceType
 
-	if withoutWorkload := modelDeploymentGroupsWithoutWorkload(groups, wlByGroup); len(withoutWorkload) > 0 {
+	if uncomposedRoles, uncomposed := modelDeploymentRolesWithUncomposedReplicas(md, pods, wlByReplica); uncomposed > 0 {
 		if kuberess.IsReservedNamespace(md.Namespace) {
 			ModelDeploymentConditionQuotaReserved.False(holder, "NoQueueInReservedNamespace", fmt.Sprintf(
 				"the deployment is in reserved namespace %q and will never be scheduled", md.Namespace))
@@ -572,149 +592,156 @@ func observeModelDeploymentQuota(
 		}
 		if len(groups) == 1 {
 			ModelDeploymentConditionQuotaReserved.Unknown(holder, "AdmissionInFlight", fmt.Sprintf(
-				"the group is complete at %d replicas but has no workload yet in cluster queue %q%s",
-				live, queue, taken))
+				"%d of this deployment's %d replicas have no workload yet in cluster queue %q%s",
+				uncomposed, modelDeploymentDeclaredReplicas(md), queue, taken))
 
 			return
 		}
 		ModelDeploymentConditionQuotaReserved.Unknown(holder, "AdmissionInFlight", fmt.Sprintf(
-			"%d of this deployment's %d groups are complete but have no workload yet: the groups "+
-				"of roles %s%s",
-			len(withoutWorkload), len(groups), strings.Join(withoutWorkload, ", "), taken))
+			"%d of this deployment's %d replicas have no workload yet: the replicas of roles %s%s",
+			uncomposed, modelDeploymentDeclaredReplicas(md),
+			strings.Join(uncomposedRoles, ", "), taken))
 
 		return
 	}
 
-	waiting := modelDeploymentGroupsWithoutQuota(groups, wlByGroup)
-	if len(waiting) == 0 {
-		// The single-group wording is kept verbatim, because for one group it is exactly right and it
-		// is what an operator reading this condition today already recognizes.
+	waitingRoles, waiting := modelDeploymentRolesWithUnquotaedReplicas(md, pods, wlByReplica)
+	if waiting == 0 {
+		// The single-role wording is kept close to what an operator reading this condition today
+		// already recognizes, because for one role it is exactly right.
 		if len(groups) == 1 {
 			ModelDeploymentConditionQuotaReserved.True(holder, "Reserved", fmt.Sprintf(
-				"the group of %d replicas has quota reserved in cluster queue %q", live, queue))
+				"all %d replicas have quota reserved in cluster queue %q", live, queue))
 
 			return
 		}
 		ModelDeploymentConditionQuotaReserved.True(holder, "Reserved", fmt.Sprintf(
-			"all %d of this deployment's groups have quota reserved", len(groups)))
+			"all %d of this deployment's replicas have quota reserved", live))
 
 		return
 	}
 
 	if len(groups) == 1 {
 		ModelDeploymentConditionQuotaReserved.False(holder, "Pending", fmt.Sprintf(
-			"the group of %d replicas is waiting for quota in cluster queue %q%s", live, queue, taken))
+			"%d of this deployment's %d replicas are waiting for quota in cluster queue %q%s",
+			waiting, modelDeploymentDeclaredReplicas(md), queue, taken))
 
 		return
 	}
 	ModelDeploymentConditionQuotaReserved.False(holder, "Pending", fmt.Sprintf(
-		"%d of this deployment's %d groups are waiting for quota: the groups of roles %s. No role "+
-			"is admitted until the whole set can run%s",
-		len(waiting), len(groups), strings.Join(waiting, ", "), taken))
+		"%d of this deployment's %d replicas are waiting for quota: the replicas of roles %s. No "+
+			"replica is admitted until the whole set can run%s",
+		waiting, modelDeploymentDeclaredReplicas(md), strings.Join(waitingRoles, ", "), taken))
 }
 
-// modelDeploymentGroupWorkloads names the pod group each of the deployment's roles forms, and
-// resolves the Workload answering for each group as the one owning that group's replicas.
+// modelDeploymentReplicaWorkloads resolves, for every replica this pass observed, the one Workload
+// owning it.
 //
-// THE WORKLOAD IS READ BY OWNERSHIP AND BY NOTHING ELSE. The name this operator derives for a group
-// moves with the spec, and whatever composes Workloads names them by its own rules -- Kueue today,
-// something else if the substrate ever changes -- so a reader that reconstructed the name would not
-// error on the day the two diverge; it would find nothing and report an empty status. Ownership is
-// the one relation both sides keep, so it is the only thing this matches on.
+// THE WORKLOAD IS READ BY OWNERSHIP AND BY NOTHING ELSE. The name this operator derives for a
+// group moves with the spec, and whatever composes Workloads names them by its own rules -- Kueue
+// today, something else if the substrate ever changes -- so a reader that reconstructed the name
+// would not error on the day the two diverge; it would find nothing and report an empty status.
+// Ownership is the one relation both sides keep, so it is the only thing this matches on.
 //
-// THE GROUP NAME IS A JOIN KEY RATHER THAN A WAY OF FINDING ANYTHING. The quota answers are phrased
-// over the groups modelDeploymentPodGroups enumerates and the rollout pass asks for a role's group
-// by name, so the answers resolved here by ownership are indexed under those names for the readers
-// that ask by them.
+// ONE ENTRY PER REPLICA RATHER THAN PER ROLE, because a role's replicas are one workload each now,
+// and every question the status asks -- how many hold quota, which flavors they landed on, which
+// slot of which role is empty -- is a question about replicas. A per-role view that answered for a
+// role from whichever workload owned any of its Pods could not tell a role that lost one replica's
+// workload from one that kept them all: the lookup hits either way, and the figures it fed carried
+// the survivors' answer for the missing replica too.
 //
-// A REPLICA IS ATTRIBUTED TO ITS GROUP THROUGH ITS ROLE rather than through the membership label it
-// carries, so that a replica predating the label, or one still being built, is counted against the
-// group its role puts it in rather than against none.
+// THE INDEX COVERS EVERY POD, TERMINATING ONES INCLUDED, because a workload holding a departing
+// replica is still the thing holding its quota and its finalizer, and the readers that must not
+// count a departing replica skip it at their own branch rather than the index pre-deciding for
+// them.
 //
-// The Workloads arrive in name order, so a group with two candidates during a rebuild resolves to
-// the same one on every pass rather than flipping while the old one drains.
-func modelDeploymentGroupWorkloads(
-	md *workercore.ModelDeployment,
-	pods []core.Pod,
-	wls []*kueue.Workload,
-) (groupOfRole map[string]string, wlByGroup map[string]*kueue.Workload) {
-	groups := modelDeploymentPodGroups(md)
-
-	groupOfRole = make(map[string]string, len(groups))
-	wlByGroup = make(map[string]*kueue.Workload, len(groups))
-	for _, group := range groups {
-		groupOfRole[group.Role] = group.Name
-
-		own := sets.New[types.UID]()
-		for i := range pods {
-			if modelDeploymentPodRole(&pods[i]) == group.Role {
-				own.Insert(pods[i].UID)
-			}
-		}
-		if own.Len() == 0 {
-			// No replica means no Pod a Workload could own, and the missing entry is the absence
-			// every reader already takes as "nothing composed for this group yet".
-			continue
-		}
+// The Workloads arrive in name order, so a replica briefly owned by two during a rebuild resolves
+// to the same one on every pass rather than flipping while the old one drains.
+func modelDeploymentReplicaWorkloads(
+	pods []core.Pod, wls []*kueue.Workload,
+) map[types.UID]*kueue.Workload {
+	byReplica := make(map[types.UID]*kueue.Workload, len(pods))
+	for i := range pods {
+		uid := pods[i].UID
 		for _, wl := range wls {
-			if modelDeploymentWorkloadOwnsAny(wl, own) {
-				wlByGroup[group.Name] = wl
+			if modelDeploymentWorkloadOwnsAny(wl, sets.New(uid)) {
+				byReplica[uid] = wl
 
 				break
 			}
 		}
 	}
 
-	return groupOfRole, wlByGroup
+	return byReplica
 }
 
-// modelDeploymentPreemptedInPart names the roles of the groups a higher-priority workload
-// reclaimed, and those of the groups that are still admitted, when BOTH sets are non-empty.
+// modelDeploymentPreemptedInPart names the roles with a replica whose quota a higher-priority
+// workload reclaimed, and the roles with a replica that is still admitted, when BOTH lists are
+// non-empty, and counts the reclaimed replicas.
 //
-// THE SECOND SET IS THE WHOLE PREDICATE. A deployment every one of whose groups was preempted is an
-// ordinary state: it holds nothing, serves nothing, and is waiting for capacity exactly as a
+// THE SECOND LIST IS THE WHOLE PREDICATE. A deployment every one of whose replicas was preempted
+// is an ordinary state: it holds nothing, serves nothing, and is waiting for capacity exactly as a
 // deployment that never started is. What makes this one different is that part of it kept its quota
 // and is running — so accelerators are held for a deployment that is no longer whole, and neither
 // half of that is visible from the other half alone. Whether the rest still serves is a question
-// about the KINDS the reclaimed groups carried, answered separately and never assumed. Reading only "was anything preempted" answers the
-// same for both, which is the shape this is written against.
+// about the KINDS the reclaimed replicas carried, answered separately and never assumed. Reading
+// only "was anything preempted" answers the same for both, which is the shape this is written
+// against.
 //
-// A GROUP WITH NO WORKLOAD COUNTS AS NEITHER, and that asymmetry is deliberate. Kueue composes no
-// Workload for a group short of its declared total, so such a group holds nothing and there is
-// nothing on it to read: it cannot be a survivor holding accelerators, and it cannot be shown to have
-// been preempted. Two consequences follow, and they are not the same.
+// A REPLICA WITH NO WORKLOAD COUNTS AS NEITHER, and that asymmetry is deliberate. Kueue composes
+// no workload for a replica that does not exist, so such a replica holds nothing and there is
+// nothing on it to read: it cannot be a survivor holding accelerators, and it cannot be shown to
+// have been preempted. Two consequences follow, and they are not the same.
 //
-// WITH A SURVIVOR PRESENT THE PREEMPTION WINS THE REPORT, even though another group is still
+// WITH A SURVIVOR PRESENT THE PREEMPTION WINS THE REPORT, even though another replica is still
 // assembling. Something took capacity this deployment was admitted for, which is the one fact an
-// operator can act on, and the assembling group resolves itself.
+// operator can act on, and the assembling replica resolves itself.
 //
 // WITH NO SURVIVOR THERE IS NOTHING TO HOLD, so this is not the state this reason names and the
 // report falls through to the branch that describes what else is wrong. That branch used to say
 // nothing about the preemption at all -- it sent the reader to investigate missing replicas when
-// something had taken a group's quota -- so the fact is carried down instead of the reason being
+// something had taken a replica's quota -- so the fact is carried down instead of the reason being
 // widened to cover a state whose harm it does not describe.
 //
-// PREEMPTION IS ASKED OF KUEUE RATHER THAN INFERRED. Kueue names it: an evicted Workload carries a
+// A ROLE CAN SIT ON BOTH LISTS AT ONCE now that each of its replicas is its own workload: one
+// replica reclaimed beside a sibling still admitted is exactly the fragmentation this reason
+// names, and sorting the role onto one list or the other would drop one of its two facts.
+//
+// PREEMPTION IS ASKED OF KUEUE RATHER THAN INFERRED. Kueue names it: an evicted workload carries a
 // reason, and Preempted is one value among PodsReadyTimeout, AdmissionCheck and the queue-stopped
 // ones. Inferring it from "lost its reservation" would fold every one of those into this answer, and
 // they need different actions.
 func modelDeploymentPreemptedInPart(
-	md *workercore.ModelDeployment, wlByGroup map[string]*kueue.Workload,
-) (lost, kept []string) {
-	for _, group := range modelDeploymentPodGroups(md) {
-		wl := wlByGroup[group.Name]
-		if wl == nil {
-			continue
+	md *workercore.ModelDeployment, pods []core.Pod, wlByReplica map[types.UID]*kueue.Workload,
+) (lost, kept []string, lostReplicas int) {
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		var lostRole, keptRole bool
+		for j := range pods {
+			if modelDeploymentPodRole(&pods[j]) != role.Name {
+				continue
+			}
+			wl := wlByReplica[pods[j].UID]
+			if wl == nil {
+				continue
+			}
+			switch {
+			case modelDeploymentWorkloadPreempted(wl):
+				lostRole = true
+				lostReplicas++
+			case kubeapistatus.ConditionType(kueue.WorkloadAdmitted).IsTrue(wl):
+				keptRole = true
+			}
 		}
-		switch {
-		case modelDeploymentWorkloadPreempted(wl):
-			lost = append(lost, group.Role)
-		case kubeapistatus.ConditionType(kueue.WorkloadAdmitted).IsTrue(wl):
-			kept = append(kept, group.Role)
+		if lostRole {
+			lost = append(lost, role.Name)
+		}
+		if keptRole {
+			kept = append(kept, role.Name)
 		}
 	}
 
-	return lost, kept
+	return lost, kept, lostReplicas
 }
 
 // modelDeploymentWorkloadPreempted reports whether Kueue took this Workload's quota back for a
@@ -739,21 +766,20 @@ func modelDeploymentWorkloadPreempted(wl *kueue.Workload) bool {
 	return false
 }
 
-// modelDeploymentKindsWithoutAdmittedGroup names the role kinds no admitted group carries, in the
-// order the roles first mention them.
+// modelDeploymentKindsWithoutAdmittedReplica names the role kinds no admitted replica carries, in
+// the order the roles first mention them.
 //
 // IT IS WHAT DECIDES WHETHER A PARTIALLY PREEMPTED DEPLOYMENT IS STILL SERVING, and it has to be
-// asked about KINDS rather than about groups. Groups are keyed by instanceType, so one kind can have
-// several: losing one prefill group out of two leaves the deployment able to prefill, while losing
-// the only decode group does not. Counting groups answers neither question.
+// asked about KINDS rather than about roles. Two roles can share one kind, so losing one role's
+// every replica while a sibling kind's survive leaves the deployment able to serve that half, and
+// counting roles answers neither question.
 //
-// A ROLE WHOSE GROUP HAS NO WORKLOAD COUNTS AS NOT ADMITTED. Kueue composes none for a group short
-// of its declared total, and a group that is not admitted is not serving whatever the reason. That
+// A ROLE WHOSE REPLICAS HAVE NO WORKLOAD COUNTS AS NOT ADMITTED. Kueue composes none for a replica
+// that does not exist, and a replica that is not admitted is not serving whatever the reason. That
 // is the accurate reading here, unlike in the preemption predicate next door, where the same state
-// means "nothing to report about this group" rather than "this group is gone".
-func modelDeploymentKindsWithoutAdmittedGroup(
-	md *workercore.ModelDeployment, wlByGroup map[string]*kueue.Workload,
-	groupOfRole map[string]string,
+// means "nothing to report about this replica" rather than "this replica is gone".
+func modelDeploymentKindsWithoutAdmittedReplica(
+	md *workercore.ModelDeployment, pods []core.Pod, wlByReplica map[types.UID]*kueue.Workload,
 ) []string {
 	order := make([]string, 0, len(md.Spec.Roles))
 	served := make(map[string]bool, len(md.Spec.Roles))
@@ -765,9 +791,16 @@ func modelDeploymentKindsWithoutAdmittedGroup(
 			served[kind] = false
 		}
 
-		wl := wlByGroup[groupOfRole[role.Name]]
-		if wl != nil && kubeapistatus.ConditionType(kueue.WorkloadAdmitted).IsTrue(wl) {
-			served[kind] = true
+		for j := range pods {
+			if modelDeploymentPodRole(&pods[j]) != role.Name {
+				continue
+			}
+			if wl := wlByReplica[pods[j].UID]; wl != nil &&
+				kubeapistatus.ConditionType(kueue.WorkloadAdmitted).IsTrue(wl) {
+				served[kind] = true
+
+				break
+			}
 		}
 	}
 
@@ -781,48 +814,86 @@ func modelDeploymentKindsWithoutAdmittedGroup(
 	return unserved
 }
 
-// modelDeploymentGroupsWithoutWorkload names the roles of the groups Kueue has composed no
-// Workload for. A complete group in that state is mid-admission; an incomplete one is reported by the
-// branch above this one, which is why the two are not the same answer.
-func modelDeploymentGroupsWithoutWorkload(
-	groups []modelDeploymentPodGroupSpec, wlByGroup map[string]*kueue.Workload,
-) []string {
-	var missing []string
-	for _, group := range groups {
-		if wlByGroup[group.Name] == nil {
-			missing = append(missing, group.Role)
-		}
+// modelDeploymentDeclaredReplicas sums the replicas every role declares, which is the denominator
+// the per-replica answers name.
+func modelDeploymentDeclaredReplicas(md *workercore.ModelDeployment) int {
+	declared := 0
+	for i := range md.Spec.Roles {
+		declared += int(md.Spec.Roles[i].Replicas)
 	}
 
-	return missing
+	return declared
 }
 
-// modelDeploymentGroupsWithoutQuota names the roles of the groups that hold no quota
-// reservation.
+// modelDeploymentRolesWithUncomposedReplicas names the roles that have a live replica Kueue has
+// composed no workload for, and counts those replicas. A live replica in that state is
+// mid-admission; a missing one is the completeness branch's answer above, which is why the two are
+// not the same list.
 //
-// A group is answered by the Workload owning ITS replicas. Reading one Workload for the whole
-// deployment cannot distinguish a set that is fully reserved from one where a sibling is held, and
-// those two states are the difference between a deployment that is about to run and one that never
-// will.
-func modelDeploymentGroupsWithoutQuota(
-	groups []modelDeploymentPodGroupSpec, wlByGroup map[string]*kueue.Workload,
-) []string {
-	var waiting []string
-	for _, group := range groups {
-		w := wlByGroup[group.Name]
-		if w == nil || !kubeapistatus.ConditionType(kueue.WorkloadQuotaReserved).IsTrue(w) {
-			waiting = append(waiting, group.Role)
+// DEPARTING REPLICAS ARE NOT COUNTED, for the same reason every figure beside this one skips them:
+// a replica on its way out is not waiting for a workload, and counting it would hold the condition
+// on a member the deployment is shedding.
+func modelDeploymentRolesWithUncomposedReplicas(
+	md *workercore.ModelDeployment, pods []core.Pod, wlByReplica map[types.UID]*kueue.Workload,
+) (roles []string, uncomposed int) {
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		var short int
+		for j := range pods {
+			pod := &pods[j]
+			if pod.DeletionTimestamp != nil || modelDeploymentPodRole(pod) != role.Name {
+				continue
+			}
+			if wlByReplica[pod.UID] == nil {
+				short++
+			}
+		}
+		if short > 0 {
+			roles = append(roles, role.Name)
+			uncomposed += short
 		}
 	}
 
-	return waiting
+	return roles, uncomposed
+}
+
+// modelDeploymentRolesWithUnquotaedReplicas names the roles that have a live replica whose
+// workload holds no quota reservation, and counts those replicas.
+//
+// A REPLICA IS ANSWERED BY THE WORKLOAD OWNING IT. Answering a role from one workload for the
+// whole of it cannot distinguish a set that is fully reserved from one where one replica's
+// reservation is gone -- a state one workload per role could not even express -- and those two are
+// the difference between a deployment that is about to run and one that is partly held.
+func modelDeploymentRolesWithUnquotaedReplicas(
+	md *workercore.ModelDeployment, pods []core.Pod, wlByReplica map[types.UID]*kueue.Workload,
+) (roles []string, waiting int) {
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		var short int
+		for j := range pods {
+			pod := &pods[j]
+			if pod.DeletionTimestamp != nil || modelDeploymentPodRole(pod) != role.Name {
+				continue
+			}
+			if wl := wlByReplica[pod.UID]; wl == nil ||
+				!kubeapistatus.ConditionType(kueue.WorkloadQuotaReserved).IsTrue(wl) {
+				short++
+			}
+		}
+		if short > 0 {
+			roles = append(roles, role.Name)
+			waiting += short
+		}
+	}
+
+	return roles, waiting
 }
 
 // findModelDeploymentGroupWorkloads returns EVERY Workload owning any of these Pods, in name order.
 //
 // THERE IS NO SINGULAR FORM OF THIS, deliberately. One that returned the first was here and had no
-// production caller left: every question is about one group, and which Workload answers for which
-// group is decided by the ownership of each group's replicas (modelDeploymentGroupWorkloads)
+// production caller left: every question is about one replica, and which Workload answers for which
+// replica is decided by the ownership each one carries (modelDeploymentReplicaWorkloads)
 // rather than by sort order. A correctly written accessor that only serves a world model this
 // package has abandoned is not dead weight, it is an invitation to reintroduce the defect it
 // enables -- and it draws no review comment, because it is not wrong.
@@ -1043,6 +1114,6 @@ func modelDeploymentPreemptionNote(lost []string) string {
 	}
 
 	return fmt.Sprintf(
-		". A higher-priority workload has also reclaimed the quota of the groups of roles %s",
+		". A higher-priority workload has also reclaimed the quota of the replicas of roles %s",
 		strings.Join(lost, ", "))
 }

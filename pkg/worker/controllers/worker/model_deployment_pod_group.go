@@ -224,18 +224,6 @@ func (r *ModelDeploymentReconciler) deleteModelDeploymentGroupWorkload(
 	return nil
 }
 
-// modelDeploymentPodsInGroup selects the replicas carrying one group's membership label.
-func modelDeploymentPodsInGroup(pods []core.Pod, group string) []core.Pod {
-	var members []core.Pod
-	for i := range pods {
-		if pods[i].Labels[kueuepodconst.GroupNameLabel] == group {
-			members = append(members, pods[i])
-		}
-	}
-
-	return members
-}
-
 // modelDeploymentReplicaGroupName derives the Kueue group name of one replica: the replica of the
 // given role at the given ordinal.
 //

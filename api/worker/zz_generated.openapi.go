@@ -7748,6 +7748,14 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 							Format:  "int32",
 						},
 					},
+					"quotaReserved": {
+						SchemaProps: spec.SchemaProps{
+							Description: "QuotaReserved is how many of the role's replicas hold a quota reservation. Each replica is its own Kueue workload, so a role sits at any count between zero and Desired while capacity arrives — where a role that shared one workload passed all-or-nothing and this figure could not exist.\n\nALWAYS PRESENT, AND ITS ZERO IS AN OBSERVED ONE: the figure is counted from Pod and Workload lists that succeeded, and a failed list writes no status at all rather than a zero, because \"this pass could not see\" and \"no replica holds quota\" call for opposite actions — one waits, the other investigates — and a zero written for both makes them the same reading.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
 					"unmanaged": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Unmanaged is true when the role replaced the whole command line, so the operator synthesized no engine argument and no client environment for it. It is ALWAYS present, for the same reason the counts are: false is the ordinary case and has to be visible as an answer rather than as a missing field.",
@@ -7765,15 +7773,28 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 							Enum:        []interface{}{"decode", "prefill", "server"},
 						},
 					},
-					"assignedFlavor": {
+					"assignedFlavors": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
 						SchemaProps: spec.SchemaProps{
-							Description: "AssignedFlavor is the ResourceFlavor Kueue assigned to this role's PodSet for its ACCELERATOR credits.\n\n  - NOT ASSIGNED YET AND ASSIGNED ARE DIFFERENT FACTS, so a role waiting for quota reports no\n    flavor at all rather than an empty name, which would read as an assignment to a flavor\n    called \"\".\n  - Per role rather than per deployment, because Kueue assigns a flavor per PodSet and two\n    roles of one deployment can be assigned different ones.\n  - AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather\n    than a gap in it. The answer is read through the same function the per-accelerator\n    admission gate uses, which speaks only of accelerator credits, so a role admitted on a pool\n    carrying no accelerator names a flavor for `cpu` and nothing here. The two answers are kept\n    identical on purpose: a flavor reported here that the gate would not fit against would be\n    worse than none.",
-							Type:        []string{"string"},
-							Format:      "",
+							Description: "AssignedFlavors is the set of ResourceFlavors Kueue assigned to this role's replicas for their ACCELERATOR credits, deduplicated and sorted. It is a set because each replica is its own workload and Kueue assigns a flavor per workload, so two replicas of one role can carry different assignments — a state one PodSet per role could not produce.\n\n  - ABSENT MEANS NO ASSIGNED REPLICA NAMED A FLAVOR, rather than an empty list reading as an\n    assignment to nothing: \"not assigned yet\" and \"assigned, but on a pool carrying no\n    accelerator names\" are both that same fact here, and absent keeps them from reading as a\n    third thing.\n  - ONE ENTRY MEANS EVERY ASSIGNED REPLICA OF THE ROLE NAMES IT. SEVERAL ENTRIES MEAN THE\n    REPLICAS WERE ASSIGNED DIFFERENT FLAVORS, which is the signal to investigate rather than a\n    degraded form of one answer: WHICH replica carries which flavor is deliberately not here,\n    because the ordinal a per-replica answer would key on is the converger's internal slotting\n    rather than a promise this API makes, and a reader needing it reads the replicas' own Pods.\n  - AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather\n    than a gap in it. The answer is read through the same function the per-accelerator\n    admission gate uses, which speaks only of accelerator credits, so a role admitted on a pool\n    carrying no accelerator names a flavor for `cpu` and nothing here. The two answers are kept\n    identical on purpose: a flavor reported here that the gate would not fit against would be\n    worse than none.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
 						},
 					},
 				},
-				Required: []string{"name", "desired", "ready", "unmanaged", "kind"},
+				Required: []string{"name", "desired", "ready", "quotaReserved", "unmanaged", "kind"},
 			},
 		},
 	}

@@ -4758,14 +4758,21 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 														"name",
 														"desired",
 														"ready",
+														"quotaReserved",
 														"unmanaged",
 														"kind",
 													},
 													Properties: map[string]v1.JSONSchemaProps{
-														"assignedFlavor": {
-															Description: "AssignedFlavor is the ResourceFlavor Kueue assigned to this role's PodSet for its ACCELERATOR\ncredits.\n- NOT ASSIGNED YET AND ASSIGNED ARE DIFFERENT FACTS, so a role waiting for quota reports no\nflavor at all rather than an empty name, which would read as an assignment to a flavor\ncalled \"\".\n- Per role rather than per deployment, because Kueue assigns a flavor per PodSet and two\nroles of one deployment can be assigned different ones.\n- AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather\nthan a gap in it. The answer is read through the same function the per-accelerator\nadmission gate uses, which speaks only of accelerator credits, so a role admitted on a pool\ncarrying no accelerator names a flavor for `cpu` and nothing here. The two answers are kept\nidentical on purpose: a flavor reported here that the gate would not fit against would be\nworse than none.",
-															Type:        "string",
-															Nullable:    true,
+														"assignedFlavors": {
+															Description: "AssignedFlavors is the set of ResourceFlavors Kueue assigned to this role's replicas for\ntheir ACCELERATOR credits, deduplicated and sorted. It is a set because each replica is its\nown workload and Kueue assigns a flavor per workload, so two replicas of one role can carry\ndifferent assignments — a state one PodSet per role could not produce.\n- ABSENT MEANS NO ASSIGNED REPLICA NAMED A FLAVOR, rather than an empty list reading as an\nassignment to nothing: \"not assigned yet\" and \"assigned, but on a pool carrying no\naccelerator names\" are both that same fact here, and absent keeps them from reading as a\nthird thing.\n- ONE ENTRY MEANS EVERY ASSIGNED REPLICA OF THE ROLE NAMES IT. SEVERAL ENTRIES MEAN THE\nREPLICAS WERE ASSIGNED DIFFERENT FLAVORS, which is the signal to investigate rather than a\ndegraded form of one answer: WHICH replica carries which flavor is deliberately not here,\nbecause the ordinal a per-replica answer would key on is the converger's internal slotting\nrather than a promise this API makes, and a reader needing it reads the replicas' own Pods.\n- AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather\nthan a gap in it. The answer is read through the same function the per-accelerator\nadmission gate uses, which speaks only of accelerator credits, so a role admitted on a pool\ncarrying no accelerator names a flavor for `cpu` and nothing here. The two answers are kept\nidentical on purpose: a flavor reported here that the gate would not fit against would be\nworse than none.",
+															Type:        "array",
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "string",
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
 														},
 														"desired": {
 															Description: "Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Both are\nALWAYS present: they are counted from a Pod list that succeeded, so a zero here is an observed\nzero. A failed list writes no status at all.",
@@ -4790,6 +4797,11 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 														"name": {
 															Description: "Name is the role this entry describes.",
 															Type:        "string",
+														},
+														"quotaReserved": {
+															Description: "QuotaReserved is how many of the role's replicas hold a quota reservation. Each replica is\nits own Kueue workload, so a role sits at any count between zero and Desired while capacity\narrives — where a role that shared one workload passed all-or-nothing and this figure could\nnot exist.\nALWAYS PRESENT, AND ITS ZERO IS AN OBSERVED ONE: the figure is counted from Pod and Workload\nlists that succeeded, and a failed list writes no status at all rather than a zero, because\n\"this pass could not see\" and \"no replica holds quota\" call for opposite actions — one waits,\nthe other investigates — and a zero written for both makes them the same reading.",
+															Type:        "integer",
+															Format:      "int32",
 														},
 														"ready": {
 															Type:   "integer",

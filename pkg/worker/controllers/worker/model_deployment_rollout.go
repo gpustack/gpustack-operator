@@ -5,10 +5,12 @@ import (
 	"strings"
 
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
+	"gpustack.ai/gpustack/pkg/utils/strconvx"
 )
 
 // ModelDeploymentConditionReplicasUpToDate reports whether the running replicas match what the
@@ -107,7 +109,7 @@ type modelDeploymentRollout struct {
 // current and the count is still short, which no spec change explains.
 func observeModelDeploymentRollout(
 	holder, md *workercore.ModelDeployment, pods []core.Pod,
-	wlByGroup map[string]*kueue.Workload, groupOfRole map[string]string, rollout *modelDeploymentRollout,
+	wlByReplica map[types.UID]*kueue.Workload, rollout *modelDeploymentRollout,
 ) {
 	// The test is on the record rather than at the call site, because "vouched for nothing" is a
 	// property of what the pass found and every caller would otherwise have to remember it.
@@ -119,7 +121,7 @@ func observeModelDeploymentRollout(
 		return
 	}
 
-	missing, missingRoles := modelDeploymentReplicasMissing(md, pods, wlByGroup, groupOfRole)
+	missing, missingWhere := modelDeploymentReplicasMissing(md, pods, wlByReplica)
 
 	switch {
 	case rollout.held > 0:
@@ -166,16 +168,23 @@ func observeModelDeploymentRollout(
 		// once the replacement exists the pass falls through to the branch below, which writes a
 		// verdict that is not this one.
 		ModelDeploymentConditionReplicasUpToDate.False(holder, modelDeploymentReasonRolloutInProgress, fmt.Sprintf(
-			"%d of the declared replicas are being replaced by the rollout in flight, from the "+
-				"groups of roles %s: the last replica built from the earlier spec has gone, and the "+
-				"pass that finds it gone creates its replacement",
-			missing, strings.Join(missingRoles, ", ")))
+			"%d of the declared replicas are being replaced by the rollout in flight: %s. The last "+
+				"replica built from the earlier spec has gone, and the pass that finds it gone "+
+				"creates its replacement",
+			missing, strings.Join(missingWhere, "; ")))
 	case missing > 0:
-		// NOBODY CHANGED THE SPEC. Every replica this pass could compare matched the render, so the
-		// shortfall is not a rollout's doing, and the message has to say that much, because the
-		// alternative readings both misdirect: RolloutInProgress sends the reader to diff a spec
-		// that did not change, and UpToDate reads exactly like the steady state while the deployment
-		// is serving below its declared count.
+		// NOTHING THIS PASS COMPARED DIFFERED, so the shortfall is not a rollout this pass can see,
+		// and the message has to say that much, because the alternative readings both misdirect:
+		// RolloutInProgress sends the reader to diff a spec that may not have changed, and UpToDate
+		// reads exactly like the steady state while the deployment is serving below its declared
+		// count.
+		//
+		// THE CLAIM RESTS ON WHAT WAS COMPARED, NOT ON THE SPEC. An earlier wording said "nothing
+		// changed the spec" as though this axis could know that; it cannot -- a scale-up whose
+		// create has not landed arrives here looking exactly like a departure, because the replica
+		// that would tell the two apart is the one that is absent. The honest statement is the
+		// observable one, and the branch below modelDeploymentReplicasMissing records the boundary
+		// in full.
 		//
 		// IT STOPS THERE AND DOES NOT SAY WHY THEY LEFT, which an earlier wording did. "They left on
 		// their own" is a claim about a cause this axis never observed, and it is wrong in a case
@@ -186,12 +195,11 @@ func observeModelDeploymentRollout(
 		// side. The quota condition reports that one, and this message points at it instead of
 		// competing with it.
 		ModelDeploymentConditionReplicasUpToDate.False(holder, modelDeploymentReasonReplacementInProgress, fmt.Sprintf(
-			"%d of the declared replicas are missing, from the groups of roles %s, while every "+
-				"surviving replica matches what this pass rendered: no rollout is in flight, because "+
-				"nothing changed the spec. What removed them is not this condition's to say -- a "+
-				"preemption reports itself on the quota condition -- and the pass creates each "+
-				"replacement as Kueue asks for it",
-			missing, strings.Join(missingRoles, ", ")))
+			"%d of the declared replicas are missing: %s. Every replica this pass could compare "+
+				"matched what it rendered, so no rollout is in flight. What removed them is not "+
+				"this condition's to say -- a preemption reports itself on the quota condition -- "+
+				"and the pass creates each replacement as Kueue asks for it",
+			missing, strings.Join(missingWhere, "; ")))
 	default:
 		ModelDeploymentConditionReplicasUpToDate.True(holder, modelDeploymentReasonUpToDate,
 			"every replica matches what this pass rendered")
@@ -217,47 +225,107 @@ func modelDeploymentRolloutWasInProgress(holder *workercore.ModelDeployment) boo
 }
 
 // modelDeploymentReplicasMissing measures how far the deployment sits below the counts its roles
-// declare, and names the roles that are short.
+// declare, and names each empty slot so the verdict it feeds speaks of replicas rather than of a
+// role-level shortfall count.
 //
-// ONLY A ROLE WITH A WORKLOAD IN THE MAP COUNTS, and that test is what separates a replacement from
-// a beginning. Kueue composes a Workload once a group has its member, so a role with a Workload and
-// a missing replica has LOST one, while a role with none is still assembling the first set it ever
-// had -- initial creation is not the replacement of anything. Counting both would report every
-// deployment's first passes as replacements, and counting neither is the old answer, which read a
-// lost replica exactly like the steady state.
+// WHAT IT DISTINGUISHES: which ordinals of which role are empty. A slot is named by the ordinal
+// label, the same identity the converger creates and removes by, so "role prefill replica 1" names
+// the exact slot that is short rather than a count over the role.
 //
-// THE LOOKUP IS AT ROLE GRANULARITY, and that is a downgrade the per-replica split left behind
-// rather than a choice this function made. A role's Workloads are one per replica now, and the
-// group-name-keyed maps it is handed resolve a role to the FIRST Workload owning any of its Pods --
-// so the hit condition reads "any replica of this role has a workload", and a role that lost its
-// only workload while keeping others is not distinguished here. The verdict this feeds reports
-// replacement at the role level; refining it per replica is the status work that follows, which is
-// the consumer these maps were kept in shape for.
+// WHAT IT CANNOT DISTINGUISH, and no single pass can: whether an empty slot was ever filled. The
+// evidence left with the replica -- its Pod, and with it the ownership every workload resolution
+// reads -- so a slot whose replica departed and a slot the spec grew into yesterday's count produce
+// the same observation. The shapes that meet there: a scale-up whose create has not landed, a
+// top-slot replica that left on its own, and a workload deleted by hand all read as one empty slot
+// beside replicas that still have workloads.
 //
-// A ROLE SCALED AWAY EXCLUDES ITSELF. Its Workloads are deleted by the pass that sweeps its Pods,
+// HOW THE INDISTINGUISHABLE IS CLASSIFIED: by the role-level proxy "any replica of this role,
+// departing ones included, still has a workload behind it". While that holds, an empty slot reads
+// as a departure -- so the scale-up window above reports replacement rather than assembly, and only
+// the previous pass's verdict (modelDeploymentRolloutWasInProgress) can upgrade the reading to a
+// rollout. When it does not hold, the role is still assembling the first set it ever had and its
+// shortfall is excluded entirely: initial creation is not the replacement of anything, and counting
+// it would report every deployment's first passes as replacements.
+//
+// THE EMPTY SLOTS ARE FILLED LOWEST FIRST AND ONLY AS MANY AS THE COUNT IS SHORT, which is the
+// same arithmetic the converger creates them by: a role carrying a replica with no ordinal still
+// counts that replica against the shortfall without claiming any slot for it.
+//
+// A ROLE SCALED AWAY EXCLUDES ITSELF. Its workloads are deleted by the pass that sweeps its Pods,
 // so it falls out of this count on its own and never reads as a replacement.
 func modelDeploymentReplicasMissing(
 	md *workercore.ModelDeployment, pods []core.Pod,
-	wlByGroup map[string]*kueue.Workload, groupOfRole map[string]string,
+	wlByReplica map[types.UID]*kueue.Workload,
 ) (int, []string) {
 	live := make(map[string]int, len(md.Spec.Roles))
+	occupied := make(map[string]map[int]bool, len(md.Spec.Roles))
 	for i := range pods {
-		if pods[i].DeletionTimestamp == nil {
-			live[modelDeploymentPodRole(&pods[i])]++
+		if pods[i].DeletionTimestamp != nil {
+			continue
+		}
+		role := modelDeploymentPodRole(&pods[i])
+		live[role]++
+		if ordinal, ok := modelDeploymentPodOrdinal(&pods[i]); ok {
+			if occupied[role] == nil {
+				occupied[role] = make(map[int]bool)
+			}
+			occupied[role][ordinal] = true
 		}
 	}
 
 	missing := 0
-	var roles []string
+	var where []string
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		short := int(role.Replicas) - live[role.Name]
-		if short <= 0 || wlByGroup[groupOfRole[role.Name]] == nil {
+		declared := int(role.Replicas)
+		short := declared - live[role.Name]
+		if short <= 0 || !modelDeploymentRoleEverAssembled(role.Name, pods, wlByReplica) {
 			continue
 		}
+
+		var ordinals []int
+		for ordinal := 0; ordinal < declared && len(ordinals) < short; ordinal++ {
+			if !occupied[role.Name][ordinal] {
+				ordinals = append(ordinals, ordinal)
+			}
+		}
 		missing += short
-		roles = append(roles, role.Name)
+		where = append(where, modelDeploymentNameReplicas(role.Name, ordinals))
 	}
 
-	return missing, roles
+	return missing, where
+}
+
+// modelDeploymentRoleEverAssembled reports whether any replica of the role, departing ones
+// included, still has a workload behind it.
+//
+// IT IS A PROXY RATHER THAN A RECORD, and its limit is the boundary the missing-count comment
+// states: it says the role assembled before, not that the empty slot ever existed. Departing
+// replicas count, because a workload holding one is still observable ownership and its deletion --
+// the converger's, during a replacement -- is exactly the moment the proxy must not flip.
+func modelDeploymentRoleEverAssembled(
+	role string, pods []core.Pod, wlByReplica map[types.UID]*kueue.Workload,
+) bool {
+	for i := range pods {
+		if modelDeploymentPodRole(&pods[i]) == role && wlByReplica[pods[i].UID] != nil {
+			return true
+		}
+	}
+
+	return false
+}
+
+// modelDeploymentNameReplicas renders one role's empty slots as a verdict fragment:
+// "role prefill replica 1", "role prefill replicas 1, 2".
+func modelDeploymentNameReplicas(role string, ordinals []int) string {
+	digits := make([]string, 0, len(ordinals))
+	for _, ordinal := range ordinals {
+		digits = append(digits, strconvx.Itoa(ordinal))
+	}
+	noun := "replica"
+	if len(ordinals) > 1 {
+		noun = "replicas"
+	}
+
+	return fmt.Sprintf("role %s %s %s", role, noun, strings.Join(digits, ", "))
 }
