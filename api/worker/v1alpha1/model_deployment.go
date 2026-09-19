@@ -330,7 +330,7 @@ type ModelDeploymentRole struct {
 	// +k8s:validation:minimum=1
 	Replicas int32 `json:"replicas,omitempty" protobuf:"varint,2,opt,name=replicas"`
 
-	// InstanceSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they
+	// ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they
 	// start together, they are replaced together, and none of them serves alone — the instance,
 	// not the Pod, is the unit that appears and disappears.
 	//
@@ -343,7 +343,7 @@ type ModelDeploymentRole struct {
 	//
 	// +k8s:validation:default=1
 	// +k8s:validation:minimum=1
-	InstanceSize int32 `json:"size,omitempty" protobuf:"varint,15,opt,name=size"`
+	ReplicaSize int32 `json:"size,omitempty" protobuf:"varint,15,opt,name=size"`
 
 	// InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.
 	// It is what the queue-name entrance label is derived from.

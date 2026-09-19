@@ -210,7 +210,7 @@ func TestValidateModelDeployment(t *testing.T) {
 			// rather than merely capped.
 			name: "role_size_one",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
-				role(func(r *workercore.ModelDeploymentRole) { r.InstanceSize = 1 }),
+				role(func(r *workercore.ModelDeploymentRole) { r.ReplicaSize = 1 }),
 			),
 		},
 		{
@@ -220,7 +220,7 @@ func TestValidateModelDeployment(t *testing.T) {
 			// rule after the day it lands.
 			name: "role_size_two",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
-				role(func(r *workercore.ModelDeploymentRole) { r.InstanceSize = 2 }),
+				role(func(r *workercore.ModelDeploymentRole) { r.ReplicaSize = 2 }),
 			),
 			wantMessage: "a role's instance cannot span more than one Pod yet",
 		},

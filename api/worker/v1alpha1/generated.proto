@@ -3237,7 +3237,7 @@ message ModelDeploymentRole {
   // +k8s:validation:minimum=1
   optional int32 replicas = 2;
 
-  // InstanceSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they
+  // ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they
   // start together, they are replaced together, and none of them serves alone — the instance,
   // not the Pod, is the unit that appears and disappears.
   //

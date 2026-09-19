@@ -4538,7 +4538,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Nullable: true,
 														},
 														"size": {
-															Description: "InstanceSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they\nstart together, they are replaced together, and none of them serves alone — the instance,\nnot the Pod, is the unit that appears and disappears.\nCHANGING THIS NUMBER REPLACES EVERY INSTANCE OF THE ROLE. The Pods a running instance is made\nof are not the Pods the new size asks for, so each instance is replaced as a whole rather than\ngrown or trimmed in place.\nTHE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and\nGo forbids a field and a method sharing a name; the API field is size.",
+															Description: "ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they\nstart together, they are replaced together, and none of them serves alone — the instance,\nnot the Pod, is the unit that appears and disappears.\nCHANGING THIS NUMBER REPLACES EVERY INSTANCE OF THE ROLE. The Pods a running instance is made\nof are not the Pods the new size asks for, so each instance is replaced as a whole rather than\ngrown or trimmed in place.\nTHE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and\nGo forbids a field and a method sharing a name; the API field is size.",
 															Type:        "integer",
 															Format:      "int32",
 															Default: &v1.JSON{

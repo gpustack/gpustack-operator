@@ -1082,12 +1082,12 @@ func validateModelDeploymentRoleResources(
 func validateModelDeploymentRoleSize(
 	role *workercore.ModelDeploymentRole, rolePath *field.Path,
 ) field.ErrorList {
-	if role.InstanceSize <= 1 {
+	if role.ReplicaSize <= 1 {
 		return nil
 	}
 
 	return field.ErrorList{field.Invalid(
-		rolePath.Child("size"), role.InstanceSize,
+		rolePath.Child("size"), role.ReplicaSize,
 		"a role's instance cannot span more than one Pod yet: the rendering that builds one "+
 			"instance across several Pods does not exist",
 	)}

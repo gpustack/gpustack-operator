@@ -62,7 +62,7 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// ones already running; shrinking it removes some of them. The instances that survive are not
 	// restarted: they keep serving without interruption and keep whatever cache they hold.
 	Replicas *int32 `json:"replicas,omitempty"`
-	// InstanceSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they
+	// ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they
 	// start together, they are replaced together, and none of them serves alone — the instance,
 	// not the Pod, is the unit that appears and disappears.
 	//
@@ -72,7 +72,7 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	//
 	// THE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and
 	// Go forbids a field and a method sharing a name; the API field is size.
-	InstanceSize *int32 `json:"size,omitempty"`
+	ReplicaSize *int32 `json:"size,omitempty"`
 	// InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.
 	// It is what the queue-name entrance label is derived from.
 	InstanceType *string `json:"instanceType,omitempty"`
@@ -165,11 +165,11 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithReplicas(value int32) *Model
 	return b
 }
 
-// WithInstanceSize sets the InstanceSize field in the declarative configuration to the given value
+// WithReplicaSize sets the ReplicaSize field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the InstanceSize field is set to the value of the last call.
-func (b *ModelDeploymentRoleApplyConfiguration) WithInstanceSize(value int32) *ModelDeploymentRoleApplyConfiguration {
-	b.InstanceSize = &value
+// If called multiple times, the ReplicaSize field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithReplicaSize(value int32) *ModelDeploymentRoleApplyConfiguration {
+	b.ReplicaSize = &value
 	return b
 }
 
