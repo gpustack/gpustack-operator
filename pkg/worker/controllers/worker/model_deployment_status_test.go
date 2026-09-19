@@ -429,6 +429,111 @@ func TestModelDeploymentStatus_AssignedFlavorIsPerGroup(t *testing.T) {
 		"and the decoder reads its own group's answer rather than its sibling's")
 }
 
+// TestModelDeploymentStatus_WorkloadAttributionReadsOwnershipNotName pins the rule every role-level
+// answer rests on: a Workload answers for a role because it owns that role's replicas, and for no
+// other reason.
+//
+// THE NAME IS DELIBERATELY NOTHING THIS OPERATOR WOULD DERIVE, because a derived name is the thing
+// the attribution must not depend on. The derivation moves with the spec, and whatever composes
+// Workloads names them by its own rules -- Kueue today, something else if the substrate changes --
+// so a reader that matched on the name would not error on the day the two diverge; it would find
+// nothing and report an empty status.
+//
+// THE SECOND ROW IS THE BASELINE THAT MAKES THE FIRST ONE A TEST. A rule that attributed every
+// Workload it was handed would pass the first row and report a flavor this deployment was never
+// assigned, so a Workload owning no replica of this deployment must leave every role with no
+// answer.
+func TestModelDeploymentStatus_WorkloadAttributionReadsOwnershipNotName(t *testing.T) {
+	// THE FIXTURE'S OWN GROUP NAMES ARE HASHES already -- a multi-role deployment derives
+	// prefixed digests, not readable names -- so the Workload names below match nothing this
+	// operator forms without any effort to make them foreign.
+	md := twoRoleDeployment()
+	prefill, decode := &md.Spec.Roles[0], &md.Spec.Roles[1]
+
+	prefillPod, decodePod := roleReplica(md, prefill.Name), roleReplica(md, decode.Name)
+	pods := []core.Pod{prefillPod, decodePod}
+
+	// admitted carries an assignment for BOTH roles while owning only one Pod, so the row that
+	// resolves it can tell "attributed to the owning role" from "attributed to any role it names a
+	// PodSet for": only the role whose replica is owned gets an answer.
+	admitted := func(name string, owns core.Pod, flavorByRole map[string]string) *kueue.Workload {
+		wl := &kueue.Workload{}
+		wl.Name, wl.Namespace = name, md.Namespace
+		wl.OwnerReferences = []meta.OwnerReference{{
+			APIVersion: "v1", Kind: "Pod", Name: owns.Name, UID: owns.UID,
+		}}
+		assignments := make([]kueue.PodSetAssignment, 0, len(md.Spec.Roles))
+		for i := range md.Spec.Roles {
+			assignments = append(assignments, kueue.PodSetAssignment{
+				Name: kueue.PodSetReference(md.Spec.Roles[i].Name),
+				Flavors: map[core.ResourceName]kueue.ResourceFlavorReference{
+					nodefeature.GetAcceleratableCreditsResourceName(nodefeature.ManufacturerNVIDIA): kueue.ResourceFlavorReference(flavorByRole[md.Spec.Roles[i].Name]),
+				},
+			})
+		}
+		wl.Status.Admission = &kueue.Admission{PodSetAssignments: assignments}
+
+		return wl
+	}
+
+	// A Pod of somebody else's deployment in the same namespace, which is what a Workload this
+	// deployment has no relation to owns.
+	theirs := core.Pod{ObjectMeta: meta.ObjectMeta{
+		Name: "their-server-0", Namespace: md.Namespace, UID: types.UID("uid-their-server-0"),
+	}}
+
+	cases := []struct {
+		name              string
+		wls               []*kueue.Workload
+		wantPrefillFlavor string
+		wantDecodeFlavor  string
+	}{
+		{
+			name: "a workload named nothing this operator derives answers for the role whose replica it owns",
+			wls: []*kueue.Workload{admitted("some-foreign-workload-name", decodePod, map[string]string{
+				prefill.Name: "h20-8",
+				decode.Name:  "a100-8",
+			})},
+			// The decoder's replica is the one owned, so the decoder reads the assignment carried
+			// for it and the prefiller reads nothing: the Workload does not own the prefiller's
+			// replica, whatever its admission carries for that role.
+			wantDecodeFlavor: "a100-8",
+		},
+		{
+			name: "a workload owning no replica of this deployment attributes nothing",
+			wls: []*kueue.Workload{admitted("another-foreign-workload-name", theirs, map[string]string{
+				prefill.Name: "h20-8",
+				decode.Name:  "a100-8",
+			})},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			statuses := roleStatusesOver(md, pods, tc.wls)
+			require.Len(t, statuses, 2)
+
+			// An empty want is the table's spelling of "no answer": the field is a pointer
+			// precisely so that "not attributed" and "attributed to an unnamed flavor" cannot
+			// collapse into one reading, and an assignment to an unnamed flavor is not a state
+			// Kueue writes.
+			for _, role := range []struct {
+				status workercore.ModelDeploymentRoleStatus
+				want   string
+			}{{statuses[0], tc.wantPrefillFlavor}, {statuses[1], tc.wantDecodeFlavor}} {
+				if role.want == "" {
+					assert.Nil(t, role.status.AssignedFlavor,
+						"no Workload owns this role's replica, so it has no answer rather than an empty one")
+
+					continue
+				}
+				require.NotNil(t, role.status.AssignedFlavor)
+				assert.Equal(t, role.want, *role.status.AssignedFlavor)
+			}
+		})
+	}
+}
+
 // TestModelDeploymentStatus_KindIsEchoedAndNeverEmpty pins the field that must never be written
 // blank.
 //
@@ -993,19 +1098,17 @@ func observeQuotaOver(
 	md *workercore.ModelDeployment, pods []core.Pod, wls []*kueue.Workload,
 	holder *workercore.ModelDeployment,
 ) {
-	groupOfRole := modelDeploymentGroupOfRole(md)
-	observeModelDeploymentQuota(md, pods, wls,
-		modelDeploymentWorkloadByGroup(md, pods, wls, groupOfRole), groupOfRole, holder)
+	groupOfRole, wlByGroup := modelDeploymentGroupWorkloads(md, pods, wls)
+	observeModelDeploymentQuota(md, pods, wls, wlByGroup, groupOfRole, holder)
 }
 
 // roleStatusesOver is the same resolution for the per-role view, for the same reason.
 func roleStatusesOver(
 	md *workercore.ModelDeployment, pods []core.Pod, wls []*kueue.Workload,
 ) []workercore.ModelDeploymentRoleStatus {
-	groupOfRole := modelDeploymentGroupOfRole(md)
+	groupOfRole, wlByGroup := modelDeploymentGroupWorkloads(md, pods, wls)
 
-	return modelDeploymentRoleStatuses(md, pods,
-		modelDeploymentWorkloadByGroup(md, pods, wls, groupOfRole), groupOfRole)
+	return modelDeploymentRoleStatuses(md, pods, wlByGroup, groupOfRole)
 }
 
 // TestObserveModelDeploymentQuota_OneGroupReservedIsNotTheDeployment is the regression the cluster
@@ -1447,10 +1550,10 @@ func TestObserveModelDeploymentQuota_ThePreemptionNoteContract(t *testing.T) {
 		// The claim is structural: a group's Workload is resolved through that group's replicas, so
 		// with no Pods there is no Workload on which a preemption could have been seen. Asserting it
 		// on the predicate rather than on the answer is what makes it a statement about the reason.
-		lost, kept := modelDeploymentPreemptedInPart(md,
-			modelDeploymentWorkloadByGroup(md, nil, []*kueue.Workload{
-				preemptedWorkload(groupWorkload([]core.Pod{roleReplica(md, "prefill")}, false), "preempted"),
-			}, modelDeploymentGroupOfRole(md)))
+		_, wlByGroup := modelDeploymentGroupWorkloads(md, nil, []*kueue.Workload{
+			preemptedWorkload(groupWorkload([]core.Pod{roleReplica(md, "prefill")}, false), "preempted"),
+		})
+		lost, kept := modelDeploymentPreemptedInPart(md, wlByGroup)
 
 		assert.Empty(t, lost, "with no replicas no Workload is resolved, so nothing can be seen preempted")
 		assert.Empty(t, kept)

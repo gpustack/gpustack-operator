@@ -181,8 +181,7 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 	// EACH GROUP'S OWN WORKLOAD, RESOLVED ONCE. There is no such thing as "the deployment's Workload"
 	// once its roles sit on several instanceTypes, and taking whichever sorts first answers for one
 	// group while misreporting every other.
-	groupOfRole := modelDeploymentGroupOfRole(md)
-	wlByGroup := modelDeploymentWorkloadByGroup(md, pods, wls, groupOfRole)
+	groupOfRole, wlByGroup := modelDeploymentGroupWorkloads(md, pods, wls)
 
 	holder.Status.Roles = modelDeploymentRoleStatuses(md, pods, wlByGroup, groupOfRole)
 	if md.Spec.Router == nil {
@@ -466,7 +465,7 @@ func observeModelDeploymentQuota(
 		// so Kueue has composed nothing for it -- reaches this branch too, because the preemption of
 		// a sibling kind's group is answered before incompleteness is.
 		effect := "the deployment still serves, without the capacity those groups provided"
-		if unserved := modelDeploymentKindsWithoutAdmittedGroup(md, wlByGroup); len(unserved) > 0 {
+		if unserved := modelDeploymentKindsWithoutAdmittedGroup(md, wlByGroup, groupOfRole); len(unserved) > 0 {
 			effect = fmt.Sprintf(
 				"the deployment has no admitted group of role kind %s at all, which is the loss of "+
 					"that role rather than of capacity",
@@ -614,62 +613,59 @@ func observeModelDeploymentQuota(
 		len(waiting), len(groups), strings.Join(waiting, ", "), taken))
 }
 
-// modelDeploymentGroupOfRole names, for each role, the pod group its replicas belong to.
+// modelDeploymentGroupWorkloads names the pod group each of the deployment's roles forms, and
+// resolves the Workload answering for each group as the one owning that group's replicas.
 //
-// A replica is attributed to a group through its ROLE rather than through the membership label it
+// THE WORKLOAD IS READ BY OWNERSHIP AND BY NOTHING ELSE. The name this operator derives for a group
+// moves with the spec, and whatever composes Workloads names them by its own rules -- Kueue today,
+// something else if the substrate ever changes -- so a reader that reconstructed the name would not
+// error on the day the two diverge; it would find nothing and report an empty status. Ownership is
+// the one relation both sides keep, so it is the only thing this matches on.
+//
+// THE GROUP NAME IS A JOIN KEY RATHER THAN A WAY OF FINDING ANYTHING. The quota answers are phrased
+// over the groups modelDeploymentPodGroups enumerates and the rollout pass asks for a role's group
+// by name, so the answers resolved here by ownership are indexed under those names for the readers
+// that ask by them.
+//
+// A REPLICA IS ATTRIBUTED TO ITS GROUP THROUGH ITS ROLE rather than through the membership label it
 // carries, so that a replica predating the label, or one still being built, is counted against the
 // group its role puts it in rather than against none.
-func modelDeploymentGroupOfRole(md *workercore.ModelDeployment) map[string]string {
-	groupOfRole := make(map[string]string, len(md.Spec.Roles))
-	for i := range md.Spec.Roles {
-		role := &md.Spec.Roles[i]
-		groupOfRole[role.Name] = modelDeploymentPodGroupFor(md, role.Name).Name
-	}
-
-	return groupOfRole
-}
-
-// modelDeploymentWorkloadByGroup resolves the Workload Kueue composed for each of this deployment's
-// pod groups, keyed by group name, and omits a group that has none yet.
 //
-// THERE IS NO SUCH THING AS "THE DEPLOYMENT'S WORKLOAD" once its roles sit on several instanceTypes.
-// Every question a caller has -- which flavor this role got, whether this group holds quota, whether
-// a group has been composed at all -- is a question about ONE group, and the Workload that answers it
-// is the one owning that group's replicas. Taking whichever sorts first answers correctly for one
-// group and misreports every other, which is a shape this package has now had twice.
-//
-// The Workloads arrive in name order, so a group with two candidates during a rebuild resolves to the
-// same one on every pass rather than flipping while the old one drains.
-func modelDeploymentWorkloadByGroup(
+// The Workloads arrive in name order, so a group with two candidates during a rebuild resolves to
+// the same one on every pass rather than flipping while the old one drains.
+func modelDeploymentGroupWorkloads(
 	md *workercore.ModelDeployment,
 	pods []core.Pod,
 	wls []*kueue.Workload,
-	groupOfRole map[string]string,
-) map[string]*kueue.Workload {
-	members := make(map[string]sets.Set[types.UID], len(md.Spec.Roles))
-	for i := range pods {
-		group := groupOfRole[modelDeploymentPodRole(&pods[i])]
-		if group == "" {
+) (groupOfRole map[string]string, wlByGroup map[string]*kueue.Workload) {
+	groups := modelDeploymentPodGroups(md)
+
+	groupOfRole = make(map[string]string, len(groups))
+	wlByGroup = make(map[string]*kueue.Workload, len(groups))
+	for _, group := range groups {
+		groupOfRole[group.Role] = group.Name
+
+		own := sets.New[types.UID]()
+		for i := range pods {
+			if modelDeploymentPodRole(&pods[i]) == group.Role {
+				own.Insert(pods[i].UID)
+			}
+		}
+		if own.Len() == 0 {
+			// No replica means no Pod a Workload could own, and the missing entry is the absence
+			// every reader already takes as "nothing composed for this group yet".
 			continue
 		}
-		if members[group] == nil {
-			members[group] = sets.New[types.UID]()
-		}
-		members[group].Insert(pods[i].UID)
-	}
-
-	byGroup := make(map[string]*kueue.Workload, len(members))
-	for group, own := range members {
-		for _, w := range wls {
-			if modelDeploymentWorkloadOwnsAny(w, own) {
-				byGroup[group] = w
+		for _, wl := range wls {
+			if modelDeploymentWorkloadOwnsAny(wl, own) {
+				wlByGroup[group.Name] = wl
 
 				break
 			}
 		}
 	}
 
-	return byGroup
+	return groupOfRole, wlByGroup
 }
 
 // modelDeploymentPreemptedInPart names the roles of the groups a higher-priority workload
@@ -757,9 +753,8 @@ func modelDeploymentWorkloadPreempted(wl *kueue.Workload) bool {
 // means "nothing to report about this group" rather than "this group is gone".
 func modelDeploymentKindsWithoutAdmittedGroup(
 	md *workercore.ModelDeployment, wlByGroup map[string]*kueue.Workload,
+	groupOfRole map[string]string,
 ) []string {
-	groupOfRole := modelDeploymentGroupOfRole(md)
-
 	order := make([]string, 0, len(md.Spec.Roles))
 	served := make(map[string]bool, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
@@ -826,10 +821,11 @@ func modelDeploymentGroupsWithoutQuota(
 // findModelDeploymentGroupWorkloads returns EVERY Workload owning any of these Pods, in name order.
 //
 // THERE IS NO SINGULAR FORM OF THIS, deliberately. One that returned the first was here and had no
-// production caller left: every question is about one group, and the group is chosen by the caller
-// through modelDeploymentWorkloadByGroup rather than by sort order. A correctly written accessor that
-// only serves a world model this package has abandoned is not dead weight, it is an invitation to
-// reintroduce the defect it enables -- and it draws no review comment, because it is not wrong.
+// production caller left: every question is about one group, and which Workload answers for which
+// group is decided by the ownership of each group's replicas (modelDeploymentGroupWorkloads)
+// rather than by sort order. A correctly written accessor that only serves a world model this
+// package has abandoned is not dead weight, it is an invitation to reintroduce the defect it
+// enables -- and it draws no review comment, because it is not wrong.
 //
 // IT MATCHES ON A PLAIN OWNER REFERENCE, NOT A CONTROLLER REFERENCE, and that is not a relaxation —
 // it is the difference between finding the Workload and never finding one. Kueue sets a CONTROLLER
